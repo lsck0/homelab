@@ -114,6 +114,7 @@ in {
           grafana-local-tls        = { rule = "Host(`grafana.internal`)";    service = "grafana";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           navidrome-local-tls      = { rule = "Host(`music.internal`)";     service = "navidrome";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           kavita-local-tls         = { rule = "Host(`read.internal`)";      service = "kavita";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          nas-local-tls            = { rule = "Host(`nas.internal`)";        service = "nas";             entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           proxmox-local-tls        = { rule = "Host(`proxmox.internal`)";    service = "proxmox";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
 
           # ── lsck0.dev — HTTPS (VPN / external) ──
@@ -138,6 +139,7 @@ in {
           grafana-tls        = { rule = "Host(`grafana.lsck0.dev`)";    service = "grafana";         entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           navidrome-tls      = { rule = "Host(`music.lsck0.dev`)";     service = "navidrome";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           kavita-tls         = { rule = "Host(`read.lsck0.dev`)";      service = "kavita";          entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
+          nas-tls            = { rule = "Host(`nas.lsck0.dev`)";       service = "nas";             entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
         };
 
         services = {
@@ -162,6 +164,7 @@ in {
           homeassistant.loadBalancer.servers  = [{ url = ip "122"; }];
           navidrome.loadBalancer.servers      = [{ url = ip "123"; }];
           kavita.loadBalancer.servers         = [{ url = ip "124"; }];
+          nas.loadBalancer.servers             = [{ url = ip "111"; }];
           proxmox.loadBalancer.servers        = [{ url = "https://192.168.178.200:8006"; }];
           proxmox.loadBalancer.serversTransport = "proxmox-transport";
         };
