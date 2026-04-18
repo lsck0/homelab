@@ -1,0 +1,11 @@
+# sops configuration — points to the age public key used for encryption.
+# The matching private key (keys/age.txt) is gitignored and must be
+# provisioned onto each VM at /var/lib/sops-nix/key.txt by sync.sh.
+#
+# To encrypt:  sops --encrypt --in-place src/secrets.yaml
+# To edit:     sops src/secrets.yaml
+creation_rules:
+  - path_regex: src/secrets\.yaml$
+    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609
+  - path_regex: src/terraform\.tfvars\.sops\.json$
+    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609
