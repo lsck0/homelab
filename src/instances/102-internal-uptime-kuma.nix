@@ -5,7 +5,7 @@ let
     { name = "Authentik";          url = "http://10.100.0.101:80"; }
     { name = "Uptime Kuma";        url = "http://10.100.0.102:80"; }
     { name = "Forgejo";            url = "http://10.100.0.103:80"; }
-    { name = "Forgejo Runner";     url = "http://10.100.0.104:80"; type = "ping"; }
+    { name = "Forgejo Runner";     url = "http://10.100.0.104:80"; }
     { name = "Registry";           url = "http://10.100.0.106:80"; }
     { name = "Homepage";           url = "http://10.100.0.108:80"; }
     { name = "Vaultwarden";        url = "http://10.100.0.109:8080"; }
@@ -15,23 +15,30 @@ let
     { name = "Jellyfin";           url = "http://10.100.0.113:80"; }
     { name = "Huginn";             url = "http://10.100.0.114:80"; }
     { name = "Home Assistant";     url = "http://10.100.0.115:80"; }
+    { name = "Grafana";            url = "http://10.100.0.116:80"; }
+    { name = "Wiki.js";            url = "http://10.100.0.117:80"; }
+    { name = "Audiobookshelf";     url = "http://10.100.0.118:80"; }
+    { name = "Headscale";          url = "http://10.100.0.119:80"; }
+    { name = "qBittorrent";        url = "http://10.100.0.120:80"; }
+    { name = "Prowlarr";           url = "http://10.100.0.121:80"; }
+    { name = "Sonarr";             url = "http://10.100.0.122:80"; }
+    { name = "Radarr";             url = "http://10.100.0.123:80"; }
     { name = "Traefik (external)"; url = "http://10.200.0.200:80"; }
     { name = "Shlink";             url = "http://10.200.0.201:80"; }
     { name = "PrivateBin";         url = "http://10.200.0.202:80"; }
     { name = "Share";              url = "http://10.200.0.203:80"; }
-    { name = "Grafana";            url = "http://10.100.0.141:3000"; }
   ];
 
   setupJs = pkgs.writeText "uptime-setup.js" ''
-    const { io } = require("socket.io-client");
+    const { io } = require("/app/node_modules/socket.io-client");
     const monitors = ${builtins.toJSON monitors};
 
     const socket = io("http://127.0.0.1:3001", { reconnection: false, timeout: 10000 });
 
-    function send(event, data) {
+    function send(event, ...args) {
       return new Promise((resolve, reject) => {
         const timer = setTimeout(() => reject(new Error("timeout")), 10000);
-        socket.emit(event, data, (res) => {
+        socket.emit(event, ...args, (res) => {
           clearTimeout(timer);
           if (res.ok) resolve(res);
           else reject(new Error(res.msg || JSON.stringify(res)));
@@ -47,7 +54,7 @@ let
       });
 
       try {
-        await send("setup", { username: "admin", password: "changeme123!" });
+        await send("setup", "admin", "changeme123!");
         console.log("Admin created");
       } catch (e) {
         if (!e.message.includes("setup")) console.log("Setup:", e.message);
@@ -112,7 +119,7 @@ in {
       ExecStart = pkgs.writeShellScript "uptime-kuma-monitors" ''
         # Wait for Uptime Kuma to be ready
         for i in $(seq 1 90); do
-          if ${pkgs.curl}/bin/curl -sf http://127.0.0.1:3001 >/dev/null 2>&1; then break; fi
+          if ${pkgs.curl}/bin/curl -sf http://127.0.0.1:80 >/dev/null 2>&1; then break; fi
           sleep 2
         done
         sleep 5
@@ -120,6 +127,10 @@ in {
         # Copy setup script into container and run with its Node.js
         ${pkgs.podman}/bin/podman cp ${setupJs} uptime-kuma:/tmp/setup.js
         ${pkgs.podman}/bin/podman exec uptime-kuma node /tmp/setup.js
+
+        # Disable built-in auth (authentik ForwardAuth handles access control)
+        ${pkgs.podman}/bin/podman exec uptime-kuma sqlite3 /app/data/kuma.db \
+          "INSERT OR REPLACE INTO setting (key, value) VALUES ('disableAuth', 'true');"
       '';
     };
   };

@@ -130,6 +130,11 @@
 
       external.local {
         template IN A {
+          match "^mc\.external\.local\.$"
+          answer "mc.external.local. 3600 IN A 10.200.0.204"
+          fallthrough
+        }
+        template IN A {
           answer "{{ .Name }} 3600 IN A 10.200.0.200"
         }
         template IN SRV _minecraft._tcp.mc.external.local {
@@ -144,6 +149,9 @@
           10.100.0.100 cloud.lsck0.dev vault.lsck0.dev paperless.lsck0.dev
           10.100.0.100 hass.lsck0.dev jellyfin.lsck0.dev status.lsck0.dev
           10.100.0.100 huginn.lsck0.dev tasks.lsck0.dev
+          10.100.0.100 grafana.lsck0.dev wiki.lsck0.dev abs.lsck0.dev
+          10.100.0.100 hs.lsck0.dev torrent.lsck0.dev
+          10.100.0.100 prowlarr.lsck0.dev sonarr.lsck0.dev radarr.lsck0.dev
           # External services → external Traefik
           10.200.0.200 paste.lsck0.dev shlink.lsck0.dev share.lsck0.dev mc.lsck0.dev
           fallthrough

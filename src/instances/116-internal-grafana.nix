@@ -3,7 +3,7 @@ let
   subnetTargets = subnet:
     builtins.map (host: "${subnet}.${toString host}:9100") (lib.range 1 254);
 in {
-  networking.hostName = "luca-grafana";
+  networking.hostName = "vm-116";
 
   services.prometheus = {
     enable = true;
@@ -17,7 +17,6 @@ in {
             ++ (subnetTargets "10.200.0")
             ++ [
               "192.168.178.200:9100"
-              "127.0.0.1:9100"
             ];
         }];
       }
@@ -29,7 +28,8 @@ in {
     settings = {
       server = {
         http_addr = "0.0.0.0";
-        http_port = 3000;
+        http_port = 80;
+        root_url = "https://grafana.internal.local";
       };
       auth = {
         disable_login_form = true;
@@ -55,7 +55,6 @@ in {
             isDefault = true;
           }
         ];
-
       };
       dashboards.settings = {
         providers = [
@@ -74,5 +73,5 @@ in {
     };
   };
 
-  networking.firewall.allowedTCPPorts = [ 3000 9090 ];
+  networking.firewall.allowedTCPPorts = [ 80 9090 ];
 }

@@ -3,10 +3,12 @@
 
   services.postgresql = {
     enable = true;
+    enableTCPIP = true;
     ensureDatabases = [ "huginn" ];
     ensureUsers = [{
       name = "huginn";
       ensureDBOwnership = true;
+      ensureClauses.createdb = true;
     }];
     authentication = ''
       local all all trust

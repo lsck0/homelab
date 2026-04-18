@@ -9,10 +9,13 @@
       EULA = "TRUE";
       TYPE = "FORGE";
       VERSION = "1.20.1";
-      MEMORY = "2G";
+      MEMORY = "3G";
       DIFFICULTY = "normal";
-      OPS = "";
       MOTD = "Homelab Minecraft";
+      ENABLE_COMMAND_BLOCK = "true";
+      SNOOPER_ENABLED = "false";
+      VIEW_DISTANCE = "12";
+      MAX_PLAYERS = "10";
     };
   };
 
