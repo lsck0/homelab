@@ -1,0 +1,29 @@
+# Terraform
+.terraform/
+**/.terraform/
+*terraform.tfvars
+*.tfvars
+
+# Nix
+result
+result-*
+
+# Secrets
+keys/
+!keys/.keep
+
+# OS
+.DS_Store
+.env
+.direnv/
+
+# Stack Secrets
+letsencrypt/
+auth/htpasswd
+
+# Test/build artifacts
+images/
+*.iso
+*.img
+*.qcow2
+*.sock
