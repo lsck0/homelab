@@ -1,6 +1,17 @@
-{ config, ... }:
+{ config, pkgs, ... }:
 let
   ip = id: "http://10.100.0.${id}:80";
+
+  # Self-signed wildcard certificate for *.internal.local
+  internalCerts = pkgs.runCommand "internal-local-certs" {
+    nativeBuildInputs = [ pkgs.openssl ];
+  } ''
+    mkdir -p $out
+    openssl req -x509 -newkey rsa:2048 -nodes \
+      -keyout $out/key.pem -out $out/cert.pem \
+      -days 3650 -subj "/CN=*.internal.local" \
+      -addext "subjectAltName=DNS:*.internal.local,DNS:internal.local"
+  '';
 in {
   networking.hostName = "vm-100";
   homelab.acmeEmail = "luca.sandrock@proton.me";
@@ -32,6 +43,12 @@ in {
       };
     };
     dynamicConfigOptions = {
+      tls = {
+        stores.default.defaultCertificate = {
+          certFile = "${internalCerts}/cert.pem";
+          keyFile = "${internalCerts}/key.pem";
+        };
+      };
       http = {
         middlewares.authentik = {
           forwardAuth = {
