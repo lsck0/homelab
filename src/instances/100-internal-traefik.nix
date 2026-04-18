@@ -2,15 +2,15 @@
 let
   ip = id: "http://10.100.0.${id}:80";
 
-  # Self-signed wildcard certificate for *.internal.local
+  # Self-signed wildcard certificate for *.internal.home
   internalCerts = pkgs.runCommand "internal-local-certs" {
     nativeBuildInputs = [ pkgs.openssl ];
   } ''
     mkdir -p $out
     openssl req -x509 -newkey rsa:2048 -nodes \
       -keyout $out/key.pem -out $out/cert.pem \
-      -days 3650 -subj "/CN=*.internal.local" \
-      -addext "subjectAltName=DNS:*.internal.local,DNS:internal.local"
+      -days 3650 -subj "/CN=*.internal.home" \
+      -addext "subjectAltName=DNS:*.internal.home,DNS:internal.home"
   '';
 in {
   networking.hostName = "vm-100";
@@ -89,28 +89,28 @@ in {
         };
 
         routers = {
-          # ── .internal.local — HTTPS (LAN, self-signed) ──
-          authentik-local-tls      = { rule = "Host(`auth.internal.local`)";       service = "authentik";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-          traefik-dash-local-tls   = { rule = "Host(`traefik.internal.local`)";    service = "api@internal";    entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          homepage-local-tls       = { rule = "Host(`home.internal.local`)";       service = "homepage";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          uptime-kuma-local-tls    = { rule = "Host(`status.internal.local`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          forgejo-local-tls        = { rule = "Host(`git.internal.local`)";        service = "forgejo";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          registry-local-tls       = { rule = "Host(`registry.internal.local`)";   service = "registry";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          taskchampion-local-tls   = { rule = "Host(`tasks.internal.local`)";      service = "taskchampion";    entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-          vaultwarden-local-tls    = { rule = "Host(`vault.internal.local`)";      service = "vaultwarden";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          nextcloud-local-tls      = { rule = "Host(`cloud.internal.local`)";      service = "nextcloud";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-          qbittorrent-local-tls    = { rule = "Host(`torrent.internal.local`)";    service = "qbittorrent";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          prowlarr-local-tls       = { rule = "Host(`prowlarr.internal.local`)";   service = "prowlarr";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          sonarr-local-tls         = { rule = "Host(`sonarr.internal.local`)";     service = "sonarr";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          radarr-local-tls         = { rule = "Host(`radarr.internal.local`)";     service = "radarr";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          jellyfin-local-tls       = { rule = "Host(`jellyfin.internal.local`)";   service = "jellyfin";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          audiobookshelf-local-tls = { rule = "Host(`abs.internal.local`)";        service = "audiobookshelf";  entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          paperless-local-tls      = { rule = "Host(`paperless.internal.local`)";  service = "paperless";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          wikijs-local-tls         = { rule = "Host(`wiki.internal.local`)";       service = "wikijs";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          huginn-local-tls         = { rule = "Host(`huginn.internal.local`)";     service = "huginn";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          homeassistant-local-tls  = { rule = "Host(`hass.internal.local`)";       service = "homeassistant";   entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          grafana-local-tls        = { rule = "Host(`grafana.internal.local`)";    service = "grafana";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          proxmox-local-tls        = { rule = "Host(`proxmox.internal.local`)";    service = "proxmox";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+          # ── .internal.home — HTTPS (LAN, self-signed) ──
+          authentik-local-tls      = { rule = "Host(`auth.internal.home`)";       service = "authentik";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+          traefik-dash-local-tls   = { rule = "Host(`traefik.internal.home`)";    service = "api@internal";    entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          homepage-local-tls       = { rule = "Host(`home.internal.home`)";       service = "homepage";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          uptime-kuma-local-tls    = { rule = "Host(`status.internal.home`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          forgejo-local-tls        = { rule = "Host(`git.internal.home`)";        service = "forgejo";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          registry-local-tls       = { rule = "Host(`registry.internal.home`)";   service = "registry";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          taskchampion-local-tls   = { rule = "Host(`tasks.internal.home`)";      service = "taskchampion";    entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+          vaultwarden-local-tls    = { rule = "Host(`vault.internal.home`)";      service = "vaultwarden";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          nextcloud-local-tls      = { rule = "Host(`cloud.internal.home`)";      service = "nextcloud";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+          qbittorrent-local-tls    = { rule = "Host(`torrent.internal.home`)";    service = "qbittorrent";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          prowlarr-local-tls       = { rule = "Host(`prowlarr.internal.home`)";   service = "prowlarr";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          sonarr-local-tls         = { rule = "Host(`sonarr.internal.home`)";     service = "sonarr";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          radarr-local-tls         = { rule = "Host(`radarr.internal.home`)";     service = "radarr";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          jellyfin-local-tls       = { rule = "Host(`jellyfin.internal.home`)";   service = "jellyfin";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          audiobookshelf-local-tls = { rule = "Host(`abs.internal.home`)";        service = "audiobookshelf";  entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          paperless-local-tls      = { rule = "Host(`paperless.internal.home`)";  service = "paperless";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          wikijs-local-tls         = { rule = "Host(`wiki.internal.home`)";       service = "wikijs";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          huginn-local-tls         = { rule = "Host(`huginn.internal.home`)";     service = "huginn";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          homeassistant-local-tls  = { rule = "Host(`hass.internal.home`)";       service = "homeassistant";   entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          grafana-local-tls        = { rule = "Host(`grafana.internal.home`)";    service = "grafana";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          proxmox-local-tls        = { rule = "Host(`proxmox.internal.home`)";    service = "proxmox";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
 
           # ── lsck0.dev — HTTPS (VPN / external) ──
           authentik-tls      = { rule = "Host(`auth.lsck0.dev`)";       service = "authentik";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };

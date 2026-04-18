@@ -1,5 +1,5 @@
 { ... }: {
-  networking.hostName = "vm-203";
+  networking.hostName = "vm-204";
   virtualisation.oci-containers.containers.share = {
     image = "stonith404/pingvin-share:latest";
     ports = [ "80:3000" ];
