@@ -64,6 +64,9 @@
             };
             networking.firewall.allowedTCPPorts = [ 9100 ];
 
+            # Prefer IPv4 — internal VMs have no IPv6 routing
+            networking.enableIPv6 = false;
+
             nix.settings.experimental-features = [ "nix-command" "flakes" ];
             system.stateVersion = "25.11";
           };

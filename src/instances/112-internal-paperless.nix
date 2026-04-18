@@ -4,8 +4,8 @@
   services.paperless = {
     enable = true;
     address = "0.0.0.0";
-    port = 80;
+    port = 8080;
   };
 
-  networking.firewall.allowedTCPPorts = [ 80 ];
+  networking.firewall.allowedTCPPorts = [ 8080 ];
 }

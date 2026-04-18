@@ -16,5 +16,9 @@
     };
   };
 
+  systemd.tmpfiles.rules = [
+    "d /var/lib/minecraft 0750 1000 1000 -"
+  ];
+
   networking.firewall.allowedTCPPorts = [ 25565 ];
 }

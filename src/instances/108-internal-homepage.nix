@@ -7,5 +7,9 @@
     volumes = [ "/var/lib/homepage:/app/config" ];
   };
 
+  systemd.tmpfiles.rules = [
+    "d /var/lib/homepage 0750 1000 1000 -"
+  ];
+
   networking.firewall.allowedTCPPorts = [ 80 ];
 }

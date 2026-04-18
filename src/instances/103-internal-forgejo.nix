@@ -7,5 +7,9 @@
     volumes = [ "/var/lib/forgejo:/data" ];
   };
 
+  systemd.tmpfiles.rules = [
+    "d /var/lib/forgejo 0750 1000 1000 -"
+  ];
+
   networking.firewall.allowedTCPPorts = [ 80 2222 ];
 }
