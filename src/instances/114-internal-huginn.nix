@@ -12,6 +12,7 @@
       local all all trust
       host all all 127.0.0.1/32 trust
       host all all ::1/128 trust
+      host all all 10.0.0.0/8 trust
     '';
   };
 
@@ -20,7 +21,7 @@
     ports = [ "80:3000" ];
     volumes = [ "/var/lib/huginn:/var/lib/huginn" ];
     environment = {
-      DOMAIN = "huginn.local";
+      DOMAIN = "huginn.internal.local";
       DATABASE_ADAPTER = "postgresql";
       DATABASE_HOST = "10.100.0.114";
       DATABASE_PORT = "5432";

@@ -1,6 +1,9 @@
 { pkgs, config, ... }: {
   networking.hostName = "vm-111";
 
+  # Resolve auth.internal.local directly to authentik VM (bypasses traefik)
+  networking.hosts."10.100.0.101" = [ "auth.internal.local" ];
+
   sops.secrets.nextcloud-admin-pass.owner = "nextcloud";
 
   services.postgresql = {
@@ -60,7 +63,7 @@
         $OCC user_oidc:provider authentik \
           --clientid="nextcloud" \
           --clientsecret="nextcloud-oidc-secret-changeme" \
-          --discoveryuri="http://10.100.0.101/application/o/nextcloud/.well-known/openid-configuration" \
+          --discoveryuri="http://auth.internal.local/application/o/nextcloud/.well-known/openid-configuration" \
           --mapping-uid="preferred_username" \
           --mapping-display-name="name" \
           --mapping-email="email" \
