@@ -205,6 +205,9 @@ let
         - Minecraft:
             icon: minecraft
             ping: http://10.200.0.205
+            widget:
+              type: minecraft
+              url: http://10.200.0.205
   '';
 
   settingsYaml = pkgs.writeText "settings.yaml" ''
