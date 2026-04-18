@@ -8,7 +8,8 @@
       DEFAULT_DOMAIN = "shlink.lsck0.dev";
       ADDITIONAL_DOMAINS = "shlink.external.local";
       IS_HTTPS_ENABLED = "true";
-      GEOLITE2_LICENSE_KEY = ""; # Optional but prevents some errors
+      DB_DRIVER = "sqlite";
+      TIMEZONE = "Europe/Berlin";
     };
   };
 

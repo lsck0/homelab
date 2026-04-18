@@ -1,4 +1,15 @@
-{ config, ... }: {
+{ config, pkgs, ... }:
+let
+  externalCerts = pkgs.runCommand "external-local-certs" {
+    nativeBuildInputs = [ pkgs.openssl ];
+  } ''
+    mkdir -p $out
+    openssl req -x509 -newkey rsa:2048 -nodes \
+      -keyout $out/key.pem -out $out/cert.pem \
+      -days 3650 -subj "/CN=*.external.local" \
+      -addext "subjectAltName=DNS:*.external.local,DNS:external.local"
+  '';
+in {
   networking.hostName = "vm-200";
   homelab.acmeEmail = "luca.sandrock@proton.me";
 
@@ -27,6 +38,12 @@
       };
     };
     dynamicConfigOptions = {
+    tls = {
+      stores.default.defaultCertificate = {
+        certFile = "${externalCerts}/cert.pem";
+        keyFile = "${externalCerts}/key.pem";
+      };
+    };
     http = {
       middlewares.redirect-https = {
         redirectScheme = { scheme = "https"; permanent = true; };

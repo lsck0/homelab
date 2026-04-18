@@ -4,15 +4,22 @@ let
     - Infra:
         - Proxmox:
             icon: proxmox
-            href: https://proxmox.local:8006
+            href: https://proxmox.internal.local
             description: Hypervisor
+            ping: http://192.168.178.200:8006
         - Router (300):
             icon: nixos
             description: NixOS Router & DNS
             ping: http://10.100.0.1
-        - Grafana (301):
+        - Grafana (116):
             icon: grafana
+            href: https://grafana.internal.local
             description: Metrics & Dashboards
+            ping: http://10.100.0.116
+        - CrowdSec (100):
+            icon: crowdsec
+            description: Security Engine
+            ping: http://10.100.0.100
 
     - Internal:
         - Traefik (100):
@@ -76,11 +83,6 @@ let
             href: https://paperless.internal.local
             description: Documents
             ping: http://10.100.0.112:8080
-        - Jellyfin (113):
-            icon: jellyfin
-            href: https://jellyfin.internal.local
-            description: Media Server
-            ping: http://10.100.0.113
         - Huginn (114):
             icon: huginn
             href: https://huginn.internal.local
@@ -91,6 +93,48 @@ let
             href: https://hass.internal.local
             description: Smart Home
             ping: http://10.100.0.115
+        - Wiki.js (117):
+            icon: wikijs
+            href: https://wiki.internal.local
+            description: Knowledge Base
+            ping: http://10.100.0.117
+        - Headscale (119):
+            icon: headscale
+            href: https://hs.internal.local
+            description: VPN Mesh
+            ping: http://10.100.0.119
+
+    - Media:
+        - Jellyfin (113):
+            icon: jellyfin
+            href: https://jellyfin.internal.local
+            description: Media Server
+            ping: http://10.100.0.113
+        - Audiobookshelf (118):
+            icon: audiobookshelf
+            href: https://abs.internal.local
+            description: Audiobooks & Podcasts
+            ping: http://10.100.0.118
+        - qBittorrent (120):
+            icon: qbittorrent
+            href: https://torrent.internal.local
+            description: Torrents
+            ping: http://10.100.0.120
+        - Prowlarr (121):
+            icon: prowlarr
+            href: https://prowlarr.internal.local
+            description: Indexer Manager
+            ping: http://10.100.0.121
+        - Sonarr (122):
+            icon: sonarr
+            href: https://sonarr.internal.local
+            description: TV Shows
+            ping: http://10.100.0.122
+        - Radarr (123):
+            icon: radarr
+            href: https://radarr.internal.local
+            description: Movies
+            ping: http://10.100.0.123
 
     - External:
         - Traefik (200):
@@ -99,22 +143,23 @@ let
             ping: http://10.200.0.200
         - Shlink (201):
             icon: shlink
-            href: https://shlink.lsck0.dev
+            href: https://shlink.external.local
             description: Short URLs
             ping: http://10.200.0.201
         - PrivateBin (202):
             icon: privatebin
-            href: https://paste.lsck0.dev
+            href: https://paste.external.local
             description: Encrypted Paste
             ping: http://10.200.0.202
         - Share (203):
             icon: filebrowser
-            href: https://share.lsck0.dev
+            href: https://share.external.local
             description: File Sharing
             ping: http://10.200.0.203
         - Minecraft (204):
             icon: minecraft
             description: Forge 1.20.1 — mc.lsck0.dev
+            ping: http://10.200.0.204
   '';
 
   settingsYaml = pkgs.writeText "settings.yaml" ''
@@ -132,12 +177,16 @@ let
     layout:
       Infra:
         style: row
-        columns: 3
+        columns: 4
         icon: mdi-server
       Internal:
         style: row
         columns: 4
         icon: mdi-lan
+      Media:
+        style: row
+        columns: 3
+        icon: mdi-multimedia
       External:
         style: row
         columns: 5
@@ -158,20 +207,16 @@ let
         provider: google
         target: _blank
         focus: true
+    - openmeteo:
+        label: Weather
+        latitude: 51.23
+        longitude: 6.78
+        timezone: Europe/Berlin
+        units: metric
   '';
 
   bookmarksYaml = pkgs.writeText "bookmarks.yaml" ''
-    - Dev:
-        - GitHub:
-            - icon: github
-              href: https://github.com
-        - NixOS Search:
-            - icon: nixos
-              href: https://search.nixos.org
-    - Tools:
-        - Proxmox:
-            - icon: proxmox
-              href: https://proxmox.local:8006
+    []
   '';
 in {
   networking.hostName = "vm-108";
@@ -189,6 +234,7 @@ in {
     environment = {
       HOMEPAGE_ALLOWED_HOSTS = "home.internal.local,home.lsck0.dev";
     };
+    extraOptions = [ "--cap-add=NET_RAW" ];
   };
 
   systemd.tmpfiles.rules = [

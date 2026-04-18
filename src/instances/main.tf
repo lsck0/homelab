@@ -28,13 +28,20 @@ locals {
     "113" = { name = "113-internal-jellyfin", type = "internal" }
     "114" = { name = "114-internal-huginn", type = "internal" }
     "115" = { name = "115-internal-homeassistant", type = "internal" }
+    "116" = { name = "116-internal-grafana", type = "internal", memory = 2048 }
+    "117" = { name = "117-internal-wikijs", type = "internal" }
+    "118" = { name = "118-internal-audiobookshelf", type = "internal" }
+    "119" = { name = "119-internal-headscale", type = "internal" }
+    "120" = { name = "120-internal-qbittorrent", type = "internal", disk = 20 }
+    "121" = { name = "121-internal-prowlarr", type = "internal" }
+    "122" = { name = "122-internal-sonarr", type = "internal", disk = 20 }
+    "123" = { name = "123-internal-radarr", type = "internal", disk = 20 }
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-shlink", type = "external" }
     "202" = { name = "202-external-privatebin", type = "external" }
     "203" = { name = "203-external-share", type = "external" }
     "204" = { name = "204-external-minecraft", type = "external", memory = 4096, cores = 6 }
     "300" = { name = "luca-router", type = "router" }
-    "301" = { name = "luca-grafana", type = "local", memory = 4096 }
   }
 }
 

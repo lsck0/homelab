@@ -2,16 +2,23 @@
 let
   # All services protected by authentik ForwardAuth.
   protectedApps = [
-    { slug = "uptime-kuma";    name = "Uptime Kuma";     local = "status.internal.local";    external = "status.lsck0.dev"; }
-    { slug = "forgejo";        name = "Forgejo";         local = "git.internal.local";       external = "git.lsck0.dev"; }
-    { slug = "registry";       name = "Registry";        local = "registry.internal.local";  external = "registry.lsck0.dev"; }
-    { slug = "homepage";       name = "Homepage";        local = "home.internal.local";      external = "home.lsck0.dev"; }
-    { slug = "vaultwarden";    name = "Vaultwarden";     local = "vault.internal.local";     external = "vault.lsck0.dev"; }
+    { slug = "uptime-kuma";    name = "Uptime Kuma";      local = "status.internal.local";     external = "status.lsck0.dev"; }
+    { slug = "forgejo";        name = "Forgejo";          local = "git.internal.local";        external = "git.lsck0.dev"; }
+    { slug = "registry";       name = "Registry";         local = "registry.internal.local";   external = "registry.lsck0.dev"; }
+    { slug = "homepage";       name = "Homepage";         local = "home.internal.local";       external = "home.lsck0.dev"; }
+    { slug = "vaultwarden";    name = "Vaultwarden";      local = "vault.internal.local";      external = "vault.lsck0.dev"; }
     # Nextcloud uses native OIDC, not ForwardAuth — see oidcEntries below
-    { slug = "paperless";      name = "Paperless";       local = "paperless.internal.local";  external = "paperless.lsck0.dev"; }
-    { slug = "jellyfin";       name = "Jellyfin";        local = "jellyfin.internal.local";  external = "jellyfin.lsck0.dev"; }
-    { slug = "huginn";         name = "Huginn";          local = "huginn.internal.local";    external = "huginn.lsck0.dev"; }
-    { slug = "homeassistant";  name = "Home Assistant";   local = "hass.internal.local";      external = "hass.lsck0.dev"; }
+    { slug = "paperless";      name = "Paperless";        local = "paperless.internal.local";  external = "paperless.lsck0.dev"; }
+    { slug = "jellyfin";       name = "Jellyfin";         local = "jellyfin.internal.local";   external = "jellyfin.lsck0.dev"; }
+    { slug = "huginn";         name = "Huginn";           local = "huginn.internal.local";     external = "huginn.lsck0.dev"; }
+    { slug = "homeassistant";  name = "Home Assistant";   local = "hass.internal.local";       external = "hass.lsck0.dev"; }
+    { slug = "grafana";        name = "Grafana";          local = "grafana.internal.local";    external = "grafana.lsck0.dev"; }
+    { slug = "wikijs";         name = "Wiki.js";          local = "wiki.internal.local";       external = "wiki.lsck0.dev"; }
+    { slug = "audiobookshelf"; name = "Audiobookshelf";   local = "abs.internal.local";        external = "abs.lsck0.dev"; }
+    { slug = "qbittorrent";    name = "qBittorrent";      local = "torrent.internal.local";    external = "torrent.lsck0.dev"; }
+    { slug = "prowlarr";       name = "Prowlarr";         local = "prowlarr.internal.local";   external = "prowlarr.lsck0.dev"; }
+    { slug = "sonarr";         name = "Sonarr";           local = "sonarr.internal.local";     external = "sonarr.lsck0.dev"; }
+    { slug = "radarr";         name = "Radarr";           local = "radarr.internal.local";     external = "radarr.lsck0.dev"; }
   ];
 
   mkProviderAndApp = variant: app:
@@ -54,12 +61,6 @@ let
   # Nextcloud OIDC provider — uses OAuth2 instead of ForwardAuth
   oidcEntries = ''
     # --- Nextcloud OIDC ---
-    - model: authentik_crypto.certificatekeypair
-      id: nextcloud-signing-key
-      identifiers:
-        name: nextcloud-signing-keypair
-      attrs:
-        name: nextcloud-signing-keypair
     - model: authentik_providers_oauth2.oauth2provider
       id: provider-nextcloud-oidc
       identifiers:
@@ -69,6 +70,7 @@ let
         client_type: confidential
         client_id: nextcloud
         client_secret: nextcloud-oidc-secret-changeme
+        signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
         redirect_uris: |
           https://cloud.internal.local/apps/user_oidc/code
           https://cloud.lsck0.dev/apps/user_oidc/code
@@ -96,6 +98,7 @@ let
         client_type: confidential
         client_id: forgejo
         client_secret: forgejo-oidc-secret-changeme
+        signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
         redirect_uris: |
           https://git.internal.local/user/oauth2/authentik/callback
           https://git.lsck0.dev/user/oauth2/authentik/callback
