@@ -54,11 +54,8 @@
         # Enable the app
         $OCC app:enable user_oidc || true
 
-        # Check if provider already exists
-        if $OCC user_oidc:provider authentik 2>/dev/null | grep -q "authentik"; then
-          echo "OIDC provider already configured"
-          exit 0
-        fi
+        # Delete existing provider to ensure config is up to date
+        $OCC user_oidc:provider:delete authentik 2>/dev/null || true
 
         $OCC user_oidc:provider authentik \
           --clientid="nextcloud" \

@@ -7,5 +7,9 @@
     volumes = [ "/var/lib/registry:/var/lib/registry" ];
   };
 
+  systemd.tmpfiles.rules = [
+    "d /var/lib/registry 0750 1000 1000 -"
+  ];
+
   networking.firewall.allowedTCPPorts = [ 80 ];
 }
