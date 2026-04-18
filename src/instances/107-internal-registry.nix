@@ -1,5 +1,5 @@
 { ... }: {
-  networking.hostName = "vm-106";
+  networking.hostName = "vm-107";
 
   virtualisation.oci-containers.containers.registry = {
     image = "registry:2";

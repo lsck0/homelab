@@ -1,5 +1,5 @@
 { config, ... }: {
-  networking.hostName = "vm-114";
+  networking.hostName = "vm-120";
 
   services.postgresql = {
     enable = true;
@@ -25,7 +25,7 @@
     environment = {
       DOMAIN = "huginn.internal.local";
       DATABASE_ADAPTER = "postgresql";
-      DATABASE_HOST = "10.100.0.114";
+      DATABASE_HOST = "10.100.0.120";
       DATABASE_PORT = "5432";
       DATABASE_NAME = "huginn";
       DATABASE_USERNAME = "huginn";

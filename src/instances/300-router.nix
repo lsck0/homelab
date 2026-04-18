@@ -64,7 +64,7 @@
       iifname "wg0" accept
 
       # Allow DMZ to reach internal Git and Registry
-      iifname "ens20" ip daddr { 10.100.0.103, 10.100.0.106 } tcp dport { 80, 443 } accept
+      iifname "ens20" ip daddr { 10.100.0.104, 10.100.0.107 } tcp dport { 80, 443 } accept
 
       # External DMZ → internal LAN: BLOCK
       iifname "ens20" oifname "ens19" counter drop
@@ -150,10 +150,10 @@
           10.100.0.100 hass.lsck0.dev jellyfin.lsck0.dev status.lsck0.dev
           10.100.0.100 huginn.lsck0.dev tasks.lsck0.dev
           10.100.0.100 grafana.lsck0.dev wiki.lsck0.dev abs.lsck0.dev
-          10.100.0.100 hs.lsck0.dev torrent.lsck0.dev
+          10.100.0.100 torrent.lsck0.dev
           10.100.0.100 prowlarr.lsck0.dev sonarr.lsck0.dev radarr.lsck0.dev
           # External services → external Traefik
-          10.200.0.200 paste.lsck0.dev shlink.lsck0.dev share.lsck0.dev mc.lsck0.dev
+          10.200.0.200 paste.lsck0.dev shlink.lsck0.dev share.lsck0.dev mc.lsck0.dev hs.lsck0.dev
           fallthrough
         }
         template IN SRV _minecraft._tcp.mc.lsck0.dev {

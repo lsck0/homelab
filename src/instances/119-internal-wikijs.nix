@@ -1,5 +1,5 @@
 { pkgs, ... }: {
-  networking.hostName = "vm-117";
+  networking.hostName = "vm-119";
 
   services.postgresql = {
     enable = true;
@@ -15,7 +15,7 @@
     ports = [ "80:3000" ];
     environment = {
       DB_TYPE = "postgres";
-      DB_HOST = "10.100.0.117";
+      DB_HOST = "10.100.0.119";
       DB_PORT = "5432";
       DB_USER = "wikijs";
       DB_NAME = "wikijs";
@@ -26,9 +26,8 @@
   # Allow container to reach host PostgreSQL
   services.postgresql.enableTCPIP = true;
   services.postgresql.authentication = ''
-    host wikijs wikijs 10.100.0.117/32 trust
-    host wikijs wikijs 10.88.0.0/16 trust
+    host wikijs wikijs 10.100.0.119/32 trust
   '';
 
-  networking.firewall.allowedTCPPorts = [ 80 ];
+  networking.firewall.allowedTCPPorts = [ 80 5432 ];
 }

@@ -83,7 +83,6 @@
       }) (builtins.filter
         (name:
           (name == "300-router.nix") ||
-          (name == "301-grafana.nix") ||
           ((builtins.match "^[12][0-9]{2}-(internal|external)-.*\\.nix$" name) != null)
         )
         (builtins.attrNames (builtins.readDir dir)))

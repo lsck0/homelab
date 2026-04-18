@@ -13,7 +13,7 @@ let
         - 10.100.0.100
   '';
 in {
-  networking.hostName = "vm-115";
+  networking.hostName = "vm-121";
 
   virtualisation.oci-containers.containers.homeassistant = {
     image = "ghcr.io/home-assistant/home-assistant:stable";

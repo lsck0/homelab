@@ -14,33 +14,33 @@ locals {
   instances = {
     "100" = { name = "100-internal-traefik", type = "internal" }
     "101" = { name = "101-internal-authentik", type = "internal", memory = 4096 }
-    "102" = { name = "102-internal-uptime-kuma", type = "internal" }
-    "103" = { name = "103-internal-forgejo", type = "internal" }
-    "104" = { name = "104-internal-forgejo-runner", type = "internal" }
-    "105" = { name = "105-internal-sccache", type = "internal" }
-    "106" = { name = "106-internal-registry", type = "internal" }
-    "107" = { name = "107-internal-nas", type = "internal" }
-    "108" = { name = "108-internal-homepage", type = "internal" }
+    "102" = { name = "102-internal-homepage", type = "internal" }
+    "103" = { name = "103-internal-uptime-kuma", type = "internal" }
+    "104" = { name = "104-internal-forgejo", type = "internal" }
+    "105" = { name = "105-internal-forgejo-runner", type = "internal" }
+    "106" = { name = "106-internal-sccache", type = "internal" }
+    "107" = { name = "107-internal-registry", type = "internal" }
+    "108" = { name = "108-internal-taskchampion", type = "internal" }
     "109" = { name = "109-internal-vaultwarden", type = "internal" }
-    "110" = { name = "110-internal-taskchampion", type = "internal" }
+    "110" = { name = "110-internal-nas", type = "internal", disk = 64 }
     "111" = { name = "111-internal-nextcloud", type = "internal" }
-    "112" = { name = "112-internal-paperless", type = "internal" }
-    "113" = { name = "113-internal-jellyfin", type = "internal" }
-    "114" = { name = "114-internal-huginn", type = "internal" }
-    "115" = { name = "115-internal-homeassistant", type = "internal" }
-    "116" = { name = "116-internal-grafana", type = "internal", memory = 2048 }
-    "117" = { name = "117-internal-wikijs", type = "internal" }
-    "118" = { name = "118-internal-audiobookshelf", type = "internal" }
-    "119" = { name = "119-internal-headscale", type = "internal" }
-    "120" = { name = "120-internal-qbittorrent", type = "internal", disk = 20 }
-    "121" = { name = "121-internal-prowlarr", type = "internal" }
-    "122" = { name = "122-internal-sonarr", type = "internal", disk = 20 }
-    "123" = { name = "123-internal-radarr", type = "internal", disk = 20 }
+    "112" = { name = "112-internal-qbittorrent", type = "internal", disk = 20 }
+    "113" = { name = "113-internal-prowlarr", type = "internal" }
+    "114" = { name = "114-internal-sonarr", type = "internal", disk = 20 }
+    "115" = { name = "115-internal-radarr", type = "internal", disk = 20 }
+    "116" = { name = "116-internal-jellyfin", type = "internal" }
+    "117" = { name = "117-internal-audiobookshelf", type = "internal" }
+    "118" = { name = "118-internal-paperless", type = "internal" }
+    "119" = { name = "119-internal-wikijs", type = "internal" }
+    "120" = { name = "120-internal-huginn", type = "internal" }
+    "121" = { name = "121-internal-homeassistant", type = "internal" }
+    "122" = { name = "122-internal-grafana", type = "internal", memory = 2048 }
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-shlink", type = "external" }
     "202" = { name = "202-external-privatebin", type = "external" }
     "203" = { name = "203-external-share", type = "external" }
     "204" = { name = "204-external-minecraft", type = "external", memory = 4096, cores = 6 }
+    "205" = { name = "205-external-headscale", type = "external" }
     "300" = { name = "luca-router", type = "router" }
   }
 }
