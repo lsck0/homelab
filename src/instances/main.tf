@@ -13,7 +13,7 @@ variable "router_external_ip" { type = string }
 locals {
   instances = {
     "100" = { name = "100-internal-traefik", type = "internal" }
-    "101" = { name = "101-internal-authentik", type = "internal", memory = 4096, cores = 4 }
+    "101" = { name = "101-internal-authentik", type = "internal", memory = 4096 }
     "102" = { name = "102-internal-uptime-kuma", type = "internal" }
     "103" = { name = "103-internal-forgejo", type = "internal" }
     "104" = { name = "104-internal-forgejo-runner", type = "internal" }
@@ -32,9 +32,9 @@ locals {
     "201" = { name = "201-external-shlink", type = "external" }
     "202" = { name = "202-external-privatebin", type = "external" }
     "203" = { name = "203-external-share", type = "external" }
-    "204" = { name = "204-external-minecraft", type = "external", memory = 4096, cores = 4 }
+    "204" = { name = "204-external-minecraft", type = "external", memory = 4096, cores = 6 }
     "300" = { name = "luca-router", type = "router" }
-    "301" = { name = "luca-grafana", type = "local" }
+    "301" = { name = "luca-grafana", type = "local", memory = 4096 }
   }
 }
 

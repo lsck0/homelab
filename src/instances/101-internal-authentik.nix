@@ -1,4 +1,116 @@
-{ config, ... }: {
+{ config, pkgs, lib, ... }:
+let
+  # All services protected by authentik ForwardAuth.
+  protectedApps = [
+    { slug = "uptime-kuma";    name = "Uptime Kuma";     local = "status.internal.local";    external = "status.lsck0.dev"; }
+    { slug = "forgejo";        name = "Forgejo";         local = "git.internal.local";       external = "git.lsck0.dev"; }
+    { slug = "registry";       name = "Registry";        local = "registry.internal.local";  external = "registry.lsck0.dev"; }
+    { slug = "homepage";       name = "Homepage";        local = "home.internal.local";      external = "home.lsck0.dev"; }
+    { slug = "vaultwarden";    name = "Vaultwarden";     local = "vault.internal.local";     external = "vault.lsck0.dev"; }
+    # Nextcloud uses native OIDC, not ForwardAuth — see oidcEntries below
+    { slug = "paperless";      name = "Paperless";       local = "paperless.internal.local";  external = "paperless.lsck0.dev"; }
+    { slug = "jellyfin";       name = "Jellyfin";        local = "jellyfin.internal.local";  external = "jellyfin.lsck0.dev"; }
+    { slug = "huginn";         name = "Huginn";          local = "huginn.internal.local";    external = "huginn.lsck0.dev"; }
+    { slug = "homeassistant";  name = "Home Assistant";   local = "hass.internal.local";      external = "hass.lsck0.dev"; }
+  ];
+
+  mkProviderAndApp = variant: app:
+    let
+      host = if variant == "local" then app.local else app.external;
+      suffix = variant;
+    in ''
+      - model: authentik_providers_proxy.proxyprovider
+        id: provider-${app.slug}-${suffix}
+        identifiers:
+          name: ${app.slug}-${suffix}-provider
+        attrs:
+          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+          mode: forward_single
+          external_host: https://${host}
+      - model: authentik_core.application
+        id: app-${app.slug}-${suffix}
+        identifiers:
+          slug: ${app.slug}-${suffix}
+        attrs:
+          name: "${app.name} (${suffix})"
+          provider: !KeyOf provider-${app.slug}-${suffix}
+          meta_launch_url: https://${host}
+    '';
+
+  appEntries = builtins.concatStringsSep "" (
+    builtins.concatMap (app: [
+      (mkProviderAndApp "local" app)
+      (mkProviderAndApp "external" app)
+    ]) protectedApps
+  );
+
+  outpostProvidersList = builtins.concatStringsSep "\n" (
+    builtins.concatMap (app: [
+      "    - !KeyOf provider-${app.slug}-local"
+      "    - !KeyOf provider-${app.slug}-external"
+    ]) protectedApps
+  );
+
+  # Nextcloud OIDC provider — uses OAuth2 instead of ForwardAuth
+  oidcEntries = ''
+    # --- Nextcloud OIDC ---
+    - model: authentik_crypto.certificatekeypair
+      id: nextcloud-signing-key
+      identifiers:
+        name: nextcloud-signing-keypair
+      attrs:
+        name: nextcloud-signing-keypair
+    - model: authentik_providers_oauth2.oauth2provider
+      id: provider-nextcloud-oidc
+      identifiers:
+        name: nextcloud-oidc-provider
+      attrs:
+        authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+        client_type: confidential
+        client_id: nextcloud
+        client_secret: nextcloud-oidc-secret-changeme
+        redirect_uris: |
+          https://cloud.internal.local/apps/user_oidc/code
+          https://cloud.lsck0.dev/apps/user_oidc/code
+        property_mappings:
+          - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
+          - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-email]]
+          - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-profile]]
+        sub_mode: hashed_user_id
+    - model: authentik_core.application
+      id: app-nextcloud
+      identifiers:
+        slug: nextcloud
+      attrs:
+        name: Nextcloud
+        provider: !KeyOf provider-nextcloud-oidc
+        meta_launch_url: https://cloud.internal.local
+  '';
+
+  blueprintYaml = ''
+    version: 1
+    metadata:
+      name: Homelab ForwardAuth Apps
+      labels:
+        blueprints.goauthentik.io/instantiate: "true"
+    entries:
+    ${appEntries}${oidcEntries}
+    - model: authentik_outposts.outpost
+      identifiers:
+        managed: goauthentik.io/outposts/embedded
+      state: present
+      attrs:
+        name: "authentik Embedded Outpost"
+        type: proxy
+        config:
+          authentik_host: https://auth.internal.local
+          authentik_host_insecure: true
+        providers:
+    ${outpostProvidersList}
+  '';
+
+  blueprintFile = pkgs.writeText "homelab-apps-blueprint.yaml" blueprintYaml;
+in {
   networking.hostName = "vm-101";
 
   sops.secrets.authentik-secret-key = {};
@@ -55,11 +167,14 @@
             AUTHENTIK_POSTGRESQL__USER: authentik
             AUTHENTIK_POSTGRESQL__NAME: authentik
             AUTHENTIK_POSTGRESQL__PASSWORD: authentik
+            AUTHENTIK_HOST: https://auth.internal.local
+            AUTHENTIK_INSECURE: "true"
           env_file:
             - ${config.sops.templates."authentik.env".path}
           volumes:
             - /var/lib/authentik/media:/media
             - /var/lib/authentik/custom-templates:/templates
+            - /var/lib/authentik/blueprints:/blueprints/custom
           ports:
             - "80:9000"
             - "443:9443"
@@ -76,6 +191,8 @@
             AUTHENTIK_POSTGRESQL__USER: authentik
             AUTHENTIK_POSTGRESQL__NAME: authentik
             AUTHENTIK_POSTGRESQL__PASSWORD: authentik
+            AUTHENTIK_HOST: https://auth.internal.local
+            AUTHENTIK_INSECURE: "true"
           env_file:
             - ${config.sops.templates."authentik.env".path}
           user: root
@@ -84,10 +201,22 @@
             - /var/lib/authentik/media:/media
             - /var/lib/authentik/certs:/certs
             - /var/lib/authentik/custom-templates:/templates
+            - /var/lib/authentik/blueprints:/blueprints/custom
           depends_on:
             - postgresql
             - redis
     '';
+  };
+
+  # Copy Nix-generated blueprint into the Docker volume before the stack starts
+  systemd.services.authentik-blueprint-sync = {
+    description = "Sync authentik blueprints from Nix store";
+    before = [ "docker-stack-authentik.service" ];
+    requiredBy = [ "docker-stack-authentik.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.coreutils}/bin/install -m 644 ${blueprintFile} /var/lib/authentik/blueprints/homelab-apps.yaml";
+    };
   };
 
   systemd.tmpfiles.rules = [
@@ -96,6 +225,7 @@
     "d /var/lib/authentik/media 0750 1000 1000 -"
     "d /var/lib/authentik/custom-templates 0750 1000 1000 -"
     "d /var/lib/authentik/certs 0750 1000 1000 -"
+    "d /var/lib/authentik/blueprints 0755 1000 1000 -"
   ];
 
   networking.firewall.allowedTCPPorts = [ 80 443 ];

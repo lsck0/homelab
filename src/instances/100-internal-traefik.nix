@@ -57,7 +57,7 @@ in {
           homepage-local-tls       = { rule = "Host(`home.internal.local`)";      service = "homepage";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           vaultwarden-local-tls    = { rule = "Host(`vault.internal.local`)";     service = "vaultwarden";    entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           taskchampion-local-tls   = { rule = "Host(`tasks.internal.local`)";     service = "taskchampion";   entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-          nextcloud-local-tls      = { rule = "Host(`cloud.internal.local`)";     service = "nextcloud";      entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          nextcloud-local-tls      = { rule = "Host(`cloud.internal.local`)";     service = "nextcloud";      entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
           paperless-local-tls      = { rule = "Host(`paperless.internal.local`)"; service = "paperless";      entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           jellyfin-local-tls       = { rule = "Host(`jellyfin.internal.local`)";  service = "jellyfin";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           huginn-local-tls         = { rule = "Host(`huginn.internal.local`)";    service = "huginn";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
@@ -71,7 +71,7 @@ in {
           homepage-tls       = { rule = "Host(`home.lsck0.dev`)";      service = "homepage";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           vaultwarden-tls    = { rule = "Host(`vault.lsck0.dev`)";     service = "vaultwarden";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           taskchampion-tls   = { rule = "Host(`tasks.lsck0.dev`)";     service = "taskchampion";   entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-          nextcloud-tls      = { rule = "Host(`cloud.lsck0.dev`)";     service = "nextcloud";      entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
+          nextcloud-tls      = { rule = "Host(`cloud.lsck0.dev`)";     service = "nextcloud";      entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
           paperless-tls      = { rule = "Host(`paperless.lsck0.dev`)"; service = "paperless";      entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           jellyfin-tls       = { rule = "Host(`jellyfin.lsck0.dev`)";  service = "jellyfin";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           huginn-tls         = { rule = "Host(`huginn.lsck0.dev`)";    service = "huginn";         entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };

@@ -21,6 +21,55 @@
     config.adminpassFile = config.sops.secrets.nextcloud-admin-pass.path;
     package = pkgs.nextcloud33;
     database.createLocally = true;
+    extraApps = {
+      user_oidc = pkgs.fetchNextcloudApp {
+        appName = "user_oidc";
+        sha256 = "sha256-G8dxIpI4k3mlCtqYIwOUwHeJiMP08XOp9zM+BY/EWSo=";
+        url = "https://github.com/nextcloud-releases/user_oidc/releases/download/v8.8.0/user_oidc-v8.8.0.tar.gz";
+        appVersion = "8.8.0";
+        license = "agpl3Plus";
+      };
+    };
+    settings = {
+      trusted_proxies = [ "10.100.0.100" ];
+      overwriteprotocol = "https";
+      allow_user_to_change_display_name = false;
+      user_oidc = {
+        single_logout = false;
+      };
+    };
+  };
+
+  # Configure OIDC provider after Nextcloud is set up
+  systemd.services."nextcloud-oidc-setup" = {
+    description = "Configure Nextcloud OIDC provider";
+    after = [ "nextcloud-setup.service" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      User = "nextcloud";
+      ExecStart = pkgs.writeShellScript "nextcloud-oidc-setup" ''
+        OCC="${config.services.nextcloud.occ}/bin/nextcloud-occ"
+
+        # Enable the app
+        $OCC app:enable user_oidc || true
+
+        # Check if provider already exists
+        if $OCC user_oidc:provider authentik 2>/dev/null | grep -q "authentik"; then
+          echo "OIDC provider already configured"
+          exit 0
+        fi
+
+        $OCC user_oidc:provider authentik \
+          --clientid="nextcloud" \
+          --clientsecret="nextcloud-oidc-secret-changeme" \
+          --discoveryuri="http://10.100.0.101/application/o/nextcloud/.well-known/openid-configuration" \
+          --mapping-uid="preferred_username" \
+          --mapping-display-name="name" \
+          --mapping-email="email" \
+          --unique-uid=1 || true
+      '';
+    };
   };
 
   systemd.services."nextcloud-setup" = {

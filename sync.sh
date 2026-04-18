@@ -392,6 +392,19 @@ for _ in $(seq 1 12); do
   sleep 5
 done
 
+# Verify DNS is working on the router before deploying VMs that depend on it.
+# VMs use 10.100.0.1 (router) as their DNS server; if it's not ready, services
+# that pull container images at boot (e.g. Authentik) will fail.
+echo ">>> Verifying router DNS is operational..."
+for _ in $(seq 1 24); do
+  if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "root@${ROUTER_WAN_IP}" \
+    "dig +short +timeout=2 ghcr.io @127.0.0.1 2>/dev/null | grep -q ." 2>/dev/null; then
+    echo ">>> Router DNS confirmed."
+    break
+  fi
+  sleep 5
+done
+
 # Deploy remaining VMs
 for nix_file in "$ROOT_DIR"/src/instances/301-grafana.nix \
                 "$ROOT_DIR"/src/instances/1[0-9][0-9]-*.nix \
