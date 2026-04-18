@@ -5,6 +5,9 @@
     image = "ghcr.io/gethomepage/homepage:latest";
     ports = [ "80:3000" ];
     volumes = [ "/var/lib/homepage:/app/config" ];
+    environment = {
+      HOMEPAGE_ALLOWED_HOSTS = "home.internal.local,home.lsck0.dev";
+    };
   };
 
   systemd.tmpfiles.rules = [
