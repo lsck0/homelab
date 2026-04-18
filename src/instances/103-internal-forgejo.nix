@@ -5,6 +5,10 @@
     image = "codeberg.org/forgejo/forgejo:7";
     ports = [ "80:3000" "2222:22" ];
     volumes = [ "/var/lib/forgejo:/data" ];
+    environment = {
+      FORGEJO__server__HTTP_PORT = "3000";
+      FORGEJO__server__ROOT_URL = "https://git.internal.local/";
+    };
   };
 
   systemd.tmpfiles.rules = [
