@@ -72,38 +72,38 @@
     "d /srv/nas/documents 0775 nobody nogroup -"
     "d /srv/nas/torrents 0775 nobody nogroup -"
     # per-service persistent data
-    "d /srv/nas/data 0775 nobody nogroup -"
-    "d /srv/nas/data/authentik 0750 nobody nogroup -"
-    "d /srv/nas/data/forgejo 0750 nobody nogroup -"
-    "d /srv/nas/data/registry 0750 nobody nogroup -"
-    "d /srv/nas/data/taskchampion 0750 nobody nogroup -"
-    "d /srv/nas/data/vaultwarden 0750 nobody nogroup -"
-    "d /srv/nas/data/nextcloud 0750 nobody nogroup -"
-    "d /srv/nas/data/nextcloud-db 0750 nobody nogroup -"
-    "d /srv/nas/data/wikijs-db 0750 nobody nogroup -"
-    "d /srv/nas/data/huginn 0750 nobody nogroup -"
-    "d /srv/nas/data/huginn-db 0750 nobody nogroup -"
-    "d /srv/nas/data/homeassistant 0750 nobody nogroup -"
-    "d /srv/nas/data/grafana 0750 nobody nogroup -"
-    "d /srv/nas/data/prometheus 0750 nobody nogroup -"
-    "d /srv/nas/data/navidrome 0750 nobody nogroup -"
-    "d /srv/nas/data/kavita 0750 nobody nogroup -"
-    "d /srv/nas/data/uptime-kuma 0750 nobody nogroup -"
-    "d /srv/nas/data/shlink 0750 nobody nogroup -"
-    "d /srv/nas/data/privatebin 0750 nobody nogroup -"
-    "d /srv/nas/data/share 0750 nobody nogroup -"
-    "d /srv/nas/data/minecraft 0750 nobody nogroup -"
-    "d /srv/nas/data/minecraft-modpacks 0750 nobody nogroup -"
-    "d /srv/nas/data/paperless 0750 nobody nogroup -"
-    "d /srv/nas/data/qbittorrent 0750 nobody nogroup -"
-    "d /srv/nas/data/prowlarr 0750 nobody nogroup -"
-    "d /srv/nas/data/sonarr 0750 nobody nogroup -"
-    "d /srv/nas/data/radarr 0750 nobody nogroup -"
-    "d /srv/nas/data/jellyfin 0750 nobody nogroup -"
-    "d /srv/nas/data/audiobookshelf 0750 nobody nogroup -"
-    "d /srv/nas/data/homepage 0750 nobody nogroup -"
-    "d /srv/nas/data/crowdsec-internal 0750 nobody nogroup -"
-    "d /srv/nas/data/crowdsec-external 0750 nobody nogroup -"
+    "d /srv/nas/data 0777 nobody nogroup -"
+    "d /srv/nas/data/authentik 0777 nobody nogroup -"
+    "d /srv/nas/data/forgejo 0777 nobody nogroup -"
+    "d /srv/nas/data/registry 0777 nobody nogroup -"
+    "d /srv/nas/data/taskchampion 0777 nobody nogroup -"
+    "d /srv/nas/data/vaultwarden 0777 nobody nogroup -"
+    "d /srv/nas/data/nextcloud 0777 nobody nogroup -"
+    "d /srv/nas/data/nextcloud-db 0777 nobody nogroup -"
+    "d /srv/nas/data/wikijs-db 0777 nobody nogroup -"
+    "d /srv/nas/data/huginn 0777 nobody nogroup -"
+    "d /srv/nas/data/huginn-db 0777 nobody nogroup -"
+    "d /srv/nas/data/homeassistant 0777 nobody nogroup -"
+    "d /srv/nas/data/grafana 0777 nobody nogroup -"
+    "d /srv/nas/data/prometheus 0777 nobody nogroup -"
+    "d /srv/nas/data/navidrome 0777 nobody nogroup -"
+    "d /srv/nas/data/kavita 0777 nobody nogroup -"
+    "d /srv/nas/data/uptime-kuma 0777 nobody nogroup -"
+    "d /srv/nas/data/shlink 0777 nobody nogroup -"
+    "d /srv/nas/data/privatebin 0777 nobody nogroup -"
+    "d /srv/nas/data/share 0777 nobody nogroup -"
+    "d /srv/nas/data/minecraft 0777 nobody nogroup -"
+    "d /srv/nas/data/minecraft-modpacks 0777 nobody nogroup -"
+    "d /srv/nas/data/paperless 0777 nobody nogroup -"
+    "d /srv/nas/data/qbittorrent 0777 nobody nogroup -"
+    "d /srv/nas/data/prowlarr 0777 nobody nogroup -"
+    "d /srv/nas/data/sonarr 0777 nobody nogroup -"
+    "d /srv/nas/data/radarr 0777 nobody nogroup -"
+    "d /srv/nas/data/jellyfin 0777 nobody nogroup -"
+    "d /srv/nas/data/audiobookshelf 0777 nobody nogroup -"
+    "d /srv/nas/data/homepage 0777 nobody nogroup -"
+    "d /srv/nas/data/crowdsec-internal 0777 nobody nogroup -"
+    "d /srv/nas/data/crowdsec-external 0777 nobody nogroup -"
     "d /var/lib/filebrowser 0750 1000 1000 -"
     "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
   ];
@@ -111,13 +111,17 @@
   # FileBrowser web UI — authentik handles auth via traefik
   virtualisation.oci-containers.containers.filebrowser = {
     image = "filebrowser/filebrowser:latest";
-    ports = [ "80:80" ];
+    ports = [ "80:8080" ];
     volumes = [
       "/srv/nas:/srv"
       "/var/lib/filebrowser/filebrowser.db:/database/filebrowser.db"
     ];
-    extraOptions = [ "--entrypoint" "" ];
-    cmd = [ "/filebrowser" "--noauth" "--database" "/database/filebrowser.db" ];
+    environment = {
+      FB_NOAUTH = "true";
+      FB_DATABASE = "/database/filebrowser.db";
+      FB_ROOT = "/srv";
+      FB_PORT = "8080";
+    };
   };
 
   networking.firewall.allowedTCPPorts = [ 80 2049 111 ];

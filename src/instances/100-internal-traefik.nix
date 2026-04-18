@@ -51,6 +51,7 @@ in {
       log.level = "WARN";
       accessLog = {};
       api.dashboard = true;
+      api.insecure = true;
       entryPoints = {
         web = {
           address = ":80";
@@ -96,10 +97,10 @@ in {
           traefik-dash-local-tls   = { rule = "Host(`traefik.internal`)";    service = "api@internal";    entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           homepage-local-tls       = { rule = "Host(`homepage.internal`)";       service = "homepage";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
           uptime-kuma-local-tls    = { rule = "Host(`status.internal`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-          forgejo-local-tls        = { rule = "Host(`git.internal`)";        service = "forgejo";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          forgejo-local-tls        = { rule = "Host(`git.internal`)";        service = "forgejo";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
           registry-local-tls       = { rule = "Host(`registry.internal`)";   service = "registry";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          taskchampion-local-tls   = { rule = "Host(`tasks.internal`)";      service = "taskchampion";    entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-          vaultwarden-local-tls    = { rule = "Host(`vault.internal`)";      service = "vaultwarden";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          taskchampion-local-tls   = { rule = "Host(`tasks.internal`)";      service = "taskchampion";    entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          vaultwarden-local-tls    = { rule = "Host(`vault.internal`)";      service = "vaultwarden";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
           nextcloud-local-tls      = { rule = "Host(`cloud.internal`)";      service = "nextcloud";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
           qbittorrent-local-tls    = { rule = "Host(`torrent.internal`)";    service = "qbittorrent";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           prowlarr-local-tls       = { rule = "Host(`prowlarr.internal`)";   service = "prowlarr";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
@@ -115,16 +116,16 @@ in {
           navidrome-local-tls      = { rule = "Host(`music.internal`)";     service = "navidrome";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           kavita-local-tls         = { rule = "Host(`read.internal`)";      service = "kavita";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           nas-local-tls            = { rule = "Host(`nas.internal`)";        service = "nas";             entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          proxmox-local-tls        = { rule = "Host(`proxmox.internal`)";    service = "proxmox";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+          proxmox-local-tls        = { rule = "Host(`proxmox.internal`)";    service = "proxmox";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
 
           # ── lsck0.dev — HTTPS (VPN / external) ──
           authentik-tls      = { rule = "Host(`auth.lsck0.dev`)";       service = "authentik";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
           homepage-tls       = { rule = "Host(`homepage.lsck0.dev`)";       service = "homepage";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
           uptime-kuma-tls    = { rule = "Host(`status.lsck0.dev`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-          forgejo-tls        = { rule = "Host(`git.lsck0.dev`)";        service = "forgejo";         entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
+          forgejo-tls        = { rule = "Host(`git.lsck0.dev`)";        service = "forgejo";         entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
           registry-tls       = { rule = "Host(`registry.lsck0.dev`)";   service = "registry";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
-          taskchampion-tls   = { rule = "Host(`tasks.lsck0.dev`)";      service = "taskchampion";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-          vaultwarden-tls    = { rule = "Host(`vault.lsck0.dev`)";      service = "vaultwarden";     entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
+          taskchampion-tls   = { rule = "Host(`tasks.lsck0.dev`)";      service = "taskchampion";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
+          vaultwarden-tls    = { rule = "Host(`vault.lsck0.dev`)";      service = "vaultwarden";     entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
           nextcloud-tls      = { rule = "Host(`cloud.lsck0.dev`)";      service = "nextcloud";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
           qbittorrent-tls    = { rule = "Host(`torrent.lsck0.dev`)";    service = "qbittorrent";     entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           prowlarr-tls       = { rule = "Host(`prowlarr.lsck0.dev`)";   service = "prowlarr";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
@@ -140,6 +141,7 @@ in {
           navidrome-tls      = { rule = "Host(`music.lsck0.dev`)";     service = "navidrome";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           kavita-tls         = { rule = "Host(`read.lsck0.dev`)";      service = "kavita";          entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           nas-tls            = { rule = "Host(`nas.lsck0.dev`)";       service = "nas";             entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
+          proxmox-tls        = { rule = "Host(`proxmox.lsck0.dev`)";   service = "proxmox";         entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
         };
 
         services = {

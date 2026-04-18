@@ -15,6 +15,8 @@
       ND_SCANSCHEDULE = "1h";
       ND_LOGLEVEL = "info";
       ND_BASEURL = "";
+      ND_REVERSEPROXYUSERHEADER = "X-Authentik-Username";
+      ND_REVERSEPROXYWHITELIST = "10.100.0.100/32";
     };
   };
 

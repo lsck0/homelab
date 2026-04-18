@@ -37,8 +37,10 @@
       };
     };
     settings = {
+      trusted_domains = [ "cloud.internal" "cloud.lsck0.dev" ];
       trusted_proxies = [ "10.100.0.100" ];
       overwriteprotocol = "https";
+      overwritehost = "cloud.internal";
       allow_user_to_change_display_name = false;
       user_oidc = {
         single_logout = false;

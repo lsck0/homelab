@@ -47,6 +47,7 @@ in {
     staticConfigOptions = {
       accessLog = {};
       api.dashboard = true;
+      api.insecure = true;
       entryPoints = {
         web = { address = ":80"; http.redirections.entryPoint = { to = "websecure"; scheme = "https"; permanent = true; }; };
         websecure.address = ":443";
@@ -70,6 +71,9 @@ in {
     };
     http = {
       routers = {
+        # ── Dashboard ──
+        traefik-dash = { rule = "Host(`traefik.external`)"; service = "api@internal"; entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+
         # ── .external — HTTP (LAN) ──
         headscale    = { rule = "Host(`hs.external`)";          service = "headscale";    entryPoints = [ "web" ]; };
         shlink       = { rule = "Host(`shlink.external`)";      service = "shlink";       entryPoints = [ "web" ]; };

@@ -1,9 +1,10 @@
 { config, pkgs, lib, nasMount, ... }:
 let
   protectedApps = [
-    { slug = "forgejo";        name = "Forgejo";          local = "git.internal";         external = "git.lsck0.dev"; }
+    { slug = "traefik";        name = "Traefik";          local = "traefik.internal";     external = "traefik.lsck0.dev"; }
+    # forgejo uses native OIDC, not ForwardAuth
     { slug = "registry";       name = "Registry";         local = "registry.internal";    external = "registry.lsck0.dev"; }
-    { slug = "vaultwarden";    name = "Vaultwarden";      local = "vault.internal";       external = "vault.lsck0.dev"; }
+    # vaultwarden uses native OIDC, not ForwardAuth
     { slug = "paperless";      name = "Paperless";        local = "paperless.internal";   external = "paperless.lsck0.dev"; }
     { slug = "jellyfin";       name = "Jellyfin";         local = "jellyfin.internal";    external = "jellyfin.lsck0.dev"; }
     { slug = "huginn";         name = "Huginn";           local = "huginn.internal";      external = "huginn.lsck0.dev"; }
@@ -18,6 +19,8 @@ let
     { slug = "navidrome";      name = "Navidrome";        local = "music.internal";       external = "music.lsck0.dev"; }
     { slug = "kavita";         name = "Kavita";           local = "read.internal";        external = "read.lsck0.dev"; }
     { slug = "nas";            name = "NAS";              local = "nas.internal";         external = "nas.lsck0.dev"; }
+    { slug = "taskchampion";   name = "Tasks";            local = "tasks.internal";       external = "tasks.lsck0.dev"; }
+    { slug = "proxmox";        name = "Proxmox";          local = "proxmox.internal";     external = "proxmox.lsck0.dev"; }
   ];
 
   mkProviderAndApp = variant: app:
@@ -85,6 +88,34 @@ let
         name: Nextcloud
         provider: !KeyOf provider-nextcloud-oidc
         meta_launch_url: https://cloud.internal
+
+    # --- Vaultwarden OIDC ---
+    - model: authentik_providers_oauth2.oauth2provider
+      id: provider-vaultwarden-oidc
+      identifiers:
+        name: vaultwarden-oidc-provider
+      attrs:
+        authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+        client_type: confidential
+        client_id: vaultwarden
+        client_secret: vaultwarden-oidc-secret-changeme
+        signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
+        redirect_uris: |
+          https://vault.internal/identity/connect/oidc-signin
+          https://vault.lsck0.dev/identity/connect/oidc-signin
+        property_mappings:
+          - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
+          - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-email]]
+          - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-profile]]
+        sub_mode: hashed_user_id
+    - model: authentik_core.application
+      id: app-vaultwarden
+      identifiers:
+        slug: vaultwarden
+      attrs:
+        name: Vaultwarden
+        provider: !KeyOf provider-vaultwarden-oidc
+        meta_launch_url: https://vault.internal
 
     # --- Forgejo OIDC ---
     - model: authentik_providers_oauth2.oauth2provider

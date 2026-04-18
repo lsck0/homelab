@@ -27,7 +27,6 @@
     path = [ pkgs.paperless-ngx ];
     serviceConfig = {
       Type = "oneshot";
-      RemainAfterExit = true;
       User = "paperless";
       Group = "paperless";
       WorkingDirectory = "/var/lib/paperless";

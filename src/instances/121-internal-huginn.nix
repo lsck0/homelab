@@ -32,6 +32,9 @@
       DATABASE_PORT = "5432";
       DATABASE_NAME = "huginn";
       DATABASE_USERNAME = "huginn";
+      SEED_USERNAME = "akadmin";
+      SEED_PASSWORD = "changeme123!";
+      REQUIRE_CONFIRMED_EMAIL = "false";
     };
   };
 
