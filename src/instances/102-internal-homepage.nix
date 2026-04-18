@@ -1,230 +1,210 @@
 { pkgs, nasMount, ... }:
 let
   servicesYaml = pkgs.writeText "services.yaml" ''
-    - Infrastructure:
-        - FritzBox:
-            icon: mdi-router-wireless
-            href: http://192.168.178.1
-            description: Home Router
-            ping: http://192.168.178.1
-        - Proxmox:
-            icon: proxmox
-            href: https://proxmox.internal
-            description: Hypervisor
-            ping: http://192.168.178.200:8006
-        - Router:
-            icon: nixos
-            description: NixOS Router & DNS
-            ping: http://10.100.0.1
+    - Infra:
         - Cloudflare:
             icon: cloudflare
             href: https://dash.cloudflare.com
-            description: DNS & CDN
-
-    - Internal:
+        - FritzBox:
+            icon: mdi-router-wireless
+            href: http://192.168.178.1
+            ping: http://192.168.178.1
+        - Router:
+            icon: nixos
+            ping: http://10.100.0.1
+        - Proxmox:
+            icon: proxmox
+            href: https://proxmox.internal
+            ping: http://192.168.178.200:8006
+            widget:
+              type: proxmox
+              url: https://192.168.178.200:8006
+              username: {{HOMEPAGE_VAR_PROXMOX_USER}}
+              password: {{HOMEPAGE_VAR_PROXMOX_PASS}}
+              node: proxmox
         - Traefik:
             icon: traefik
             href: https://traefik.internal
-            description: Reverse Proxy & Ingress
             ping: http://10.100.0.100
             widget:
               type: traefik
-              url: http://10.100.0.100
-        - CrowdSec:
-            icon: crowdsec
-            description: Intrusion Prevention
+              url: http://10.100.0.100:8080
         - Authentik:
             icon: authentik
             href: https://auth.internal
-            description: Identity Provider & SSO
             ping: http://10.100.0.101
-        - Homepage:
-            icon: homepage
-            href: https://homepage.internal
-            description: Dashboard
-            ping: http://10.100.0.102
-        - Uptime Kuma:
-            icon: uptime-kuma
-            href: https://status.internal
-            description: Availability Monitoring
-            ping: http://10.100.0.103
             widget:
-              type: uptimekuma
-              url: http://10.100.0.103:80
-              slug: default
+              type: authentik
+              url: http://10.100.0.101
+              key: {{HOMEPAGE_VAR_AUTHENTIK_TOKEN}}
         - Grafana:
             icon: grafana
             href: https://grafana.internal
-            description: Metrics & Dashboards
             ping: http://10.100.0.104
             widget:
               type: grafana
-              url: http://10.100.0.104:80
-        - Forgejo:
-            icon: forgejo
-            href: https://git.internal
-            description: Git Forge
-            ping: http://10.100.0.105
-        - Forgejo Runner:
-            icon: forgejo
-            description: CI/CD Runner
-            ping: http://10.100.0.106
-        - sccache:
-            icon: mdi-cached
-            description: Shared Build Cache
-            ping: http://10.100.0.107
-        - Registry:
-            icon: docker
-            href: https://registry.internal
-            description: Container Registry
-            ping: http://10.100.0.108
-        - Taskchampion:
-            icon: mdi-checkbox-marked-outline
-            href: https://tasks.internal
-            description: Task Sync Server
-            ping: http://10.100.0.109:8080
-        - Vaultwarden:
-            icon: vaultwarden
-            href: https://vault.internal
-            description: Password Manager
-            ping: http://10.100.0.110:8080
+              url: http://10.100.0.104
+              username: admin
+              password: admin
+        - Status:
+            icon: uptime-kuma
+            href: https://status.internal
+            ping: http://10.100.0.103
+            widget:
+              type: uptimekuma
+              url: http://10.100.0.103
+              slug: homelab
         - NAS:
             icon: mdi-nas
             href: https://nas.internal
-            description: NFS Storage (100 GB)
             ping: http://10.100.0.111
+
+    - Services:
+        - Forgejo:
+            icon: forgejo
+            href: https://git.internal
+            ping: http://10.100.0.105
+            widget:
+              type: gitea
+              url: http://10.100.0.105
+        - Forgejo Runner:
+            icon: forgejo
+            ping: http://10.100.0.106
+        - Registry:
+            icon: docker-moby
+            href: https://registry.internal
+            ping: http://10.100.0.108
+        - sccache:
+            icon: mdi-cached
         - Nextcloud:
             icon: nextcloud
             href: https://cloud.internal
-            description: Files, Calendar & Contacts
             ping: http://10.100.0.112
-        - qBittorrent:
-            icon: qbittorrent
-            href: https://torrent.internal
-            description: Torrent Client
-            ping: http://10.100.0.113
             widget:
-              type: qbittorrent
-              url: http://10.100.0.113:80
-        - Prowlarr:
-            icon: prowlarr
-            href: https://prowlarr.internal
-            description: Indexer Manager
-            ping: http://10.100.0.114
-            widget:
-              type: prowlarr
-              url: http://10.100.0.114:80
-        - Sonarr:
-            icon: sonarr
-            href: https://sonarr.internal
-            description: TV Series Automation
-            ping: http://10.100.0.115
-            widget:
-              type: sonarr
-              url: http://10.100.0.115:80
-        - Radarr:
-            icon: radarr
-            href: https://radarr.internal
-            description: Movie Automation
-            ping: http://10.100.0.116
-            widget:
-              type: radarr
-              url: http://10.100.0.116:80
-        - Navidrome:
-            icon: navidrome
-            href: https://music.internal
-            description: Music Server
-            ping: http://10.100.0.123
-            widget:
-              type: navidrome
-              url: http://10.100.0.123:80
-        - Kavita:
-            icon: kavita
-            href: https://read.internal
-            description: Manga & Comics
-            ping: http://10.100.0.124
-        - Jellyfin:
-            icon: jellyfin
-            href: https://jellyfin.internal
-            description: Media Streaming
-            ping: http://10.100.0.117
-            widget:
-              type: jellyfin
-              url: http://10.100.0.117:80
-              enableNowPlaying: true
-        - Audiobookshelf:
-            icon: audiobookshelf
-            href: https://abs.internal
-            description: Audiobooks & Podcasts
-            ping: http://10.100.0.118
-            widget:
-              type: audiobookshelf
-              url: http://10.100.0.118:80
+              type: nextcloud
+              url: http://10.100.0.112
+        - Vaultwarden:
+            icon: vaultwarden
+            href: https://vault.internal
+            ping: http://10.100.0.110:8080
         - Paperless:
             icon: paperless-ngx
             href: https://paperless.internal
-            description: Document Management
             ping: http://10.100.0.119:8080
             widget:
-              type: paperlessngx
+              type: paperless
               url: http://10.100.0.119:8080
         - Wiki.js:
             icon: wikijs
             href: https://wiki.internal
-            description: Knowledge Base
             ping: http://10.100.0.120
-        - Huginn:
-            icon: huginn
-            href: https://huginn.internal
-            description: Event-driven Automation
-            ping: http://10.100.0.121
         - Home Assistant:
             icon: home-assistant
             href: https://hass.internal
-            description: Smart Home Hub
             ping: http://10.100.0.122
             widget:
               type: homeassistant
-              url: http://10.100.0.122:80
+              url: http://10.100.0.122:8123
+              key: {{HOMEPAGE_VAR_HASS_TOKEN}}
+        - Huginn:
+            icon: huginn
+            href: https://huginn.internal
+            ping: http://10.100.0.121
+        - Tasks:
+            icon: mdi-checkbox-marked-outline
+            href: https://tasks.internal
+            ping: http://10.100.0.109:8080
+
+    - Media:
+        - Jellyfin:
+            icon: jellyfin
+            href: https://jellyfin.internal
+            ping: http://10.100.0.117
+            widget:
+              type: jellyfin
+              url: http://10.100.0.117
+              enableNowPlaying: true
+              enableBlocks: true
+        - qBittorrent:
+            icon: qbittorrent
+            href: https://torrent.internal
+            ping: http://10.100.0.113
+            widget:
+              type: qbittorrent
+              url: http://10.100.0.113
+        - Sonarr:
+            icon: sonarr
+            href: https://sonarr.internal
+            ping: http://10.100.0.115
+            widget:
+              type: sonarr
+              url: http://10.100.0.115
+              key: 626adc3d01074b2989e95d1b31f8bc02
+        - Radarr:
+            icon: radarr
+            href: https://radarr.internal
+            ping: http://10.100.0.116
+            widget:
+              type: radarr
+              url: http://10.100.0.116
+              key: ec5dbde1269d4ab59a3714e175a7f2e6
+        - Prowlarr:
+            icon: prowlarr
+            href: https://prowlarr.internal
+            ping: http://10.100.0.114
+            widget:
+              type: prowlarr
+              url: http://10.100.0.114
+              key: c21a45cc3d624c48a315d0960de8937c
+        - Navidrome:
+            icon: navidrome
+            href: https://music.internal
+            ping: http://10.100.0.123
+            widget:
+              type: navidrome
+              url: http://10.100.0.123
+        - Audiobookshelf:
+            icon: audiobookshelf
+            href: https://abs.internal
+            ping: http://10.100.0.118
+            widget:
+              type: audiobookshelf
+              url: http://10.100.0.118
+        - Kavita:
+            icon: kavita
+            href: https://read.internal
+            ping: http://10.100.0.124
+            widget:
+              type: kavita
+              url: http://10.100.0.124
 
     - External:
-        - Traefik:
+        - Ext Traefik:
             icon: traefik
-            description: External Reverse Proxy
+            href: https://traefik.external
             ping: http://10.200.0.200
             widget:
               type: traefik
-              url: http://10.200.0.200
-        - CrowdSec:
-            icon: crowdsec
-            description: External Intrusion Prevention
+              url: http://10.200.0.200:8080
         - Headscale:
             icon: headscale
             href: https://hs.lsck0.dev
-            description: Tailscale-compatible VPN
             ping: http://10.200.0.201
         - Shlink:
             icon: shlink
             href: https://shlink.external
-            description: URL Shortener
             ping: http://10.200.0.202
         - PrivateBin:
             icon: privatebin
             href: https://paste.external
-            description: Encrypted Pastebin
             ping: http://10.200.0.203
         - Share:
             icon: filebrowser
             href: https://share.external
-            description: Public File Sharing
             ping: http://10.200.0.204
         - Minecraft:
             icon: minecraft
-            description: Forge 1.20.1
             ping: http://10.200.0.205
-            widget:
-              type: minecraft
-              url: udp://10.200.0.205:25565
   '';
 
   settingsYaml = pkgs.writeText "settings.yaml" ''
@@ -241,21 +221,22 @@ let
     headerStyle: clean
     statusStyle: dot
     hideVersion: true
-    disableCollapse: false
+    disableCollapse: true
+    fiveColumns: true
     layout:
-      Infrastructure:
+      Infra:
         style: row
-        columns: 4
-        icon: mdi-server-network
+        columns: 5
         header: false
-      Internal:
+      Services:
+        style: row
+        columns: 5
+      Media:
         style: row
         columns: 4
-        icon: mdi-lan
       External:
         style: row
-        columns: 4
-        icon: mdi-earth
+        columns: 3
   '';
 
   widgetsYaml = pkgs.writeText "widgets.yaml" ''
@@ -277,6 +258,12 @@ let
     - search:
         provider: google
         target: _blank
+    - resources:
+        cpu: true
+        memory: true
+        cputemp: true
+        uptime: true
+        disk: /
   '';
 
   bookmarksYaml = pkgs.writeText "bookmarks.yaml" ''

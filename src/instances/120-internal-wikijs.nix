@@ -28,6 +28,7 @@
   # Allow container to reach host PostgreSQL
   services.postgresql.enableTCPIP = true;
   services.postgresql.authentication = ''
+    host wikijs wikijs 10.88.0.0/16 trust
     host wikijs wikijs 10.100.0.120/32 trust
   '';
 

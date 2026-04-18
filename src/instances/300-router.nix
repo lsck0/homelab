@@ -21,15 +21,10 @@
     enable = true;
     externalInterface = "ens18";
     internalInterfaces = [ "ens19" "ens20" "wg0" ];
-    forwardPorts = [
-      # FritzBox forwards 443 → here, route to external traefik
-      { destination = "10.200.0.200:443"; proto = "tcp"; sourcePort = 443; }
-      # alternate ports for direct access (internal/external traefik)
-      { destination = "10.100.0.100:443"; proto = "tcp"; sourcePort = 10100; }
-      { destination = "10.200.0.200:443"; proto = "tcp"; sourcePort = 10200; }
-      # non-HTTP services
-      { destination = "10.200.0.200:25565"; proto = "tcp"; sourcePort = 25565; }
-    ];
+    # forwardPorts left empty — NixOS forwardPorts matches ALL inbound traffic on ens18,
+    # hijacking LAN→10.100.0.x:443 to external traefik. Custom nftables below restrict
+    # DNAT to traffic destined for the router's own WAN IP only.
+    forwardPorts = [];
   };
 
   # ── Firewall ────────────────────────────────────────────────
@@ -78,6 +73,20 @@
 
       # External DMZ → internet: allow
       iifname "ens20" accept
+    '';
+  };
+
+  # ── Port Forwards (DNAT only for router's own WAN IP) ─────
+  networking.nftables.tables.port-forwards = {
+    family = "ip";
+    content = ''
+      chain prerouting {
+        type nat hook prerouting priority dstnat - 1; policy accept;
+        ip daddr 192.168.178.29 tcp dport 443 dnat to 10.200.0.200:443
+        ip daddr 192.168.178.29 tcp dport 10100 dnat to 10.100.0.100:443
+        ip daddr 192.168.178.29 tcp dport 10200 dnat to 10.200.0.200:443
+        ip daddr 192.168.178.29 tcp dport 25565 dnat to 10.200.0.200:25565
+      }
     '';
   };
 
@@ -155,6 +164,7 @@
           10.100.0.100 grafana.lsck0.dev wiki.lsck0.dev abs.lsck0.dev
           10.100.0.100 torrent.lsck0.dev music.lsck0.dev read.lsck0.dev
           10.100.0.100 prowlarr.lsck0.dev sonarr.lsck0.dev radarr.lsck0.dev
+          10.100.0.100 nas.lsck0.dev proxmox.lsck0.dev traefik.lsck0.dev
           # external services → external Traefik
           10.200.0.200 hs.lsck0.dev shlink.lsck0.dev paste.lsck0.dev share.lsck0.dev mc.lsck0.dev
           fallthrough
@@ -175,15 +185,79 @@
   # After first boot, get server pubkey: wg show wg0 public-key
   # Generate client config with that key + endpoint = <your-public-ip>:51820
   sops.secrets.wireguard-private-key = {};
+  sops.secrets.cloudflare-token = {};
+
+  # ── DDNS (Cloudflare) ──────────────────────────────────────
+  systemd.services.ddns-cloudflare = {
+    description = "Update vpn.lsck0.dev A record with current public IP";
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    path = [ pkgs.curl pkgs.jq ];
+    serviceConfig = {
+      Type = "oneshot";
+      EnvironmentFile = config.sops.secrets.cloudflare-token.path;
+    };
+    script = ''
+      TOKEN=$(cat ${config.sops.secrets.cloudflare-token.path})
+      DOMAIN="wg.lsck0.dev"
+      ZONE_NAME="lsck0.dev"
+
+      IP=$(curl -sf https://api.ipify.org)
+      [ -z "$IP" ] && { echo "Failed to get public IP"; exit 1; }
+
+      ZONE_ID=$(curl -sf -H "Authorization: Bearer $TOKEN" \
+        "https://api.cloudflare.com/client/v4/zones?name=$ZONE_NAME" | jq -r '.result[0].id')
+      [ -z "$ZONE_ID" ] || [ "$ZONE_ID" = "null" ] && { echo "Failed to get zone ID"; exit 1; }
+
+      RECORD=$(curl -sf -H "Authorization: Bearer $TOKEN" \
+        "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$DOMAIN&type=A")
+      RECORD_ID=$(echo "$RECORD" | jq -r '.result[0].id // empty')
+      CURRENT_IP=$(echo "$RECORD" | jq -r '.result[0].content // empty')
+
+      if [ "$CURRENT_IP" = "$IP" ]; then
+        echo "$DOMAIN already points to $IP"
+        exit 0
+      fi
+
+      if [ -n "$RECORD_ID" ]; then
+        curl -sf -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+          "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+          -d "{\"type\":\"A\",\"name\":\"$DOMAIN\",\"content\":\"$IP\",\"ttl\":300,\"proxied\":false}" | jq .
+        echo "Updated $DOMAIN: $CURRENT_IP -> $IP"
+      else
+        curl -sf -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+          "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+          -d "{\"type\":\"A\",\"name\":\"$DOMAIN\",\"content\":\"$IP\",\"ttl\":300,\"proxied\":false}" | jq .
+        echo "Created $DOMAIN -> $IP"
+      fi
+    '';
+  };
+
+  systemd.timers.ddns-cloudflare = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "1min";
+      OnUnitActiveSec = "5min";
+    };
+  };
   networking.wireguard.interfaces.wg0 = {
     ips = [ "10.0.0.1/24" ];
     listenPort = 51820;
     privateKeyFile = config.sops.secrets.wireguard-private-key.path;
-    # Add peers here. Example:
-    # peers = [{
-    #   publicKey = "CLIENT_PUBLIC_KEY_HERE";
-    #   allowedIPs = [ "10.0.0.2/32" ];
-    # }];
+    peers = [
+      { # laptop
+        publicKey = "uS6fCRVw/IvsfT4R7r0coMLxWl9+gHRY0H/KlNFkBVs=";
+        allowedIPs = [ "10.0.0.2/32" ];
+      }
+      { # phone
+        publicKey = "lplUjlL/gPLRaSwi/wbtmpZ34BCinSq9bY9dmwxXh3s=";
+        allowedIPs = [ "10.0.0.3/32" ];
+      }
+      { # tablet
+        publicKey = "AW4t+4glZqmUl8ZAtrq60K/GTDmzZJisz1+6EqYnmzI=";
+        allowedIPs = [ "10.0.0.4/32" ];
+      }
+    ];
     postSetup = ''
       ${pkgs.iptables}/bin/iptables -A FORWARD -i wg0 -j ACCEPT
       ${pkgs.iptables}/bin/iptables -t nat -A POSTROUTING -o ens18 -j MASQUERADE

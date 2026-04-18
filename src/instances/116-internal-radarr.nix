@@ -1,4 +1,4 @@
-{ nasMount, nasPath, ... }: {
+{ pkgs, nasMount, nasPath, ... }: {
   networking.hostName = "vm-116";
 
   fileSystems = nasMount "/var/lib/radarr" "radarr"
@@ -23,6 +23,30 @@
   systemd.tmpfiles.rules = [
     "d /var/lib/radarr 0750 1000 1000 -"
   ];
+
+  # Disable built-in auth — authentik ForwardAuth handles access control
+  systemd.services.radarr-disable-auth = {
+    description = "Disable Radarr built-in auth";
+    after = [ "podman-radarr.service" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      conf="/var/lib/radarr/config.xml"
+      for i in $(seq 1 60); do
+        [ -f "$conf" ] && break
+        sleep 2
+      done
+      [ ! -f "$conf" ] && exit 1
+
+      ${pkgs.gnused}/bin/sed -i 's|<AuthenticationMethod>.*</AuthenticationMethod>|<AuthenticationMethod>External</AuthenticationMethod>|' "$conf"
+      ${pkgs.gnused}/bin/sed -i 's|<AuthenticationRequired>.*</AuthenticationRequired>|<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>|' "$conf"
+
+      ${pkgs.podman}/bin/podman restart radarr
+    '';
+  };
 
   networking.firewall.allowedTCPPorts = [ 80 ];
 }

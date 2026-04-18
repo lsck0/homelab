@@ -63,7 +63,7 @@ let
         await send("setup", "admin", "changeme123!");
         console.log("Admin created");
       } catch (e) {
-        if (!e.message.includes("setup")) console.log("Setup:", e.message);
+        console.log("Setup:", e.message);
       }
 
       await send("login", { username: "admin", password: "changeme123!", token: "" });

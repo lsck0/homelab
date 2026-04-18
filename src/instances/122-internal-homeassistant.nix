@@ -8,9 +8,11 @@ let
     script: !include scripts.yaml
     scene: !include scenes.yaml
     http:
+      server_host: 0.0.0.0
       use_x_forwarded_for: true
       trusted_proxies:
-        - 10.100.0.100
+        - 10.100.0.0/24
+        - 10.0.0.0/8
   '';
 in {
   networking.hostName = "vm-122";
