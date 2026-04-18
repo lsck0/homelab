@@ -45,6 +45,8 @@
             };
 
             services.qemuGuest.enable = true;
+            # Use simple eth0 naming so cloud-init network config matches
+            networking.usePredictableInterfaceNames = false;
             services.openssh = {
               enable = true;
               settings = {
@@ -55,7 +57,7 @@
 
             security.sudo.wheelNeedsPassword = false;
 
-                        environment.systemPackages = with pkgs; [ vim curl htop ];
+            environment.systemPackages = with pkgs; [ vim curl htop ];
             services.prometheus.exporters.node = {
               enable = true;
               openFirewall = true;
@@ -84,12 +86,44 @@
         (builtins.attrNames (builtins.readDir dir)))
     ) hostDirs);
 
-    hostConfigs = builtins.listToAttrs (map (entry: {
-      name = lib.removeSuffix ".nix" entry.name;
+    parseEntry = entry: let
+      basename = lib.removeSuffix ".nix" entry.name;
+      parts = lib.splitString "-" basename;
+      vmId = lib.toInt (builtins.head parts);
+      type =
+        if builtins.length parts >= 2 then builtins.elemAt parts 1
+        else "unknown";
+    in { inherit basename vmId type; };
+
+    networkConfig = parsed: { lib, ... }: let
+      # Compute static IP from VM ID and type
+      subnet =
+        if parsed.type == "internal" then "10.100.0"
+        else if parsed.type == "external" then "10.200.0"
+        else null;
+      gateway =
+        if parsed.type == "internal" then "10.100.0.1"
+        else if parsed.type == "external" then "10.200.0.1"
+        else null;
+    in lib.mkIf (subnet != null) {
+      networking.useDHCP = lib.mkDefault false;
+      networking.interfaces.eth0.ipv4.addresses = [{
+        address = "${subnet}.${toString parsed.vmId}";
+        prefixLength = 24;
+      }];
+      networking.defaultGateway = { address = gateway; interface = "eth0"; };
+      networking.nameservers = [ gateway ];
+    };
+
+    hostConfigs = builtins.listToAttrs (map (entry: let
+      parsed = parseEntry entry;
+    in {
+      name = parsed.basename;
       value = lib.nixosSystem {
         inherit system;
         modules = [
           common
+          (networkConfig parsed)
           (entry.dir + "/${entry.name}")
         ];
       };
@@ -105,6 +139,11 @@
           common
           ({ lib, ... }: {
             services.cloud-init.enable = true; services.cloud-init.network.enable = true;
+            # Ensure only root is used and no default 'nixos' user is created
+            services.cloud-init.settings = {
+              users = [ "root" ];
+              disable_root = false;
+            };
           })
         ];
       }).config;

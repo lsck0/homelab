@@ -33,8 +33,6 @@ locals {
     "202" = { name = "202-external-privatebin", type = "external" }
     "203" = { name = "203-external-share", type = "external" }
     "204" = { name = "204-external-minecraft", type = "external" }
-    "205" = { name = "205-external-hello-nginx", type = "external" }
-    "206" = { name = "206-external-hello-swarm", type = "external" }
     "300" = { name = "luca-router", type = "router" }
     "301" = { name = "luca-grafana", type = "local" }
   }
