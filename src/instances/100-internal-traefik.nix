@@ -36,6 +36,7 @@ in {
   };
 
   systemd.tmpfiles.rules = [
+    "d /var/lib/traefik 0700 traefik traefik -"
     "d /var/lib/crowdsec/config 0750 root root -"
     "d /var/lib/crowdsec/data 0750 root root -"
     "d /var/log/traefik 0750 root root -"
