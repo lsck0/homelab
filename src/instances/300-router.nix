@@ -8,7 +8,7 @@
   # wg0   = WireGuard VPN (10.0.0.0/24)
 
   networking.useDHCP = false;
-  networking.interfaces.ens18.useDHCP = true;
+  # networking.interfaces.ens18.useDHCP = true;  # Handled by cloud-init static IP
   networking.interfaces.ens19.ipv4.addresses = [{ address = "10.100.0.1"; prefixLength = 24; }];
   networking.interfaces.ens20.ipv4.addresses = [{ address = "10.200.0.1"; prefixLength = 24; }];
 
