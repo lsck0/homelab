@@ -94,25 +94,15 @@ in {
   virtualisation.oci-containers.containers.homepage = {
     image = "ghcr.io/gethomepage/homepage:latest";
     ports = [ "80:3000" ];
-    volumes = [ "/var/lib/homepage:/app/config" ];
+    volumes = [
+      "/var/lib/homepage:/app/config"
+      "${servicesYaml}:/app/config/services.yaml:ro"
+      "${settingsYaml}:/app/config/settings.yaml:ro"
+      "${bookmarksYaml}:/app/config/bookmarks.yaml:ro"
+      "${widgetsYaml}:/app/config/widgets.yaml:ro"
+    ];
     environment = {
       HOMEPAGE_ALLOWED_HOSTS = "home.internal.local,home.lsck0.dev";
-    };
-  };
-
-  # Sync Nix-generated config into the volume before the container starts
-  systemd.services.homepage-config-sync = {
-    description = "Sync Homepage config from Nix store";
-    before = [ "docker-homepage.service" ];
-    requiredBy = [ "docker-homepage.service" ];
-    serviceConfig = {
-      Type = "oneshot";
-      ExecStart = pkgs.writeShellScript "homepage-config-sync" ''
-        install -m 644 ${servicesYaml} /var/lib/homepage/services.yaml
-        install -m 644 ${settingsYaml} /var/lib/homepage/settings.yaml
-        install -m 644 ${bookmarksYaml} /var/lib/homepage/bookmarks.yaml
-        install -m 644 ${widgetsYaml} /var/lib/homepage/widgets.yaml
-      '';
     };
   };
 
