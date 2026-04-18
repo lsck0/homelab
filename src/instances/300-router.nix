@@ -178,13 +178,6 @@
         }
       }
 
-      lan {
-        hosts {
-          192.168.178.138 luca-pc.lan
-          fallthrough
-        }
-      }
-
       . {
         forward . 1.1.1.1 8.8.8.8
         cache 300

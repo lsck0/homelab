@@ -95,7 +95,7 @@
     script = ''
       [ -f /var/lib/homepage-tokens/nextcloud-user.token ] && exit 0
       echo -n "admin" > /var/lib/homepage-tokens/nextcloud-user.token
-      cp ${config.sops.secrets.nextcloud-admin-pass.path} /var/lib/homepage-tokens/nextcloud-pass.token
+      tr -d '\n' < ${config.sops.secrets.nextcloud-admin-pass.path} > /var/lib/homepage-tokens/nextcloud-pass.token
       chmod 644 /var/lib/homepage-tokens/nextcloud-user.token /var/lib/homepage-tokens/nextcloud-pass.token
     '';
   };

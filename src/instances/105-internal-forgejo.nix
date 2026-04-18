@@ -81,11 +81,15 @@
         --email homepage@internal \
         --must-change-password=false 2>/dev/null || true
 
-      # Generate access token
+      # Delete stale token for idempotency, then generate new one
+      podman exec forgejo forgejo admin user generate-access-token \
+        --username homepage-bot \
+        --token-name homepage \
+        --delete 2>/dev/null || true
       TOKEN=$(podman exec forgejo forgejo admin user generate-access-token \
         --username homepage-bot \
         --token-name homepage \
-        --scopes read 2>/dev/null | grep -oP 'Access token was successfully created\.\.\. \K.*' || true)
+        2>/dev/null | grep -oP 'Access token was successfully created\.\.\. \K.*' || true)
 
       if [ -n "$TOKEN" ]; then
         echo -n "$TOKEN" > "$TOKEN_FILE"
