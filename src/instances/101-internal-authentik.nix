@@ -85,6 +85,33 @@ let
         name: Nextcloud
         provider: !KeyOf provider-nextcloud-oidc
         meta_launch_url: https://cloud.internal.local
+
+    # --- Forgejo OIDC ---
+    - model: authentik_providers_oauth2.oauth2provider
+      id: provider-forgejo-oidc
+      identifiers:
+        name: forgejo-oidc-provider
+      attrs:
+        authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+        client_type: confidential
+        client_id: forgejo
+        client_secret: forgejo-oidc-secret-changeme
+        redirect_uris: |
+          https://git.internal.local/user/oauth2/authentik/callback
+          https://git.lsck0.dev/user/oauth2/authentik/callback
+        property_mappings:
+          - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
+          - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-email]]
+          - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-profile]]
+        sub_mode: hashed_user_id
+    - model: authentik_core.application
+      id: app-forgejo
+      identifiers:
+        slug: forgejo-oidc
+      attrs:
+        name: Forgejo
+        provider: !KeyOf provider-forgejo-oidc
+        meta_launch_url: https://git.internal.local
   '';
 
   blueprintYaml = ''
