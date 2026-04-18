@@ -1,32 +1,36 @@
 { pkgs, ... }:
 let
   monitors = [
+    # Internal
     { name = "Traefik (internal)"; url = "http://10.100.0.100:80"; }
     { name = "Authentik";          url = "http://10.100.0.101:80"; }
-    { name = "Uptime Kuma";        url = "http://10.100.0.102:80"; }
-    { name = "Forgejo";            url = "http://10.100.0.103:80"; }
-    { name = "Forgejo Runner";     url = "http://10.100.0.104:80"; }
-    { name = "Registry";           url = "http://10.100.0.106:80"; }
-    { name = "Homepage";           url = "http://10.100.0.108:80"; }
+    { name = "Homepage";           url = "http://10.100.0.102:80"; }
+    { name = "Uptime Kuma";        url = "http://10.100.0.103:80"; }
+    { name = "Forgejo";            url = "http://10.100.0.104:80"; }
+    { name = "sccache";            url = "10.100.0.106"; type = "port"; port = 6379; }
+    { name = "Registry";           url = "http://10.100.0.107:80"; }
+    { name = "Taskchampion";       url = "http://10.100.0.108:8080"; }
     { name = "Vaultwarden";        url = "http://10.100.0.109:8080"; }
-    { name = "Taskchampion";       url = "http://10.100.0.110:8080"; }
+    { name = "NAS";                url = "10.100.0.110"; type = "port"; port = 2049; }
     { name = "Nextcloud";          url = "http://10.100.0.111:80"; }
-    { name = "Paperless";          url = "http://10.100.0.112:8080"; }
-    { name = "Jellyfin";           url = "http://10.100.0.113:80"; }
-    { name = "Huginn";             url = "http://10.100.0.114:80"; }
-    { name = "Home Assistant";     url = "http://10.100.0.115:80"; }
-    { name = "Grafana";            url = "http://10.100.0.116:80"; }
-    { name = "Wiki.js";            url = "http://10.100.0.117:80"; }
-    { name = "Audiobookshelf";     url = "http://10.100.0.118:80"; }
-    { name = "Headscale";          url = "http://10.100.0.119:80"; }
-    { name = "qBittorrent";        url = "http://10.100.0.120:80"; }
-    { name = "Prowlarr";           url = "http://10.100.0.121:80"; }
-    { name = "Sonarr";             url = "http://10.100.0.122:80"; }
-    { name = "Radarr";             url = "http://10.100.0.123:80"; }
+    { name = "qBittorrent";        url = "http://10.100.0.112:80"; }
+    { name = "Prowlarr";           url = "http://10.100.0.113:80"; }
+    { name = "Sonarr";             url = "http://10.100.0.114:80"; }
+    { name = "Radarr";             url = "http://10.100.0.115:80"; }
+    { name = "Jellyfin";           url = "http://10.100.0.116:80"; }
+    { name = "Audiobookshelf";     url = "http://10.100.0.117:80"; }
+    { name = "Paperless";          url = "http://10.100.0.118:8080"; }
+    { name = "Wiki.js";            url = "http://10.100.0.119:80"; }
+    { name = "Huginn";             url = "http://10.100.0.120:80"; }
+    { name = "Home Assistant";     url = "http://10.100.0.121:80"; }
+    { name = "Grafana";            url = "http://10.100.0.122:80"; }
+    # External
     { name = "Traefik (external)"; url = "http://10.200.0.200:80"; }
     { name = "Shlink";             url = "http://10.200.0.201:80"; }
     { name = "PrivateBin";         url = "http://10.200.0.202:80"; }
     { name = "Share";              url = "http://10.200.0.203:80"; }
+    { name = "Minecraft";          url = "10.200.0.204"; type = "port"; port = 25565; }
+    { name = "Headscale";          url = "http://10.200.0.205:80"; }
   ];
 
   setupJs = pkgs.writeText "uptime-setup.js" ''
@@ -69,11 +73,24 @@ let
         setTimeout(() => resolve({}), 5000);
       });
 
-      const existingNames = new Set(Object.values(existing).map(m => m.name));
+      const existingByName = {};
+      for (const [id, mon] of Object.entries(existing)) {
+        existingByName[mon.name] = { id: Number(id), ...mon };
+      }
 
       for (const m of monitors) {
-        if (existingNames.has(m.name)) {
+        const ex = existingByName[m.name];
+        if (ex && ex.url === m.url) {
           console.log("Exists:", m.name);
+          continue;
+        }
+        if (ex) {
+          try {
+            await send("editMonitor", { ...ex, url: m.url, hostname: m.url.replace(/https?:\/\//, "").replace(/:\d+$/, "") });
+            console.log("Updated:", m.name, "->", m.url);
+          } catch (e) {
+            console.error("Update failed:", m.name, e.message);
+          }
           continue;
         }
         try {
@@ -82,6 +99,7 @@ let
             name: m.name,
             url: m.url,
             hostname: m.url.replace(/https?:\/\//, "").replace(/:\d+$/, ""),
+            port: m.port || undefined,
             interval: 60,
             retryInterval: 30,
             maxretries: 3,
@@ -94,13 +112,25 @@ let
         }
       }
 
+      const configNames = new Set(monitors.map(m => m.name));
+      for (const [id, mon] of Object.entries(existing)) {
+        if (!configNames.has(mon.name)) {
+          try {
+            await send("deleteMonitor", Number(id));
+            console.log("Deleted:", mon.name);
+          } catch (e) {
+            console.error("Delete failed:", mon.name, e.message);
+          }
+        }
+      }
+
       socket.disconnect();
     }
 
     main().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
   '';
 in {
-  networking.hostName = "vm-102";
+  networking.hostName = "vm-103";
 
   virtualisation.oci-containers.containers.uptime-kuma = {
     image = "louislam/uptime-kuma:latest";
@@ -108,7 +138,6 @@ in {
     volumes = [ "/var/lib/uptime-kuma:/app/data" ];
   };
 
-  # Run setup script inside container (has socket.io-client already)
   systemd.services.uptime-kuma-monitors = {
     description = "Configure Uptime Kuma monitors";
     after = [ "podman-uptime-kuma.service" ];

@@ -1,24 +1,24 @@
 { ... }: {
-  networking.hostName = "vm-122";
+  networking.hostName = "vm-115";
 
   fileSystems."/srv/downloads" = {
-    device = "10.100.0.107:/srv/nas/torrents";
+    device = "10.100.0.110:/srv/nas/torrents";
     fsType = "nfs";
     options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
   };
 
-  fileSystems."/srv/tv" = {
-    device = "10.100.0.107:/srv/nas/media/tv";
+  fileSystems."/srv/movies" = {
+    device = "10.100.0.110:/srv/nas/media/movies";
     fsType = "nfs";
     options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
   };
 
-  virtualisation.oci-containers.containers.sonarr = {
-    image = "lscr.io/linuxserver/sonarr:latest";
-    ports = [ "80:8989" ];
+  virtualisation.oci-containers.containers.radarr = {
+    image = "lscr.io/linuxserver/radarr:latest";
+    ports = [ "80:7878" ];
     volumes = [
-      "/var/lib/sonarr:/config"
-      "/srv/tv:/tv"
+      "/var/lib/radarr:/config"
+      "/srv/movies:/movies"
       "/srv/downloads:/downloads"
     ];
     environment = {
@@ -29,7 +29,7 @@
   };
 
   systemd.tmpfiles.rules = [
-    "d /var/lib/sonarr 0750 1000 1000 -"
+    "d /var/lib/radarr 0750 1000 1000 -"
   ];
 
   networking.firewall.allowedTCPPorts = [ 80 ];

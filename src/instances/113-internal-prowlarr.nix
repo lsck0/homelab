@@ -1,5 +1,5 @@
 { ... }: {
-  networking.hostName = "vm-121";
+  networking.hostName = "vm-113";
 
   virtualisation.oci-containers.containers.prowlarr = {
     image = "lscr.io/linuxserver/prowlarr:latest";

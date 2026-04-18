@@ -1,9 +1,9 @@
 { pkgs, ... }: {
-  networking.hostName = "vm-112";
+  networking.hostName = "vm-118";
 
   # Mount consume dir from NAS for scanner intake
   fileSystems."/var/lib/paperless/consume" = {
-    device = "10.100.0.107:/srv/nas/documents";
+    device = "10.100.0.110:/srv/nas/documents";
     fsType = "nfs";
     options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
   };

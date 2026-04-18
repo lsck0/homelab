@@ -1,5 +1,5 @@
 { pkgs, ... }: {
-  networking.hostName = "vm-103";
+  networking.hostName = "vm-104";
 
   # Resolve auth.internal.local directly to authentik VM
   networking.hosts."10.100.0.101" = [ "auth.internal.local" ];

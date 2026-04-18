@@ -1,5 +1,5 @@
 { ... }: {
-  networking.hostName = "vm-107";
+  networking.hostName = "vm-110";
 
   services.nfs.server = {
     enable = true;
@@ -17,7 +17,7 @@
     settings = {
       global = {
         workgroup = "WORKGROUP";
-        "server string" = "vm-107-nas";
+        "server string" = "vm-110-nas";
         "map to guest" = "Bad User";
       };
       public = {

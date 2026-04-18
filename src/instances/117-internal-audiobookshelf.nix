@@ -1,8 +1,8 @@
 { ... }: {
-  networking.hostName = "vm-118";
+  networking.hostName = "vm-117";
 
   fileSystems."/srv/audiobooks" = {
-    device = "10.100.0.107:/srv/nas/media/audiobooks";
+    device = "10.100.0.110:/srv/nas/media/audiobooks";
     fsType = "nfs";
     options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
   };

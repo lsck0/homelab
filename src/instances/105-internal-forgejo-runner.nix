@@ -1,5 +1,5 @@
 { pkgs, ... }: {
-  networking.hostName = "vm-104";
+  networking.hostName = "vm-105";
 
   virtualisation.docker.enable = true;
 
@@ -11,8 +11,8 @@
       "/var/run/docker.sock:/var/run/docker.sock"
     ];
     environment = {
-      FORGEJO_URL = "http://10.100.0.103:80";
-      SCCACHE_REDIS = "redis://10.100.0.105:6379";
+      FORGEJO_URL = "http://10.100.0.104:80";
+      SCCACHE_REDIS = "redis://10.100.0.106:6379";
     };
   };
 

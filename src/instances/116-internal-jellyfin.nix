@@ -1,9 +1,9 @@
 { ... }: {
-  networking.hostName = "vm-113";
+  networking.hostName = "vm-116";
 
   # Mount media from NAS
   fileSystems."/mnt/media" = {
-    device = "10.100.0.107:/srv/nas/media";
+    device = "10.100.0.110:/srv/nas/media";
     fsType = "nfs";
     options = [ "nfsvers=4" "ro" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
   };
