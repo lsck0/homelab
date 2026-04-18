@@ -8,6 +8,7 @@
     volumes = [ "/var/lib/pingvin-share:/opt/app/backend/data" ];
     environment = {
       TRUST_PROXY = "true";
+      APP_URL = "https://share.lsck0.dev";
     };
   };
 

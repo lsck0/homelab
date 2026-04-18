@@ -1,10 +1,8 @@
 { config, pkgs, lib, nasMount, ... }:
 let
   protectedApps = [
-    { slug = "uptime-kuma";    name = "Uptime Kuma";      local = "status.internal";      external = "status.lsck0.dev"; }
     { slug = "forgejo";        name = "Forgejo";          local = "git.internal";         external = "git.lsck0.dev"; }
     { slug = "registry";       name = "Registry";         local = "registry.internal";    external = "registry.lsck0.dev"; }
-    { slug = "homepage";       name = "Homepage";         local = "homepage.internal";    external = "homepage.lsck0.dev"; }
     { slug = "vaultwarden";    name = "Vaultwarden";      local = "vault.internal";       external = "vault.lsck0.dev"; }
     { slug = "paperless";      name = "Paperless";        local = "paperless.internal";   external = "paperless.lsck0.dev"; }
     { slug = "jellyfin";       name = "Jellyfin";         local = "jellyfin.internal";    external = "jellyfin.lsck0.dev"; }
@@ -246,8 +244,12 @@ in {
     requiredBy = [ "docker-stack-authentik.service" ];
     serviceConfig = {
       Type = "oneshot";
-      ExecStart = "${pkgs.coreutils}/bin/install -m 644 ${blueprintFile} /var/lib/authentik/blueprints/homelab-apps.yaml";
     };
+    script = ''
+      # triggers NFS automount by accessing the path
+      ${pkgs.coreutils}/bin/mkdir -p /var/lib/authentik/blueprints
+      ${pkgs.coreutils}/bin/install -m 644 ${blueprintFile} /var/lib/authentik/blueprints/homelab-apps.yaml
+    '';
   };
 
   systemd.tmpfiles.rules = [

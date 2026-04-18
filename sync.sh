@@ -198,16 +198,14 @@ deploy_nixos() {
   echo ">>> Waiting for SSH on $ip..."
   if ! wait_for_ssh "$ip" 24 5; then return 1; fi
 
-  local result
-  if ! result=$(nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
+  local toplevel
+  toplevel=$(nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
     --extra-experimental-features "nix-command flakes" \
-    --no-link --print-out-paths 2>&1); then
-    echo "ERROR: Failed to build $name"
-    echo "$result"
+    --no-link --print-out-paths 2>&1 | tail -n1)
+  if [ -z "$toplevel" ] || [ ! -e "$toplevel" ]; then
+    echo "ERROR: Failed to resolve closure for $name"
     return 1
   fi
-  local toplevel
-  toplevel=$(echo "$result" | tail -n1)
 
   if [ -f "$AGE_KEY" ]; then
     ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
@@ -238,6 +236,29 @@ deploy_nixos() {
 git_auto_prepare
 load_tfvars
 setup_ssh_transport
+
+# Start building all NixOS closures in background (doesn't need running VMs)
+echo ">>> Building all VM closures (background)..."
+BUILD_LOG=$(mktemp --suffix=.build.log)
+CLEANUP_FILES+=("$BUILD_LOG")
+(
+  rc=0
+  for nix_file in "$ROOT_DIR"/src/instances/1[0-9][0-9]-*.nix \
+                  "$ROOT_DIR"/src/instances/2[0-9][0-9]-*.nix \
+                  "$ROOT_DIR"/src/instances/300-router.nix; do
+    [ -f "$nix_file" ] || continue
+    vm_name=$(basename "$nix_file" .nix)
+    echo ">>> Building $vm_name..."
+    if ! nix build "$ROOT_DIR/src#nixosConfigurations.${vm_name}.config.system.build.toplevel" \
+      --extra-experimental-features "nix-command flakes" \
+      --no-link 2>&1; then
+      echo "ERROR: Failed to build $vm_name"
+      rc=1
+    fi
+  done
+  exit $rc
+) > "$BUILD_LOG" 2>&1 &
+BUILD_PID=$!
 
 # Ensure golden image exists on Proxmox
 if ! "${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
@@ -433,26 +454,19 @@ deploy_vm_by_file() {
   fi
 }
 
-# Build all closures first (sequential, populates nix store)
-echo ">>> Building all VM closures..."
+# Wait for background nix builds to complete
+echo ">>> Waiting for background nix builds to finish..."
 BUILD_FAILURE=0
-for nix_file in "$ROOT_DIR"/src/instances/1[0-9][0-9]-*.nix \
-                "$ROOT_DIR"/src/instances/2[0-9][0-9]-*.nix; do
-  [ -f "$nix_file" ] || continue
-  vm_name=$(basename "$nix_file" .nix)
-  echo ">>> Building $vm_name..."
-  if ! nix build "$ROOT_DIR/src#nixosConfigurations.${vm_name}.config.system.build.toplevel" \
-    --extra-experimental-features "nix-command flakes" \
-    --no-link 2>&1; then
-    echo "ERROR: Failed to build $vm_name"
-    BUILD_FAILURE=1
-  fi
-done
+if ! wait "$BUILD_PID"; then
+  BUILD_FAILURE=1
+fi
+cat "$BUILD_LOG"
 
 if [ "$BUILD_FAILURE" -ne 0 ]; then
   echo "ERROR: Some builds failed. Aborting deployment."
   exit 1
 fi
+echo ">>> All builds complete."
 
 # Deploy in parallel (copy + switch)
 echo ">>> Deploying VMs (up to $MAX_PARALLEL in parallel)..."
