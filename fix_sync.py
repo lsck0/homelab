@@ -1,12 +1,9 @@
 with open('sync.sh', 'r') as f:
     sync_content = f.read()
 
-# Make sure we don't use 'root' in sync.sh if it expects 'luca'.
-# sync.sh: `ssh ... "root@${ip}"` -> it already uses root!
-# But the user says "change the usernames on the vms to root".
-# Wait, look at the output of terraform from earlier:
-# "ssh-ed25519 AAAAC... homelab-deploy@luca-pc" -> that's the key.
+# The regex accidentally deleted the closing bracket `}` of the `setup_ssh_transport()` function because the matching was too greedy or matched the wrong thing.
+# Let's restore the closing bracket.
+sync_content = sync_content.replace('export NIX_SSHOPTS="-F $SSH_CONFIG"\n', 'export NIX_SSHOPTS="-F $SSH_CONFIG"\n}\n')
 
-# Wait, maybe they mean in the Nix config?
-# `users.users.luca` -> they want to remove `luca` and just use `root`?
-# Okay, let's remove `luca` user from flake.nix.
+with open('sync.sh', 'w') as f:
+    f.write(sync_content)
