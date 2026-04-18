@@ -2,7 +2,8 @@
   networking.hostName = "vm-119";
 
   fileSystems = nasMount "/var/lib/paperless" "paperless"
-    // nasPath "/var/lib/paperless/consume" "documents";
+    // nasPath "/var/lib/paperless/consume" "documents"
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   services.paperless = {
     enable = true;
@@ -56,6 +57,46 @@
       if echo "$PROMOTED" | grep -q "TOTAL:0"; then
         echo "No users yet, will retry..."
         exit 1
+      fi
+    '';
+  };
+
+  # Generate API token for Homepage widget
+  systemd.services.paperless-homepage-token = {
+    description = "Generate Paperless API token for Homepage";
+    after = [ "paperless-web.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.paperless-ngx ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      User = "paperless";
+      Group = "paperless";
+      WorkingDirectory = "/var/lib/paperless";
+    };
+    environment = {
+      PAPERLESS_URL = "https://paperless.internal";
+    };
+    script = ''
+      TOKEN_FILE="/var/lib/homepage-tokens/paperless-key.token"
+      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
+      sleep 10
+
+      TOKEN=$(paperless-ngx shell -c "
+      from django.contrib.auth.models import User
+      from rest_framework.authtoken.models import Token
+      # Create or get service user
+      user, created = User.objects.get_or_create(
+          username='homepage-bot',
+          defaults={'is_staff': True, 'is_superuser': True, 'email': 'homepage@internal'}
+      )
+      token, _ = Token.objects.get_or_create(user=user)
+      print(token.key)
+      " 2>/dev/null | tail -1)
+
+      if [ -n "$TOKEN" ]; then
+        echo -n "$TOKEN" > "$TOKEN_FILE"
+        echo "Paperless Homepage token created"
       fi
     '';
   };

@@ -102,6 +102,7 @@
     "d /srv/nas/data/jellyfin 0777 nobody nogroup -"
     "d /srv/nas/data/audiobookshelf 0777 nobody nogroup -"
     "d /srv/nas/data/homepage 0777 nobody nogroup -"
+    "d /srv/nas/data/homepage-tokens 0777 nobody nogroup -"
     "d /srv/nas/data/crowdsec-internal 0777 nobody nogroup -"
     "d /srv/nas/data/crowdsec-external 0777 nobody nogroup -"
     "d /var/lib/filebrowser 0750 1000 1000 -"
