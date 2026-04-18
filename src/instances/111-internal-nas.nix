@@ -1,4 +1,4 @@
-{ ... }: {
+{ nasMount, ... }: {
   networking.hostName = "vm-111";
 
   services.nfs.server = {
@@ -104,8 +104,22 @@
     "d /srv/nas/data/homepage 0750 nobody nogroup -"
     "d /srv/nas/data/crowdsec-internal 0750 nobody nogroup -"
     "d /srv/nas/data/crowdsec-external 0750 nobody nogroup -"
+    "d /var/lib/filebrowser 0750 1000 1000 -"
+    "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
   ];
 
-  networking.firewall.allowedTCPPorts = [ 2049 111 ];
+  # FileBrowser web UI — authentik handles auth via traefik
+  virtualisation.oci-containers.containers.filebrowser = {
+    image = "filebrowser/filebrowser:latest";
+    ports = [ "80:80" ];
+    volumes = [
+      "/srv/nas:/srv"
+      "/var/lib/filebrowser/filebrowser.db:/database/filebrowser.db"
+    ];
+    extraOptions = [ "--entrypoint" "" ];
+    cmd = [ "/filebrowser" "--noauth" "--database" "/database/filebrowser.db" ];
+  };
+
+  networking.firewall.allowedTCPPorts = [ 80 2049 111 ];
   networking.firewall.allowedUDPPorts = [ 2049 111 ];
 }

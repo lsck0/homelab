@@ -19,6 +19,7 @@ let
     { slug = "radarr";         name = "Radarr";           local = "radarr.internal";      external = "radarr.lsck0.dev"; }
     { slug = "navidrome";      name = "Navidrome";        local = "music.internal";       external = "music.lsck0.dev"; }
     { slug = "kavita";         name = "Kavita";           local = "read.internal";        external = "read.lsck0.dev"; }
+    { slug = "nas";            name = "NAS";              local = "nas.internal";         external = "nas.lsck0.dev"; }
   ];
 
   mkProviderAndApp = variant: app:

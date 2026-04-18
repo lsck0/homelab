@@ -12,7 +12,7 @@ let
     { name = "Registry";           url = "http://10.100.0.108:80"; }
     { name = "Taskchampion";       url = "http://10.100.0.109:8080"; }
     { name = "Vaultwarden";        url = "http://10.100.0.110:8080"; }
-    { name = "NAS";                url = "10.100.0.111"; type = "port"; port = 2049; }
+    { name = "NAS";                url = "http://10.100.0.111:80"; }
     { name = "Nextcloud";          url = "http://10.100.0.112:80"; }
     { name = "qBittorrent";        url = "http://10.100.0.113:80"; }
     { name = "Prowlarr";           url = "http://10.100.0.114:80"; }

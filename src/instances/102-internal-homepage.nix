@@ -90,6 +90,7 @@ let
             ping: http://10.100.0.110:8080
         - NAS:
             icon: mdi-nas
+            href: https://nas.internal
             description: NFS Storage (100 GB)
             ping: http://10.100.0.111
         - Nextcloud:
@@ -309,15 +310,25 @@ in {
 
   fileSystems = nasMount "/var/lib/homepage" "homepage";
 
+  # Copy Nix-generated config into NAS dir before container starts
+  systemd.services.homepage-config = {
+    description = "Sync Homepage config from Nix store";
+    before = [ "podman-homepage.service" ];
+    requiredBy = [ "podman-homepage.service" ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      cp -f ${servicesYaml}  /var/lib/homepage/services.yaml
+      cp -f ${settingsYaml}  /var/lib/homepage/settings.yaml
+      cp -f ${bookmarksYaml} /var/lib/homepage/bookmarks.yaml
+      cp -f ${widgetsYaml}   /var/lib/homepage/widgets.yaml
+    '';
+  };
+
   virtualisation.oci-containers.containers.homepage = {
     image = "ghcr.io/gethomepage/homepage:latest";
     ports = [ "80:3000" ];
     volumes = [
       "/var/lib/homepage:/app/config"
-      "${servicesYaml}:/app/config/services.yaml:ro"
-      "${settingsYaml}:/app/config/settings.yaml:ro"
-      "${bookmarksYaml}:/app/config/bookmarks.yaml:ro"
-      "${widgetsYaml}:/app/config/widgets.yaml:ro"
     ];
     environment = {
       HOMEPAGE_ALLOWED_HOSTS = "homepage.internal,homepage.lsck0.dev";
