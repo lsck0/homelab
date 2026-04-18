@@ -1,6 +1,29 @@
 { pkgs, nasMount, ... }:
 let
   servicesYaml = pkgs.writeText "services.yaml" ''
+    - Links:
+        - Proton Mail:
+            icon: mdi-email
+            href: https://mail.proton.me/u/0/inbox
+        - Proton Calendar:
+            icon: mdi-calendar
+            href: https://calendar.proton.me/u/0/
+        - Proton Drive:
+            icon: mdi-cloud
+            href: https://drive.proton.me
+        - YouTube:
+            icon: mdi-youtube
+            href: https://youtube.com
+        - Twitch:
+            icon: mdi-twitch
+            href: https://twitch.tv
+        - Reddit:
+            icon: mdi-reddit
+            href: https://reddit.com
+        - eCampus:
+            icon: mdi-school
+            href: https://ecampus.uni-goettingen.de
+
     - Infra:
         - Cloudflare:
             icon: cloudflare
@@ -16,12 +39,6 @@ let
             icon: proxmox
             href: https://proxmox.internal
             ping: http://192.168.178.200:8006
-            widget:
-              type: proxmox
-              url: https://192.168.178.200:8006
-              username: {{HOMEPAGE_VAR_PROXMOX_USER}}
-              password: {{HOMEPAGE_VAR_PROXMOX_PASS}}
-              node: proxmox
         - Traefik:
             icon: traefik
             href: https://traefik.internal
@@ -33,17 +50,10 @@ let
             icon: authentik
             href: https://auth.internal
             ping: http://10.100.0.101
-            widget:
-              type: authentik
-              url: http://10.100.0.101
-              key: {{HOMEPAGE_VAR_AUTHENTIK_KEY}}
         - Grafana:
             icon: grafana
             href: https://grafana.internal
             ping: http://10.100.0.104
-            widget:
-              type: grafana
-              url: http://10.100.0.104
         - Status:
             icon: uptime-kuma
             href: https://status.internal
@@ -104,10 +114,6 @@ let
             icon: home-assistant
             href: https://hass.internal
             ping: http://10.100.0.122
-            widget:
-              type: homeassistant
-              url: http://10.100.0.122:8123
-              key: {{HOMEPAGE_VAR_HASS_KEY}}
         - Huginn:
             icon: huginn
             href: https://huginn.internal
@@ -122,12 +128,6 @@ let
             icon: jellyfin
             href: https://jellyfin.internal
             ping: http://10.100.0.117
-            widget:
-              type: jellyfin
-              url: http://10.100.0.117
-              key: {{HOMEPAGE_VAR_JELLYFIN_KEY}}
-              enableNowPlaying: true
-              enableBlocks: true
         - qBittorrent:
             icon: qbittorrent
             href: https://torrent.internal
@@ -163,29 +163,14 @@ let
             icon: navidrome
             href: https://music.internal
             ping: http://10.100.0.123
-            widget:
-              type: navidrome
-              url: http://10.100.0.123
-              user: {{HOMEPAGE_VAR_NAVIDROME_USER}}
-              token: {{HOMEPAGE_VAR_NAVIDROME_PASS}}
-              salt: homepage
         - Audiobookshelf:
             icon: audiobookshelf
             href: https://abs.internal
             ping: http://10.100.0.118
-            widget:
-              type: audiobookshelf
-              url: http://10.100.0.118
-              key: {{HOMEPAGE_VAR_AUDIOBOOKSHELF_KEY}}
         - Kavita:
             icon: kavita
             href: https://read.internal
             ping: http://10.100.0.124
-            widget:
-              type: kavita
-              url: http://10.100.0.124
-              username: {{HOMEPAGE_VAR_KAVITA_USER}}
-              password: {{HOMEPAGE_VAR_KAVITA_PASS}}
 
     - External:
         - Ext Traefik:
@@ -240,10 +225,13 @@ let
     disableCollapse: true
     fiveColumns: true
     layout:
+      Links:
+        style: row
+        columns: 7
+        header: false
       Infra:
         style: row
         columns: 5
-        header: false
       Services:
         style: row
         columns: 5
@@ -282,30 +270,7 @@ let
   '';
 
   bookmarksYaml = pkgs.writeText "bookmarks.yaml" ''
-    - Proton:
-        - Mail:
-            - icon: mdi-email
-              href: https://mail.proton.me/u/0/inbox
-        - Calendar:
-            - icon: mdi-calendar
-              href: https://calendar.proton.me/u/0/
-        - Drive:
-            - icon: mdi-cloud
-              href: https://drive.proton.me/u/0/RvS9PUVnaRTZn1AU8LN5eug_KJTeUNFPMkik0QFe0Qrx1JvqrTuAII0jV9Mk1KS4b0IwlLgltgKhkjrwaKCCvw==/folder/zPFLh2fkcep6PeGkzhl3quE2R0GhTOsEYn7QymVSrHT3S9i0UJA65C98AGj368bjTuAPZD2g5hoF85jM6Tgi3g==
-    - Browse:
-        - YouTube:
-            - icon: mdi-youtube
-              href: https://youtube.com
-        - Twitch:
-            - icon: mdi-twitch
-              href: https://twitch.tv
-        - Reddit:
-            - icon: mdi-reddit
-              href: https://reddit.com
-    - Uni:
-        - eCampus:
-            - icon: mdi-school
-              href: https://ecampus.uni-goettingen.de/h1/pages/cs/sys/portal/hisinoneStartPage.faces?page=0
+    []
   '';
 in {
   networking.hostName = "vm-102";

@@ -40,7 +40,7 @@
         sleep 2
       done
 
-      KEY=$(podman exec shlink shlink api-key:generate --no-interaction 2>/dev/null | grep -oP '[0-9a-f-]{30,}')
+      KEY=$(podman exec shlink shlink api-key:generate --no-interaction 2>/dev/null | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
       if [ -n "$KEY" ]; then
         echo -n "$KEY" > "$TOKEN_FILE"
         echo "Shlink Homepage API key created"

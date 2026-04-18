@@ -142,15 +142,13 @@ let
       });
 
       try {
-        await send("saveStatusPage", "homelab", {
-          publicGroupList: [{
-            name: "Services",
-            monitorList: Object.keys(allMonitors).map(id => ({
-              id: Number(id),
-              name: allMonitors[id].name,
-            })),
-          }],
-        });
+        await send("saveStatusPage", "homelab", { title: "Homelab" }, null, [{
+          name: "Services",
+          monitorList: Object.keys(allMonitors).map(id => ({
+            id: Number(id),
+            name: allMonitors[id].name,
+          })),
+        }]);
         console.log("Status page updated with all monitors");
       } catch (e) {
         console.error("Status page update:", e.message);
