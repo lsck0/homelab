@@ -48,7 +48,6 @@ in {
       entryPoints = {
         web = { address = ":80"; http.redirections.entryPoint = { to = "websecure"; scheme = "https"; permanent = true; }; };
         websecure.address = ":443";
-        # Non-HTTP services — add new entrypoints here for each service
         minecraft.address = ":25565";
       };
       certificatesResolvers.cloudflare.acme = {
@@ -68,50 +67,41 @@ in {
       };
     };
     http = {
-      middlewares.redirect-https = {
-        redirectScheme = { scheme = "https"; permanent = true; };
-      };
-
       routers = {
         # ── .external.home — HTTP (LAN) ──
+        headscale    = { rule = "Host(`hs.external.home`)";          service = "headscale";    entryPoints = [ "web" ]; };
         shlink       = { rule = "Host(`shlink.external.home`)";      service = "shlink";       entryPoints = [ "web" ]; };
         privatebin   = { rule = "Host(`paste.external.home`)";       service = "privatebin";   entryPoints = [ "web" ]; };
         share        = { rule = "Host(`share.external.home`)";       service = "share";        entryPoints = [ "web" ]; };
-        headscale    = { rule = "Host(`hs.external.home`)";          service = "headscale";    entryPoints = [ "web" ]; };
 
         # ── .external.home — HTTPS (LAN, self-signed) ──
+        headscale-local-tls  = { rule = "Host(`hs.external.home`)";      service = "headscale";  entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
         shlink-local-tls     = { rule = "Host(`shlink.external.home`)";  service = "shlink";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
         privatebin-local-tls = { rule = "Host(`paste.external.home`)";   service = "privatebin"; entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
         share-local-tls      = { rule = "Host(`share.external.home`)";   service = "share";      entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-        headscale-local-tls  = { rule = "Host(`hs.external.home`)";      service = "headscale";  entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
 
         # ── lsck0.dev — HTTPS (internet) ──
+        headscale-tls   = { rule = "Host(`hs.lsck0.dev`)";          service = "headscale";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
         shlink-tls      = { rule = "Host(`shlink.lsck0.dev`)";      service = "shlink";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
         privatebin-tls  = { rule = "Host(`paste.lsck0.dev`)";       service = "privatebin";   entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
         share-tls       = { rule = "Host(`share.lsck0.dev`)";       service = "share";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-        headscale-tls   = { rule = "Host(`hs.lsck0.dev`)";          service = "headscale";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       };
 
       services = {
-        shlink.loadBalancer.servers       = [{ url = "http://10.200.0.201:80"; }];
-        privatebin.loadBalancer.servers   = [{ url = "http://10.200.0.202:80"; }];
-        share.loadBalancer.servers        = [{ url = "http://10.200.0.203:80"; }];
-        headscale.loadBalancer.servers    = [{ url = "http://10.200.0.205:80"; }];
+        headscale.loadBalancer.servers    = [{ url = "http://10.200.0.201:80"; }];
+        shlink.loadBalancer.servers       = [{ url = "http://10.200.0.202:80"; }];
+        privatebin.loadBalancer.servers   = [{ url = "http://10.200.0.203:80"; }];
+        share.loadBalancer.servers        = [{ url = "http://10.200.0.204:80"; }];
       };
     };
-    # Non-HTTP services — TCP passthrough routing
-    # mc.external.home:25565 → vm-204:25565 (Minecraft)
+    # ── TCP passthrough ──
     tcp = {
-      routers = {
-        minecraft = {
-          rule = "HostSNI(`*`)";
-          service = "minecraft";
-          entryPoints = [ "minecraft" ];
-        };
+      routers.minecraft = {
+        rule = "HostSNI(`*`)";
+        service = "minecraft";
+        entryPoints = [ "minecraft" ];
       };
-      services = {
-        minecraft.loadBalancer.servers = [{ address = "10.200.0.204:25565"; }];
-      };
+      services.minecraft.loadBalancer.servers = [{ address = "10.200.0.205:25565"; }];
     };
     };
   };

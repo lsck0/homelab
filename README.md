@@ -1,93 +1,105 @@
 # Homelab IaC
 
-Declarative homelab. Proxmox + NixOS, managed entirely through Terraform and Nix.
+Declarative homelab. Proxmox + NixOS, managed entirely through Terraform and Nix flakes.
 
 ## Architecture
 
-- **Hypervisor:** Proxmox VE
+- **Hypervisor:** Proxmox VE on bare metal
 - **Router (vm-300):** NixOS — nftables, NAT, CoreDNS, Kea DHCP, WireGuard
-- **OS:** NixOS on every instance
+- **OS:** NixOS on every VM (auto-built golden image)
 - **Networks:**
-  - `10.100.0.0/24` — Internal: reverse proxy + all homelab services
-  - `10.200.0.0/24` — External DMZ: isolated, public-facing apps
+  - `10.100.0.0/24` — Internal LAN: all homelab services behind Traefik + Authentik SSO
+  - `10.200.0.0/24` — External DMZ: public-facing apps, isolated from internal
   - `10.0.0.0/24` — WireGuard VPN
-- **Isolation:** DMZ cannot reach internal or local network
-- **DNS:** CoreDNS on router — `*.internal.local` → vm-100 (Traefik), `*.external.local` → vm-200 (Traefik)
-- **SSO:** Authentik forward auth on Traefik for internal services
-- **Port forwarding:** Router `10100->vm-100:443`, `10200->vm-200:443`, `25565->vm-200:25565`
+- **DNS:** CoreDNS on router — `*.internal.home` → internal Traefik, `*.external.home` → external Traefik
+- **SSO:** Authentik (ForwardAuth on Traefik for most services, native OIDC for Nextcloud/Forgejo)
+- **Security:** CrowdSec on both Traefik instances, nftables DMZ isolation
+- **Storage:** NAS VM (NFS + Samba) shared across media/document services
+- **Monitoring:** Uptime Kuma, Grafana + Prometheus, Homepage dashboard
+
+### Port Forwarding (FritzBox → Router → Services)
+
+| External Port | Router Port | Destination | Service |
+|---------------|-------------|-------------|---------|
+| 443 | 443 | 10.200.0.200:443 | External Traefik (Cloudflare proxy) |
+| 10100 | 10100 | 10.100.0.100:443 | Internal Traefik (direct) |
+| 10200 | 10200 | 10.200.0.200:443 | External Traefik (direct) |
+| 25565 | 25565 | 10.200.0.200:25565 | Minecraft (TCP passthrough) |
+| 51820/udp | 51820/udp | Router | WireGuard VPN |
 
 ### VM Layout
 
-| VM  | IP           | Role                                  |
-| --- | ------------ | ------------------------------------- |
-| 100 | 10.100.0.100 | Traefik reverse proxy (Authentik SSO) |
-| 101 | 10.100.0.101 | Authentik                             |
-| 102 | 10.100.0.102 | Homepage                              |
-| 103 | 10.100.0.103 | Forgejo                               |
-| 104 | 10.100.0.104 | Forgejo Runner                        |
-| 105 | 10.100.0.105 | Docker Registry                       |
-| 106 | 10.100.0.106 | Nextcloud                             |
-| 107 | 10.100.0.107 | Vaultwarden                           |
-| 108 | 10.100.0.108 | Paperless                             |
-| 109 | 10.100.0.109 | Home Assistant                        |
-| 110 | 10.100.0.110 | Jellyfin                              |
-| 111 | 10.100.0.111 | Uptime Kuma                           |
-| 112 | 10.100.0.112 | Huginn                                |
-| 113 | 10.100.0.113 | PrivateBin                            |
-| 114 | 10.100.0.114 | Taskchampion                          |
-| 115 | 10.100.0.115 | Hello world (test)                    |
-| 116 | 10.100.0.116 | NAS (Samba)                           |
-| 117 | 10.100.0.117 | Shared sccache Redis backend          |
-| 200 | 10.200.0.200 | Traefik external reverse proxy        |
-| 201 | 10.200.0.201 | Hello world (external)                |
-| 202 | 10.200.0.202 | Hello world (external)                |
-| 203 | 10.200.0.203 | Hello world (external)                |
-| 204 | 10.200.0.204 | Minecraft (Forge modpack)             |
-| 300 | DHCP (WAN)   | NixOS Router                          |
-| 301 | DHCP (LAN)   | Grafana + Prometheus system metrics   |
+| VM  | IP           | Role                    |
+|-----|--------------|-------------------------|
+| 100 | 10.100.0.100 | Internal Traefik + CrowdSec |
+| 101 | 10.100.0.101 | Authentik SSO           |
+| 102 | 10.100.0.102 | Homepage dashboard      |
+| 103 | 10.100.0.103 | Uptime Kuma             |
+| 104 | 10.100.0.104 | Forgejo (Git)           |
+| 105 | 10.100.0.105 | Forgejo Runner (CI)     |
+| 106 | 10.100.0.106 | sccache (Redis)         |
+| 107 | 10.100.0.107 | Container Registry      |
+| 108 | 10.100.0.108 | Taskchampion sync       |
+| 109 | 10.100.0.109 | Vaultwarden             |
+| 110 | 10.100.0.110 | NAS (NFS + Samba, 64GB) |
+| 111 | 10.100.0.111 | Nextcloud               |
+| 112 | 10.100.0.112 | qBittorrent             |
+| 113 | 10.100.0.113 | Prowlarr                |
+| 114 | 10.100.0.114 | Sonarr                  |
+| 115 | 10.100.0.115 | Radarr                  |
+| 116 | 10.100.0.116 | Jellyfin                |
+| 117 | 10.100.0.117 | Audiobookshelf          |
+| 118 | 10.100.0.118 | Paperless-ngx           |
+| 119 | 10.100.0.119 | Wiki.js                 |
+| 120 | 10.100.0.120 | Huginn                  |
+| 121 | 10.100.0.121 | Home Assistant          |
+| 122 | 10.100.0.122 | Grafana + Prometheus    |
+| 123 | 10.100.0.123 | Navidrome (music)       |
+| 124 | 10.100.0.124 | Kavita (manga/comics)   |
+| 200 | 10.200.0.200 | External Traefik + CrowdSec |
+| 201 | 10.200.0.201 | Headscale VPN           |
+| 202 | 10.200.0.202 | Shlink (URL shortener)  |
+| 203 | 10.200.0.203 | PrivateBin              |
+| 204 | 10.200.0.204 | Pingvin Share           |
+| 205 | 10.200.0.205 | Minecraft               |
+| 300 | 192.168.178.29 | NixOS Router          |
 
-### Defaults
-
-Default VM profile: 2 cores, 1 GB RAM, 8 GB disk (Grafana VM uses a larger profile in `vm_local`).
+Default VM: 2 cores, 2 GB RAM, 8 GB disk. Exceptions: Authentik (4 GB), Minecraft (4 GB, 6 cores), NAS (64 GB disk), media arr stack (20 GB disk each).
 
 ## Project Structure
 
 ```
-scripts/init.sh         One-time bootstrap (Proxmox + image + tfvars)
-sync.sh                 Deploy everything (Terraform + NixOS)
+sync.sh                   deploy everything (terraform + nixos)
+scripts/init.sh           one-time bootstrap (proxmox + image + tfvars)
+scripts/deinit.sh         reset proxmox for fresh init
 
-src/                 Terraform root & NixOS entrypoint
-  main.tf               (includes Terraform variables)
-  secrets.yaml          Encrypted sops-nix secrets
-  terraform.tfvars.sops.json  Encrypted Terraform connection/config vars
-  terraform.tfstate     Terraform state (tracked in git)
-  flake.nix             NixOS flake (auto-discovers 1XX/2XX + special 300-router and 301-grafana)
-  # shared NixOS base config is inlined in flake.nix
+src/
+  flake.nix               nixos flake (auto-discovers instances)
+  secrets.yaml            encrypted sops-nix secrets
+  terraform.tfvars.sops.json  encrypted terraform vars
 
-src/instances/        Per-instance `.tf` + `.nix` definitions
-src/modules/          Reusable TF modules (vm_*, plus shared vm base module)
-src/modules/docker-stack.nix  Docker Compose deployment module
+src/instances/            per-VM nix + terraform configs
+  main.tf                 VM definitions (all instances)
+  {id}-{type}-{name}.nix  NixOS config per VM
+  300-router.nix          router (multi-NIC, NAT, DNS, DHCP, VPN)
+  dashboards/             grafana dashboard JSON
 
-scripts/
-  pve-install.sh        Proxmox bridge + API token setup
-  deinit.sh             Reset Proxmox host for fresh init
+src/modules/
+  vm/main.tf              terraform VM module (proxmox provider)
+  docker-stack.nix        docker compose deployment module
 ```
 
 ## Quick Start
 
 ### Prerequisites
 
-`nix`, `sops`, `terraform`, `age`, `jq`, `openssl`, `sshpass` (if using password auth)
+`nix`, `sops`, `terraform`, `age`, `jq`, `openssl`
 
 ### 1. Initialize
-
-Only input needed: Proxmox IP and root password. Everything else (SSH keys, age keys, secrets, golden image, API tokens) is auto-generated.
 
 ```bash
 ./scripts/init.sh 192.168.178.200
 ```
-
-`scripts/init.sh` writes encrypted Terraform vars to `src/terraform.tfvars.sops.json` (committable). Keep only `keys/age.txt` out of git.
 
 ### 2. Deploy
 
@@ -95,184 +107,65 @@ Only input needed: Proxmox IP and root password. Everything else (SSH keys, age 
 ./sync.sh
 ```
 
-Re-run `sync.sh` after any `.tf` or `.nix` change.
-By default `sync.sh` also runs auto-git steps (pull/submodules before sync, then add/commit/push after success). Disable with `HOMELAB_AUTO_GIT=0 ./sync.sh`.
+### 3. Home router setup (one-time, manual)
 
-### Reset Proxmox and start over
+On your FritzBox (or equivalent):
+- Set static DHCP lease: `192.168.178.29` for the router VM
+- Set DNS server in DHCP settings: `192.168.178.29`
+- Port forwards to `192.168.178.29`: 443/tcp, 25565/tcp, 51820/udp
 
-```bash
-./scripts/deinit.sh --yes
-./scripts/init.sh 192.168.178.200
-```
+### 4. Cloudflare DNS
 
-### 3. Home router setup (manual, one-time)
-
-Configure your home router to:
-
-- Route `10.100.0.0/24` and `10.200.0.0/24` through the luca-router VM's WAN IP
-- Port-forward external traffic to `luca-router:10100` (internal HTTPS) and `luca-router:10200` (external HTTPS)
+Add a wildcard `*` A record pointing to your public IP (proxied).
+Add `mc` and `wg` A records (DNS-only, not proxied) for direct connections.
 
 ## Adding a New VM
 
-Step-by-step guide to add a new VM to the homelab.
+1. Pick an ID: `1XX` for internal, `2XX` for external. IP = `10.{100|200}.0.{ID}`.
+2. Add entry to `src/instances/main.tf`
+3. Create `src/instances/{ID}-{type}-{name}.nix`
+4. Add Traefik route in `100-internal-traefik.nix` or `200-external-traefik.nix`
+5. Add to Authentik `protectedApps` in `101-internal-authentik.nix` (if SSO needed)
+6. Add to homepage in `102-internal-homepage.nix`
+7. Add monitor in `103-internal-uptime-kuma.nix`
+8. `git add -A && ./sync.sh`
 
-### 1. Pick an ID
-
-Choose the next available VM ID. Internal services use the `1XX` range (e.g. `115`), external/DMZ services use `2XX`. The VM ID determines the IP: ID `115` gets `10.100.0.115`.
-
-### 2. Create the Terraform file
-
-Create `src/instances/115-internal-my-service.tf`:
-
-```hcl
-module "vm_115" {
-  source  = "../modules/vm_internal"   # or vm_external for DMZ
-  globals = var.globals
-  vm_id   = 115
-  name    = "my-service"
-}
-
-output "ip_115" { value = module.vm_115.ipv4_address }
-```
-
-Sizing defaults are centralized in `src/modules/vm/main.tf`.
-
-### 3. Create the NixOS config
-
-Create `src/instances/115-internal-my-service.nix`. The flake auto-discovers `1XX-internal-*.nix`, `2XX-external-*.nix`, `300-router.nix`, and `301-grafana.nix`.
-
-**Option A: Native NixOS service**
-
-```nix
-{ ... }: {
-  networking.hostName = "vm-115";
-
-  services.my-service = {
-    enable = true;
-    # ... service-specific config
-  };
-
-  networking.firewall.allowedTCPPorts = [ 80 ];
-}
-```
-
-**Option B: Docker container (OCI)**
-
-```nix
-{ ... }: {
-  networking.hostName = "vm-115";
-
-  virtualisation.oci-containers.containers.my-service = {
-    image = "myimage:latest";
-    ports = [ "80:8080" ];
-    volumes = [ "/var/lib/my-service:/data" ];
-  };
-
-  networking.firewall.allowedTCPPorts = [ 80 ];
-}
-```
-
-**Option C: Docker Compose stack (inline)**
-
-```nix
-{ ... }: {
-  networking.hostName = "vm-115";
-
-  homelab.dockerStack = {
-    enable = true;
-    stackName = "my-service";
-    composeFile = ''
-      services:
-        app:
-          image: myimage:latest
-          ports:
-            - "80:8080"
-    '';
-  };
-
-  networking.firewall.allowedTCPPorts = [ 80 ];
-}
-```
-
-**Option D: Docker Compose from a git repo**
-
-```nix
-{ ... }: {
-  networking.hostName = "vm-115";
-
-  homelab.dockerStack = {
-    enable = true;
-    stackName = "my-service";
-    gitRepo = "https://github.com/user/repo.git";
-    gitBranch = "main";              # optional, defaults to repo default
-    composePath = "deploy";          # optional, subdirectory in repo
-    composeFilename = "compose.yml"; # optional, defaults to docker-compose.yaml
-    pollInterval = "10m";            # optional, defaults to 5m
-  };
-
-  networking.firewall.allowedTCPPorts = [ 80 ];
-}
-```
-
-### 4. Register the output
-
-Add the VM to `src/instances/outputs.tf`:
-
-```hcl
-"115" = module.vm_115.ipv4_address
-```
-
-### 5. Add a Traefik route (optional)
-
-If the service should be reachable via a hostname, add a router and service entry to the Traefik config in `src/instances/100-internal-traefik.nix` (internal) or `src/instances/200-external-traefik.nix` (external):
-
-```nix
-# In routers:
-my-service = {
-  rule = "Host(`my-service.internal`)";
-  service = "my-service";
-  entryPoints = [ "websecure" ];
-  tls.certResolver = "cloudflare";
-  middlewares = [ "authentik" ];  # remove for no SSO
-};
-
-# In services:
-my-service.loadBalancer.servers = [{ url = "http://10.100.0.115:80"; }];
-```
-
-### 6. Add secrets (optional)
-
-If the service needs secrets, add them to `src/secrets.yaml` and reference via sops:
-
-```nix
-{ config, ... }: {
-  sops.secrets.my-secret = {};
-  # Use: config.sops.secrets.my-secret.path
-}
-```
-
-### 7. Stage and deploy
-
-```bash
-git add -A
-./sync.sh
-```
-
-The flake auto-discovers new instance nix files (`1XX-internal-*`, `2XX-external-*`, plus `300-router` and `301-grafana`), Terraform creates the VM, and sync.sh deploys the NixOS config.
+The flake auto-discovers files matching `{1,2}XX-{internal,external}-*.nix` plus `300-router.nix`.
 
 ## Secrets
 
-Encrypted with [sops-nix](https://github.com/Mic92/sops-nix). Edit: `sops src/secrets.yaml`. WireGuard keys auto-generated on router first boot (`wg show` to get public key).
+Encrypted with [sops-nix](https://github.com/Mic92/sops-nix). Edit: `sops src/secrets.yaml`.
 
-## Shared sccache setup
+## Minecraft Modpacks
 
-Shared backend runs on `vm-117` via Redis (`redis://10.100.0.117:6379`).
+The MC server uses `itzg/minecraft-server`. Edit `205-external-minecraft.nix` and uncomment one:
 
-For your local machine:
-
-```bash
-export SCCACHE_REDIS=redis://10.100.0.117:6379
-export RUSTC_WRAPPER=sccache
+**Server zip** — place zip at `/var/lib/minecraft-modpacks/` on vm-205:
+```
+GENERIC_PACK = "/modpacks/server-pack.zip";
 ```
 
-For Forgejo runner jobs, set the same env vars in your workflow/job container and ensure `sccache` is installed in that build environment.
+**CurseForge page** — auto-downloads:
+```
+TYPE = "AUTO_CURSEFORGE";
+CF_PAGE_URL = "https://www.curseforge.com/minecraft/modpacks/...";
+```
+
+**Pack with its own run script** — extract to `/var/lib/minecraft/`, then:
+```
+TYPE = "CUSTOM";
+CUSTOM_SERVER = "/data/run.sh";
+SKIP_SERVER_PROPERTIES = "true";
+EXEC_DIRECTLY = "true";
+```
+
+This bypasses the itzg launcher entirely and runs the pack's script directly.
+
+## Authentik Password Recovery
+
+```bash
+ssh -J root@192.168.178.29 root@10.100.0.101
+docker exec -it authentik-server-1 ak create_recovery_key 10 akadmin
+```
+
+Open the printed URL from your LAN browser.

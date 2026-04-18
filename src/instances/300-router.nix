@@ -2,12 +2,11 @@
   networking.hostName = "luca-router";
 
   # ── Network Interfaces ──────────────────────────────────────
-  # ens18  = WAN    → DHCP from home router (set a static lease on your router)
+  # ens18 = WAN    → static lease from FritzBox
   # ens19 = Internal LAN  (10.100.0.0/24)
   # ens20 = External DMZ  (10.200.0.0/24)
   # wg0   = WireGuard VPN (10.0.0.0/24)
 
-  # Router needs predictable names for multi-NIC setup
   networking.usePredictableInterfaceNames = lib.mkForce true;
   networking.useDHCP = false;
   networking.interfaces.ens18.ipv4.addresses = [{ address = "192.168.178.29"; prefixLength = 24; }];
@@ -23,12 +22,13 @@
     externalInterface = "ens18";
     internalInterfaces = [ "ens19" "ens20" "wg0" ];
     forwardPorts = [
-      # Internal reverse proxy (vm-100 Traefik) - HTTPS only
+      # FritzBox forwards 443 → here, route to external traefik
+      { destination = "10.200.0.200:443"; proto = "tcp"; sourcePort = 443; }
+      # alternate ports for direct access (internal/external traefik)
       { destination = "10.100.0.100:443"; proto = "tcp"; sourcePort = 10100; }
-      # External reverse proxy (vm-200 Traefik) - HTTPS only
       { destination = "10.200.0.200:443"; proto = "tcp"; sourcePort = 10200; }
-      # Explicit non-HTTP service forwards
-      { destination = "10.200.0.200:25565"; proto = "tcp"; sourcePort = 25565; } # Minecraft
+      # non-HTTP services
+      { destination = "10.200.0.200:25565"; proto = "tcp"; sourcePort = 25565; }
     ];
   };
 
@@ -39,7 +39,7 @@
     filterForward = true;
 
     interfaces.ens18 = {
-      allowedTCPPorts = [ 22 10100 10200 25565 ];
+      allowedTCPPorts = [ 22 443 10100 10200 25565 ];
       allowedUDPPorts = [ 51820 ];
     };
     interfaces.ens19 = {
@@ -54,7 +54,7 @@
     extraForwardRules = ''
       ct state established,related accept
 
-      # Local network (WAN) → all internal networks: allow
+      # WAN → all internal networks: allow
       iifname "ens18" accept
 
       # Internal LAN → anywhere: allow
@@ -63,7 +63,7 @@
       # WireGuard VPN → anywhere: allow
       iifname "wg0" accept
 
-      # Allow DMZ to reach internal Git and Registry
+      # allow DMZ to reach internal Git and Registry (for CI/CD)
       iifname "ens20" ip daddr { 10.100.0.104, 10.100.0.107 } tcp dport { 80, 443 } accept
 
       # External DMZ → internal LAN: BLOCK
@@ -116,8 +116,7 @@
   };
 
   # ── DNS Server (CoreDNS) ─────────────────────────────────────
-  # Local DNS: *.internal.home → internal Traefik, *.external.home → external Traefik
-  # All VMs use the router as primary DNS via DHCP
+  # *.internal.home → internal Traefik, *.external.home → external Traefik
   services.resolved.enable = false;
   services.coredns = {
     enable = true;
@@ -131,7 +130,7 @@
       external.home {
         template IN A {
           match "^mc\.external\.home\.$"
-          answer "mc.external.home. 3600 IN A 10.200.0.204"
+          answer "mc.external.home. 3600 IN A 10.200.0.205"
           fallthrough
         }
         template IN A {
@@ -144,16 +143,16 @@
 
       lsck0.dev {
         hosts {
-          # Internal services → internal Traefik
-          10.100.0.100 auth.lsck0.dev home.lsck0.dev git.lsck0.dev registry.lsck0.dev
+          # internal services → internal Traefik
+          10.100.0.100 auth.lsck0.dev homepage.lsck0.dev git.lsck0.dev registry.lsck0.dev
           10.100.0.100 cloud.lsck0.dev vault.lsck0.dev paperless.lsck0.dev
           10.100.0.100 hass.lsck0.dev jellyfin.lsck0.dev status.lsck0.dev
           10.100.0.100 huginn.lsck0.dev tasks.lsck0.dev
           10.100.0.100 grafana.lsck0.dev wiki.lsck0.dev abs.lsck0.dev
-          10.100.0.100 torrent.lsck0.dev
+          10.100.0.100 torrent.lsck0.dev music.lsck0.dev read.lsck0.dev
           10.100.0.100 prowlarr.lsck0.dev sonarr.lsck0.dev radarr.lsck0.dev
-          # External services → external Traefik
-          10.200.0.200 paste.lsck0.dev shlink.lsck0.dev share.lsck0.dev mc.lsck0.dev hs.lsck0.dev
+          # external services → external Traefik
+          10.200.0.200 hs.lsck0.dev shlink.lsck0.dev paste.lsck0.dev share.lsck0.dev mc.lsck0.dev
           fallthrough
         }
         template IN SRV _minecraft._tcp.mc.lsck0.dev {
@@ -174,14 +173,8 @@
     listenPort = 51820;
     generatePrivateKeyFile = true;
     privateKeyFile = "/etc/wireguard/private.key";
-    # Add peers as needed:
-    # peers = [{
-    #   publicKey = "...";
-    #   allowedIPs = [ "10.0.0.2/32" ];
-    # }];
   };
 
-  # Router doesn't need Docker
   virtualisation.docker.enable = lib.mkForce false;
 
   environment.systemPackages = with pkgs; [

@@ -92,7 +92,7 @@ in {
           # ── .internal.home — HTTPS (LAN, self-signed) ──
           authentik-local-tls      = { rule = "Host(`auth.internal.home`)";       service = "authentik";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
           traefik-dash-local-tls   = { rule = "Host(`traefik.internal.home`)";    service = "api@internal";    entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
-          homepage-local-tls       = { rule = "Host(`home.internal.home`)";       service = "homepage";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          homepage-local-tls       = { rule = "Host(`homepage.internal.home`)";       service = "homepage";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           uptime-kuma-local-tls    = { rule = "Host(`status.internal.home`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           forgejo-local-tls        = { rule = "Host(`git.internal.home`)";        service = "forgejo";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           registry-local-tls       = { rule = "Host(`registry.internal.home`)";   service = "registry";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
@@ -110,11 +110,13 @@ in {
           huginn-local-tls         = { rule = "Host(`huginn.internal.home`)";     service = "huginn";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           homeassistant-local-tls  = { rule = "Host(`hass.internal.home`)";       service = "homeassistant";   entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           grafana-local-tls        = { rule = "Host(`grafana.internal.home`)";    service = "grafana";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          navidrome-local-tls      = { rule = "Host(`music.internal.home`)";     service = "navidrome";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          kavita-local-tls         = { rule = "Host(`read.internal.home`)";      service = "kavita";          entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           proxmox-local-tls        = { rule = "Host(`proxmox.internal.home`)";    service = "proxmox";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
 
           # ── lsck0.dev — HTTPS (VPN / external) ──
           authentik-tls      = { rule = "Host(`auth.lsck0.dev`)";       service = "authentik";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-          homepage-tls       = { rule = "Host(`home.lsck0.dev`)";       service = "homepage";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
+          homepage-tls       = { rule = "Host(`homepage.lsck0.dev`)";       service = "homepage";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           uptime-kuma-tls    = { rule = "Host(`status.lsck0.dev`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           forgejo-tls        = { rule = "Host(`git.lsck0.dev`)";        service = "forgejo";         entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           registry-tls       = { rule = "Host(`registry.lsck0.dev`)";   service = "registry";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
@@ -132,6 +134,8 @@ in {
           huginn-tls         = { rule = "Host(`huginn.lsck0.dev`)";     service = "huginn";          entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           homeassistant-tls  = { rule = "Host(`hass.lsck0.dev`)";       service = "homeassistant";   entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           grafana-tls        = { rule = "Host(`grafana.lsck0.dev`)";    service = "grafana";         entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
+          navidrome-tls      = { rule = "Host(`music.lsck0.dev`)";     service = "navidrome";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
+          kavita-tls         = { rule = "Host(`read.lsck0.dev`)";      service = "kavita";          entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
         };
 
         services = {
@@ -154,6 +158,8 @@ in {
           huginn.loadBalancer.servers         = [{ url = ip "120"; }];
           homeassistant.loadBalancer.servers  = [{ url = ip "121"; }];
           grafana.loadBalancer.servers        = [{ url = ip "122"; }];
+          navidrome.loadBalancer.servers      = [{ url = ip "123"; }];
+          kavita.loadBalancer.servers         = [{ url = ip "124"; }];
           proxmox.loadBalancer.servers        = [{ url = "https://192.168.178.200:8006"; }];
           proxmox.loadBalancer.serversTransport = "proxmox-transport";
         };

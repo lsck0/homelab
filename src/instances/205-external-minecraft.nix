@@ -6,8 +6,6 @@
     ports = [ "25565:25565" ];
     volumes = [
       "/var/lib/minecraft:/data"
-      # to install a modpack, place the server zip at /var/lib/minecraft-modpacks/
-      # and set GENERIC_PACK below to the filename
       "/var/lib/minecraft-modpacks:/modpacks:ro"
     ];
     environment = {
@@ -21,8 +19,24 @@
       SNOOPER_ENABLED = "false";
       VIEW_DISTANCE = "12";
       MAX_PLAYERS = "10";
-      # for custom modpacks: set TYPE=AUTO_CURSEFORGE and CF_PAGE_URL
-      # or set GENERIC_PACK=/modpacks/server-pack.zip
+
+      # ── modpack options (uncomment one) ──
+      #
+      # server zip (auto-extracted):
+      #   GENERIC_PACK = "/modpacks/server-pack.zip";
+      #
+      # curseforge page:
+      #   TYPE = "AUTO_CURSEFORGE";
+      #   CF_PAGE_URL = "https://www.curseforge.com/minecraft/modpacks/...";
+      #   CF_API_KEY = "...";
+      #
+      # pack with its own run script (bypasses itzg launcher):
+      #   TYPE = "CUSTOM";
+      #   CUSTOM_SERVER = "/data/forge-server.jar";
+      #   or extract pack to /var/lib/minecraft/ and:
+      #   SKIP_SERVER_PROPERTIES = "true";
+      #   EXEC_DIRECTLY = "true";
+      #   CUSTOM_SERVER = "/data/run.sh";
     };
   };
 

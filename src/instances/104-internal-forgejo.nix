@@ -1,8 +1,8 @@
 { pkgs, ... }: {
   networking.hostName = "vm-104";
 
-  # Resolve auth.internal.local directly to authentik VM
-  networking.hosts."10.100.0.101" = [ "auth.internal.local" ];
+  # Resolve auth.internal.home directly to authentik VM
+  networking.hosts."10.100.0.101" = [ "auth.internal.home" ];
 
   virtualisation.oci-containers.containers.forgejo = {
     image = "codeberg.org/forgejo/forgejo:7";
@@ -10,7 +10,7 @@
     volumes = [ "/var/lib/forgejo:/data" ];
     environment = {
       FORGEJO__server__HTTP_PORT = "3000";
-      FORGEJO__server__ROOT_URL = "https://git.internal.local/";
+      FORGEJO__server__ROOT_URL = "https://git.internal.home/";
     };
   };
 
@@ -44,7 +44,7 @@
         --provider openidConnect \
         --key forgejo \
         --secret forgejo-oidc-secret-changeme \
-        --auto-discover-url "http://auth.internal.local/application/o/forgejo-oidc/.well-known/openid-configuration" \
+        --auto-discover-url "http://auth.internal.home/application/o/forgejo-oidc/.well-known/openid-configuration" \
         --skip-local-2fa \
         --auto-create-user \
         2>/dev/null || echo "Auth source may already exist"
