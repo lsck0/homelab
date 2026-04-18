@@ -7,7 +7,7 @@
       ROCKET_ADDRESS = "0.0.0.0";
       ROCKET_PORT = 8080;
       SIGNUPS_ALLOWED = false;
-      DOMAIN = "https://vault.internal.local";
+      DOMAIN = "https://vault.internal.home";
       WEBSOCKET_ENABLED = true;
       SENDS_ALLOWED = true;
       EMERGENCY_ACCESS_ALLOWED = true;

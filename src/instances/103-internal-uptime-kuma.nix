@@ -1,7 +1,7 @@
 { pkgs, ... }:
 let
   monitors = [
-    # Internal
+    # internal
     { name = "Traefik (internal)"; url = "http://10.100.0.100:80"; }
     { name = "Authentik";          url = "http://10.100.0.101:80"; }
     { name = "Homepage";           url = "http://10.100.0.102:80"; }
@@ -24,13 +24,15 @@ let
     { name = "Huginn";             url = "http://10.100.0.120:80"; }
     { name = "Home Assistant";     url = "http://10.100.0.121:80"; }
     { name = "Grafana";            url = "http://10.100.0.122:80"; }
-    # External
+    { name = "Navidrome";          url = "http://10.100.0.123:80"; }
+    { name = "Kavita";             url = "http://10.100.0.124:80"; }
+    # external
     { name = "Traefik (external)"; url = "http://10.200.0.200:80"; }
-    { name = "Shlink";             url = "http://10.200.0.201:80"; }
-    { name = "PrivateBin";         url = "http://10.200.0.202:80"; }
-    { name = "Share";              url = "http://10.200.0.203:80"; }
-    { name = "Minecraft";          url = "10.200.0.204"; type = "port"; port = 25565; }
-    { name = "Headscale";          url = "http://10.200.0.205:80"; }
+    { name = "Headscale";          url = "http://10.200.0.201:80"; }
+    { name = "Shlink";             url = "http://10.200.0.202:80"; }
+    { name = "PrivateBin";         url = "http://10.200.0.203:80"; }
+    { name = "Share";              url = "http://10.200.0.204:80"; }
+    { name = "Minecraft";          url = "10.200.0.205"; type = "port"; port = 25565; }
   ];
 
   setupJs = pkgs.writeText "uptime-setup.js" ''
@@ -146,18 +148,16 @@ in {
       Type = "oneshot";
       RemainAfterExit = true;
       ExecStart = pkgs.writeShellScript "uptime-kuma-monitors" ''
-        # Wait for Uptime Kuma to be ready
         for i in $(seq 1 90); do
           if ${pkgs.curl}/bin/curl -sf http://127.0.0.1:80 >/dev/null 2>&1; then break; fi
           sleep 2
         done
         sleep 5
 
-        # Copy setup script into container and run with its Node.js
         ${pkgs.podman}/bin/podman cp ${setupJs} uptime-kuma:/tmp/setup.js
         ${pkgs.podman}/bin/podman exec uptime-kuma node /tmp/setup.js
 
-        # Disable built-in auth (authentik ForwardAuth handles access control)
+        # disable built-in auth (authentik ForwardAuth handles access control)
         ${pkgs.podman}/bin/podman exec uptime-kuma sqlite3 /app/data/kuma.db \
           "INSERT OR REPLACE INTO setting (key, value) VALUES ('disableAuth', 'true');"
       '';

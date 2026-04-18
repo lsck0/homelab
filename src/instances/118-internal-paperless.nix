@@ -15,8 +15,8 @@
     settings = {
       PAPERLESS_ENABLE_HTTP_REMOTE_USER = "true";
       PAPERLESS_HTTP_REMOTE_USER_HEADER_NAME = "HTTP_X_AUTHENTIK_USERNAME";
-      PAPERLESS_URL = "https://paperless.internal.local";
-      PAPERLESS_CSRF_TRUSTED_ORIGINS = "https://paperless.internal.local,https://paperless.lsck0.dev";
+      PAPERLESS_URL = "https://paperless.internal.home";
+      PAPERLESS_CSRF_TRUSTED_ORIGINS = "https://paperless.internal.home,https://paperless.lsck0.dev";
       PAPERLESS_TIME_ZONE = "Europe/Berlin";
       PAPERLESS_OCR_LANGUAGE = "deu+eng";
       PAPERLESS_CONSUMER_POLLING = "30";
@@ -39,7 +39,7 @@
       RestartSec = 30;
     };
     environment = {
-      PAPERLESS_URL = "https://paperless.internal.local";
+      PAPERLESS_URL = "https://paperless.internal.home";
     };
     script = ''
       # Wait for web service to be ready

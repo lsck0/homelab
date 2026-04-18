@@ -65,6 +65,8 @@
     "d /srv/nas/media/tv 0775 nobody nogroup -"
     "d /srv/nas/media/movies 0775 nobody nogroup -"
     "d /srv/nas/media/audiobooks 0775 nobody nogroup -"
+    "d /srv/nas/media/music 0775 nobody nogroup -"
+    "d /srv/nas/media/manga 0775 nobody nogroup -"
     "d /srv/nas/documents 0775 nobody nogroup -"
     "d /srv/nas/torrents 0775 nobody nogroup -"
   ];
