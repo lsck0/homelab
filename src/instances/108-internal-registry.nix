@@ -18,7 +18,6 @@
     ports = [ "80:80" ];
     environment = {
       REGISTRY_TITLE = "Homelab Registry";
-      REGISTRY_URL = "http://localhost:5000";
       SINGLE_REGISTRY = "true";
       DELETE_IMAGES = "true";
       NGINX_PROXY_PASS_URL = "http://10.100.0.108:5000";

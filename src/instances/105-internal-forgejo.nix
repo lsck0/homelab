@@ -4,7 +4,8 @@
   # Resolve auth.internal directly to authentik VM
   networking.hosts."10.100.0.101" = [ "auth.internal" ];
 
-  fileSystems = nasMount "/var/lib/forgejo" "forgejo";
+  fileSystems = nasMount "/var/lib/forgejo" "forgejo"
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   virtualisation.oci-containers.containers.forgejo = {
     image = "codeberg.org/forgejo/forgejo:7";
@@ -50,6 +51,48 @@
         --skip-local-2fa \
         --auto-create-user \
         2>/dev/null || echo "Auth source may already exist"
+    '';
+  };
+
+  # Generate API token for Homepage widget
+  systemd.services.forgejo-homepage-token = {
+    description = "Generate Forgejo API token for Homepage";
+    after = [ "podman-forgejo.service" "forgejo-oauth2-setup.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.curl pkgs.jq pkgs.podman ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      TOKEN_FILE="/var/lib/homepage-tokens/forgejo-key.token"
+      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
+
+      # Wait for Forgejo API
+      for i in $(seq 1 60); do
+        curl -sf http://127.0.0.1:3000/api/v1/settings/api >/dev/null 2>&1 && break
+        sleep 2
+      done
+
+      # Create a local bot user for API access
+      podman exec forgejo forgejo admin user create \
+        --username homepage-bot \
+        --password "homepage-bot-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
+        --email homepage@internal \
+        --must-change-password=false 2>/dev/null || true
+
+      # Generate access token
+      TOKEN=$(podman exec forgejo forgejo admin user generate-access-token \
+        --username homepage-bot \
+        --token-name homepage \
+        --scopes read 2>/dev/null | grep -oP 'Access token was successfully created\.\.\. \K.*' || true)
+
+      if [ -n "$TOKEN" ]; then
+        echo -n "$TOKEN" > "$TOKEN_FILE"
+        echo "Forgejo Homepage token created"
+      else
+        echo "Token may already exist or creation failed"
+      fi
     '';
   };
 

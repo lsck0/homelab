@@ -5,7 +5,8 @@
   networking.hosts."10.100.0.101" = [ "auth.internal" ];
 
   fileSystems = nasMount "/var/lib/nextcloud" "nextcloud"
-    // nasMount "/var/lib/postgresql" "nextcloud-db";
+    // nasMount "/var/lib/postgresql" "nextcloud-db"
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   sops.secrets.nextcloud-admin-pass.owner = "nextcloud";
 
@@ -80,6 +81,23 @@
   systemd.services."nextcloud-setup" = {
     requires = [ "postgresql.service" ];
     after = [ "postgresql.service" ];
+  };
+
+  # Export admin credentials for Homepage widget
+  systemd.services.nextcloud-homepage-token = {
+    description = "Export Nextcloud credentials for Homepage";
+    after = [ "nextcloud-setup.service" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      [ -f /var/lib/homepage-tokens/nextcloud-user.token ] && exit 0
+      echo -n "admin" > /var/lib/homepage-tokens/nextcloud-user.token
+      cp ${config.sops.secrets.nextcloud-admin-pass.path} /var/lib/homepage-tokens/nextcloud-pass.token
+      chmod 644 /var/lib/homepage-tokens/nextcloud-user.token /var/lib/homepage-tokens/nextcloud-pass.token
+    '';
   };
 
   networking.firewall.allowedTCPPorts = [ 80 ];

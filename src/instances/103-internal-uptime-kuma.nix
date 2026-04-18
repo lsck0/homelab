@@ -126,6 +126,36 @@ let
         }
       }
 
+      // Create "homelab" status page with all monitors
+      try {
+        await send("addStatusPage", "Homelab", "homelab");
+        console.log("Status page created");
+      } catch (e) {
+        console.log("Status page:", e.message);
+      }
+
+      // Re-fetch monitors to get all IDs
+      const allMonitors = await new Promise((resolve) => {
+        socket.once("monitorList", resolve);
+        send("getMonitorList", {}).catch(() => {});
+        setTimeout(() => resolve({}), 5000);
+      });
+
+      try {
+        await send("saveStatusPage", "homelab", {
+          publicGroupList: [{
+            name: "Services",
+            monitorList: Object.keys(allMonitors).map(id => ({
+              id: Number(id),
+              name: allMonitors[id].name,
+            })),
+          }],
+        });
+        console.log("Status page updated with all monitors");
+      } catch (e) {
+        console.error("Status page update:", e.message);
+      }
+
       socket.disconnect();
     }
 

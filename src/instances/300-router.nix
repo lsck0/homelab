@@ -45,6 +45,10 @@
       allowedTCPPorts = [ 53 ];
       allowedUDPPorts = [ 53 67 ];
     };
+    interfaces.wg0 = {
+      allowedTCPPorts = [ 53 ];
+      allowedUDPPorts = [ 53 ];
+    };
 
     extraForwardRules = ''
       ct state established,related accept
@@ -174,6 +178,13 @@
         }
       }
 
+      lan {
+        hosts {
+          192.168.178.138 luca-pc.lan
+          fallthrough
+        }
+      }
+
       . {
         forward . 1.1.1.1 8.8.8.8
         cache 300
@@ -258,19 +269,17 @@
         allowedIPs = [ "10.0.0.4/32" ];
       }
     ];
-    postSetup = ''
-      ${pkgs.iptables}/bin/iptables -A FORWARD -i wg0 -j ACCEPT
-      ${pkgs.iptables}/bin/iptables -t nat -A POSTROUTING -o ens18 -j MASQUERADE
-    '';
-    postShutdown = ''
-      ${pkgs.iptables}/bin/iptables -D FORWARD -i wg0 -j ACCEPT
-      ${pkgs.iptables}/bin/iptables -t nat -D POSTROUTING -o ens18 -j MASQUERADE
-    '';
   };
 
   virtualisation.docker.enable = lib.mkForce false;
 
+  # Wake-on-LAN: wake luca-pc from VPN
+  # Usage: ssh root@10.0.0.1 wol-pc
+  environment.etc."profile.d/wol.sh".text = ''
+    alias wol-pc='wakeonlan -i 192.168.178.255 10:ff:e0:e4:04:4a'
+  '';
+
   environment.systemPackages = with pkgs; [
-    tcpdump iperf3 wireguard-tools ethtool
+    tcpdump iperf3 wireguard-tools ethtool wakeonlan
   ];
 }

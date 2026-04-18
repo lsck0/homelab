@@ -36,7 +36,7 @@ let
             widget:
               type: authentik
               url: http://10.100.0.101
-              key: {{HOMEPAGE_VAR_AUTHENTIK_TOKEN}}
+              key: {{HOMEPAGE_VAR_AUTHENTIK_KEY}}
         - Grafana:
             icon: grafana
             href: https://grafana.internal
@@ -44,8 +44,6 @@ let
             widget:
               type: grafana
               url: http://10.100.0.104
-              username: admin
-              password: admin
         - Status:
             icon: uptime-kuma
             href: https://status.internal
@@ -67,6 +65,7 @@ let
             widget:
               type: gitea
               url: http://10.100.0.105
+              key: {{HOMEPAGE_VAR_FORGEJO_KEY}}
         - Forgejo Runner:
             icon: forgejo
             ping: http://10.100.0.106
@@ -83,6 +82,8 @@ let
             widget:
               type: nextcloud
               url: http://10.100.0.112
+              username: {{HOMEPAGE_VAR_NEXTCLOUD_USER}}
+              password: {{HOMEPAGE_VAR_NEXTCLOUD_PASS}}
         - Vaultwarden:
             icon: vaultwarden
             href: https://vault.internal
@@ -92,8 +93,9 @@ let
             href: https://paperless.internal
             ping: http://10.100.0.119:8080
             widget:
-              type: paperless
+              type: paperlessngx
               url: http://10.100.0.119:8080
+              key: {{HOMEPAGE_VAR_PAPERLESS_KEY}}
         - Wiki.js:
             icon: wikijs
             href: https://wiki.internal
@@ -105,7 +107,7 @@ let
             widget:
               type: homeassistant
               url: http://10.100.0.122:8123
-              key: {{HOMEPAGE_VAR_HASS_TOKEN}}
+              key: {{HOMEPAGE_VAR_HASS_KEY}}
         - Huginn:
             icon: huginn
             href: https://huginn.internal
@@ -123,6 +125,7 @@ let
             widget:
               type: jellyfin
               url: http://10.100.0.117
+              key: {{HOMEPAGE_VAR_JELLYFIN_KEY}}
               enableNowPlaying: true
               enableBlocks: true
         - qBittorrent:
@@ -163,6 +166,9 @@ let
             widget:
               type: navidrome
               url: http://10.100.0.123
+              user: {{HOMEPAGE_VAR_NAVIDROME_USER}}
+              token: {{HOMEPAGE_VAR_NAVIDROME_PASS}}
+              salt: homepage
         - Audiobookshelf:
             icon: audiobookshelf
             href: https://abs.internal
@@ -170,6 +176,7 @@ let
             widget:
               type: audiobookshelf
               url: http://10.100.0.118
+              key: {{HOMEPAGE_VAR_AUDIOBOOKSHELF_KEY}}
         - Kavita:
             icon: kavita
             href: https://read.internal
@@ -177,6 +184,8 @@ let
             widget:
               type: kavita
               url: http://10.100.0.124
+              username: {{HOMEPAGE_VAR_KAVITA_USER}}
+              password: {{HOMEPAGE_VAR_KAVITA_PASS}}
 
     - External:
         - Ext Traefik:
@@ -194,6 +203,10 @@ let
             icon: shlink
             href: https://shlink.external
             ping: http://10.200.0.202
+            widget:
+              type: shlink
+              url: http://10.200.0.202
+              key: {{HOMEPAGE_VAR_SHLINK_KEY}}
         - PrivateBin:
             icon: privatebin
             href: https://paste.external
@@ -207,7 +220,7 @@ let
             ping: http://10.200.0.205
             widget:
               type: minecraft
-              url: http://10.200.0.205
+              url: udp://10.200.0.205
   '';
 
   settingsYaml = pkgs.writeText "settings.yaml" ''
@@ -264,7 +277,6 @@ let
     - resources:
         cpu: true
         memory: true
-        cputemp: true
         uptime: true
         disk: /
   '';
@@ -298,19 +310,33 @@ let
 in {
   networking.hostName = "vm-102";
 
-  fileSystems = nasMount "/var/lib/homepage" "homepage";
+  fileSystems = nasMount "/var/lib/homepage" "homepage"
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
-  # Copy Nix-generated config into NAS dir before container starts
+  # Build env file from token files on NAS before container starts
   systemd.services.homepage-config = {
-    description = "Sync Homepage config from Nix store";
+    description = "Sync Homepage config and collect API tokens";
     before = [ "podman-homepage.service" ];
     requiredBy = [ "podman-homepage.service" ];
     serviceConfig.Type = "oneshot";
+    path = [ pkgs.coreutils ];
     script = ''
       cp -f ${servicesYaml}  /var/lib/homepage/services.yaml
       cp -f ${settingsYaml}  /var/lib/homepage/settings.yaml
       cp -f ${bookmarksYaml} /var/lib/homepage/bookmarks.yaml
       cp -f ${widgetsYaml}   /var/lib/homepage/widgets.yaml
+
+      # Collect API tokens from shared NAS directory into env file
+      ENV_FILE="/var/lib/homepage/homepage.env"
+      : > "$ENV_FILE"
+      for f in /var/lib/homepage-tokens/*.token; do
+        [ -f "$f" ] || continue
+        name="$(basename "$f" .token)"
+        # Convert e.g. "forgejo-key" to "HOMEPAGE_VAR_FORGEJO_KEY"
+        varname="HOMEPAGE_VAR_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"
+        echo "''${varname}=$(cat "$f")" >> "$ENV_FILE"
+      done
+      chmod 600 "$ENV_FILE"
     '';
   };
 
@@ -323,6 +349,7 @@ in {
     environment = {
       HOMEPAGE_ALLOWED_HOSTS = "homepage.internal,homepage.lsck0.dev";
     };
+    environmentFiles = [ "/var/lib/homepage/homepage.env" ];
     extraOptions = [ "--cap-add=NET_RAW" ];
   };
 
