@@ -40,23 +40,17 @@
         shlink       = { rule = "Host(`shlink.external.local`)";      service = "shlink";       entryPoints = [ "web" ]; };
         privatebin   = { rule = "Host(`paste.external.local`)";       service = "privatebin";   entryPoints = [ "web" ]; };
         share        = { rule = "Host(`share.external.local`)";       service = "share";        entryPoints = [ "web" ]; };
-        hello-nginx  = { rule = "Host(`hello-nginx.external.local`)"; service = "hello-nginx";  entryPoints = [ "web" ]; };
-        hello-swarm  = { rule = "Host(`hello-swarm.external.local`)"; service = "hello-swarm";  entryPoints = [ "web" ]; };
 
         # ── lsck0.dev — HTTPS (internet) ──
         shlink-tls      = { rule = "Host(`shlink.lsck0.dev`)";      service = "shlink";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
         privatebin-tls  = { rule = "Host(`paste.lsck0.dev`)";       service = "privatebin";   entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
         share-tls       = { rule = "Host(`share.lsck0.dev`)";       service = "share";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-        hello-nginx-tls = { rule = "Host(`hello-nginx.lsck0.dev`)"; service = "hello-nginx";  entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-        hello-swarm-tls = { rule = "Host(`hello-swarm.lsck0.dev`)"; service = "hello-swarm";  entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       };
 
       services = {
         shlink.loadBalancer.servers       = [{ url = "http://10.200.0.201:80"; }];
         privatebin.loadBalancer.servers   = [{ url = "http://10.200.0.202:80"; }];
         share.loadBalancer.servers        = [{ url = "http://10.200.0.203:80"; }];
-        hello-nginx.loadBalancer.servers  = [{ url = "http://10.200.0.205:80"; }];
-        hello-swarm.loadBalancer.servers  = [{ url = "http://10.200.0.206:80"; }];
       };
     };
     # Non-HTTP services — TCP passthrough routing

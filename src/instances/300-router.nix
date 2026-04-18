@@ -7,8 +7,11 @@
   # ens20 = External DMZ  (10.200.0.0/24)
   # wg0   = WireGuard VPN (10.0.0.0/24)
 
+  # Router needs predictable names for multi-NIC setup
+  networking.usePredictableInterfaceNames = lib.mkForce true;
   networking.useDHCP = false;
-  # networking.interfaces.ens18.useDHCP = true;  # Handled by cloud-init static IP
+  networking.interfaces.ens18.ipv4.addresses = [{ address = "192.168.178.29"; prefixLength = 24; }];
+  networking.defaultGateway = { address = "192.168.178.1"; interface = "ens18"; };
   networking.interfaces.ens19.ipv4.addresses = [{ address = "10.100.0.1"; prefixLength = 24; }];
   networking.interfaces.ens20.ipv4.addresses = [{ address = "10.200.0.1"; prefixLength = 24; }];
 
@@ -115,6 +118,7 @@
   # ── DNS Server (CoreDNS) ─────────────────────────────────────
   # Local DNS: *.internal.local → internal Traefik, *.external.local → external Traefik
   # All VMs use the router as primary DNS via DHCP
+  services.resolved.enable = false;
   services.coredns = {
     enable = true;
     config = ''
@@ -141,7 +145,7 @@
           10.100.0.100 hass.lsck0.dev jellyfin.lsck0.dev status.lsck0.dev
           10.100.0.100 huginn.lsck0.dev tasks.lsck0.dev
           # External services → external Traefik
-          10.200.0.200 paste.lsck0.dev shlink.lsck0.dev share.lsck0.dev hello-nginx.lsck0.dev hello-swarm.lsck0.dev mc.lsck0.dev
+          10.200.0.200 paste.lsck0.dev shlink.lsck0.dev share.lsck0.dev mc.lsck0.dev
           fallthrough
         }
         template IN SRV _minecraft._tcp.mc.lsck0.dev {

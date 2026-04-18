@@ -3,12 +3,17 @@
 # The only command you need to update the lab after changing config.
 set -e
 
+# Force bash as SHELL — OpenSSH uses $SHELL for ProxyCommand, and zsh can break it
+export SHELL=/bin/bash
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$SCRIPT_DIR"
 TFVARS_PATH="$ROOT_DIR/src/terraform.tfvars"
 TFVARS_ENC_PATH="$ROOT_DIR/src/terraform.tfvars.sops.json"
 ACTIVE_TFVARS_PATH=""
-
+DEPLOY_FAILURE=0
+CLEANUP_FILES=()
+trap 'rm -f "${CLEANUP_FILES[@]}"' EXIT
 
 echo ">>> SYNCING HARDWARE + OS..."
 
@@ -64,7 +69,7 @@ load_tfvars() {
   else
     sops --decrypt "$TFVARS_ENC_PATH" > "$ACTIVE_TFVARS_PATH"
   fi
-  trap 'rm -f "$ACTIVE_TFVARS_PATH"' EXIT
+  CLEANUP_FILES+=("$ACTIVE_TFVARS_PATH")
 
   if ! jq empty "$ACTIVE_TFVARS_PATH" >/dev/null 2>&1; then
     echo "ERROR: Decrypted tfvars is not valid JSON."
@@ -116,6 +121,12 @@ git_auto_commit_push() {
 }
 
 setup_ssh_transport() {
+  if [ -n "$(read_tfvar proxmox_ssh_password)" ]; then
+    SSH_CMD=(sshpass -p "$(read_tfvar proxmox_ssh_password)" ssh -p "$(read_tfvar proxmox_ssh_port)" -o StrictHostKeyChecking=accept-new)
+  else
+    SSH_CMD=(ssh -p "$(read_tfvar proxmox_ssh_port)" -o StrictHostKeyChecking=accept-new)
+  fi
+
   PROXMOX_SSH_HOST="$(read_tfvar proxmox_ssh_host)"
   PROXMOX_SSH_PORT="$(read_tfvar proxmox_ssh_port)"
   PROXMOX_SSH_USER="$(read_tfvar proxmox_ssh_user)"
@@ -134,16 +145,38 @@ setup_ssh_transport() {
   fi
 
   if [ -n "$PROXMOX_SSH_PASSWORD" ]; then
-  export SSHPASS="$PROXMOX_SSH_PASSWORD"
-fi
+    export SSHPASS="$PROXMOX_SSH_PASSWORD"
+  fi
 
-cat >> "$SSH_CONFIG" <<EOF_SSH
+  SSH_CONFIG="$(mktemp --suffix=.ssh_config)"
+  CLEANUP_FILES+=("$SSH_CONFIG")
+
+  # Use explicit ProxyCommand instead of ProxyJump for compatibility
+  local ssh_bin
+  ssh_bin="$(command -v ssh)"
+
+  # Router VM (192.168.178.29) is the bastion for internal/external networks.
+  # Proxmox has no IPs on vmbr100/vmbr200, so can't route to 10.* VMs.
+  ROUTER_WAN_IP="192.168.178.29"
+
+  cat > "$SSH_CONFIG" <<EOF_SSH
+Host proxmox-bastion
+  HostName ${PROXMOX_SSH_HOST}
+  Port ${PROXMOX_SSH_PORT}
+  User ${PROXMOX_SSH_USER}
+  StrictHostKeyChecking accept-new
+
 Host 10.*
-  ProxyJump root@192.168.178.29
+  ProxyCommand ${ssh_bin} -F ${SSH_CONFIG} -W %h:%p root@${ROUTER_WAN_IP}
+  StrictHostKeyChecking accept-new
+  UserKnownHostsFile /dev/null
 EOF_SSH
 
-BASTION_SSHOPTS=(-F "$SSH_CONFIG")
-export NIX_SSHOPTS="-F $SSH_CONFIG"
+  BASTION_SSHOPTS=(-F "$SSH_CONFIG")
+  export NIX_SSHOPTS="-F $SSH_CONFIG"
+
+  # Ensure SHELL is bash for ProxyCommand execution (zsh can break fork+exec in some setups)
+  export SHELL=/bin/bash
 }
 
 AGE_KEY="$ROOT_DIR/keys/age.txt"
@@ -163,7 +196,7 @@ deploy_nixos() {
   echo ">>> Deploying $name to $ip..."
 
   echo ">>> Waiting for SSH on $ip..."
-  if ! wait_for_ssh "$ip" 6 5; then return 1; fi
+  if ! wait_for_ssh "$ip" 24 5; then return 1; fi
 
   local result
   if ! result=$(nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
@@ -184,8 +217,8 @@ deploy_nixos() {
   fi
 
   nix copy --extra-experimental-features "nix-command flakes" \
-      --to "ssh://root@${ip}?ssh-key=$HOME/.ssh/id_ed25519" \
-      "$toplevel" 2>/dev/null \
+      --to "ssh-ng://root@${ip}" \
+      "$toplevel" \
   || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
 
   # Run the switch command in the background detached from SSH via systemd-run, because network restarts
@@ -203,10 +236,32 @@ deploy_nixos() {
   echo ">>> $name deployed."
 }
 
+git_auto_prepare
+load_tfvars
+setup_ssh_transport
+
+# Ensure golden image exists on Proxmox
+if ! "${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
+  if [ -f "$ROOT_DIR/images/nixos.img" ]; then
+    echo ">>> Uploading golden image to Proxmox..."
+    scp -o StrictHostKeyChecking=accept-new "$ROOT_DIR/images/nixos.img" \
+      "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}:/var/lib/vz/template/iso/nixos.img"
+  else
+    echo "ERROR: Golden image not found. Run: sudo nix build ./src#cloud-image"
+    exit 1
+  fi
+fi
+
+if [ ! -d "$ROOT_DIR/src/.terraform" ]; then
+  echo ">>> Initializing Terraform..."
+  terraform -chdir="$ROOT_DIR/src" init
+fi
+
+echo ">>> Applying Terraform..."
+tf_apply_retry "$ROOT_DIR/src" -var-file="$ACTIVE_TFVARS_PATH"
+
 echo ">>> Fetching VM IPs from Terraform..."
 VM_IPS=$(terraform -chdir="$ROOT_DIR/src" output -raw vm_ips 2>/dev/null || echo "")
-
-# Ensure the Proxmox host can route to the internal/external networks to act as a bastion.
 
 # Deploy the router first (other VMs depend on it for connectivity)
 # The router may have a DHCP IP (golden image) instead of its configured static IP.
@@ -228,7 +283,7 @@ discover_wan_ip() {
 
   # Get the WAN MAC from Terraform state
   local mac
-  mac=$(terraform -chdir="$ROOT_DIR/src" state show "module.vms.module.vm_${vm_id}.module.vm.proxmox_virtual_environment_vm.this" 2>/dev/null \
+  mac=$(terraform -chdir="$ROOT_DIR/src" state show "module.instances.module.vm[\"${vm_id}\"].proxmox_virtual_environment_vm.this" 2>/dev/null \
     | awk '/network_device \{/{found=1} found && /mac_address/{gsub(/"/,"",$3); print tolower($3); exit}')
 
   if [ -z "$mac" ]; then
@@ -332,6 +387,7 @@ for nix_file in "$ROOT_DIR"/src/instances/301-grafana.nix \
 
   if ! deploy_nixos "$vm_name" "$ip"; then
     echo "WARNING: Failed to deploy $vm_name"
+    DEPLOY_FAILURE=1
     continue
   fi
 done

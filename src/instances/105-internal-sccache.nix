@@ -5,12 +5,12 @@
     enable = true;
     port = 6379;
     bind = "0.0.0.0";
-    extraConfig = ''
-      protected-mode no
-      maxmemory 2gb
-      maxmemory-policy allkeys-lru
-      appendonly yes
-    '';
+    settings = {
+      protected-mode = "no";
+      maxmemory = "2gb";
+      maxmemory-policy = "allkeys-lru";
+      appendonly = "yes";
+    };
   };
 
   environment.systemPackages = [ pkgs.sccache ];
