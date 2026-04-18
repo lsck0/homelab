@@ -1,12 +1,8 @@
-{ pkgs, ... }: {
-  networking.hostName = "vm-118";
+{ pkgs, nasMount, nasPath, ... }: {
+  networking.hostName = "vm-119";
 
-  # Mount consume dir from NAS for scanner intake
-  fileSystems."/var/lib/paperless/consume" = {
-    device = "10.100.0.110:/srv/nas/documents";
-    fsType = "nfs";
-    options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  };
+  fileSystems = nasMount "/var/lib/paperless" "paperless"
+    // nasPath "/var/lib/paperless/consume" "documents";
 
   services.paperless = {
     enable = true;
@@ -15,8 +11,8 @@
     settings = {
       PAPERLESS_ENABLE_HTTP_REMOTE_USER = "true";
       PAPERLESS_HTTP_REMOTE_USER_HEADER_NAME = "HTTP_X_AUTHENTIK_USERNAME";
-      PAPERLESS_URL = "https://paperless.internal.home";
-      PAPERLESS_CSRF_TRUSTED_ORIGINS = "https://paperless.internal.home,https://paperless.lsck0.dev";
+      PAPERLESS_URL = "https://paperless.internal";
+      PAPERLESS_CSRF_TRUSTED_ORIGINS = "https://paperless.internal,https://paperless.lsck0.dev";
       PAPERLESS_TIME_ZONE = "Europe/Berlin";
       PAPERLESS_OCR_LANGUAGE = "deu+eng";
       PAPERLESS_CONSUMER_POLLING = "30";
@@ -39,7 +35,7 @@
       RestartSec = 30;
     };
     environment = {
-      PAPERLESS_URL = "https://paperless.internal.home";
+      PAPERLESS_URL = "https://paperless.internal";
     };
     script = ''
       # Wait for web service to be ready

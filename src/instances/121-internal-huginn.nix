@@ -1,5 +1,8 @@
-{ config, ... }: {
-  networking.hostName = "vm-120";
+{ config, nasMount, ... }: {
+  networking.hostName = "vm-121";
+
+  fileSystems = nasMount "/var/lib/huginn" "huginn"
+    // nasMount "/var/lib/postgresql" "huginn-db";
 
   services.postgresql = {
     enable = true;
@@ -23,9 +26,9 @@
     ports = [ "80:3000" ];
     volumes = [ "/var/lib/huginn:/var/lib/huginn" ];
     environment = {
-      DOMAIN = "huginn.internal.home";
+      DOMAIN = "huginn.internal";
       DATABASE_ADAPTER = "postgresql";
-      DATABASE_HOST = "10.100.0.120";
+      DATABASE_HOST = "10.100.0.121";
       DATABASE_PORT = "5432";
       DATABASE_NAME = "huginn";
       DATABASE_USERNAME = "huginn";

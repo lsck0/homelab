@@ -1,4 +1,4 @@
-{ config, pkgs, ... }:
+{ config, pkgs, nasMount, ... }:
 let
   externalCerts = pkgs.runCommand "external-local-certs" {
     nativeBuildInputs = [ pkgs.openssl ];
@@ -6,8 +6,8 @@ let
     mkdir -p $out
     openssl req -x509 -newkey rsa:2048 -nodes \
       -keyout $out/key.pem -out $out/cert.pem \
-      -days 3650 -subj "/CN=*.external.home" \
-      -addext "subjectAltName=DNS:*.external.home,DNS:external.home"
+      -days 3650 -subj "/CN=*.external" \
+      -addext "subjectAltName=DNS:*.external,DNS:external"
   '';
 in {
   networking.hostName = "vm-200";
@@ -31,6 +31,8 @@ in {
       COLLECTIONS = "crowdsecurity/traefik crowdsecurity/http-cve";
     };
   };
+
+  fileSystems = nasMount "/var/lib/crowdsec" "crowdsec-external";
 
   systemd.tmpfiles.rules = [
     "d /var/lib/traefik 0700 traefik traefik -"
@@ -68,17 +70,17 @@ in {
     };
     http = {
       routers = {
-        # ── .external.home — HTTP (LAN) ──
-        headscale    = { rule = "Host(`hs.external.home`)";          service = "headscale";    entryPoints = [ "web" ]; };
-        shlink       = { rule = "Host(`shlink.external.home`)";      service = "shlink";       entryPoints = [ "web" ]; };
-        privatebin   = { rule = "Host(`paste.external.home`)";       service = "privatebin";   entryPoints = [ "web" ]; };
-        share        = { rule = "Host(`share.external.home`)";       service = "share";        entryPoints = [ "web" ]; };
+        # ── .external — HTTP (LAN) ──
+        headscale    = { rule = "Host(`hs.external`)";          service = "headscale";    entryPoints = [ "web" ]; };
+        shlink       = { rule = "Host(`shlink.external`)";      service = "shlink";       entryPoints = [ "web" ]; };
+        privatebin   = { rule = "Host(`paste.external`)";       service = "privatebin";   entryPoints = [ "web" ]; };
+        share        = { rule = "Host(`share.external`)";       service = "share";        entryPoints = [ "web" ]; };
 
-        # ── .external.home — HTTPS (LAN, self-signed) ──
-        headscale-local-tls  = { rule = "Host(`hs.external.home`)";      service = "headscale";  entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-        shlink-local-tls     = { rule = "Host(`shlink.external.home`)";  service = "shlink";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-        privatebin-local-tls = { rule = "Host(`paste.external.home`)";   service = "privatebin"; entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-        share-local-tls      = { rule = "Host(`share.external.home`)";   service = "share";      entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+        # ── .external — HTTPS (LAN, self-signed) ──
+        headscale-local-tls  = { rule = "Host(`hs.external`)";      service = "headscale";  entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+        shlink-local-tls     = { rule = "Host(`shlink.external`)";  service = "shlink";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+        privatebin-local-tls = { rule = "Host(`paste.external`)";   service = "privatebin"; entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+        share-local-tls      = { rule = "Host(`share.external`)";   service = "share";      entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
 
         # ── lsck0.dev — HTTPS (internet) ──
         headscale-tls   = { rule = "Host(`hs.lsck0.dev`)";          service = "headscale";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };

@@ -1,12 +1,8 @@
-{ ... }: {
-  networking.hostName = "vm-116";
+{ nasMount, nasMedia, ... }: {
+  networking.hostName = "vm-117";
 
-  # Mount media from NAS
-  fileSystems."/mnt/media" = {
-    device = "10.100.0.110:/srv/nas/media";
-    fsType = "nfs";
-    options = [ "nfsvers=4" "ro" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  };
+  fileSystems = nasMount "/var/lib/jellyfin" "jellyfin"
+    // nasMedia "/mnt/media" "";
 
   virtualisation.oci-containers.containers.jellyfin = {
     image = "jellyfin/jellyfin:latest";
@@ -17,7 +13,7 @@
       "/mnt/media:/media:ro"
     ];
     environment = {
-      JELLYFIN_PublishedServerUrl = "https://jellyfin.internal.home";
+      JELLYFIN_PublishedServerUrl = "https://jellyfin.internal";
     };
   };
 

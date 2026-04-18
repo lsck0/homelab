@@ -1,5 +1,7 @@
-{ ... }: {
+{ nasMount, ... }: {
   networking.hostName = "vm-204";
+  fileSystems = nasMount "/var/lib/pingvin-share" "share";
+
   virtualisation.oci-containers.containers.share = {
     image = "stonith404/pingvin-share:latest";
     ports = [ "80:3000" ];

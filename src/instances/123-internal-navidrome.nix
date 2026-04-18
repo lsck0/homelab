@@ -1,11 +1,8 @@
-{ ... }: {
+{ nasMount, nasMedia, ... }: {
   networking.hostName = "vm-123";
 
-  fileSystems."/srv/music" = {
-    device = "10.100.0.110:/srv/nas/media/music";
-    fsType = "nfs";
-    options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  };
+  fileSystems = nasMount "/var/lib/navidrome" "navidrome"
+    // nasMedia "/srv/music" "music";
 
   virtualisation.oci-containers.containers.navidrome = {
     image = "deluan/navidrome:latest";

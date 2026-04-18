@@ -64,7 +64,11 @@
       iifname "wg0" accept
 
       # allow DMZ to reach internal Git and Registry (for CI/CD)
-      iifname "ens20" ip daddr { 10.100.0.104, 10.100.0.107 } tcp dport { 80, 443 } accept
+      iifname "ens20" ip daddr { 10.100.0.105, 10.100.0.108 } tcp dport { 80, 443 } accept
+
+      # allow DMZ to reach NAS (NFS for persistent data)
+      iifname "ens20" ip daddr 10.100.0.111 tcp dport { 111, 2049 } accept
+      iifname "ens20" ip daddr 10.100.0.111 udp dport { 111, 2049 } accept
 
       # External DMZ → internal LAN: BLOCK
       iifname "ens20" oifname "ens19" counter drop
@@ -116,28 +120,28 @@
   };
 
   # ── DNS Server (CoreDNS) ─────────────────────────────────────
-  # *.internal.home → internal Traefik, *.external.home → external Traefik
+  # *.internal → internal Traefik, *.external → external Traefik
   services.resolved.enable = false;
   services.coredns = {
     enable = true;
     config = ''
-      internal.home {
+      internal {
         template IN A {
           answer "{{ .Name }} 3600 IN A 10.100.0.100"
         }
       }
 
-      external.home {
+      external {
         template IN A {
-          match "^mc\.external\.home\.$"
-          answer "mc.external.home. 3600 IN A 10.200.0.205"
+          match "^mc\.external\.$"
+          answer "mc.external. 3600 IN A 10.200.0.205"
           fallthrough
         }
         template IN A {
           answer "{{ .Name }} 3600 IN A 10.200.0.200"
         }
-        template IN SRV _minecraft._tcp.mc.external.home {
-          answer "{{ .Name }} 3600 IN SRV 0 0 25565 mc.external.home."
+        template IN SRV _minecraft._tcp.mc.external {
+          answer "{{ .Name }} 3600 IN SRV 0 0 25565 mc.external."
         }
       }
 
@@ -168,11 +172,26 @@
   };
 
   # ── WireGuard VPN ───────────────────────────────────────────
+  # After first boot, get server pubkey: wg show wg0 public-key
+  # Generate client config with that key + endpoint = <your-public-ip>:51820
+  sops.secrets.wireguard-private-key = {};
   networking.wireguard.interfaces.wg0 = {
     ips = [ "10.0.0.1/24" ];
     listenPort = 51820;
-    generatePrivateKeyFile = true;
-    privateKeyFile = "/etc/wireguard/private.key";
+    privateKeyFile = config.sops.secrets.wireguard-private-key.path;
+    # Add peers here. Example:
+    # peers = [{
+    #   publicKey = "CLIENT_PUBLIC_KEY_HERE";
+    #   allowedIPs = [ "10.0.0.2/32" ];
+    # }];
+    postSetup = ''
+      ${pkgs.iptables}/bin/iptables -A FORWARD -i wg0 -j ACCEPT
+      ${pkgs.iptables}/bin/iptables -t nat -A POSTROUTING -o ens18 -j MASQUERADE
+    '';
+    postShutdown = ''
+      ${pkgs.iptables}/bin/iptables -D FORWARD -i wg0 -j ACCEPT
+      ${pkgs.iptables}/bin/iptables -t nat -D POSTROUTING -o ens18 -j MASQUERADE
+    '';
   };
 
   virtualisation.docker.enable = lib.mkForce false;

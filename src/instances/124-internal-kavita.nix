@@ -1,11 +1,8 @@
-{ ... }: {
+{ nasMount, nasMedia, ... }: {
   networking.hostName = "vm-124";
 
-  fileSystems."/srv/manga" = {
-    device = "10.100.0.110:/srv/nas/media/manga";
-    fsType = "nfs";
-    options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  };
+  fileSystems = nasMount "/var/lib/kavita" "kavita"
+    // nasMedia "/srv/manga" "manga";
 
   virtualisation.oci-containers.containers.kavita = {
     image = "jvmilazz0/kavita:latest";

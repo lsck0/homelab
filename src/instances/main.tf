@@ -17,25 +17,25 @@ locals {
     "101" = { name = "101-internal-authentik", type = "internal", memory = 4096 }
     "102" = { name = "102-internal-homepage", type = "internal" }
     "103" = { name = "103-internal-uptime-kuma", type = "internal" }
-    "104" = { name = "104-internal-forgejo", type = "internal" }
-    "105" = { name = "105-internal-forgejo-runner", type = "internal" }
-    "106" = { name = "106-internal-sccache", type = "internal" }
-    "107" = { name = "107-internal-registry", type = "internal" }
-    "108" = { name = "108-internal-taskchampion", type = "internal" }
-    "109" = { name = "109-internal-vaultwarden", type = "internal" }
-    "110" = { name = "110-internal-nas", type = "internal", disk = 64 }
-    "111" = { name = "111-internal-nextcloud", type = "internal" }
-    "112" = { name = "112-internal-qbittorrent", type = "internal", disk = 20 }
-    "113" = { name = "113-internal-prowlarr", type = "internal" }
-    "114" = { name = "114-internal-sonarr", type = "internal", disk = 20 }
-    "115" = { name = "115-internal-radarr", type = "internal", disk = 20 }
-    "116" = { name = "116-internal-jellyfin", type = "internal" }
-    "117" = { name = "117-internal-audiobookshelf", type = "internal" }
-    "118" = { name = "118-internal-paperless", type = "internal" }
-    "119" = { name = "119-internal-wikijs", type = "internal" }
-    "120" = { name = "120-internal-huginn", type = "internal" }
-    "121" = { name = "121-internal-homeassistant", type = "internal" }
-    "122" = { name = "122-internal-grafana", type = "internal" }
+    "104" = { name = "104-internal-grafana", type = "internal" }
+    "105" = { name = "105-internal-forgejo", type = "internal" }
+    "106" = { name = "106-internal-forgejo-runner", type = "internal" }
+    "107" = { name = "107-internal-sccache", type = "internal" }
+    "108" = { name = "108-internal-registry", type = "internal" }
+    "109" = { name = "109-internal-taskchampion", type = "internal" }
+    "110" = { name = "110-internal-vaultwarden", type = "internal" }
+    "111" = { name = "111-internal-nas", type = "internal", disk = 500 }
+    "112" = { name = "112-internal-nextcloud", type = "internal" }
+    "113" = { name = "113-internal-qbittorrent", type = "internal" }
+    "114" = { name = "114-internal-prowlarr", type = "internal" }
+    "115" = { name = "115-internal-sonarr", type = "internal" }
+    "116" = { name = "116-internal-radarr", type = "internal" }
+    "117" = { name = "117-internal-jellyfin", type = "internal" }
+    "118" = { name = "118-internal-audiobookshelf", type = "internal" }
+    "119" = { name = "119-internal-paperless", type = "internal" }
+    "120" = { name = "120-internal-wikijs", type = "internal" }
+    "121" = { name = "121-internal-huginn", type = "internal" }
+    "122" = { name = "122-internal-homeassistant", type = "internal" }
     "123" = { name = "123-internal-navidrome", type = "internal" }
     "124" = { name = "124-internal-kavita", type = "internal" }
     # ── external ──
@@ -59,7 +59,7 @@ module "vm" {
   target_node  = var.target_node
   datastore_id = var.proxmox_datastore
   cores        = try(each.value.cores, 2)
-  memory       = try(each.value.memory, 2048)
+  memory       = try(each.value.memory, 1024)
   disk         = try(each.value.disk, 8)
   image_id     = var.nixos_image_id
   ssh_key      = var.ssh_public_key

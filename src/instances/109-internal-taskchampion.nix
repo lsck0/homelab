@@ -1,5 +1,7 @@
-{ config, lib, ... }: {
-  networking.hostName = "vm-108";
+{ config, lib, nasMount, ... }: {
+  networking.hostName = "vm-109";
+
+  fileSystems = nasMount "/var/lib/taskchampion" "taskchampion";
 
   services.taskchampion-sync-server = {
     enable = true;

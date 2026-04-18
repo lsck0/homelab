@@ -1,9 +1,12 @@
-{ ... }: {
+{ config, nasMount, ... }: {
   networking.hostName = "vm-205";
+
+  fileSystems = nasMount "/var/lib/minecraft" "minecraft"
+    // nasMount "/var/lib/minecraft-modpacks" "minecraft-modpacks";
 
   virtualisation.oci-containers.containers.minecraft = {
     image = "itzg/minecraft-server:latest";
-    ports = [ "25565:25565" ];
+    ports = [ "25565:25565" "25575:25575" ];
     volumes = [
       "/var/lib/minecraft:/data"
       "/var/lib/minecraft-modpacks:/modpacks:ro"
@@ -19,6 +22,10 @@
       SNOOPER_ENABLED = "false";
       VIEW_DISTANCE = "12";
       MAX_PLAYERS = "10";
+      ENABLE_RCON = "true";
+      RCON_PASSWORD = "changeme";
+      ENABLE_WHITELIST = "true";
+      ENFORCE_WHITELIST = "true";
 
       # ── modpack options (uncomment one) ──
       #

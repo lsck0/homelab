@@ -1,11 +1,8 @@
-{ ... }: {
-  networking.hostName = "vm-117";
+{ nasMount, nasPath, ... }: {
+  networking.hostName = "vm-118";
 
-  fileSystems."/srv/audiobooks" = {
-    device = "10.100.0.110:/srv/nas/media/audiobooks";
-    fsType = "nfs";
-    options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  };
+  fileSystems = nasMount "/var/lib/audiobookshelf" "audiobookshelf"
+    // nasPath "/srv/audiobooks" "media/audiobooks";
 
   virtualisation.oci-containers.containers.audiobookshelf = {
     image = "ghcr.io/advplyr/audiobookshelf:latest";

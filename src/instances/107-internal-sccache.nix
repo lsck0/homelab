@@ -1,5 +1,5 @@
 { pkgs, ... }: {
-  networking.hostName = "vm-106";
+  networking.hostName = "vm-107";
 
   services.redis.servers.sccache = {
     enable = true;

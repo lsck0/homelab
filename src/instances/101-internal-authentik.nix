@@ -1,26 +1,24 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, nasMount, ... }:
 let
-  # All services protected by authentik ForwardAuth.
   protectedApps = [
-    { slug = "uptime-kuma";    name = "Uptime Kuma";      local = "status.internal.home";     external = "status.lsck0.dev"; }
-    { slug = "forgejo";        name = "Forgejo";          local = "git.internal.home";        external = "git.lsck0.dev"; }
-    { slug = "registry";       name = "Registry";         local = "registry.internal.home";   external = "registry.lsck0.dev"; }
-    { slug = "homepage";       name = "Homepage";         local = "homepage.internal.home";       external = "homepage.lsck0.dev"; }
-    { slug = "vaultwarden";    name = "Vaultwarden";      local = "vault.internal.home";      external = "vault.lsck0.dev"; }
-    # Nextcloud uses native OIDC, not ForwardAuth — see oidcEntries below
-    { slug = "paperless";      name = "Paperless";        local = "paperless.internal.home";  external = "paperless.lsck0.dev"; }
-    { slug = "jellyfin";       name = "Jellyfin";         local = "jellyfin.internal.home";   external = "jellyfin.lsck0.dev"; }
-    { slug = "huginn";         name = "Huginn";           local = "huginn.internal.home";     external = "huginn.lsck0.dev"; }
-    { slug = "homeassistant";  name = "Home Assistant";   local = "hass.internal.home";       external = "hass.lsck0.dev"; }
-    { slug = "grafana";        name = "Grafana";          local = "grafana.internal.home";    external = "grafana.lsck0.dev"; }
-    { slug = "wikijs";         name = "Wiki.js";          local = "wiki.internal.home";       external = "wiki.lsck0.dev"; }
-    { slug = "audiobookshelf"; name = "Audiobookshelf";   local = "abs.internal.home";        external = "abs.lsck0.dev"; }
-    { slug = "qbittorrent";    name = "qBittorrent";      local = "torrent.internal.home";    external = "torrent.lsck0.dev"; }
-    { slug = "prowlarr";       name = "Prowlarr";         local = "prowlarr.internal.home";   external = "prowlarr.lsck0.dev"; }
-    { slug = "sonarr";         name = "Sonarr";           local = "sonarr.internal.home";     external = "sonarr.lsck0.dev"; }
-    { slug = "radarr";         name = "Radarr";           local = "radarr.internal.home";      external = "radarr.lsck0.dev"; }
-    { slug = "navidrome";      name = "Navidrome";        local = "music.internal.home";       external = "music.lsck0.dev"; }
-    { slug = "kavita";         name = "Kavita";           local = "read.internal.home";        external = "read.lsck0.dev"; }
+    { slug = "uptime-kuma";    name = "Uptime Kuma";      local = "status.internal";      external = "status.lsck0.dev"; }
+    { slug = "forgejo";        name = "Forgejo";          local = "git.internal";         external = "git.lsck0.dev"; }
+    { slug = "registry";       name = "Registry";         local = "registry.internal";    external = "registry.lsck0.dev"; }
+    { slug = "homepage";       name = "Homepage";         local = "homepage.internal";    external = "homepage.lsck0.dev"; }
+    { slug = "vaultwarden";    name = "Vaultwarden";      local = "vault.internal";       external = "vault.lsck0.dev"; }
+    { slug = "paperless";      name = "Paperless";        local = "paperless.internal";   external = "paperless.lsck0.dev"; }
+    { slug = "jellyfin";       name = "Jellyfin";         local = "jellyfin.internal";    external = "jellyfin.lsck0.dev"; }
+    { slug = "huginn";         name = "Huginn";           local = "huginn.internal";      external = "huginn.lsck0.dev"; }
+    { slug = "homeassistant";  name = "Home Assistant";   local = "hass.internal";        external = "hass.lsck0.dev"; }
+    { slug = "grafana";        name = "Grafana";          local = "grafana.internal";     external = "grafana.lsck0.dev"; }
+    { slug = "wikijs";         name = "Wiki.js";          local = "wiki.internal";        external = "wiki.lsck0.dev"; }
+    { slug = "audiobookshelf"; name = "Audiobookshelf";   local = "abs.internal";         external = "abs.lsck0.dev"; }
+    { slug = "qbittorrent";    name = "qBittorrent";      local = "torrent.internal";     external = "torrent.lsck0.dev"; }
+    { slug = "prowlarr";       name = "Prowlarr";         local = "prowlarr.internal";    external = "prowlarr.lsck0.dev"; }
+    { slug = "sonarr";         name = "Sonarr";           local = "sonarr.internal";      external = "sonarr.lsck0.dev"; }
+    { slug = "radarr";         name = "Radarr";           local = "radarr.internal";      external = "radarr.lsck0.dev"; }
+    { slug = "navidrome";      name = "Navidrome";        local = "music.internal";       external = "music.lsck0.dev"; }
+    { slug = "kavita";         name = "Kavita";           local = "read.internal";        external = "read.lsck0.dev"; }
   ];
 
   mkProviderAndApp = variant: app:
@@ -60,7 +58,6 @@ let
     ]) protectedApps
   );
 
-  # Nextcloud OIDC provider — uses OAuth2 instead of ForwardAuth
   oidcEntries = ''
     # --- Nextcloud OIDC ---
     - model: authentik_providers_oauth2.oauth2provider
@@ -74,7 +71,7 @@ let
         client_secret: nextcloud-oidc-secret-changeme
         signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
         redirect_uris: |
-          https://cloud.internal.home/apps/user_oidc/code
+          https://cloud.internal/apps/user_oidc/code
           https://cloud.lsck0.dev/apps/user_oidc/code
         property_mappings:
           - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
@@ -88,7 +85,7 @@ let
       attrs:
         name: Nextcloud
         provider: !KeyOf provider-nextcloud-oidc
-        meta_launch_url: https://cloud.internal.home
+        meta_launch_url: https://cloud.internal
 
     # --- Forgejo OIDC ---
     - model: authentik_providers_oauth2.oauth2provider
@@ -102,7 +99,7 @@ let
         client_secret: forgejo-oidc-secret-changeme
         signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
         redirect_uris: |
-          https://git.internal.home/user/oauth2/authentik/callback
+          https://git.internal/user/oauth2/authentik/callback
           https://git.lsck0.dev/user/oauth2/authentik/callback
         property_mappings:
           - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
@@ -116,7 +113,7 @@ let
       attrs:
         name: Forgejo
         provider: !KeyOf provider-forgejo-oidc
-        meta_launch_url: https://git.internal.home
+        meta_launch_url: https://git.internal
   '';
 
   blueprintYaml = ''
@@ -135,7 +132,7 @@ let
         name: "authentik Embedded Outpost"
         type: proxy
         config:
-          authentik_host: https://auth.internal.home
+          authentik_host: https://auth.internal
           authentik_host_insecure: true
         providers:
     ${outpostProvidersList}
@@ -144,6 +141,8 @@ let
   blueprintFile = pkgs.writeText "homelab-apps-blueprint.yaml" blueprintYaml;
 in {
   networking.hostName = "vm-101";
+
+  fileSystems = nasMount "/var/lib/authentik" "authentik";
 
   sops.secrets.authentik-secret-key = {};
   sops.templates."authentik.env".content = ''
@@ -199,7 +198,7 @@ in {
             AUTHENTIK_POSTGRESQL__USER: authentik
             AUTHENTIK_POSTGRESQL__NAME: authentik
             AUTHENTIK_POSTGRESQL__PASSWORD: authentik
-            AUTHENTIK_HOST: https://auth.internal.home
+            AUTHENTIK_HOST: https://auth.internal
             AUTHENTIK_INSECURE: "true"
           env_file:
             - ${config.sops.templates."authentik.env".path}
@@ -223,7 +222,7 @@ in {
             AUTHENTIK_POSTGRESQL__USER: authentik
             AUTHENTIK_POSTGRESQL__NAME: authentik
             AUTHENTIK_POSTGRESQL__PASSWORD: authentik
-            AUTHENTIK_HOST: https://auth.internal.home
+            AUTHENTIK_HOST: https://auth.internal
             AUTHENTIK_INSECURE: "true"
           env_file:
             - ${config.sops.templates."authentik.env".path}
@@ -240,7 +239,6 @@ in {
     '';
   };
 
-  # Copy Nix-generated blueprint into the Docker volume before the stack starts
   systemd.services.authentik-blueprint-sync = {
     description = "Sync authentik blueprints from Nix store";
     before = [ "docker-stack-authentik.service" ];
