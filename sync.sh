@@ -134,117 +134,17 @@ setup_ssh_transport() {
   fi
 
   if [ -n "$PROXMOX_SSH_PASSWORD" ]; then
-    if ! command -v sshpass >/dev/null 2>&1; then
-      echo "ERROR: proxmox_ssh_password is set but sshpass is not installed."
-      exit 1
-    fi
-    SSH_CMD=(sshpass -p "$PROXMOX_SSH_PASSWORD" ssh -o StrictHostKeyChecking=yes -p "$PROXMOX_SSH_PORT")
-    SCP_CMD=(sshpass -p "$PROXMOX_SSH_PASSWORD" scp -o StrictHostKeyChecking=yes -P "$PROXMOX_SSH_PORT")
-  else
-    SSH_CMD=(ssh -o StrictHostKeyChecking=yes -p "$PROXMOX_SSH_PORT")
-    SCP_CMD=(scp -o StrictHostKeyChecking=yes -P "$PROXMOX_SSH_PORT")
-  fi
-}
-
-ensure_image_on_proxmox() {
-  local image_id="$1" fallback_local="$2"
-  local image_name="${image_id##*/}"
-  local remote_iso_dir="/var/lib/vz/template/iso"
-  local remote_path="${remote_iso_dir}/${image_name}"
-
-  if "${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" "test -f '$remote_path'"; then
-    return 0
-  fi
-
-  local source_path="$ROOT_DIR/images/$image_name"
-  if [ ! -f "$source_path" ] && [ -n "$fallback_local" ] && [ -f "$fallback_local" ]; then
-    source_path="$fallback_local"
-  fi
-
-  if [ ! -f "$source_path" ]; then
-    echo "ERROR: Missing local image for $image_id."
-    echo "Expected: $ROOT_DIR/images/$image_name"
-    [ -n "$fallback_local" ] && echo "      or: $fallback_local"
-    exit 1
-  fi
-
-  echo ">>> Uploading $(basename "$source_path") to Proxmox as $image_name..."
-  "${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" "mkdir -p '$remote_iso_dir'"
-  "${SCP_CMD[@]}" "$source_path" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}:$remote_path"
-}
-
-
-git_auto_prepare
-load_tfvars
-
-PROXMOX_API_URL="$(read_tfvar proxmox_api_url)"
-if [ -n "$PROXMOX_API_URL" ]; then
-  echo ">>> Waiting for Proxmox API..."
-  wait_for_http "$PROXMOX_API_URL" "Proxmox API" 90 2
-fi
-
-setup_ssh_transport
-
-NIXOS_IMAGE_ID="$(read_tfvar nixos_image_id)"
-[ -n "$NIXOS_IMAGE_ID" ] || NIXOS_IMAGE_ID="local:iso/nixos.img"
-
-ensure_image_on_proxmox "$NIXOS_IMAGE_ID" "$ROOT_DIR/images/nixos.img"
-
-terraform -chdir="$ROOT_DIR/src" init
-
-
-echo ">>> Phase 1/2: Terraform apply..."
-tf_apply_retry "$ROOT_DIR/src" -var-file="$ACTIVE_TFVARS_PATH"
-
-DEPLOY_FAILURE=0
-
-# Build NixOS configs locally, then copy closures and activate on each VM.
-
-echo ">>> Phase 2/2: NixOS deploy..."
-
-# Nix flakes require files to be tracked in git, otherwise they are invisible during evaluation.
-if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git -C "$ROOT_DIR" add -N "$ROOT_DIR/src/instances/"*.nix "$ROOT_DIR/src/flake.nix" 2>/dev/null || true
-fi
-
-# Fix OpenSSH ProxyCommand execution if user's $SHELL is not an absolute path.
-export SHELL=/bin/sh
-
-SSH_CONFIG="$(mktemp)"
-trap 'rm -f "$SSH_CONFIG"' EXIT
-
-cat > "$SSH_CONFIG" <<EOF
-Host *
-  StrictHostKeyChecking accept-new
-EOF
-
-if [ -n "$PROXMOX_SSH_PASSWORD" ]; then
   export SSHPASS="$PROXMOX_SSH_PASSWORD"
-  cat >> "$SSH_CONFIG" <<EOF
-Host bastion
-  HostName ${PROXMOX_SSH_HOST}
-  Port ${PROXMOX_SSH_PORT}
-  User ${PROXMOX_SSH_USER}
-  ProxyCommand none
-
-Host *
-  ProxyCommand sshpass -e ssh -F "$SSH_CONFIG" -W %h:%p bastion
-EOF
-else
-  cat >> "$SSH_CONFIG" <<EOF
-Host bastion
-  HostName ${PROXMOX_SSH_HOST}
-  Port ${PROXMOX_SSH_PORT}
-  User ${PROXMOX_SSH_USER}
-  ProxyJump none
-
-Host *
-  ProxyJump bastion
-EOF
 fi
+
+cat >> "$SSH_CONFIG" <<EOF_SSH
+Host 10.*
+  ProxyJump root@192.168.178.29
+EOF_SSH
 
 BASTION_SSHOPTS=(-F "$SSH_CONFIG")
 export NIX_SSHOPTS="-F $SSH_CONFIG"
+}
 
 AGE_KEY="$ROOT_DIR/keys/age.txt"
 
@@ -307,9 +207,6 @@ echo ">>> Fetching VM IPs from Terraform..."
 VM_IPS=$(terraform -chdir="$ROOT_DIR/src" output -raw vm_ips 2>/dev/null || echo "")
 
 # Ensure the Proxmox host can route to the internal/external networks to act as a bastion.
-echo ">>> Temporarily adding deployment IPs to Proxmox bridges..."
-"${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" "ip addr add 10.100.0.2/24 dev vmbr100 2>/dev/null || true"
-"${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" "ip addr add 10.200.0.2/24 dev vmbr200 2>/dev/null || true"
 
 # Deploy the router first (other VMs depend on it for connectivity)
 # The router may have a DHCP IP (golden image) instead of its configured static IP.
