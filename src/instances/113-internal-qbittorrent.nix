@@ -1,17 +1,9 @@
-{ ... }: {
-  networking.hostName = "vm-112";
+{ nasMount, nasMedia, nasPath, ... }: {
+  networking.hostName = "vm-113";
 
-  fileSystems."/srv/downloads" = {
-    device = "10.100.0.110:/srv/nas/torrents";
-    fsType = "nfs";
-    options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  };
-
-  fileSystems."/srv/media" = {
-    device = "10.100.0.110:/srv/nas/media";
-    fsType = "nfs";
-    options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  };
+  fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
+    // nasMedia "/srv/media" ""
+    // nasPath "/srv/downloads" "torrents";
 
   virtualisation.oci-containers.containers.qbittorrent = {
     image = "lscr.io/linuxserver/qbittorrent:latest";

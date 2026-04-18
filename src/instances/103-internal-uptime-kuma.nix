@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, nasMount, ... }:
 let
   monitors = [
     # internal
@@ -6,24 +6,24 @@ let
     { name = "Authentik";          url = "http://10.100.0.101:80"; }
     { name = "Homepage";           url = "http://10.100.0.102:80"; }
     { name = "Uptime Kuma";        url = "http://10.100.0.103:80"; }
-    { name = "Forgejo";            url = "http://10.100.0.104:80"; }
-    { name = "sccache";            url = "10.100.0.106"; type = "port"; port = 6379; }
-    { name = "Registry";           url = "http://10.100.0.107:80"; }
-    { name = "Taskchampion";       url = "http://10.100.0.108:8080"; }
-    { name = "Vaultwarden";        url = "http://10.100.0.109:8080"; }
-    { name = "NAS";                url = "10.100.0.110"; type = "port"; port = 2049; }
-    { name = "Nextcloud";          url = "http://10.100.0.111:80"; }
-    { name = "qBittorrent";        url = "http://10.100.0.112:80"; }
-    { name = "Prowlarr";           url = "http://10.100.0.113:80"; }
-    { name = "Sonarr";             url = "http://10.100.0.114:80"; }
-    { name = "Radarr";             url = "http://10.100.0.115:80"; }
-    { name = "Jellyfin";           url = "http://10.100.0.116:80"; }
-    { name = "Audiobookshelf";     url = "http://10.100.0.117:80"; }
-    { name = "Paperless";          url = "http://10.100.0.118:8080"; }
-    { name = "Wiki.js";            url = "http://10.100.0.119:80"; }
-    { name = "Huginn";             url = "http://10.100.0.120:80"; }
-    { name = "Home Assistant";     url = "http://10.100.0.121:80"; }
-    { name = "Grafana";            url = "http://10.100.0.122:80"; }
+    { name = "Grafana";            url = "http://10.100.0.104:80"; }
+    { name = "Forgejo";            url = "http://10.100.0.105:80"; }
+    { name = "sccache";            url = "10.100.0.107"; type = "port"; port = 6379; }
+    { name = "Registry";           url = "http://10.100.0.108:80"; }
+    { name = "Taskchampion";       url = "http://10.100.0.109:8080"; }
+    { name = "Vaultwarden";        url = "http://10.100.0.110:8080"; }
+    { name = "NAS";                url = "10.100.0.111"; type = "port"; port = 2049; }
+    { name = "Nextcloud";          url = "http://10.100.0.112:80"; }
+    { name = "qBittorrent";        url = "http://10.100.0.113:80"; }
+    { name = "Prowlarr";           url = "http://10.100.0.114:80"; }
+    { name = "Sonarr";             url = "http://10.100.0.115:80"; }
+    { name = "Radarr";             url = "http://10.100.0.116:80"; }
+    { name = "Jellyfin";           url = "http://10.100.0.117:80"; }
+    { name = "Audiobookshelf";     url = "http://10.100.0.118:80"; }
+    { name = "Paperless";          url = "http://10.100.0.119:8080"; }
+    { name = "Wiki.js";            url = "http://10.100.0.120:80"; }
+    { name = "Huginn";             url = "http://10.100.0.121:80"; }
+    { name = "Home Assistant";     url = "http://10.100.0.122:80"; }
     { name = "Navidrome";          url = "http://10.100.0.123:80"; }
     { name = "Kavita";             url = "http://10.100.0.124:80"; }
     # external
@@ -133,6 +133,8 @@ let
   '';
 in {
   networking.hostName = "vm-103";
+
+  fileSystems = nasMount "/var/lib/uptime-kuma" "uptime-kuma";
 
   virtualisation.oci-containers.containers.uptime-kuma = {
     image = "louislam/uptime-kuma:latest";

@@ -1,5 +1,7 @@
-{ ... }: {
-  networking.hostName = "vm-109";
+{ nasMount, ... }: {
+  networking.hostName = "vm-110";
+
+  fileSystems = nasMount "/var/lib/bitwarden_rs" "vaultwarden";
 
   services.vaultwarden = {
     enable = true;
@@ -7,7 +9,7 @@
       ROCKET_ADDRESS = "0.0.0.0";
       ROCKET_PORT = 8080;
       SIGNUPS_ALLOWED = false;
-      DOMAIN = "https://vault.internal.home";
+      DOMAIN = "https://vault.internal";
       WEBSOCKET_ENABLED = true;
       SENDS_ALLOWED = true;
       EMERGENCY_ACCESS_ALLOWED = true;

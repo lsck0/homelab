@@ -1,17 +1,9 @@
-{ ... }: {
-  networking.hostName = "vm-115";
+{ nasMount, nasPath, ... }: {
+  networking.hostName = "vm-116";
 
-  fileSystems."/srv/downloads" = {
-    device = "10.100.0.110:/srv/nas/torrents";
-    fsType = "nfs";
-    options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  };
-
-  fileSystems."/srv/movies" = {
-    device = "10.100.0.110:/srv/nas/media/movies";
-    fsType = "nfs";
-    options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  };
+  fileSystems = nasMount "/var/lib/radarr" "radarr"
+    // nasPath "/srv/downloads" "torrents"
+    // nasPath "/srv/movies" "media/movies";
 
   virtualisation.oci-containers.containers.radarr = {
     image = "lscr.io/linuxserver/radarr:latest";

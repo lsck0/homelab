@@ -117,12 +117,43 @@
       networking.nameservers = [ gateway ];
     };
 
+    # shared helpers passed to all instance modules
+    nasIP = "10.100.0.111";
+    nfsOpts = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
+    helpers = {
+      # mount NAS data dir: nasMount "/var/lib/foo" "foo"
+      nasMount = mountpoint: name: {
+        "${mountpoint}" = {
+          device = "${nasIP}:/srv/nas/data/${name}";
+          fsType = "nfs";
+          options = nfsOpts;
+        };
+      };
+      # mount NAS media dir (read-only): nasMedia "/srv/music" "music"
+      nasMedia = mountpoint: subpath: {
+        "${mountpoint}" = {
+          device = "${nasIP}:/srv/nas/media/${subpath}";
+          fsType = "nfs";
+          options = [ "nfsvers=4" "ro" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
+        };
+      };
+      # mount arbitrary NAS path (rw): nasPath "/srv/downloads" "torrents"
+      nasPath = mountpoint: naspath: {
+        "${mountpoint}" = {
+          device = "${nasIP}:/srv/nas/${naspath}";
+          fsType = "nfs";
+          options = nfsOpts;
+        };
+      };
+    };
+
     hostConfigs = builtins.listToAttrs (map (entry: let
       parsed = parseEntry entry;
     in {
       name = parsed.basename;
       value = lib.nixosSystem {
         inherit system;
+        specialArgs = helpers;
         modules = [
           common
           (networkConfig parsed)

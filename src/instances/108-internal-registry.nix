@@ -1,5 +1,7 @@
-{ ... }: {
-  networking.hostName = "vm-107";
+{ nasMount, ... }: {
+  networking.hostName = "vm-108";
+
+  fileSystems = nasMount "/var/lib/registry" "registry";
 
   virtualisation.oci-containers.containers.registry = {
     image = "registry:2";

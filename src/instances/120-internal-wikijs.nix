@@ -1,5 +1,7 @@
-{ pkgs, ... }: {
-  networking.hostName = "vm-119";
+{ pkgs, nasMount, ... }: {
+  networking.hostName = "vm-120";
+
+  fileSystems = nasMount "/var/lib/postgresql" "wikijs-db";
 
   services.postgresql = {
     enable = true;
@@ -15,7 +17,7 @@
     ports = [ "80:3000" ];
     environment = {
       DB_TYPE = "postgres";
-      DB_HOST = "10.100.0.119";
+      DB_HOST = "10.100.0.120";
       DB_PORT = "5432";
       DB_USER = "wikijs";
       DB_NAME = "wikijs";
@@ -26,7 +28,7 @@
   # Allow container to reach host PostgreSQL
   services.postgresql.enableTCPIP = true;
   services.postgresql.authentication = ''
-    host wikijs wikijs 10.100.0.119/32 trust
+    host wikijs wikijs 10.100.0.120/32 trust
   '';
 
   networking.firewall.allowedTCPPorts = [ 80 5432 ];

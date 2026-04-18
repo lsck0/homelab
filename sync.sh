@@ -33,7 +33,7 @@ tf_apply_retry() {
   local attempts=5 rc=0
   for i in $(seq 1 "$attempts"); do
     rc=0
-    terraform -chdir="$dir" apply -refresh=false -auto-approve "$@" || rc=$?
+    terraform -chdir="$dir" apply -refresh=false -auto-approve -parallelism=3 "$@" || rc=$?
     [ "$rc" -eq 0 ] && return 0
     echo "Terraform apply failed (attempt $i/$attempts). Retrying..."
     sleep 5
@@ -405,11 +405,12 @@ for _ in $(seq 1 24); do
   sleep 5
 done
 
-# Deploy remaining VMs
-for nix_file in "$ROOT_DIR"/src/instances/301-grafana.nix \
-                "$ROOT_DIR"/src/instances/1[0-9][0-9]-*.nix \
-                "$ROOT_DIR"/src/instances/2[0-9][0-9]-*.nix; do
-  [ -f "$nix_file" ] || continue
+# Deploy remaining VMs — parallel by default, set PARALLEL=1 to disable
+MAX_PARALLEL="${HOMELAB_PARALLEL:-3}"
+
+deploy_vm_by_file() {
+  local nix_file="$1"
+  local vm_name vm_id ip
   vm_name=$(basename "$nix_file" .nix)
   vm_id="${vm_name%%-*}"
 
@@ -423,14 +424,71 @@ for nix_file in "$ROOT_DIR"/src/instances/301-grafana.nix \
 
   if [ -z "$ip" ]; then
     echo ">>> WARNING: VM $vm_id has no Terraform output. Skipping."
-    continue
+    return 0
   fi
 
   if ! deploy_nixos "$vm_name" "$ip"; then
     echo "WARNING: Failed to deploy $vm_name"
-    DEPLOY_FAILURE=1
-    continue
+    return 1
   fi
+}
+
+# Build all closures first (sequential, populates nix store)
+echo ">>> Building all VM closures..."
+BUILD_FAILURE=0
+for nix_file in "$ROOT_DIR"/src/instances/1[0-9][0-9]-*.nix \
+                "$ROOT_DIR"/src/instances/2[0-9][0-9]-*.nix; do
+  [ -f "$nix_file" ] || continue
+  vm_name=$(basename "$nix_file" .nix)
+  echo ">>> Building $vm_name..."
+  if ! nix build "$ROOT_DIR/src#nixosConfigurations.${vm_name}.config.system.build.toplevel" \
+    --extra-experimental-features "nix-command flakes" \
+    --no-link 2>&1; then
+    echo "ERROR: Failed to build $vm_name"
+    BUILD_FAILURE=1
+  fi
+done
+
+if [ "$BUILD_FAILURE" -ne 0 ]; then
+  echo "ERROR: Some builds failed. Aborting deployment."
+  exit 1
+fi
+
+# Deploy in parallel (copy + switch)
+echo ">>> Deploying VMs (up to $MAX_PARALLEL in parallel)..."
+DEPLOY_PIDS=()
+DEPLOY_NAMES=()
+
+for nix_file in "$ROOT_DIR"/src/instances/1[0-9][0-9]-*.nix \
+                "$ROOT_DIR"/src/instances/2[0-9][0-9]-*.nix; do
+  [ -f "$nix_file" ] || continue
+
+  # Throttle: wait for a slot if at max parallelism
+  while [ "${#DEPLOY_PIDS[@]}" -ge "$MAX_PARALLEL" ]; do
+    NEW_PIDS=()
+    NEW_NAMES=()
+    for i in "${!DEPLOY_PIDS[@]}"; do
+      if kill -0 "${DEPLOY_PIDS[$i]}" 2>/dev/null; then
+        NEW_PIDS+=("${DEPLOY_PIDS[$i]}")
+        NEW_NAMES+=("${DEPLOY_NAMES[$i]}")
+      else
+        wait "${DEPLOY_PIDS[$i]}" || { echo "WARNING: Failed to deploy ${DEPLOY_NAMES[$i]}"; DEPLOY_FAILURE=1; }
+      fi
+    done
+    DEPLOY_PIDS=("${NEW_PIDS[@]}")
+    DEPLOY_NAMES=("${NEW_NAMES[@]}")
+    [ "${#DEPLOY_PIDS[@]}" -ge "$MAX_PARALLEL" ] && sleep 2
+  done
+
+  vm_name=$(basename "$nix_file" .nix)
+  deploy_vm_by_file "$nix_file" &
+  DEPLOY_PIDS+=("$!")
+  DEPLOY_NAMES+=("$vm_name")
+done
+
+# Wait for all remaining
+for i in "${!DEPLOY_PIDS[@]}"; do
+  wait "${DEPLOY_PIDS[$i]}" || { echo "WARNING: Failed to deploy ${DEPLOY_NAMES[$i]}"; DEPLOY_FAILURE=1; }
 done
 
 if [ "$DEPLOY_FAILURE" -ne 0 ]; then

@@ -1,5 +1,7 @@
-{ ... }: {
-  networking.hostName = "vm-113";
+{ nasMount, ... }: {
+  networking.hostName = "vm-114";
+
+  fileSystems = nasMount "/var/lib/prowlarr" "prowlarr";
 
   virtualisation.oci-containers.containers.prowlarr = {
     image = "lscr.io/linuxserver/prowlarr:latest";

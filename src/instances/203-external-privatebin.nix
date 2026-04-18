@@ -1,5 +1,7 @@
-{ ... }: {
+{ nasMount, ... }: {
   networking.hostName = "vm-203";
+
+  fileSystems = nasMount "/var/lib/privatebin" "privatebin";
 
   virtualisation.oci-containers.containers.privatebin = {
     image = "privatebin/nginx-fpm-alpine:latest";

@@ -1,17 +1,9 @@
-{ ... }: {
-  networking.hostName = "vm-114";
+{ nasMount, nasPath, ... }: {
+  networking.hostName = "vm-115";
 
-  fileSystems."/srv/downloads" = {
-    device = "10.100.0.110:/srv/nas/torrents";
-    fsType = "nfs";
-    options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  };
-
-  fileSystems."/srv/tv" = {
-    device = "10.100.0.110:/srv/nas/media/tv";
-    fsType = "nfs";
-    options = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  };
+  fileSystems = nasMount "/var/lib/sonarr" "sonarr"
+    // nasPath "/srv/downloads" "torrents"
+    // nasPath "/srv/tv" "media/tv";
 
   virtualisation.oci-containers.containers.sonarr = {
     image = "lscr.io/linuxserver/sonarr:latest";

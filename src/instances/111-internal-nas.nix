@@ -1,5 +1,5 @@
 { ... }: {
-  networking.hostName = "vm-110";
+  networking.hostName = "vm-111";
 
   services.nfs.server = {
     enable = true;
@@ -8,6 +8,8 @@
       /srv/nas/documents  10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/public     10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/torrents   10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
+      /srv/nas/data       10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
+      /srv/nas/data       10.200.0.0/24(rw,sync,no_subtree_check,no_root_squash)
     '';
   };
 
@@ -17,7 +19,7 @@
     settings = {
       global = {
         workgroup = "WORKGROUP";
-        "server string" = "vm-110-nas";
+        "server string" = "vm-111-nas";
         "map to guest" = "Bad User";
       };
       public = {
@@ -69,6 +71,39 @@
     "d /srv/nas/media/manga 0775 nobody nogroup -"
     "d /srv/nas/documents 0775 nobody nogroup -"
     "d /srv/nas/torrents 0775 nobody nogroup -"
+    # per-service persistent data
+    "d /srv/nas/data 0775 nobody nogroup -"
+    "d /srv/nas/data/authentik 0750 nobody nogroup -"
+    "d /srv/nas/data/forgejo 0750 nobody nogroup -"
+    "d /srv/nas/data/registry 0750 nobody nogroup -"
+    "d /srv/nas/data/taskchampion 0750 nobody nogroup -"
+    "d /srv/nas/data/vaultwarden 0750 nobody nogroup -"
+    "d /srv/nas/data/nextcloud 0750 nobody nogroup -"
+    "d /srv/nas/data/nextcloud-db 0750 nobody nogroup -"
+    "d /srv/nas/data/wikijs-db 0750 nobody nogroup -"
+    "d /srv/nas/data/huginn 0750 nobody nogroup -"
+    "d /srv/nas/data/huginn-db 0750 nobody nogroup -"
+    "d /srv/nas/data/homeassistant 0750 nobody nogroup -"
+    "d /srv/nas/data/grafana 0750 nobody nogroup -"
+    "d /srv/nas/data/prometheus 0750 nobody nogroup -"
+    "d /srv/nas/data/navidrome 0750 nobody nogroup -"
+    "d /srv/nas/data/kavita 0750 nobody nogroup -"
+    "d /srv/nas/data/uptime-kuma 0750 nobody nogroup -"
+    "d /srv/nas/data/shlink 0750 nobody nogroup -"
+    "d /srv/nas/data/privatebin 0750 nobody nogroup -"
+    "d /srv/nas/data/share 0750 nobody nogroup -"
+    "d /srv/nas/data/minecraft 0750 nobody nogroup -"
+    "d /srv/nas/data/minecraft-modpacks 0750 nobody nogroup -"
+    "d /srv/nas/data/paperless 0750 nobody nogroup -"
+    "d /srv/nas/data/qbittorrent 0750 nobody nogroup -"
+    "d /srv/nas/data/prowlarr 0750 nobody nogroup -"
+    "d /srv/nas/data/sonarr 0750 nobody nogroup -"
+    "d /srv/nas/data/radarr 0750 nobody nogroup -"
+    "d /srv/nas/data/jellyfin 0750 nobody nogroup -"
+    "d /srv/nas/data/audiobookshelf 0750 nobody nogroup -"
+    "d /srv/nas/data/homepage 0750 nobody nogroup -"
+    "d /srv/nas/data/crowdsec-internal 0750 nobody nogroup -"
+    "d /srv/nas/data/crowdsec-external 0750 nobody nogroup -"
   ];
 
   networking.firewall.allowedTCPPorts = [ 2049 111 ];

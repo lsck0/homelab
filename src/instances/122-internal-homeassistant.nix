@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, nasMount, ... }:
 let
   hassConfig = pkgs.writeText "configuration.yaml" ''
     default_config:
@@ -13,7 +13,9 @@ let
         - 10.100.0.100
   '';
 in {
-  networking.hostName = "vm-121";
+  networking.hostName = "vm-122";
+
+  fileSystems = nasMount "/var/lib/homeassistant" "homeassistant";
 
   virtualisation.oci-containers.containers.homeassistant = {
     image = "ghcr.io/home-assistant/home-assistant:stable";

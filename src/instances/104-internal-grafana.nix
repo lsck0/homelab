@@ -1,9 +1,12 @@
-{ lib, ... }:
+{ lib, nasMount, ... }:
 let
   subnetTargets = subnet:
     builtins.map (host: "${subnet}.${toString host}:9100") (lib.range 1 254);
 in {
-  networking.hostName = "vm-122";
+  networking.hostName = "vm-104";
+
+  fileSystems = nasMount "/var/lib/grafana" "grafana"
+    // nasMount "/var/lib/prometheus2" "prometheus";
 
   services.prometheus = {
     enable = true;
@@ -29,7 +32,7 @@ in {
       server = {
         http_addr = "0.0.0.0";
         http_port = 80;
-        root_url = "https://grafana.internal.home";
+        root_url = "https://grafana.internal";
       };
       auth = {
         disable_login_form = true;
@@ -70,6 +73,9 @@ in {
   environment.etc = {
     "grafana-dashboards/node-exporter.json" = {
       source = ./dashboards/node-exporter.json;
+    };
+    "grafana-dashboards/homelab-overview.json" = {
+      source = ./dashboards/homelab-overview.json;
     };
   };
 

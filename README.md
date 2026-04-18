@@ -11,7 +11,7 @@ Declarative homelab. Proxmox + NixOS, managed entirely through Terraform and Nix
   - `10.100.0.0/24` — Internal LAN: all homelab services behind Traefik + Authentik SSO
   - `10.200.0.0/24` — External DMZ: public-facing apps, isolated from internal
   - `10.0.0.0/24` — WireGuard VPN
-- **DNS:** CoreDNS on router — `*.internal.home` → internal Traefik, `*.external.home` → external Traefik
+- **DNS:** CoreDNS on router — `*.internal` → internal Traefik, `*.external` → external Traefik
 - **SSO:** Authentik (ForwardAuth on Traefik for most services, native OIDC for Nextcloud/Forgejo)
 - **Security:** CrowdSec on both Traefik instances, nftables DMZ isolation
 - **Storage:** NAS VM (NFS + Samba) shared across media/document services
@@ -35,25 +35,25 @@ Declarative homelab. Proxmox + NixOS, managed entirely through Terraform and Nix
 | 101 | 10.100.0.101 | Authentik SSO           |
 | 102 | 10.100.0.102 | Homepage dashboard      |
 | 103 | 10.100.0.103 | Uptime Kuma             |
-| 104 | 10.100.0.104 | Forgejo (Git)           |
-| 105 | 10.100.0.105 | Forgejo Runner (CI)     |
-| 106 | 10.100.0.106 | sccache (Redis)         |
-| 107 | 10.100.0.107 | Container Registry      |
-| 108 | 10.100.0.108 | Taskchampion sync       |
-| 109 | 10.100.0.109 | Vaultwarden             |
-| 110 | 10.100.0.110 | NAS (NFS + Samba, 64GB) |
-| 111 | 10.100.0.111 | Nextcloud               |
-| 112 | 10.100.0.112 | qBittorrent             |
-| 113 | 10.100.0.113 | Prowlarr                |
-| 114 | 10.100.0.114 | Sonarr                  |
-| 115 | 10.100.0.115 | Radarr                  |
-| 116 | 10.100.0.116 | Jellyfin                |
-| 117 | 10.100.0.117 | Audiobookshelf          |
-| 118 | 10.100.0.118 | Paperless-ngx           |
-| 119 | 10.100.0.119 | Wiki.js                 |
-| 120 | 10.100.0.120 | Huginn                  |
-| 121 | 10.100.0.121 | Home Assistant          |
-| 122 | 10.100.0.122 | Grafana + Prometheus    |
+| 104 | 10.100.0.104 | Grafana + Prometheus    |
+| 105 | 10.100.0.105 | Forgejo (Git)           |
+| 106 | 10.100.0.106 | Forgejo Runner (CI)     |
+| 107 | 10.100.0.107 | sccache (Redis)         |
+| 108 | 10.100.0.108 | Container Registry      |
+| 109 | 10.100.0.109 | Taskchampion sync       |
+| 110 | 10.100.0.110 | Vaultwarden             |
+| 111 | 10.100.0.111 | NAS (NFS + Samba, 100GB)|
+| 112 | 10.100.0.112 | Nextcloud               |
+| 113 | 10.100.0.113 | qBittorrent             |
+| 114 | 10.100.0.114 | Prowlarr                |
+| 115 | 10.100.0.115 | Sonarr                  |
+| 116 | 10.100.0.116 | Radarr                  |
+| 117 | 10.100.0.117 | Jellyfin                |
+| 118 | 10.100.0.118 | Audiobookshelf          |
+| 119 | 10.100.0.119 | Paperless-ngx           |
+| 120 | 10.100.0.120 | Wiki.js                 |
+| 121 | 10.100.0.121 | Huginn                  |
+| 122 | 10.100.0.122 | Home Assistant          |
 | 123 | 10.100.0.123 | Navidrome (music)       |
 | 124 | 10.100.0.124 | Kavita (manga/comics)   |
 | 200 | 10.200.0.200 | External Traefik + CrowdSec |
@@ -64,7 +64,7 @@ Declarative homelab. Proxmox + NixOS, managed entirely through Terraform and Nix
 | 205 | 10.200.0.205 | Minecraft               |
 | 300 | 192.168.178.29 | NixOS Router          |
 
-Default VM: 2 cores, 2 GB RAM, 8 GB disk. Exceptions: Authentik (4 GB), Minecraft (4 GB, 6 cores), NAS (64 GB disk), media arr stack (20 GB disk each).
+Default VM: 2 cores, 2 GB RAM, 8 GB disk. Exceptions: Authentik (4 GB RAM), Minecraft (4 GB RAM, 6 cores), NAS (100 GB disk).
 
 ## Project Structure
 
