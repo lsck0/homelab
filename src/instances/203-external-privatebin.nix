@@ -1,5 +1,5 @@
 { ... }: {
-  networking.hostName = "vm-202";
+  networking.hostName = "vm-203";
 
   virtualisation.oci-containers.containers.privatebin = {
     image = "privatebin/nginx-fpm-alpine:latest";

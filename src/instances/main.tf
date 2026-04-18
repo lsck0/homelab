@@ -12,6 +12,7 @@ variable "router_external_ip" { type = string }
 
 locals {
   instances = {
+    # ── internal ──
     "100" = { name = "100-internal-traefik", type = "internal" }
     "101" = { name = "101-internal-authentik", type = "internal", memory = 4096 }
     "102" = { name = "102-internal-homepage", type = "internal" }
@@ -34,13 +35,17 @@ locals {
     "119" = { name = "119-internal-wikijs", type = "internal" }
     "120" = { name = "120-internal-huginn", type = "internal" }
     "121" = { name = "121-internal-homeassistant", type = "internal" }
-    "122" = { name = "122-internal-grafana", type = "internal", memory = 2048 }
+    "122" = { name = "122-internal-grafana", type = "internal" }
+    "123" = { name = "123-internal-navidrome", type = "internal" }
+    "124" = { name = "124-internal-kavita", type = "internal" }
+    # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
-    "201" = { name = "201-external-shlink", type = "external" }
-    "202" = { name = "202-external-privatebin", type = "external" }
-    "203" = { name = "203-external-share", type = "external" }
-    "204" = { name = "204-external-minecraft", type = "external", memory = 4096, cores = 6 }
-    "205" = { name = "205-external-headscale", type = "external" }
+    "201" = { name = "201-external-headscale", type = "external" }
+    "202" = { name = "202-external-shlink", type = "external" }
+    "203" = { name = "203-external-privatebin", type = "external" }
+    "204" = { name = "204-external-share", type = "external" }
+    "205" = { name = "205-external-minecraft", type = "external", memory = 4096, cores = 6 }
+    # ── router ──
     "300" = { name = "luca-router", type = "router" }
   }
 }
@@ -54,7 +59,7 @@ module "vm" {
   target_node  = var.target_node
   datastore_id = var.proxmox_datastore
   cores        = try(each.value.cores, 2)
-  memory       = try(each.value.memory, 1024)
+  memory       = try(each.value.memory, 2048)
   disk         = try(each.value.disk, 8)
   image_id     = var.nixos_image_id
   ssh_key      = var.ssh_public_key

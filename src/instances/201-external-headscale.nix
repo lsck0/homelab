@@ -1,5 +1,5 @@
 { ... }: {
-  networking.hostName = "vm-205";
+  networking.hostName = "vm-201";
 
   services.headscale = {
     enable = true;

@@ -6,8 +6,8 @@ let
     mkdir -p $out
     openssl req -x509 -newkey rsa:2048 -nodes \
       -keyout $out/key.pem -out $out/cert.pem \
-      -days 3650 -subj "/CN=*.external.local" \
-      -addext "subjectAltName=DNS:*.external.local,DNS:external.local"
+      -days 3650 -subj "/CN=*.external.home" \
+      -addext "subjectAltName=DNS:*.external.home,DNS:external.home"
   '';
 in {
   networking.hostName = "vm-200";
@@ -73,17 +73,17 @@ in {
       };
 
       routers = {
-        # ── .external.local — HTTP (LAN) ──
-        shlink       = { rule = "Host(`shlink.external.local`)";      service = "shlink";       entryPoints = [ "web" ]; };
-        privatebin   = { rule = "Host(`paste.external.local`)";       service = "privatebin";   entryPoints = [ "web" ]; };
-        share        = { rule = "Host(`share.external.local`)";       service = "share";        entryPoints = [ "web" ]; };
-        headscale    = { rule = "Host(`hs.external.local`)";          service = "headscale";    entryPoints = [ "web" ]; };
+        # ── .external.home — HTTP (LAN) ──
+        shlink       = { rule = "Host(`shlink.external.home`)";      service = "shlink";       entryPoints = [ "web" ]; };
+        privatebin   = { rule = "Host(`paste.external.home`)";       service = "privatebin";   entryPoints = [ "web" ]; };
+        share        = { rule = "Host(`share.external.home`)";       service = "share";        entryPoints = [ "web" ]; };
+        headscale    = { rule = "Host(`hs.external.home`)";          service = "headscale";    entryPoints = [ "web" ]; };
 
-        # ── .external.local — HTTPS (LAN, self-signed) ──
-        shlink-local-tls     = { rule = "Host(`shlink.external.local`)";  service = "shlink";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-        privatebin-local-tls = { rule = "Host(`paste.external.local`)";   service = "privatebin"; entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-        share-local-tls      = { rule = "Host(`share.external.local`)";   service = "share";      entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-        headscale-local-tls  = { rule = "Host(`hs.external.local`)";      service = "headscale";  entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+        # ── .external.home — HTTPS (LAN, self-signed) ──
+        shlink-local-tls     = { rule = "Host(`shlink.external.home`)";  service = "shlink";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+        privatebin-local-tls = { rule = "Host(`paste.external.home`)";   service = "privatebin"; entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+        share-local-tls      = { rule = "Host(`share.external.home`)";   service = "share";      entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+        headscale-local-tls  = { rule = "Host(`hs.external.home`)";      service = "headscale";  entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
 
         # ── lsck0.dev — HTTPS (internet) ──
         shlink-tls      = { rule = "Host(`shlink.lsck0.dev`)";      service = "shlink";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
@@ -100,7 +100,7 @@ in {
       };
     };
     # Non-HTTP services — TCP passthrough routing
-    # mc.external.local:25565 → vm-204:25565 (Minecraft)
+    # mc.external.home:25565 → vm-204:25565 (Minecraft)
     tcp = {
       routers = {
         minecraft = {

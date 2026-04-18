@@ -116,29 +116,29 @@
   };
 
   # ── DNS Server (CoreDNS) ─────────────────────────────────────
-  # Local DNS: *.internal.local → internal Traefik, *.external.local → external Traefik
+  # Local DNS: *.internal.home → internal Traefik, *.external.home → external Traefik
   # All VMs use the router as primary DNS via DHCP
   services.resolved.enable = false;
   services.coredns = {
     enable = true;
     config = ''
-      internal.local {
+      internal.home {
         template IN A {
           answer "{{ .Name }} 3600 IN A 10.100.0.100"
         }
       }
 
-      external.local {
+      external.home {
         template IN A {
-          match "^mc\.external\.local\.$"
-          answer "mc.external.local. 3600 IN A 10.200.0.204"
+          match "^mc\.external\.home\.$"
+          answer "mc.external.home. 3600 IN A 10.200.0.204"
           fallthrough
         }
         template IN A {
           answer "{{ .Name }} 3600 IN A 10.200.0.200"
         }
-        template IN SRV _minecraft._tcp.mc.external.local {
-          answer "{{ .Name }} 3600 IN SRV 0 0 25565 mc.external.local."
+        template IN SRV _minecraft._tcp.mc.external.home {
+          answer "{{ .Name }} 3600 IN SRV 0 0 25565 mc.external.home."
         }
       }
 
