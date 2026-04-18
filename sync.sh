@@ -33,7 +33,7 @@ tf_apply_retry() {
   local attempts=5 rc=0
   for i in $(seq 1 "$attempts"); do
     rc=0
-    terraform -chdir="$dir" apply -parallelism=1 -auto-approve "$@" || rc=$?
+    terraform -chdir="$dir" apply -refresh=false -auto-approve "$@" || rc=$?
     [ "$rc" -eq 0 ] && return 0
     echo "Terraform apply failed (attempt $i/$attempts). Retrying..."
     sleep 5
@@ -221,15 +221,14 @@ deploy_nixos() {
       "$toplevel" \
   || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
 
-  # Run the switch command in the background detached from SSH via systemd-run, because network restarts
-  # (e.g. dhcpcd) will drop the SSH connection and SIGHUP the switch process mid-way.
+  # Set new profile and configure it as boot default, then reboot for a clean activation.
   ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-    "nix-env -p /nix/var/nix/profiles/system --set $toplevel && systemd-run --unit=nixos-switch-$name $toplevel/bin/switch-to-configuration switch"
+    "nix-env -p /nix/var/nix/profiles/system --set $toplevel && $toplevel/bin/switch-to-configuration boot && nohup sh -c 'sleep 1 && reboot' >/dev/null 2>&1 &"
 
-  echo ">>> Waiting for VM to apply configuration and return online..."
-  sleep 10
-  if ! wait_for_ssh "$ip" 30 5; then
-    echo "ERROR: VM did not come back online after configuration switch!"
+  echo ">>> Rebooting VM..."
+  sleep 15
+  if ! wait_for_ssh "$ip" 60 5; then
+    echo "ERROR: VM did not come back online after reboot!"
     return 1
   fi
   
@@ -257,8 +256,20 @@ if [ ! -d "$ROOT_DIR/src/.terraform" ]; then
   terraform -chdir="$ROOT_DIR/src" init
 fi
 
-echo ">>> Applying Terraform..."
-tf_apply_retry "$ROOT_DIR/src" -var-file="$ACTIVE_TFVARS_PATH"
+TF_STAMP="$ROOT_DIR/src/.tf-last-apply"
+tf_files_changed() {
+  [ ! -f "$TF_STAMP" ] && return 0
+  # Check if any .tf file or tfvars changed since last successful apply
+  find "$ROOT_DIR/src" -maxdepth 2 \( -name '*.tf' -o -name '*.tfvars' -o -name '*.tfvars.json' -o -name '*.tfvars.sops.json' \) -newer "$TF_STAMP" | grep -q .
+}
+
+if tf_files_changed; then
+  echo ">>> Terraform files changed. Applying..."
+  tf_apply_retry "$ROOT_DIR/src" -var-file="$ACTIVE_TFVARS_PATH"
+  touch "$TF_STAMP"
+else
+  echo ">>> No Terraform file changes since last apply. Skipping."
+fi
 
 echo ">>> Fetching VM IPs from Terraform..."
 VM_IPS=$(terraform -chdir="$ROOT_DIR/src" output -raw vm_ips 2>/dev/null || echo "")
@@ -362,6 +373,23 @@ for nix_file in "$ROOT_DIR"/src/instances/300-router.nix; do
     echo "WARNING: Could not reach router VM. Skipping."
     DEPLOY_FAILURE=1
   fi
+done
+
+# After router deploy, wait for bastion connectivity to internal/external subnets.
+# Router's switch-to-configuration restarts networking, so SSH via the bastion breaks temporarily.
+echo ">>> Waiting for router bastion to become ready for subnet routing..."
+if ! wait_for_ssh "$ROUTER_WAN_IP" 30 5; then
+  echo "ERROR: Router not reachable after deploy. Cannot reach subnet VMs."
+  exit 1
+fi
+# Verify we can proxy through the router to an internal VM
+echo ">>> Verifying bastion can proxy to internal subnet..."
+for _ in $(seq 1 12); do
+  if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@10.100.0.100" "true" 2>/dev/null; then
+    echo ">>> Bastion routing confirmed."
+    break
+  fi
+  sleep 5
 done
 
 # Deploy remaining VMs

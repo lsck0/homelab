@@ -90,5 +90,13 @@
     '';
   };
 
+  systemd.tmpfiles.rules = [
+    "d /var/lib/authentik/db 0750 70 70 -"
+    "d /var/lib/authentik/redis 0750 999 999 -"
+    "d /var/lib/authentik/media 0750 1000 1000 -"
+    "d /var/lib/authentik/custom-templates 0750 1000 1000 -"
+    "d /var/lib/authentik/certs 0750 1000 1000 -"
+  ];
+
   networking.firewall.allowedTCPPorts = [ 80 443 ];
 }

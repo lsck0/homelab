@@ -7,5 +7,9 @@
     volumes = [ "/var/lib/uptime-kuma:/app/data" ];
   };
 
+  systemd.tmpfiles.rules = [
+    "d /var/lib/uptime-kuma 0750 1000 1000 -"
+  ];
+
   networking.firewall.allowedTCPPorts = [ 80 ];
 }

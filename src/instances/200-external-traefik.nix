@@ -12,7 +12,7 @@
     enable = true;
     staticConfigOptions = {
       entryPoints = {
-        web.address = ":80";
+        web = { address = ":80"; http.redirections.entryPoint = { to = "websecure"; scheme = "https"; permanent = true; }; };
         websecure.address = ":443";
         # Non-HTTP services — add new entrypoints here for each service
         minecraft.address = ":25565";
@@ -25,11 +25,8 @@
           resolvers = [ "1.1.1.1:53" "8.8.8.8:53" ];
         };
       };
-      providers.file.filename = "/etc/traefik/dynamic.yaml";
     };
-  };
-
-  environment.etc."traefik/dynamic.yaml".text = builtins.toJSON {
+    dynamicConfigOptions = {
     http = {
       middlewares.redirect-https = {
         redirectScheme = { scheme = "https"; permanent = true; };
@@ -40,6 +37,11 @@
         shlink       = { rule = "Host(`shlink.external.local`)";      service = "shlink";       entryPoints = [ "web" ]; };
         privatebin   = { rule = "Host(`paste.external.local`)";       service = "privatebin";   entryPoints = [ "web" ]; };
         share        = { rule = "Host(`share.external.local`)";       service = "share";        entryPoints = [ "web" ]; };
+
+        # ── .external.local — HTTPS (LAN, self-signed) ──
+        shlink-local-tls     = { rule = "Host(`shlink.external.local`)";  service = "shlink";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+        privatebin-local-tls = { rule = "Host(`paste.external.local`)";   service = "privatebin"; entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+        share-local-tls      = { rule = "Host(`share.external.local`)";   service = "share";      entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
 
         # ── lsck0.dev — HTTPS (internet) ──
         shlink-tls      = { rule = "Host(`shlink.lsck0.dev`)";      service = "shlink";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
@@ -66,6 +68,7 @@
       services = {
         minecraft.loadBalancer.servers = [{ address = "10.200.0.204:25565"; }];
       };
+    };
     };
   };
 

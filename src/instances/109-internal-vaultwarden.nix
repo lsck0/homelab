@@ -5,10 +5,10 @@
     enable = true;
     config = {
       ROCKET_ADDRESS = "0.0.0.0";
-      ROCKET_PORT = 80;
+      ROCKET_PORT = 8080;
       SIGNUPS_ALLOWED = false;
     };
   };
 
-  networking.firewall.allowedTCPPorts = [ 80 ];
+  networking.firewall.allowedTCPPorts = [ 8080 ];
 }

@@ -1,11 +1,11 @@
 { ... }: {
   networking.hostName = "vm-110";
 
-  virtualisation.oci-containers.containers.taskchampion-sync-server = {
-    image = "ghcr.io/gothenburg-bit-factory/taskchampion-sync-server:latest";
-    ports = [ "80:8080" ];
-    volumes = [ "/var/lib/taskchampion:/data" ];
+  services.taskchampion-sync-server = {
+    enable = true;
+    port = 8080;
+    dataDir = "/var/lib/taskchampion";
   };
 
-  networking.firewall.allowedTCPPorts = [ 80 ];
+  networking.firewall.allowedTCPPorts = [ 8080 ];
 }
