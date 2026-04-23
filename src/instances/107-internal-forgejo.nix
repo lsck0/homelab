@@ -43,14 +43,13 @@
       fi
 
       # Create via Forgejo CLI inside container
-      podman exec forgejo forgejo admin auth add-oauth \
+      podman exec -u git forgejo forgejo admin auth add-oauth \
         --name authentik \
         --provider openidConnect \
         --key forgejo \
         --secret forgejo-oidc-secret-changeme \
-        --auto-discover-url "http://auth.internal/application/o/forgejo-oidc/.well-known/openid-configuration" \
+        --auto-discover-url "https://auth.internal/application/o/forgejo-oidc/.well-known/openid-configuration" \
         --skip-local-2fa \
-        --auto-create-user \
         2>/dev/null || echo "Auth source may already exist"
     '';
   };
@@ -76,18 +75,18 @@
       done
 
       # Create a local bot user for API access
-      podman exec forgejo forgejo admin user create \
+      podman exec -u git forgejo forgejo admin user create \
         --username homepage-bot \
         --password "homepage-bot-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
         --email homepage@internal \
         --must-change-password=false 2>/dev/null || true
 
       # Delete stale token for idempotency, then generate new one
-      podman exec forgejo forgejo admin user generate-access-token \
+      podman exec -u git forgejo forgejo admin user generate-access-token \
         --username homepage-bot \
         --token-name homepage \
         --delete 2>/dev/null || true
-      TOKEN=$(podman exec forgejo forgejo admin user generate-access-token \
+      TOKEN=$(podman exec -u git forgejo forgejo admin user generate-access-token \
         --username homepage-bot \
         --token-name homepage \
         2>/dev/null | grep -oP 'Access token was successfully created\.\.\. \K.*' || true)
