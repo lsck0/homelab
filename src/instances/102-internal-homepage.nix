@@ -1,4 +1,4 @@
-{ pkgs, nasMount, ... }:
+{ config, pkgs, nasMount, ... }:
 let
   servicesYaml = pkgs.writeText "services.yaml" ''
     - Infra:
@@ -38,6 +38,8 @@ let
             icon: mdi-nas
             href: https://nas.internal
             ping: http://10.100.0.111
+        - sccache:
+            icon: mdi-cached
         - Forgejo:
             icon: forgejo
             href: https://git.internal
@@ -45,12 +47,10 @@ let
         - Forgejo Runner:
             icon: forgejo
             ping: http://10.100.0.106
-        - Registry:
-            icon: docker-moby
-            href: https://registry.internal
-            ping: http://10.100.0.108
-        - sccache:
-            icon: mdi-cached
+        - Tasks:
+            icon: mdi-checkbox-marked-outline
+            href: https://tasks.internal
+            ping: http://10.100.0.109:8080
         - Nextcloud:
             icon: nextcloud
             href: https://cloud.internal
@@ -59,6 +59,10 @@ let
             icon: vaultwarden
             href: https://vault.internal
             ping: http://10.100.0.110:8080
+        - Registry:
+            icon: docker-moby
+            href: https://registry.internal
+            ping: http://10.100.0.108
         - Paperless:
             icon: paperless-ngx
             href: https://paperless.internal
@@ -75,10 +79,6 @@ let
             icon: huginn
             href: https://huginn.internal
             ping: http://10.100.0.121
-        - Tasks:
-            icon: mdi-checkbox-marked-outline
-            href: https://tasks.internal
-            ping: http://10.100.0.109:8080
         - Jellyfin:
             icon: jellyfin
             href: https://jellyfin.internal
@@ -185,11 +185,11 @@ let
     - search:
         provider: google
         target: _blank
-    - resources:
-        cpu: true
-        memory: true
-        uptime: true
-        disk: /
+    - proxmox:
+        url: https://192.168.178.200:8006
+        username: {{HOMEPAGE_VAR_PROXMOX_USER}}
+        password: {{HOMEPAGE_VAR_PROXMOX_PASS}}
+        node: luca-server
   '';
 
   bookmarksYaml = pkgs.writeText "bookmarks.yaml" ''
@@ -197,6 +197,9 @@ let
   '';
 in {
   networking.hostName = "vm-102";
+
+  sops.secrets."proxmox-user" = {};
+  sops.secrets."proxmox-pass" = {};
 
   fileSystems = nasMount "/var/lib/homepage" "homepage"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
@@ -224,6 +227,10 @@ in {
         varname="HOMEPAGE_VAR_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"
         echo "''${varname}=$(cat "$f")" >> "$ENV_FILE"
       done
+      
+      echo "HOMEPAGE_VAR_PROXMOX_USER=$(cat ${config.sops.secrets."proxmox-user".path})" >> "$ENV_FILE"
+      echo "HOMEPAGE_VAR_PROXMOX_PASS=$(cat ${config.sops.secrets."proxmox-pass".path})" >> "$ENV_FILE"
+      
       chmod 600 "$ENV_FILE"
     '';
   };
