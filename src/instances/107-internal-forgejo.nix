@@ -14,6 +14,7 @@
     environment = {
       FORGEJO__server__HTTP_PORT = "3000";
       FORGEJO__server__ROOT_URL = "https://git.internal/";
+      FORGEJO__actions__ENABLED = "true";
     };
   };
 
