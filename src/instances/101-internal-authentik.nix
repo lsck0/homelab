@@ -60,6 +60,7 @@ let
     ]) protectedApps
   );
 
+  # OIDC entries use __PLACEHOLDER__ tokens replaced at runtime by blueprint-sync
   oidcEntries = ''
     # --- Nextcloud OIDC ---
     - model: authentik_providers_oauth2.oauth2provider
@@ -70,7 +71,7 @@ let
         authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
         client_type: confidential
         client_id: nextcloud
-        client_secret: nextcloud-oidc-secret-changeme
+        client_secret: __NEXTCLOUD_OIDC_SECRET__
         signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
         redirect_uris: |
           https://cloud.internal/apps/user_oidc/code
@@ -98,7 +99,7 @@ let
         authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
         client_type: confidential
         client_id: vaultwarden
-        client_secret: vaultwarden-oidc-secret-changeme
+        client_secret: __VAULTWARDEN_OIDC_SECRET__
         signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
         redirect_uris: |
           https://vault.internal/identity/connect/oidc-signin
@@ -126,7 +127,7 @@ let
         authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
         client_type: confidential
         client_id: forgejo
-        client_secret: forgejo-oidc-secret-changeme
+        client_secret: __FORGEJO_OIDC_SECRET__
         signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
         redirect_uris: |
           https://git.internal/user/oauth2/authentik/callback
@@ -175,6 +176,10 @@ in {
   fileSystems = nasMount "/var/lib/authentik" "authentik";
 
   sops.secrets.authentik-secret-key = {};
+  sops.secrets.authentik-db-password = {};
+  sops.secrets.nextcloud-oidc-secret = {};
+  sops.secrets.vaultwarden-oidc-secret = {};
+  sops.secrets.forgejo-oidc-secret = {};
   sops.templates."authentik.env".content = ''
     AUTHENTIK_SECRET_KEY=${config.sops.placeholder.authentik-secret-key}
     AUTHENTIK_ERROR_REPORTING__ENABLED=true
@@ -182,7 +187,10 @@ in {
     AUTHENTIK_POSTGRESQL__HOST=postgresql
     AUTHENTIK_POSTGRESQL__USER=authentik
     AUTHENTIK_POSTGRESQL__NAME=authentik
-    AUTHENTIK_POSTGRESQL__PASSWORD=authentik
+    AUTHENTIK_POSTGRESQL__PASSWORD=${config.sops.placeholder.authentik-db-password}
+  '';
+  sops.templates."postgres.env".content = ''
+    POSTGRES_PASSWORD=${config.sops.placeholder.authentik-db-password}
   '';
 
   homelab.dockerStack = {
@@ -202,8 +210,9 @@ in {
             timeout: 5s
           volumes:
             - /var/lib/authentik/db:/var/lib/postgresql/data
+          env_file:
+            - ${config.sops.templates."postgres.env".path}
           environment:
-            POSTGRES_PASSWORD: authentik
             POSTGRES_USER: authentik
             POSTGRES_DB: authentik
         redis:
@@ -223,11 +232,6 @@ in {
           restart: unless-stopped
           command: server
           environment:
-            AUTHENTIK_REDIS__HOST: redis
-            AUTHENTIK_POSTGRESQL__HOST: postgresql
-            AUTHENTIK_POSTGRESQL__USER: authentik
-            AUTHENTIK_POSTGRESQL__NAME: authentik
-            AUTHENTIK_POSTGRESQL__PASSWORD: authentik
             AUTHENTIK_HOST: https://auth.internal
             AUTHENTIK_INSECURE: "true"
           env_file:
@@ -247,11 +251,6 @@ in {
           restart: unless-stopped
           command: worker
           environment:
-            AUTHENTIK_REDIS__HOST: redis
-            AUTHENTIK_POSTGRESQL__HOST: postgresql
-            AUTHENTIK_POSTGRESQL__USER: authentik
-            AUTHENTIK_POSTGRESQL__NAME: authentik
-            AUTHENTIK_POSTGRESQL__PASSWORD: authentik
             AUTHENTIK_HOST: https://auth.internal
             AUTHENTIK_INSECURE: "true"
           env_file:
@@ -269,6 +268,12 @@ in {
     '';
   };
 
+  sops.templates."blueprint-secrets.env".content = ''
+    NEXTCLOUD_OIDC_SECRET=${config.sops.placeholder.nextcloud-oidc-secret}
+    VAULTWARDEN_OIDC_SECRET=${config.sops.placeholder.vaultwarden-oidc-secret}
+    FORGEJO_OIDC_SECRET=${config.sops.placeholder.forgejo-oidc-secret}
+  '';
+
   systemd.services.authentik-blueprint-sync = {
     description = "Sync authentik blueprints from Nix store";
     before = [ "docker-stack-authentik.service" ];
@@ -279,7 +284,15 @@ in {
     script = ''
       # triggers NFS automount by accessing the path
       ${pkgs.coreutils}/bin/mkdir -p /var/lib/authentik/blueprints
-      ${pkgs.coreutils}/bin/install -m 644 ${blueprintFile} /var/lib/authentik/blueprints/homelab-apps.yaml
+
+      # Inject OIDC secrets into blueprint at deploy time
+      . ${config.sops.templates."blueprint-secrets.env".path}
+      ${pkgs.gnused}/bin/sed \
+        -e "s|__NEXTCLOUD_OIDC_SECRET__|$NEXTCLOUD_OIDC_SECRET|g" \
+        -e "s|__VAULTWARDEN_OIDC_SECRET__|$VAULTWARDEN_OIDC_SECRET|g" \
+        -e "s|__FORGEJO_OIDC_SECRET__|$FORGEJO_OIDC_SECRET|g" \
+        ${blueprintFile} > /var/lib/authentik/blueprints/homelab-apps.yaml
+      chmod 644 /var/lib/authentik/blueprints/homelab-apps.yaml
     '';
   };
 

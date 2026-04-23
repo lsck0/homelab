@@ -28,7 +28,7 @@
     environment = {
       DOMAIN = "huginn.internal";
       DATABASE_ADAPTER = "postgresql";
-      DATABASE_HOST = "10.100.0.121";
+      DATABASE_HOST = "10.88.0.1";
       DATABASE_PORT = "5432";
       DATABASE_NAME = "huginn";
       DATABASE_USERNAME = "huginn";

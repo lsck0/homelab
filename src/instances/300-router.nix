@@ -139,6 +139,11 @@
     enable = true;
     config = ''
       internal. {
+        hosts {
+          # Direct-access services (not behind traefik)
+          10.100.0.106 sccache.internal
+          fallthrough
+        }
         template IN A {
           answer "{{ .Name }} 3600 IN A 10.100.0.100"
         }
@@ -168,7 +173,8 @@
           10.100.0.100 grafana.lsck0.dev wiki.lsck0.dev abs.lsck0.dev
           10.100.0.100 torrent.lsck0.dev music.lsck0.dev read.lsck0.dev
           10.100.0.100 prowlarr.lsck0.dev sonarr.lsck0.dev radarr.lsck0.dev
-          10.100.0.100 nas.lsck0.dev proxmox.lsck0.dev traefik.lsck0.dev
+          10.100.0.100 nas.lsck0.dev proxmox.lsck0.dev traefik.lsck0.dev registry-ui.lsck0.dev
+          10.100.0.106 sccache.lsck0.dev
           # external services → external Traefik
           10.200.0.200 hs.lsck0.dev shlink.lsck0.dev paste.lsck0.dev share.lsck0.dev mc.lsck0.dev
           fallthrough

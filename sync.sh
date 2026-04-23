@@ -6,10 +6,10 @@ set -e
 # Force bash as SHELL — OpenSSH uses $SHELL for ProxyCommand, and zsh can break it
 export SHELL=/bin/bash
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$SCRIPT_DIR"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TFVARS_PATH="$ROOT_DIR/src/terraform.tfvars"
 TFVARS_ENC_PATH="$ROOT_DIR/src/terraform.tfvars.sops.json"
+AGE_KEY="$ROOT_DIR/secrets/age.txt"
 ACTIVE_TFVARS_PATH=""
 DEPLOY_FAILURE=0
 CLEANUP_FILES=()
@@ -17,34 +17,10 @@ trap 'rm -f "${CLEANUP_FILES[@]}"' EXIT
 
 echo ">>> SYNCING HARDWARE + OS..."
 
-
-wait_for_http() {
-  local url="$1" label="$2" attempts="${3:-60}" sleep_s="${4:-2}"
-  for _ in $(seq 1 "$attempts"); do
-    if curl -k -sS --connect-timeout 3 "$url" >/dev/null 2>&1; then return 0; fi
-    sleep "$sleep_s"
-  done
-  echo "ERROR: $label not reachable at $url"
-  return 1
-}
-
-tf_apply_retry() {
-  local dir="$1"; shift
-  local attempts=5 rc=0
-  for i in $(seq 1 "$attempts"); do
-    rc=0
-    terraform -chdir="$dir" apply -refresh=false -auto-approve -parallelism=3 "$@" || rc=$?
-    [ "$rc" -eq 0 ] && return 0
-    echo "Terraform apply failed (attempt $i/$attempts). Retrying..."
-    sleep 5
-  done
-  echo "ERROR: Terraform apply failed after $attempts attempts."
-  return 1
-}
+# ── Helper functions ─────────────────────────────────────────
 
 read_tfvar() {
-  local key="$1"
-  jq -r --arg key "$key" 'if has($key) and .[$key] != null then .[$key] else empty end' "$ACTIVE_TFVARS_PATH"
+  jq -r --arg key "$1" 'if has($key) and .[$key] != null then .[$key] else empty end' "$ACTIVE_TFVARS_PATH"
 }
 
 load_tfvars() {
@@ -53,36 +29,86 @@ load_tfvars() {
     return 0
   fi
 
-  if [ ! -f "$TFVARS_ENC_PATH" ]; then
-    echo "ERROR: Missing tfvars. Run ./scripts/init.sh first."
-    return 1
-  fi
-
-  if ! command -v sops >/dev/null 2>&1; then
-    echo "ERROR: sops required to decrypt $TFVARS_ENC_PATH"
-    return 1
-  fi
+  [ -f "$TFVARS_ENC_PATH" ] || { echo "ERROR: Missing tfvars. Run ./scripts/init.sh first."; return 1; }
+  command -v sops >/dev/null 2>&1 || { echo "ERROR: sops required to decrypt $TFVARS_ENC_PATH"; return 1; }
 
   ACTIVE_TFVARS_PATH="$(mktemp --suffix=.tfvars.json)"
-  if [ -f "$ROOT_DIR/keys/age.txt" ]; then
-    SOPS_AGE_KEY_FILE="$ROOT_DIR/keys/age.txt" sops --decrypt "$TFVARS_ENC_PATH" > "$ACTIVE_TFVARS_PATH"
+  CLEANUP_FILES+=("$ACTIVE_TFVARS_PATH")
+  if [ -f "$AGE_KEY" ]; then
+    SOPS_AGE_KEY_FILE="$AGE_KEY" sops --decrypt "$TFVARS_ENC_PATH" > "$ACTIVE_TFVARS_PATH"
   else
     sops --decrypt "$TFVARS_ENC_PATH" > "$ACTIVE_TFVARS_PATH"
   fi
-  CLEANUP_FILES+=("$ACTIVE_TFVARS_PATH")
 
-  if ! jq empty "$ACTIVE_TFVARS_PATH" >/dev/null 2>&1; then
-    echo "ERROR: Decrypted tfvars is not valid JSON."
-    return 1
-  fi
+  jq empty "$ACTIVE_TFVARS_PATH" >/dev/null 2>&1 || { echo "ERROR: Decrypted tfvars is not valid JSON."; return 1; }
 }
+
+wait_for_ssh() {
+  local ip="$1" attempts="${2:-60}" sleep_s="${3:-5}"
+  for _ in $(seq 1 "$attempts"); do
+    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=3 "${BASTION_SSHOPTS[@]}" "root@${ip}" "true" 2>/dev/null && return 0
+    sleep "$sleep_s"
+  done
+  echo "ERROR: SSH not reachable at $ip"
+  return 1
+}
+
+tf_apply_retry() {
+  local dir="$1"; shift
+  for i in $(seq 1 5); do
+    terraform -chdir="$dir" apply -refresh=false -auto-approve -parallelism=3 "$@" && return 0
+    echo "Terraform apply failed (attempt $i/5). Retrying..."
+    sleep 5
+  done
+  echo "ERROR: Terraform apply failed after 5 attempts."
+  return 1
+}
+
+deploy_nixos() {
+  local name="$1" ip="$2"
+  echo ">>> Deploying $name to $ip..."
+
+  if ! wait_for_ssh "$ip" 24 5; then return 1; fi
+
+  local toplevel
+  toplevel=$(nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
+    --extra-experimental-features "nix-command flakes" \
+    --no-link --print-out-paths 2>&1 | tail -n1)
+  [ -n "$toplevel" ] && [ -e "$toplevel" ] || { echo "ERROR: Failed to resolve closure for $name"; return 1; }
+
+  # Skip if already up-to-date
+  local current
+  current=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@${ip}" "readlink -f /run/current-system" 2>/dev/null || true)
+  if [ "$current" = "$toplevel" ]; then
+    echo ">>> $name already up-to-date. Skipping."
+    return 0
+  fi
+
+  # Push age key for sops-nix
+  if [ -f "$AGE_KEY" ]; then
+    ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
+      "mkdir -p /var/lib/sops-nix && chmod 700 /var/lib/sops-nix" || return 1
+    cat "$AGE_KEY" | ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
+      "cat > /var/lib/sops-nix/key.txt && chmod 600 /var/lib/sops-nix/key.txt" || return 1
+  fi
+
+  # Copy closure and activate
+  nix copy --extra-experimental-features "nix-command flakes" --to "ssh-ng://root@${ip}" "$toplevel" \
+    || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
+
+  ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
+    "nix-env -p /nix/var/nix/profiles/system --set $toplevel && $toplevel/bin/switch-to-configuration boot && nohup sh -c 'sleep 1 && reboot' >/dev/null 2>&1 &"
+
+  sleep 15
+  wait_for_ssh "$ip" 60 5 || { echo "ERROR: VM did not come back after reboot!"; return 1; }
+  echo ">>> $name deployed."
+}
+
+# ── Git ──────────────────────────────────────────────────────
 
 git_auto_prepare() {
   [ "${HOMELAB_AUTO_GIT:-1}" = "1" ] || return 0
-
-  if ! git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    return 0
-  fi
+  git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
 
   if ! git -C "$ROOT_DIR" diff --quiet || ! git -C "$ROOT_DIR" diff --cached --quiet; then
     echo ">>> Skipping git pull (local changes detected)."
@@ -96,20 +122,13 @@ git_auto_prepare() {
 
 git_auto_commit_push() {
   [ "${HOMELAB_AUTO_GIT:-1}" = "1" ] || return 0
-
-  if ! git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-    return 0
-  fi
+  git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
 
   git -C "$ROOT_DIR" add -A
-  if git -C "$ROOT_DIR" diff --cached --quiet; then
-    echo ">>> Auto git: no changes to commit."
-    return 0
-  fi
+  git -C "$ROOT_DIR" diff --cached --quiet && { echo ">>> Auto git: no changes to commit."; return 0; }
 
-  local last_subject commit_msg next_gen
+  local last_subject next_gen commit_msg="Generation: 1"
   last_subject="$(git -C "$ROOT_DIR" show -s --format=%s 2>/dev/null || true)"
-  commit_msg="Generation: 1"
   if [[ "$last_subject" =~ Generation:\ ([0-9]+) ]]; then
     next_gen=$((BASH_REMATCH[1] + 1))
     commit_msg="Generation: ${next_gen}"
@@ -120,44 +139,35 @@ git_auto_commit_push() {
   git -C "$ROOT_DIR" push || echo "WARNING: git push failed; continuing."
 }
 
-setup_ssh_transport() {
-  if [ -n "$(read_tfvar proxmox_ssh_password)" ]; then
-    SSH_CMD=(sshpass -p "$(read_tfvar proxmox_ssh_password)" ssh -p "$(read_tfvar proxmox_ssh_port)" -o StrictHostKeyChecking=accept-new)
-  else
-    SSH_CMD=(ssh -p "$(read_tfvar proxmox_ssh_port)" -o StrictHostKeyChecking=accept-new)
-  fi
+# ── SSH transport ────────────────────────────────────────────
 
+setup_ssh_transport() {
   PROXMOX_SSH_HOST="$(read_tfvar proxmox_ssh_host)"
   PROXMOX_SSH_PORT="$(read_tfvar proxmox_ssh_port)"
   PROXMOX_SSH_USER="$(read_tfvar proxmox_ssh_user)"
   PROXMOX_SSH_PASSWORD="$(read_tfvar proxmox_ssh_password)"
+  : "${PROXMOX_SSH_HOST:=127.0.0.1}" "${PROXMOX_SSH_PORT:=22}" "${PROXMOX_SSH_USER:=root}"
 
-  [ -n "$PROXMOX_SSH_HOST" ] || PROXMOX_SSH_HOST="127.0.0.1"
-  [ -n "$PROXMOX_SSH_PORT" ] || PROXMOX_SSH_PORT="22"
-  [ -n "$PROXMOX_SSH_USER" ] || PROXMOX_SSH_USER="root"
+  if [ -n "$PROXMOX_SSH_PASSWORD" ]; then
+    SSH_CMD=(sshpass -p "$PROXMOX_SSH_PASSWORD" ssh -p "$PROXMOX_SSH_PORT" -o StrictHostKeyChecking=accept-new)
+    export SSHPASS="$PROXMOX_SSH_PASSWORD"
+  else
+    SSH_CMD=(ssh -p "$PROXMOX_SSH_PORT" -o StrictHostKeyChecking=accept-new)
+  fi
 
+  # Accept Proxmox host key
   mkdir -p "$HOME/.ssh"
   touch "$HOME/.ssh/known_hosts"
   ssh-keygen -R "[$PROXMOX_SSH_HOST]:$PROXMOX_SSH_PORT" >/dev/null 2>&1 || true
-  if ! ssh-keyscan -p "$PROXMOX_SSH_PORT" -H "$PROXMOX_SSH_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null; then
-    echo "ERROR: Could not fetch SSH host key for $PROXMOX_SSH_HOST:$PROXMOX_SSH_PORT"
-    exit 1
-  fi
+  ssh-keyscan -p "$PROXMOX_SSH_PORT" -H "$PROXMOX_SSH_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null \
+    || { echo "ERROR: Could not fetch SSH host key for $PROXMOX_SSH_HOST:$PROXMOX_SSH_PORT"; exit 1; }
 
-  if [ -n "$PROXMOX_SSH_PASSWORD" ]; then
-    export SSHPASS="$PROXMOX_SSH_PASSWORD"
-  fi
+  # Router VM is the bastion for internal/external networks
+  ROUTER_WAN_IP="192.168.178.29"
 
   SSH_CONFIG="$(mktemp --suffix=.ssh_config)"
   CLEANUP_FILES+=("$SSH_CONFIG")
-
-  # Use explicit ProxyCommand instead of ProxyJump for compatibility
-  local ssh_bin
-  ssh_bin="$(command -v ssh)"
-
-  # Router VM (192.168.178.29) is the bastion for internal/external networks.
-  # Proxmox has no IPs on vmbr100/vmbr200, so can't route to 10.* VMs.
-  ROUTER_WAN_IP="192.168.178.29"
+  local ssh_bin="$(command -v ssh)"
 
   cat > "$SSH_CONFIG" <<EOF_SSH
 Host proxmox-bastion
@@ -174,101 +184,85 @@ EOF_SSH
 
   BASTION_SSHOPTS=(-F "$SSH_CONFIG")
   export NIX_SSHOPTS="-F $SSH_CONFIG"
-
-  # Ensure SHELL is bash for ProxyCommand execution (zsh can break fork+exec in some setups)
-  export SHELL=/bin/bash
 }
 
-AGE_KEY="$ROOT_DIR/keys/age.txt"
+# ── VM IP discovery ──────────────────────────────────────────
 
-wait_for_ssh() {
-  local ip="$1" attempts="${2:-60}" sleep_s="${3:-5}"
-  for _ in $(seq 1 "$attempts"); do
-    if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=3 "${BASTION_SSHOPTS[@]}" "root@${ip}" "true"; then return 0; fi
-    sleep "$sleep_s"
-  done
-  echo "ERROR: SSH not reachable at $ip"
+discover_wan_ip() {
+  local vm_id="$1" configured_ip="$2"
+
+  # Try configured IP first
+  if [ -n "$configured_ip" ] && [ "$configured_ip" != "dhcp" ]; then
+    if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=3 "${BASTION_SSHOPTS[@]}" "root@${configured_ip}" "true" 2>/dev/null; then
+      echo "$configured_ip"; return 0
+    fi
+    echo ">>> VM $vm_id not reachable at $configured_ip, scanning network..." >&2
+  fi
+
+  # Get MAC from Terraform state
+  local mac
+  mac=$(terraform -chdir="$ROOT_DIR/src" state show "module.instances.module.vm[\"${vm_id}\"].proxmox_virtual_environment_vm.this" 2>/dev/null \
+    | awk '/network_device \{/{found=1} found && /mac_address/{gsub(/"/,"",$3); print tolower($3); exit}')
+  [ -z "$mac" ] && { echo ">>> Could not determine MAC for VM $vm_id" >&2; return 1; }
+
+  echo ">>> Looking for VM $vm_id MAC $mac..." >&2
+
+  # Populate ARP table
+  local subnet
+  subnet=$(ip -4 addr show | awk '/inet.*brd/{print $4; exit}')
+  [ -n "$subnet" ] && ping -b -c 2 -W 1 "$subnet" >/dev/null 2>&1 || true
+
+  # Try arp-scan, then ARP table, then QEMU guest agent
+  local ip=""
+  if command -v arp-scan >/dev/null 2>&1; then
+    ip=$(sudo arp-scan -l 2>/dev/null | grep -i "$mac" | awk '{print $1}' | head -1)
+  fi
+  [ -z "$ip" ] && ip=$(ip -4 neigh show | grep -i "$mac" | awk '{print $1}' | head -1)
+  [ -z "$ip" ] && ip=$("${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" \
+    "pvesh get /nodes/\$(hostname)/qemu/${vm_id}/agent/network-get-interfaces --output-format json 2>/dev/null" \
+    | python3 -c "
+import sys,json
+for r in json.load(sys.stdin).get('result',[]):
+  if r['name']=='lo': continue
+  for a in r.get('ip-addresses',[]):
+    if a['ip-address-type']=='ipv4' and not a['ip-address'].startswith(('172.','169.254.')):
+      print(a['ip-address']); sys.exit()
+" 2>/dev/null)
+
+  if [ -n "$ip" ]; then
+    echo ">>> Found VM $vm_id at $ip" >&2
+    echo "$ip"; return 0
+  fi
+  echo ">>> Could not discover IP for VM $vm_id" >&2
   return 1
 }
 
-deploy_nixos() {
-  local name="$1" ip="$2"
-  echo ">>> Deploying $name to $ip..."
-
-  echo ">>> Waiting for SSH on $ip..."
-  if ! wait_for_ssh "$ip" 24 5; then return 1; fi
-
-  local toplevel
-  toplevel=$(nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
-    --extra-experimental-features "nix-command flakes" \
-    --no-link --print-out-paths 2>&1 | tail -n1)
-  if [ -z "$toplevel" ] || [ ! -e "$toplevel" ]; then
-    echo "ERROR: Failed to resolve closure for $name"
-    return 1
-  fi
-
-  # Check if current system profile matches new toplevel
-  local current_toplevel
-  current_toplevel=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@${ip}" "readlink -f /run/current-system" 2>/dev/null || true)
-  if [ "$current_toplevel" = "$toplevel" ]; then
-    echo ">>> $name already up-to-date ($toplevel). Skipping deploy."
-    return 0
-  fi
-
-  if [ -f "$AGE_KEY" ]; then
-    ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-      "mkdir -p /var/lib/sops-nix && chmod 700 /var/lib/sops-nix" || return 1
-    cat "$AGE_KEY" | ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-      "cat > /var/lib/sops-nix/key.txt && chmod 600 /var/lib/sops-nix/key.txt" || return 1
-  fi
-
-  nix copy --extra-experimental-features "nix-command flakes" \
-      --to "ssh-ng://root@${ip}" \
-      "$toplevel" \
-  || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
-
-  # Set new profile and configure it as boot default, then reboot for a clean activation.
-  ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-    "nix-env -p /nix/var/nix/profiles/system --set $toplevel && $toplevel/bin/switch-to-configuration boot && nohup sh -c 'sleep 1 && reboot' >/dev/null 2>&1 &"
-
-  echo ">>> Rebooting VM..."
-  sleep 15
-  if ! wait_for_ssh "$ip" 60 5; then
-    echo "ERROR: VM did not come back online after reboot!"
-    return 1
-  fi
-  
-  echo ">>> $name deployed."
-}
+# ── Main ─────────────────────────────────────────────────────
 
 git_auto_prepare
 load_tfvars
 setup_ssh_transport
 
-# Start building all NixOS closures in background (doesn't need running VMs)
+# Build all NixOS closures in background
 echo ">>> Building all VM closures (background)..."
 BUILD_LOG=$(mktemp --suffix=.build.log)
 CLEANUP_FILES+=("$BUILD_LOG")
 (
   rc=0
-  for nix_file in "$ROOT_DIR"/src/instances/1[0-9][0-9]-*.nix \
-                  "$ROOT_DIR"/src/instances/2[0-9][0-9]-*.nix \
+  for nix_file in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix \
                   "$ROOT_DIR"/src/instances/300-router.nix; do
     [ -f "$nix_file" ] || continue
     vm_name=$(basename "$nix_file" .nix)
     echo ">>> Building $vm_name..."
-    if ! nix build "$ROOT_DIR/src#nixosConfigurations.${vm_name}.config.system.build.toplevel" \
-      --extra-experimental-features "nix-command flakes" \
-      --no-link 2>&1; then
-      echo "ERROR: Failed to build $vm_name"
-      rc=1
-    fi
+    nix build "$ROOT_DIR/src#nixosConfigurations.${vm_name}.config.system.build.toplevel" \
+      --extra-experimental-features "nix-command flakes" --no-link 2>&1 \
+      || { echo "ERROR: Failed to build $vm_name"; rc=1; }
   done
   exit $rc
 ) > "$BUILD_LOG" 2>&1 &
 BUILD_PID=$!
 
-# Ensure golden image exists on Proxmox
+# Upload golden image if missing
 if ! "${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
   if [ -f "$ROOT_DIR/images/nixos.img" ]; then
     echo ">>> Uploading golden image to Proxmox..."
@@ -280,19 +274,11 @@ if ! "${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" "test -f /var/lib
   fi
 fi
 
-if [ ! -d "$ROOT_DIR/src/.terraform" ]; then
-  echo ">>> Initializing Terraform..."
-  terraform -chdir="$ROOT_DIR/src" init
-fi
+# Terraform
+[ -d "$ROOT_DIR/src/.terraform" ] || terraform -chdir="$ROOT_DIR/src" init
 
 TF_STAMP="$ROOT_DIR/src/.tf-last-apply"
-tf_files_changed() {
-  [ ! -f "$TF_STAMP" ] && return 0
-  # Check if any .tf file or tfvars changed since last successful apply
-  find "$ROOT_DIR/src" -maxdepth 2 \( -name '*.tf' -o -name '*.tfvars' -o -name '*.tfvars.json' -o -name '*.tfvars.sops.json' \) -newer "$TF_STAMP" | grep -q .
-}
-
-if tf_files_changed; then
+if [ ! -f "$TF_STAMP" ] || find "$ROOT_DIR/src" -maxdepth 2 \( -name '*.tf' -o -name '*.tfvars*' \) -newer "$TF_STAMP" | grep -q .; then
   echo ">>> Terraform files changed. Applying..."
   tf_apply_retry "$ROOT_DIR/src" -var-file="$ACTIVE_TFVARS_PATH"
   touch "$TF_STAMP"
@@ -303,220 +289,106 @@ fi
 echo ">>> Fetching VM IPs from Terraform..."
 VM_IPS=$(terraform -chdir="$ROOT_DIR/src" output -raw vm_ips 2>/dev/null || echo "")
 
-# Deploy the router first (other VMs depend on it for connectivity)
-# The router may have a DHCP IP (golden image) instead of its configured static IP.
-# Discover its actual IP by MAC address from the local network.
-discover_wan_ip() {
-  local vm_id="$1"
-  local configured_ip="$2"
+# ── Deploy router first ──────────────────────────────────────
 
-  # Try configured IP first
-  if [ -n "$configured_ip" ] && [ "$configured_ip" != "dhcp" ]; then
-    if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=3 "${BASTION_SSHOPTS[@]}" "root@${configured_ip}" "true" 2>/dev/null; then
-      echo "$configured_ip"
-      return 0
-    fi
-    echo ">>> VM $vm_id not reachable at $configured_ip, scanning network..." >&2
-  else
-    echo ">>> VM $vm_id configured with DHCP, scanning network..." >&2
+configured_ip=$(echo "$VM_IPS" | grep "^300=" | cut -d= -f2 || true)
+router_ip=$(discover_wan_ip "300" "$configured_ip" 2>/dev/null || true)
+
+# Fallback: try internal bridge
+if [ -z "$router_ip" ]; then
+  echo ">>> Router not found on WAN, trying internal bridge (10.100.0.1)..."
+  if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@10.100.0.1" "true" 2>/dev/null; then
+    router_ip="10.100.0.1"
   fi
-
-  # Get the WAN MAC from Terraform state
-  local mac
-  mac=$(terraform -chdir="$ROOT_DIR/src" state show "module.instances.module.vm[\"${vm_id}\"].proxmox_virtual_environment_vm.this" 2>/dev/null \
-    | awk '/network_device \{/{found=1} found && /mac_address/{gsub(/"/,"",$3); print tolower($3); exit}')
-
-  if [ -z "$mac" ]; then
-    echo ">>> Could not determine MAC address for VM $vm_id" >&2
-    return 1
-  fi
-
-  echo ">>> Looking for VM $vm_id MAC $mac on local network..." >&2
-
-  # Ping broadcast to populate ARP table, then check
-  local subnet
-  subnet=$(ip -4 addr show | awk '/inet.*brd/{print $4; exit}')
-  if [ -n "$subnet" ]; then
-    ping -b -c 2 -W 1 "$subnet" >/dev/null 2>&1 || true
-  fi
-
-  # Also try arp-scan if available, otherwise fall back to ARP table
-  local discovered_ip=""
-  if command -v arp-scan >/dev/null 2>&1; then
-    discovered_ip=$(sudo arp-scan -l 2>/dev/null | grep -i "$mac" | awk '{print $1}' | head -1)
-  fi
-
-  if [ -z "$discovered_ip" ]; then
-    discovered_ip=$(ip -4 neigh show | grep -i "$mac" | awk '{print $1}' | head -1)
-  fi
-
-  if [ -z "$discovered_ip" ]; then
-    # Last resort: ask Proxmox for the VM's IP via QEMU guest agent
-    discovered_ip=$("${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" \
-      "pvesh get /nodes/\$(hostname)/qemu/${vm_id}/agent/network-get-interfaces --output-format json 2>/dev/null" \
-      | python3 -c "import sys,json; [print(a['ip-address']) for r in json.load(sys.stdin)['result'] if r['name']!='lo' for a in r.get('ip-addresses',[]) if a['ip-address-type']=='ipv4' and not a['ip-address'].startswith('172.') and not a['ip-address'].startswith('169.254')]" 2>/dev/null \
-      | head -1)
-  fi
-
-  if [ -n "$discovered_ip" ]; then
-    echo ">>> Found VM $vm_id at $discovered_ip" >&2
-    echo "$discovered_ip"
-    return 0
-  fi
-
-  echo ">>> Could not discover IP for VM $vm_id" >&2
-  return 1
-}
-
-discover_vm_ip() {
-  local vm_id="$1"
-  "${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" \
-    "pvesh get /nodes/\$(hostname)/qemu/${vm_id}/agent/network-get-interfaces --output-format json 2>/dev/null" \
-    | python3 -c "import json,sys; data=json.load(sys.stdin).get('result',[]); ips=[]; [ips.append(a['ip-address']) for iface in data for a in iface.get('ip-addresses',[]) if a.get('ip-address-type')=='ipv4' and not a['ip-address'].startswith('127.') and not a['ip-address'].startswith('169.254.')]; print(ips[0] if ips else '')" 2>/dev/null \
-    | head -1
-}
-
-for nix_file in "$ROOT_DIR"/src/instances/300-router.nix; do
-  [ -f "$nix_file" ] || continue
-  vm_name=$(basename "$nix_file" .nix)
-  configured_ip=$(echo "$VM_IPS" | grep "^300=" | cut -d= -f2 || true)
-  ip=$(discover_wan_ip "300" "$configured_ip") || true
-
-  if [ -z "$ip" ]; then
-    # Fallback: deploy via internal interface if the router is reachable there
-    echo ">>> Router not found on WAN, trying internal bridge (10.100.0.1)..."
-    if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
-         "${BASTION_SSHOPTS[@]}" \
-         "root@10.100.0.1" "true" 2>/dev/null; then
-      ip="10.100.0.1"
-      echo ">>> Router reachable at $ip via Proxmox bridge"
-    fi
-  fi
-
-  if [ -n "$ip" ]; then
-    if ! deploy_nixos "$vm_name" "$ip"; then
-      echo "WARNING: Failed to deploy router"
-      DEPLOY_FAILURE=1
-    fi
-  else
-    echo "WARNING: Could not reach router VM. Skipping."
-    DEPLOY_FAILURE=1
-  fi
-done
-
-# After router deploy, wait for bastion connectivity to internal/external subnets.
-# Router's switch-to-configuration restarts networking, so SSH via the bastion breaks temporarily.
-echo ">>> Waiting for router bastion to become ready for subnet routing..."
-if ! wait_for_ssh "$ROUTER_WAN_IP" 30 5; then
-  echo "ERROR: Router not reachable after deploy. Cannot reach subnet VMs."
-  exit 1
 fi
-# Verify we can proxy through the router to an internal VM
-echo ">>> Verifying bastion can proxy to internal subnet..."
+
+if [ -n "$router_ip" ]; then
+  deploy_nixos "300-router" "$router_ip" || { echo "WARNING: Failed to deploy router"; DEPLOY_FAILURE=1; }
+else
+  echo "WARNING: Could not reach router VM. Skipping."
+  DEPLOY_FAILURE=1
+fi
+
+# Wait for bastion connectivity after router deploy
+echo ">>> Waiting for router bastion..."
+wait_for_ssh "$ROUTER_WAN_IP" 30 5 || { echo "ERROR: Router not reachable after deploy."; exit 1; }
+
+echo ">>> Verifying bastion proxy to internal subnet..."
 for _ in $(seq 1 12); do
-  if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@10.100.0.100" "true" 2>/dev/null; then
-    echo ">>> Bastion routing confirmed."
-    break
-  fi
+  ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@10.100.0.100" "true" 2>/dev/null && break
   sleep 5
 done
 
-# Verify DNS is working on the router before deploying VMs that depend on it.
-# VMs use 10.100.0.1 (router) as their DNS server; if it's not ready, services
-# that pull container images at boot (e.g. Authentik) will fail.
-echo ">>> Verifying router DNS is operational..."
+echo ">>> Verifying router DNS..."
 for _ in $(seq 1 24); do
-  if ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "root@${ROUTER_WAN_IP}" \
-    "dig +short +timeout=2 ghcr.io @127.0.0.1 2>/dev/null | grep -q ." 2>/dev/null; then
-    echo ">>> Router DNS confirmed."
-    break
-  fi
+  ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "root@${ROUTER_WAN_IP}" \
+    "dig +short +timeout=2 ghcr.io @127.0.0.1 2>/dev/null | grep -q ." 2>/dev/null && break
   sleep 5
 done
 
-# Deploy remaining VMs — parallel by default, set PARALLEL=1 to disable
-MAX_PARALLEL="${HOMELAB_PARALLEL:-3}"
+# ── Wait for builds ──────────────────────────────────────────
 
-deploy_vm_by_file() {
-  local nix_file="$1"
-  local vm_name vm_id ip
-  vm_name=$(basename "$nix_file" .nix)
-  vm_id="${vm_name%%-*}"
-
-  ip=$(echo "$VM_IPS" | grep "^${vm_id}=" | cut -d= -f2 || true)
-  if [ -z "$ip" ] || [ "$ip" = "dhcp" ]; then
-    ip=$(discover_wan_ip "$vm_id" "dhcp" || true)
-    if [ -z "$ip" ]; then
-      ip=$(discover_vm_ip "$vm_id" || true)
-    fi
-  fi
-
-  if [ -z "$ip" ]; then
-    echo ">>> WARNING: VM $vm_id has no Terraform output. Skipping."
-    return 0
-  fi
-
-  if ! deploy_nixos "$vm_name" "$ip"; then
-    echo "WARNING: Failed to deploy $vm_name"
-    return 1
-  fi
-}
-
-# Wait for background nix builds to complete
-echo ">>> Waiting for background nix builds to finish..."
-BUILD_FAILURE=0
+echo ">>> Waiting for background nix builds..."
 if ! wait "$BUILD_PID"; then
-  BUILD_FAILURE=1
-fi
-cat "$BUILD_LOG"
-
-if [ "$BUILD_FAILURE" -ne 0 ]; then
+  cat "$BUILD_LOG"
   echo "ERROR: Some builds failed. Aborting deployment."
   exit 1
 fi
+cat "$BUILD_LOG"
 echo ">>> All builds complete."
 
-# Deploy in parallel (copy + switch)
-echo ">>> Deploying VMs (up to $MAX_PARALLEL in parallel)..."
+# ── Deploy remaining VMs in parallel ─────────────────────────
+
+MAX_PARALLEL="${HOMELAB_PARALLEL:-3}"
 DEPLOY_PIDS=()
 DEPLOY_NAMES=()
 
-for nix_file in "$ROOT_DIR"/src/instances/1[0-9][0-9]-*.nix \
-                "$ROOT_DIR"/src/instances/2[0-9][0-9]-*.nix; do
-  [ -f "$nix_file" ] || continue
+reap_finished() {
+  local new_pids=() new_names=()
+  for i in "${!DEPLOY_PIDS[@]}"; do
+    if kill -0 "${DEPLOY_PIDS[$i]}" 2>/dev/null; then
+      new_pids+=("${DEPLOY_PIDS[$i]}")
+      new_names+=("${DEPLOY_NAMES[$i]}")
+    else
+      wait "${DEPLOY_PIDS[$i]}" || { echo "WARNING: Failed to deploy ${DEPLOY_NAMES[$i]}"; DEPLOY_FAILURE=1; }
+    fi
+  done
+  DEPLOY_PIDS=("${new_pids[@]}")
+  DEPLOY_NAMES=("${new_names[@]}")
+}
 
-  # Throttle: wait for a slot if at max parallelism
+echo ">>> Deploying VMs (up to $MAX_PARALLEL in parallel)..."
+for nix_file in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix; do
+  [ -f "$nix_file" ] || continue
+  vm_name=$(basename "$nix_file" .nix)
+  vm_id="${vm_name%%-*}"
+
+  # Throttle
   while [ "${#DEPLOY_PIDS[@]}" -ge "$MAX_PARALLEL" ]; do
-    NEW_PIDS=()
-    NEW_NAMES=()
-    for i in "${!DEPLOY_PIDS[@]}"; do
-      if kill -0 "${DEPLOY_PIDS[$i]}" 2>/dev/null; then
-        NEW_PIDS+=("${DEPLOY_PIDS[$i]}")
-        NEW_NAMES+=("${DEPLOY_NAMES[$i]}")
-      else
-        wait "${DEPLOY_PIDS[$i]}" || { echo "WARNING: Failed to deploy ${DEPLOY_NAMES[$i]}"; DEPLOY_FAILURE=1; }
-      fi
-    done
-    DEPLOY_PIDS=("${NEW_PIDS[@]}")
-    DEPLOY_NAMES=("${NEW_NAMES[@]}")
+    reap_finished
     [ "${#DEPLOY_PIDS[@]}" -ge "$MAX_PARALLEL" ] && sleep 2
   done
 
-  vm_name=$(basename "$nix_file" .nix)
-  deploy_vm_by_file "$nix_file" &
+  # Resolve IP
+  ip=$(echo "$VM_IPS" | grep "^${vm_id}=" | cut -d= -f2 || true)
+  [ -z "$ip" ] || [ "$ip" = "dhcp" ] && ip=$(discover_wan_ip "$vm_id" "dhcp" 2>/dev/null || true)
+
+  if [ -z "$ip" ]; then
+    echo ">>> WARNING: VM $vm_id has no IP. Skipping."
+    continue
+  fi
+
+  deploy_nixos "$vm_name" "$ip" &
   DEPLOY_PIDS+=("$!")
   DEPLOY_NAMES+=("$vm_name")
 done
 
-# Wait for all remaining
+# Wait for stragglers
 for i in "${!DEPLOY_PIDS[@]}"; do
   wait "${DEPLOY_PIDS[$i]}" || { echo "WARNING: Failed to deploy ${DEPLOY_NAMES[$i]}"; DEPLOY_FAILURE=1; }
 done
 
-if [ "$DEPLOY_FAILURE" -ne 0 ]; then
-  echo "ERROR: One or more deployments failed."
-  exit 1
-fi
+[ "$DEPLOY_FAILURE" -ne 0 ] && { echo "ERROR: One or more deployments failed."; exit 1; }
 
 git_auto_commit_push
 echo ">>> LAB IS FULLY SYNCHRONIZED"

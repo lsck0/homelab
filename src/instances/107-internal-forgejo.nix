@@ -1,4 +1,4 @@
-{ pkgs, nasMount, ... }: {
+{ config, pkgs, nasMount, ... }: {
   networking.hostName = "vm-107";
 
   # Resolve auth.internal directly to authentik VM
@@ -7,14 +7,24 @@
   fileSystems = nasMount "/var/lib/forgejo" "forgejo"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
+  sops.secrets.forgejo-oidc-secret = {};
+
   virtualisation.oci-containers.containers.forgejo = {
     image = "codeberg.org/forgejo/forgejo:7";
     ports = [ "80:3000" "2222:22" ];
     volumes = [ "/var/lib/forgejo:/data" ];
+    # Pass host's /etc/hosts into container so auth.internal resolves
+    extraOptions = [ "--add-host=auth.internal:10.100.0.101" ];
     environment = {
       FORGEJO__server__HTTP_PORT = "3000";
       FORGEJO__server__ROOT_URL = "https://git.internal/";
       FORGEJO__actions__ENABLED = "true";
+      FORGEJO__service__DISABLE_REGISTRATION = "false";
+      FORGEJO__service__ALLOW_ONLY_EXTERNAL_REGISTRATION = "true";
+      FORGEJO__openid__ENABLE_OPENID_SIGNIN = "true";
+      FORGEJO__oauth2_client__ENABLE_AUTO_REGISTRATION = "true";
+      FORGEJO__oauth2_client__ACCOUNT_LINKING = "auto";
+      FORGEJO__oauth2_client__USERNAME = "nickname";
     };
   };
 
@@ -23,7 +33,7 @@
     description = "Configure Forgejo OAuth2 with authentik";
     after = [ "podman-forgejo.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq ];
+    path = [ pkgs.curl pkgs.jq pkgs.podman ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -35,10 +45,17 @@
         sleep 2
       done
 
+      OIDC_SECRET=$(cat ${config.sops.secrets.forgejo-oidc-secret.path})
+
       # Check if auth source already exists
       SOURCES=$(curl -sf http://127.0.0.1:3000/api/v1/admin/identity-sources 2>/dev/null || echo "[]")
       if echo "$SOURCES" | jq -e '.[] | select(.name == "authentik")' >/dev/null 2>&1; then
-        echo "OAuth2 source already exists"
+        echo "OAuth2 source already exists, updating secret..."
+        # Update via CLI to ensure secret stays current
+        podman exec -u git forgejo forgejo admin auth update-oauth \
+          --id $(echo "$SOURCES" | jq -r '.[] | select(.name == "authentik") | .id') \
+          --secret "$OIDC_SECRET" \
+          2>/dev/null || true
         exit 0
       fi
 
@@ -47,8 +64,8 @@
         --name authentik \
         --provider openidConnect \
         --key forgejo \
-        --secret forgejo-oidc-secret-changeme \
-        --auto-discover-url "https://auth.internal/application/o/forgejo-oidc/.well-known/openid-configuration" \
+        --secret "$OIDC_SECRET" \
+        --auto-discover-url "http://auth.internal/application/o/forgejo-oidc/.well-known/openid-configuration" \
         --skip-local-2fa \
         2>/dev/null || echo "Auth source may already exist"
     '';
@@ -96,6 +113,32 @@
         echo "Forgejo Homepage token created"
       else
         echo "Token may already exist or creation failed"
+      fi
+    '';
+  };
+
+  # Generate runner registration token and save to NAS for runner VM
+  systemd.services.forgejo-runner-token = {
+    description = "Generate Forgejo runner registration token";
+    after = [ "podman-forgejo.service" "forgejo-oauth2-setup.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.podman ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      # Wait for Forgejo to be ready
+      for i in $(seq 1 60); do
+        podman exec -u git forgejo forgejo admin user list >/dev/null 2>&1 && break
+        sleep 2
+      done
+
+      # Always regenerate token (they're one-use for registration)
+      TOKEN=$(podman exec -u git forgejo forgejo actions generate-runner-token 2>/dev/null || true)
+      if [ -n "$TOKEN" ]; then
+        echo -n "$TOKEN" > /var/lib/homepage-tokens/forgejo-runner.token
+        echo "Runner token generated"
       fi
     '';
   };

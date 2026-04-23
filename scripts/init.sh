@@ -84,10 +84,10 @@ else
 fi
 
 
-AGE_KEY="$ROOT_DIR/keys/age.txt"
+AGE_KEY="$ROOT_DIR/secrets/age.txt"
 if [ ! -f "$AGE_KEY" ]; then
     echo ">>> Generating age key for sops-nix..."
-    mkdir -p "$ROOT_DIR/keys"
+    mkdir -p "$ROOT_DIR/secrets"
     age-keygen -o "$AGE_KEY" 2>/dev/null
     chmod 600 "$AGE_KEY"
     AGE_PUB=$(age-keygen -y "$AGE_KEY")
@@ -102,13 +102,29 @@ AGE_PUB=$(age-keygen -y "$AGE_KEY")
 
 if grep -q "CHANGE_ME" "$SECRETS_FILE" 2>/dev/null; then
     echo ">>> Generating secrets..."
-    NEXTCLOUD_PASS=$(generate_secret)
-    AUTHENTIK_KEY=$(generate_secret)
 
+    # Generate WireGuard keypair
+    WG_PRIVKEY=$(wg genkey 2>/dev/null || openssl rand -base64 32)
+
+    # Secrets grouped by VM, in VM ID order
     cat > "$SECRETS_FILE" <<SECRETS_EOF
-nextcloud-admin-pass: $NEXTCLOUD_PASS
-authentik-secret-key: $AUTHENTIK_KEY
+# ── VM 100/200: Traefik (Cloudflare DNS challenge) ──
 cloudflare-token: ENTER_YOUR_CLOUDFLARE_API_TOKEN_HERE
+
+# ── VM 101: Authentik (SSO) ──
+authentik-secret-key: $(generate_secret)
+authentik-db-password: $(generate_secret)
+
+# ── VM 101 → OIDC clients (sorted by consumer VM) ──
+forgejo-oidc-secret: $(generate_secret)
+vaultwarden-oidc-secret: $(generate_secret)
+nextcloud-oidc-secret: $(generate_secret)
+
+# ── VM 112: Nextcloud ──
+nextcloud-admin-pass: $(generate_secret)
+
+# ── VM 300: Router ──
+wireguard-private-key: $WG_PRIVKEY
 SECRETS_EOF
 
     echo ">>> Encrypting secrets with sops..."

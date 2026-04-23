@@ -1,5 +1,7 @@
-{ ... }: {
+{ nasMount, ... }: {
   networking.hostName = "vm-201";
+
+  fileSystems = nasMount "/var/lib/headscale" "headscale";
 
   services.headscale = {
     enable = true;
