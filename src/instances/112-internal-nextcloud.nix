@@ -38,6 +38,7 @@
         license = "agpl3Plus";
       };
     };
+    appstoreEnable = false;
     settings = {
       trusted_domains = [ "cloud.internal" "cloud.lsck0.dev" ];
       trusted_proxies = [ "10.100.0.100" ];
