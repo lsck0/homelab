@@ -46,16 +46,18 @@
       done
 
       OIDC_SECRET=$(cat ${config.sops.secrets.forgejo-oidc-secret.path})
+      DISCOVER_URL="http://auth.internal/application/o/forgejo-oidc/.well-known/openid-configuration"
 
-      # Check if auth source already exists
-      SOURCES=$(curl -sf http://127.0.0.1:3000/api/v1/admin/identity-sources 2>/dev/null || echo "[]")
-      if echo "$SOURCES" | jq -e '.[] | select(.name == "authentik")' >/dev/null 2>&1; then
-        echo "OAuth2 source already exists, updating secret..."
-        # Update via CLI to ensure secret stays current
+      # Check if auth source already exists via CLI
+      AUTH_ID=$(podman exec -u git forgejo forgejo admin auth list 2>/dev/null \
+        | grep -w authentik | awk '{print $1}')
+
+      if [ -n "$AUTH_ID" ]; then
+        echo "OAuth2 source exists (id=$AUTH_ID), updating..."
         podman exec -u git forgejo forgejo admin auth update-oauth \
-          --id $(echo "$SOURCES" | jq -r '.[] | select(.name == "authentik") | .id') \
+          --id "$AUTH_ID" \
           --secret "$OIDC_SECRET" \
-          --auto-discover-url "http://auth.internal/application/o/forgejo-oidc/.well-known/openid-configuration" \
+          --auto-discover-url "$DISCOVER_URL" \
           2>/dev/null || true
         exit 0
       fi
@@ -66,7 +68,7 @@
         --provider openidConnect \
         --key forgejo \
         --secret "$OIDC_SECRET" \
-        --auto-discover-url "http://auth.internal/application/o/forgejo-oidc/.well-known/openid-configuration" \
+        --auto-discover-url "$DISCOVER_URL" \
         --skip-local-2fa \
         2>/dev/null || echo "Auth source may already exist"
     '';
