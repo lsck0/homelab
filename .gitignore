@@ -10,8 +10,8 @@ result
 result-*
 
 # Secrets
-keys/
-!keys/.keep
+secrets/
+!secrets/.keep
 
 # OS
 .DS_Store

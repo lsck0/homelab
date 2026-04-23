@@ -9,6 +9,7 @@
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   sops.secrets.nextcloud-admin-pass.owner = "nextcloud";
+  sops.secrets.nextcloud-oidc-secret = {};
 
   services.postgresql = {
     enable = true;
@@ -59,6 +60,7 @@
       User = "nextcloud";
       ExecStart = pkgs.writeShellScript "nextcloud-oidc-setup" ''
         OCC="${config.services.nextcloud.occ}/bin/nextcloud-occ"
+        OIDC_SECRET=$(cat ${config.sops.secrets.nextcloud-oidc-secret.path})
 
         # Enable the app
         $OCC app:enable user_oidc || true
@@ -68,7 +70,7 @@
 
         $OCC user_oidc:provider authentik \
           --clientid="nextcloud" \
-          --clientsecret="nextcloud-oidc-secret-changeme" \
+          --clientsecret="$OIDC_SECRET" \
           --discoveryuri="http://auth.internal/application/o/nextcloud/.well-known/openid-configuration" \
           --mapping-uid="preferred_username" \
           --mapping-display-name="name" \

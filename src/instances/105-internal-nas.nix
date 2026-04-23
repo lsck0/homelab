@@ -75,6 +75,8 @@
     "d /srv/nas/data 0777 nobody nogroup -"
     "d /srv/nas/data/authentik 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo 0777 nobody nogroup -"
+    "d /srv/nas/data/forgejo-runner 0777 nobody nogroup -"
+    "d /srv/nas/data/headscale 0777 nobody nogroup -"
     "d /srv/nas/data/registry 0777 nobody nogroup -"
     "d /srv/nas/data/taskchampion 0777 nobody nogroup -"
     "d /srv/nas/data/vaultwarden 0777 nobody nogroup -"

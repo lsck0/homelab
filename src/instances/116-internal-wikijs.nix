@@ -5,11 +5,15 @@
 
   services.postgresql = {
     enable = true;
+    enableTCPIP = true;
     ensureDatabases = [ "wikijs" ];
     ensureUsers = [{
       name = "wikijs";
       ensureDBOwnership = true;
     }];
+    authentication = ''
+      host wikijs wikijs 10.88.0.0/16 trust
+    '';
   };
 
   virtualisation.oci-containers.containers.wikijs = {
@@ -17,20 +21,13 @@
     ports = [ "80:3000" ];
     environment = {
       DB_TYPE = "postgres";
-      DB_HOST = "10.100.0.120";
+      DB_HOST = "10.88.0.1";
       DB_PORT = "5432";
       DB_USER = "wikijs";
       DB_NAME = "wikijs";
       DB_PASS = "wikijs";
     };
   };
-
-  # Allow container to reach host PostgreSQL
-  services.postgresql.enableTCPIP = true;
-  services.postgresql.authentication = ''
-    host wikijs wikijs 10.88.0.0/16 trust
-    host wikijs wikijs 10.100.0.120/32 trust
-  '';
 
   networking.firewall.allowedTCPPorts = [ 80 5432 ];
 }

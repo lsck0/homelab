@@ -98,7 +98,8 @@ in {
           homepage-local-tls       = { rule = "Host(`homepage.internal`)";       service = "homepage";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
           uptime-kuma-local-tls    = { rule = "Host(`status.internal`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
           forgejo-local-tls        = { rule = "Host(`git.internal`)";        service = "forgejo";         entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-          registry-local-tls       = { rule = "Host(`registry.internal`)";   service = "registry";        entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
+          registry-local-tls       = { rule = "Host(`registry.internal`)";   service = "registry-api";    entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+          registry-ui-local-tls    = { rule = "Host(`registry-ui.internal`)"; service = "registry-ui";   entryPoints = [ "websecure" ]; tls = { options = "default"; }; middlewares = [ "authentik" ]; };
           taskchampion-local-tls   = { rule = "Host(`tasks.internal`)";      service = "taskchampion";    entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
           vaultwarden-local-tls    = { rule = "Host(`vault.internal`)";      service = "vaultwarden";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
           nextcloud-local-tls      = { rule = "Host(`cloud.internal`)";      service = "nextcloud";       entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
@@ -123,7 +124,8 @@ in {
           homepage-tls       = { rule = "Host(`homepage.lsck0.dev`)";       service = "homepage";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
           uptime-kuma-tls    = { rule = "Host(`status.lsck0.dev`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
           forgejo-tls        = { rule = "Host(`git.lsck0.dev`)";        service = "forgejo";         entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-          registry-tls       = { rule = "Host(`registry.lsck0.dev`)";   service = "registry";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
+          registry-tls       = { rule = "Host(`registry.lsck0.dev`)";   service = "registry-api";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+          registry-ui-tls    = { rule = "Host(`registry-ui.lsck0.dev`)"; service = "registry-ui"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "authentik" ]; };
           taskchampion-tls   = { rule = "Host(`tasks.lsck0.dev`)";      service = "taskchampion";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
           vaultwarden-tls    = { rule = "Host(`vault.lsck0.dev`)";      service = "vaultwarden";     entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
           nextcloud-tls      = { rule = "Host(`cloud.lsck0.dev`)";      service = "nextcloud";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
@@ -150,7 +152,8 @@ in {
           uptime-kuma.loadBalancer.servers       = [{ url = ip "104"; }];
           grafana.loadBalancer.servers       = [{ url = ip "103"; }];
           forgejo.loadBalancer.servers       = [{ url = ip "107"; }];
-          registry.loadBalancer.servers       = [{ url = ip "109"; }];
+          registry-api.loadBalancer.servers    = [{ url = "http://10.100.0.109:5000"; }];
+          registry-ui.loadBalancer.servers     = [{ url = ip "109"; }];
           taskchampion.loadBalancer.servers   = [{ url = "http://10.100.0.110:8080"; }];
           vaultwarden.loadBalancer.servers    = [{ url = "http://10.100.0.111:8080"; }];
           nextcloud.loadBalancer.servers       = [{ url = ip "112"; }];

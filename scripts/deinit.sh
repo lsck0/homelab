@@ -42,8 +42,8 @@ load_tfvars() {
   fi
 
   ACTIVE_TFVARS_PATH="$(mktemp)"
-  if [ -f "$ROOT_DIR/keys/age.txt" ]; then
-    SOPS_AGE_KEY_FILE="$ROOT_DIR/keys/age.txt" sops --decrypt "$TFVARS_ENC_PATH" > "$ACTIVE_TFVARS_PATH"
+  if [ -f "$ROOT_DIR/secrets/age.txt" ]; then
+    SOPS_AGE_KEY_FILE="$ROOT_DIR/secrets/age.txt" sops --decrypt "$TFVARS_ENC_PATH" > "$ACTIVE_TFVARS_PATH"
   else
     sops --decrypt "$TFVARS_ENC_PATH" > "$ACTIVE_TFVARS_PATH"
   fi
