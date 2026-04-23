@@ -1,7 +1,9 @@
-{ pkgs, nasMount, ... }:
-let
-  servicesYaml = pkgs.writeText "services.yaml" ''
-    - Infra:
+import re
+
+with open("src/instances/102-internal-homepage.nix", "r") as f:
+    content = f.read()
+
+services_yaml = """    - Infra:
         - Cloudflare:
             icon: cloudflare
             href: https://dash.cloudflare.com
@@ -135,11 +137,9 @@ let
             ping: http://10.200.0.204
         - Minecraft:
             icon: minecraft
-            ping: http://10.200.0.205
-  '';
+            ping: http://10.200.0.205"""
 
-  settingsYaml = pkgs.writeText "settings.yaml" ''
-    title: Homelab
+settings_yaml = """    title: Homelab
     favicon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/heimdall.png
     background:
       image: https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=2560
@@ -163,65 +163,13 @@ let
         columns: 5
       External:
         style: row
-        columns: 3
-  '';
+        columns: 3"""
 
-  widgetsYaml = pkgs.writeText "widgets.yaml" ''
-    []
-  '';
+widgets_yaml = "    []"
 
-  bookmarksYaml = pkgs.writeText "bookmarks.yaml" ''
-    []
-  '';
-in {
-  networking.hostName = "vm-102";
+content = re.sub(r'  servicesYaml = pkgs.writeText "services\.yaml" \'\'.*?\'\';\n\n  settingsYaml', f"  servicesYaml = pkgs.writeText \"services.yaml\" ''\n{services_yaml}\n  '';\n\n  settingsYaml", content, flags=re.DOTALL)
+content = re.sub(r'  settingsYaml = pkgs.writeText "settings\.yaml" \'\'.*?\'\';\n\n  widgetsYaml', f"  settingsYaml = pkgs.writeText \"settings.yaml\" ''\n{settings_yaml}\n  '';\n\n  widgetsYaml", content, flags=re.DOTALL)
+content = re.sub(r'  widgetsYaml = pkgs.writeText "widgets\.yaml" \'\'.*?\'\';\n\n  bookmarksYaml', f"  widgetsYaml = pkgs.writeText \"widgets.yaml\" ''\n{widgets_yaml}\n  '';\n\n  bookmarksYaml", content, flags=re.DOTALL)
 
-  fileSystems = nasMount "/var/lib/homepage" "homepage"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
-
-  # Build env file from token files on NAS before container starts
-  systemd.services.homepage-config = {
-    description = "Sync Homepage config and collect API tokens";
-    before = [ "podman-homepage.service" ];
-    requiredBy = [ "podman-homepage.service" ];
-    serviceConfig.Type = "oneshot";
-    path = [ pkgs.coreutils ];
-    script = ''
-      cp -f ${servicesYaml}  /var/lib/homepage/services.yaml
-      cp -f ${settingsYaml}  /var/lib/homepage/settings.yaml
-      cp -f ${bookmarksYaml} /var/lib/homepage/bookmarks.yaml
-      cp -f ${widgetsYaml}   /var/lib/homepage/widgets.yaml
-
-      # Collect API tokens from shared NAS directory into env file
-      ENV_FILE="/var/lib/homepage/homepage.env"
-      : > "$ENV_FILE"
-      for f in /var/lib/homepage-tokens/*.token; do
-        [ -f "$f" ] || continue
-        name="$(basename "$f" .token)"
-        # Convert e.g. "forgejo-key" to "HOMEPAGE_VAR_FORGEJO_KEY"
-        varname="HOMEPAGE_VAR_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"
-        echo "''${varname}=$(cat "$f")" >> "$ENV_FILE"
-      done
-      chmod 600 "$ENV_FILE"
-    '';
-  };
-
-  virtualisation.oci-containers.containers.homepage = {
-    image = "ghcr.io/gethomepage/homepage:latest";
-    ports = [ "80:3000" ];
-    volumes = [
-      "/var/lib/homepage:/app/config"
-    ];
-    environment = {
-      HOMEPAGE_ALLOWED_HOSTS = "homepage.internal,homepage.lsck0.dev";
-    };
-    environmentFiles = [ "/var/lib/homepage/homepage.env" ];
-    extraOptions = [ "--cap-add=NET_RAW" ];
-  };
-
-  systemd.tmpfiles.rules = [
-    "d /var/lib/homepage 0750 1000 1000 -"
-  ];
-
-  networking.firewall.allowedTCPPorts = [ 80 ];
-}
+with open("src/instances/102-internal-homepage.nix", "w") as f:
+    f.write(content)
