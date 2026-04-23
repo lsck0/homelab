@@ -1,5 +1,5 @@
 { nasMount, ... }: {
-  networking.hostName = "vm-108";
+  networking.hostName = "vm-109";
 
   fileSystems = nasMount "/var/lib/registry" "registry";
 
@@ -20,7 +20,7 @@
       REGISTRY_TITLE = "Homelab Registry";
       SINGLE_REGISTRY = "true";
       DELETE_IMAGES = "true";
-      NGINX_PROXY_PASS_URL = "http://10.100.0.108:5000";
+      NGINX_PROXY_PASS_URL = "http://10.100.0.109:5000";
     };
   };
 

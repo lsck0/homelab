@@ -118,7 +118,7 @@
     };
 
     # shared helpers passed to all instance modules
-    nasIP = "10.100.0.111";
+    nasIP = "10.100.0.105";
     nfsOpts = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
     helpers = {
       # mount NAS data dir: nasMount "/var/lib/foo" "foo"

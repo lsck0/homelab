@@ -1,5 +1,5 @@
 { nasMount, nasPath, ... }: {
-  networking.hostName = "vm-118";
+  networking.hostName = "vm-122";
 
   fileSystems = nasMount "/var/lib/audiobookshelf" "audiobookshelf"
     // nasPath "/srv/audiobooks" "media/audiobooks";

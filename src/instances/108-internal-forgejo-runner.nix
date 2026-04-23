@@ -1,5 +1,5 @@
 { pkgs, ... }: {
-  networking.hostName = "vm-106";
+  networking.hostName = "vm-108";
 
   virtualisation.docker.enable = true;
 
@@ -12,7 +12,7 @@
       "/var/run/docker.sock:/var/run/docker.sock"
     ];
     environment = {
-      SCCACHE_REDIS = "redis://10.100.0.107:6379";
+      SCCACHE_REDIS = "redis://10.100.0.106:6379";
     };
   };
 
@@ -42,7 +42,7 @@
 
       # Wait for Forgejo API
       for i in $(seq 1 90); do
-        if curl -sf http://10.100.0.105:80/api/v1/settings/api >/dev/null 2>&1; then break; fi
+        if curl -sf http://10.100.0.107:80/api/v1/settings/api >/dev/null 2>&1; then break; fi
         sleep 2
       done
 
@@ -50,13 +50,13 @@
       # Use CLI inside Forgejo container on VM 105 — not available from here
       # Runner must be registered manually once:
       #   docker exec -it forgejo-runner forgejo-runner register \
-      #     --instance http://10.100.0.105:80 \
+      #     --instance http://10.100.0.107:80 \
       #     --token <TOKEN_FROM_FORGEJO_ADMIN> \
-      #     --name vm-106-runner \
+      #     --name vm-108-runner \
       #     --labels docker:docker://node:20-bookworm,ubuntu-latest:docker://ubuntu:22.04 \
       #     --no-interactive
       echo "Runner not registered. Get token from https://git.internal/-/admin/runners"
-      echo "Then run: docker exec -it forgejo-runner forgejo-runner register --instance http://10.100.0.105:80 --token <TOKEN> --name vm-106-runner --labels docker:docker://node:20-bookworm,ubuntu-latest:docker://ubuntu:22.04 --no-interactive"
+      echo "Then run: docker exec -it forgejo-runner forgejo-runner register --instance http://10.100.0.107:80 --token <TOKEN> --name vm-108-runner --labels docker:docker://node:20-bookworm,ubuntu-latest:docker://ubuntu:22.04 --no-interactive"
       exit 1
     '';
   };

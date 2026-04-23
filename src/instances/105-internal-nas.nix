@@ -1,5 +1,5 @@
 { nasMount, ... }: {
-  networking.hostName = "vm-111";
+  networking.hostName = "vm-105";
 
   services.nfs.server = {
     enable = true;

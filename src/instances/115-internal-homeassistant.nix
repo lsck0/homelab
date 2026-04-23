@@ -15,7 +15,7 @@ let
         - 10.0.0.0/8
   '';
 in {
-  networking.hostName = "vm-122";
+  networking.hostName = "vm-115";
 
   fileSystems = nasMount "/var/lib/homeassistant" "homeassistant";
 
