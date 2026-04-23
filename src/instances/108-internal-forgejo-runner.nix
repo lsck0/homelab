@@ -6,11 +6,12 @@
   virtualisation.oci-containers.backend = "docker";
   virtualisation.oci-containers.containers.forgejo-runner = {
     image = "code.forgejo.org/forgejo/runner:6.2.1";
-    cmd = [ "daemon" "--config" "/data/config.yaml" ];
+    cmd = [ "forgejo-runner" "daemon" "--config" "/data/config.yaml" ];
     volumes = [
       "/var/lib/forgejo-runner:/data"
       "/var/run/docker.sock:/var/run/docker.sock"
     ];
+    user = "root:root";
     environment = {
       SCCACHE_REDIS = "redis://10.100.0.106:6379";
     };
