@@ -63,11 +63,11 @@
       iifname "wg0" accept
 
       # allow DMZ to reach internal Git and Registry (for CI/CD)
-      iifname "ens20" ip daddr { 10.100.0.105, 10.100.0.108 } tcp dport { 80, 443 } accept
+      iifname "ens20" ip daddr { 10.100.0.107, 10.100.0.109 } tcp dport { 80, 443 } accept
 
       # allow DMZ to reach NAS (NFS for persistent data)
-      iifname "ens20" ip daddr 10.100.0.111 tcp dport { 111, 2049 } accept
-      iifname "ens20" ip daddr 10.100.0.111 udp dport { 111, 2049 } accept
+      iifname "ens20" ip daddr 10.100.0.105 tcp dport { 111, 2049 } accept
+      iifname "ens20" ip daddr 10.100.0.105 udp dport { 111, 2049 } accept
 
       # External DMZ → internal LAN: BLOCK
       iifname "ens20" oifname "ens19" counter drop

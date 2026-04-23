@@ -1,5 +1,5 @@
 { pkgs, nasMount, nasPath, ... }: {
-  networking.hostName = "vm-119";
+  networking.hostName = "vm-113";
 
   fileSystems = nasMount "/var/lib/paperless" "paperless"
     // nasPath "/var/lib/paperless/consume" "documents"

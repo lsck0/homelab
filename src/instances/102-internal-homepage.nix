@@ -29,89 +29,88 @@ let
         - Grafana:
             icon: grafana
             href: https://grafana.internal
-            ping: http://10.100.0.104
+            ping: http://10.100.0.103
         - Status:
             icon: uptime-kuma
             href: https://status.internal
-            ping: http://10.100.0.103
+            ping: http://10.100.0.104
         - NAS:
             icon: mdi-nas
             href: https://nas.internal
-            ping: http://10.100.0.111
+            ping: http://10.100.0.105
         - sccache:
             icon: mdi-cached
         - Forgejo:
             icon: forgejo
             href: https://git.internal
-            ping: http://10.100.0.105
+            ping: http://10.100.0.107
         - Forgejo Runner:
             icon: forgejo
-            ping: http://10.100.0.106
+            ping: http://10.100.0.108
+        - Registry:
+            icon: docker-moby
+            href: https://registry.internal
+            ping: http://10.100.0.109
         - Tasks:
             icon: mdi-checkbox-marked-outline
             href: https://tasks.internal
-            ping: http://10.100.0.109:8080
+            ping: http://10.100.0.110:8080
+        - Vaultwarden:
+            icon: vaultwarden
+            href: https://vault.internal
+            ping: http://10.100.0.111:8080
         - Nextcloud:
             icon: nextcloud
             href: https://cloud.internal
             ping: http://10.100.0.112
-        - Vaultwarden:
-            icon: vaultwarden
-            href: https://vault.internal
-            ping: http://10.100.0.110:8080
-        - Registry:
-            icon: docker-moby
-            href: https://registry.internal
-            ping: http://10.100.0.108
         - Paperless:
             icon: paperless-ngx
             href: https://paperless.internal
-            ping: http://10.100.0.119:8080
-        - Wiki.js:
-            icon: wikijs
-            href: https://wiki.internal
-            ping: http://10.100.0.120
-        - Home Assistant:
-            icon: home-assistant
-            href: https://hass.internal
-            ping: http://10.100.0.122
+            ping: http://10.100.0.113:8080
         - Huginn:
             icon: huginn
             href: https://huginn.internal
-            ping: http://10.100.0.121
-        - Jellyfin:
-            icon: jellyfin
-            href: https://jellyfin.internal
-            ping: http://10.100.0.117
+            ping: http://10.100.0.114
+        - Home Assistant:
+            icon: home-assistant
+            href: https://hass.internal
+            ping: http://10.100.0.115
+        - Wiki.js:
+            icon: wikijs
+            href: https://wiki.internal
+            ping: http://10.100.0.116
         - qBittorrent:
             icon: qbittorrent
             href: https://torrent.internal
-            ping: http://10.100.0.113
-        - Sonarr:
-            icon: sonarr
-            href: https://sonarr.internal
-            ping: http://10.100.0.115
-        - Radarr:
-            icon: radarr
-            href: https://radarr.internal
-            ping: http://10.100.0.116
+            ping: http://10.100.0.117
         - Prowlarr:
             icon: prowlarr
             href: https://prowlarr.internal
-            ping: http://10.100.0.114
+            ping: http://10.100.0.118
+        - Radarr:
+            icon: radarr
+            href: https://radarr.internal
+            ping: http://10.100.0.119
+        - Sonarr:
+            icon: sonarr
+            href: https://sonarr.internal
+            ping: http://10.100.0.120
+        - Jellyfin:
+            icon: jellyfin
+            href: https://jellyfin.internal
+            ping: http://10.100.0.121
+        - Audiobookshelf:
+            icon: audiobookshelf
+            href: https://abs.internal
+            ping: http://10.100.0.122
         - Navidrome:
             icon: navidrome
             href: https://music.internal
             ping: http://10.100.0.123
-        - Audiobookshelf:
-            icon: audiobookshelf
-            href: https://abs.internal
-            ping: http://10.100.0.118
         - Kavita:
             icon: kavita
             href: https://read.internal
             ping: http://10.100.0.124
-
     - External:
         - Ext Traefik:
             icon: traefik
@@ -185,11 +184,6 @@ let
     - search:
         provider: google
         target: _blank
-    - proxmox:
-        url: https://192.168.178.200:8006
-        username: {{HOMEPAGE_VAR_PROXMOX_USER}}
-        password: {{HOMEPAGE_VAR_PROXMOX_PASS}}
-        node: luca-server
   '';
 
   bookmarksYaml = pkgs.writeText "bookmarks.yaml" ''

@@ -1,5 +1,5 @@
 { nasMount, nasMedia, ... }: {
-  networking.hostName = "vm-117";
+  networking.hostName = "vm-121";
 
   fileSystems = nasMount "/var/lib/jellyfin" "jellyfin"
     // nasMedia "/mnt/media" "";

@@ -34,26 +34,26 @@ Declarative homelab. Proxmox + NixOS, managed entirely through Terraform and Nix
 | 100 | 10.100.0.100 | Internal Traefik + CrowdSec |
 | 101 | 10.100.0.101 | Authentik SSO           |
 | 102 | 10.100.0.102 | Homepage dashboard      |
-| 103 | 10.100.0.103 | Uptime Kuma             |
-| 104 | 10.100.0.104 | Grafana + Prometheus    |
-| 105 | 10.100.0.105 | Forgejo (Git)           |
-| 106 | 10.100.0.106 | Forgejo Runner (CI)     |
-| 107 | 10.100.0.107 | sccache (Redis)         |
-| 108 | 10.100.0.108 | Container Registry      |
-| 109 | 10.100.0.109 | Taskchampion sync       |
-| 110 | 10.100.0.110 | Vaultwarden             |
-| 111 | 10.100.0.111 | NAS (NFS + Samba, 100GB)|
+| 103 | 10.100.0.103 | Grafana + Prometheus    |
+| 104 | 10.100.0.104 | Uptime Kuma             |
+| 105 | 10.100.0.105 | NAS (NFS + Samba, 100GB) |
+| 106 | 10.100.0.106 | sccache (Redis)         |
+| 107 | 10.100.0.107 | Forgejo (Git)           |
+| 108 | 10.100.0.108 | Forgejo Runner (CI)     |
+| 109 | 10.100.0.109 | Container Registry      |
+| 110 | 10.100.0.110 | Taskchampion sync       |
+| 111 | 10.100.0.111 | Vaultwarden             |
 | 112 | 10.100.0.112 | Nextcloud               |
-| 113 | 10.100.0.113 | qBittorrent             |
-| 114 | 10.100.0.114 | Prowlarr                |
-| 115 | 10.100.0.115 | Sonarr                  |
-| 116 | 10.100.0.116 | Radarr                  |
-| 117 | 10.100.0.117 | Jellyfin                |
-| 118 | 10.100.0.118 | Audiobookshelf          |
-| 119 | 10.100.0.119 | Paperless-ngx           |
-| 120 | 10.100.0.120 | Wiki.js                 |
-| 121 | 10.100.0.121 | Huginn                  |
-| 122 | 10.100.0.122 | Home Assistant          |
+| 113 | 10.100.0.113 | Paperless-ngx           |
+| 114 | 10.100.0.114 | Huginn                  |
+| 115 | 10.100.0.115 | Home Assistant          |
+| 116 | 10.100.0.116 | Wiki.js                 |
+| 117 | 10.100.0.117 | qBittorrent             |
+| 118 | 10.100.0.118 | Prowlarr                |
+| 119 | 10.100.0.119 | Radarr                  |
+| 120 | 10.100.0.120 | Sonarr                  |
+| 121 | 10.100.0.121 | Jellyfin                |
+| 122 | 10.100.0.122 | Audiobookshelf          |
 | 123 | 10.100.0.123 | Navidrome (music)       |
 | 124 | 10.100.0.124 | Kavita (manga/comics)   |
 | 200 | 10.200.0.200 | External Traefik + CrowdSec |

@@ -3,7 +3,7 @@ let
   subnetTargets = subnet:
     builtins.map (host: "${subnet}.${toString host}:9100") (lib.range 1 254);
 in {
-  networking.hostName = "vm-104";
+  networking.hostName = "vm-103";
 
   fileSystems = nasMount "/var/lib/grafana" "grafana"
     // nasMount "/var/lib/prometheus2" "prometheus";

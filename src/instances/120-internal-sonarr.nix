@@ -1,5 +1,5 @@
 { pkgs, nasMount, nasPath, ... }: {
-  networking.hostName = "vm-115";
+  networking.hostName = "vm-120";
 
   fileSystems = nasMount "/var/lib/sonarr" "sonarr"
     // nasPath "/srv/downloads" "torrents"

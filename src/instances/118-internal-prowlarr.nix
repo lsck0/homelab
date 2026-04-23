@@ -1,17 +1,13 @@
-{ pkgs, nasMount, nasPath, ... }: {
-  networking.hostName = "vm-116";
+{ pkgs, nasMount, ... }: {
+  networking.hostName = "vm-118";
 
-  fileSystems = nasMount "/var/lib/radarr" "radarr"
-    // nasPath "/srv/downloads" "torrents"
-    // nasPath "/srv/movies" "media/movies";
+  fileSystems = nasMount "/var/lib/prowlarr" "prowlarr";
 
-  virtualisation.oci-containers.containers.radarr = {
-    image = "lscr.io/linuxserver/radarr:latest";
-    ports = [ "80:7878" ];
+  virtualisation.oci-containers.containers.prowlarr = {
+    image = "lscr.io/linuxserver/prowlarr:latest";
+    ports = [ "80:9696" ];
     volumes = [
-      "/var/lib/radarr:/config"
-      "/srv/movies:/movies"
-      "/srv/downloads:/downloads"
+      "/var/lib/prowlarr:/config"
     ];
     environment = {
       PUID = "1000";
@@ -21,20 +17,20 @@
   };
 
   systemd.tmpfiles.rules = [
-    "d /var/lib/radarr 0750 1000 1000 -"
+    "d /var/lib/prowlarr 0750 1000 1000 -"
   ];
 
   # Disable built-in auth — authentik ForwardAuth handles access control
-  systemd.services.radarr-disable-auth = {
-    description = "Disable Radarr built-in auth";
-    after = [ "podman-radarr.service" ];
+  systemd.services.prowlarr-disable-auth = {
+    description = "Disable Prowlarr built-in auth";
+    after = [ "podman-prowlarr.service" ];
     wantedBy = [ "multi-user.target" ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
     };
     script = ''
-      conf="/var/lib/radarr/config.xml"
+      conf="/var/lib/prowlarr/config.xml"
       for i in $(seq 1 60); do
         [ -f "$conf" ] && break
         sleep 2
@@ -44,7 +40,7 @@
       ${pkgs.gnused}/bin/sed -i 's|<AuthenticationMethod>.*</AuthenticationMethod>|<AuthenticationMethod>External</AuthenticationMethod>|' "$conf"
       ${pkgs.gnused}/bin/sed -i 's|<AuthenticationRequired>.*</AuthenticationRequired>|<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>|' "$conf"
 
-      ${pkgs.podman}/bin/podman restart radarr
+      ${pkgs.podman}/bin/podman restart prowlarr
     '';
   };
 

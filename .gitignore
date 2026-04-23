@@ -28,3 +28,4 @@ images/
 *.img
 *.qcow2
 *.sock
+*.tfvars.json

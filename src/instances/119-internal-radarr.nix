@@ -1,13 +1,17 @@
-{ pkgs, nasMount, ... }: {
-  networking.hostName = "vm-114";
+{ pkgs, nasMount, nasPath, ... }: {
+  networking.hostName = "vm-119";
 
-  fileSystems = nasMount "/var/lib/prowlarr" "prowlarr";
+  fileSystems = nasMount "/var/lib/radarr" "radarr"
+    // nasPath "/srv/downloads" "torrents"
+    // nasPath "/srv/movies" "media/movies";
 
-  virtualisation.oci-containers.containers.prowlarr = {
-    image = "lscr.io/linuxserver/prowlarr:latest";
-    ports = [ "80:9696" ];
+  virtualisation.oci-containers.containers.radarr = {
+    image = "lscr.io/linuxserver/radarr:latest";
+    ports = [ "80:7878" ];
     volumes = [
-      "/var/lib/prowlarr:/config"
+      "/var/lib/radarr:/config"
+      "/srv/movies:/movies"
+      "/srv/downloads:/downloads"
     ];
     environment = {
       PUID = "1000";
@@ -17,20 +21,20 @@
   };
 
   systemd.tmpfiles.rules = [
-    "d /var/lib/prowlarr 0750 1000 1000 -"
+    "d /var/lib/radarr 0750 1000 1000 -"
   ];
 
   # Disable built-in auth — authentik ForwardAuth handles access control
-  systemd.services.prowlarr-disable-auth = {
-    description = "Disable Prowlarr built-in auth";
-    after = [ "podman-prowlarr.service" ];
+  systemd.services.radarr-disable-auth = {
+    description = "Disable Radarr built-in auth";
+    after = [ "podman-radarr.service" ];
     wantedBy = [ "multi-user.target" ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
     };
     script = ''
-      conf="/var/lib/prowlarr/config.xml"
+      conf="/var/lib/radarr/config.xml"
       for i in $(seq 1 60); do
         [ -f "$conf" ] && break
         sleep 2
@@ -40,7 +44,7 @@
       ${pkgs.gnused}/bin/sed -i 's|<AuthenticationMethod>.*</AuthenticationMethod>|<AuthenticationMethod>External</AuthenticationMethod>|' "$conf"
       ${pkgs.gnused}/bin/sed -i 's|<AuthenticationRequired>.*</AuthenticationRequired>|<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>|' "$conf"
 
-      ${pkgs.podman}/bin/podman restart prowlarr
+      ${pkgs.podman}/bin/podman restart radarr
     '';
   };
 

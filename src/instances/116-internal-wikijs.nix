@@ -1,5 +1,5 @@
 { pkgs, nasMount, ... }: {
-  networking.hostName = "vm-120";
+  networking.hostName = "vm-116";
 
   fileSystems = nasMount "/var/lib/postgresql" "wikijs-db";
 

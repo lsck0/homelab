@@ -1,5 +1,5 @@
 { config, lib, nasMount, ... }: {
-  networking.hostName = "vm-109";
+  networking.hostName = "vm-110";
 
   fileSystems = nasMount "/var/lib/taskchampion" "taskchampion";
 

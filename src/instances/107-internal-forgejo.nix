@@ -1,5 +1,5 @@
 { pkgs, nasMount, ... }: {
-  networking.hostName = "vm-105";
+  networking.hostName = "vm-107";
 
   # Resolve auth.internal directly to authentik VM
   networking.hosts."10.100.0.101" = [ "auth.internal" ];

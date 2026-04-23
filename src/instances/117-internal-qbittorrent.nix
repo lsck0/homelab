@@ -1,5 +1,5 @@
 { pkgs, nasMount, nasMedia, nasPath, ... }: {
-  networking.hostName = "vm-113";
+  networking.hostName = "vm-117";
 
   fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
     // nasMedia "/srv/media" ""

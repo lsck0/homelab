@@ -1,5 +1,5 @@
 { config, nasMount, ... }: {
-  networking.hostName = "vm-121";
+  networking.hostName = "vm-114";
 
   fileSystems = nasMount "/var/lib/huginn" "huginn"
     // nasMount "/var/lib/postgresql" "huginn-db";

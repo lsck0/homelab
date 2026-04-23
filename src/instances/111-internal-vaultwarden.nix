@@ -1,5 +1,5 @@
 { nasMount, ... }: {
-  networking.hostName = "vm-110";
+  networking.hostName = "vm-111";
 
   # Resolve auth.internal directly to authentik VM
   networking.hosts."10.100.0.101" = [ "auth.internal" ];
