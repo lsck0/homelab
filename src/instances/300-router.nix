@@ -138,13 +138,13 @@
   services.coredns = {
     enable = true;
     config = ''
-      internal {
+      internal. {
         template IN A {
           answer "{{ .Name }} 3600 IN A 10.100.0.100"
         }
       }
 
-      external {
+      external. {
         template IN A {
           match "^mc\.external\.$"
           answer "mc.external. 3600 IN A 10.200.0.205"
@@ -153,7 +153,7 @@
         template IN A {
           answer "{{ .Name }} 3600 IN A 10.200.0.200"
         }
-        template IN SRV _minecraft._tcp.mc.external {
+        template IN SRV _minecraft._tcp.mc.external. {
           answer "{{ .Name }} 3600 IN SRV 0 0 25565 mc.external."
         }
       }
