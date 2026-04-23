@@ -55,6 +55,7 @@
         podman exec -u git forgejo forgejo admin auth update-oauth \
           --id $(echo "$SOURCES" | jq -r '.[] | select(.name == "authentik") | .id') \
           --secret "$OIDC_SECRET" \
+          --auto-discover-url "http://auth.internal/application/o/forgejo-oidc/.well-known/openid-configuration" \
           2>/dev/null || true
         exit 0
       fi
