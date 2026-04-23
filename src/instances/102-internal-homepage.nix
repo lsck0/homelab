@@ -167,7 +167,29 @@ let
   '';
 
   widgetsYaml = pkgs.writeText "widgets.yaml" ''
-    []
+    - greeting:
+        text_size: xl
+        text: Homelab
+    - datetime:
+        text_size: l
+        format:
+          dateStyle: long
+          timeStyle: short
+          hour12: false
+    - openmeteo:
+        label: Weather
+        latitude: 51.23
+        longitude: 6.78
+        timezone: Europe/Berlin
+        units: metric
+    - search:
+        provider: google
+        target: _blank
+    - resources:
+        cpu: true
+        memory: true
+        uptime: true
+        disk: /
   '';
 
   bookmarksYaml = pkgs.writeText "bookmarks.yaml" ''

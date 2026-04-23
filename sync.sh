@@ -207,6 +207,14 @@ deploy_nixos() {
     return 1
   fi
 
+  # Check if current system profile matches new toplevel
+  local current_toplevel
+  current_toplevel=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@${ip}" "readlink -f /run/current-system" 2>/dev/null || true)
+  if [ "$current_toplevel" = "$toplevel" ]; then
+    echo ">>> $name already up-to-date ($toplevel). Skipping deploy."
+    return 0
+  fi
+
   if [ -f "$AGE_KEY" ]; then
     ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
       "mkdir -p /var/lib/sops-nix && chmod 700 /var/lib/sops-nix" || return 1
