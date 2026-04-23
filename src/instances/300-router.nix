@@ -203,7 +203,6 @@
     };
     script = ''
       TOKEN=$(cat ${config.sops.secrets.cloudflare-token.path})
-      DOMAIN="wg.lsck0.dev"
       ZONE_NAME="lsck0.dev"
 
       IP=$(curl -sf https://api.ipify.org)
@@ -213,27 +212,38 @@
         "https://api.cloudflare.com/client/v4/zones?name=$ZONE_NAME" | jq -r '.result[0].id')
       [ -z "$ZONE_ID" ] || [ "$ZONE_ID" = "null" ] && { echo "Failed to get zone ID"; exit 1; }
 
-      RECORD=$(curl -sf -H "Authorization: Bearer $TOKEN" \
-        "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?name=$DOMAIN&type=A")
-      RECORD_ID=$(echo "$RECORD" | jq -r '.result[0].id // empty')
-      CURRENT_IP=$(echo "$RECORD" | jq -r '.result[0].content // empty')
+      # format: "domain:proxied"
+      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false *.lsck0.dev:true"
 
-      if [ "$CURRENT_IP" = "$IP" ]; then
-        echo "$DOMAIN already points to $IP"
-        exit 0
-      fi
+      for ENTRY in $DOMAINS; do
+        DOMAIN="''${ENTRY%%:*}"
+        PROXIED="''${ENTRY##*:}"
 
-      if [ -n "$RECORD_ID" ]; then
-        curl -sf -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-          "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
-          -d "{\"type\":\"A\",\"name\":\"$DOMAIN\",\"content\":\"$IP\",\"ttl\":300,\"proxied\":false}" | jq .
-        echo "Updated $DOMAIN: $CURRENT_IP -> $IP"
-      else
-        curl -sf -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
-          "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
-          -d "{\"type\":\"A\",\"name\":\"$DOMAIN\",\"content\":\"$IP\",\"ttl\":300,\"proxied\":false}" | jq .
-        echo "Created $DOMAIN -> $IP"
-      fi
+        RECORD=$(curl -sf -G -H "Authorization: Bearer $TOKEN" \
+          --data-urlencode "name=$DOMAIN" \
+          --data-urlencode "type=A" \
+          "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records")
+        RECORD_ID=$(echo "$RECORD" | jq -r '.result[0].id // empty')
+        CURRENT_IP=$(echo "$RECORD" | jq -r '.result[0].content // empty')
+        CURRENT_PROX=$(echo "$RECORD" | jq -r '.result[0].proxied // empty')
+
+        if [ "$CURRENT_IP" = "$IP" ] && [ "$CURRENT_PROX" = "$PROXIED" ]; then
+          echo "$DOMAIN already points to $IP (proxied: $PROXIED)"
+          continue
+        fi
+
+        if [ -n "$RECORD_ID" ]; then
+          curl -sf -X PUT -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/$RECORD_ID" \
+            -d "{\"type\":\"A\",\"name\":\"$DOMAIN\",\"content\":\"$IP\",\"ttl\":1,\"proxied\":$PROXIED}" | jq -c .
+          echo "Updated $DOMAIN: $CURRENT_IP -> $IP (proxied: $PROXIED)"
+        else
+          curl -sf -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+            "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
+            -d "{\"type\":\"A\",\"name\":\"$DOMAIN\",\"content\":\"$IP\",\"ttl\":1,\"proxied\":$PROXIED}" | jq -c .
+          echo "Created $DOMAIN -> $IP (proxied: $PROXIED)"
+        fi
+      done
     '';
   };
 
