@@ -11,7 +11,7 @@ let
             ping: http://192.168.178.1
         - Proxmox:
             icon: proxmox
-            href: https://proxmox.internal
+            href: https://proxmox.lsck0.dev
             ping: http://192.168.178.200:8006
         - Router:
             icon: nixos
@@ -20,101 +20,101 @@ let
     - Internal:
         - Traefik:
             icon: traefik
-            href: https://traefik.internal
+            href: https://traefik.lsck0.dev
             ping: http://10.100.0.100
         - Authentik:
             icon: authentik
-            href: https://auth.internal
+            href: https://auth.lsck0.dev
             ping: http://10.100.0.101
         - Grafana:
             icon: grafana
-            href: https://grafana.internal
+            href: https://grafana.lsck0.dev
             ping: http://10.100.0.103
         - Status:
             icon: uptime-kuma
-            href: https://status.internal
+            href: https://status.lsck0.dev
             ping: http://10.100.0.104
         - NAS:
             icon: mdi-nas
-            href: https://nas.internal
+            href: https://nas.lsck0.dev
             ping: http://10.100.0.105
         - sccache:
             icon: mdi-cached
         - Forgejo:
             icon: forgejo
-            href: https://git.internal
+            href: https://git.lsck0.dev
             ping: http://10.100.0.107
         - Forgejo Runner:
             icon: forgejo
             ping: http://10.100.0.108
         - Registry:
             icon: docker-moby
-            href: https://registry.internal
+            href: https://registry.lsck0.dev
             ping: http://10.100.0.109
         - Tasks:
             icon: mdi-checkbox-marked-outline
-            href: https://tasks.internal
+            href: https://tasks.lsck0.dev
             ping: http://10.100.0.110:8080
         - Vaultwarden:
             icon: vaultwarden
-            href: https://vault.internal
+            href: https://vault.lsck0.dev
             ping: http://10.100.0.111:8080
         - Nextcloud:
             icon: nextcloud
-            href: https://cloud.internal
+            href: https://cloud.lsck0.dev
             ping: http://10.100.0.112
         - Paperless:
             icon: paperless-ngx
-            href: https://paperless.internal
+            href: https://paperless.lsck0.dev
             ping: http://10.100.0.113:8080
         - Huginn:
             icon: huginn
-            href: https://huginn.internal
+            href: https://huginn.lsck0.dev
             ping: http://10.100.0.114
         - Home Assistant:
             icon: home-assistant
-            href: https://hass.internal
+            href: https://hass.lsck0.dev
             ping: http://10.100.0.115
         - Wiki.js:
             icon: wikijs
-            href: https://wiki.internal
+            href: https://wiki.lsck0.dev
             ping: http://10.100.0.116
         - qBittorrent:
             icon: qbittorrent
-            href: https://torrent.internal
+            href: https://torrent.lsck0.dev
             ping: http://10.100.0.117
         - Prowlarr:
             icon: prowlarr
-            href: https://prowlarr.internal
+            href: https://prowlarr.lsck0.dev
             ping: http://10.100.0.118
         - Radarr:
             icon: radarr
-            href: https://radarr.internal
+            href: https://radarr.lsck0.dev
             ping: http://10.100.0.119
         - Sonarr:
             icon: sonarr
-            href: https://sonarr.internal
+            href: https://sonarr.lsck0.dev
             ping: http://10.100.0.120
         - Jellyfin:
             icon: jellyfin
-            href: https://jellyfin.internal
+            href: https://jellyfin.lsck0.dev
             ping: http://10.100.0.121
         - Audiobookshelf:
             icon: audiobookshelf
-            href: https://abs.internal
+            href: https://abs.lsck0.dev
             ping: http://10.100.0.122
         - Navidrome:
             icon: navidrome
-            href: https://music.internal
+            href: https://music.lsck0.dev
             ping: http://10.100.0.123
         - Kavita:
             icon: kavita
-            href: https://read.internal
+            href: https://read.lsck0.dev
             ping: http://10.100.0.124
     - External:
         - Ext Traefik:
             icon: traefik
-            href: https://traefik.external
+            href: https://ext-traefik.lsck0.dev
             ping: http://10.200.0.200
         - Headscale:
             icon: headscale
@@ -122,15 +122,15 @@ let
             ping: http://10.200.0.201
         - Shlink:
             icon: shlink
-            href: https://shlink.external
+            href: https://shlink.lsck0.dev
             ping: http://10.200.0.202
         - PrivateBin:
             icon: privatebin
-            href: https://paste.external
+            href: https://paste.lsck0.dev
             ping: http://10.200.0.203
         - Share:
             icon: filebrowser
-            href: https://share.external
+            href: https://share.lsck0.dev
             ping: http://10.200.0.204
         - Minecraft:
             icon: minecraft
@@ -221,10 +221,10 @@ in {
         varname="HOMEPAGE_VAR_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"
         echo "''${varname}=$(cat "$f")" >> "$ENV_FILE"
       done
-      
+
       echo "HOMEPAGE_VAR_PROXMOX_USER=$(cat ${config.sops.secrets."proxmox-user".path})" >> "$ENV_FILE"
       echo "HOMEPAGE_VAR_PROXMOX_PASS=$(cat ${config.sops.secrets."proxmox-pass".path})" >> "$ENV_FILE"
-      
+
       chmod 600 "$ENV_FILE"
     '';
   };
@@ -236,7 +236,7 @@ in {
       "/var/lib/homepage:/app/config"
     ];
     environment = {
-      HOMEPAGE_ALLOWED_HOSTS = "homepage.internal,homepage.lsck0.dev";
+      HOMEPAGE_ALLOWED_HOSTS = "homepage.lsck0.dev";
     };
     environmentFiles = [ "/var/lib/homepage/homepage.env" ];
     extraOptions = [ "--cap-add=NET_RAW" ];

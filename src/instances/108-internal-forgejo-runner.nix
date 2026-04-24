@@ -1,9 +1,6 @@
 { pkgs, nasMount, ... }: {
   networking.hostName = "vm-108";
 
-  # Resolve git.internal directly to Forgejo (bypass traefik for runner)
-  networking.hosts."10.100.0.107" = [ "git.internal" ];
-
   fileSystems = nasMount "/var/lib/forgejo-runner" "forgejo-runner"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
@@ -18,9 +15,9 @@
       "/var/run/docker.sock:/var/run/docker.sock"
     ];
     user = "root:root";
-    extraOptions = [ "--add-host=git.internal:10.100.0.107" ];
+    extraOptions = [ "--add-host=git.lsck0.dev:10.100.0.100" ];
     environment = {
-      SCCACHE_REDIS = "redis://sccache.internal";
+      SCCACHE_REDIS = "redis://sccache.lsck0.dev";
     };
   };
 
@@ -53,7 +50,7 @@
 
       # Wait for Forgejo API
       for i in $(seq 1 90); do
-        if curl -sf http://git.internal/api/v1/settings/api >/dev/null 2>&1; then break; fi
+        if curl -sf https://git.lsck0.dev/api/v1/settings/api >/dev/null 2>&1; then break; fi
         sleep 2
       done
 
@@ -73,10 +70,10 @@
       REG_TOKEN=$(cat "$TOKEN_FILE")
 
       docker run --rm -v /var/lib/forgejo-runner:/data \
-        --add-host=git.internal:10.100.0.107 \
+        --add-host=git.lsck0.dev:10.100.0.100 \
         code.forgejo.org/forgejo/runner:6.2.1 \
         forgejo-runner register \
-          --instance http://git.internal \
+          --instance https://git.lsck0.dev \
           --token "$REG_TOKEN" \
           --name vm-108-runner \
           --labels "docker:docker://node:20-bookworm,ubuntu-latest:docker://ubuntu:22.04,rust:docker://rust:1.80-bookworm" \

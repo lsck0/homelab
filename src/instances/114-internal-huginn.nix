@@ -26,7 +26,7 @@
     ports = [ "80:3000" ];
     volumes = [ "/var/lib/huginn:/var/lib/huginn" ];
     environment = {
-      DOMAIN = "huginn.internal";
+      DOMAIN = "huginn.lsck0.dev";
       DATABASE_ADAPTER = "postgresql";
       DATABASE_HOST = "10.88.0.1";
       DATABASE_PORT = "5432";

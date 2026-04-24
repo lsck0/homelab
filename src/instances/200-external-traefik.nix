@@ -1,15 +1,5 @@
 { config, pkgs, nasMount, ... }:
-let
-  externalCerts = pkgs.runCommand "external-local-certs" {
-    nativeBuildInputs = [ pkgs.openssl ];
-  } ''
-    mkdir -p $out
-    openssl req -x509 -newkey rsa:2048 -nodes \
-      -keyout $out/key.pem -out $out/cert.pem \
-      -days 3650 -subj "/CN=*.external" \
-      -addext "subjectAltName=DNS:*.external,DNS:external"
-  '';
-in {
+{
   networking.hostName = "vm-200";
   homelab.acmeEmail = "luca.sandrock@proton.me";
 
@@ -63,52 +53,31 @@ in {
       };
     };
     dynamicConfigOptions = {
-    tls = {
-      stores.default.defaultCertificate = {
-        certFile = "${externalCerts}/cert.pem";
-        keyFile = "${externalCerts}/key.pem";
-      };
-    };
-    http = {
-      routers = {
-        # ── Dashboard ──
-        traefik-dash = { rule = "Host(`traefik.external`)"; service = "api@internal"; entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
+      http = {
+        routers = {
+          traefik-dash-tls = { rule = "Host(`ext-traefik.lsck0.dev`)"; service = "api@internal"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+          headscale-tls    = { rule = "Host(`hs.lsck0.dev`)";          service = "headscale";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+          shlink-tls       = { rule = "Host(`shlink.lsck0.dev`)";      service = "shlink";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+          privatebin-tls   = { rule = "Host(`paste.lsck0.dev`)";       service = "privatebin";   entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+          share-tls        = { rule = "Host(`share.lsck0.dev`)";       service = "share";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+        };
 
-        # ── .external — HTTP (LAN) ──
-        headscale    = { rule = "Host(`hs.external`)";          service = "headscale";    entryPoints = [ "web" ]; };
-        shlink       = { rule = "Host(`shlink.external`)";      service = "shlink";       entryPoints = [ "web" ]; };
-        privatebin   = { rule = "Host(`paste.external`)";       service = "privatebin";   entryPoints = [ "web" ]; };
-        share        = { rule = "Host(`share.external`)";       service = "share";        entryPoints = [ "web" ]; };
-
-        # ── .external — HTTPS (LAN, self-signed) ──
-        headscale-local-tls  = { rule = "Host(`hs.external`)";      service = "headscale";  entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-        shlink-local-tls     = { rule = "Host(`shlink.external`)";  service = "shlink";     entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-        privatebin-local-tls = { rule = "Host(`paste.external`)";   service = "privatebin"; entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-        share-local-tls      = { rule = "Host(`share.external`)";   service = "share";      entryPoints = [ "websecure" ]; tls = { options = "default"; }; };
-
-        # ── lsck0.dev — HTTPS (internet) ──
-        headscale-tls   = { rule = "Host(`hs.lsck0.dev`)";          service = "headscale";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-        shlink-tls      = { rule = "Host(`shlink.lsck0.dev`)";      service = "shlink";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-        privatebin-tls  = { rule = "Host(`paste.lsck0.dev`)";       service = "privatebin";   entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-        share-tls       = { rule = "Host(`share.lsck0.dev`)";       service = "share";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+        services = {
+          headscale.loadBalancer.servers    = [{ url = "http://10.200.0.201:80"; }];
+          shlink.loadBalancer.servers       = [{ url = "http://10.200.0.202:80"; }];
+          privatebin.loadBalancer.servers   = [{ url = "http://10.200.0.203:80"; }];
+          share.loadBalancer.servers        = [{ url = "http://10.200.0.204:80"; }];
+        };
       };
-
-      services = {
-        headscale.loadBalancer.servers    = [{ url = "http://10.200.0.201:80"; }];
-        shlink.loadBalancer.servers       = [{ url = "http://10.200.0.202:80"; }];
-        privatebin.loadBalancer.servers   = [{ url = "http://10.200.0.203:80"; }];
-        share.loadBalancer.servers        = [{ url = "http://10.200.0.204:80"; }];
+      # ── TCP passthrough ──
+      tcp = {
+        routers.minecraft = {
+          rule = "HostSNI(`*`)";
+          service = "minecraft";
+          entryPoints = [ "minecraft" ];
+        };
+        services.minecraft.loadBalancer.servers = [{ address = "10.200.0.205:25565"; }];
       };
-    };
-    # ── TCP passthrough ──
-    tcp = {
-      routers.minecraft = {
-        rule = "HostSNI(`*`)";
-        service = "minecraft";
-        entryPoints = [ "minecraft" ];
-      };
-      services.minecraft.loadBalancer.servers = [{ address = "10.200.0.205:25565"; }];
-    };
     };
   };
 

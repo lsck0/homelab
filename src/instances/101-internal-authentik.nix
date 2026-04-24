@@ -1,63 +1,51 @@
 { config, pkgs, lib, nasMount, ... }:
 let
   protectedApps = [
-    { slug = "traefik";        name = "Traefik";          local = "traefik.internal";     external = "traefik.lsck0.dev"; }
-    # forgejo uses native OIDC, not ForwardAuth
-    { slug = "registry";       name = "Registry";         local = "registry.internal";    external = "registry.lsck0.dev"; }
-    # vaultwarden uses native OIDC, not ForwardAuth
-    { slug = "paperless";      name = "Paperless";        local = "paperless.internal";   external = "paperless.lsck0.dev"; }
-    { slug = "jellyfin";       name = "Jellyfin";         local = "jellyfin.internal";    external = "jellyfin.lsck0.dev"; }
-    { slug = "huginn";         name = "Huginn";           local = "huginn.internal";      external = "huginn.lsck0.dev"; }
-    { slug = "homeassistant";  name = "Home Assistant";   local = "hass.internal";        external = "hass.lsck0.dev"; }
-    { slug = "grafana";        name = "Grafana";          local = "grafana.internal";     external = "grafana.lsck0.dev"; }
-    { slug = "wikijs";         name = "Wiki.js";          local = "wiki.internal";        external = "wiki.lsck0.dev"; }
-    { slug = "audiobookshelf"; name = "Audiobookshelf";   local = "abs.internal";         external = "abs.lsck0.dev"; }
-    { slug = "qbittorrent";    name = "qBittorrent";      local = "torrent.internal";     external = "torrent.lsck0.dev"; }
-    { slug = "prowlarr";       name = "Prowlarr";         local = "prowlarr.internal";    external = "prowlarr.lsck0.dev"; }
-    { slug = "sonarr";         name = "Sonarr";           local = "sonarr.internal";      external = "sonarr.lsck0.dev"; }
-    { slug = "radarr";         name = "Radarr";           local = "radarr.internal";      external = "radarr.lsck0.dev"; }
-    { slug = "navidrome";      name = "Navidrome";        local = "music.internal";       external = "music.lsck0.dev"; }
-    { slug = "kavita";         name = "Kavita";           local = "read.internal";        external = "read.lsck0.dev"; }
-    { slug = "nas";            name = "NAS";              local = "nas.internal";         external = "nas.lsck0.dev"; }
-    { slug = "taskchampion";   name = "Tasks";            local = "tasks.internal";       external = "tasks.lsck0.dev"; }
-    { slug = "proxmox";        name = "Proxmox";          local = "proxmox.internal";     external = "proxmox.lsck0.dev"; }
+    { slug = "traefik";        name = "Traefik";          domain = "traefik.lsck0.dev"; }
+    { slug = "registry";       name = "Registry";         domain = "registry.lsck0.dev"; }
+    { slug = "paperless";      name = "Paperless";        domain = "paperless.lsck0.dev"; }
+    { slug = "jellyfin";       name = "Jellyfin";         domain = "jellyfin.lsck0.dev"; }
+    { slug = "huginn";         name = "Huginn";           domain = "huginn.lsck0.dev"; }
+    { slug = "homeassistant";  name = "Home Assistant";   domain = "hass.lsck0.dev"; }
+    { slug = "grafana";        name = "Grafana";          domain = "grafana.lsck0.dev"; }
+    { slug = "wikijs";         name = "Wiki.js";          domain = "wiki.lsck0.dev"; }
+    { slug = "audiobookshelf"; name = "Audiobookshelf";   domain = "abs.lsck0.dev"; }
+    { slug = "qbittorrent";    name = "qBittorrent";      domain = "torrent.lsck0.dev"; }
+    { slug = "prowlarr";       name = "Prowlarr";         domain = "prowlarr.lsck0.dev"; }
+    { slug = "sonarr";         name = "Sonarr";           domain = "sonarr.lsck0.dev"; }
+    { slug = "radarr";         name = "Radarr";           domain = "radarr.lsck0.dev"; }
+    { slug = "navidrome";      name = "Navidrome";        domain = "music.lsck0.dev"; }
+    { slug = "kavita";         name = "Kavita";           domain = "read.lsck0.dev"; }
+    { slug = "nas";            name = "NAS";              domain = "nas.lsck0.dev"; }
+    { slug = "taskchampion";   name = "Tasks";            domain = "tasks.lsck0.dev"; }
+    { slug = "proxmox";        name = "Proxmox";          domain = "proxmox.lsck0.dev"; }
   ];
 
-  mkProviderAndApp = variant: app:
-    let
-      host = if variant == "local" then app.local else app.external;
-      suffix = variant;
-    in ''
-      - model: authentik_providers_proxy.proxyprovider
-        id: provider-${app.slug}-${suffix}
-        identifiers:
-          name: ${app.slug}-${suffix}-provider
-        attrs:
-          authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
-          mode: forward_single
-          external_host: https://${host}
-      - model: authentik_core.application
-        id: app-${app.slug}-${suffix}
-        identifiers:
-          slug: ${app.slug}-${suffix}
-        attrs:
-          name: "${app.name} (${suffix})"
-          provider: !KeyOf provider-${app.slug}-${suffix}
-          meta_launch_url: https://${host}
-    '';
+  mkProviderAndApp = app: ''
+    - model: authentik_providers_proxy.proxyprovider
+      id: provider-${app.slug}
+      identifiers:
+        name: ${app.slug}-provider
+      attrs:
+        authorization_flow: !Find [authentik_flows.flow, [slug, default-provider-authorization-implicit-consent]]
+        mode: forward_single
+        external_host: https://${app.domain}
+    - model: authentik_core.application
+      id: app-${app.slug}
+      identifiers:
+        slug: ${app.slug}
+      attrs:
+        name: "${app.name}"
+        provider: !KeyOf provider-${app.slug}
+        meta_launch_url: https://${app.domain}
+  '';
 
   appEntries = builtins.concatStringsSep "" (
-    builtins.concatMap (app: [
-      (mkProviderAndApp "local" app)
-      (mkProviderAndApp "external" app)
-    ]) protectedApps
+    builtins.map mkProviderAndApp protectedApps
   );
 
   outpostProvidersList = builtins.concatStringsSep "\n" (
-    builtins.concatMap (app: [
-      "    - !KeyOf provider-${app.slug}-local"
-      "    - !KeyOf provider-${app.slug}-external"
-    ]) protectedApps
+    builtins.map (app: "    - !KeyOf provider-${app.slug}") protectedApps
   );
 
   # OIDC entries use __PLACEHOLDER__ tokens replaced at runtime by blueprint-sync
@@ -74,7 +62,6 @@ let
         client_secret: __NEXTCLOUD_OIDC_SECRET__
         signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
         redirect_uris: |
-          https://cloud.internal/apps/user_oidc/code
           https://cloud.lsck0.dev/apps/user_oidc/code
         property_mappings:
           - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
@@ -88,7 +75,7 @@ let
       attrs:
         name: Nextcloud
         provider: !KeyOf provider-nextcloud-oidc
-        meta_launch_url: https://cloud.internal
+        meta_launch_url: https://cloud.lsck0.dev
 
     # --- Vaultwarden OIDC ---
     - model: authentik_providers_oauth2.oauth2provider
@@ -102,7 +89,6 @@ let
         client_secret: __VAULTWARDEN_OIDC_SECRET__
         signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
         redirect_uris: |
-          https://vault.internal/identity/connect/oidc-signin
           https://vault.lsck0.dev/identity/connect/oidc-signin
         property_mappings:
           - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
@@ -116,7 +102,7 @@ let
       attrs:
         name: Vaultwarden
         provider: !KeyOf provider-vaultwarden-oidc
-        meta_launch_url: https://vault.internal
+        meta_launch_url: https://vault.lsck0.dev
 
     # --- Forgejo OIDC ---
     - model: authentik_providers_oauth2.oauth2provider
@@ -130,7 +116,6 @@ let
         client_secret: __FORGEJO_OIDC_SECRET__
         signing_key: !Find [authentik_crypto.certificatekeypair, [name, authentik Self-signed Certificate]]
         redirect_uris: |
-          https://git.internal/user/oauth2/authentik/callback
           https://git.lsck0.dev/user/oauth2/authentik/callback
         property_mappings:
           - !Find [authentik_providers_oauth2.scopemapping, [managed, goauthentik.io/providers/oauth2/scope-openid]]
@@ -144,7 +129,7 @@ let
       attrs:
         name: Forgejo
         provider: !KeyOf provider-forgejo-oidc
-        meta_launch_url: https://git.internal
+        meta_launch_url: https://git.lsck0.dev
   '';
 
   blueprintYaml = ''
@@ -163,7 +148,7 @@ let
         name: "authentik Embedded Outpost"
         type: proxy
         config:
-          authentik_host: https://auth.internal
+          authentik_host: https://auth.lsck0.dev
           authentik_host_insecure: true
         providers:
     ${outpostProvidersList}
@@ -232,7 +217,7 @@ in {
           restart: unless-stopped
           command: server
           environment:
-            AUTHENTIK_HOST: https://auth.internal
+            AUTHENTIK_HOST: https://auth.lsck0.dev
             AUTHENTIK_INSECURE: "true"
           env_file:
             - ${config.sops.templates."authentik.env".path}
@@ -251,7 +236,7 @@ in {
           restart: unless-stopped
           command: worker
           environment:
-            AUTHENTIK_HOST: https://auth.internal
+            AUTHENTIK_HOST: https://auth.lsck0.dev
             AUTHENTIK_INSECURE: "true"
           env_file:
             - ${config.sops.templates."authentik.env".path}
