@@ -34,8 +34,8 @@
     filterForward = true;
 
     interfaces.ens18 = {
-      allowedTCPPorts = [ 22 443 10100 10200 25565 ];
-      allowedUDPPorts = [ 51820 ];
+      allowedTCPPorts = [ 22 53 443 10100 10200 25565 ];
+      allowedUDPPorts = [ 53 51820 ];
     };
     interfaces.ens19 = {
       allowedTCPPorts = [ 22 53 9100 ];
