@@ -29,7 +29,7 @@
     environment = {
       EULA = "TRUE";
       MEMORY = "11G";
-      DIFFICULTY = "normal";
+      DIFFICULTY = "hard";
       MOTD = "Homelab Minecraft";
       ENABLE_COMMAND_BLOCK = "true";
       SNOOPER_ENABLED = "false";
