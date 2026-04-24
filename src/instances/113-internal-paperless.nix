@@ -14,8 +14,8 @@
       PAPERLESS_AUTO_LOGIN_USERNAME = "admin";
       PAPERLESS_ENABLE_HTTP_REMOTE_USER = "true";
       PAPERLESS_HTTP_REMOTE_USER_HEADER_NAME = "HTTP_X_AUTHENTIK_USERNAME";
-      PAPERLESS_URL = "https://paperless.internal";
-      PAPERLESS_CSRF_TRUSTED_ORIGINS = "https://paperless.internal,https://paperless.lsck0.dev";
+      PAPERLESS_URL = "https://paperless.lsck0.dev";
+      PAPERLESS_CSRF_TRUSTED_ORIGINS = "https://paperless.lsck0.dev";
       PAPERLESS_TIME_ZONE = "Europe/Berlin";
       PAPERLESS_OCR_LANGUAGE = "deu+eng";
       PAPERLESS_CONSUMER_POLLING = "30";
@@ -37,7 +37,7 @@
       RestartSec = 30;
     };
     environment = {
-      PAPERLESS_URL = "https://paperless.internal";
+      PAPERLESS_URL = "https://paperless.lsck0.dev";
     };
     script = ''
       # Wait for web service to be ready
@@ -77,7 +77,7 @@
       WorkingDirectory = "/var/lib/paperless";
     };
     environment = {
-      PAPERLESS_URL = "https://paperless.internal";
+      PAPERLESS_URL = "https://paperless.lsck0.dev";
     };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/paperless-key.token"

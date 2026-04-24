@@ -9,7 +9,6 @@
     volumes = [ "/var/lib/shlink:/etc/shlink/data" ];
     environment = {
       DEFAULT_DOMAIN = "shlink.lsck0.dev";
-      ADDITIONAL_DOMAINS = "shlink.external";
       IS_HTTPS_ENABLED = "true";
       DB_DRIVER = "sqlite";
       TIMEZONE = "Europe/Berlin";

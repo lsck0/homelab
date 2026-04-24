@@ -133,36 +133,11 @@
   };
 
   # ── DNS Server (CoreDNS) ─────────────────────────────────────
-  # *.internal → internal Traefik, *.external → external Traefik
+  # All services use *.lsck0.dev — internal DNS resolves to local traefik IPs
   services.resolved.enable = false;
   services.coredns = {
     enable = true;
     config = ''
-      internal. {
-        hosts {
-          # Direct-access services (not behind traefik)
-          10.100.0.106 sccache.internal
-          fallthrough
-        }
-        template IN A {
-          answer "{{ .Name }} 3600 IN A 10.100.0.100"
-        }
-      }
-
-      external. {
-        template IN A {
-          match "^mc\.external\.$"
-          answer "mc.external. 3600 IN A 10.200.0.205"
-          fallthrough
-        }
-        template IN A {
-          answer "{{ .Name }} 3600 IN A 10.200.0.200"
-        }
-        template IN SRV _minecraft._tcp.mc.external. {
-          answer "{{ .Name }} 3600 IN SRV 0 0 25565 mc.external."
-        }
-      }
-
       lsck0.dev {
         hosts {
           # internal services → internal Traefik
@@ -177,6 +152,7 @@
           10.100.0.106 sccache.lsck0.dev
           # external services → external Traefik
           10.200.0.200 hs.lsck0.dev shlink.lsck0.dev paste.lsck0.dev share.lsck0.dev mc.lsck0.dev
+          10.200.0.200 ext-traefik.lsck0.dev
           fallthrough
         }
         template IN SRV _minecraft._tcp.mc.lsck0.dev {
