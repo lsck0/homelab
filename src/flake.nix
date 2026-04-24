@@ -15,62 +15,7 @@
 
     common = {
       imports = [
-        ({ pkgs, lib, modulesPath, ... }: {
-          imports = [
-            (modulesPath + "/profiles/qemu-guest.nix")
-            ./modules/docker-stack.nix
-          ];
-
-          options.homelab.acmeEmail = lib.mkOption {
-            type = lib.types.str;
-            default = "admin@example.com";
-            description = "Default email for ACME certificates.";
-          };
-
-          config = {
-            boot.loader.grub.enable = true;
-            boot.loader.grub.device = "/dev/sda";
-            boot.growPartition = true;
-
-            fileSystems."/" = {
-              device = "/dev/disk/by-label/nixos";
-              fsType = "ext4";
-              autoResize = true;
-            };
-
-            sops = {
-              defaultSopsFile = ./secrets.yaml;
-              age.keyFile = "/var/lib/sops-nix/key.txt";
-              gnupg.sshKeyPaths = [];
-            };
-
-            services.qemuGuest.enable = true;
-            # Use simple eth0 naming so cloud-init network config matches
-            networking.usePredictableInterfaceNames = false;
-            services.openssh = {
-              enable = true;
-              settings = {
-                PermitRootLogin = "prohibit-password";
-                PasswordAuthentication = false;
-              };
-            };
-
-            security.sudo.wheelNeedsPassword = false;
-
-            environment.systemPackages = with pkgs; [ vim curl htop ];
-            services.prometheus.exporters.node = {
-              enable = true;
-              openFirewall = true;
-            };
-            networking.firewall.allowedTCPPorts = [ 9100 ];
-
-            # Prefer IPv4 — internal VMs have no IPv6 routing
-            networking.enableIPv6 = false;
-
-            nix.settings.experimental-features = [ "nix-command" "flakes" ];
-            system.stateVersion = "25.11";
-          };
-        })
+        ./modules/base.nix
         sops-nix.nixosModules.sops
       ];
     };
@@ -90,106 +35,24 @@
 
     parseEntry = entry: let
       basename = lib.removeSuffix ".nix" entry.name;
-      parts = lib.splitString "-" basename;
-      vmId = lib.toInt (builtins.head parts);
-      type =
-        if builtins.length parts >= 2 then builtins.elemAt parts 1
-        else "unknown";
-    in { inherit basename vmId type; };
+    in basename;
 
-    networkConfig = parsed: { lib, ... }: let
-      # Compute static IP from VM ID and type
-      subnet =
-        if parsed.type == "internal" then "10.100.0"
-        else if parsed.type == "external" then "10.200.0"
-        else null;
-      gateway =
-        if parsed.type == "internal" then "10.100.0.1"
-        else if parsed.type == "external" then "10.200.0.1"
-        else null;
-    in lib.mkIf (subnet != null) {
-      networking.useDHCP = lib.mkDefault false;
-      networking.interfaces.eth0.ipv4.addresses = [{
-        address = "${subnet}.${toString parsed.vmId}";
-        prefixLength = 24;
-      }];
-      networking.defaultGateway = { address = gateway; interface = "eth0"; };
-      networking.nameservers = [ gateway ];
-    };
-
-    # shared helpers passed to all instance modules
-    nasIP = "10.100.0.105";
-    nfsOpts = [ "nfsvers=4" "rw" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-    helpers = {
-      # mount NAS data dir: nasMount "/var/lib/foo" "foo"
-      nasMount = mountpoint: name: {
-        "${mountpoint}" = {
-          device = "${nasIP}:/srv/nas/data/${name}";
-          fsType = "nfs";
-          options = nfsOpts;
-        };
-      };
-      # mount NAS media dir (read-only): nasMedia "/srv/music" "music"
-      nasMedia = mountpoint: subpath: {
-        "${mountpoint}" = {
-          device = "${nasIP}:/srv/nas/media/${subpath}";
-          fsType = "nfs";
-          options = [ "nfsvers=4" "ro" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-        };
-      };
-      # mount arbitrary NAS path (rw): nasPath "/srv/downloads" "torrents"
-      nasPath = mountpoint: naspath: {
-        "${mountpoint}" = {
-          device = "${nasIP}:/srv/nas/${naspath}";
-          fsType = "nfs";
-          options = nfsOpts;
-        };
-      };
-    };
-
-    hostConfigs = builtins.listToAttrs (map (entry: let
-      parsed = parseEntry entry;
-    in {
-      name = parsed.basename;
+    hostConfigs = builtins.listToAttrs (map (entry: {
+      name = parseEntry entry;
       value = lib.nixosSystem {
         inherit system;
-        specialArgs = helpers;
         modules = [
           common
-          (networkConfig parsed)
           (entry.dir + "/${entry.name}")
         ];
       };
     }) hostEntries);
 
   in {
-    # Golden Image
-    # Build with: sudo nix build ./src#cloud-image --extra-experimental-features "nix-command flakes"
-    packages.${system}.cloud-image = let
-      goldenConfig = (lib.nixosSystem {
-        inherit system;
-        modules = [
-          common
-          ({ lib, ... }: {
-            services.cloud-init.enable = true; services.cloud-init.network.enable = true;
-            # Ensure only root is used and no default 'nixos' user is created
-            services.cloud-init.settings = {
-              users = [ "root" ];
-              disable_root = false;
-            };
-          })
-        ];
-      }).config;
-    in import "${nixpkgs}/nixos/lib/make-disk-image.nix" {
-      inherit pkgs lib;
-      config = goldenConfig;
-      format = "qcow2";
-      diskSize = "auto";
-      additionalSpace = "1G";
-      label = "nixos";
+    packages.${system}.cloud-image = import ./modules/cloud-image.nix {
+      inherit pkgs lib nixpkgs common;
     };
 
-    # Host configs are auto-discovered from src/instances/{1XX-internal-*,2XX-external-*,300-router}.nix
     nixosConfigurations = hostConfigs;
   };
 }

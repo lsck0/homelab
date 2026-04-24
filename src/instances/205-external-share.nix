@@ -1,5 +1,5 @@
 { nasMount, ... }: {
-  networking.hostName = "vm-204";
+  networking.hostName = "vm-205";
   fileSystems = nasMount "/var/lib/pingvin-share" "share";
 
   virtualisation.oci-containers.containers.share = {

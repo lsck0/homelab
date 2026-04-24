@@ -29,10 +29,12 @@ let
     # external
     { name = "Traefik (external)"; url = "http://10.200.0.200:80"; }
     { name = "Headscale";          url = "http://10.200.0.201:80"; }
-    { name = "Shlink";             url = "http://10.200.0.202:80"; }
-    { name = "PrivateBin";         url = "http://10.200.0.203:80"; }
-    { name = "Share";              url = "http://10.200.0.204:80"; }
-    { name = "Minecraft";          url = "10.200.0.205"; type = "port"; port = 25565; }
+    { name = "SearXNG";            url = "http://10.200.0.202:80"; }
+    { name = "Shlink";             url = "http://10.200.0.203:80"; }
+    { name = "PrivateBin";         url = "http://10.200.0.204:80"; }
+    { name = "Share";              url = "http://10.200.0.205:80"; }
+    { name = "Hello";              url = "http://10.200.0.208:80"; }
+    { name = "Minecraft";          url = "10.200.0.207"; type = "port"; port = 25565; }
   ];
 
   setupJs = pkgs.writeText "uptime-setup.js" ''

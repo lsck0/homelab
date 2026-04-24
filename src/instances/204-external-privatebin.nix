@@ -1,5 +1,5 @@
 { nasMount, ... }: {
-  networking.hostName = "vm-203";
+  networking.hostName = "vm-204";
 
   fileSystems = nasMount "/var/lib/privatebin" "privatebin";
 

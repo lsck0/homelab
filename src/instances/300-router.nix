@@ -62,8 +62,8 @@
       # WireGuard VPN → anywhere: allow
       iifname "wg0" accept
 
-      # allow DMZ to reach internal Git and Registry (for CI/CD)
-      iifname "ens20" ip daddr { 10.100.0.107, 10.100.0.109 } tcp dport { 80, 443 } accept
+      # allow DMZ to reach internal Traefik, Git, and Registry (for CI/CD + image pulls)
+      iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.107, 10.100.0.109 } tcp dport { 80, 443 } accept
 
       # allow DMZ to reach NAS (NFS for persistent data)
       iifname "ens20" ip daddr 10.100.0.105 tcp dport { 111, 2049 } accept
@@ -151,8 +151,8 @@
           10.100.0.100 nas.lsck0.dev proxmox.lsck0.dev traefik.lsck0.dev registry-ui.lsck0.dev
           10.100.0.106 sccache.lsck0.dev
           # external services → external Traefik
-          10.200.0.200 hs.lsck0.dev shlink.lsck0.dev paste.lsck0.dev share.lsck0.dev mc.lsck0.dev
-          10.200.0.200 ext-traefik.lsck0.dev
+          10.200.0.200 hs.lsck0.dev search.lsck0.dev shlink.lsck0.dev paste.lsck0.dev share.lsck0.dev
+          10.200.0.200 mc.lsck0.dev hello.lsck0.dev ext-traefik.lsck0.dev
           fallthrough
         }
         template IN SRV _minecraft._tcp.mc.lsck0.dev {
@@ -197,7 +197,7 @@
       # format: "domain:proxied"
       # Only external (public) services get Cloudflare DNS records.
       # Internal services resolve via CoreDNS only — no public DNS exposure.
-      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false hs.lsck0.dev:true shlink.lsck0.dev:true paste.lsck0.dev:true share.lsck0.dev:true"
+      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false hs.lsck0.dev:true search.lsck0.dev:true shlink.lsck0.dev:true paste.lsck0.dev:true share.lsck0.dev:true hello.lsck0.dev:true"
 
       for ENTRY in $DOMAINS; do
         DOMAIN="''${ENTRY%%:*}"
