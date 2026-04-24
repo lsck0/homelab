@@ -1,9 +1,6 @@
 { config, pkgs, nasMount, ... }: {
   networking.hostName = "vm-107";
 
-  # Resolve auth.internal directly to authentik VM
-  networking.hosts."10.100.0.101" = [ "auth.internal" ];
-
   fileSystems = nasMount "/var/lib/forgejo" "forgejo"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
@@ -13,11 +10,10 @@
     image = "codeberg.org/forgejo/forgejo:7";
     ports = [ "80:3000" "2222:22" ];
     volumes = [ "/var/lib/forgejo:/data" ];
-    # Pass host's /etc/hosts into container so auth.internal resolves
-    extraOptions = [ "--add-host=auth.internal:10.100.0.101" ];
+    extraOptions = [ "--add-host=auth.lsck0.dev:10.100.0.100" ];
     environment = {
       FORGEJO__server__HTTP_PORT = "3000";
-      FORGEJO__server__ROOT_URL = "https://git.internal/";
+      FORGEJO__server__ROOT_URL = "https://git.lsck0.dev/";
       FORGEJO__actions__ENABLED = "true";
       FORGEJO__service__DISABLE_REGISTRATION = "false";
       FORGEJO__service__ALLOW_ONLY_EXTERNAL_REGISTRATION = "true";
@@ -46,7 +42,7 @@
       done
 
       OIDC_SECRET=$(cat ${config.sops.secrets.forgejo-oidc-secret.path})
-      DISCOVER_URL="http://auth.internal/application/o/forgejo-oidc/.well-known/openid-configuration"
+      DISCOVER_URL="https://auth.lsck0.dev/application/o/forgejo-oidc/.well-known/openid-configuration"
 
       # Check if auth source already exists via CLI
       AUTH_ID=$(podman exec -u git forgejo forgejo admin auth list 2>/dev/null \

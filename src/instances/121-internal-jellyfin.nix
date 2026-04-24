@@ -13,7 +13,7 @@
       "/mnt/media:/media:ro"
     ];
     environment = {
-      JELLYFIN_PublishedServerUrl = "https://jellyfin.internal";
+      JELLYFIN_PublishedServerUrl = "https://jellyfin.lsck0.dev";
     };
   };
 

@@ -1,9 +1,6 @@
 { pkgs, config, nasMount, ... }: {
   networking.hostName = "vm-112";
 
-  # Resolve auth.internal directly to authentik VM (bypasses traefik)
-  networking.hosts."10.100.0.101" = [ "auth.internal" ];
-
   fileSystems = nasMount "/var/lib/nextcloud" "nextcloud"
     // nasMount "/var/lib/postgresql" "nextcloud-db"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
@@ -22,7 +19,7 @@
 
   services.nextcloud = {
     enable = true;
-    hostName = "cloud.internal";
+    hostName = "cloud.lsck0.dev";
     config.dbtype = "pgsql";
     config.dbhost = "/run/postgresql";
     config.dbname = "nextcloud";
@@ -39,10 +36,10 @@
       };
     };
     settings = {
-      trusted_domains = [ "cloud.internal" "cloud.lsck0.dev" ];
+      trusted_domains = [ "cloud.lsck0.dev" ];
       trusted_proxies = [ "10.100.0.100" ];
       overwriteprotocol = "https";
-      overwritehost = "cloud.internal";
+      overwritehost = "cloud.lsck0.dev";
       allow_user_to_change_display_name = false;
       user_oidc = {
         single_logout = false;
@@ -71,7 +68,7 @@
         $OCC user_oidc:provider authentik \
           --clientid="nextcloud" \
           --clientsecret="$OIDC_SECRET" \
-          --discoveryuri="http://auth.internal/application/o/nextcloud/.well-known/openid-configuration" \
+          --discoveryuri="https://auth.lsck0.dev/application/o/nextcloud/.well-known/openid-configuration" \
           --mapping-uid="preferred_username" \
           --mapping-display-name="name" \
           --mapping-email="email" \

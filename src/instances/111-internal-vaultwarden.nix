@@ -1,9 +1,6 @@
 { config, nasMount, ... }: {
   networking.hostName = "vm-111";
 
-  # Resolve auth.internal directly to authentik VM
-  networking.hosts."10.100.0.101" = [ "auth.internal" ];
-
   fileSystems = nasMount "/var/lib/bitwarden_rs" "vaultwarden";
 
   sops.secrets.vaultwarden-oidc-secret = {};
@@ -18,14 +15,14 @@
       ROCKET_ADDRESS = "0.0.0.0";
       ROCKET_PORT = 8080;
       SIGNUPS_ALLOWED = false;
-      DOMAIN = "https://vault.internal";
+      DOMAIN = "https://vault.lsck0.dev";
       WEBSOCKET_ENABLED = true;
       SENDS_ALLOWED = true;
       EMERGENCY_ACCESS_ALLOWED = true;
       SHOW_PASSWORD_HINT = false;
       SSO_ENABLED = true;
       SSO_CLIENT_ID = "vaultwarden";
-      SSO_AUTHORITY = "http://auth.internal/application/o/vaultwarden/";
+      SSO_AUTHORITY = "https://auth.lsck0.dev/application/o/vaultwarden/";
       SSO_PKCE = true;
       SSO_SIGNUPS_MATCH_EMAIL = true;
     };
