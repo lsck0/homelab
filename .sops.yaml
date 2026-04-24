@@ -2,10 +2,10 @@
 # The matching private key (secrets/age.txt) is gitignored and must be
 # provisioned onto each VM at /var/lib/sops-nix/key.txt by sync.sh.
 #
-# To encrypt:  sops --encrypt --in-place src/secrets.yaml
-# To edit:     sops src/secrets.yaml
+# To encrypt:  sops --encrypt --in-place src/secrets.json
+# To edit:     sops src/secrets.json
 creation_rules:
-  - path_regex: src/secrets\.yaml$
+  - path_regex: src/secrets\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609
   - path_regex: src/terraform\.tfvars\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609

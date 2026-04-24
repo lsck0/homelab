@@ -120,21 +120,29 @@ let
             icon: headscale
             href: https://hs.lsck0.dev
             ping: http://10.200.0.201
+        - SearXNG:
+            icon: searxng
+            href: https://search.lsck0.dev
+            ping: http://10.200.0.202
         - Shlink:
             icon: shlink
             href: https://shlink.lsck0.dev
-            ping: http://10.200.0.202
+            ping: http://10.200.0.203
         - PrivateBin:
             icon: privatebin
             href: https://paste.lsck0.dev
-            ping: http://10.200.0.203
+            ping: http://10.200.0.204
         - Share:
             icon: filebrowser
             href: https://share.lsck0.dev
-            ping: http://10.200.0.204
+            ping: http://10.200.0.205
         - Minecraft:
             icon: minecraft
-            ping: http://10.200.0.205
+            ping: http://10.200.0.207
+        - Hello:
+            icon: mdi-hand-wave
+            href: https://hello.lsck0.dev
+            ping: http://10.200.0.208
   '';
 
   settingsYaml = pkgs.writeText "settings.yaml" ''
@@ -162,7 +170,7 @@ let
         columns: 5
       External:
         style: row
-        columns: 3
+        columns: 4
   '';
 
   widgetsYaml = pkgs.writeText "widgets.yaml" ''

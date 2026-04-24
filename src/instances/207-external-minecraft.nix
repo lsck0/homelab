@@ -1,5 +1,5 @@
 { config, nasMount, ... }: {
-  networking.hostName = "vm-205";
+  networking.hostName = "vm-207";
 
   fileSystems = nasMount "/var/lib/minecraft" "minecraft"
     // nasMount "/var/lib/minecraft-modpacks" "minecraft-modpacks";

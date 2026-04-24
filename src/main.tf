@@ -118,3 +118,7 @@ module "instances" {
 output "vm_ips" {
   value = module.instances.vm_ips
 }
+
+output "disabled_vms" {
+  value = module.instances.disabled_vms
+}

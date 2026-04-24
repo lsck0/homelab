@@ -1,5 +1,5 @@
 { pkgs, nasMount, ... }: {
-  networking.hostName = "vm-202";
+  networking.hostName = "vm-203";
   fileSystems = nasMount "/var/lib/shlink" "shlink"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
