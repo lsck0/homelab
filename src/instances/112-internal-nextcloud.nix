@@ -9,7 +9,7 @@
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   sops.secrets.nextcloud-admin-pass.owner = "nextcloud";
-  sops.secrets.nextcloud-oidc-secret = {};
+  sops.secrets.nextcloud-oidc-secret.owner = "nextcloud";
 
   services.postgresql = {
     enable = true;
