@@ -33,7 +33,7 @@
     description = "Configure Forgejo OAuth2 with authentik";
     after = [ "podman-forgejo.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq pkgs.podman ];
+    path = [ pkgs.curl pkgs.jq pkgs.podman pkgs.gawk pkgs.gnugrep ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
