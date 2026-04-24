@@ -26,6 +26,7 @@
     description = "Disable qBittorrent built-in auth";
     after = [ "podman-qbittorrent.service" ];
     wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.gnused pkgs.podman pkgs.coreutils ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -38,19 +39,16 @@
       done
       [ ! -f "$conf" ] && exit 1
 
-      # Enable subnet whitelist bypass for all private ranges
-      ${pkgs.gnused}/bin/sed -i '/\[Preferences\]/,/^\[/{
-        /WebUI\\AuthSubnetWhitelistEnabled/d
-        /WebUI\\AuthSubnetWhitelist/d
-        /WebUI\\LocalHostAuth/d
-      }' "$conf"
-      ${pkgs.gnused}/bin/sed -i '/\[Preferences\]/a\
-WebUI\\AuthSubnetWhitelistEnabled=true\
-WebUI\\AuthSubnetWhitelist=10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16\
-WebUI\\LocalHostAuth=false' "$conf"
+      # Remove old auth lines if present
+      sed -i '/WebUI.AuthSubnetWhitelist/d; /WebUI.LocalHostAuth/d' "$conf"
+
+      # Append whitelist settings to [Preferences] section
+      if ! grep -q 'AuthSubnetWhitelistEnabled' "$conf"; then
+        printf '\n[Preferences]\nWebUI\\AuthSubnetWhitelistEnabled=true\nWebUI\\AuthSubnetWhitelist=10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16\nWebUI\\LocalHostAuth=false\n' >> "$conf"
+      fi
 
       # Restart container to pick up config
-      ${pkgs.podman}/bin/podman restart qbittorrent
+      podman restart qbittorrent
     '';
   };
 
