@@ -18,7 +18,7 @@ locals {
     "102" = { name = "102-internal-homepage", type = "internal" }
     "103" = { name = "103-internal-grafana", type = "internal" }
     "104" = { name = "104-internal-uptime-kuma", type = "internal" }
-    "105" = { name = "105-internal-nas", type = "internal", disk = 500 }
+    "105" = { name = "105-internal-nas", type = "internal", disk = 750 }
     "106" = { name = "106-internal-sccache", type = "internal" }
     "107" = { name = "107-internal-forgejo", type = "internal" }
     "108" = { name = "108-internal-forgejo-runner", type = "internal" }
@@ -45,7 +45,7 @@ locals {
     "203" = { name = "203-external-shlink", type = "external" }
     "204" = { name = "204-external-privatebin", type = "external" }
     "205" = { name = "205-external-share", type = "external" }
-    "207" = { name = "207-external-minecraft", type = "external", memory = 8192, cores = 8 }
+    "207" = { name = "207-external-minecraft", type = "external", memory = 12288, cores = 8 }
     "208" = { name = "208-external-hello", type = "external" }
     # ── router ──
     "300" = { name = "luca-router", type = "router" }

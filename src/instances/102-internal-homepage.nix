@@ -190,7 +190,8 @@ let
         timezone: Europe/Berlin
         units: metric
     - search:
-        provider: google
+        provider: custom
+        url: https://search.lsck0.dev/search?q=
         target: _blank
   '';
 

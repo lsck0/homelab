@@ -63,7 +63,8 @@
       iifname "wg0" accept
 
       # allow DMZ to reach internal Traefik, Git, and Registry (for CI/CD + image pulls)
-      iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.107, 10.100.0.109 } tcp dport { 80, 443 } accept
+      iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.107 } tcp dport { 80, 443 } accept
+      iifname "ens20" ip daddr 10.100.0.109 tcp dport { 80, 443, 5000 } accept
 
       # allow DMZ to reach NAS (NFS for persistent data)
       iifname "ens20" ip daddr 10.100.0.105 tcp dport { 111, 2049 } accept

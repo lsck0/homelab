@@ -5,6 +5,7 @@
     ./nas.nix
     ./network.nix
     ./traefik.nix
+    ./nas-backup.nix
   ];
 
   options.homelab.acmeEmail = lib.mkOption {
