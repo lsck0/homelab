@@ -5,10 +5,13 @@ let
   workDir = "/var/lib/docker-stacks/${cfg.stackName}";
   composeDir = if hasGit then "${workDir}/repo/${cfg.composePath}" else workDir;
   composeFile = "${composeDir}/${cfg.composeFilename}";
+  composeEtcFile = "/etc/docker-stacks/${cfg.stackName}/${cfg.composeFilename}";
 
   gitCloneScript = pkgs.writeShellScript "docker-stack-git-sync-${cfg.stackName}" ''
     set -euo pipefail
-    export PATH="${lib.makeBinPath [ pkgs.git pkgs.docker-compose pkgs.coreutils pkgs.diffutils ]}"
+    export PATH="${lib.makeBinPath ([ pkgs.git pkgs.coreutils pkgs.diffutils ]
+      ++ lib.optional (!cfg.useSwarm) pkgs.docker-compose
+      ++ lib.optional cfg.useSwarm pkgs.docker)}"
 
     REPO_DIR="${workDir}/repo"
     HASH_FILE="${workDir}/.last-hash"
@@ -29,8 +32,12 @@ let
 
     if [ "$NEW_HASH" != "$OLD_HASH" ]; then
       echo "Compose file changed, redeploying..."
+      ${if cfg.useSwarm then ''
+      docker stack deploy -c "${composeFile}" --resolve-image always --prune ${cfg.stackName}
+      '' else ''
       docker-compose -f "${composeFile}" -p "${cfg.stackName}" pull --quiet
       docker-compose -f "${composeFile}" -p "${cfg.stackName}" up -d --remove-orphans
+      ''}
       echo "$NEW_HASH" > "$HASH_FILE"
     else
       echo "No changes detected."
@@ -83,6 +90,14 @@ in {
       description = "How often to poll the git repo for changes (systemd calendar syntax).";
     };
 
+    useSwarm = lib.mkEnableOption "Docker Swarm mode (docker stack deploy instead of docker-compose)";
+
+    updateInterval = lib.mkOption {
+      type = lib.types.str;
+      default = "5m";
+      description = "How often to check for new images and redeploy (Swarm mode only).";
+    };
+
     # Shared options
     registryMirrors = lib.mkOption {
       type = lib.types.listOf lib.types.str;
@@ -113,20 +128,66 @@ in {
       ];
     }
 
+    # Swarm init (shared between inline and git modes)
+    (lib.mkIf cfg.useSwarm {
+      systemd.services."docker-swarm-init" = {
+        description = "Initialize Docker Swarm";
+        after = [ "docker.service" ];
+        requiredBy = [ "docker-stack-${cfg.stackName}.service" ];
+        before = [ "docker-stack-${cfg.stackName}.service" ];
+        path = [ pkgs.docker ];
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+        };
+        script = ''
+          if ! docker info --format '{{.Swarm.LocalNodeState}}' | grep -q active; then
+            docker swarm init --advertise-addr lo
+          fi
+        '';
+      };
+    })
+
     # Mode 1: inline compose file
     (lib.mkIf (!hasGit) {
       environment.etc."docker-stacks/${cfg.stackName}/${cfg.composeFilename}".text = cfg.composeFile;
 
       systemd.services."docker-stack-${cfg.stackName}" = {
-        description = "Docker Compose stack: ${cfg.stackName}";
+        description = "Docker ${if cfg.useSwarm then "Swarm" else "Compose"} stack: ${cfg.stackName}";
         after = [ "docker.service" "network-online.target" ];
         wants = [ "docker.service" "network-online.target" ];
         wantedBy = [ "multi-user.target" ];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
-          ExecStart = "${pkgs.docker-compose}/bin/docker-compose -f /etc/docker-stacks/${cfg.stackName}/${cfg.composeFilename} -p ${cfg.stackName} up -d --remove-orphans";
-          ExecStop = "${pkgs.docker-compose}/bin/docker-compose -f /etc/docker-stacks/${cfg.stackName}/${cfg.composeFilename} -p ${cfg.stackName} down";
+        } // (if cfg.useSwarm then {
+          ExecStart = "${pkgs.docker}/bin/docker stack deploy -c ${composeEtcFile} --resolve-image always --prune ${cfg.stackName}";
+          ExecStop = "${pkgs.docker}/bin/docker stack rm ${cfg.stackName}";
+        } else {
+          ExecStart = "${pkgs.docker-compose}/bin/docker-compose -f ${composeEtcFile} -p ${cfg.stackName} up -d --remove-orphans";
+          ExecStop = "${pkgs.docker-compose}/bin/docker-compose -f ${composeEtcFile} -p ${cfg.stackName} down";
+        });
+      };
+    })
+
+    # Swarm update timer (inline mode) — periodically re-deploys to pick up new images
+    (lib.mkIf (!hasGit && cfg.useSwarm) {
+      systemd.services."docker-stack-${cfg.stackName}-update" = {
+        description = "Update Swarm stack: ${cfg.stackName}";
+        after = [ "docker-stack-${cfg.stackName}.service" ];
+        path = [ pkgs.docker ];
+        serviceConfig = {
+          Type = "oneshot";
+          ExecStart = "${pkgs.docker}/bin/docker stack deploy -c ${composeEtcFile} --resolve-image always ${cfg.stackName}";
+        };
+      };
+
+      systemd.timers."docker-stack-${cfg.stackName}-update" = {
+        description = "Poll registry for ${cfg.stackName} image updates";
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnBootSec = cfg.updateInterval;
+          OnUnitActiveSec = cfg.updateInterval;
         };
       };
     })
@@ -139,7 +200,7 @@ in {
       programs.ssh.extraConfig = ''
         Host docker-stack-${cfg.stackName}
           IdentityFile ${workDir}/deploy_key
-          StrictHostKeyChecking no
+          StrictHostKeyChecking accept-new
       '';
 
       systemd.services."docker-stack-${cfg.stackName}" = {
