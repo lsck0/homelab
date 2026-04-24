@@ -49,7 +49,7 @@ let
             ping: http://10.100.0.108
         - Registry:
             icon: docker-moby
-            href: https://registry.lsck0.dev
+            href: https://registry-ui.lsck0.dev
             ping: http://10.100.0.109
         - Tasks:
             icon: mdi-checkbox-marked-outline

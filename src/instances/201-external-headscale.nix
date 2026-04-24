@@ -10,7 +10,7 @@
     settings = {
       server_url = "https://hs.lsck0.dev";
       dns = {
-        base_domain = "hs.lsck0.dev";
+        base_domain = "vpn.lsck0.dev";
         nameservers.global = [ "10.200.0.1" ];
       };
       prefixes = {
