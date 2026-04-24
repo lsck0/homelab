@@ -41,11 +41,6 @@ in {
       description = "Traefik servers transports.";
     };
 
-    crowdsecInstance = lib.mkOption {
-      type = lib.types.str;
-      description = "CrowdSec data directory name on NAS (e.g. crowdsec-internal).";
-    };
-
     logLevel = lib.mkOption {
       type = lib.types.str;
       default = "WARN";

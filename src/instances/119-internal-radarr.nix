@@ -1,7 +1,8 @@
 { pkgs, nasMount, nasPath, ... }: {
   networking.hostName = "vm-119";
 
-  fileSystems = nasMount "/var/lib/radarr" "radarr"
+  fileSystems = nasMount "/var/lib/homepage-tokens" "homepage-tokens"
+    // nasMount "/var/lib/radarr" "radarr"
     // nasPath "/srv/downloads" "torrents"
     // nasPath "/srv/movies" "media/movies";
 
@@ -45,6 +46,22 @@
       ${pkgs.gnused}/bin/sed -i 's|<AuthenticationRequired>.*</AuthenticationRequired>|<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>|' "$conf"
 
       ${pkgs.podman}/bin/podman restart radarr
+    '';
+  };
+
+  systemd.services.radarr-homepage-token = {
+    description = "Export Radarr API key for Homepage";
+    after = [ "podman-radarr.service" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = ''
+      TOKEN_FILE="/var/lib/homepage-tokens/radarr-key.token"
+      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
+      conf="/var/lib/radarr/config.xml"
+      for i in $(seq 1 60); do [ -f "$conf" ] && break; sleep 2; done
+      [ ! -f "$conf" ] && exit 1
+      KEY=$(${pkgs.gnugrep}/bin/grep -oP '<ApiKey>\K[^<]+' "$conf")
+      [ -n "$KEY" ] && echo -n "$KEY" > "$TOKEN_FILE"
     '';
   };
 
