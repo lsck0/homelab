@@ -10,6 +10,8 @@
     address = "0.0.0.0";
     port = 8080;
     settings = {
+      # Authentik ForwardAuth gates access; auto-login skips Paperless' own login
+      PAPERLESS_AUTO_LOGIN_USERNAME = "admin";
       PAPERLESS_ENABLE_HTTP_REMOTE_USER = "true";
       PAPERLESS_HTTP_REMOTE_USER_HEADER_NAME = "HTTP_X_AUTHENTIK_USERNAME";
       PAPERLESS_URL = "https://paperless.internal";
