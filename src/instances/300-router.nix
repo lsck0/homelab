@@ -195,7 +195,9 @@
       [ -z "$ZONE_ID" ] || [ "$ZONE_ID" = "null" ] && { echo "Failed to get zone ID"; exit 1; }
 
       # format: "domain:proxied"
-      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false *.lsck0.dev:true"
+      # Only external (public) services get Cloudflare DNS records.
+      # Internal services resolve via CoreDNS only — no public DNS exposure.
+      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false hs.lsck0.dev:true shlink.lsck0.dev:true paste.lsck0.dev:true share.lsck0.dev:true"
 
       for ENTRY in $DOMAINS; do
         DOMAIN="''${ENTRY%%:*}"

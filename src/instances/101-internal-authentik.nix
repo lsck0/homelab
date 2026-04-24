@@ -149,7 +149,7 @@ let
         type: proxy
         config:
           authentik_host: https://auth.lsck0.dev
-          authentik_host_insecure: true
+          authentik_host_insecure: false
         providers:
     ${outpostProvidersList}
   '';
@@ -218,7 +218,7 @@ in {
           command: server
           environment:
             AUTHENTIK_HOST: https://auth.lsck0.dev
-            AUTHENTIK_INSECURE: "true"
+            AUTHENTIK_INSECURE: "false"
           env_file:
             - ${config.sops.templates."authentik.env".path}
           volumes:
@@ -237,7 +237,7 @@ in {
           command: worker
           environment:
             AUTHENTIK_HOST: https://auth.lsck0.dev
-            AUTHENTIK_INSECURE: "true"
+            AUTHENTIK_INSECURE: "false"
           env_file:
             - ${config.sops.templates."authentik.env".path}
           user: root
