@@ -97,11 +97,7 @@
         --email homepage@lsck0.dev \
         --must-change-password=false 2>/dev/null || true
 
-      # Delete stale token for idempotency, then generate new one
-      podman exec -u git forgejo forgejo admin user generate-access-token \
-        --username homepage-bot \
-        --token-name homepage \
-        --delete 2>/dev/null || true
+      # Generate token (skip if already exists)
       TOKEN=$(podman exec -u git forgejo forgejo admin user generate-access-token \
         --username homepage-bot \
         --token-name homepage \

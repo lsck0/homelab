@@ -72,22 +72,16 @@
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
-      User = "paperless";
-      Group = "paperless";
-      WorkingDirectory = "/var/lib/paperless";
-    };
-    environment = {
-      PAPERLESS_URL = "https://paperless.lsck0.dev";
     };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/paperless-key.token"
       [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
       sleep 10
 
-      TOKEN=$(paperless-ngx shell -c "
+      export PAPERLESS_URL="https://paperless.lsck0.dev"
+      TOKEN=$(sudo -u paperless -E ${pkgs.paperless-ngx}/bin/paperless-ngx shell -c "
       from django.contrib.auth.models import User
       from rest_framework.authtoken.models import Token
-      # Create or get service user
       user, created = User.objects.get_or_create(
           username='homepage-bot',
           defaults={'is_staff': True, 'is_superuser': True, 'email': 'homepage@internal'}
