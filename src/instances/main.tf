@@ -27,24 +27,26 @@ locals {
     "111" = { name = "111-internal-vaultwarden", type = "internal" }
     "112" = { name = "112-internal-nextcloud", type = "internal" }
     "113" = { name = "113-internal-paperless", type = "internal" }
-    "114" = { name = "114-internal-huginn", type = "internal" }
-    "115" = { name = "115-internal-homeassistant", type = "internal" }
-    "116" = { name = "116-internal-wikijs", type = "internal" }
-    "117" = { name = "117-internal-qbittorrent", type = "internal" }
-    "118" = { name = "118-internal-prowlarr", type = "internal" }
-    "119" = { name = "119-internal-radarr", type = "internal" }
-    "120" = { name = "120-internal-sonarr", type = "internal" }
-    "121" = { name = "121-internal-jellyfin", type = "internal" }
-    "122" = { name = "122-internal-audiobookshelf", type = "internal" }
-    "123" = { name = "123-internal-navidrome", type = "internal" }
-    "124" = { name = "124-internal-kavita", type = "internal" }
+    "114" = { name = "114-internal-huginn", type = "internal", enabled = false }
+    "115" = { name = "115-internal-homeassistant", type = "internal", enabled = false }
+    "116" = { name = "116-internal-wikijs", type = "internal", enabled = false }
+    "117" = { name = "117-internal-qbittorrent", type = "internal", enabled = false }
+    "118" = { name = "118-internal-prowlarr", type = "internal", enabled = false }
+    "119" = { name = "119-internal-radarr", type = "internal", enabled = false }
+    "120" = { name = "120-internal-sonarr", type = "internal", enabled = false }
+    "121" = { name = "121-internal-jellyfin", type = "internal", enabled = false }
+    "122" = { name = "122-internal-audiobookshelf", type = "internal", enabled = false }
+    "123" = { name = "123-internal-navidrome", type = "internal", enabled = false }
+    "124" = { name = "124-internal-kavita", type = "internal", enabled = false }
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-headscale", type = "external" }
-    "202" = { name = "202-external-shlink", type = "external" }
-    "203" = { name = "203-external-privatebin", type = "external" }
-    "204" = { name = "204-external-share", type = "external" }
-    "205" = { name = "205-external-minecraft", type = "external", memory = 4096, cores = 6 }
+    "202" = { name = "202-external-searxng", type = "external" }
+    "203" = { name = "203-external-shlink", type = "external" }
+    "204" = { name = "204-external-privatebin", type = "external" }
+    "205" = { name = "205-external-share", type = "external" }
+    "207" = { name = "207-external-minecraft", type = "external", memory = 8192, cores = 8 }
+    "208" = { name = "208-external-hello", type = "external" }
     # ── router ──
     "300" = { name = "luca-router", type = "router" }
   }
@@ -61,6 +63,7 @@ module "vm" {
   cores        = try(each.value.cores, 2)
   memory       = try(each.value.memory, 1024)
   disk         = try(each.value.disk, 8)
+  enabled      = try(each.value.enabled, true)
   image_id     = var.nixos_image_id
   ssh_key      = var.ssh_public_key
 
@@ -92,4 +95,8 @@ module "vm" {
 
 output "vm_ips" {
   value = join("\n", [for k, v in module.vm : "${k}=${split("/", v.ipv4_address)[0]}"])
+}
+
+output "disabled_vms" {
+  value = join("\n", [for k, v in local.instances : k if try(v.enabled, true) == false])
 }

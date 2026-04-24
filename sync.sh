@@ -64,6 +64,12 @@ tf_apply_retry() {
   return 1
 }
 
+# Check if a VM is disabled in main.tf (enabled = false)
+is_vm_disabled() {
+  local vm_id="$1"
+  echo "$DISABLED_VMS" | grep -qx "$vm_id"
+}
+
 deploy_nixos() {
   local name="$1" ip="$2"
   echo ">>> Deploying $name to $ip..."
@@ -243,25 +249,6 @@ git_auto_prepare
 load_tfvars
 setup_ssh_transport
 
-# Build all NixOS closures in background
-echo ">>> Building all VM closures (background)..."
-BUILD_LOG=$(mktemp --suffix=.build.log)
-CLEANUP_FILES+=("$BUILD_LOG")
-(
-  rc=0
-  for nix_file in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix \
-                  "$ROOT_DIR"/src/instances/300-router.nix; do
-    [ -f "$nix_file" ] || continue
-    vm_name=$(basename "$nix_file" .nix)
-    echo ">>> Building $vm_name..."
-    nix build "$ROOT_DIR/src#nixosConfigurations.${vm_name}.config.system.build.toplevel" \
-      --extra-experimental-features "nix-command flakes" --no-link 2>&1 \
-      || { echo "ERROR: Failed to build $vm_name"; rc=1; }
-  done
-  exit $rc
-) > "$BUILD_LOG" 2>&1 &
-BUILD_PID=$!
-
 # Upload golden image if missing
 if ! "${SSH_CMD[@]}" "${PROXMOX_SSH_USER}@${PROXMOX_SSH_HOST}" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
   if [ -f "$ROOT_DIR/images/nixos.img" ]; then
@@ -286,8 +273,37 @@ else
   echo ">>> No Terraform file changes since last apply. Skipping."
 fi
 
-echo ">>> Fetching VM IPs from Terraform..."
+echo ">>> Fetching VM state from Terraform..."
 VM_IPS=$(terraform -chdir="$ROOT_DIR/src" output -raw vm_ips 2>/dev/null || echo "")
+DISABLED_VMS=$(terraform -chdir="$ROOT_DIR/src" output -raw disabled_vms 2>/dev/null || echo "")
+
+if [ -n "$DISABLED_VMS" ]; then
+  echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')"
+fi
+
+# Build all NixOS closures in background (skip disabled VMs)
+echo ">>> Building all VM closures (background)..."
+BUILD_LOG=$(mktemp --suffix=.build.log)
+CLEANUP_FILES+=("$BUILD_LOG")
+(
+  rc=0
+  for nix_file in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix \
+                  "$ROOT_DIR"/src/instances/300-router.nix; do
+    [ -f "$nix_file" ] || continue
+    vm_name=$(basename "$nix_file" .nix)
+    vm_id="${vm_name%%-*}"
+    if echo "$DISABLED_VMS" | grep -qx "$vm_id"; then
+      echo ">>> Skipping build for $vm_name (disabled)"
+      continue
+    fi
+    echo ">>> Building $vm_name..."
+    nix build "$ROOT_DIR/src#nixosConfigurations.${vm_name}.config.system.build.toplevel" \
+      --extra-experimental-features "nix-command flakes" --no-link 2>&1 \
+      || { echo "ERROR: Failed to build $vm_name"; rc=1; }
+  done
+  exit $rc
+) > "$BUILD_LOG" 2>&1 &
+BUILD_PID=$!
 
 # ── Deploy router first ──────────────────────────────────────
 
@@ -362,6 +378,12 @@ for nix_file in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix; do
   [ -f "$nix_file" ] || continue
   vm_name=$(basename "$nix_file" .nix)
   vm_id="${vm_name%%-*}"
+
+  # Skip disabled VMs
+  if is_vm_disabled "$vm_id"; then
+    echo ">>> Skipping $vm_name (disabled)"
+    continue
+  fi
 
   # Throttle
   while [ "${#DEPLOY_PIDS[@]}" -ge "$MAX_PARALLEL" ]; do
