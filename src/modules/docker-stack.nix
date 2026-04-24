@@ -133,16 +133,23 @@ in {
       systemd.services."docker-swarm-init" = {
         description = "Initialize Docker Swarm";
         after = [ "docker.service" ];
+        requires = [ "docker.service" ];
         requiredBy = [ "docker-stack-${cfg.stackName}.service" ];
         before = [ "docker-stack-${cfg.stackName}.service" ];
-        path = [ pkgs.docker ];
+        path = [ pkgs.docker pkgs.coreutils ];
         serviceConfig = {
           Type = "oneshot";
           RemainAfterExit = true;
         };
         script = ''
-          if ! docker info --format '{{.Swarm.LocalNodeState}}' | grep -q active; then
-            docker swarm init --advertise-addr lo
+          set -e
+          # Wait for Docker daemon to accept API calls
+          for i in $(seq 1 30); do
+            docker info >/dev/null 2>&1 && break
+            sleep 1
+          done
+          if ! docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q active; then
+            docker swarm init
           fi
         '';
       };
