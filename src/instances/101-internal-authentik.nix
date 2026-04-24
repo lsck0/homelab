@@ -298,9 +298,16 @@ in {
         sleep 2
       done
       sleep 10
-      # Create API token via management command
-      TOKEN=$(docker exec authentik-server-1 ak create_token homepage 2>/dev/null \
-        | grep -oP 'token: \K.*' || true)
+      # Create API token via Django ORM
+      TOKEN=$(docker exec authentik-server-1 ak shell -c "
+      from authentik.core.models import User, Token, TokenIntents
+      user = User.objects.get(username='akadmin')
+      token, created = Token.objects.get_or_create(
+          identifier='homepage-api',
+          defaults={'user': user, 'intent': TokenIntents.INTENT_API, 'expiring': False}
+      )
+      print(token.key)
+      " 2>/dev/null | tail -1)
       if [ -n "$TOKEN" ]; then
         echo -n "$TOKEN" > "$TOKEN_FILE"
         echo "Authentik Homepage token created"

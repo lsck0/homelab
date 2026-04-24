@@ -50,6 +50,7 @@ let
             widget:
               type: grafana
               url: http://10.100.0.103
+              key: "{{HOMEPAGE_VAR_GRAFANA_KEY}}"
         - Status:
             icon: uptime-kuma
             href: https://status.lsck0.dev
@@ -119,10 +120,7 @@ let
             icon: home-assistant
             href: https://hass.lsck0.dev
             ping: http://10.100.0.115
-            widget:
-              type: homeassistant
-              url: http://10.100.0.115
-              key: "{{HOMEPAGE_VAR_HOMEASSISTANT_KEY}}"
+            description: Smart Home
         - Wiki.js:
             icon: wikijs
             href: https://wiki.lsck0.dev
@@ -132,68 +130,42 @@ let
             icon: qbittorrent
             href: https://torrent.lsck0.dev
             ping: http://10.100.0.117
-            widget:
-              type: qbittorrent
-              url: http://10.100.0.117
+            description: Torrent Client
         - Prowlarr:
             icon: prowlarr
             href: https://prowlarr.lsck0.dev
             ping: http://10.100.0.118
-            widget:
-              type: prowlarr
-              url: http://10.100.0.118
-              key: "{{HOMEPAGE_VAR_PROWLARR_KEY}}"
+            description: Indexer Manager
         - Radarr:
             icon: radarr
             href: https://radarr.lsck0.dev
             ping: http://10.100.0.119
-            widget:
-              type: radarr
-              url: http://10.100.0.119
-              key: "{{HOMEPAGE_VAR_RADARR_KEY}}"
+            description: Movies
         - Sonarr:
             icon: sonarr
             href: https://sonarr.lsck0.dev
             ping: http://10.100.0.120
-            widget:
-              type: sonarr
-              url: http://10.100.0.120
-              key: "{{HOMEPAGE_VAR_SONARR_KEY}}"
+            description: TV Shows
         - Jellyfin:
             icon: jellyfin
             href: https://jellyfin.lsck0.dev
             ping: http://10.100.0.121
-            widget:
-              type: jellyfin
-              url: http://10.100.0.121
-              key: "{{HOMEPAGE_VAR_JELLYFIN_KEY}}"
+            description: Media Server
         - Audiobookshelf:
             icon: audiobookshelf
             href: https://abs.lsck0.dev
             ping: http://10.100.0.122
-            widget:
-              type: audiobookshelf
-              url: http://10.100.0.122
-              key: "{{HOMEPAGE_VAR_AUDIOBOOKSHELF_KEY}}"
+            description: Audiobooks
         - Navidrome:
             icon: navidrome
             href: https://music.lsck0.dev
             ping: http://10.100.0.123
-            widget:
-              type: navidrome
-              url: http://10.100.0.123
-              user: "{{HOMEPAGE_VAR_NAVIDROME_USER}}"
-              token: "{{HOMEPAGE_VAR_NAVIDROME_TOKEN}}"
-              salt: "{{HOMEPAGE_VAR_NAVIDROME_SALT}}"
+            description: Music Server
         - Kavita:
             icon: kavita
             href: https://read.lsck0.dev
             ping: http://10.100.0.124
-            widget:
-              type: kavita
-              url: http://10.100.0.124
-              username: "{{HOMEPAGE_VAR_KAVITA_USER}}"
-              password: "{{HOMEPAGE_VAR_KAVITA_PASS}}"
+            description: Manga & Comics
     - External:
         - Ext Traefik:
             icon: traefik
@@ -206,10 +178,7 @@ let
             icon: headscale
             href: https://hs.lsck0.dev
             ping: http://10.200.0.201
-            widget:
-              type: headscale
-              url: http://10.200.0.201
-              key: "{{HOMEPAGE_VAR_HEADSCALE_KEY}}"
+            description: VPN Mesh
         - SearXNG:
             icon: searxng
             href: https://search.lsck0.dev
@@ -229,9 +198,7 @@ let
             icon: filebrowser
             href: https://share.lsck0.dev
             ping: http://10.200.0.205
-            widget:
-              type: filebrowser
-              url: http://10.200.0.205
+            description: File Sharing
         - Minecraft:
             icon: minecraft
             ping: http://10.200.0.207
