@@ -1,6 +1,12 @@
 { nasMount, ... }: {
   networking.hostName = "vm-105";
 
+  homelab.nasBackup = {
+    enable = true;
+    sourceDir = "/srv/nas";
+    backupDir = "/srv/backups";
+  };
+
   services.nfs.server = {
     enable = true;
     exports = ''
@@ -107,6 +113,7 @@
     "d /srv/nas/data/homepage-tokens 0777 nobody nogroup -"
     "d /srv/nas/data/crowdsec-internal 0777 nobody nogroup -"
     "d /srv/nas/data/crowdsec-external 0777 nobody nogroup -"
+    "d /srv/nas/data/searxng 0777 nobody nogroup -"
     "d /var/lib/filebrowser 0750 1000 1000 -"
     "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
   ];

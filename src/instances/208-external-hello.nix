@@ -7,7 +7,7 @@
     composeFile = ''
       services:
         hello:
-          image: registry.lsck0.dev/axum-webserver:latest
+          image: 10.100.0.109:5000/axum-webserver:latest
           ports:
             - "80:8000"
           restart: unless-stopped
@@ -18,6 +18,9 @@
             retries: 3
     '';
   };
+
+  # Registry is HTTP-only on port 5000
+  virtualisation.docker.daemon.settings.insecure-registries = [ "10.100.0.109:5000" ];
 
   networking.firewall.allowedTCPPorts = [ 80 ];
 }
