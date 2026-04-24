@@ -287,25 +287,23 @@ in {
     description = "Generate Authentik API token for Homepage";
     after = [ "docker-stack-authentik.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq ];
+    path = [ pkgs.docker-compose pkgs.docker pkgs.gnugrep pkgs.gawk ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/authentik-key.token"
       [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
-      # Wait for Authentik API
-      for i in $(seq 1 90); do
-        curl -sf http://127.0.0.1:80/api/v3/core/tokens/ >/dev/null 2>&1 && break
+      # Wait for Authentik to be ready
+      for i in $(seq 1 120); do
+        docker exec authentik-server-1 ak healthcheck >/dev/null 2>&1 && break
         sleep 2
       done
-      sleep 5
-      # Create token via API using admin bootstrap credentials
-      ADMIN_TOKEN=$(curl -sf -X POST http://127.0.0.1:80/api/v3/core/tokens/ \
-        -H "Content-Type: application/json" \
-        -u "akadmin:$(cat ${config.sops.secrets.authentik-secret-key.path} | head -c 20)" \
-        -d '{"identifier":"homepage","intent":"api","description":"Homepage dashboard widget"}' \
-        2>/dev/null | jq -r '.key // empty')
-      if [ -n "$ADMIN_TOKEN" ]; then
-        echo -n "$ADMIN_TOKEN" > "$TOKEN_FILE"
+      sleep 10
+      # Create API token via management command
+      TOKEN=$(docker exec authentik-server-1 ak create_token homepage 2>/dev/null \
+        | grep -oP 'token: \K.*' || true)
+      if [ -n "$TOKEN" ]; then
+        echo -n "$TOKEN" > "$TOKEN_FILE"
+        echo "Authentik Homepage token created"
       fi
     '';
   };
