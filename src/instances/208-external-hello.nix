@@ -16,6 +16,12 @@
             interval: 30s
             timeout: 5s
             retries: 3
+        watchtower:
+          image: containrrr/watchtower
+          volumes:
+            - /var/run/docker.sock:/var/run/docker.sock
+          command: --interval 300 --cleanup hello
+          restart: unless-stopped
     '';
   };
 

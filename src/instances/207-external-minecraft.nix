@@ -30,6 +30,10 @@
       EULA = "TRUE";
       MEMORY = "11G";
       DIFFICULTY = "hard";
+      # Custom server icon — place a 64x64 PNG at /var/lib/minecraft/server-icon.png
+      # or set ICON to a URL:
+      # ICON = "https://example.com/icon.png";
+      OVERRIDE_ICON = "TRUE";
       MOTD = "Homelab Minecraft";
       ENABLE_COMMAND_BLOCK = "true";
       SNOOPER_ENABLED = "false";
@@ -38,6 +42,9 @@
       ENABLE_RCON = "true";
       ENABLE_WHITELIST = "true";
       ENFORCE_WHITELIST = "true";
+      WHITELIST = builtins.concatStringsSep "," [
+        "apokryphos"
+      ];
 
       # ── Server type ──────────────────────────────────────────
       # Default: vanilla. Uncomment ONE block below to switch.
