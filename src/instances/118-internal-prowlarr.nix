@@ -1,7 +1,8 @@
 { pkgs, nasMount, ... }: {
   networking.hostName = "vm-118";
 
-  fileSystems = nasMount "/var/lib/prowlarr" "prowlarr";
+  fileSystems = nasMount "/var/lib/prowlarr" "prowlarr"
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   virtualisation.oci-containers.containers.prowlarr = {
     image = "lscr.io/linuxserver/prowlarr:latest";
@@ -41,6 +42,22 @@
       ${pkgs.gnused}/bin/sed -i 's|<AuthenticationRequired>.*</AuthenticationRequired>|<AuthenticationRequired>DisabledForLocalAddresses</AuthenticationRequired>|' "$conf"
 
       ${pkgs.podman}/bin/podman restart prowlarr
+    '';
+  };
+
+  systemd.services.prowlarr-homepage-token = {
+    description = "Export Prowlarr API key for Homepage";
+    after = [ "podman-prowlarr.service" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = ''
+      TOKEN_FILE="/var/lib/homepage-tokens/prowlarr-key.token"
+      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
+      conf="/var/lib/prowlarr/config.xml"
+      for i in $(seq 1 60); do [ -f "$conf" ] && break; sleep 2; done
+      [ ! -f "$conf" ] && exit 1
+      KEY=$(${pkgs.gnugrep}/bin/grep -oP '<ApiKey>\K[^<]+' "$conf")
+      [ -n "$KEY" ] && echo -n "$KEY" > "$TOKEN_FILE"
     '';
   };
 

@@ -158,7 +158,8 @@ let
 in {
   networking.hostName = "vm-101";
 
-  fileSystems = nasMount "/var/lib/authentik" "authentik";
+  fileSystems = nasMount "/var/lib/authentik" "authentik"
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   sops.secrets.authentik-secret-key = {};
   sops.secrets.authentik-db-password = {};
@@ -278,6 +279,34 @@ in {
         -e "s|__FORGEJO_OIDC_SECRET__|$FORGEJO_OIDC_SECRET|g" \
         ${blueprintFile} > /var/lib/authentik/blueprints/homelab-apps.yaml
       chmod 644 /var/lib/authentik/blueprints/homelab-apps.yaml
+    '';
+  };
+
+  # Generate API token for Homepage widget
+  systemd.services.authentik-homepage-token = {
+    description = "Generate Authentik API token for Homepage";
+    after = [ "docker-stack-authentik.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.curl pkgs.jq ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = ''
+      TOKEN_FILE="/var/lib/homepage-tokens/authentik-key.token"
+      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
+      # Wait for Authentik API
+      for i in $(seq 1 90); do
+        curl -sf http://127.0.0.1:80/api/v3/core/tokens/ >/dev/null 2>&1 && break
+        sleep 2
+      done
+      sleep 5
+      # Create token via API using admin bootstrap credentials
+      ADMIN_TOKEN=$(curl -sf -X POST http://127.0.0.1:80/api/v3/core/tokens/ \
+        -H "Content-Type: application/json" \
+        -u "akadmin:$(cat ${config.sops.secrets.authentik-secret-key.path} | head -c 20)" \
+        -d '{"identifier":"homepage","intent":"api","description":"Homepage dashboard widget"}' \
+        2>/dev/null | jq -r '.key // empty')
+      if [ -n "$ADMIN_TOKEN" ]; then
+        echo -n "$ADMIN_TOKEN" > "$TOKEN_FILE"
+      fi
     '';
   };
 

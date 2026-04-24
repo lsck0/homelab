@@ -4,24 +4,25 @@
   homelab.dockerStack = {
     enable = true;
     stackName = "hello";
+    useSwarm = true;
+    updateInterval = "5m";
     composeFile = ''
       services:
         hello:
           image: 10.100.0.109:5000/axum-webserver:latest
           ports:
             - "80:8000"
-          restart: unless-stopped
           healthcheck:
             test: ["CMD", "curl", "-f", "http://localhost:8000/"]
             interval: 30s
             timeout: 5s
             retries: 3
-        watchtower:
-          image: containrrr/watchtower
-          volumes:
-            - /var/run/docker.sock:/var/run/docker.sock
-          command: --interval 300 --cleanup hello
-          restart: unless-stopped
+          deploy:
+            update_config:
+              parallelism: 1
+              order: start-first
+            restart_policy:
+              condition: any
     '';
   };
 

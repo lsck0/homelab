@@ -5,144 +5,232 @@ let
         - Cloudflare:
             icon: cloudflare
             href: https://dash.cloudflare.com
+            description: DNS & CDN
         - FritzBox:
             icon: mdi-router-wireless
             href: http://192.168.178.1
             ping: http://192.168.178.1
+            description: ISP Router
         - Proxmox:
             icon: proxmox
             href: https://proxmox.lsck0.dev
             ping: http://192.168.178.200:8006
+            widget:
+              type: proxmox
+              url: https://192.168.178.200:8006
+              username: "{{HOMEPAGE_VAR_PROXMOX_USER}}"
+              password: "{{HOMEPAGE_VAR_PROXMOX_PASS}}"
         - Router:
             icon: nixos
             ping: http://10.100.0.1
+            description: NixOS Gateway
 
     - Internal:
         - Traefik:
             icon: traefik
             href: https://traefik.lsck0.dev
             ping: http://10.100.0.100
+            widget:
+              type: traefik
+              url: http://10.100.0.100:8080
         - Authentik:
             icon: authentik
             href: https://auth.lsck0.dev
             ping: http://10.100.0.101
+            widget:
+              type: authentik
+              url: http://10.100.0.101
+              key: "{{HOMEPAGE_VAR_AUTHENTIK_KEY}}"
         - Grafana:
             icon: grafana
             href: https://grafana.lsck0.dev
             ping: http://10.100.0.103
+            widget:
+              type: grafana
+              url: http://10.100.0.103
         - Status:
             icon: uptime-kuma
             href: https://status.lsck0.dev
             ping: http://10.100.0.104
+            widget:
+              type: uptimekuma
+              url: http://10.100.0.104
+              slug: homelab
         - NAS:
             icon: mdi-nas
             href: https://nas.lsck0.dev
             ping: http://10.100.0.105
+            description: NFS Storage
         - sccache:
             icon: mdi-cached
+            description: Build Cache
         - Forgejo:
             icon: forgejo
             href: https://git.lsck0.dev
             ping: http://10.100.0.107
+            widget:
+              type: forgejo
+              url: http://10.100.0.107
+              key: "{{HOMEPAGE_VAR_FORGEJO_KEY}}"
         - Forgejo Runner:
             icon: forgejo
             ping: http://10.100.0.108
+            description: CI Runner
         - Registry:
             icon: docker-moby
             href: https://registry-ui.lsck0.dev
             ping: http://10.100.0.109
+            description: Docker Registry
         - Tasks:
             icon: mdi-checkbox-marked-outline
             href: https://tasks.lsck0.dev
             ping: http://10.100.0.110:8080
+            description: TaskChampion Sync
         - Vaultwarden:
             icon: vaultwarden
             href: https://vault.lsck0.dev
             ping: http://10.100.0.111:8080
+            description: Password Manager
         - Nextcloud:
             icon: nextcloud
             href: https://cloud.lsck0.dev
             ping: http://10.100.0.112
+            widget:
+              type: nextcloud
+              url: http://10.100.0.112
+              username: "{{HOMEPAGE_VAR_NEXTCLOUD_USER}}"
+              password: "{{HOMEPAGE_VAR_NEXTCLOUD_PASS}}"
         - Paperless:
             icon: paperless-ngx
             href: https://paperless.lsck0.dev
             ping: http://10.100.0.113:8080
+            widget:
+              type: paperlessngx
+              url: http://10.100.0.113:8080
+              key: "{{HOMEPAGE_VAR_PAPERLESS_KEY}}"
         - Huginn:
             icon: huginn
             href: https://huginn.lsck0.dev
             ping: http://10.100.0.114
+            description: Automation
         - Home Assistant:
             icon: home-assistant
             href: https://hass.lsck0.dev
             ping: http://10.100.0.115
+            widget:
+              type: homeassistant
+              url: http://10.100.0.115
+              key: "{{HOMEPAGE_VAR_HOMEASSISTANT_KEY}}"
         - Wiki.js:
             icon: wikijs
             href: https://wiki.lsck0.dev
             ping: http://10.100.0.116
+            description: Knowledge Base
         - qBittorrent:
             icon: qbittorrent
             href: https://torrent.lsck0.dev
             ping: http://10.100.0.117
+            widget:
+              type: qbittorrent
+              url: http://10.100.0.117
         - Prowlarr:
             icon: prowlarr
             href: https://prowlarr.lsck0.dev
             ping: http://10.100.0.118
+            widget:
+              type: prowlarr
+              url: http://10.100.0.118
+              key: "{{HOMEPAGE_VAR_PROWLARR_KEY}}"
         - Radarr:
             icon: radarr
             href: https://radarr.lsck0.dev
             ping: http://10.100.0.119
+            widget:
+              type: radarr
+              url: http://10.100.0.119
+              key: "{{HOMEPAGE_VAR_RADARR_KEY}}"
         - Sonarr:
             icon: sonarr
             href: https://sonarr.lsck0.dev
             ping: http://10.100.0.120
+            widget:
+              type: sonarr
+              url: http://10.100.0.120
+              key: "{{HOMEPAGE_VAR_SONARR_KEY}}"
         - Jellyfin:
             icon: jellyfin
             href: https://jellyfin.lsck0.dev
             ping: http://10.100.0.121
+            widget:
+              type: jellyfin
+              url: http://10.100.0.121
+              key: "{{HOMEPAGE_VAR_JELLYFIN_KEY}}"
         - Audiobookshelf:
             icon: audiobookshelf
             href: https://abs.lsck0.dev
             ping: http://10.100.0.122
+            description: Audiobooks
         - Navidrome:
             icon: navidrome
             href: https://music.lsck0.dev
             ping: http://10.100.0.123
+            widget:
+              type: navidrome
+              url: http://10.100.0.123
+              user: "{{HOMEPAGE_VAR_NAVIDROME_USER}}"
+              token: "{{HOMEPAGE_VAR_NAVIDROME_TOKEN}}"
+              salt: "{{HOMEPAGE_VAR_NAVIDROME_SALT}}"
         - Kavita:
             icon: kavita
             href: https://read.lsck0.dev
             ping: http://10.100.0.124
+            description: Manga & Comics
     - External:
         - Ext Traefik:
             icon: traefik
             href: https://ext-traefik.lsck0.dev
             ping: http://10.200.0.200
+            widget:
+              type: traefik
+              url: http://10.200.0.200:8080
         - Headscale:
             icon: headscale
             href: https://hs.lsck0.dev
             ping: http://10.200.0.201
+            description: VPN Mesh
         - SearXNG:
             icon: searxng
             href: https://search.lsck0.dev
             ping: http://10.200.0.202
+            widget:
+              type: searxng
+              url: http://10.200.0.202
         - Shlink:
             icon: shlink
             href: https://shlink.lsck0.dev
             ping: http://10.200.0.203
+            description: URL Shortener
         - PrivateBin:
             icon: privatebin
             href: https://paste.lsck0.dev
             ping: http://10.200.0.204
+            description: Encrypted Paste
         - Share:
             icon: filebrowser
             href: https://share.lsck0.dev
             ping: http://10.200.0.205
+            description: File Sharing
         - Minecraft:
             icon: minecraft
             ping: http://10.200.0.207
+            widget:
+              type: minecraft
+              url: udp://10.200.0.207:25565
         - Hello:
             icon: mdi-hand-wave
             href: https://hello.lsck0.dev
             ping: http://10.200.0.208
+            description: Demo App
   '';
 
   settingsYaml = pkgs.writeText "settings.yaml" ''
