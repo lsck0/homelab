@@ -80,6 +80,24 @@
     };
   };
 
+  # Ensure NFS-backed dirs exist with correct ownership before Nextcloud starts
+  systemd.services."nextcloud-prepare-dirs" = {
+    description = "Create Nextcloud directories on NFS";
+    before = [ "nextcloud-setup.service" ];
+    requiredBy = [ "nextcloud-setup.service" ];
+    after = [ "var-lib-nextcloud.mount" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      # Touch the mount to trigger NFS automount
+      ls /var/lib/nextcloud >/dev/null 2>&1 || true
+      mkdir -p /var/lib/nextcloud/{config,data,store-apps,apps}
+      chown -R nextcloud:nextcloud /var/lib/nextcloud
+    '';
+  };
+
   systemd.services."nextcloud-setup" = {
     requires = [ "postgresql.service" ];
     after = [ "postgresql.service" ];
