@@ -37,25 +37,17 @@ let
             icon: authentik
             href: https://auth.lsck0.dev
             ping: http://10.100.0.101
-            widget:
-              type: authentik
-              url: http://10.100.0.101
-              key: "{{HOMEPAGE_VAR_AUTHENTIK_KEY}}"
+            description: SSO & Auth
         - Grafana:
             icon: grafana
             href: https://grafana.lsck0.dev
             ping: http://10.100.0.103
-            widget:
-              type: grafana
-              url: http://10.100.0.103
+            description: Monitoring
         - Status:
             icon: uptime-kuma
             href: https://status.lsck0.dev
             ping: http://10.100.0.104
-            widget:
-              type: uptimekuma
-              url: http://10.100.0.104
-              slug: homelab
+            description: Uptime Monitoring
         - NAS:
             icon: mdi-nas
             href: https://nas.lsck0.dev
@@ -69,7 +61,7 @@ let
             href: https://git.lsck0.dev
             ping: http://10.100.0.107
             widget:
-              type: forgejo
+              type: gitea
               url: http://10.100.0.107
               key: "{{HOMEPAGE_VAR_FORGEJO_KEY}}"
         - Forgejo Runner:
@@ -97,7 +89,7 @@ let
             ping: http://10.100.0.112
             widget:
               type: nextcloud
-              url: http://10.100.0.112
+              url: https://cloud.lsck0.dev
               username: "{{HOMEPAGE_VAR_NEXTCLOUD_USER}}"
               password: "{{HOMEPAGE_VAR_NEXTCLOUD_PASS}}"
         - Paperless:
@@ -117,10 +109,7 @@ let
             icon: home-assistant
             href: https://hass.lsck0.dev
             ping: http://10.100.0.115
-            widget:
-              type: homeassistant
-              url: http://10.100.0.115
-              key: "{{HOMEPAGE_VAR_HOMEASSISTANT_KEY}}"
+            description: Smart Home
         - Wiki.js:
             icon: wikijs
             href: https://wiki.lsck0.dev
@@ -130,41 +119,27 @@ let
             icon: qbittorrent
             href: https://torrent.lsck0.dev
             ping: http://10.100.0.117
-            widget:
-              type: qbittorrent
-              url: http://10.100.0.117
+            description: Torrent Client
         - Prowlarr:
             icon: prowlarr
             href: https://prowlarr.lsck0.dev
             ping: http://10.100.0.118
-            widget:
-              type: prowlarr
-              url: http://10.100.0.118
-              key: "{{HOMEPAGE_VAR_PROWLARR_KEY}}"
+            description: Indexer Manager
         - Radarr:
             icon: radarr
             href: https://radarr.lsck0.dev
             ping: http://10.100.0.119
-            widget:
-              type: radarr
-              url: http://10.100.0.119
-              key: "{{HOMEPAGE_VAR_RADARR_KEY}}"
+            description: Movies
         - Sonarr:
             icon: sonarr
             href: https://sonarr.lsck0.dev
             ping: http://10.100.0.120
-            widget:
-              type: sonarr
-              url: http://10.100.0.120
-              key: "{{HOMEPAGE_VAR_SONARR_KEY}}"
+            description: TV Shows
         - Jellyfin:
             icon: jellyfin
             href: https://jellyfin.lsck0.dev
             ping: http://10.100.0.121
-            widget:
-              type: jellyfin
-              url: http://10.100.0.121
-              key: "{{HOMEPAGE_VAR_JELLYFIN_KEY}}"
+            description: Media Server
         - Audiobookshelf:
             icon: audiobookshelf
             href: https://abs.lsck0.dev
@@ -174,12 +149,7 @@ let
             icon: navidrome
             href: https://music.lsck0.dev
             ping: http://10.100.0.123
-            widget:
-              type: navidrome
-              url: http://10.100.0.123
-              user: "{{HOMEPAGE_VAR_NAVIDROME_USER}}"
-              token: "{{HOMEPAGE_VAR_NAVIDROME_TOKEN}}"
-              salt: "{{HOMEPAGE_VAR_NAVIDROME_SALT}}"
+            description: Music Server
         - Kavita:
             icon: kavita
             href: https://read.lsck0.dev
@@ -202,9 +172,7 @@ let
             icon: searxng
             href: https://search.lsck0.dev
             ping: http://10.200.0.202
-            widget:
-              type: searxng
-              url: http://10.200.0.202
+            description: Metasearch
         - Shlink:
             icon: shlink
             href: https://shlink.lsck0.dev
