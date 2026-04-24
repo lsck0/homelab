@@ -15,7 +15,11 @@
       "/var/run/docker.sock:/var/run/docker.sock"
     ];
     user = "root:root";
-    extraOptions = [ "--add-host=git.lsck0.dev:10.100.0.100" ];
+    extraOptions = [
+      "--add-host=git.lsck0.dev:10.100.0.100"
+      "--add-host=registry.lsck0.dev:10.100.0.109"
+      "--add-host=sccache.lsck0.dev:10.100.0.106"
+    ];
     environment = {
       SCCACHE_REDIS = "redis://sccache.lsck0.dev";
     };
