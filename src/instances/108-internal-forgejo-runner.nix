@@ -77,7 +77,7 @@
           --instance https://git.lsck0.dev \
           --token "$REG_TOKEN" \
           --name vm-108-runner \
-          --labels "docker:docker://node:20-bookworm,ubuntu-latest:docker://ubuntu:22.04,rust:docker://rust:1.80-bookworm" \
+          --labels "docker:docker://node:20-bookworm,ubuntu-latest:docker://catthehacker/ubuntu:act-22.04,rust:docker://rust:1.80-bookworm" \
           --no-interactive
 
       echo "Runner registered successfully"
