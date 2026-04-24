@@ -1,7 +1,7 @@
 { pkgs, nasMount, ... }: {
   networking.hostName = "vm-108";
 
-  # Resolve git.internal directly to Forgejo (bypass traefik for runner registration)
+  # Resolve git.internal directly to Forgejo (bypass traefik for runner)
   networking.hosts."10.100.0.107" = [ "git.internal" ];
 
   fileSystems = nasMount "/var/lib/forgejo-runner" "forgejo-runner"
@@ -18,6 +18,7 @@
       "/var/run/docker.sock:/var/run/docker.sock"
     ];
     user = "root:root";
+    extraOptions = [ "--add-host=git.internal:10.100.0.107" ];
     environment = {
       SCCACHE_REDIS = "redis://sccache.internal";
     };
@@ -28,7 +29,7 @@
     description = "Register Forgejo runner";
     before = [ "docker-forgejo-runner.service" ];
     requiredBy = [ "docker-forgejo-runner.service" ];
-    path = [ pkgs.curl pkgs.jq pkgs.docker ];
+    path = [ pkgs.curl pkgs.jq pkgs.docker pkgs.gnused ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -46,6 +47,9 @@
           code.forgejo.org/forgejo/runner:6.2.1 \
           forgejo-runner generate-config > /var/lib/forgejo-runner/config.yaml
       fi
+
+      # Enable insecure mode (self-signed certs) and set valid_volumes for docker socket
+      sed -i 's/insecure: false/insecure: true/' /var/lib/forgejo-runner/config.yaml
 
       # Wait for Forgejo API
       for i in $(seq 1 90); do
@@ -69,6 +73,7 @@
       REG_TOKEN=$(cat "$TOKEN_FILE")
 
       docker run --rm -v /var/lib/forgejo-runner:/data \
+        --add-host=git.internal:10.100.0.107 \
         code.forgejo.org/forgejo/runner:6.2.1 \
         forgejo-runner register \
           --instance http://git.internal \
@@ -76,6 +81,9 @@
           --name vm-108-runner \
           --labels "docker:docker://node:20-bookworm,ubuntu-latest:docker://ubuntu:22.04,rust:docker://rust:1.80-bookworm" \
           --no-interactive
+
+      # Patch config: set insecure and allow Docker-in-Docker volumes
+      sed -i 's/insecure: false/insecure: true/' /var/lib/forgejo-runner/config.yaml
 
       echo "Runner registered successfully"
     '';
