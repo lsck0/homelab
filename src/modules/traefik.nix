@@ -103,12 +103,9 @@ in {
         };
       };
       dynamicConfigOptions = {
-        http = {
-          routers = cfg.routers;
-          services = cfg.services;
-          middlewares = cfg.middlewares;
-          serversTransports = cfg.serversTransports;
-        };
+        http = { routers = cfg.routers; services = cfg.services; }
+          // lib.optionalAttrs (cfg.middlewares != {}) { middlewares = cfg.middlewares; }
+          // lib.optionalAttrs (cfg.serversTransports != {}) { serversTransports = cfg.serversTransports; };
       } // lib.optionalAttrs (cfg.tcp != {}) { tcp = cfg.tcp; };
     };
 
