@@ -45,9 +45,6 @@
           forgejo-runner generate-config > /var/lib/forgejo-runner/config.yaml
       fi
 
-      # Enable insecure mode (self-signed certs) and set valid_volumes for docker socket
-      sed -i 's/insecure: false/insecure: true/' /var/lib/forgejo-runner/config.yaml
-
       # Wait for Forgejo API
       for i in $(seq 1 90); do
         if curl -sf https://git.lsck0.dev/api/v1/settings/api >/dev/null 2>&1; then break; fi
@@ -78,9 +75,6 @@
           --name vm-108-runner \
           --labels "docker:docker://node:20-bookworm,ubuntu-latest:docker://ubuntu:22.04,rust:docker://rust:1.80-bookworm" \
           --no-interactive
-
-      # Patch config: set insecure and allow Docker-in-Docker volumes
-      sed -i 's/insecure: false/insecure: true/' /var/lib/forgejo-runner/config.yaml
 
       echo "Runner registered successfully"
     '';

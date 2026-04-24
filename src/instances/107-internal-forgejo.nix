@@ -94,7 +94,7 @@
       podman exec -u git forgejo forgejo admin user create \
         --username homepage-bot \
         --password "homepage-bot-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
-        --email homepage@internal \
+        --email homepage@lsck0.dev \
         --must-change-password=false 2>/dev/null || true
 
       # Delete stale token for idempotency, then generate new one
