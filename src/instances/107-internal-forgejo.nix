@@ -41,7 +41,7 @@
     script = ''
       # Wait for Forgejo API
       for i in $(seq 1 60); do
-        if curl -sf http://127.0.0.1:3000/api/v1/settings/api >/dev/null 2>&1; then break; fi
+        if curl -sf http://127.0.0.1:80/api/v1/settings/api >/dev/null 2>&1; then break; fi
         sleep 2
       done
 
@@ -90,7 +90,7 @@
 
       # Wait for Forgejo API
       for i in $(seq 1 60); do
-        curl -sf http://127.0.0.1:3000/api/v1/settings/api >/dev/null 2>&1 && break
+        curl -sf http://127.0.0.1:80/api/v1/settings/api >/dev/null 2>&1 && break
         sleep 2
       done
 
