@@ -32,13 +32,11 @@
       DIFFICULTY = "hard";
       # Custom server icon — place a 64x64 PNG at /var/lib/minecraft/server-icon.png
       # or set ICON to a URL:
-      # ICON = "https://example.com/icon.png";
+      ICON = "https://d.furaffinity.net/art/skullfugg/1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png";
       OVERRIDE_ICON = "TRUE";
-      MOTD = "Homelab Minecraft";
-      ENABLE_COMMAND_BLOCK = "true";
-      SNOOPER_ENABLED = "false";
+      MOTD = "minecwaft sewvew 🐾✨";
       VIEW_DISTANCE = "12";
-      MAX_PLAYERS = "10";
+      MAX_PLAYERS = "42069";
       ENABLE_RCON = "true";
       ENABLE_WHITELIST = "true";
       ENFORCE_WHITELIST = "true";
@@ -50,13 +48,13 @@
       # Default: vanilla. Uncomment ONE block below to switch.
       #
       # Vanilla (default):
-      TYPE = "VANILLA";
-      VERSION = "LATEST";
+      # TYPE = "VANILLA";
+      # VERSION = "LATEST";
       #
       # Modrinth modpack:
-      #   TYPE = "MODRINTH";
-      #   MODRINTH_MODPACK = "https://modrinth.com/modpack/cobblemon-fabric";
-      #   VERSION = "LATEST";
+        TYPE = "MODRINTH";
+        MODRINTH_MODPACK = "https://modrinth.com/modpack/cobblemon-fabric";
+        VERSION = "LATEST";
       #
       # CurseForge server ZIP (no API key needed):
       #   TYPE = "AUTO_CURSEFORGE";
