@@ -41,6 +41,7 @@
       ENFORCE_WHITELIST = "true";
       WHITELIST = builtins.concatStringsSep "," [
         "apokryphos"
+        "LocalBlanky"
       ];
 
       # ── Server type ──────────────────────────────────────────
@@ -52,7 +53,7 @@
       #
       # Modrinth modpack:
       TYPE = "MODRINTH";
-      MODRINTH_MODPACK = "https://modrinth.com/modpack/cobblemon-fabric";
+      MODRINTH_MODPACK = "https://modrinth.com/modpack/cobbleverse";
       VERSION = "LATEST";
       #
       # CurseForge server ZIP (no API key needed):
