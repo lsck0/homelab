@@ -119,7 +119,10 @@ let
             icon: home-assistant
             href: https://hass.lsck0.dev
             ping: http://10.100.0.115
-            description: Smart Home
+            widget:
+              type: homeassistant
+              url: http://10.100.0.115
+              key: "{{HOMEPAGE_VAR_HASS_KEY}}"
         - Wiki.js:
             icon: wikijs
             href: https://wiki.lsck0.dev
@@ -129,42 +132,70 @@ let
             icon: qbittorrent
             href: https://torrent.lsck0.dev
             ping: http://10.100.0.117
-            description: Torrent Client
+            widget:
+              type: qbittorrent
+              url: http://10.100.0.117
+              username: admin
+              password: adminadmin
         - Prowlarr:
             icon: prowlarr
             href: https://prowlarr.lsck0.dev
             ping: http://10.100.0.118
-            description: Indexer Manager
+            widget:
+              type: prowlarr
+              url: http://10.100.0.118
+              key: "{{HOMEPAGE_VAR_PROWLARR_KEY}}"
         - Radarr:
             icon: radarr
             href: https://radarr.lsck0.dev
             ping: http://10.100.0.119
-            description: Movies
+            widget:
+              type: radarr
+              url: http://10.100.0.119
+              key: "{{HOMEPAGE_VAR_RADARR_KEY}}"
         - Sonarr:
             icon: sonarr
             href: https://sonarr.lsck0.dev
             ping: http://10.100.0.120
-            description: TV Shows
+            widget:
+              type: sonarr
+              url: http://10.100.0.120
+              key: "{{HOMEPAGE_VAR_SONARR_KEY}}"
         - Jellyfin:
             icon: jellyfin
             href: https://jellyfin.lsck0.dev
             ping: http://10.100.0.121
-            description: Media Server
+            widget:
+              type: jellyfin
+              url: http://10.100.0.121
+              key: "{{HOMEPAGE_VAR_JELLYFIN_KEY}}"
         - Audiobookshelf:
             icon: audiobookshelf
             href: https://abs.lsck0.dev
             ping: http://10.100.0.122
-            description: Audiobooks
+            widget:
+              type: audiobookshelf
+              url: http://10.100.0.122
+              key: "{{HOMEPAGE_VAR_AUDIOBOOKSHELF_KEY}}"
         - Navidrome:
             icon: navidrome
             href: https://music.lsck0.dev
             ping: http://10.100.0.123
-            description: Music Server
+            widget:
+              type: navidrome
+              url: http://10.100.0.123
+              user: "{{HOMEPAGE_VAR_NAVIDROME_USER}}"
+              token: "{{HOMEPAGE_VAR_NAVIDROME_TOKEN}}"
+              salt: "{{HOMEPAGE_VAR_NAVIDROME_SALT}}"
         - Kavita:
             icon: kavita
             href: https://read.lsck0.dev
             ping: http://10.100.0.124
-            description: Manga & Comics
+            widget:
+              type: kavita
+              url: http://10.100.0.124
+              username: "{{HOMEPAGE_VAR_KAVITA_USER}}"
+              password: "{{HOMEPAGE_VAR_KAVITA_PASS}}"
     - External:
         - Ext Traefik:
             icon: traefik
@@ -198,12 +229,6 @@ let
             href: https://share.lsck0.dev
             ping: http://10.200.0.205
             description: File Sharing
-        - Minecraft:
-            icon: minecraft
-            ping: http://10.200.0.207
-            widget:
-              type: minecraft
-              url: udp://10.200.0.207:25565
         - Hello:
             icon: mdi-hand-wave
             href: https://hello.lsck0.dev

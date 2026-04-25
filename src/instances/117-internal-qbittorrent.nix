@@ -3,7 +3,8 @@
 
   fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
     // nasMedia "/srv/media" ""
-    // nasPath "/srv/downloads" "torrents";
+    // nasPath "/srv/downloads" "torrents"
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   virtualisation.oci-containers.containers.qbittorrent = {
     image = "lscr.io/linuxserver/qbittorrent:latest";
@@ -55,6 +56,22 @@
   systemd.tmpfiles.rules = [
     "d /var/lib/qbittorrent 0750 1000 1000 -"
   ];
+
+  # Export qBittorrent credentials for Homepage widget
+  systemd.services.qbittorrent-homepage-token = {
+    description = "Export qBittorrent credentials for Homepage";
+    after = [ "podman-qbittorrent.service" "qbittorrent-disable-auth.service" ];
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = ''
+      TOKEN_FILE="/var/lib/homepage-tokens/qbittorrent-user.token"
+      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
+      # With auth disabled for local subnet, credentials don't matter
+      # but the widget requires them
+      echo -n "admin" > /var/lib/homepage-tokens/qbittorrent-user.token
+      echo -n "adminadmin" > /var/lib/homepage-tokens/qbittorrent-pass.token
+    '';
+  };
 
   networking.firewall.allowedTCPPorts = [ 80 6881 ];
   networking.firewall.allowedUDPPorts = [ 6881 ];
