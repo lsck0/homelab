@@ -25,7 +25,7 @@
     description = "Export Audiobookshelf API token for Homepage";
     after = [ "podman-audiobookshelf.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.coreutils ];
+    path = [ pkgs.curl pkgs.coreutils pkgs.gnugrep ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/audiobookshelf-key.token"
@@ -35,10 +35,17 @@
         curl -sf http://127.0.0.1:80/healthcheck >/dev/null 2>&1 && break
         sleep 2
       done
-      # Login with default root/root credentials, extract token
+      # Initialize if not yet set up
+      STATUS=$(curl -sf http://127.0.0.1:80/status 2>/dev/null || true)
+      if echo "$STATUS" | grep -q '"isInit":false'; then
+        curl -sf -X POST "http://127.0.0.1:80/init" \
+          -H "Content-Type: application/json" \
+          -d '{"newRoot":{"username":"admin","password":"admin"}}' 2>/dev/null || true
+      fi
+      # Login and extract token
       TOKEN=$(curl -sf -X POST "http://127.0.0.1:80/login" \
         -H "Content-Type: application/json" \
-        -d '{"username":"root","password":"root"}' 2>/dev/null \
+        -d '{"username":"admin","password":"admin"}' 2>/dev/null \
         | grep -oP '"token"\s*:\s*"\K[^"]+' || true)
       if [ -n "$TOKEN" ]; then
         echo -n "$TOKEN" > "$TOKEN_FILE"

@@ -27,7 +27,7 @@
     description = "Export Jellyfin API key for Homepage";
     after = [ "podman-jellyfin.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq ];
+    path = [ pkgs.curl pkgs.gnugrep pkgs.coreutils ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/jellyfin-key.token"
@@ -36,13 +36,35 @@
         curl -sf http://127.0.0.1:80/health >/dev/null 2>&1 && break
         sleep 2
       done
-      # Create API key via Jellyfin API (no auth needed on first setup / local)
-      curl -sf -X POST "http://127.0.0.1:80/Auth/Keys" \
-        -H "Content-Type: application/json" \
-        -d '{"App":"homepage"}' 2>/dev/null || true
+
+      # Complete startup wizard if needed
+      WIZARD=$(curl -sf http://127.0.0.1:80/System/Info/Public 2>/dev/null || true)
+      if echo "$WIZARD" | grep -q '"StartupWizardCompleted":false'; then
+        curl -sf -X POST "http://127.0.0.1:80/Startup/Configuration" \
+          -H "Content-Type: application/json" \
+          -d '{"UICulture":"en-US","MetadataCountryCode":"DE","PreferredMetadataLanguage":"en"}' 2>/dev/null || true
+        curl -sf -X POST "http://127.0.0.1:80/Startup/User" \
+          -H "Content-Type: application/json" \
+          -d '{"Name":"admin","Password":"admin"}' 2>/dev/null || true
+        curl -sf -X POST "http://127.0.0.1:80/Startup/Complete" 2>/dev/null || true
+      fi
+
+      # Authenticate
+      AUTH_HDR="X-Emby-Authorization: MediaBrowser Client=\"Homepage\", Device=\"Server\", DeviceId=\"homepage\", Version=\"1.0\""
+      ACCESS_TOKEN=$(curl -sf -X POST "http://127.0.0.1:80/Users/AuthenticateByName" \
+        -H "Content-Type: application/json" -H "$AUTH_HDR" \
+        -d '{"Username":"admin","Pw":"admin"}' 2>/dev/null \
+        | grep -oP '"AccessToken"\s*:\s*"\K[^"]+' || true)
+      [ -z "$ACCESS_TOKEN" ] && exit 1
+
+      # Create API key
+      curl -sf -X POST "http://127.0.0.1:80/Auth/Keys?app=homepage" \
+        -H "X-Emby-Token: $ACCESS_TOKEN" 2>/dev/null || true
+
       # Fetch the key
-      KEY=$(curl -sf "http://127.0.0.1:80/Auth/Keys" 2>/dev/null \
-        | jq -r '.Items[] | select(.AppName=="homepage") | .AccessToken' 2>/dev/null | head -1)
+      KEY=$(curl -sf "http://127.0.0.1:80/Auth/Keys" \
+        -H "X-Emby-Token: $ACCESS_TOKEN" 2>/dev/null \
+        | grep -oP '"AccessToken"\s*:\s*"\K[^"]+' | head -1 || true)
       [ -n "$KEY" ] && echo -n "$KEY" > "$TOKEN_FILE"
     '';
   };

@@ -95,3 +95,18 @@ fi
 
 printf '%s\n' "$TOKEN_SECRET" > /root/terraform_token.txt
 chmod 600 /root/terraform_token.txt
+
+# Homepage read-only user for dashboard widget
+if ! pveum user list 2>/dev/null | grep -q "homepage@pve"; then
+    pveum user add homepage@pve --password "homepage-readonly" >/dev/null 2>&1 || true
+fi
+pveum acl modify / -user homepage@pve -role PVEAuditor
+
+# Recreate homepage API token
+pveum user token delete homepage@pve homepage >/dev/null 2>&1 || true
+HOMEPAGE_TOKEN="$(
+    pveum user token add homepage@pve homepage --privsep 0 \
+      | awk -F'│' '/^[[:space:]]*│[[:space:]]*value[[:space:]]*│/ {gsub(/[[:space:]]/, "", $3); print $3; exit}'
+)"
+printf '%s\n' "$HOMEPAGE_TOKEN" > /root/homepage_token.txt
+chmod 600 /root/homepage_token.txt

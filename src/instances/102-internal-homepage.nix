@@ -1,4 +1,4 @@
-{ pkgs, nasMount, ... }:
+{ config, pkgs, nasMount, ... }:
 let
   servicesYaml = pkgs.writeText "services.yaml" ''
     - Infra:
@@ -118,7 +118,10 @@ let
             icon: home-assistant
             href: https://hass.lsck0.dev
             ping: http://10.100.0.115
-            description: Smart Home
+            widget:
+              type: homeassistant
+              url: http://10.100.0.115
+              key: "{{HOMEPAGE_VAR_HASS_KEY}}"
         - Wiki.js:
             icon: wikijs
             href: https://wiki.lsck0.dev
@@ -177,12 +180,21 @@ let
             icon: navidrome
             href: https://music.lsck0.dev
             ping: http://10.100.0.123
-            description: Music Server
+            widget:
+              type: navidrome
+              url: http://10.100.0.123
+              user: "{{HOMEPAGE_VAR_NAVIDROME_USER}}"
+              token: "{{HOMEPAGE_VAR_NAVIDROME_TOKEN}}"
+              salt: "{{HOMEPAGE_VAR_NAVIDROME_SALT}}"
         - Kavita:
             icon: kavita
             href: https://read.lsck0.dev
             ping: http://10.100.0.124
-            description: Manga & Comics
+            widget:
+              type: kavita
+              url: http://10.100.0.124
+              username: "{{HOMEPAGE_VAR_KAVITA_USER}}"
+              password: "{{HOMEPAGE_VAR_KAVITA_PASS}}"
     - External:
         - Ext Traefik:
             icon: traefik
@@ -216,6 +228,12 @@ let
             href: https://share.lsck0.dev
             ping: http://10.200.0.205
             description: File Sharing
+        - Minecraft:
+            icon: minecraft
+            ping: http://10.200.0.207
+            widget:
+              type: minecraft
+              url: udp://10.200.0.207:25565
         - Hello:
             icon: mdi-hand-wave
             href: https://hello.lsck0.dev
@@ -279,6 +297,9 @@ let
 in {
   networking.hostName = "vm-102";
 
+  sops.secrets."proxmox-user" = {};
+  sops.secrets."proxmox-pass" = {};
+
   fileSystems = nasMount "/var/lib/homepage" "homepage"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
@@ -305,6 +326,10 @@ in {
         varname="HOMEPAGE_VAR_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"
         echo "''${varname}=$(cat "$f")" >> "$ENV_FILE"
       done
+
+      # Proxmox credentials from sops (available on fresh deploy before NAS tokens exist)
+      echo "HOMEPAGE_VAR_PROXMOX_USER=$(cat ${config.sops.secrets."proxmox-user".path})" >> "$ENV_FILE"
+      echo "HOMEPAGE_VAR_PROXMOX_PASS=$(cat ${config.sops.secrets."proxmox-pass".path})" >> "$ENV_FILE"
 
       chmod 600 "$ENV_FILE"
     '';
