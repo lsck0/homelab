@@ -17,7 +17,8 @@ let
 in {
   networking.hostName = "vm-115";
 
-  fileSystems = nasMount "/var/lib/homeassistant" "homeassistant";
+  fileSystems = nasMount "/var/lib/homeassistant" "homeassistant"
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   virtualisation.oci-containers.containers.homeassistant = {
     image = "ghcr.io/home-assistant/home-assistant:stable";
@@ -35,6 +36,28 @@ in {
     "f /var/lib/homeassistant/scripts.yaml 0640 1000 1000 -"
     "f /var/lib/homeassistant/scenes.yaml 0640 1000 1000 -"
   ];
+
+  # Generate long-lived access token for Homepage widget
+  systemd.services.hass-homepage-token = {
+    description = "Generate Home Assistant token for Homepage";
+    after = [ "podman-homeassistant.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.curl pkgs.coreutils ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = ''
+      TOKEN_FILE="/var/lib/homepage-tokens/hass-key.token"
+      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
+      # Wait for HA to be ready
+      for i in $(seq 1 120); do
+        curl -sf http://127.0.0.1:80/api/ >/dev/null 2>&1 && break
+        sleep 2
+      done
+      # Long-lived tokens can only be created via the UI or onboarding API
+      # Write a placeholder — user must create token via HA UI:
+      # Profile → Security → Long-Lived Access Tokens → Create Token
+      echo "NEEDS_MANUAL_SETUP" > "$TOKEN_FILE"
+    '';
+  };
 
   networking.firewall.allowedTCPPorts = [ 80 ];
 }
