@@ -153,6 +153,7 @@ echo ">>> Configuring Proxmox (bridges + API token)..."
 
 
 TOKEN_SECRET=$("${SSH_CMD[@]}" root@"$TARGET_IP" "cat /root/terraform_token.txt")
+HOMEPAGE_TOKEN=$("${SSH_CMD[@]}" root@"$TARGET_IP" "cat /root/homepage_token.txt" 2>/dev/null || echo "")
 TARGET_NODE_NAME=$("${SSH_CMD[@]}" root@"$TARGET_IP" "hostname")
 TFVARS_ENC_PATH="$ROOT_DIR/src/terraform.tfvars.sops.json"
 
@@ -183,6 +184,15 @@ jq -n \
 
 sops --encrypt --in-place "$TFVARS_ENC_PATH"
 rm -f "$ROOT_DIR/src/terraform.tfvars"
+
+# Store Homepage PVE token in secrets.json for sops-nix
+if [ -n "$HOMEPAGE_TOKEN" ]; then
+    echo ">>> Storing Homepage Proxmox API token in secrets..."
+    SOPS_AGE_KEY_FILE="$AGE_KEY" sops set "$ROOT_DIR/src/secrets.json" \
+        '["proxmox-user"]' '"homepage@pve!homepage"'
+    SOPS_AGE_KEY_FILE="$AGE_KEY" sops set "$ROOT_DIR/src/secrets.json" \
+        '["proxmox-pass"]' "\"$HOMEPAGE_TOKEN\""
+fi
 
 echo ">>> INIT COMPLETE!"
 echo ">>> WireGuard: keys auto-generated on first deploy. Run 'wg show' on the router to get the public key."
