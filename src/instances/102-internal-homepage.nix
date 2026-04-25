@@ -119,10 +119,7 @@ let
             icon: home-assistant
             href: https://hass.lsck0.dev
             ping: http://10.100.0.115
-            widget:
-              type: homeassistant
-              url: http://10.100.0.115
-              key: "{{HOMEPAGE_VAR_HASS_KEY}}"
+            description: Smart Home
         - Wiki.js:
             icon: wikijs
             href: https://wiki.lsck0.dev
@@ -181,21 +178,12 @@ let
             icon: navidrome
             href: https://music.lsck0.dev
             ping: http://10.100.0.123
-            widget:
-              type: navidrome
-              url: http://10.100.0.123
-              user: "{{HOMEPAGE_VAR_NAVIDROME_USER}}"
-              token: "{{HOMEPAGE_VAR_NAVIDROME_TOKEN}}"
-              salt: "{{HOMEPAGE_VAR_NAVIDROME_SALT}}"
+            description: Music Server
         - Kavita:
             icon: kavita
             href: https://read.lsck0.dev
             ping: http://10.100.0.124
-            widget:
-              type: kavita
-              url: http://10.100.0.124
-              username: "{{HOMEPAGE_VAR_KAVITA_USER}}"
-              password: "{{HOMEPAGE_VAR_KAVITA_PASS}}"
+            description: Manga & Comics
     - External:
         - Ext Traefik:
             icon: traefik
