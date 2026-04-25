@@ -43,19 +43,20 @@
         sleep 2
       done
 
-      # Create initial admin user via Navidrome API (first-run only)
-      curl -sf -X POST "http://127.0.0.1:80/api/user" \
+      # Create admin user via first-run endpoint (returns Subsonic credentials)
+      RESP=$(curl -sf -X POST "http://127.0.0.1:80/auth/createAdmin" \
         -H "Content-Type: application/json" \
-        -d '{"userName":"admin","name":"Admin","password":"admin","isAdmin":true}' 2>/dev/null || true
+        -d '{"username":"admin","password":"admin"}' 2>/dev/null || true)
 
-      # Generate Subsonic API credentials: token = md5(password + salt)
-      SALT=$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')
-      TOKEN=$(printf '%s' "admin$SALT" | md5sum | cut -d' ' -f1)
+      SALT=$(echo "$RESP" | grep -oP '"subsonicSalt"\s*:\s*"\K[^"]+' || true)
+      TOKEN=$(echo "$RESP" | grep -oP '"subsonicToken"\s*:\s*"\K[^"]+' || true)
 
-      echo -n "admin" > /var/lib/homepage-tokens/navidrome-user.token
-      echo -n "$TOKEN" > /var/lib/homepage-tokens/navidrome-token.token
-      echo -n "$SALT" > /var/lib/homepage-tokens/navidrome-salt.token
-      echo "Navidrome Homepage credentials created"
+      if [ -n "$SALT" ] && [ -n "$TOKEN" ]; then
+        echo -n "admin" > /var/lib/homepage-tokens/navidrome-user.token
+        echo -n "$TOKEN" > /var/lib/homepage-tokens/navidrome-token.token
+        echo -n "$SALT" > /var/lib/homepage-tokens/navidrome-salt.token
+        echo "Navidrome Homepage credentials created"
+      fi
     '';
   };
 
