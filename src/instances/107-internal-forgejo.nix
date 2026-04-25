@@ -101,7 +101,7 @@
       TOKEN=$(podman exec -u git forgejo forgejo admin user generate-access-token \
         --username homepage-bot \
         --token-name homepage \
-        --scopes read:notification,read:user,read:organization,read:repository \
+        --scopes read:activitypub,read:issue,read:misc,read:notification,read:organization,read:package,read:repository,read:user \
         2>/dev/null | grep -oP 'Access token was successfully created\.\.\. \K.*' || true)
 
       if [ -n "$TOKEN" ]; then
