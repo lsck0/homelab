@@ -22,6 +22,7 @@ let
               url: https://192.168.178.200:8006
               username: "{{HOMEPAGE_VAR_PROXMOX_USER}}"
               password: "{{HOMEPAGE_VAR_PROXMOX_PASS}}"
+              node: luca-server
         - Router:
             icon: nixos
             ping: http://10.100.0.1
@@ -47,9 +48,7 @@ let
             icon: grafana
             href: https://grafana.lsck0.dev
             ping: http://10.100.0.103
-            widget:
-              type: grafana
-              url: http://admin:admin@10.100.0.103
+            description: Monitoring
         - Status:
             icon: uptime-kuma
             href: https://status.lsck0.dev
@@ -319,6 +318,7 @@ in {
     ];
     environment = {
       HOMEPAGE_ALLOWED_HOSTS = "homepage.lsck0.dev";
+      NODE_TLS_REJECT_UNAUTHORIZED = "0";
     };
     environmentFiles = [ "/var/lib/homepage/homepage.env" ];
     extraOptions = [ "--cap-add=NET_RAW" ];
