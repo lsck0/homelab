@@ -19,7 +19,7 @@
   };
 
   virtualisation.oci-containers.containers.minecraft = {
-    image = "itzg/minecraft-server:latest";
+    image = "itzg/minecraft-server:java21";
     ports = [ "25565:25565" "25575:25575" ];
     volumes = [
       "/var/lib/minecraft:/data"
@@ -36,6 +36,7 @@
       OVERRIDE_ICON = "TRUE";
       MOTD = "minecwaft sewvew 🐾✨";
       VIEW_DISTANCE = "12";
+      SPAWN_PROTECTION = "0";
       MAX_PLAYERS = "42069";
       ENABLE_RCON = "true";
       ENABLE_WHITELIST = "true";
