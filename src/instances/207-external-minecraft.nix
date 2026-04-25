@@ -28,14 +28,12 @@
     environmentFiles = [ "/var/lib/minecraft/rcon.env" ];
     environment = {
       EULA = "TRUE";
-      MEMORY = "11G";
+      MEMORY = "18G";
       DIFFICULTY = "hard";
-      # Custom server icon — place a 64x64 PNG at /var/lib/minecraft/server-icon.png
-      # or set ICON to a URL:
       ICON = "https://d.furaffinity.net/art/skullfugg/1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png";
       OVERRIDE_ICON = "TRUE";
-      MOTD = "minecwaft sewvew 🐾✨";
-      VIEW_DISTANCE = "12";
+      MOTD = "nya~ minecwaft sewvew 🐾✨";
+      VIEW_DISTANCE = "16";
       SPAWN_PROTECTION = "0";
       MAX_PLAYERS = "42069";
       ENABLE_RCON = "true";
@@ -53,9 +51,9 @@
       # VERSION = "LATEST";
       #
       # Modrinth modpack:
-        TYPE = "MODRINTH";
-        MODRINTH_MODPACK = "https://modrinth.com/modpack/cobblemon-fabric";
-        VERSION = "LATEST";
+      TYPE = "MODRINTH";
+      MODRINTH_MODPACK = "https://modrinth.com/modpack/cobblemon-fabric";
+      VERSION = "LATEST";
       #
       # CurseForge server ZIP (no API key needed):
       #   TYPE = "AUTO_CURSEFORGE";

@@ -24,9 +24,9 @@ locals {
     "108" = { name = "108-internal-forgejo-runner", type = "internal" }
     "109" = { name = "109-internal-registry", type = "internal" }
     "110" = { name = "110-internal-taskchampion", type = "internal" }
-    "111" = { name = "111-internal-vaultwarden", type = "internal" }
-    "112" = { name = "112-internal-nextcloud", type = "internal" }
-    "113" = { name = "113-internal-paperless", type = "internal" }
+    "111" = { name = "111-internal-vaultwarden", type = "internal", enabled = false }
+    "112" = { name = "112-internal-nextcloud", type = "internal", enabled = false }
+    "113" = { name = "113-internal-paperless", type = "internal", enabled = false }
     "114" = { name = "114-internal-huginn", type = "internal", enabled = false }
     "115" = { name = "115-internal-homeassistant", type = "internal", enabled = false }
     "116" = { name = "116-internal-wikijs", type = "internal", enabled = false }
@@ -41,12 +41,12 @@ locals {
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-headscale", type = "external" }
-    "202" = { name = "202-external-searxng", type = "external" }
-    "203" = { name = "203-external-shlink", type = "external" }
-    "204" = { name = "204-external-privatebin", type = "external" }
-    "205" = { name = "205-external-share", type = "external" }
-    "207" = { name = "207-external-minecraft", type = "external", memory = 12288, cores = 8, enabled = true }
-    "208" = { name = "208-external-hello", type = "external" }
+    "202" = { name = "202-external-searxng", type = "external", enabled = false }
+    "203" = { name = "203-external-shlink", type = "external", enabled = false }
+    "204" = { name = "204-external-privatebin", type = "external", enabled = false }
+    "205" = { name = "205-external-share", type = "external", enabled = false }
+    "207" = { name = "207-external-minecraft", type = "external", memory = 20480, cores = 8, enabled = true }
+    "208" = { name = "208-external-hello", type = "external", enabled = false }
     # ── router ──
     "300" = { name = "luca-router", type = "router" }
   }
