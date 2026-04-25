@@ -1,4 +1,4 @@
-{ config, pkgs, nasMount, ... }:
+{ pkgs, nasMount, ... }:
 let
   servicesYaml = pkgs.writeText "services.yaml" ''
     - Infra:
@@ -49,8 +49,7 @@ let
             ping: http://10.100.0.103
             widget:
               type: grafana
-              url: http://10.100.0.103
-              key: "{{HOMEPAGE_VAR_GRAFANA_KEY}}"
+              url: http://admin:admin@10.100.0.103
         - Status:
             icon: uptime-kuma
             href: https://status.lsck0.dev
@@ -268,9 +267,6 @@ let
 in {
   networking.hostName = "vm-102";
 
-  sops.secrets."proxmox-user" = {};
-  sops.secrets."proxmox-pass" = {};
-
   fileSystems = nasMount "/var/lib/homepage" "homepage"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
@@ -297,9 +293,6 @@ in {
         varname="HOMEPAGE_VAR_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"
         echo "''${varname}=$(cat "$f")" >> "$ENV_FILE"
       done
-
-      echo "HOMEPAGE_VAR_PROXMOX_USER=$(cat ${config.sops.secrets."proxmox-user".path})" >> "$ENV_FILE"
-      echo "HOMEPAGE_VAR_PROXMOX_PASS=$(cat ${config.sops.secrets."proxmox-pass".path})" >> "$ENV_FILE"
 
       chmod 600 "$ENV_FILE"
     '';

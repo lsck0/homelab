@@ -27,17 +27,17 @@ locals {
     "111" = { name = "111-internal-vaultwarden", type = "internal" }
     "112" = { name = "112-internal-nextcloud", type = "internal" }
     "113" = { name = "113-internal-paperless", type = "internal" }
-    "114" = { name = "114-internal-huginn", type = "internal", enabled = false }
-    "115" = { name = "115-internal-homeassistant", type = "internal", enabled = false }
-    "116" = { name = "116-internal-wikijs", type = "internal", enabled = false }
-    "117" = { name = "117-internal-qbittorrent", type = "internal", enabled = false }
-    "118" = { name = "118-internal-prowlarr", type = "internal", enabled = false }
-    "119" = { name = "119-internal-radarr", type = "internal", enabled = false }
-    "120" = { name = "120-internal-sonarr", type = "internal", enabled = false }
-    "121" = { name = "121-internal-jellyfin", type = "internal", enabled = false }
-    "122" = { name = "122-internal-audiobookshelf", type = "internal", enabled = false }
-    "123" = { name = "123-internal-navidrome", type = "internal", enabled = false }
-    "124" = { name = "124-internal-kavita", type = "internal", enabled = false }
+    "114" = { name = "114-internal-huginn", type = "internal", enabled = true }
+    "115" = { name = "115-internal-homeassistant", type = "internal", enabled = true }
+    "116" = { name = "116-internal-wikijs", type = "internal", enabled = true }
+    "117" = { name = "117-internal-qbittorrent", type = "internal", enabled = true }
+    "118" = { name = "118-internal-prowlarr", type = "internal", enabled = true }
+    "119" = { name = "119-internal-radarr", type = "internal", enabled = true }
+    "120" = { name = "120-internal-sonarr", type = "internal", enabled = true }
+    "121" = { name = "121-internal-jellyfin", type = "internal", enabled = true }
+    "122" = { name = "122-internal-audiobookshelf", type = "internal", enabled = true }
+    "123" = { name = "123-internal-navidrome", type = "internal", enabled = true }
+    "124" = { name = "124-internal-kavita", type = "internal", enabled = true }
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-headscale", type = "external" }

@@ -97,10 +97,11 @@
         --email homepage@lsck0.dev \
         --must-change-password=false 2>/dev/null || true
 
-      # Generate token (skip if already exists)
+      # Generate token with required scopes (skip if already exists)
       TOKEN=$(podman exec -u git forgejo forgejo admin user generate-access-token \
         --username homepage-bot \
         --token-name homepage \
+        --scopes read:notification,read:user,read:organization,read:repository \
         2>/dev/null | grep -oP 'Access token was successfully created\.\.\. \K.*' || true)
 
       if [ -n "$TOKEN" ]; then
