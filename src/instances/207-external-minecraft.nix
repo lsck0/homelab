@@ -55,7 +55,7 @@
       TYPE = "MODRINTH";
       MODRINTH_MODPACK = "https://modrinth.com/modpack/cobbleverse";
       VERSION = "LATEST";
-      DISABLE_MODS = builtins.concatStringsSep "," [
+      GENERIC_PACKS_DISABLE_MODS = builtins.concatStringsSep " " [
         "MobsBeGone-0.0.7.jar"
       ];
       #
