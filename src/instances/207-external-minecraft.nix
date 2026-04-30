@@ -55,6 +55,9 @@
       TYPE = "MODRINTH";
       MODRINTH_MODPACK = "https://modrinth.com/modpack/cobbleverse";
       VERSION = "LATEST";
+      DISABLE_MODS = builtins.concatStringsSep "," [
+        "MobsBeGone-0.0.7.jar"
+      ];
       #
       # CurseForge server ZIP (no API key needed):
       #   TYPE = "AUTO_CURSEFORGE";
