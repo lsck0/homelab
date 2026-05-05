@@ -69,6 +69,7 @@ in {
     systemd.tmpfiles.rules = [
       "d /var/lib/traefik 0700 traefik traefik -"
       "d /var/lib/traefik/acme 0700 traefik traefik -"
+      "d /var/lib/traefik/certs 0700 traefik traefik -"
       "d /var/lib/crowdsec/config 0750 root root -"
       "d /var/lib/crowdsec/data 0750 root root -"
       "d /var/log/traefik 0750 root root -"
@@ -97,23 +98,36 @@ in {
             resolvers = [ "1.1.1.1:53" "8.8.8.8:53" ];
           };
         };
-        certificatesResolvers.letsencrypt.acme = {
-          email = config.homelab.acmeEmail;
-          storage = "/var/lib/traefik/acme/acme.json";
-          caServer = "https://acme-v02.api.letsencrypt.org/directory";
-          dnsChallenge = {
-            provider = "cloudflare";
-            resolvers = [ "1.1.1.1:53" "8.8.8.8:53" ];
-            delayBeforeCheck = 0;
-            disablePropagationCheck = false;
-          };
-        };
+        tls.certificates = [
+          {
+            certFile = "/var/lib/traefik/certs/server-cert.pem";
+            keyFile = "/var/lib/traefik/certs/server-key.pem";
+          }
+        ];
       };
       dynamicConfigOptions = {
         http = { routers = cfg.routers; services = cfg.services; }
           // lib.optionalAttrs (cfg.middlewares != {}) { middlewares = cfg.middlewares; }
           // lib.optionalAttrs (cfg.serversTransports != {}) { serversTransports = cfg.serversTransports; };
       } // lib.optionalAttrs (cfg.tcp != {}) { tcp = cfg.tcp; };
+    };
+
+    systemd.services.traefik-certs = {
+      description = "Setup certs for traefik";
+      before = [ "traefik.service" ];
+      wantedBy = [ "traefik.service" ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = ''
+          ${pkgs.bash}/bin/bash -c '
+            mkdir -p /var/lib/traefik/certs
+            cp ${./../../secrets/server-key.pem} /var/lib/traefik/certs/server-key.pem
+            cp ${./../../secrets/server-cert.pem} /var/lib/traefik/certs/server-cert.pem
+            chown traefik:traefik /var/lib/traefik/certs/*.pem
+            chmod 600 /var/lib/traefik/certs/*.pem
+          '
+        '';
+      };
     };
 
     networking.firewall.allowedTCPPorts = [ 80 443 8080 ];
