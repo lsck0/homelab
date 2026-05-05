@@ -75,6 +75,28 @@ in {
       "d /var/log/traefik 0750 root root -"
     ];
 
+    environment.etc."traefik-certs-setup.sh" = {
+      text = ''
+        #!/usr/bin/env bash
+        mkdir -p /var/lib/traefik/certs
+        
+        # Server certificate
+        cat > /var/lib/traefik/certs/server-cert.pem << 'CERT_EOF'
+        ${builtins.readFile ../../secrets/server-cert.pem}
+        CERT_EOF
+        
+        # Server key
+        cat > /var/lib/traefik/certs/server-key.pem << 'KEY_EOF'
+        ${builtins.readFile ../../secrets/server-key.pem}
+        KEY_EOF
+        
+        chown traefik:traefik /var/lib/traefik/certs/*.pem
+        chmod 600 /var/lib/traefik/certs/server-key.pem
+        chmod 644 /var/lib/traefik/certs/server-cert.pem
+      '';
+      mode = "0755";
+    };
+
     services.traefik = {
       enable = true;
       environmentFiles = [ config.sops.templates."traefik.env".path ];
@@ -118,7 +140,7 @@ in {
       wantedBy = [ "traefik.service" ];
       serviceConfig = {
         Type = "oneshot";
-        ExecStart = "${pkgs.bash}/bin/bash -c 'mkdir -p /var/lib/traefik/certs && cp /nix/store/*-server-key.pem /var/lib/traefik/certs/server-key.pem 2>/dev/null || true && cp /nix/store/*-server-cert.pem /var/lib/traefik/certs/server-cert.pem 2>/dev/null || true && chown traefik:traefik /var/lib/traefik/certs/*.pem && chmod 600 /var/lib/traefik/certs/*.pem'";
+        ExecStart = "/etc/traefik-certs-setup.sh";
       };
     };
 
