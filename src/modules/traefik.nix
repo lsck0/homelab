@@ -101,7 +101,7 @@ in {
       enable = true;
       environmentFiles = [ config.sops.templates."traefik.env".path ];
       staticConfigOptions = {
-        log.level = cfg.logLevel;
+        log.level = "DEBUG";
         accessLog = {};
         api.dashboard = true;
         api.insecure = true;
