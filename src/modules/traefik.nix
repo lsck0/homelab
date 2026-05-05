@@ -120,17 +120,15 @@ in {
             resolvers = [ "1.1.1.1:53" "8.8.8.8:53" ];
           };
         };
-        tls = {
-          stores.default.defaultCertificate = {
-            certFile = "/var/lib/traefik/certs/server-cert.pem";
-            keyFile = "/var/lib/traefik/certs/server-key.pem";
-          };
-        };
       };
       dynamicConfigOptions = {
         http = { routers = cfg.routers; services = cfg.services; }
           // lib.optionalAttrs (cfg.middlewares != {}) { middlewares = cfg.middlewares; }
           // lib.optionalAttrs (cfg.serversTransports != {}) { serversTransports = cfg.serversTransports; };
+        tls.stores.default.defaultCertificate = {
+          certFile = "/var/lib/traefik/certs/server-cert.pem";
+          keyFile = "/var/lib/traefik/certs/server-key.pem";
+        };
       } // lib.optionalAttrs (cfg.tcp != {}) { tcp = cfg.tcp; };
     };
 
