@@ -1,6 +1,15 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.homelab.traefik;
+  routersWithTls = lib.mapAttrs (_: router:
+    let
+      entryPoints = router.entryPoints or [];
+    in
+    if builtins.elem "websecure" entryPoints && !(router ? tls) then
+      router // { tls = {}; }
+    else
+      router
+  ) cfg.routers;
 in {
   options.homelab.traefik = {
     enable = lib.mkEnableOption "Traefik reverse proxy with ACME and CrowdSec";
@@ -122,7 +131,7 @@ in {
         };
       };
       dynamicConfigOptions = {
-        http = { routers = cfg.routers; services = cfg.services; }
+        http = { routers = routersWithTls; services = cfg.services; }
           // lib.optionalAttrs (cfg.middlewares != {}) { middlewares = cfg.middlewares; }
           // lib.optionalAttrs (cfg.serversTransports != {}) { serversTransports = cfg.serversTransports; };
         tls.stores.default.defaultCertificate = {
