@@ -120,15 +120,21 @@ in {
             resolvers = [ "1.1.1.1:53" "8.8.8.8:53" ];
           };
         };
-        tls.certificates = [
-          {
+        tls = {
+          stores.default.defaultCertificate = {
             certFile = "/var/lib/traefik/certs/server-cert.pem";
             keyFile = "/var/lib/traefik/certs/server-key.pem";
-            domains = [
-              { main = "lsck0.dev"; sans = [ "*.lsck0.dev" ]; }
-            ];
-          }
-        ];
+          };
+          certificates = [
+            {
+              certFile = "/var/lib/traefik/certs/server-cert.pem";
+              keyFile = "/var/lib/traefik/certs/server-key.pem";
+              domains = [
+                { main = "lsck0.dev"; sans = [ "*.lsck0.dev" ]; }
+              ];
+            }
+          ];
+        };
       };
       dynamicConfigOptions = {
         http = { routers = cfg.routers; services = cfg.services; }
