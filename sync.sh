@@ -277,6 +277,74 @@ echo ">>> Fetching VM state from Terraform..."
 VM_IPS=$(terraform -chdir="$ROOT_DIR/src" output -raw vm_ips 2>/dev/null || echo "")
 DISABLED_VMS=$(terraform -chdir="$ROOT_DIR/src" output -raw disabled_vms 2>/dev/null || echo "")
 
+# ── SSH key pre-flight ────────────────────────────────────────
+# On fresh clone ~/.ssh/id_ed25519 may be missing. Generate if needed.
+if [ ! -f "$HOME/.ssh/id_ed25519" ]; then
+  echo ">>> No SSH key found — generating..."
+  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+  ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/id_ed25519" -C "homelab@$(hostname)" >/dev/null
+fi
+PUBKEY=$(cat "$HOME/.ssh/id_ed25519.pub")
+
+# Push SSH key to all running VMs via QEMU agent (no-op if already correct)
+push_ssh_keys_all() {
+  local api_base="https://${PROXMOX_SSH_HOST}:8006/api2/json"
+  local token_id token_secret node
+  token_id=$(read_tfvar proxmox_api_token_id 2>/dev/null || true)
+  token_secret=$(read_tfvar proxmox_api_token_secret 2>/dev/null || true)
+  node=$(read_tfvar target_node 2>/dev/null || true)
+  [ -z "$token_id" ] || [ -z "$token_secret" ] && return 0
+  local auth="Authorization: PVEAPIToken=$token_id=$token_secret"
+
+  echo ">>> Ensuring SSH key installed on all running VMs..."
+  local vmids
+  vmids=$(curl -sk "$api_base/nodes/$node/qemu" -H "$auth" \
+    | jq -r '.data[] | select(.status=="running") | .vmid' 2>/dev/null || true)
+
+  local cmd
+  cmd="mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo $(printf '%q' "$PUBKEY") > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && systemctl disable --now cloud-init 2>/dev/null; true"
+
+  for vmid in $vmids; do
+    local payload pid
+    payload=$(jq -cn --arg cmd "$cmd" '{"command":["/bin/sh","-c",$cmd]}')
+    pid=$(curl -sk -X POST "$api_base/nodes/$node/qemu/$vmid/agent/exec" \
+      -H "$auth" -H "Content-Type: application/json" -d "$payload" \
+      | jq -r '.data.pid // empty' 2>/dev/null || true)
+    [ -n "$pid" ] || echo "  VM $vmid: no agent (will rely on NixOS authorized_keys)"
+  done
+  sleep 3  # let agent execs complete
+}
+push_ssh_keys_all
+
+# ── Ensure Proxmox vzdump backup jobs exist ───────────────────
+setup_vzdump_jobs() {
+  local api_base="https://${PROXMOX_SSH_HOST}:8006/api2/json"
+  local token_id token_secret node
+  token_id=$(read_tfvar proxmox_api_token_id 2>/dev/null || true)
+  token_secret=$(read_tfvar proxmox_api_token_secret 2>/dev/null || true)
+  node=$(read_tfvar target_node 2>/dev/null || true)
+  [ -z "$token_id" ] || [ -z "$token_secret" ] || [ -z "$node" ] && return 0
+  local auth="Authorization: PVEAPIToken=$token_id=$token_secret"
+
+  local existing
+  existing=$(curl -sk "$api_base/cluster/backup" -H "$auth" \
+    | jq -r '.data[]?.id // empty' 2>/dev/null || true)
+
+  _create_job() {
+    local id="$1" vmids="$2" schedule="$3" maxfiles="$4"
+    echo "$existing" | grep -qx "$id" && return 0
+    echo ">>> Creating vzdump job: $id ($schedule) VMs=$vmids keep=$maxfiles"
+    curl -sk -X POST "$api_base/cluster/backup" -H "$auth" \
+      -d "id=$id&vmid=$vmids&schedule=$schedule&storage=local&mode=snapshot&compress=zstd&maxfiles=$maxfiles&enabled=1&node=$node" \
+      >/dev/null 2>&1 || echo "WARNING: Could not create vzdump job $id"
+  }
+
+  _create_job "homelab-daily"   "105,207" "0 2 * * *" "3"  # 3 days
+  _create_job "homelab-weekly"  "105,207" "0 3 * * 1" "2"  # 2 weeks
+  _create_job "homelab-monthly" "105,207" "0 4 1 * *" "1"  # 1 month
+}
+setup_vzdump_jobs
+
 if [ -n "$DISABLED_VMS" ]; then
   echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')"
 fi

@@ -4,7 +4,8 @@ let
 in {
   networking.hostName = "vm-100";
 
-  fileSystems = nasMount "/var/lib/crowdsec" "crowdsec-internal";
+  fileSystems = (nasMount "/var/lib/crowdsec" "crowdsec-internal")
+    // (nasMount "/var/lib/traefik/acme" "traefik-acme-internal");
 
   homelab.traefik = {
     enable = true;
