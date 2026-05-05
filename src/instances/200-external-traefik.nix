@@ -18,31 +18,16 @@
       privatebin-tls   = { rule = "Host(`paste.lsck0.dev`)";       service = "privatebin";   entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       share-tls        = { rule = "Host(`share.lsck0.dev`)";       service = "share";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       hello-tls        = { rule = "Host(`hello.lsck0.dev`)";       service = "hello";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-      # Catch-all: forward all other *.lsck0.dev to internal Traefik
-      internal-catchall = {
-        rule = "HostRegexp(`{host:.+\\.lsck0\\.dev}`)";
-        service = "internal-traefik";
-        entryPoints = [ "websecure" ];
-        tls.certResolver = "cloudflare";
-        priority = 1;
-      };
     };
 
     services = {
-      headscale.loadBalancer.servers         = [{ url = "http://10.200.0.201:80"; }];
-      searxng.loadBalancer.servers           = [{ url = "http://10.200.0.202:80"; }];
-      shlink.loadBalancer.servers            = [{ url = "http://10.200.0.203:80"; }];
-      privatebin.loadBalancer.servers        = [{ url = "http://10.200.0.204:80"; }];
-      share.loadBalancer.servers             = [{ url = "http://10.200.0.205:80"; }];
-      hello.loadBalancer.servers             = [{ url = "http://10.200.0.208:80"; }];
-      internal-traefik.loadBalancer = {
-        servers = [{ url = "https://10.100.0.100:443"; }];
-        passHostHeader = true;
-        serversTransport = "internal-insecure";
-      };
+      headscale.loadBalancer.servers    = [{ url = "http://10.200.0.201:80"; }];
+      searxng.loadBalancer.servers      = [{ url = "http://10.200.0.202:80"; }];
+      shlink.loadBalancer.servers       = [{ url = "http://10.200.0.203:80"; }];
+      privatebin.loadBalancer.servers   = [{ url = "http://10.200.0.204:80"; }];
+      share.loadBalancer.servers        = [{ url = "http://10.200.0.205:80"; }];
+      hello.loadBalancer.servers        = [{ url = "http://10.200.0.208:80"; }];
     };
-
-    serversTransports.internal-insecure.insecureSkipVerify = true;
 
     tcp = {
       routers.minecraft = {
