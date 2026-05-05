@@ -34,6 +34,10 @@
     services.qemuGuest.enable = true;
     # Use simple eth0 naming so cloud-init network config matches
     networking.usePredictableInterfaceNames = false;
+    users.users.root.openssh.authorizedKeys.keys = [
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
+    ];
+
     services.openssh = {
       enable = true;
       settings = {

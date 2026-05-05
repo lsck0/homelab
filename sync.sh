@@ -74,7 +74,7 @@ deploy_nixos() {
   local name="$1" ip="$2"
   echo ">>> Deploying $name to $ip..."
 
-  if ! wait_for_ssh "$ip" 24 5; then return 1; fi
+  if ! wait_for_ssh "$ip" 60 5; then return 1; fi
 
   local toplevel
   toplevel=$(nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
@@ -325,22 +325,24 @@ else
   DEPLOY_FAILURE=1
 fi
 
-# Wait for bastion connectivity after router deploy
-echo ">>> Waiting for router bastion..."
-wait_for_ssh "$ROUTER_WAN_IP" 30 5 || { echo "ERROR: Router not reachable after deploy."; exit 1; }
+if [ "$DEPLOY_FAILURE" -eq 0 ]; then
+  # Wait for bastion connectivity after router deploy
+  echo ">>> Waiting for router bastion..."
+  wait_for_ssh "$ROUTER_WAN_IP" 30 5 || { echo "ERROR: Router not reachable after deploy."; exit 1; }
 
-echo ">>> Verifying bastion proxy to internal subnet..."
-for _ in $(seq 1 12); do
-  ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@10.100.0.100" "true" 2>/dev/null && break
-  sleep 5
-done
+  echo ">>> Verifying bastion proxy to internal subnet..."
+  for _ in $(seq 1 12); do
+    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@10.100.0.100" "true" 2>/dev/null && break
+    sleep 5
+  done
 
-echo ">>> Verifying router DNS..."
-for _ in $(seq 1 24); do
-  ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "root@${ROUTER_WAN_IP}" \
-    "dig +short +timeout=2 ghcr.io @127.0.0.1 2>/dev/null | grep -q ." 2>/dev/null && break
-  sleep 5
-done
+  echo ">>> Verifying router DNS..."
+  for _ in $(seq 1 24); do
+    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "root@${ROUTER_WAN_IP}" \
+      "dig +short +timeout=2 ghcr.io @127.0.0.1 2>/dev/null | grep -q ." 2>/dev/null && break
+    sleep 5
+  done
+fi
 
 # ── Wait for builds ──────────────────────────────────────────
 
@@ -410,7 +412,6 @@ for i in "${!DEPLOY_PIDS[@]}"; do
   wait "${DEPLOY_PIDS[$i]}" || { echo "WARNING: Failed to deploy ${DEPLOY_NAMES[$i]}"; DEPLOY_FAILURE=1; }
 done
 
-[ "$DEPLOY_FAILURE" -ne 0 ] && { echo "ERROR: One or more deployments failed."; exit 1; }
-
 git_auto_commit_push
+[ "$DEPLOY_FAILURE" -ne 0 ] && { echo "ERROR: One or more deployments failed."; exit 1; }
 echo ">>> LAB IS FULLY SYNCHRONIZED"
