@@ -40,8 +40,10 @@
       ENABLE_WHITELIST = "true";
       ENFORCE_WHITELIST = "true";
       WHITELIST = builtins.concatStringsSep "," [
-        "apokryphos"
         "LocalBlanky"
+        "apokryphos"
+        "sanabwun"
+        "zidoio"
       ];
 
       # ── Server type ──────────────────────────────────────────

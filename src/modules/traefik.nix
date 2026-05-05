@@ -68,6 +68,7 @@ in {
 
     systemd.tmpfiles.rules = [
       "d /var/lib/traefik 0700 traefik traefik -"
+      "d /var/lib/traefik/acme 0700 traefik traefik -"
       "d /var/lib/crowdsec/config 0750 root root -"
       "d /var/lib/crowdsec/data 0750 root root -"
       "d /var/log/traefik 0750 root root -"
@@ -90,7 +91,7 @@ in {
         } // cfg.entryPoints;
         certificatesResolvers.cloudflare.acme = {
           email = config.homelab.acmeEmail;
-          storage = "/var/lib/traefik/acme.json";
+          storage = "/var/lib/traefik/acme/acme.json";
           dnsChallenge = {
             provider = "cloudflare";
             resolvers = [ "1.1.1.1:53" "8.8.8.8:53" ];

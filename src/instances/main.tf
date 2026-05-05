@@ -24,29 +24,10 @@ locals {
     "108" = { name = "108-internal-forgejo-runner", type = "internal" }
     "109" = { name = "109-internal-registry", type = "internal" }
     "110" = { name = "110-internal-taskchampion", type = "internal" }
-    "111" = { name = "111-internal-vaultwarden", type = "internal", enabled = false }
-    "112" = { name = "112-internal-nextcloud", type = "internal", enabled = false }
-    "113" = { name = "113-internal-paperless", type = "internal", enabled = false }
-    "114" = { name = "114-internal-huginn", type = "internal", enabled = false }
-    "115" = { name = "115-internal-homeassistant", type = "internal", enabled = false }
-    "116" = { name = "116-internal-wikijs", type = "internal", enabled = false }
-    "117" = { name = "117-internal-qbittorrent", type = "internal", enabled = false }
-    "118" = { name = "118-internal-prowlarr", type = "internal", enabled = false }
-    "119" = { name = "119-internal-radarr", type = "internal", enabled = false }
-    "120" = { name = "120-internal-sonarr", type = "internal", enabled = false }
-    "121" = { name = "121-internal-jellyfin", type = "internal", enabled = false }
-    "122" = { name = "122-internal-audiobookshelf", type = "internal", enabled = false }
-    "123" = { name = "123-internal-navidrome", type = "internal", enabled = false }
-    "124" = { name = "124-internal-kavita", type = "internal", enabled = false }
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-headscale", type = "external" }
-    "202" = { name = "202-external-searxng", type = "external", enabled = false }
-    "203" = { name = "203-external-shlink", type = "external", enabled = false }
-    "204" = { name = "204-external-privatebin", type = "external", enabled = false }
-    "205" = { name = "205-external-share", type = "external", enabled = false }
-    "207" = { name = "207-external-minecraft", type = "external", memory = 20480, cores = 8, enabled = true }
-    "208" = { name = "208-external-hello", type = "external", enabled = false }
+    "207" = { name = "207-external-minecraft", type = "external", memory = 20480, cores = 8 }
     # ── router ──
     "300" = { name = "luca-router", type = "router" }
   }
@@ -63,7 +44,7 @@ module "vm" {
   cores        = try(each.value.cores, 2)
   memory       = try(each.value.memory, 1024)
   disk         = try(each.value.disk, 8)
-  enabled      = try(each.value.enabled, true)
+  enabled      = true
   image_id     = var.nixos_image_id
   ssh_key      = var.ssh_public_key
 
@@ -97,6 +78,3 @@ output "vm_ips" {
   value = join("\n", [for k, v in module.vm : "${k}=${split("/", v.ipv4_address)[0]}"])
 }
 
-output "disabled_vms" {
-  value = join("\n", [for k, v in local.instances : k if try(v.enabled, true) == false])
-}

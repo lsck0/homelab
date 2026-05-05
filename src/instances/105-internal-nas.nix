@@ -5,6 +5,8 @@
     enable = true;
     sourceDir = "/srv/nas";
     backupDir = "/srv/backups";
+    proxmoxBackupHost = "192.168.178.200";
+    proxmoxBackupPath = "/var/lib/vz/nas-backups";
   };
 
   services.nfs.server = {
@@ -100,6 +102,8 @@
     "d /srv/nas/data/shlink 0777 nobody nogroup -"
     "d /srv/nas/data/privatebin 0777 nobody nogroup -"
     "d /srv/nas/data/share 0777 nobody nogroup -"
+    "d /srv/nas/data/traefik-acme-internal 0777 nobody nogroup -"
+    "d /srv/nas/data/traefik-acme-external 0777 nobody nogroup -"
     "d /srv/nas/data/minecraft 0777 nobody nogroup -"
     "d /srv/nas/data/minecraft-modpacks 0777 nobody nogroup -"
     "d /srv/nas/data/paperless 0777 nobody nogroup -"

@@ -2,7 +2,8 @@
 {
   networking.hostName = "vm-200";
 
-  fileSystems = nasMount "/var/lib/crowdsec" "crowdsec-external";
+  fileSystems = (nasMount "/var/lib/crowdsec" "crowdsec-external")
+    // (nasMount "/var/lib/traefik/acme" "traefik-acme-external");
 
   homelab.traefik = {
     enable = true;

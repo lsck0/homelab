@@ -4,48 +4,98 @@ let
 
   backupScript = pkgs.writeShellScript "nas-backup" ''
     set -euo pipefail
-    export PATH="${lib.makeBinPath [ pkgs.coreutils pkgs.gnutar pkgs.zstd pkgs.findutils ]}"
+    export PATH="${lib.makeBinPath [ pkgs.coreutils pkgs.gnutar pkgs.zstd pkgs.findutils pkgs.rsync pkgs.openssh ]}"
 
-    BACKUP_DIR="${cfg.backupDir}"
-    SOURCE_DIR="${cfg.sourceDir}"
-    TYPE="$1"  # daily, weekly, monthly
-
-    mkdir -p "$BACKUP_DIR/$TYPE"
-
-    STAMP=$(date +%Y-%m-%d_%H%M)
-    DEST="$BACKUP_DIR/$TYPE/nas-$STAMP.tar.zst"
-
-    echo ">>> Creating $TYPE backup: $DEST"
-    tar --create --zstd \
-      --exclude='*.tmp' \
-      --exclude='lost+found' \
-      -f "$DEST" \
-      -C "$(dirname "$SOURCE_DIR")" "$(basename "$SOURCE_DIR")"
-
-    echo ">>> Backup complete: $(du -sh "$DEST" | cut -f1)"
-
-    # Rotate old backups
+    TYPE="$1"
     KEEP="$2"
-    cd "$BACKUP_DIR/$TYPE"
-    ls -1t nas-*.tar.zst 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old; do
-      echo ">>> Removing old backup: $old"
-      rm -f "$old"
+
+    BACKUP_ROOT="${cfg.backupDir}"
+    SOURCE="${cfg.sourceDir}"
+    STAMP=$(date +%Y-%m-%d_%H%M)
+    DEST="$BACKUP_ROOT/$TYPE/$STAMP"
+    mkdir -p "$DEST"
+
+    echo ">>> NAS $TYPE backup -> $DEST"
+
+    backup_folder() {
+      local src="$1" label="$2"
+      [ -d "$src" ] || return 0
+      local out="$DEST/$label.tar.zst"
+      echo "  $src -> $label.tar.zst"
+      tar --create --zstd \
+        --exclude='*.tmp' --exclude='lost+found' \
+        -f "$out" -C "$(dirname "$src")" "$(basename "$src")"
+    }
+
+    for dir in "$SOURCE"/*/; do
+      name=$(basename "$dir")
+      case "$name" in
+        data)
+          for sub in "$dir"*/; do
+            [ -d "$sub" ] || continue
+            backup_folder "$sub" "data-$(basename "$sub")"
+          done
+          ;;
+        *)
+          backup_folder "$dir" "$name"
+          ;;
+      esac
     done
+
+    echo ">>> On-disk backup complete: $(du -sh "$DEST" | cut -f1)"
+
+    # Rotate on-disk snapshots
+    cd "$BACKUP_ROOT/$TYPE"
+    ls -1dt */ 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old; do
+      echo ">>> Removing old snapshot: $old"
+      rm -rf "$old"
+    done
+
+    # Sync latest snapshot to Proxmox host as off-disk copy
+    ${lib.optionalString (cfg.proxmoxBackupHost != null) ''
+      REMOTE="${cfg.proxmoxBackupHost}"
+      REMOTE_DIR="${cfg.proxmoxBackupPath}/$TYPE/$STAMP"
+      echo ">>> Syncing to Proxmox host $REMOTE:$REMOTE_DIR ..."
+      ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
+        -i /etc/nas-backup-key \
+        "root@$REMOTE" "mkdir -p $REMOTE_DIR" 2>/dev/null \
+        && rsync -a --delete \
+          -e "ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i /etc/nas-backup-key" \
+          "$DEST/" "root@$REMOTE:$REMOTE_DIR/" \
+        && echo ">>> Remote sync complete" \
+        || echo "WARNING: Remote sync failed (local backup still intact)"
+
+      # Rotate remote snapshots
+      ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
+        -i /etc/nas-backup-key "root@$REMOTE" \
+        "cd ${cfg.proxmoxBackupPath}/$TYPE && ls -1dt */ 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -rf" \
+        2>/dev/null || true
+    ''}
   '';
 in {
   options.homelab.nasBackup = {
-    enable = lib.mkEnableOption "Compressed NAS backups with rotation";
+    enable = lib.mkEnableOption "Per-folder NAS backups with rotation";
 
     sourceDir = lib.mkOption {
       type = lib.types.str;
       default = "/srv/nas";
-      description = "Directory to back up.";
     };
 
     backupDir = lib.mkOption {
       type = lib.types.str;
       default = "/srv/backups";
-      description = "Where to store compressed backups.";
+    };
+
+    proxmoxBackupHost = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Proxmox host IP to rsync backups to as secondary copy.";
+    };
+
+    proxmoxBackupPath = lib.mkOption {
+      type = lib.types.str;
+      default = "/var/lib/vz/nas-backups";
+      description = "Path on Proxmox host for off-disk backup copies.";
     };
   };
 
@@ -57,52 +107,31 @@ in {
       "d ${cfg.backupDir}/monthly 0750 root root -"
     ];
 
-    # Daily backup — keep 3 (start of day, 02:00)
     systemd.services.nas-backup-daily = {
-      description = "Daily NAS backup";
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${backupScript} daily 3";
-      };
+      description = "Daily per-folder NAS backup";
+      serviceConfig = { Type = "oneshot"; ExecStart = "${backupScript} daily 3"; };  # keep 3 days
     };
     systemd.timers.nas-backup-daily = {
       wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = "*-*-* 02:00:00";
-        Persistent = true;
-      };
+      timerConfig = { OnCalendar = "*-*-* 02:00:00"; Persistent = true; };
     };
 
-    # Weekly backup — keep 3 (start of week, Monday 03:00)
     systemd.services.nas-backup-weekly = {
-      description = "Weekly NAS backup";
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${backupScript} weekly 3";
-      };
+      description = "Weekly per-folder NAS backup";
+      serviceConfig = { Type = "oneshot"; ExecStart = "${backupScript} weekly 2"; };  # keep 2 weeks
     };
     systemd.timers.nas-backup-weekly = {
       wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = "Mon *-*-* 03:00:00";
-        Persistent = true;
-      };
+      timerConfig = { OnCalendar = "Mon *-*-* 03:00:00"; Persistent = true; };
     };
 
-    # Monthly backup — keep 3 (1st of month, 04:00)
     systemd.services.nas-backup-monthly = {
-      description = "Monthly NAS backup";
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "${backupScript} monthly 3";
-      };
+      description = "Monthly per-folder NAS backup";
+      serviceConfig = { Type = "oneshot"; ExecStart = "${backupScript} monthly 1"; };  # keep 1 month
     };
     systemd.timers.nas-backup-monthly = {
       wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = "*-*-01 04:00:00";
-        Persistent = true;
-      };
+      timerConfig = { OnCalendar = "*-*-01 04:00:00"; Persistent = true; };
     };
   };
 }
