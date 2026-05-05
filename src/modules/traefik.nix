@@ -118,15 +118,7 @@ in {
       wantedBy = [ "traefik.service" ];
       serviceConfig = {
         Type = "oneshot";
-        ExecStart = ''
-          ${pkgs.bash}/bin/bash -c '
-            mkdir -p /var/lib/traefik/certs
-            cp /nix/store/*-server-key.pem /var/lib/traefik/certs/server-key.pem 2>/dev/null || true
-            cp /nix/store/*-server-cert.pem /var/lib/traefik/certs/server-cert.pem 2>/dev/null || true
-            chown traefik:traefik /var/lib/traefik/certs/*.pem
-            chmod 600 /var/lib/traefik/certs/*.pem
-          '
-        '';
+        ExecStart = "${pkgs.bash}/bin/bash -c 'mkdir -p /var/lib/traefik/certs && cp /nix/store/*-server-key.pem /var/lib/traefik/certs/server-key.pem 2>/dev/null || true && cp /nix/store/*-server-cert.pem /var/lib/traefik/certs/server-cert.pem 2>/dev/null || true && chown traefik:traefik /var/lib/traefik/certs/*.pem && chmod 600 /var/lib/traefik/certs/*.pem'";
       };
     };
 
