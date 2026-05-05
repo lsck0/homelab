@@ -34,12 +34,16 @@ variable "gw" {
   default = null
 }
 variable "ssh_key" { type = string }
+variable "enabled" {
+  type    = bool
+  default = true
+}
 
 resource "proxmox_virtual_environment_vm" "this" {
   name      = var.name
   node_name = var.target_node
   vm_id     = var.vm_id
-  started   = true
+  started   = var.enabled
 
   lifecycle {
     ignore_changes = [
