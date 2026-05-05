@@ -124,6 +124,9 @@ in {
           {
             certFile = "/var/lib/traefik/certs/server-cert.pem";
             keyFile = "/var/lib/traefik/certs/server-key.pem";
+            domains = [
+              { main = "lsck0.dev"; sans = [ "*.lsck0.dev" ]; }
+            ];
           }
         ];
       };
