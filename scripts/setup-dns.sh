@@ -9,6 +9,7 @@
 set -euo pipefail
 
 ROUTER_IP="192.168.178.29"
+ROUTER_DNS_PORT="5353"
 DOMAIN="lsck0.dev"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -32,11 +33,11 @@ dns=dnsmasq
 EOF
 
 cat > /etc/NetworkManager/dnsmasq.d/${DOMAIN//./-}.conf << EOF
-server=/${DOMAIN}/${ROUTER_IP}
+server=/${DOMAIN}/${ROUTER_IP}#${ROUTER_DNS_PORT}
 EOF
 
 systemctl restart NetworkManager
 
-echo "Split DNS configured: *.${DOMAIN} → ${ROUTER_IP}"
+echo "Split DNS configured: *.${DOMAIN} → ${ROUTER_IP}:${ROUTER_DNS_PORT}"
 echo "Verifying..."
-host homepage.${DOMAIN} 2>/dev/null && echo "OK" || echo "FAIL - is ${ROUTER_IP} reachable?"
+dig +short homepage.${DOMAIN} @${ROUTER_IP} -p ${ROUTER_DNS_PORT} 2>/dev/null | grep -q "10.100.0.100" && echo "OK" || echo "FAIL - is ${ROUTER_IP}:${ROUTER_DNS_PORT} reachable?"
