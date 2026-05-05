@@ -97,6 +97,17 @@ in {
             resolvers = [ "1.1.1.1:53" "8.8.8.8:53" ];
           };
         };
+        certificatesResolvers.letsencrypt.acme = {
+          email = config.homelab.acmeEmail;
+          storage = "/var/lib/traefik/acme/acme.json";
+          caServer = "https://acme-v02.api.letsencrypt.org/directory";
+          dnsChallenge = {
+            provider = "cloudflare";
+            resolvers = [ "1.1.1.1:53" "8.8.8.8:53" ];
+            delayBeforeCheck = 0;
+            disablePropagationCheck = false;
+          };
+        };
       };
       dynamicConfigOptions = {
         http = { routers = cfg.routers; services = cfg.services; }
