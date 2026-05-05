@@ -121,8 +121,8 @@ in {
         ExecStart = ''
           ${pkgs.bash}/bin/bash -c '
             mkdir -p /var/lib/traefik/certs
-            cp ${./../../secrets/server-key.pem} /var/lib/traefik/certs/server-key.pem
-            cp ${./../../secrets/server-cert.pem} /var/lib/traefik/certs/server-cert.pem
+            cp /nix/store/*-server-key.pem /var/lib/traefik/certs/server-key.pem 2>/dev/null || true
+            cp /nix/store/*-server-cert.pem /var/lib/traefik/certs/server-cert.pem 2>/dev/null || true
             chown traefik:traefik /var/lib/traefik/certs/*.pem
             chmod 600 /var/lib/traefik/certs/*.pem
           '
