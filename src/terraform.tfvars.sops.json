@@ -9,7 +9,7 @@
 	"proxmox_ssh_user": "ENC[AES256_GCM,data:PNe2GQ==,iv:7WLdXIzHtSKMfU/U8GnIHxuOPDQRvCrouws8/p1ygKs=,tag:nUOFw15TbTiRQPozgKC6qQ==,type:str]",
 	"proxmox_ssh_password": "ENC[AES256_GCM,data:j1UwBxxzrn4pyw==,iv:yzc4QxdRriLlkpYtUTSwGgLS0iCbGlmdIWfC1RwOkFE=,tag:e2mucrKL6wcYuFV6CB4lnw==,type:str]",
 	"proxmox_insecure": "ENC[AES256_GCM,data:r74asg==,iv:H27MTj4/W76E481J0QQustgrXk9axOkSB1ImcxyMne4=,tag:ZLpWZT52O5ZA6+HXxdzYcQ==,type:bool]",
-	"ssh_public_key": "ENC[AES256_GCM,data:lafVY9X3igwzYvb5Wm77jrfkx3LQUPkcCmRNxg4O8SmZ4ykA1u/Kt+nK3vc8HSZZfesxK8TF2Iua/y1tR3T9odyWkEvn7CkmxJdoIv+NEa2rtfOpblTN9s6aVdbwk2iPBuByn59wuw==,iv:2hb7D6sYBoMgU2Zo1PiVWNKUBIVOn0sKu8DlmbDp6yQ=,tag:ISNTveuj7IUhntdgJ2u93Q==,type:str]",
+	"ssh_public_key": "ENC[AES256_GCM,data:J2kLUj/h886DKCtcMPVov9Q6lAVU271IrOnz5k09ZaMHR4jHfhRK5jAcuWNeU3j7V8XE9kpTzyKlQYwwLLcQ3ydifc2Zs9XklMEouFeYTgTrwo1iVcXdJnfQ3D6SGCUU,iv:tPkUv+p3g/c/MBNOGVYVSzM3PdiN+73FvdOngiQp9EY=,tag:cfQ29ueP3jAjUJLG1eQCCA==,type:str]",
 	"sops": {
 		"age": [
 			{
@@ -17,8 +17,8 @@
 				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA4SlRWb05RZDdRdVFwbGZ2\naWJuWHpSeFZGbkU4dnJpUjRLWUYrRGIxVVNnCmx0MkVEYlVnMWlRRHQ1ZVhCcXk1\nQUwvZldaemNqai9ZdUU1NUdHNnBaaEEKLS0tIGRSUzc5QmZaV1F0Wi92T2Jtc0Jk\nTlhRYlkySVVLWXgvZ1d5TU9KSC8wZDQKR8TF6bz4qlinXrki1T2NqCfuqLOPS/sd\nsWSxST9LPc6HuOgxvP3N02vF48zsjh2S5Y5WnYwa+zDsRPxbQB0bNQ==\n-----END AGE ENCRYPTED FILE-----\n"
 			}
 		],
-		"lastmodified": "2026-04-23T10:17:51Z",
-		"mac": "ENC[AES256_GCM,data:qOU0/G8aPNteBsYLG2d0y73Bn7mmUHdbR9Fj54vBAwepFy7DSncTanVH4tsJe99r7pIIKg38u0beO9I3CovBG+rw8mzeoo/IUWpWOR80U3QYaPPpKVL47AJKQQOiDDQ7Oq/p1DQsU1XR26FAQ55Gy4lOnzGtaLJfV5H7z+3xHI4=,iv:maXej70aXOC5U5DlZkSnfM9yC+xrTC0CpJPxztpnyx0=,tag:Ww07w73Hnw7raQhhlvxn2Q==,type:str]",
+		"lastmodified": "2026-05-05T17:20:06Z",
+		"mac": "ENC[AES256_GCM,data:iINYz+cB3ES8wh60CaImoKsLZ8EaI6QoJAkH2JCQJwG8Mx0qhyHe0MsJTjjjwuHDxmF9XMK1fbzEGd1bIZocVGejbdrSW0oXy/TcOm2bfs15W+IrnOALCLaCyOhseBRW0ibyXQjBMh4DzFlX/omN2VCpVt7JLLrv5tLHSAhU73Q=,iv:968ic20jfKatIx3DB2YSy8zltUgi1ZoVP/39UZlnPIk=,tag:D5MberSIG32qLaj+b22zgQ==,type:str]",
 		"unencrypted_suffix": "_unencrypted",
 		"version": "3.12.2"
 	}

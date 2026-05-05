@@ -45,6 +45,16 @@ resource "proxmox_virtual_environment_vm" "this" {
   vm_id     = var.vm_id
   started   = var.enabled
 
+  lifecycle {
+    ignore_changes = [
+      initialization,
+      ipv4_addresses,
+      ipv6_addresses,
+      mac_addresses,
+      network_interface_names,
+    ]
+  }
+
   agent {
     enabled = true
   }
