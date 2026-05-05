@@ -77,7 +77,7 @@ in {
 
     environment.etc."traefik-certs-setup.sh" = {
       text = ''
-        #!/usr/bin/env bash
+        #!/bin/sh
         mkdir -p /var/lib/traefik/certs
         
         # Server certificate
