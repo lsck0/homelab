@@ -119,17 +119,16 @@
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/forgejo-key.token"
 
-      # Check existing token validity; clear if stale
+      # Check existing token validity; only clear on explicit 401 (stale), not network errors
       if [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ]; then
         HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
           -H "Authorization: token $(cat "$TOKEN_FILE")" \
-          http://127.0.0.1:80/api/v1/user 2>/dev/null || echo "0")
-        if [ "$HTTP" = "200" ]; then
-          echo "Homepage token valid"
-          exit 0
-        fi
-        echo "Homepage token stale (HTTP $HTTP), regenerating..."
-        rm -f "$TOKEN_FILE"
+          http://127.0.0.1:80/api/v1/user 2>/dev/null)
+        case "$HTTP" in
+          200) echo "Homepage token valid"; exit 0 ;;
+          401) echo "Homepage token stale, regenerating..."; rm -f "$TOKEN_FILE" ;;
+          *)   echo "Homepage token check inconclusive (HTTP $HTTP), keeping token"; exit 0 ;;
+        esac
       fi
 
       # Wait for Forgejo API
