@@ -39,6 +39,7 @@
       ENABLE_RCON = "true";
       ENABLE_WHITELIST = "true";
       ENFORCE_WHITELIST = "true";
+      OPS = "apokryphos";
       WHITELIST = builtins.concatStringsSep "," [
         "LocalBlanky"
         "apokryphos"
