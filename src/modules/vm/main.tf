@@ -48,7 +48,6 @@ resource "proxmox_virtual_environment_vm" "this" {
   lifecycle {
     ignore_changes = [
       initialization,
-      ipv4_addresses,
       ipv6_addresses,
       mac_addresses,
       network_interface_names,
