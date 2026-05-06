@@ -43,8 +43,8 @@ locals {
     "201" = { name = "201-external-headscale", type = "external" }
     "202" = { name = "202-external-searxng", type = "external", enabled = false }
     "203" = { name = "203-external-shlink", type = "external", enabled = false }
-    "204" = { name = "204-external-privatebin", type = "external", enabled = false }
-    "205" = { name = "205-external-share", type = "external", enabled = false }
+    "204" = { name = "204-external-privatebin", type = "external" }
+    "205" = { name = "205-external-share", type = "external" }
     "207" = { name = "207-external-minecraft", type = "external", memory = 20480, cores = 8, enabled = true }
     "208" = { name = "208-external-hello", type = "external", enabled = false }
     # ── router ──
