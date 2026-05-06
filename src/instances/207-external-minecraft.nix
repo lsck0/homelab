@@ -21,6 +21,7 @@
   virtualisation.oci-containers.containers.minecraft = {
     image = "itzg/minecraft-server:java21";
     ports = [ "25565:25565" "25575:25575" ];
+    extraOptions = [ "--dns=1.1.1.1" "--dns=8.8.8.8" ];
     volumes = [
       "/var/lib/minecraft:/data"
       "/var/lib/minecraft-modpacks:/modpacks:ro"
