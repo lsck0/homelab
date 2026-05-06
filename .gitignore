@@ -9,9 +9,8 @@
 result
 result-*
 
-# Secrets
-secrets/
-!secrets/.keep
+# Secrets — only the age private key is excluded; certs and other secrets are tracked
+secrets/age.txt
 
 # OS
 .DS_Store

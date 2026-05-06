@@ -9,7 +9,7 @@
     composeFile = ''
       services:
         hello:
-          image: 10.100.0.109:5000/axum-webserver:latest
+          image: registry.lsck0.dev/hello:latest
           ports:
             - "80:8000"
           healthcheck:
@@ -25,9 +25,6 @@
               condition: any
     '';
   };
-
-  # Registry is HTTP-only on port 5000
-  virtualisation.docker.daemon.settings.insecure-registries = [ "10.100.0.109:5000" ];
 
   networking.firewall.allowedTCPPorts = [ 80 ];
 }

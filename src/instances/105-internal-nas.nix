@@ -9,6 +9,11 @@
     proxmoxBackupPath = "/var/lib/vz/nas-backups";
   };
 
+  sops.secrets.nas-backup-key = {
+    path = "/etc/nas-backup-key";
+    mode = "0600";
+  };
+
   services.nfs.server = {
     enable = true;
     exports = ''

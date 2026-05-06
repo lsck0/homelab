@@ -3,7 +3,7 @@ let
   cfg = config.homelab.nasBackup;
 
   backupScript = pkgs.writeShellScript "nas-backup" ''
-    set -euo pipefail
+    set -uo pipefail
     export PATH="${lib.makeBinPath [ pkgs.coreutils pkgs.gnutar pkgs.zstd pkgs.findutils pkgs.rsync pkgs.openssh ]}"
 
     TYPE="$1"
@@ -16,6 +16,7 @@ let
     mkdir -p "$DEST"
 
     echo ">>> NAS $TYPE backup -> $DEST"
+    FAILED=0
 
     backup_folder() {
       local src="$1" label="$2"
@@ -23,8 +24,12 @@ let
       local out="$DEST/$label.tar.zst"
       echo "  $src -> $label.tar.zst"
       tar --create --zstd \
+        --ignore-failed-read --warning=no-file-changed \
         --exclude='*.tmp' --exclude='lost+found' \
-        -f "$out" -C "$(dirname "$src")" "$(basename "$src")"
+        -f "$out" -C "$(dirname "$src")" "$(basename "$src")" || {
+        echo "  WARNING: $label backup had errors (partial archive kept)"
+        FAILED=1
+      }
     }
 
     for dir in "$SOURCE"/*/; do
@@ -42,7 +47,8 @@ let
       esac
     done
 
-    echo ">>> On-disk backup complete: $(du -sh "$DEST" | cut -f1)"
+    echo ">>> On-disk backup complete: $(du -sh "$DEST" | cut -f1)${if cfg.proxmoxBackupHost != null then "" else ""}"
+    [ "$FAILED" -eq 0 ] || echo "WARNING: Some archives had read errors (partial data backed up)"
 
     # Rotate on-disk snapshots
     cd "$BACKUP_ROOT/$TYPE"
