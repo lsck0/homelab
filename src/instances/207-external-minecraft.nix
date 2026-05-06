@@ -83,5 +83,5 @@
     "d /var/lib/minecraft-modpacks 0750 1000 1000 -"
   ];
 
-  networking.firewall.allowedTCPPorts = [ 25565 ];
+  networking.firewall.allowedTCPPorts = [ 22 25565 25575 ];
 }
