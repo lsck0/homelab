@@ -76,13 +76,11 @@ deploy_nixos() {
   nix copy --extra-experimental-features "nix-command flakes" --to "ssh-ng://root@${ip}" "$toplevel" \
     || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
 
+  # Use 'switch' — activates config in-place, restarts changed services, no reboot needed.
+  # Reboot manually only when kernel changes (rare).
   ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
     "nix-env -p /nix/var/nix/profiles/system --set '${toplevel}' \
-     && '${toplevel}/bin/switch-to-configuration' boot \
-     && nohup sh -c 'sleep 1 && reboot' >/dev/null 2>&1 &"
-
-  sleep 15
-  wait_for_ssh "$ip" 60 5 || { echo "ERROR: $name did not come back after reboot!"; return 1; }
+     && '${toplevel}/bin/switch-to-configuration' switch"
   echo ">>> $name deployed."
 }
 
@@ -158,6 +156,13 @@ if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
   done
 fi
 
+# Proxmox host power savings (idempotent, best-effort)
+"${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+  'for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo powersave > "$f" 2>/dev/null; done
+   hdparm -S 241 /dev/sda 2>/dev/null || true   # spin down unused HDD after ~30min
+   echo ">>> Proxmox: CPU powersave, HDD spin-down 30min"' \
+  2>/dev/null || true
+
 # Golden image
 if ! "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
   [ -f "$ROOT_DIR/images/nixos.img" ] || { echo "ERROR: Golden image missing. Run: sudo nix build ./src#cloud-image"; exit 1; }
@@ -186,11 +191,11 @@ VM_IPS=$(terraform -chdir="$ROOT_DIR/src" output -raw vm_ips 2>/dev/null || echo
 DISABLED_VMS=$(terraform -chdir="$ROOT_DIR/src" output -raw disabled_vms 2>/dev/null || echo "")
 [ -n "$DISABLED_VMS" ] && echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')"
 
-# Build all enabled closures in background
-echo ">>> Building all VM closures (background)..."
+# Build all enabled closures in parallel
+echo ">>> Building all VM closures (parallel)..."
 BUILD_LOG=$(mktemp --suffix=.build.log); CLEANUP_FILES+=("$BUILD_LOG")
 (
-  rc=0
+  rc=0; pids=(); names=()
   for f in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix "$ROOT_DIR"/src/instances/300-router.nix; do
     [ -f "$f" ] || continue
     name=$(basename "$f" .nix); vm_id="${name%%-*}"
@@ -198,9 +203,13 @@ BUILD_LOG=$(mktemp --suffix=.build.log); CLEANUP_FILES+=("$BUILD_LOG")
       echo ">>> Skipping build for $name (disabled)"; continue
     fi
     echo ">>> Building $name..."
-    nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
+    (nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
       --extra-experimental-features "nix-command flakes" --no-link 2>&1 \
-      || { echo "ERROR: Build failed for $name"; rc=1; }
+      || echo "ERROR: Build failed for $name") &
+    pids+=($!); names+=("$name")
+  done
+  for i in "${!pids[@]}"; do
+    wait "${pids[$i]}" || { echo "ERROR: Build failed for ${names[$i]}"; rc=1; }
   done
   exit $rc
 ) > "$BUILD_LOG" 2>&1 &
@@ -237,7 +246,7 @@ cat "$BUILD_LOG"
 echo ">>> All builds complete."
 
 # Deploy all other VMs (parallel, max 3)
-MAX_PARALLEL="${HOMELAB_PARALLEL:-3}"
+MAX_PARALLEL="${HOMELAB_PARALLEL:-6}"
 DEPLOY_PIDS=(); DEPLOY_NAMES=()
 
 reap() {
