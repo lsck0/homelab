@@ -3,9 +3,6 @@ name: hello
 on:
   push:
     branches: [master]
-    paths:
-      - 'example/**'
-      - '.forgejo/workflows/hello.yml'
 
 jobs:
   build-and-push:
@@ -20,7 +17,7 @@ jobs:
             --network=host \
             --build-arg SCCACHE_REDIS=redis://sccache.lsck0.dev \
             -t registry.lsck0.dev/hello:latest \
-            example/
+            .
 
       - name: Push to registry
         run: docker push registry.lsck0.dev/hello:latest
