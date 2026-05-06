@@ -83,5 +83,10 @@
     "d /var/lib/minecraft-modpacks 0750 1000 1000 -"
   ];
 
-  networking.firewall.allowedTCPPorts = [ 22 25565 25575 ];
+  networking.firewall.allowedTCPPorts = [ 25565 25575 ];
+  networking.firewall.extraCommands = ''
+    iptables -A nixos-fw -p tcp --dport 22 -s 10.0.0.0/8 -j ACCEPT
+    iptables -A nixos-fw -p tcp --dport 22 -s 172.16.0.0/12 -j ACCEPT
+    iptables -A nixos-fw -p tcp --dport 22 -s 192.168.0.0/16 -j ACCEPT
+  '';
 }
