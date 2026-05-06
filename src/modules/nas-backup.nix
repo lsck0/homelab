@@ -23,9 +23,9 @@ let
       [ -d "$src" ] || return 0
       local out="$DEST/$label.tar.zst"
       echo "  $src -> $label.tar.zst"
-      tar --create --zstd \
+      tar --create --use-compress-program="${pkgs.zstd}/bin/zstd -T0 -19" \
         --ignore-failed-read --warning=no-file-changed \
-        --exclude='*.tmp' --exclude='lost+found' \
+        --exclude='*.tmp' --exclude='lost+found' --exclude='BACKUPS' \
         -f "$out" -C "$(dirname "$src")" "$(basename "$src")" || {
         echo "  WARNING: $label backup had errors (partial archive kept)"
         FAILED=1
@@ -89,7 +89,7 @@ in {
 
     backupDir = lib.mkOption {
       type = lib.types.str;
-      default = "/srv/backups";
+      default = "/srv/nas/BACKUPS";
     };
 
     proxmoxBackupHost = lib.mkOption {
@@ -106,6 +106,8 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    # Backup dirs are inside the NAS share — created here for idempotency.
+    # BACKUPS/ itself is excluded from the backup source to prevent circular archiving.
     systemd.tmpfiles.rules = [
       "d ${cfg.backupDir} 0750 root root -"
       "d ${cfg.backupDir}/daily 0750 root root -"
@@ -119,7 +121,7 @@ in {
     };
     systemd.timers.nas-backup-daily = {
       wantedBy = [ "timers.target" ];
-      timerConfig = { OnCalendar = "*-*-* 02:00:00"; Persistent = true; };
+      timerConfig = { OnCalendar = "*-*-* 00:00:00"; Persistent = true; };
     };
 
     systemd.services.nas-backup-weekly = {
@@ -128,7 +130,7 @@ in {
     };
     systemd.timers.nas-backup-weekly = {
       wantedBy = [ "timers.target" ];
-      timerConfig = { OnCalendar = "Mon *-*-* 03:00:00"; Persistent = true; };
+      timerConfig = { OnCalendar = "Mon *-*-* 00:00:00"; Persistent = true; };
     };
 
     systemd.services.nas-backup-monthly = {
@@ -137,7 +139,7 @@ in {
     };
     systemd.timers.nas-backup-monthly = {
       wantedBy = [ "timers.target" ];
-      timerConfig = { OnCalendar = "*-*-01 04:00:00"; Persistent = true; };
+      timerConfig = { OnCalendar = "*-*-01 00:00:00"; Persistent = true; };
     };
   };
 }

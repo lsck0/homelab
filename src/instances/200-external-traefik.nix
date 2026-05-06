@@ -11,7 +11,6 @@
     entryPoints.minecraft.address = ":25565";
 
     routers = {
-      traefik-dash-tls = { rule = "Host(`ext-traefik.lsck0.dev`)"; service = "api@internal"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       headscale-tls    = { rule = "Host(`hs.lsck0.dev`)";          service = "headscale";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       searxng-tls      = { rule = "Host(`search.lsck0.dev`)";      service = "searxng";      entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       shlink-tls       = { rule = "Host(`shlink.lsck0.dev`)";      service = "shlink";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };

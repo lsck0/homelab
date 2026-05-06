@@ -1,12 +1,15 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.homelab.traefik;
+  # Ensure every websecure route has tls.certResolver = "cloudflare" unless overridden
   routersWithTls = lib.mapAttrs (_: router:
     let
-      entryPoints = router.entryPoints or [];
+      eps = router.entryPoints or [];
+      needsTls = builtins.elem "websecure" eps;
+      hasCertResolver = (router ? tls) && (router.tls ? certResolver);
     in
-    if builtins.elem "websecure" entryPoints && !(router ? tls) then
-      router // { tls = {}; }
+    if needsTls && !hasCertResolver then
+      router // { tls = (router.tls or {}) // { certResolver = "cloudflare"; }; }
     else
       router
   ) cfg.routers;
@@ -78,33 +81,10 @@ in {
     systemd.tmpfiles.rules = [
       "d /var/lib/traefik 0700 traefik traefik -"
       "d /var/lib/traefik/acme 0700 traefik traefik -"
-      "d /var/lib/traefik/certs 0700 traefik traefik -"
       "d /var/lib/crowdsec/config 0750 root root -"
       "d /var/lib/crowdsec/data 0750 root root -"
       "d /var/log/traefik 0750 root root -"
     ];
-
-    environment.etc."traefik-certs-setup.sh" = {
-      text = ''
-        #!/bin/sh
-        mkdir -p /var/lib/traefik/certs
-        
-        # Server certificate
-        cat > /var/lib/traefik/certs/server-cert.pem << 'CERT_EOF'
-        ${builtins.readFile ../../secrets/server-cert.pem}
-        CERT_EOF
-        
-        # Server key
-        cat > /var/lib/traefik/certs/server-key.pem << 'KEY_EOF'
-        ${builtins.readFile ../../secrets/server-key.pem}
-        KEY_EOF
-        
-        chown traefik:traefik /var/lib/traefik/certs/*.pem
-        chmod 600 /var/lib/traefik/certs/server-key.pem
-        chmod 644 /var/lib/traefik/certs/server-cert.pem
-      '';
-      mode = "0755";
-    };
 
     services.traefik = {
       enable = true;
@@ -113,7 +93,6 @@ in {
         log.level = cfg.logLevel;
         accessLog = {};
         api.dashboard = true;
-        api.insecure = true;
         entryPoints = {
           web = {
             address = ":80";
@@ -134,23 +113,9 @@ in {
         http = { routers = routersWithTls; services = cfg.services; }
           // lib.optionalAttrs (cfg.middlewares != {}) { middlewares = cfg.middlewares; }
           // lib.optionalAttrs (cfg.serversTransports != {}) { serversTransports = cfg.serversTransports; };
-        tls.stores.default.defaultCertificate = {
-          certFile = "/var/lib/traefik/certs/server-cert.pem";
-          keyFile = "/var/lib/traefik/certs/server-key.pem";
-        };
       } // lib.optionalAttrs (cfg.tcp != {}) { tcp = cfg.tcp; };
     };
 
-    systemd.services.traefik-certs = {
-      description = "Setup certs for traefik";
-      before = [ "traefik.service" ];
-      wantedBy = [ "traefik.service" ];
-      serviceConfig = {
-        Type = "oneshot";
-        ExecStart = "/etc/traefik-certs-setup.sh";
-      };
-    };
-
-    networking.firewall.allowedTCPPorts = [ 80 443 8080 ];
+    networking.firewall.allowedTCPPorts = [ 80 443 ];
   };
 }

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Sync the entire lab: apply Terraform, deploy NixOS.
-set -e
+set -euo pipefail
 export SHELL=/bin/bash
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -77,8 +77,8 @@ deploy_nixos() {
     || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
 
   ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-    "nix-env -p /nix/var/nix/profiles/system --set $toplevel \
-     && $toplevel/bin/switch-to-configuration boot \
+    "nix-env -p /nix/var/nix/profiles/system --set '${toplevel}' \
+     && '${toplevel}/bin/switch-to-configuration' boot \
      && nohup sh -c 'sleep 1 && reboot' >/dev/null 2>&1 &"
 
   sleep 15

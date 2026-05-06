@@ -153,7 +153,7 @@
           10.100.0.106 sccache.lsck0.dev
           # external services → external Traefik
           10.200.0.200 hs.lsck0.dev search.lsck0.dev shlink.lsck0.dev paste.lsck0.dev share.lsck0.dev
-          10.200.0.200 mc.lsck0.dev hello.lsck0.dev ext-traefik.lsck0.dev
+          10.200.0.200 mc.lsck0.dev hello.lsck0.dev
           fallthrough
         }
         template IN SRV _minecraft._tcp.mc.lsck0.dev {
@@ -168,9 +168,8 @@
     '';
   };
 
-  # ── WireGuard VPN ───────────────────────────────────────────
   # After first boot, get server pubkey: wg show wg0 public-key
-  # Generate client config with that key + endpoint = <your-public-ip>:51820
+  # Generate client config: endpoint = <public-ip>:51820, DNS = 10.0.0.1
   sops.secrets.wireguard-private-key = {};
   sops.secrets.cloudflare-token = {};
 
@@ -239,6 +238,10 @@
       OnUnitActiveSec = "5min";
     };
   };
+  # ── WireGuard VPN ───────────────────────────────────────────
+  # Client config MUST include: DNS = 10.0.0.1
+  # This enables split-horizon DNS so *.lsck0.dev resolves to internal IPs over VPN.
+  # Port 53 is already open on wg0 (see firewall above).
   networking.wireguard.interfaces.wg0 = {
     ips = [ "10.0.0.1/24" ];
     listenPort = 51820;

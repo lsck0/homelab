@@ -3,7 +3,7 @@ FROM alpine:3.21 AS builder
 RUN apk add --no-cache gcc musl-dev make sccache
 
 WORKDIR /build
-COPY main.c Makefile .
+COPY main.c httpserver.h Makefile .
 
 ARG SCCACHE_REDIS
 ENV SCCACHE_REDIS=${SCCACHE_REDIS}

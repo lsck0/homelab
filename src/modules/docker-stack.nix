@@ -185,7 +185,7 @@ in {
         path = [ pkgs.docker ];
         serviceConfig = {
           Type = "oneshot";
-          ExecStart = "${pkgs.docker}/bin/docker stack deploy -c ${composeEtcFile} --resolve-image always ${cfg.stackName}";
+          ExecStart = "${pkgs.docker}/bin/docker stack deploy -c ${composeEtcFile} --resolve-image always --prune ${cfg.stackName}";
         };
       };
 
