@@ -18,7 +18,7 @@ locals {
     "102" = { name = "102-internal-homepage", type = "internal" }
     "103" = { name = "103-internal-grafana", type = "internal", enabled = false }
     "104" = { name = "104-internal-uptime-kuma", type = "internal" }
-    "105" = { name = "105-internal-nas", type = "internal", disk = 750 }
+    "105" = { name = "105-internal-nas", type = "internal", memory = 2048, disk = 750 }
     "106" = { name = "106-internal-sccache", type = "internal" }
     "107" = { name = "107-internal-forgejo", type = "internal" }
     "108" = { name = "108-internal-forgejo-runner", type = "internal" }
