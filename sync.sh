@@ -15,6 +15,14 @@ trap 'rm -f "${CLEANUP_FILES[@]}"' EXIT
 
 echo ">>> SYNCING HARDWARE + OS..."
 
+# Abort if branch is behind upstream (unpulled changes exist)
+git -C "$ROOT_DIR" fetch origin --quiet 2>/dev/null || true
+BEHIND=$(git -C "$ROOT_DIR" rev-list "HEAD..@{u}" --count 2>/dev/null || echo "0")
+if [ "$BEHIND" -gt 0 ]; then
+  echo "ERROR: Branch is $BEHIND commit(s) behind upstream. Run 'git pull' first."
+  exit 1
+fi
+
 # ── Helpers ───────────────────────────────────────────────────
 
 read_tfvar() {
@@ -138,8 +146,8 @@ if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
 
   # Vzdump backup jobs (idempotent)
   EXISTING_JOBS=$(curl -sk "$PVE_API/cluster/backup" -H "$PVE_AUTH" | jq -r '.data[]?.id // empty' 2>/dev/null || true)
-  for job_spec in "homelab-daily:105,207:02:00:3" "homelab-weekly:105,207:Mon 03:00:2" "homelab-monthly:105,207:*-*-01 04:00:1"; do
-    IFS=: read -r jid jvms jsched jkeep <<< "$job_spec"
+  for job_spec in "homelab-daily|105,207|02:00|3" "homelab-weekly|105,207|Mon 03:00|2" "homelab-monthly|105,207|*-*-01 04:00|1"; do
+    IFS='|' read -r jid jvms jsched jkeep <<< "$job_spec"
     echo "$EXISTING_JOBS" | grep -qx "$jid" && continue
     echo ">>> Creating vzdump job: $jid"
     RESULT=$(curl -sk -X POST "$PVE_API/cluster/backup" -H "$PVE_AUTH" \

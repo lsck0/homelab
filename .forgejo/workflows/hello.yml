@@ -1,0 +1,26 @@
+name: hello
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'example/**'
+      - '.forgejo/workflows/hello.yml'
+
+jobs:
+  build-and-push:
+    runs-on: docker
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: |
+          docker build \
+            --network=host \
+            --build-arg SCCACHE_REDIS=redis://sccache.lsck0.dev \
+            -t registry.lsck0.dev/hello:latest \
+            example/
+
+      - name: Push to registry
+        run: docker push registry.lsck0.dev/hello:latest

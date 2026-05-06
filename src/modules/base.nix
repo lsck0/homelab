@@ -58,6 +58,11 @@
     # Prefer IPv4 — internal VMs have no IPv6 routing
     networking.enableIPv6 = false;
 
+    # Trust homelab CA so Docker and other tools can reach registry.lsck0.dev
+    security.pki.certificates = [
+      (builtins.readFile ../../secrets/homelab-ca.pem)
+    ];
+
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
     system.stateVersion = "25.11";
   };
