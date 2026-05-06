@@ -5,6 +5,7 @@
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   sops.secrets.forgejo-oidc-secret = {};
+  sops.secrets.forgejo-admin-pass = {};
 
   virtualisation.oci-containers.containers.forgejo = {
     image = "codeberg.org/forgejo/forgejo:7";
@@ -14,6 +15,7 @@
     environment = {
       FORGEJO__server__HTTP_PORT = "3000";
       FORGEJO__server__ROOT_URL = "https://git.lsck0.dev/";
+      FORGEJO__security__INSTALL_LOCK = "true";
       FORGEJO__actions__ENABLED = "true";
       FORGEJO__service__DISABLE_REGISTRATION = "false";
       FORGEJO__service__ALLOW_ONLY_EXTERNAL_REGISTRATION = "true";
@@ -24,10 +26,44 @@
     };
   };
 
-  # Configure OAuth2 auth source after Forgejo starts
+  # Create the initial admin user if Forgejo has no users yet.
+  # Idempotent: exits immediately if any user already exists.
+  # Password retrieved from SOPS; login via Authentik SSO is the normal path.
+  systemd.services.forgejo-init = {
+    description = "Initialise Forgejo admin user";
+    after = [ "podman-forgejo.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.curl pkgs.podman ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      # Wait for API
+      for i in $(seq 1 60); do
+        curl -sf http://127.0.0.1:80/api/v1/settings/api >/dev/null 2>&1 && break
+        sleep 2
+      done
+
+      # Skip if users already exist
+      COUNT=$(podman exec -u git forgejo forgejo admin user list 2>/dev/null | grep -c '^[0-9]' || echo 0)
+      [ "$COUNT" -gt 0 ] && { echo "Users exist ($COUNT), skipping init"; exit 0; }
+
+      PASS=$(cat ${config.sops.secrets.forgejo-admin-pass.path})
+      podman exec -u git forgejo forgejo admin user create \
+        --admin \
+        --username luca \
+        --password "$PASS" \
+        --email luca.sandrock@proton.me \
+        --must-change-password=false
+      echo "Admin user created"
+    '';
+  };
+
+  # Configure OAuth2 auth source after Forgejo starts and is initialised
   systemd.services.forgejo-oauth2-setup = {
     description = "Configure Forgejo OAuth2 with authentik";
-    after = [ "podman-forgejo.service" ];
+    after = [ "podman-forgejo.service" "forgejo-init.service" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.curl pkgs.jq pkgs.podman pkgs.gawk pkgs.gnugrep ];
     serviceConfig = {
@@ -82,7 +118,19 @@
     };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/forgejo-key.token"
-      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
+
+      # Check existing token validity; clear if stale
+      if [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ]; then
+        HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: token $(cat "$TOKEN_FILE")" \
+          http://127.0.0.1:80/api/v1/user 2>/dev/null || echo "0")
+        if [ "$HTTP" = "200" ]; then
+          echo "Homepage token valid"
+          exit 0
+        fi
+        echo "Homepage token stale (HTTP $HTTP), regenerating..."
+        rm -f "$TOKEN_FILE"
+      fi
 
       # Wait for Forgejo API
       for i in $(seq 1 60); do
