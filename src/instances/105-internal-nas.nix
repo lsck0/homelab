@@ -91,6 +91,18 @@
     openFirewall = true;
   };
 
+  # mDNS advertisement — lets file managers (Nemo, Nautilus, Finder) auto-discover the NAS
+  services.avahi = {
+    enable = true;
+    nssmdns4 = true;
+    publish = {
+      enable = true;
+      addresses = true;
+      workstation = true;
+      userServices = true;
+    };
+  };
+
   systemd.tmpfiles.rules = [
     "d /srv/nas 0775 nobody nogroup -"
     "d /srv/nas/public 0775 nobody nogroup -"
