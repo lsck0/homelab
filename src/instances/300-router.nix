@@ -193,7 +193,7 @@
 
       ZONE_ID=$(curl -sf -H "Authorization: Bearer $TOKEN" \
         "https://api.cloudflare.com/client/v4/zones?name=$ZONE_NAME" | jq -r '.result[0].id')
-      [ -z "$ZONE_ID" ] || [ "$ZONE_ID" = "null" ] && { echo "Failed to get zone ID"; exit 1; }
+      { [ -z "$ZONE_ID" ] || [ "$ZONE_ID" = "null" ]; } && { echo "Failed to get zone ID"; exit 1; }
 
       # format: "domain:proxied"
       # Only external (public) services get Cloudflare DNS records.
