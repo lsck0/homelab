@@ -65,6 +65,24 @@
         "force user" = "nobody";
         "force group" = "nogroup";
       };
+      BACKUPS = {
+        path = "/srv/nas/BACKUPS";
+        browseable = "yes";
+        "read only" = "yes";
+        "guest ok" = "yes";
+        "force user" = "nobody";
+        "force group" = "nogroup";
+      };
+      homelab = {
+        path = "/srv/nas";
+        browseable = "yes";
+        "read only" = "no";
+        "guest ok" = "yes";
+        "create mask" = "0664";
+        "directory mask" = "0775";
+        "force user" = "nobody";
+        "force group" = "nogroup";
+      };
     };
   };
 
