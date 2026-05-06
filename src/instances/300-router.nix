@@ -34,20 +34,20 @@
     filterForward = true;
 
     interfaces.ens18 = {
-      allowedTCPPorts = [ 22 443 5353 10100 10200 25565 ];
-      allowedUDPPorts = [ 5353 51820 ];
+      allowedTCPPorts = [ 22 53 443 10100 10200 25565 ];
+      allowedUDPPorts = [ 53 51820 ];
     };
     interfaces.ens19 = {
-      allowedTCPPorts = [ 22 5353 9100 ];
-      allowedUDPPorts = [ 5353 67 ];
+      allowedTCPPorts = [ 22 53 9100 ];
+      allowedUDPPorts = [ 53 67 ];
     };
     interfaces.ens20 = {
-      allowedTCPPorts = [ 5353 ];
-      allowedUDPPorts = [ 5353 67 ];
+      allowedTCPPorts = [ 53 ];
+      allowedUDPPorts = [ 53 67 ];
     };
     interfaces.wg0 = {
-      allowedTCPPorts = [ 5353 ];
-      allowedUDPPorts = [ 5353 ];
+      allowedTCPPorts = [ 53 ];
+      allowedUDPPorts = [ 53 ];
     };
 
     extraForwardRules = ''
@@ -139,7 +139,7 @@
   services.coredns = {
     enable = true;
     config = ''
-      lsck0.dev:5353 {
+      lsck0.dev:53 {
         hosts {
           # internal services → internal Traefik
           10.100.0.100 auth.lsck0.dev homepage.lsck0.dev git.lsck0.dev registry.lsck0.dev
@@ -161,7 +161,7 @@
         }
       }
 
-      .:5353 {
+      .:53 {
         forward . 1.1.1.1 8.8.8.8
         cache 300
       }
@@ -198,7 +198,7 @@
       # format: "domain:proxied"
       # Only external (public) services get Cloudflare DNS records.
       # Internal services resolve via CoreDNS only — no public DNS exposure.
-      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false hs.lsck0.dev:true search.lsck0.dev:true shlink.lsck0.dev:true paste.lsck0.dev:true share.lsck0.dev:true hello.lsck0.dev:true"
+      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false hs.lsck0.dev:true search.lsck0.dev:true shlink.lsck0.dev:true paste.lsck0.dev:true share.lsck0.dev:false hello.lsck0.dev:true"
 
       for ENTRY in $DOMAINS; do
         DOMAIN="''${ENTRY%%:*}"
