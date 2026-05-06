@@ -4,7 +4,7 @@
   homelab.nasBackup = {
     enable = true;
     sourceDir = "/srv/nas";
-    backupDir = "/srv/backups";
+    backupDir = "/srv/nas/BACKUPS";
     proxmoxBackupHost = "192.168.178.200";
     proxmoxBackupPath = "/var/lib/vz/nas-backups";
   };
