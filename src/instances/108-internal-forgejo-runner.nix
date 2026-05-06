@@ -43,6 +43,12 @@
           forgejo-runner generate-config > /var/lib/forgejo-runner/config.yaml
       fi
 
+      # Patch config: mount Docker socket in job containers (needed for docker build/push in CI)
+      sed -i 's|docker_host: "-"|docker_host: "automount"|' /var/lib/forgejo-runner/config.yaml
+      # Ensure job containers can resolve internal hostnames
+      sed -i "s|^  options:.*|  options: \"--add-host=git.lsck0.dev:10.100.0.100 --add-host=registry.lsck0.dev:10.100.0.109 --add-host=sccache.lsck0.dev:10.100.0.106\"|" \
+        /var/lib/forgejo-runner/config.yaml
+
       # Wait for Forgejo API
       for i in $(seq 1 90); do
         if curl -sf https://git.lsck0.dev/api/v1/settings/api >/dev/null 2>&1; then break; fi
