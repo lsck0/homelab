@@ -41,8 +41,8 @@ locals {
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-headscale", type = "external" }
-    "202" = { name = "202-external-searxng", type = "external", enabled = false }
-    "203" = { name = "203-external-shlink", type = "external", enabled = false }
+    "202" = { name = "202-external-searxng", type = "external" }
+    "203" = { name = "203-external-shlink", type = "external" }
     "204" = { name = "204-external-privatebin", type = "external" }
     "205" = { name = "205-external-share", type = "external" }
     "207" = { name = "207-external-minecraft", type = "external", memory = 20480, cores = 8, enabled = true }
