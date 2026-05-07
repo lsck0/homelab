@@ -142,17 +142,23 @@ if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
   done
   sleep 3
 
-  # Vzdump backup jobs (idempotent)
-  EXISTING_JOBS=$(curl -sk "$PVE_API/cluster/backup" -H "$PVE_AUTH" | jq -r '.data[]?.id // empty' 2>/dev/null || true)
-  for job_spec in "homelab-daily|105,207|02:00|3" "homelab-weekly|105,207|Mon 03:00|2" "homelab-monthly|105,207|*-*-01 04:00|1"; do
+  # Vzdump backup jobs — always PUT (upsert: creates or updates schedule/settings)
+  for job_spec in "homelab-daily|105,207|00:00|3" "homelab-weekly|105,207|Mon 00:00|2" "homelab-monthly|105,207|*-*-01 00:00|1"; do
     IFS='|' read -r jid jvms jsched jkeep <<< "$job_spec"
-    echo "$EXISTING_JOBS" | grep -qx "$jid" && continue
-    echo ">>> Creating vzdump job: $jid"
-    RESULT=$(curl -sk -X POST "$PVE_API/cluster/backup" -H "$PVE_AUTH" \
-      --data-urlencode "id=$jid" --data-urlencode "vmid=$jvms" --data-urlencode "schedule=$jsched" \
+    # Try update first; if 404, create
+    RESULT=$(curl -sk -X PUT "$PVE_API/cluster/backup/$jid" -H "$PVE_AUTH" \
+      --data-urlencode "vmid=$jvms" --data-urlencode "schedule=$jsched" \
       --data-urlencode "storage=local" --data-urlencode "mode=snapshot" --data-urlencode "compress=zstd" \
       --data-urlencode "maxfiles=$jkeep" --data-urlencode "enabled=1" --data-urlencode "node=$PROXMOX_NODE" 2>&1)
-    echo "$RESULT" | grep -q '"errors"' && echo "WARNING: Failed to create vzdump job $jid: $RESULT" || echo ">>> Created $jid"
+    if echo "$RESULT" | grep -q '"errors"'; then
+      RESULT=$(curl -sk -X POST "$PVE_API/cluster/backup" -H "$PVE_AUTH" \
+        --data-urlencode "id=$jid" --data-urlencode "vmid=$jvms" --data-urlencode "schedule=$jsched" \
+        --data-urlencode "storage=local" --data-urlencode "mode=snapshot" --data-urlencode "compress=zstd" \
+        --data-urlencode "maxfiles=$jkeep" --data-urlencode "enabled=1" --data-urlencode "node=$PROXMOX_NODE" 2>&1)
+      echo "$RESULT" | grep -q '"errors"' && echo "WARNING: Failed to upsert vzdump job $jid" || echo ">>> Created vzdump job $jid"
+    else
+      echo ">>> Vzdump job $jid: schedule=$jsched maxfiles=$jkeep"
+    fi
   done
 fi
 
