@@ -25,7 +25,7 @@ let
       echo "  $src -> $label.tar.zst"
       tar --create --use-compress-program="${pkgs.zstd}/bin/zstd -T0 -19" \
         --ignore-failed-read --warning=no-file-changed \
-        --exclude='*.tmp' --exclude='lost+found' --exclude='BACKUPS' \
+        --exclude='*.tmp' --exclude='lost+found' \
         -f "$out" -C "$(dirname "$src")" "$(basename "$src")" || {
         echo "  WARNING: $label backup had errors (partial archive kept)"
         FAILED=1
@@ -35,6 +35,7 @@ let
     for dir in "$SOURCE"/*/; do
       name=$(basename "$dir")
       case "$name" in
+        BACKUPS) ;;  # skip — this is the backup destination, not a source
         data)
           for sub in "$dir"*/; do
             [ -d "$sub" ] || continue
