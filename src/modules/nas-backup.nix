@@ -109,10 +109,10 @@ in {
     # Backup dirs are inside the NAS share — created here for idempotency.
     # BACKUPS/ itself is excluded from the backup source to prevent circular archiving.
     systemd.tmpfiles.rules = [
-      "d ${cfg.backupDir} 0750 root root -"
-      "d ${cfg.backupDir}/daily 0750 root root -"
-      "d ${cfg.backupDir}/weekly 0750 root root -"
-      "d ${cfg.backupDir}/monthly 0750 root root -"
+      "d ${cfg.backupDir} 0755 root root -"
+      "d ${cfg.backupDir}/daily 0755 root root -"
+      "d ${cfg.backupDir}/weekly 0755 root root -"
+      "d ${cfg.backupDir}/monthly 0755 root root -"
     ];
 
     systemd.services.nas-backup-daily = {
