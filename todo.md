@@ -1,0 +1,3 @@
+- setup paperless AI for doc categorizing
+- make qbittorrent use tor-router
+- setup a non-exit tor node
