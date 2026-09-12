@@ -4,6 +4,6 @@
 - setup a hermes agent vm
 - can we mark vms as "on-demand" so they only spin up when hit by a request?
 - are there alternatives to authentik given how much fucking memory it uses
-- https://shop.trmnl.com/products/trmnl-x integration
+- https://shop.trmnl.com/products/trmnl-x integration (ESPECIALLY SYNCED CALENDAR AND KRAKEN)
 - i want to have a SYNCED calendar sourcing from work outlook, uni studip, personal proton
 - do an audit for security and performance, then do a pentest.
