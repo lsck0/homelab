@@ -1,17 +1,41 @@
 { config, lib, pkgs, ... }:
 let
   cfg = config.homelab.traefik;
-  # Ensure every websecure route has tls.certResolver = "cloudflare" unless overridden
-  routersWithTls = lib.mapAttrs (_: router:
+
+  # Baseline response-header hardening attached to every websecure route: HSTS,
+  # no MIME sniffing, deny framing, a referrer policy. Individual routers can
+  # opt out by listing themselves in cfg.noSecureHeaders (e.g. an app that must
+  # be embedded in a frame).
+  secureHeadersMiddleware = {
+    secure-headers.headers = {
+      stsSeconds = 31536000;
+      stsIncludeSubdomains = true;
+      stsPreload = true;
+      contentTypeNosniff = true;
+      browserXssFilter = true;
+      frameDeny = true;
+      referrerPolicy = "strict-origin-when-cross-origin";
+    };
+  };
+
+  # Ensure every websecure route has tls.certResolver = "cloudflare" unless
+  # overridden, and prepend the secure-headers middleware unless opted out.
+  routersWithTls = lib.mapAttrs (name: router:
     let
       eps = router.entryPoints or [];
       needsTls = builtins.elem "websecure" eps;
       hasCertResolver = (router ? tls) && (router.tls ? certResolver);
+      withTls =
+        if needsTls && !hasCertResolver then
+          router // { tls = (router.tls or {}) // { certResolver = "cloudflare"; }; }
+        else
+          router;
+      wantsHeaders = needsTls && !(builtins.elem name cfg.noSecureHeaders);
     in
-    if needsTls && !hasCertResolver then
-      router // { tls = (router.tls or {}) // { certResolver = "cloudflare"; }; }
+    if wantsHeaders then
+      withTls // { middlewares = [ "secure-headers" ] ++ (withTls.middlewares or []); }
     else
-      router
+      withTls
   ) cfg.routers;
 in {
   options.homelab.traefik = {
@@ -51,6 +75,12 @@ in {
       type = lib.types.attrsOf lib.types.anything;
       default = {};
       description = "Traefik servers transports.";
+    };
+
+    noSecureHeaders = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      description = "Router names that should NOT get the secure-headers middleware.";
     };
 
     logLevel = lib.mkOption {
@@ -110,8 +140,11 @@ in {
         };
       };
       dynamicConfigOptions = {
-        http = { routers = routersWithTls; services = cfg.services; }
-          // lib.optionalAttrs (cfg.middlewares != {}) { middlewares = cfg.middlewares; }
+        http = {
+          routers = routersWithTls;
+          services = cfg.services;
+          middlewares = cfg.middlewares // secureHeadersMiddleware;
+        }
           // lib.optionalAttrs (cfg.serversTransports != {}) { serversTransports = cfg.serversTransports; };
       } // lib.optionalAttrs (cfg.tcp != {}) { tcp = cfg.tcp; };
     };

@@ -43,13 +43,62 @@
       # Remove old auth lines if present
       sed -i '/WebUI.AuthSubnetWhitelist/d; /WebUI.LocalHostAuth/d' "$conf"
 
-      # Append whitelist settings to [Preferences] section
+      # Whitelist only the internal Traefik (10.100.0.100), which already sits
+      # behind Authentik/Authelia ForwardAuth. A broad subnet whitelist would
+      # let any LAN or VPN host reach 10.100.0.117:80 directly with no login and
+      # change the download path to write files across the NFS mounts.
       if ! grep -q 'AuthSubnetWhitelistEnabled' "$conf"; then
-        printf '\n[Preferences]\nWebUI\\AuthSubnetWhitelistEnabled=true\nWebUI\\AuthSubnetWhitelist=10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16\nWebUI\\LocalHostAuth=false\n' >> "$conf"
+        printf '\n[Preferences]\nWebUI\\AuthSubnetWhitelistEnabled=true\nWebUI\\AuthSubnetWhitelist=10.100.0.100/32\nWebUI\\LocalHostAuth=false\n' >> "$conf"
       fi
 
       # Restart container to pick up config
       podman restart qbittorrent
+    '';
+  };
+
+  # Route all qBittorrent traffic through the Tor SOCKS5 gateway on vm-127.
+  #
+  # Tor carries TCP only, so DHT, PEX and LSD are turned off here: they are UDP
+  # or LAN broadcast and would otherwise bypass the proxy and expose the real
+  # WAN address. That also means peers are only discovered through trackers,
+  # and inbound connections cannot arrive at all, so swarms will be small and
+  # slow. A WireGuard VPN is the better tool if the goal is throughput.
+  systemd.services.qbittorrent-tor-proxy = {
+    description = "Point qBittorrent at the Tor SOCKS5 proxy";
+    after = [ "podman-qbittorrent.service" "qbittorrent-disable-auth.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.curl ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      Restart = "on-failure";
+      RestartSec = 30;
+    };
+    script = ''
+      API="http://127.0.0.1/api/v2"
+      # WebUI\LocalHostAuth=false means loopback needs no credentials.
+      for i in $(seq 1 60); do
+        curl -fsS "$API/app/version" >/dev/null 2>&1 && break
+        sleep 2
+      done
+      curl -fsS "$API/app/version" >/dev/null || { echo "qBittorrent API unreachable"; exit 1; }
+
+      curl -fsS -X POST "$API/app/setPreferences" --data-urlencode 'json={
+        "proxy_type": "SOCKS5",
+        "proxy_ip": "10.100.0.127",
+        "proxy_port": 9050,
+        "proxy_auth_enabled": false,
+        "proxy_hostname_lookup": true,
+        "proxy_bittorrent": true,
+        "proxy_peer_connections": true,
+        "proxy_misc": true,
+        "proxy_rss": true,
+        "anonymous_mode": true,
+        "dht": false,
+        "pex": false,
+        "lsd": false
+      }'
+      echo "qBittorrent proxied via Tor (10.100.0.127:9050)"
     '';
   };
 

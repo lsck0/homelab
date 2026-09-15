@@ -4,6 +4,8 @@ let
     { slug = "traefik";        name = "Traefik";          domain = "traefik.lsck0.dev"; }
     { slug = "registry-ui";    name = "Registry";         domain = "registry-ui.lsck0.dev"; }
     { slug = "paperless";      name = "Paperless";        domain = "paperless.lsck0.dev"; }
+    { slug = "paperless-ai";   name = "Paperless AI";     domain = "paperless-ai.lsck0.dev"; }
+    { slug = "hermes";         name = "Hermes (LLM)";     domain = "hermes.lsck0.dev"; }
     { slug = "jellyfin";       name = "Jellyfin";         domain = "jellyfin.lsck0.dev"; }
     { slug = "huginn";         name = "Huginn";           domain = "huginn.lsck0.dev"; }
     { slug = "homeassistant";  name = "Home Assistant";   domain = "hass.lsck0.dev"; }

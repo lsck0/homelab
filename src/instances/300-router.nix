@@ -34,7 +34,7 @@
     filterForward = true;
 
     interfaces.ens18 = {
-      allowedTCPPorts = [ 22 53 443 10100 10200 25565 ];
+      allowedTCPPorts = [ 22 53 443 9001 10100 10200 25565 ];
       allowedUDPPorts = [ 53 51820 ];
     };
     interfaces.ens19 = {
@@ -91,6 +91,8 @@
         ip daddr 192.168.178.29 tcp dport 10100 dnat to 10.100.0.100:443
         ip daddr 192.168.178.29 tcp dport 10200 dnat to 10.200.0.200:443
         ip daddr 192.168.178.29 tcp dport 25565 dnat to 10.200.0.200:25565
+        # Tor relay ORPort — must also be forwarded on the FritzBox.
+        ip daddr 192.168.178.29 tcp dport 9001 dnat to 10.200.0.209:9001
       }
     '';
   };
@@ -142,10 +144,10 @@
       lsck0.dev:53 {
         hosts {
           # internal services → internal Traefik
-          10.100.0.100 auth.lsck0.dev homepage.lsck0.dev git.lsck0.dev registry.lsck0.dev
-          10.100.0.100 cloud.lsck0.dev vault.lsck0.dev paperless.lsck0.dev
+          10.100.0.100 auth.lsck0.dev auth2.lsck0.dev homepage.lsck0.dev git.lsck0.dev registry.lsck0.dev
+          10.100.0.100 cloud.lsck0.dev vault.lsck0.dev paperless.lsck0.dev paperless-ai.lsck0.dev
           10.100.0.100 hass.lsck0.dev jellyfin.lsck0.dev status.lsck0.dev
-          10.100.0.100 huginn.lsck0.dev tasks.lsck0.dev
+          10.100.0.100 huginn.lsck0.dev tasks.lsck0.dev hermes.lsck0.dev cal.lsck0.dev
           10.100.0.100 grafana.lsck0.dev wiki.lsck0.dev abs.lsck0.dev
           10.100.0.100 torrent.lsck0.dev music.lsck0.dev read.lsck0.dev
           10.100.0.100 prowlarr.lsck0.dev sonarr.lsck0.dev radarr.lsck0.dev
@@ -198,7 +200,9 @@
       # format: "domain:proxied"
       # Only external (public) services get Cloudflare DNS records.
       # Internal services resolve via CoreDNS only — no public DNS exposure.
-      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false hs.lsck0.dev:true search.lsck0.dev:true shlink.lsck0.dev:true paste.lsck0.dev:true share.lsck0.dev:false hello.lsck0.dev:true"
+      # tor.lsck0.dev must stay unproxied: the relay publishes this address to
+      # the Tor consensus and it has to resolve to the real public IP.
+      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false tor.lsck0.dev:false cal.lsck0.dev:true hs.lsck0.dev:true search.lsck0.dev:true shlink.lsck0.dev:true paste.lsck0.dev:true share.lsck0.dev:false hello.lsck0.dev:true"
 
       for ENTRY in $DOMAINS; do
         DOMAIN="''${ENTRY%%:*}"
