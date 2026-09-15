@@ -24,6 +24,7 @@ Declarative homelab. Proxmox + NixOS, managed entirely through Terraform and Nix
 | 443 | 443 | 10.200.0.200:443 | External Traefik (Cloudflare proxy) |
 | 10100 | 10100 | 10.100.0.100:443 | Internal Traefik (direct) |
 | 10200 | 10200 | 10.200.0.200:443 | External Traefik (direct) |
+| 9001 | 9001 | 10.200.0.209:9001 | Tor relay ORPort |
 | 25565 | 25565 | 10.200.0.200:25565 | Minecraft (TCP passthrough) |
 | 51820/udp | 51820/udp | Router | WireGuard VPN |
 
@@ -56,15 +57,115 @@ Declarative homelab. Proxmox + NixOS, managed entirely through Terraform and Nix
 | 122 | 10.100.0.122 | Audiobookshelf          |
 | 123 | 10.100.0.123 | Navidrome (music)       |
 | 124 | 10.100.0.124 | Kavita (manga/comics)   |
+| 125 | 10.100.0.125 | Paperless AI (auto-tagging) |
+| 126 | 10.100.0.126 | Hermes (Ollama LLM API) |
+| 127 | 10.100.0.127 | Tor router (SOCKS5 gateway) |
+| 128 | 10.100.0.128 | Authelia SSO (Authentik replacement) |
+| 129 | 10.100.0.129 | Calendar aggregator + TRMNL feed |
 | 200 | 10.200.0.200 | External Traefik + CrowdSec |
 | 201 | 10.200.0.201 | Headscale VPN           |
-| 202 | 10.200.0.202 | Shlink (URL shortener)  |
-| 203 | 10.200.0.203 | PrivateBin              |
-| 204 | 10.200.0.204 | Pingvin Share           |
-| 205 | 10.200.0.205 | Minecraft               |
+| 202 | 10.200.0.202 | SearXNG                 |
+| 203 | 10.200.0.203 | Shlink (URL shortener)  |
+| 204 | 10.200.0.204 | PrivateBin              |
+| 205 | 10.200.0.205 | Pingvin Share           |
+| 207 | 10.200.0.207 | Minecraft               |
+| 208 | 10.200.0.208 | Hello (demo app)        |
+| 209 | 10.200.0.209 | Tor relay (non-exit)    |
 | 300 | 192.168.178.29 | NixOS Router          |
 
-Default VM: 2 cores, 2 GB RAM, 8 GB disk. Exceptions: Authentik (4 GB RAM), Minecraft (4 GB RAM, 6 cores), NAS (100 GB disk).
+Default VM: 2 cores, 1 GB RAM, 8 GB disk. Exceptions: Authentik (4 GB RAM), Paperless AI (2 GB RAM), NAS (2 GB RAM, 750 GB disk), Hermes (12 GB RAM, 8 cores, 60 GB disk), Minecraft (20 GB RAM, 8 cores).
+
+### On-Demand VMs
+
+`src/modules/on-demand.nix` lets a VM stay powered off until something asks for
+it. A systemd socket on the proxy VM listens in its place; the first connection
+is held in the socket queue while an `ExecStartPre` hook starts the VM through
+the Proxmox API, then `systemd-socket-proxyd` forwards traffic. When the proxy
+has been idle for `idleTimeout` it exits and `ExecStopPost` shuts the VM down.
+
+```nix
+homelab.onDemand = {
+  enable = true;
+  tokenFile = config.sops.secrets.proxmox-api-token.path;
+  services.minecraft = {
+    vmid = 207; listenPort = 26565;
+    target = "10.200.0.207"; targetPort = 25565;
+    idleTimeout = "30m";
+  };
+};
+```
+
+Then point the reverse proxy at `127.0.0.1:<listenPort>` instead of the VM.
+
+Two things limit where this is worth using:
+
+- **Anything that polls the VM keeps it awake.** Homepage widgets hit most
+  internal services directly by IP every few seconds, and Uptime Kuma checks
+  are configured in its own UI rather than in Nix. A VM with a Homepage widget
+  or a Kuma monitor will never go idle. Remove those first.
+- **Cold starts are slow.** VM boot plus NFS automount plus service start runs
+  30 s to several minutes. Browsers wait; Minecraft clients and most API
+  clients time out on the first attempt and need a retry.
+
+Requires a Proxmox API token with `VM.PowerMgmt` and `VM.Audit`, stored in
+`src/secrets.json` as `proxmox-api-token` in `USER@REALM!TOKENID=SECRET` form.
+
+### Calendar + TRMNL (vm-129)
+
+`src/modules/calendar-sync.py` pulls every configured ICS feed every 15
+minutes, merges them into one calendar, and renders a JSON payload for a TRMNL
+private plugin. nginx serves both files.
+
+Configure the sources in `src/secrets.json` under `calendar-sources`, one per
+line as `NAME|URL`:
+
+```
+work|https://outlook.office365.com/owa/calendar/<id>/reachcalendar.ics
+uni|https://studip.example.edu/dispatch.php/calendar/export/ical?<token>
+proton|https://calendar.proton.me/api/calendar/v1/url/<id>/calendar.ics
+```
+
+Each source is a *published* ICS link, so the merged calendar is read-only.
+Get them from Outlook (Settings → Calendar → Shared calendars → Publish; many
+work tenants disable this), StudIP (Calendar → Export → iCalendar) and Proton
+Calendar (Share → Share with anyone). Events keep their source in
+`CATEGORIES`, and UIDs are prefixed with the source name so two feeds reusing
+a UID do not collide.
+
+Both files live under a directory named after the `calendar-token` secret, and
+that unguessable path is the only thing protecting them — the routes carry no
+SSO, because the TRMNL cloud cannot log in:
+
+```
+https://cal.lsck0.dev/<calendar-token>/merged.ics    subscribe from any client
+https://cal.lsck0.dev/<calendar-token>/trmnl.json    TRMNL polling URL
+```
+
+`cal.lsck0.dev` is the one internal host relayed through the external Traefik,
+so the feed is reachable from the internet without the DMZ gaining access to
+the internal network.
+
+For TRMNL: create a private plugin with strategy **Polling**, point it at the
+`trmnl.json` URL, and write the Liquid markup against this shape:
+
+```json
+{
+  "generated_at": "...",
+  "events": [{ "source": "uni", "summary": "...", "location": "...",
+               "start": "2026-09-21T10:00:00+02:00", "end": "...",
+               "all_day": false }],
+  "kraken": { "ticker": { "XXBTZEUR": { "last": 65508.3, "change_pct": -3.2 } },
+              "balance": { "XXBT": 0.5 } }
+}
+```
+
+Events are sorted and cover the next 14 days, with recurrences already
+expanded. Kraken prices come from the public ticker and need no credentials;
+`balance` stays empty until `kraken-api-key` and `kraken-api-secret` are set.
+
+**Anything that can guess the token URL can read your calendar, and your
+Kraken balances if you enable them.** Rotate by changing `calendar-token` and
+redeploying — the sync job deletes the old directory on its next run.
 
 ## Project Structure
 

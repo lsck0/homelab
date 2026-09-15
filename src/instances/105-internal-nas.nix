@@ -117,6 +117,8 @@
     # per-service persistent data
     "d /srv/nas/data 0777 nobody nogroup -"
     "d /srv/nas/data/authentik 0777 nobody nogroup -"
+    "d /srv/nas/data/authelia 0777 nobody nogroup -"
+    "d /srv/nas/data/calendar 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo-runner 0777 nobody nogroup -"
     "d /srv/nas/data/headscale 0777 nobody nogroup -"
@@ -142,6 +144,7 @@
     "d /srv/nas/data/minecraft 0777 nobody nogroup -"
     "d /srv/nas/data/minecraft-modpacks 0777 nobody nogroup -"
     "d /srv/nas/data/paperless 0777 nobody nogroup -"
+    "d /srv/nas/data/paperless-ai 0777 nobody nogroup -"
     "d /srv/nas/data/qbittorrent 0777 nobody nogroup -"
     "d /srv/nas/data/prowlarr 0777 nobody nogroup -"
     "d /srv/nas/data/sonarr 0777 nobody nogroup -"
@@ -153,6 +156,7 @@
     "d /srv/nas/data/crowdsec-internal 0777 nobody nogroup -"
     "d /srv/nas/data/crowdsec-external 0777 nobody nogroup -"
     "d /srv/nas/data/searxng 0777 nobody nogroup -"
+    "d /srv/nas/data/tor-relay-keys 0777 nobody nogroup -"
     "d /var/lib/filebrowser 0750 1000 1000 -"
     "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
   ];
