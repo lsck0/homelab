@@ -38,6 +38,11 @@ locals {
     "122" = { name = "122-internal-audiobookshelf", type = "internal", enabled = false }
     "123" = { name = "123-internal-navidrome", type = "internal", enabled = false }
     "124" = { name = "124-internal-kavita", type = "internal", enabled = false }
+    "125" = { name = "125-internal-paperless-ai", type = "internal", memory = 2048, enabled = false }
+    "126" = { name = "126-internal-hermes", type = "internal", memory = 12288, cores = 8, disk = 60, enabled = false }
+    "127" = { name = "127-internal-tor-router", type = "internal", enabled = false }
+    "128" = { name = "128-internal-authelia", type = "internal", enabled = false }
+    "129" = { name = "129-internal-calendar", type = "internal", enabled = false }
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-headscale", type = "external" }
@@ -47,6 +52,7 @@ locals {
     "205" = { name = "205-external-share", type = "external" }
     "207" = { name = "207-external-minecraft", type = "external", memory = 20480, cores = 8 }
     "208" = { name = "208-external-hello", type = "external" }
+    "209" = { name = "209-external-tor-relay", type = "external", enabled = false }
     # ── router ──
     "300" = { name = "luca-router", type = "router" }
   }

@@ -1,0 +1,20 @@
+{
+  "target": "https://192.168.178.200:8006/",
+  "host": "192.168.178.200",
+  "generated": "2026-09-15T23:39:39Z",
+  "mode": { "stealth": false, "dos": false, "rate": 0 },
+  "severity_total": { "critical": 0, "high": 52, "medium": 0, "low": 0, "info": 0 },
+  "severity_nuclei": { "critical": 0, "high": 0, "medium": 0, "low": 0, "info": 0 },
+  "open_ports": "",
+  "crawl_urls": 318,
+  "openapi_endpoints": 0,
+  "graphql_introspection_open": false,
+  "provoked_5xx": 0,
+  "verified": { "injection": 0, "xxe": 0, "deserialization": 0, "deser_exploit_dispatched": 0, "ws_message_findings": 0, "smuggling": 0, "sql_errors": 0, "authz_flaws": 0, "open_redirect": 0, "source_maps": 0, "jwt_issues": 0, "cache_poisoning": 0, "js_secrets": 52 },
+  "websocket_endpoints": 0,
+  "frameworks": [],
+  "access_control_bypasses": 0,
+  "cors_reflections": 0,
+  "missing_tools": ["waybackurls"],
+  "report": "./sf-report-192.168.178.200-20260916-013646/REPORT.md"
+}

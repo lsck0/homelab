@@ -1,0 +1,9 @@
+https://192.168.178.200:8006/access/permissions?userid=
+https://192.168.178.200:8006/proxmoxlib.js?ver=v5.0.4-t1754316706
+https://192.168.178.200:8006/pve2/ext6/reader.json
+https://192.168.178.200:8006/pve2/ext6/store.json
+https://192.168.178.200:8006/pve2/ext6/writer.json
+https://192.168.178.200:8006/usr/share/javascript/extjs/reader.json
+https://192.168.178.200:8006/usr/share/javascript/extjs/store.json
+https://192.168.178.200:8006/usr/share/javascript/extjs/writer.json
+https://192.168.178.200:8006/v1/metrics
