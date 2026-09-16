@@ -17,9 +17,16 @@
       FORGEJO__server__ROOT_URL = "https://git.lsck0.dev/";
       FORGEJO__security__INSTALL_LOCK = "true";
       FORGEJO__actions__ENABLED = "true";
-      FORGEJO__service__DISABLE_REGISTRATION = "false";
+      # SSO-only: no self-service signup, and nothing is visible without logging
+      # in (kills anonymous browsing). Accounts are created only by the Authelia
+      # OAuth source (auto-register); the local login form stays only as a
+      # break-glass admin. Basic-auth git-over-HTTP is disabled — use SSH or a
+      # personal access token.
+      FORGEJO__service__DISABLE_REGISTRATION = "true";
       FORGEJO__service__ALLOW_ONLY_EXTERNAL_REGISTRATION = "true";
-      FORGEJO__openid__ENABLE_OPENID_SIGNIN = "true";
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW = "true";
+      FORGEJO__service__ENABLE_BASIC_AUTHENTICATION = "false";
+      FORGEJO__openid__ENABLE_OPENID_SIGNIN = "false";
       FORGEJO__oauth2_client__ENABLE_AUTO_REGISTRATION = "true";
       FORGEJO__oauth2_client__ACCOUNT_LINKING = "auto";
       FORGEJO__oauth2_client__USERNAME = "nickname";

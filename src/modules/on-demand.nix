@@ -20,12 +20,21 @@ let
     fi
 
     # Hold the queued client connection until the service actually answers.
+    # TCP-open is not enough: an app can accept connections before it can serve,
+    # returning 500s on the first requests. For HTTP services, wait for a real
+    # (non-5xx) response so the client's first request always succeeds.
     for _ in $(seq 1 ${toString svc.bootTimeout}); do
-      nc -z -w 2 ${svc.target} ${toString svc.targetPort} && exit 0
+      if nc -z -w 2 ${svc.target} ${toString svc.targetPort}; then
+        ${if svc.httpCheck then ''
+        code=$(curl -sk -o /dev/null -w '%{http_code}' -m 3 "http://${svc.target}:${toString svc.targetPort}/" 2>/dev/null || echo 000)
+        # Any real HTTP answer that is not a 5xx / connection failure means ready.
+        case "$code" in 000|5??) : ;; *) exit 0 ;; esac
+        '' else "exit 0"}
+      fi
       sleep 1
     done
 
-    echo "vm-${toString svc.vmid} did not open ${svc.target}:${toString svc.targetPort} in ${toString svc.bootTimeout}s"
+    echo "vm-${toString svc.vmid} not ready at ${svc.target}:${toString svc.targetPort} in ${toString svc.bootTimeout}s"
     exit 1
   '';
 
@@ -82,6 +91,12 @@ let
         type = lib.types.int;
         default = 180;
         description = "Seconds to wait for the VM to answer before failing the connection.";
+      };
+
+      httpCheck = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Wait for a non-5xx HTTP response (not just an open TCP port) before releasing the held client. Set false for non-HTTP backends (e.g. Minecraft).";
       };
     };
   });

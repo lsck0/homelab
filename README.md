@@ -1,272 +1,121 @@
-# Homelab IaC
+# Homelab
 
-Declarative homelab. Proxmox + NixOS, managed entirely through Terraform and Nix flakes.
+Declarative Proxmox + NixOS homelab. Every VM is a NixOS flake config; every VM
+is provisioned by Terraform. One command deploys the whole fleet:
 
-## Architecture
-
-- **Hypervisor:** Proxmox VE on bare metal
-- **Router (vm-300):** NixOS — nftables, NAT, CoreDNS, Kea DHCP, WireGuard
-- **OS:** NixOS on every VM (auto-built golden image)
-- **Networks:**
-  - `10.100.0.0/24` — Internal LAN: all homelab services behind Traefik + Authentik SSO
-  - `10.200.0.0/24` — External DMZ: public-facing apps, isolated from internal
-  - `10.0.0.0/24` — WireGuard VPN
-- **DNS:** CoreDNS on router — `*.internal` → internal Traefik, `*.external` → external Traefik
-- **SSO:** Authentik (ForwardAuth on Traefik for most services, native OIDC for Nextcloud/Forgejo)
-- **Security:** CrowdSec on both Traefik instances, nftables DMZ isolation
-- **Storage:** NAS VM (NFS + Samba) shared across media/document services
-- **Monitoring:** Uptime Kuma, Grafana + Prometheus, Homepage dashboard
-
-### Port Forwarding (FritzBox → Router → Services)
-
-| External Port | Router Port | Destination | Service |
-|---------------|-------------|-------------|---------|
-| 443 | 443 | 10.200.0.200:443 | External Traefik (Cloudflare proxy) |
-| 10100 | 10100 | 10.100.0.100:443 | Internal Traefik (direct) |
-| 10200 | 10200 | 10.200.0.200:443 | External Traefik (direct) |
-| 9001 | 9001 | 10.200.0.209:9001 | Tor relay ORPort |
-| 25565 | 25565 | 10.200.0.200:25565 | Minecraft (TCP passthrough) |
-| 51820/udp | 51820/udp | Router | WireGuard VPN |
-
-### VM Layout
-
-| VM  | IP           | Role                    |
-|-----|--------------|-------------------------|
-| 100 | 10.100.0.100 | Internal Traefik + CrowdSec |
-| 101 | 10.100.0.101 | Authentik SSO           |
-| 102 | 10.100.0.102 | Homepage dashboard      |
-| 103 | 10.100.0.103 | Grafana + Prometheus    |
-| 104 | 10.100.0.104 | Uptime Kuma             |
-| 105 | 10.100.0.105 | NAS (NFS + Samba, 100GB) |
-| 106 | 10.100.0.106 | sccache (Redis)         |
-| 107 | 10.100.0.107 | Forgejo (Git)           |
-| 108 | 10.100.0.108 | Forgejo Runner (CI)     |
-| 109 | 10.100.0.109 | Container Registry      |
-| 110 | 10.100.0.110 | Taskchampion sync       |
-| 111 | 10.100.0.111 | Vaultwarden             |
-| 112 | 10.100.0.112 | Nextcloud               |
-| 113 | 10.100.0.113 | Paperless-ngx           |
-| 114 | 10.100.0.114 | Huginn                  |
-| 115 | 10.100.0.115 | Home Assistant          |
-| 116 | 10.100.0.116 | Wiki.js                 |
-| 117 | 10.100.0.117 | qBittorrent             |
-| 118 | 10.100.0.118 | Prowlarr                |
-| 119 | 10.100.0.119 | Radarr                  |
-| 120 | 10.100.0.120 | Sonarr                  |
-| 121 | 10.100.0.121 | Jellyfin                |
-| 122 | 10.100.0.122 | Audiobookshelf          |
-| 123 | 10.100.0.123 | Navidrome (music)       |
-| 124 | 10.100.0.124 | Kavita (manga/comics)   |
-| 125 | 10.100.0.125 | Paperless AI (auto-tagging) |
-| 126 | 10.100.0.126 | Hermes (Ollama LLM API) |
-| 127 | 10.100.0.127 | Tor router (SOCKS5 gateway) |
-| 128 | 10.100.0.128 | Authelia SSO (Authentik replacement) |
-| 129 | 10.100.0.129 | Calendar aggregator + TRMNL feed |
-| 200 | 10.200.0.200 | External Traefik + CrowdSec |
-| 201 | 10.200.0.201 | Headscale VPN           |
-| 202 | 10.200.0.202 | SearXNG                 |
-| 203 | 10.200.0.203 | Shlink (URL shortener)  |
-| 204 | 10.200.0.204 | PrivateBin              |
-| 205 | 10.200.0.205 | Pingvin Share           |
-| 207 | 10.200.0.207 | Minecraft               |
-| 208 | 10.200.0.208 | Hello (demo app)        |
-| 209 | 10.200.0.209 | Tor relay (non-exit)    |
-| 300 | 192.168.178.29 | NixOS Router          |
-
-Default VM: 2 cores, 1 GB RAM, 8 GB disk. Exceptions: Authentik (4 GB RAM), Paperless AI (2 GB RAM), NAS (2 GB RAM, 750 GB disk), Hermes (12 GB RAM, 8 cores, 60 GB disk), Minecraft (20 GB RAM, 8 cores).
-
-### On-Demand VMs
-
-`src/modules/on-demand.nix` lets a VM stay powered off until something asks for
-it. A systemd socket on the proxy VM listens in its place; the first connection
-is held in the socket queue while an `ExecStartPre` hook starts the VM through
-the Proxmox API, then `systemd-socket-proxyd` forwards traffic. When the proxy
-has been idle for `idleTimeout` it exits and `ExecStopPost` shuts the VM down.
-
-```nix
-homelab.onDemand = {
-  enable = true;
-  tokenFile = config.sops.secrets.proxmox-api-token.path;
-  services.minecraft = {
-    vmid = 207; listenPort = 26565;
-    target = "10.200.0.207"; targetPort = 25565;
-    idleTimeout = "30m";
-  };
-};
-```
-
-Then point the reverse proxy at `127.0.0.1:<listenPort>` instead of the VM.
-
-Two things limit where this is worth using:
-
-- **Anything that polls the VM keeps it awake.** Homepage widgets hit most
-  internal services directly by IP every few seconds, and Uptime Kuma checks
-  are configured in its own UI rather than in Nix. A VM with a Homepage widget
-  or a Kuma monitor will never go idle. Remove those first.
-- **Cold starts are slow.** VM boot plus NFS automount plus service start runs
-  30 s to several minutes. Browsers wait; Minecraft clients and most API
-  clients time out on the first attempt and need a retry.
-
-Requires a Proxmox API token with `VM.PowerMgmt` and `VM.Audit`, stored in
-`src/secrets.json` as `proxmox-api-token` in `USER@REALM!TOKENID=SECRET` form.
-
-### Calendar + TRMNL (vm-129)
-
-`src/modules/calendar-sync.py` pulls every configured ICS feed every 15
-minutes, merges them into one calendar, and renders a JSON payload for a TRMNL
-private plugin. nginx serves both files.
-
-Configure the sources in `src/secrets.json` under `calendar-sources`, one per
-line as `NAME|URL`:
-
-```
-work|https://outlook.office365.com/owa/calendar/<id>/reachcalendar.ics
-uni|https://studip.example.edu/dispatch.php/calendar/export/ical?<token>
-proton|https://calendar.proton.me/api/calendar/v1/url/<id>/calendar.ics
-```
-
-Each source is a *published* ICS link, so the merged calendar is read-only.
-Get them from Outlook (Settings → Calendar → Shared calendars → Publish; many
-work tenants disable this), StudIP (Calendar → Export → iCalendar) and Proton
-Calendar (Share → Share with anyone). Events keep their source in
-`CATEGORIES`, and UIDs are prefixed with the source name so two feeds reusing
-a UID do not collide.
-
-Both files live under a directory named after the `calendar-token` secret, and
-that unguessable path is the only thing protecting them — the routes carry no
-SSO, because the TRMNL cloud cannot log in:
-
-```
-https://cal.lsck0.dev/<calendar-token>/merged.ics    subscribe from any client
-https://cal.lsck0.dev/<calendar-token>/trmnl.json    TRMNL polling URL
-```
-
-`cal.lsck0.dev` is the one internal host relayed through the external Traefik,
-so the feed is reachable from the internet without the DMZ gaining access to
-the internal network.
-
-For TRMNL: create a private plugin with strategy **Polling**, point it at the
-`trmnl.json` URL, and write the Liquid markup against this shape:
-
-```json
-{
-  "generated_at": "...",
-  "events": [{ "source": "uni", "summary": "...", "location": "...",
-               "start": "2026-09-21T10:00:00+02:00", "end": "...",
-               "all_day": false }],
-  "kraken": { "ticker": { "XXBTZEUR": { "last": 65508.3, "change_pct": -3.2 } },
-              "balance": { "XXBT": 0.5 } }
-}
-```
-
-Events are sorted and cover the next 14 days, with recurrences already
-expanded. Kraken prices come from the public ticker and need no credentials;
-`balance` stays empty until `kraken-api-key` and `kraken-api-secret` are set.
-
-**Anything that can guess the token URL can read your calendar, and your
-Kraken balances if you enable them.** Rotate by changing `calendar-token` and
-redeploying — the sync job deletes the old directory on its next run.
-
-## Project Structure
-
-```
-sync.sh                   deploy everything (terraform + nixos)
-scripts/init.sh           one-time bootstrap (proxmox + image + tfvars)
-scripts/deinit.sh         reset proxmox for fresh init
-
-src/
-  flake.nix               nixos flake (auto-discovers instances)
-  secrets.yaml            encrypted sops-nix secrets
-  terraform.tfvars.sops.json  encrypted terraform vars
-
-src/instances/            per-VM nix + terraform configs
-  main.tf                 VM definitions (all instances)
-  {id}-{type}-{name}.nix  NixOS config per VM
-  300-router.nix          router (multi-NIC, NAT, DNS, DHCP, VPN)
-  dashboards/             grafana dashboard JSON
-
-src/modules/
-  vm/main.tf              terraform VM module (proxmox provider)
-  docker-stack.nix        docker compose deployment module
-```
-
-## Quick Start
-
-### Prerequisites
-
-`nix`, `sops`, `terraform`, `age`, `jq`, `openssl`
-
-### 1. Initialize
-
-```bash
-./scripts/init.sh 192.168.178.200
-```
-
-### 2. Deploy
-
-```bash
+```sh
 ./sync.sh
 ```
 
-### 3. Home router setup (one-time, manual)
+- **Networks:** `10.100.0.0/24` internal (Authelia-gated) · `10.200.0.0/24` DMZ (public) · `10.0.0.0/24` WireGuard
+- **Ingress:** Cloudflare (proxied) → FritzBox `:443` → router `192.168.178.29` → external Traefik → service, or relayed to internal Traefik
+- **Identity:** lldap (store + admin UI) · Authelia (SSO/OIDC + ForwardAuth, WebAuthn/FIDO2)
+- **Edge security:** CrowdSec bouncer + AppSec WAF + Anubis bot filter (external); Authelia two-factor (internal)
+- **Observability:** Prometheus + Loki + Tempo + Grafana + Alertmanager → ntfy
+- **Storage & backup:** NAS (NFS/SMB/Syncthing) + encrypted, verified restic backups (`nas-restore`)
 
-On your FritzBox (or equivalent):
-- Set static DHCP lease: `192.168.178.29` for the router VM
-- Set DNS server in DHCP settings: `192.168.178.29`
-- Port forwards to `192.168.178.29`: 443/tcp, 25565/tcp, 51820/udp
+## Services
 
-### 4. Cloudflare DNS
+### Internal — `10.100.0.0/24` (behind Authelia)
 
-Add a wildcard `*` A record pointing to your public IP (proxied).
-Add `mc` and `wg` A records (DNS-only, not proxied) for direct connections.
+| VM | Host | Service |
+|----|------|---------|
+| 100 | `traefik.lsck0.dev` | Internal reverse proxy (TLS/ACME, Authelia ForwardAuth, on-demand proxy) |
+| 102 | `homepage.lsck0.dev` | Dashboard / service landing page |
+| 103 | `grafana.lsck0.dev` | Metrics, logs, traces, alerting |
+| 104 | `status.lsck0.dev` | Uptime Kuma |
+| 105 | `nas.lsck0.dev` | NAS — NFS + SMB + Syncthing + FileBrowser + backups |
+| 106 | `sccache.lsck0.dev` | Shared compile cache |
+| 107 | `git.lsck0.dev` | Forgejo git forge (SSO-only) |
+| 108 | — | Forgejo CI runner |
+| 109 | `registry.lsck0.dev` | Docker registry (LAN/VPN only) |
+| 110 | `tasks.lsck0.dev` | Taskwarrior sync (TaskChampion) |
+| 111 | `vault.lsck0.dev` | Vaultwarden password manager |
+| 112 | `cloud.lsck0.dev` | Nextcloud |
+| 113 | `paperless.lsck0.dev` | Paperless-ngx documents |
+| 114 | `huginn.lsck0.dev` | Automation agents |
+| 115 | `hass.lsck0.dev` | Home Assistant |
+| 116 | `wiki.lsck0.dev` | Wiki.js |
+| 117 | `torrent.lsck0.dev` | qBittorrent (via Tor) |
+| 118–120 | `prowlarr/radarr/sonarr.lsck0.dev` | *arr media automation |
+| 121 | `jellyfin.lsck0.dev` | Jellyfin media server |
+| 122 | `abs.lsck0.dev` | Audiobookshelf |
+| 123 | `music.lsck0.dev` | Navidrome |
+| 124 | `read.lsck0.dev` | Kavita |
+| 125 | `paperless-ai.lsck0.dev` | AI document tagging |
+| 126 | `hermes.lsck0.dev` | GPU LLM agent (Ollama, RTX 2060) |
+| 127 | — | Tor SOCKS router |
+| 128 | `auth.lsck0.dev` | Authelia SSO / OIDC |
+| 129 | `cal.lsck0.dev` | Synced calendar feeds |
+| 131 | `attic.lsck0.dev` | Nix binary cache |
+| 132 | — | SMTP relay |
+| 133 | `lldap.lsck0.dev` | LDAP identity store + admin |
+| 135 | `budget.lsck0.dev` | Actual Budget · on-demand |
+| 136 | `requests.lsck0.dev` | Jellyseerr |
+| 137 | `subs.lsck0.dev` | Bazarr subtitles |
+| 138 | — | Recyclarr |
+| 139 | — | Mosquitto MQTT |
+| 140 | `firefly.lsck0.dev` | Firefly III finance · on-demand |
 
-## Adding a New VM
+### External — `10.200.0.0/24` (public, DMZ)
 
-1. Pick an ID: `1XX` for internal, `2XX` for external. IP = `10.{100|200}.0.{ID}`.
-2. Add entry to `src/instances/main.tf`
-3. Create `src/instances/{ID}-{type}-{name}.nix`
-4. Add Traefik route in `100-internal-traefik.nix` or `200-external-traefik.nix`
-5. Add to Authentik `protectedApps` in `101-internal-authentik.nix` (if SSO needed)
-6. Add to homepage in `102-internal-homepage.nix`
-7. Add monitor in `103-internal-uptime-kuma.nix`
-8. `git add -A && ./sync.sh`
+| VM | Host | Service |
+|----|------|---------|
+| 200 | — | External reverse proxy (CrowdSec + WAF + Anubis + relay) |
+| 201 | `hs.lsck0.dev` | Headscale (Tailscale control) |
+| 202 | `search.lsck0.dev` | SearXNG metasearch · on-demand |
+| 203 | `shlink.lsck0.dev` | URL shortener |
+| 204 | `paste.lsck0.dev` | PrivateBin · on-demand |
+| 205 | `share.lsck0.dev` | File sharing · on-demand |
+| 206 | `ntfy.lsck0.dev` | Push notifications |
+| 207 | `mc.lsck0.dev` | Minecraft · on-demand |
+| 208 | `hello.lsck0.dev` | Demo / swarm test |
+| 209 | — | Tor relay (non-exit) |
+| 300 | — | Router — NAT, firewall, DHCP, DNS/blocky, WireGuard, DDNS |
 
-The flake auto-discovers files matching `{1,2}XX-{internal,external}-*.nix` plus `300-router.nix`.
+## Architecture
 
-## Secrets
+```mermaid
+flowchart TB
+    user([User / Internet])
+    cf[Cloudflare<br/>proxied DNS + edge]
+    fritz[FritzBox<br/>public IP · :443 forward]
 
-Encrypted with [sops-nix](https://github.com/Mic92/sops-nix). Edit: `sops src/secrets.yaml`.
+    subgraph host[Proxmox host · luca-server]
+        router[vm-300 Router<br/>nftables · CoreDNS+blocky · Kea DHCP · WireGuard · DDNS]
 
-## Minecraft Modpacks
+        subgraph dmz[DMZ 10.200.0.0/24]
+            extt[vm-200 External Traefik<br/>CrowdSec · AppSec WAF · Anubis]
+            extsvc[searxng · paste · share<br/>shlink · ntfy · minecraft · headscale]
+        end
 
-The MC server uses `itzg/minecraft-server`. Edit `205-external-minecraft.nix` and uncomment one:
+        subgraph internal[Internal 10.100.0.0/24]
+            intt[vm-100 Internal Traefik]
+            authelia[vm-128 Authelia<br/>SSO · OIDC · WebAuthn]
+            lldap[vm-133 lldap<br/>identity store]
+            intsvc[grafana · forgejo · nextcloud · vaultwarden<br/>paperless · jellyfin · *arr · firefly · ...]
+            nas[vm-105 NAS<br/>NFS/SMB · restic backups]
+            obs[vm-103 Observability<br/>Prometheus · Loki · Tempo · Grafana]
+            ntfyext[vm-206 ntfy]
+        end
+    end
 
-**Server zip** — place zip at `/var/lib/minecraft-modpacks/` on vm-205:
+    user --> cf --> fritz --> router
+    router --> extt
+    extt -->|external hosts| extsvc
+    extt -->|unknown host = internal| intt
+    intt -->|ForwardAuth| authelia
+    authelia --> lldap
+    intt --> intsvc
+    intsvc -. NFS .-> nas
+    intsvc -. metrics/logs .-> obs
+    obs -->|alerts| ntfyext
+    router -->|WireGuard / split-horizon DNS| intt
 ```
-GENERIC_PACK = "/modpacks/server-pack.zip";
-```
 
-**CurseForge page** — auto-downloads:
-```
-TYPE = "AUTO_CURSEFORGE";
-CF_PAGE_URL = "https://www.curseforge.com/minecraft/modpacks/...";
-```
+## Layout
 
-**Pack with its own run script** — extract to `/var/lib/minecraft/`, then:
-```
-TYPE = "CUSTOM";
-CUSTOM_SERVER = "/data/run.sh";
-SKIP_SERVER_PROPERTIES = "true";
-EXEC_DIRECTLY = "true";
-```
-
-This bypasses the itzg launcher entirely and runs the pack's script directly.
-
-## Authentik Password Recovery
-
-```bash
-ssh -J root@192.168.178.29 root@10.100.0.101
-docker exec -it authentik-server-1 ak create_recovery_key 10 akadmin
-```
-
-Open the printed URL from your LAN browser.
+- `src/instances/*.nix` — one NixOS config per VM (`<id>-<zone>-<name>.nix`)
+- `src/instances/main.tf` — the VM inventory (id → name, resources, flags)
+- `src/modules/*.nix` — shared modules (`traefik`, `on-demand`, `nas-backup`, `base`)
+- `sync.sh` — build every closure, copy to each VM, switch, commit `Generation: N`

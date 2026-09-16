@@ -222,19 +222,30 @@ DISABLED_VMS=$(terraform -chdir="$ROOT_DIR/src" output -raw disabled_vms 2>/dev/
 ON_DEMAND_VMS=$(terraform -chdir="$ROOT_DIR/src" output -raw on_demand_vms 2>/dev/null || echo "")
 if [ -n "$ON_DEMAND_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
   echo ">>> Waking on-demand VMs for deploy: $(echo "$ON_DEMAND_VMS" | tr '\n' ' ')"
+  # Start every stopped on-demand VM. sync always deploys ALL enabled VMs — the
+  # on-demand idle-stop is only for user request traffic, config must never drift.
   for vmid in $ON_DEMAND_VMS; do
     st=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/status/current" -H "$PVE_AUTH" | jq -r '.data.status // "unknown"' 2>/dev/null)
-    [ "$st" = "running" ] || curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
+    if [ "$st" != "running" ]; then
+      echo ">>>   starting vm-$vmid ($st)"
+      curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
+    fi
   done
-  # give them a moment to boot before pushing the SSH key via the guest agent
-  sleep 25
+  # Wait for each guest agent to answer (cold NixOS boot), THEN push the SSH key.
+  # Polling beats a fixed sleep: a slow boot no longer means a skipped deploy.
   for vmid in $ON_DEMAND_VMS; do
+    ready=0
+    for _ in $(seq 1 60); do   # up to ~180s
+      code=$(curl -sk -o /dev/null -w '%{http_code}' "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/agent/ping" -H "$PVE_AUTH" 2>/dev/null)
+      [ "$code" = "200" ] && { ready=1; break; }
+      sleep 3
+    done
+    [ "$ready" = "1" ] || { echo ">>>   WARNING: vm-$vmid guest agent not ready; deploy may retry"; continue; }
     payload=$(jq -cn --arg k "$PUBKEY" \
       '{"command":["/bin/sh","-c","mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo \($k) > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"]}')
     curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/agent/exec" \
       -H "$PVE_AUTH" -H "Content-Type: application/json" -d "$payload" >/dev/null 2>&1 || true
   done
-  sleep 3
 fi
 
 # Build all enabled closures in parallel

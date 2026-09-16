@@ -29,7 +29,7 @@ in {
       searxng    = { vmid = 202; listenPort = 26202; target = "10.200.0.202"; targetPort = 80; };
       privatebin = { vmid = 204; listenPort = 26204; target = "10.200.0.204"; targetPort = 80; };
       share      = { vmid = 205; listenPort = 26205; target = "10.200.0.205"; targetPort = 80; };
-      minecraft  = { vmid = 207; listenPort = 26565; target = "10.200.0.207"; targetPort = 25565; bootTimeout = 300; };
+      minecraft  = { vmid = 207; listenPort = 26565; target = "10.200.0.207"; targetPort = 25565; bootTimeout = 300; httpCheck = false; };
     };
   };
 
@@ -38,6 +38,9 @@ in {
 
   homelab.traefik = {
     enable = true;
+    # Behind Cloudflare: take the real client IP from X-Forwarded-For so Anubis
+    # and CrowdSec see a stable client, not the rotating edge IP.
+    trustCloudflare = true;
 
     # Deny public access to internal-only services that have no auth of their own
     # and are headless (so Authelia's browser redirect can't gate them). Requests
