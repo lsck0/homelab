@@ -1,16 +1,17 @@
 { lib, nasMount, ... }: {
   networking.hostName = "vm-105";
 
+  # Encrypted, verified, deduplicated restic backups (local repo). Retention +
+  # integrity defaults live in the module. Off-site repo is the next step
+  # (restic copy to B2/S3/SFTP) — until then this survives accidental deletion
+  # and bitrot, but not a full host loss.
   homelab.nasBackup = {
     enable = true;
     sourceDir = "/srv/nas";
-    backupDir = "/srv/nas/BACKUPS";
-    proxmoxBackupHost = "192.168.178.200";
-    proxmoxBackupPath = "/var/lib/vz/nas-backups";
   };
 
-  sops.secrets.nas-backup-key = {
-    path = "/etc/nas-backup-key";
+  sops.secrets.restic-password = {
+    path = "/etc/restic-password";
     mode = "0600";
   };
 
