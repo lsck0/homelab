@@ -123,6 +123,8 @@
     "d /srv/nas/data/jellyseerr 0777 nobody nogroup -"
     "d /srv/nas/data/bazarr 0777 nobody nogroup -"
     "d /srv/nas/data/firefly 0777 nobody nogroup -"
+    "d /srv/nas/data/firefly/db 0750 999 999 -"
+    "d /srv/nas/data/firefly/upload 0750 1000 1000 -"
     "d /srv/nas/syncthing 0775 nobody nogroup -"
     "d /var/lib/syncthing 0700 nobody nogroup -"
     "d /srv/nas/data/calendar 0777 nobody nogroup -"
