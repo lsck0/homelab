@@ -223,7 +223,10 @@ in {
     systemd.tmpfiles.rules = [
       "d /var/lib/traefik 0700 traefik traefik -"
       "d /var/lib/traefik/acme 0700 traefik traefik -"
-      "d /var/log/traefik 0750 root root -"
+      # traefik (not root) writes access.log here; the crowdsec container reads
+      # it. root-owned 0750 blocked the write, so the access log never appeared
+      # and crowdsec had nothing to parse.
+      "d /var/log/traefik 0755 traefik traefik -"
     ];
 
     # /var/lib/crowdsec is an NFS automount, so tmpfiles cannot reliably create
