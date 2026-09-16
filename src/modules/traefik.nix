@@ -323,10 +323,14 @@ in {
       environmentFiles = [ config.sops.templates."traefik.env".path ];
       staticConfigOptions = {
         log.level = cfg.logLevel;
-        # Access logs go to a file (not stdout) so CrowdSec can read them and
-        # make local behavioural decisions, not just serve the community
-        # blocklist. The file is bind-mounted into the crowdsec container.
-        accessLog.filePath = "/var/log/traefik/access.log";
+        # JSON access log to a file: CrowdSec parses it, and promtail ships it to
+        # Loki. Keep Cf-Ipcountry so the Grafana world map can plot request
+        # origins (Cloudflare sets it on every proxied request).
+        accessLog = {
+          filePath = "/var/log/traefik/access.log";
+          format = "json";
+          fields.headers.names."Cf-Ipcountry" = "keep";
+        };
         api.dashboard = true;
         # Prometheus metrics on a dedicated entrypoint (:8082), scraped by
         # vm-103. Per-entrypoint/router/service labels drive the HTTP analytics
