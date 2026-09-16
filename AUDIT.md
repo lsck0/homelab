@@ -221,3 +221,24 @@ Confirm nothing else keeps unique state on a local disk.
 3. S3 (finish Authelia cutover or bump Authentik).
 4. S4 (fix ACME) and S6 (security headers).
 5. Everything else as hardening.
+
+---
+
+## Addendum (2026-09-16, follow-up work)
+
+### P6 — CoreDNS split-horizon for `*.lsck0.dev` is not working (Medium, pre-existing)
+
+`dig SOA lsck0.dev @10.100.0.1` returns Cloudflare's SOA with `ra` (not `aa`) and a
+short TTL, and `dig smb.lsck0.dev @10.100.0.1` — a name that exists only in
+CoreDNS, with no public record — returns the public wildcard `87.148.112.159`.
+So the router's `lsck0.dev:53` authoritative block is bypassed and every
+internal name is resolved against public DNS instead of the local Traefik IP.
+This is masked today because services address each other by hardcoded IP
+(`http://10.100.0.x`) or `--add-host`, so nothing actually relies on the
+split-horizon. Combined with the wildcard record (S1), internal names resolve
+to a stale public IP even from inside the LAN.
+
+Not introduced by the blocky change (that only touched the `.:53` forward). Fix
+belongs with S1: either make the `hosts`/`template` block in CoreDNS actually
+authoritative for the zone, or remove the reliance on it. Deleting the public
+wildcard (S1) plus a working local zone gives correct internal-only resolution.
