@@ -42,6 +42,11 @@ in
   homelab.traefik = {
     enable = true;
 
+    # Public-facing ingress: turn CrowdSec from log-only into an enforcing
+    # bouncer (community blocklist + local bans) on every route. AppSec/WAF is
+    # enabled once the bouncer itself is verified.
+    crowdsecBouncer.enable = true;
+
     entryPoints.minecraft.address = ":25565";
 
     routers = {
