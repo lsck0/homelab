@@ -139,6 +139,10 @@ in {
         wants = [ "network-online.target" ];
         after = [ "ondemand-${name}.socket" "network-online.target" ];
         serviceConfig = {
+          # start-pre holds the client while the VM boots; systemd's default 90s
+          # start timeout would kill the wake before a cold VM answers. Give the
+          # wake its full bootTimeout plus margin.
+          TimeoutStartSec = svc.bootTimeout + 60;
           ExecStartPre = wakeScript name svc;
           ExecStart = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd"
             + " --exit-idle-time=${svc.idleTimeout}"

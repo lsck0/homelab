@@ -76,6 +76,11 @@
       # External DMZ → internal LAN: BLOCK
       iifname "ens20" oifname "ens19" counter drop
 
+      # allow external Traefik to reach the Proxmox API for on-demand VM wake.
+      # Narrow: only vm-200, only the hypervisor, only the API port. The token is
+      # scoped to VM.PowerMgmt/VM.Audit. Must precede the management-net drop.
+      iifname "ens20" ip saddr 10.200.0.200 ip daddr 192.168.178.200 tcp dport 8006 accept
+
       # External DMZ → local/management network: BLOCK
       iifname "ens20" oifname "ens18" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } counter drop
 
