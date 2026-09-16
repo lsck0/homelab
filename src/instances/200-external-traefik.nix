@@ -1,5 +1,18 @@
 { config, lib, pkgs, nasMount, ... }:
-{
+let
+  # Anubis proof-of-work bot filter in front of the browser-facing DMZ routes.
+  # Off by default: flipping this repoints each web route through its local
+  # Anubis instance (Traefik points at 272xx instead of the upstream/on-demand
+  # 262xx port). A real browser solves one JS challenge; AI crawlers and
+  # headless scrapers that ignore it are dropped before they reach the app.
+  # Not applied to headscale (tailscale client API), ntfy (app polling),
+  # calendar (TRMNL polling) or minecraft (raw TCP) — none are browsers.
+  anubisEnable = false;
+  # Traefik server URL for a browser-facing service: the Anubis instance when
+  # the filter is on, the original upstream when off.
+  fronted = anubisPort: upstream:
+    if anubisEnable then "http://127.0.0.1:${toString anubisPort}" else upstream;
+in {
   networking.hostName = "vm-200";
 
   # On-demand DMZ services: each VM sits stopped and boots on the first request
@@ -31,6 +44,20 @@
     # enabled once the bouncer itself is verified.
     crowdsecBouncer.enable = true;
 
+    # Bot filter for the browser-facing routes. Each instance forwards to the
+    # service's real upstream (an on-demand 262xx proxy for the on-demand ones,
+    # the VM directly otherwise). Enable by flipping anubisEnable above.
+    anubis = {
+      enable = anubisEnable;
+      instances = {
+        searxng    = { upstream = "http://127.0.0.1:26202"; listenPort = 27202; };
+        privatebin = { upstream = "http://127.0.0.1:26204"; listenPort = 27204; };
+        share      = { upstream = "http://127.0.0.1:26205"; listenPort = 27205; };
+        shlink     = { upstream = "http://10.200.0.203:80";  listenPort = 27203; };
+        hello      = { upstream = "http://10.200.0.208:80";  listenPort = 27208; };
+      };
+    };
+
     entryPoints.minecraft.address = ":25565";
 
     routers = {
@@ -48,12 +75,14 @@
 
     services = {
       headscale.loadBalancer.servers    = [{ url = "http://10.200.0.201:80"; }];
-      # on-demand: point at the local socket-proxy, not the VM directly.
-      searxng.loadBalancer.servers      = [{ url = "http://127.0.0.1:26202"; }];
-      shlink.loadBalancer.servers       = [{ url = "http://10.200.0.203:80"; }];
-      privatebin.loadBalancer.servers   = [{ url = "http://127.0.0.1:26204"; }];
-      share.loadBalancer.servers        = [{ url = "http://127.0.0.1:26205"; }];
-      hello.loadBalancer.servers        = [{ url = "http://10.200.0.208:80"; }];
+      # Browser-facing routes go through Anubis when anubisEnable is on; each
+      # `fronted` picks the 272xx instance or the original upstream. The
+      # on-demand ones still terminate at the 262xx socket-proxy behind Anubis.
+      searxng.loadBalancer.servers      = [{ url = fronted 27202 "http://127.0.0.1:26202"; }];
+      shlink.loadBalancer.servers       = [{ url = fronted 27203 "http://10.200.0.203:80"; }];
+      privatebin.loadBalancer.servers   = [{ url = fronted 27204 "http://127.0.0.1:26204"; }];
+      share.loadBalancer.servers        = [{ url = fronted 27205 "http://127.0.0.1:26205"; }];
+      hello.loadBalancer.servers        = [{ url = fronted 27208 "http://10.200.0.208:80"; }];
       ntfy.loadBalancer.servers         = [{ url = "http://10.200.0.206:80"; }];
       calendar.loadBalancer.servers     = [{ url = "https://10.100.0.100:443"; }];
       calendar.loadBalancer.serversTransport = "internal-traefik";
