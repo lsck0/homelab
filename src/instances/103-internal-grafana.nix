@@ -9,6 +9,10 @@ let
   #   1. sops src/secrets.json  → fill telegram-bot-token and telegram-chat-id
   #   2. flip this to true and redeploy
   enableTelegram = false;
+
+  # ntfy topic for alerts — public but unguessable. Subscribe the phone to
+  # https://ntfy.lsck0.dev/<this>. Change it to rotate.
+  ntfyAlertTopic = "lsck0-homelab-a7f3k9d2xq";
 in {
   networking.hostName = "vm-103";
 
@@ -174,13 +178,25 @@ in {
           }
         ];
       };
-      alerting = lib.mkIf enableTelegram {
+      # Alerting is always on and delivers to ntfy (vm-206, public, works when
+      # the LAN is down) with no credentials needed — subscribe the phone app to
+      # https://ntfy.lsck0.dev/${ntfyAlertTopic}. Telegram is added as a second
+      # channel once its token is filled (enableTelegram).
+      alerting = {
         contactPoints.settings = {
           apiVersion = 1;
           contactPoints = [{
             orgId = 1;
-            name = "telegram";
+            name = "homelab-alerts";
             receivers = [{
+              uid = "ntfy_cp";
+              type = "webhook";
+              settings = {
+                url = "https://ntfy.lsck0.dev/${ntfyAlertTopic}";
+                httpMethod = "POST";
+              };
+              disableResolveMessage = false;
+            }] ++ lib.optional enableTelegram {
               uid = "telegram_cp";
               type = "telegram";
               settings = {
@@ -188,14 +204,14 @@ in {
                 chatid = "$__env{TELEGRAM_CHAT_ID}";
               };
               disableResolveMessage = false;
-            }];
+            };
           }];
         };
         policies.settings = {
           apiVersion = 1;
           policies = [{
             orgId = 1;
-            receiver = "telegram";
+            receiver = "homelab-alerts";
             group_by = [ "grafana_folder" "alertname" ];
             group_wait = "30s";
             group_interval = "5m";
