@@ -30,6 +30,24 @@ let
 in {
   networking.hostName = "luca-router";
 
+  # Advertise the hostname over mDNS on the FritzBox LAN. ens18 is a static IP
+  # (no DHCP), so the FritzBox never receives a DHCP hostname and shows the
+  # stale install-time name ("nixos"). Publishing luca-router.local via avahi on
+  # ens18 lets FRITZ!OS resolve and display the correct name. Restricted to
+  # ens18 so mDNS is not exposed on the internal/DMZ subnets.
+  services.avahi = {
+    enable = true;
+    allowInterfaces = [ "ens18" ];
+    ipv4 = true;
+    ipv6 = false;
+    publish = {
+      enable = true;
+      addresses = true;
+      workstation = true;
+      hinfo = true;
+    };
+  };
+
   # ── Network Interfaces ──────────────────────────────────────
   # ens18 = WAN    → static lease from FritzBox
   # ens19 = Internal LAN  (10.100.0.0/24)
@@ -64,7 +82,7 @@ in {
 
     interfaces.ens18 = {
       allowedTCPPorts = [ 22 53 443 9001 10100 10200 25565 ];
-      allowedUDPPorts = [ 53 51820 ];
+      allowedUDPPorts = [ 53 51820 5353 ];
     };
     interfaces.ens19 = {
       allowedTCPPorts = [ 22 53 9100 ];
