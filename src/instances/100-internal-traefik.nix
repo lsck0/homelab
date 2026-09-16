@@ -60,6 +60,9 @@ in {
       kavita-tls         = { rule = "Host(`read.lsck0.dev`)";       service = "kavita";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       nas-tls            = { rule = "Host(`nas.lsck0.dev`)";        service = "nas";             entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       syncthing-tls      = { rule = "Host(`sync.lsck0.dev`)";       service = "syncthing";       entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
+      lldap-tls          = { rule = "Host(`lldap.lsck0.dev`)";      service = "lldap";           entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
+      # No SSO: nix clients authenticate to attic with their own token.
+      attic-tls          = { rule = "Host(`attic.lsck0.dev`)";      service = "attic";           entryPoints = [ "websecure" ]; };
       proxmox-tls        = { rule = "Host(`proxmox.lsck0.dev`)";    service = "proxmox";         entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
     };
 
@@ -91,6 +94,8 @@ in {
       kavita.loadBalancer.servers           = [{ url = ip "124"; }];
       nas.loadBalancer.servers              = [{ url = ip "105"; }];
       syncthing.loadBalancer.servers        = [{ url = "http://10.100.0.105:8384"; }];
+      lldap.loadBalancer.servers            = [{ url = "http://10.100.0.133:17170"; }];
+      attic.loadBalancer.servers            = [{ url = "http://10.100.0.131:8080"; }];
       proxmox.loadBalancer.servers          = [{ url = "https://192.168.178.200:8006"; }];
       proxmox.loadBalancer.serversTransport = "proxmox-transport";
     };
