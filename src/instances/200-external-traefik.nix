@@ -56,6 +56,7 @@ in
       privatebin-tls   = { rule = "Host(`paste.lsck0.dev`)";       service = "privatebin";   entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       share-tls        = { rule = "Host(`share.lsck0.dev`)";       service = "share";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       hello-tls        = { rule = "Host(`hello.lsck0.dev`)";       service = "hello";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+      ntfy-tls         = { rule = "Host(`ntfy.lsck0.dev`)";        service = "ntfy";         entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       # The calendar lives on the internal side; only this one host is relayed
       # through, so the TRMNL cloud can poll it without the DMZ reaching in.
       calendar-tls     = { rule = "Host(`cal.lsck0.dev`)";         service = "calendar";     entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
@@ -68,6 +69,7 @@ in
       privatebin.loadBalancer.servers   = [{ url = "http://10.200.0.204:80"; }];
       share.loadBalancer.servers        = [{ url = "http://10.200.0.205:80"; }];
       hello.loadBalancer.servers        = [{ url = "http://10.200.0.208:80"; }];
+      ntfy.loadBalancer.servers         = [{ url = "http://10.200.0.206:80"; }];
       calendar.loadBalancer.servers     = [{ url = "https://10.100.0.100:443"; }];
       calendar.loadBalancer.serversTransport = "internal-traefik";
     };
