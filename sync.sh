@@ -73,7 +73,10 @@ deploy_nixos() {
       "cat > /var/lib/sops-nix/key.txt && chmod 600 /var/lib/sops-nix/key.txt" || return 1
   fi
 
-  nix copy --extra-experimental-features "nix-command flakes" --to "ssh-ng://root@${ip}" "$toplevel" \
+  # --no-check-sigs: the closures are built locally and pushed to our own VMs,
+  # so they are unsigned; without this the remote daemon rejects them with
+  # "cannot add path ... because it lacks a signature by a trusted key".
+  nix copy --extra-experimental-features "nix-command flakes" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
     || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
 
   # Use 'switch' — activates config in-place, restarts changed services, no reboot needed.
