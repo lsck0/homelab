@@ -47,11 +47,14 @@ in {
     routers = {
       authelia-tls       = { rule = "Host(`auth.lsck0.dev`)";       service = "authelia";        entryPoints = [ "websecure" ]; };
       traefik-dash-tls   = { rule = "Host(`traefik.lsck0.dev`)";    service = "api@internal";    entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      homepage-tls       = { rule = "Host(`homepage.lsck0.dev`)";   service = "homepage";        entryPoints = [ "websecure" ]; };
-      uptime-kuma-tls    = { rule = "Host(`status.lsck0.dev`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; };
+      homepage-tls       = { rule = "Host(`homepage.lsck0.dev`)";   service = "homepage";        entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
+      uptime-kuma-tls    = { rule = "Host(`status.lsck0.dev`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       forgejo-tls        = { rule = "Host(`git.lsck0.dev`)";        service = "forgejo";         entryPoints = [ "websecure" ]; };
       registry-tls       = { rule = "Host(`registry.lsck0.dev`)";   service = "registry-api";    entryPoints = [ "websecure" ]; };
       registry-ui-tls    = { rule = "Host(`registry-ui.lsck0.dev`)"; service = "registry-ui";    entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
+      # No SSO: TaskChampion is a headless sync API. The taskwarrior CLI cannot
+      # complete Authelia's browser redirect; it authenticates with its own
+      # client UUID and the replica is end-to-end encrypted. Exposed like attic.
       taskchampion-tls   = { rule = "Host(`tasks.lsck0.dev`)";      service = "taskchampion";    entryPoints = [ "websecure" ]; };
       vaultwarden-tls    = { rule = "Host(`vault.lsck0.dev`)";      service = "vaultwarden";     entryPoints = [ "websecure" ]; };
       nextcloud-tls      = { rule = "Host(`cloud.lsck0.dev`)";      service = "nextcloud";       entryPoints = [ "websecure" ]; };
