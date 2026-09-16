@@ -67,6 +67,35 @@ fi
 
 ifreload -a || true
 
+# ── Quiet + low-power tuning (server lives in a bedroom) ─────────────────────
+# powersave governor caps clocks at idle; disabling boost stops the short,
+# loud, hot frequency spikes that spin fans up. Small throughput cost, large
+# noise/heat/power win. Applied now and made persistent across reboots.
+for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+    echo powersave > "$g" 2>/dev/null || true
+done
+# AMD global boost toggle (cpufreq) and, as fallback, the pstate knob.
+echo 0 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
+echo 1 > /sys/devices/system/cpu/amd_pstate/cpb_boost 2>/dev/null || true
+# Spin down idle spinning disks after ~10 min.
+for d in /dev/sd?; do hdparm -S 120 "$d" 2>/dev/null || true; done
+
+cat > /etc/systemd/system/lab-lowpower.service <<'EOF'
+[Unit]
+Description=Low-power/quiet tuning (governor + no boost)
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo powersave > "$g" 2>/dev/null || true; done; echo 0 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true'
+
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl daemon-reload
+systemctl enable --now lab-lowpower.service >/dev/null 2>&1 || true
+
 # ── GPU passthrough (NVIDIA RTX 2060 / TU106) ────────────────────────────────
 # Bind the GPU and its HDMI-audio function to vfio-pci so a VM can claim them.
 # Whole IOMMU group must be bound to vfio-pci for the group to be assignable,
