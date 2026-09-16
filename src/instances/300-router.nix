@@ -183,7 +183,7 @@
           10.100.0.100 prowlarr.lsck0.dev sonarr.lsck0.dev radarr.lsck0.dev
           10.100.0.100 nas.lsck0.dev proxmox.lsck0.dev traefik.lsck0.dev registry-ui.lsck0.dev
           10.100.0.105 smb.lsck0.dev sync.lsck0.dev
-          10.100.0.100 lldap.lsck0.dev attic.lsck0.dev budget.lsck0.dev requests.lsck0.dev
+          10.100.0.100 lldap.lsck0.dev attic.lsck0.dev budget.lsck0.dev requests.lsck0.dev subs.lsck0.dev
           10.100.0.106 sccache.lsck0.dev
           # external services → external Traefik
           10.200.0.200 hs.lsck0.dev search.lsck0.dev shlink.lsck0.dev paste.lsck0.dev share.lsck0.dev
