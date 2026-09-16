@@ -59,6 +59,7 @@ in {
       navidrome-tls      = { rule = "Host(`music.lsck0.dev`)";      service = "navidrome";       entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       kavita-tls         = { rule = "Host(`read.lsck0.dev`)";       service = "kavita";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       nas-tls            = { rule = "Host(`nas.lsck0.dev`)";        service = "nas";             entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
+      syncthing-tls      = { rule = "Host(`sync.lsck0.dev`)";       service = "syncthing";       entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       proxmox-tls        = { rule = "Host(`proxmox.lsck0.dev`)";    service = "proxmox";         entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
     };
 
@@ -89,6 +90,7 @@ in {
       navidrome.loadBalancer.servers        = [{ url = ip "123"; }];
       kavita.loadBalancer.servers           = [{ url = ip "124"; }];
       nas.loadBalancer.servers              = [{ url = ip "105"; }];
+      syncthing.loadBalancer.servers        = [{ url = "http://10.100.0.105:8384"; }];
       proxmox.loadBalancer.servers          = [{ url = "https://192.168.178.200:8006"; }];
       proxmox.loadBalancer.serversTransport = "proxmox-transport";
     };

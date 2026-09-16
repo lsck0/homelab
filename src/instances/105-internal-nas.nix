@@ -1,4 +1,4 @@
-{ nasMount, ... }: {
+{ lib, nasMount, ... }: {
   networking.hostName = "vm-105";
 
   homelab.nasBackup = {
@@ -118,6 +118,7 @@
     "d /srv/nas/data 0777 nobody nogroup -"
     "d /srv/nas/data/authelia 0777 nobody nogroup -"
     "d /srv/nas/data/loki 0777 nobody nogroup -"
+    "d /srv/nas/syncthing 0775 nobody nogroup -"
     "d /srv/nas/data/calendar 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo-runner 0777 nobody nogroup -"
@@ -177,6 +178,25 @@
     };
   };
 
-  networking.firewall.allowedTCPPorts = [ 80 2049 111 ];
-  networking.firewall.allowedUDPPorts = [ 2049 111 ];
+  # ── Syncthing: continuous device sync, complements SMB/NFS ──────────────────
+  # GUI at sync.lsck0.dev behind Authelia; sync protocol on 22000 (LAN only,
+  # not port-forwarded). Data lives under the NAS tree so it is backed up.
+  services.syncthing = {
+    enable = true;
+    user = "nobody";
+    group = "nogroup";
+    dataDir = "/srv/nas/syncthing";
+    configDir = "/var/lib/syncthing";
+    guiAddress = "0.0.0.0:8384";
+    overrideDevices = false;
+    overrideFolders = false;
+    settings.gui = {
+      # Authelia ForwardAuth gates the route; disable Syncthing's own auth so it
+      # does not double-prompt, and keep the GUI off the public port.
+      insecureSkipHostcheck = true;
+    };
+  };
+
+  networking.firewall.allowedTCPPorts = [ 80 2049 111 8384 22000 ];
+  networking.firewall.allowedUDPPorts = [ 2049 111 22000 21027 ];
 }
