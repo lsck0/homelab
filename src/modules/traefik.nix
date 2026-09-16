@@ -143,6 +143,37 @@ in {
         OWASP-CRS-compatible rules, in addition to IP reputation blocking'';
     };
 
+    anubis = {
+      enable = lib.mkEnableOption ''
+        Anubis proof-of-work bot filter in front of browser-facing routes.
+        Each instance sits between Traefik and one upstream: a real browser
+        solves a JS challenge once, headless scrapers and AI crawlers that
+        ignore it are dropped. Point the route's Traefik service at the
+        instance's listenPort instead of the upstream'';
+
+      instances = lib.mkOption {
+        type = lib.types.attrsOf (lib.types.submodule {
+          options = {
+            upstream = lib.mkOption {
+              type = lib.types.str;
+              description = "Backend URL Anubis forwards solved requests to (may itself be an on-demand proxy port).";
+            };
+            listenPort = lib.mkOption {
+              type = lib.types.port;
+              description = "127.0.0.1 port Anubis binds. Point the Traefik service here.";
+            };
+            difficulty = lib.mkOption {
+              type = lib.types.int;
+              default = 4;
+              description = "Proof-of-work difficulty in leading zero bits. Higher = more client CPU.";
+            };
+          };
+        });
+        default = {};
+        description = "Anubis bot-filter instances keyed by name.";
+      };
+    };
+
     logLevel = lib.mkOption {
       type = lib.types.str;
       default = "WARN";
@@ -308,6 +339,22 @@ in {
           // lib.optionalAttrs (cfg.serversTransports != {}) { serversTransports = cfg.serversTransports; };
       } // lib.optionalAttrs (cfg.tcp != {}) { tcp = cfg.tcp; };
     };
+
+    # Anubis instances: one per browser-facing upstream, each bound to loopback.
+    # The default baked-in bot policy (challenge Mozilla UAs, allow well-known /
+    # robots / API-JSON) is sufficient; only the bind, target and difficulty vary.
+    services.anubis.instances = lib.mkIf cfg.anubis.enable (lib.mapAttrs (name: a: {
+      settings = {
+        BIND = "127.0.0.1:${toString a.listenPort}";
+        BIND_NETWORK = "tcp";
+        TARGET = a.upstream;
+        DIFFICULTY = a.difficulty;
+        # Unique loopback metrics port per instance; Prometheus can scrape later.
+        METRICS_BIND = "127.0.0.1:${toString (a.listenPort + 1000)}";
+        METRICS_BIND_NETWORK = "tcp";
+        SERVE_ROBOTS_TXT = true;
+      };
+    }) cfg.anubis.instances);
 
     networking.firewall.allowedTCPPorts = [ 80 443 ];
   };
