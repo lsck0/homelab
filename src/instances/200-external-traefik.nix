@@ -48,10 +48,14 @@ in {
       "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16"
     ];
 
-    # Public-facing ingress: turn CrowdSec from log-only into an enforcing
-    # bouncer (community blocklist + local bans) on every route. AppSec/WAF is
-    # enabled once the bouncer itself is verified.
+    # Public-facing ingress: CrowdSec as an enforcing bouncer (community
+    # blocklist + local bans) plus AppSec/WAF (inline OWASP inspection) on every
+    # route — except headscale (Tailscale control plane) and ntfy (push API),
+    # whose non-browser protocols the WAF rules would break; those keep the IP
+    # bouncer but skip WAF.
     crowdsecBouncer.enable = true;
+    crowdsecBouncer.appsec = true;
+    crowdsecBouncer.noAppsecRouters = [ "headscale-tls" "ntfy-tls" ];
 
     # Bot filter for the browser-facing routes. Each instance forwards to the
     # service's real upstream (an on-demand 262xx proxy for the on-demand ones,
