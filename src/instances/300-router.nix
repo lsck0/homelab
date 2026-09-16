@@ -1,4 +1,33 @@
-{ config, pkgs, lib, ... }: {
+{ config, pkgs, lib, ... }:
+let
+  # Every browser-facing *.lsck0.dev hostname gets a Cloudflare-PROXIED A record
+  # so it resolves to the Cloudflare edge (not the raw WAN IP). LAN clients then
+  # reach services through the edge without needing NAT hairpin, and remote
+  # clients work identically — no per-device DNS config anywhere. Traffic lands
+  # on WAN:443 → external Traefik, which serves the external services directly
+  # and relays every other (internal) host to the internal Traefik behind
+  # Authelia. Free-plan Cloudflare cannot proxy a wildcard, hence per-host.
+  proxiedHosts = [
+    # external services (served directly by external Traefik)
+    "hs" "search" "shlink" "paste" "share" "hello" "ntfy" "cal"
+    # internal services (relayed to internal Traefik, gated by Authelia)
+    "auth" "homepage" "git" "registry" "registry-ui" "cloud" "vault"
+    "paperless" "paperless-ai" "hass" "jellyfin" "status" "huginn" "tasks"
+    "hermes" "grafana" "wiki" "abs" "torrent" "music" "read" "prowlarr"
+    "sonarr" "radarr" "nas" "proxmox" "traefik" "lldap" "attic" "budget"
+    "requests" "subs" "firefly" "smb" "sync" "sccache"
+  ];
+  # Records that must stay unproxied (raw WAN IP): Cloudflare only proxies
+  # HTTP(S). Minecraft (TCP), WireGuard (UDP) and the Tor ORPort are L4.
+  # The wildcard is kept fresh as a DNS-only fallback so an unlisted name never
+  # resolves to a stale IP (it previously pointed at an old WAN address).
+  rawHosts = [ "wg" "mc" "tor" "*" ];
+  # domain:proxied entries the DDNS loop consumes.
+  ddnsDomains = lib.concatStringsSep " " (
+    (map (h: "${h}.lsck0.dev:true") proxiedHosts)
+    ++ (map (h: "${h}.lsck0.dev:false") rawHosts)
+  );
+in {
   networking.hostName = "luca-router";
 
   # ── Network Interfaces ──────────────────────────────────────
@@ -239,12 +268,10 @@
         "https://api.cloudflare.com/client/v4/zones?name=$ZONE_NAME" | jq -r '.result[0].id')
       { [ -z "$ZONE_ID" ] || [ "$ZONE_ID" = "null" ]; } && { echo "Failed to get zone ID"; exit 1; }
 
-      # format: "domain:proxied"
-      # Only external (public) services get Cloudflare DNS records.
-      # Internal services resolve via CoreDNS only — no public DNS exposure.
-      # tor.lsck0.dev must stay unproxied: the relay publishes this address to
-      # the Tor consensus and it has to resolve to the real public IP.
-      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false tor.lsck0.dev:false cal.lsck0.dev:true hs.lsck0.dev:true search.lsck0.dev:true shlink.lsck0.dev:true paste.lsck0.dev:true share.lsck0.dev:false hello.lsck0.dev:true ntfy.lsck0.dev:true"
+      # format: "domain:proxied" — built from proxiedHosts/rawHosts in Nix so
+      # this list is the single source of truth for public DNS. Every HTTP
+      # service (internal + external) is proxied; L4 services stay raw.
+      DOMAINS="${ddnsDomains}"
 
       for ENTRY in $DOMAINS; do
         DOMAIN="''${ENTRY%%:*}"
