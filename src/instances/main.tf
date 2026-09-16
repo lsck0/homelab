@@ -60,6 +60,8 @@ locals {
     "133" = { name = "133-internal-lldap", type = "internal" }
     "135" = { name = "135-internal-actual", type = "internal" }
     "136" = { name = "136-internal-jellyseerr", type = "internal" }
+    "137" = { name = "137-internal-bazarr", type = "internal" }
+    "138" = { name = "138-internal-recyclarr", type = "internal" }
     "139" = { name = "139-internal-mosquitto", type = "internal" }
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
