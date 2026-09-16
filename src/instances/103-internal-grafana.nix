@@ -34,15 +34,24 @@ in {
         http_port = 80;
         root_url = "https://grafana.lsck0.dev";
       };
+      # Access is gated by Authelia ForwardAuth on the Traefik route, which
+      # injects the Remote-User header. Grafana trusts that header (auth.proxy)
+      # instead of granting every anonymous visitor admin — so hitting
+      # 10.100.0.103:80 directly, without the header, gets nothing.
       auth = {
         disable_login_form = true;
       };
-      "auth.anonymous" = {
+      "auth.anonymous".enabled = false;
+      "auth.proxy" = {
         enabled = true;
-        org_role = "Admin";
+        header_name = "Remote-User";
+        header_property = "username";
+        auto_sign_up = true;
       };
       users = {
         allow_sign_up = false;
+        # Single-user lab: anyone Authelia lets through is the admin.
+        auto_assign_org_role = "Admin";
       };
     };
     provision = {

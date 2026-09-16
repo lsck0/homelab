@@ -215,13 +215,8 @@ in {
       requiredBy = [ "podman-crowdsec.service" ];
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script = ''
-        ${pkgs.coreutils}/bin/cat > /var/lib/crowdsec/acquis-appsec.yaml <<'EOF'
-        source: appsec
-        listen_addr: 0.0.0.0:7422
-        appsec_config: crowdsecurity/appsec-default
-        labels:
-          type: appsec
-        EOF
+        ${pkgs.coreutils}/bin/printf 'source: appsec\nlisten_addr: 0.0.0.0:7422\nappsec_config: crowdsecurity/appsec-default\nlabels:\n  type: appsec\n' \
+          > /var/lib/crowdsec/acquis-appsec.yaml
       '';
     };
 
@@ -243,7 +238,13 @@ in {
       requiredBy = [ "podman-crowdsec.service" ];
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script = ''
-        ${pkgs.coreutils}/bin/mkdir -p /var/lib/crowdsec/config /var/lib/crowdsec/data
+        ${pkgs.coreutils}/bin/mkdir -p /var/lib/crowdsec/config/acquis.d /var/lib/crowdsec/data
+        # Tell CrowdSec to read the Traefik access log so its traefik/http-cve
+        # scenarios fire on real traffic. The path is inside the container
+        # (the log dir is bind-mounted there). printf, not a heredoc, so Nix
+        # string de-indentation cannot corrupt the YAML.
+        ${pkgs.coreutils}/bin/printf 'source: file\nfilenames:\n  - /var/log/traefik/access.log\nlabels:\n  type: traefik\n' \
+          > /var/lib/crowdsec/config/acquis.d/traefik.yaml
       '';
     };
 
@@ -265,7 +266,10 @@ in {
       environmentFiles = [ config.sops.templates."traefik.env".path ];
       staticConfigOptions = {
         log.level = cfg.logLevel;
-        accessLog = {};
+        # Access logs go to a file (not stdout) so CrowdSec can read them and
+        # make local behavioural decisions, not just serve the community
+        # blocklist. The file is bind-mounted into the crowdsec container.
+        accessLog.filePath = "/var/log/traefik/access.log";
         api.dashboard = true;
         entryPoints = {
           web = {
