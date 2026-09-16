@@ -58,6 +58,9 @@ locals {
     "131" = { name = "131-internal-attic", type = "internal", disk = 40 }
     "132" = { name = "132-internal-smtp", type = "internal", enabled = false }
     "133" = { name = "133-internal-lldap", type = "internal" }
+    "135" = { name = "135-internal-actual", type = "internal" }
+    "136" = { name = "136-internal-jellyseerr", type = "internal" }
+    "139" = { name = "139-internal-mosquitto", type = "internal" }
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-headscale", type = "external" }
@@ -66,6 +69,7 @@ locals {
     "204" = { name = "204-external-privatebin", type = "external" }
     "205" = { name = "205-external-share", type = "external" }
     "207" = { name = "207-external-minecraft", type = "external", memory = 20480, cores = 8 }
+    "206" = { name = "206-external-ntfy", type = "external" }
     "208" = { name = "208-external-hello", type = "external" }
     "209" = { name = "209-external-tor-relay", type = "external", enabled = false }
     # ── router ──
