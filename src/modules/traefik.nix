@@ -228,10 +228,24 @@ in {
     systemd.tmpfiles.rules = [
       "d /var/lib/traefik 0700 traefik traefik -"
       "d /var/lib/traefik/acme 0700 traefik traefik -"
-      "d /var/lib/crowdsec/config 0750 root root -"
-      "d /var/lib/crowdsec/data 0750 root root -"
       "d /var/log/traefik 0750 root root -"
     ];
+
+    # /var/lib/crowdsec is an NFS automount, so tmpfiles cannot reliably create
+    # its subdirs (it runs before the mount triggers). Without config/ and data/
+    # the crowdsec container fails to start with
+    #   "statfs /var/lib/crowdsec/config: no such file or directory".
+    # Accessing the path here triggers the automount, then mkdir creates the
+    # dirs on the share before the container runs.
+    systemd.services.crowdsec-prepare-dirs = {
+      description = "Create CrowdSec config/data dirs on the NFS share";
+      before = [ "podman-crowdsec.service" ];
+      requiredBy = [ "podman-crowdsec.service" ];
+      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+      script = ''
+        ${pkgs.coreutils}/bin/mkdir -p /var/lib/crowdsec/config /var/lib/crowdsec/data
+      '';
+    };
 
     # lego (Traefik's ACME client) refuses to load acme.json if it is more
     # permissive than 0600 and silently drops the whole cloudflare resolver:
