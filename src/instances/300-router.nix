@@ -138,6 +138,33 @@
     };
   };
 
+  # ── DNS blocklist + DoT upstream (blocky) ──────────────────────
+  # Loopback-only; CoreDNS forwards `.` here. Blocks ads/trackers/malware and
+  # encrypts upstream queries over DNS-over-TLS to Cloudflare/Quad9.
+  services.blocky = {
+    enable = true;
+    settings = {
+      ports.dns = "127.0.0.1:5335";
+      upstreams.groups.default = [
+        "tcp-tls:1.1.1.1:853"
+        "tcp-tls:9.9.9.9:853"
+      ];
+      # Resolve the DoT hostnames' bootstrap without a chicken-and-egg loop.
+      bootstrapDns = [
+        { upstream = "tcp-tls:1.1.1.1:853"; ips = [ "1.1.1.1" ]; }
+      ];
+      blocking = {
+        denylists.ads = [
+          "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
+          "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.txt"
+        ];
+        clientGroupsBlock.default = [ "ads" ];
+        loading.downloads = { timeout = "60s"; attempts = 3; };
+      };
+      caching = { minTime = "5m"; maxTime = "30m"; prefetching = true; };
+    };
+  };
+
   # ── DNS Server (CoreDNS) ─────────────────────────────────────
   # All services use *.lsck0.dev — internal DNS resolves to local traefik IPs
   services.resolved.enable = false;
@@ -168,7 +195,13 @@
       }
 
       .:53 {
-        forward . 1.1.1.1 8.8.8.8
+        # Forward to local blocky (ad/tracker/malware blocklists + DoT upstream)
+        # first; fall back to plain 1.1.1.1/8.8.8.8 if blocky is down, so DNS
+        # for the whole LAN never depends on blocky staying up.
+        forward . 127.0.0.1:5335 1.1.1.1 8.8.8.8 {
+          policy sequential
+          health_check 5s
+        }
         cache 300
       }
     '';
