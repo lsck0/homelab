@@ -2,21 +2,31 @@
 let
   subnetTargets = subnet:
     builtins.map (host: "${subnet}.${toString host}:9100") (lib.range 1 254);
+
+  # Telegram alerting. Grafana validates the contact point at startup and
+  # crashes if the bot token is empty, and Nix cannot read the sops value at
+  # build time — so this stays off until the token exists. To enable:
+  #   1. sops src/secrets.json  → fill telegram-bot-token and telegram-chat-id
+  #   2. flip this to true and redeploy
+  enableTelegram = false;
 in {
   networking.hostName = "vm-103";
 
-  # Telegram alerting. Bot token + chat id come from sops via an env file that
-  # Grafana reads; the provisioned contact point references them with
-  # $__env{...} so the secret never lands in the world-readable Nix store.
-  # Fill the two values with: sops src/secrets.json
-  sops.secrets.telegram-bot-token = {};
-  sops.secrets.telegram-chat-id = {};
-  sops.templates."grafana-telegram.env".content = ''
-    TELEGRAM_BOT_TOKEN=${config.sops.placeholder.telegram-bot-token}
-    TELEGRAM_CHAT_ID=${config.sops.placeholder.telegram-chat-id}
-  '';
+  # Bot token + chat id come from sops via an env file Grafana reads; the
+  # contact point references them with $__env{...} so the secret never lands in
+  # the world-readable Nix store.
+  sops.secrets = lib.mkIf enableTelegram {
+    telegram-bot-token = {};
+    telegram-chat-id = {};
+  };
+  sops.templates = lib.mkIf enableTelegram {
+    "grafana-telegram.env".content = ''
+      TELEGRAM_BOT_TOKEN=${config.sops.placeholder.telegram-bot-token}
+      TELEGRAM_CHAT_ID=${config.sops.placeholder.telegram-chat-id}
+    '';
+  };
   systemd.services.grafana.serviceConfig.EnvironmentFile =
-    config.sops.templates."grafana-telegram.env".path;
+    lib.mkIf enableTelegram config.sops.templates."grafana-telegram.env".path;
 
   fileSystems = nasMount "/var/lib/grafana" "grafana"
     // nasMount "/var/lib/prometheus2" "prometheus"
@@ -164,7 +174,7 @@ in {
           }
         ];
       };
-      alerting = {
+      alerting = lib.mkIf enableTelegram {
         contactPoints.settings = {
           apiVersion = 1;
           contactPoints = [{
