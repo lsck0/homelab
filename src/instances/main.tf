@@ -55,6 +55,9 @@ locals {
     "127" = { name = "127-internal-tor-router", type = "internal", enabled = false }
     "128" = { name = "128-internal-authelia", type = "internal" }
     "129" = { name = "129-internal-calendar", type = "internal", enabled = false }
+    "131" = { name = "131-internal-attic", type = "internal", disk = 40 }
+    "132" = { name = "132-internal-smtp", type = "internal", enabled = false }
+    "133" = { name = "133-internal-lldap", type = "internal" }
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-headscale", type = "external" }

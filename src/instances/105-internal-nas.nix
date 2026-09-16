@@ -118,6 +118,7 @@
     "d /srv/nas/data 0777 nobody nogroup -"
     "d /srv/nas/data/authelia 0777 nobody nogroup -"
     "d /srv/nas/data/loki 0777 nobody nogroup -"
+    "d /srv/nas/data/attic 0777 nobody nogroup -"
     "d /srv/nas/syncthing 0775 nobody nogroup -"
     "d /var/lib/syncthing 0700 nobody nogroup -"
     "d /srv/nas/data/calendar 0777 nobody nogroup -"
