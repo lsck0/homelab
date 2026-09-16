@@ -78,6 +78,15 @@ let
         "cd ${cfg.proxmoxBackupPath}/$TYPE && ls -1dt */ 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -rf" \
         2>/dev/null || true
     ''}
+
+    # Dead-man's-switch: ping on success, /fail on any archive error.
+    ${lib.optionalString (cfg.healthcheckUrl != "") ''
+      if [ "$FAILED" -eq 0 ]; then
+        ${pkgs.curl}/bin/curl -fsS -m 15 "${cfg.healthcheckUrl}" >/dev/null 2>&1 || true
+      else
+        ${pkgs.curl}/bin/curl -fsS -m 15 "${cfg.healthcheckUrl}/fail" >/dev/null 2>&1 || true
+      fi
+    ''}
   '';
 in {
   options.homelab.nasBackup = {
@@ -103,6 +112,17 @@ in {
       type = lib.types.str;
       default = "/var/lib/vz/nas-backups";
       description = "Path on Proxmox host for off-disk backup copies.";
+    };
+
+    healthcheckUrl = lib.mkOption {
+      type = lib.types.str;
+      default = "";
+      description = ''
+        Dead-man's-switch ping URL (healthchecks.io or self-hosted). Pinged on a
+        successful backup, and with /fail appended on failure. If nothing pings
+        it within the grace window the watcher alerts, so a backup box that dies
+        silently is caught. Empty disables it.
+      '';
     };
   };
 
