@@ -71,6 +71,21 @@ in {
       # The calendar lives on the internal side; only this one host is relayed
       # through, so the TRMNL cloud can poll it without the DMZ reaching in.
       calendar-tls     = { rule = "Host(`cal.lsck0.dev`)";         service = "calendar";     entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+
+      # Catch-all: any *.lsck0.dev host without a dedicated router above is an
+      # internal service. Relay it to the internal Traefik (10.100.0.100), which
+      # routes by Host header and gates it behind Authelia. Lowest priority so
+      # every explicit external router wins. One wildcard cert covers all names.
+      # This is the "when Cloudflare/edge doesn't know it, send it to internal"
+      # path — internal services become reachable by name with no device config.
+      internal-relay   = {
+        rule = "HostRegexp(`^[a-z0-9-]+\\.lsck0\\.dev$`)";
+        service = "internal-relay";
+        entryPoints = [ "websecure" ];
+        priority = 1;
+        tls.certResolver = "cloudflare";
+        tls.domains = [{ main = "lsck0.dev"; sans = [ "*.lsck0.dev" ]; }];
+      };
     };
 
     services = {
@@ -86,11 +101,19 @@ in {
       ntfy.loadBalancer.servers         = [{ url = "http://10.200.0.206:80"; }];
       calendar.loadBalancer.servers     = [{ url = "https://10.100.0.100:443"; }];
       calendar.loadBalancer.serversTransport = "internal-traefik";
+      # Relay backend for the catch-all: forward to internal Traefik over HTTPS,
+      # preserving the Host header so it routes to the right service. The client
+      # Host (grafana.lsck0.dev, …) becomes the SNI, so no per-host serverName is
+      # needed; insecureSkipVerify accepts whatever cert internal Traefik serves.
+      internal-relay.loadBalancer.servers = [{ url = "https://10.100.0.100:443"; }];
+      internal-relay.loadBalancer.serversTransport = "internal-relay";
+      internal-relay.loadBalancer.passHostHeader = true;
     };
 
     # Traefik takes SNI from the server URL, which is an IP here, so the
     # internal instance has to be told which certificate to present.
     serversTransports.internal-traefik.serverName = "cal.lsck0.dev";
+    serversTransports.internal-relay.insecureSkipVerify = true;
 
     tcp = {
       routers.minecraft = {
