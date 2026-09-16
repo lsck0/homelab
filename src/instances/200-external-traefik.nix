@@ -1,25 +1,16 @@
 { config, lib, pkgs, nasMount, ... }:
 let
-  # Anubis proof-of-work bot filter in front of the browser-facing DMZ routes.
-  # Off by default: flipping this repoints each web route through its local
-  # Anubis instance (Traefik points at 272xx instead of the upstream/on-demand
-  # 262xx port). A real browser solves one JS challenge; AI crawlers and
-  # headless scrapers that ignore it are dropped before they reach the app.
-  # Not applied to headscale (tailscale client API), ntfy (app polling),
-  # calendar (TRMNL polling) or minecraft (raw TCP) — none are browsers.
+  # Anubis PoW bot filter on the browser-facing routes: on = Traefik points at
+  # the 272xx Anubis instance, off = straight to the upstream. Not for the
+  # non-browser routes (headscale/ntfy/calendar/minecraft).
   anubisEnable = true;
-  # Traefik server URL for a browser-facing service: the Anubis instance when
-  # the filter is on, the original upstream when off.
   fronted = anubisPort: upstream:
     if anubisEnable then "http://127.0.0.1:${toString anubisPort}" else upstream;
 in {
   networking.hostName = "vm-200";
 
-  # On-demand DMZ services: each VM sits stopped and boots on the first request
-  # via a socket-activated proxy here, shutting down after idle. Traefik points
-  # at the local proxy ports instead of the VMs. The proxmox-api-token (reused
-  # terraform Administrator token) grants VM.PowerMgmt. sync.sh wakes these for
-  # deploys. Prometheus InstanceDown excludes them (vm-103) so idle != alert.
+  # On-demand DMZ services: VM boots on first request via a socket proxy here,
+  # idles off after. Traefik points at the local proxy port, not the VM.
   sops.secrets.proxmox-api-token = {};
   homelab.onDemand = {
     enable = true;
@@ -42,27 +33,20 @@ in {
     # and CrowdSec see a stable client, not the rotating edge IP.
     trustCloudflare = true;
 
-    # Deny public access to internal-only services that have no auth of their own
-    # and are headless (so Authelia's browser redirect can't gate them). Requests
-    # here arrive from the Cloudflare edge (a public peer), so an ipAllowList of
-    # private ranges rejects every public hit; LAN/VPN clients reach these via
-    # split-horizon straight to the internal Traefik and never touch this box.
+    # Deny public access to headless internal-only services (no own auth): every
+    # request here comes from the Cloudflare edge, so a private-range allowlist
+    # rejects it; LAN/VPN reach them directly via split-horizon.
     middlewares.internal-only.ipAllowList.sourceRange = [
       "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16"
     ];
 
-    # Public-facing ingress: CrowdSec as an enforcing bouncer (community
-    # blocklist + local bans) plus AppSec/WAF (inline OWASP inspection) on every
-    # route — except headscale (Tailscale control plane) and ntfy (push API),
-    # whose non-browser protocols the WAF rules would break; those keep the IP
-    # bouncer but skip WAF.
+    # CrowdSec bouncer (blocklist + bans) + AppSec/WAF on every route, except
+    # headscale/ntfy (non-browser APIs the WAF would break — IP bouncer only).
     crowdsecBouncer.enable = true;
     crowdsecBouncer.appsec = true;
     crowdsecBouncer.noAppsecRouters = [ "headscale-tls" "ntfy-tls" ];
 
-    # Bot filter for the browser-facing routes. Each instance forwards to the
-    # service's real upstream (an on-demand 262xx proxy for the on-demand ones,
-    # the VM directly otherwise). Enable by flipping anubisEnable above.
+    # Bot filter per browser-facing route → its upstream (262xx on-demand proxy or the VM).
     anubis = {
       enable = anubisEnable;
       instances = {
@@ -92,12 +76,9 @@ in {
       # public path; CI runner and swarm nodes reach it via split-horizon.
       registry-block = { rule = "Host(`registry.lsck0.dev`)"; service = "internal-relay"; entryPoints = [ "websecure" ]; priority = 100; middlewares = [ "internal-only" ]; tls.certResolver = "cloudflare"; };
 
-      # Catch-all: any *.lsck0.dev host without a dedicated router above is an
-      # internal service. Relay it to the internal Traefik (10.100.0.100), which
-      # routes by Host header and gates it behind Authelia. Lowest priority so
-      # every explicit external router wins. One wildcard cert covers all names.
-      # This is the "when Cloudflare/edge doesn't know it, send it to internal"
-      # path — internal services become reachable by name with no device config.
+      # Catch-all (lowest priority): any *.lsck0.dev not matched above is an
+      # internal service — relay to internal Traefik (routes by Host, Authelia-gated).
+      # One wildcard cert covers all names.
       internal-relay   = {
         rule = "HostRegexp(`^[a-z0-9-]+\\.lsck0\\.dev$`)";
         service = "internal-relay";

@@ -2,11 +2,8 @@
 let
   cfg = config.homelab.traefik;
 
-  # Cloudflare's published edge ranges. When the ingress sits behind Cloudflare
-  # (proxied DNS), the immediate peer is a rotating edge IP; trusting these lets
-  # Traefik take the real client IP from X-Forwarded-For and pass a STABLE one to
-  # the backends. Without it Anubis re-challenges every request (the edge IP
-  # changes each time) and CrowdSec bans Cloudflare instead of the attacker.
+  # Cloudflare edge ranges — trusted so Traefik reads the real client IP from
+  # XFF (else Anubis re-challenges every request and CrowdSec bans the edge).
   cloudflareRanges = [
     "173.245.48.0/20" "103.21.244.0/22" "103.22.200.0/22" "103.31.4.0/22"
     "141.101.64.0/18" "108.162.192.0/18" "190.93.240.0/20" "188.114.96.0/20"
@@ -14,10 +11,7 @@ let
     "104.24.0.0/14" "172.64.0.0/13" "131.0.72.0/22"
   ];
 
-  # Baseline response-header hardening attached to every websecure route: HSTS,
-  # no MIME sniffing, deny framing, a referrer policy. Individual routers can
-  # opt out by listing themselves in cfg.noSecureHeaders (e.g. an app that must
-  # be embedded in a frame).
+  # Response-header hardening on every websecure route (opt out via noSecureHeaders).
   secureHeadersMiddleware = {
     secure-headers.headers = {
       stsSeconds = 31536000;
@@ -30,12 +24,8 @@ let
     };
   };
 
-  # Per-source-IP limits attached to every websecure route, as a first line of
-  # DoS defence in front of every service. Values are generous enough for normal
-  # browsing (a page load fans out to dozens of asset requests) but cap a single
-  # source's sustained rate and concurrency. Cloudflare-proxied traffic arrives
-  # with the client IP in X-Forwarded-For, so depth = 1 reads the real client
-  # rather than rate-limiting the whole Cloudflare edge as one address.
+  # Per-source-IP DoS limits on every websecure route (depth=1 reads the real
+  # client from XFF, not the Cloudflare edge).
   rateLimitAverage = 50;   # requests/second sustained per source IP
   rateLimitBurst = 100;    # short spikes allowed above the average
   inFlightAmount = 100;    # concurrent in-flight requests per source IP
@@ -53,10 +43,8 @@ let
     };
   };
 
-  # CrowdSec bouncer middleware (plugin). Reads the LAPI key from a file so the
-  # key never lands in the world-readable Nix store. In "live" mode the plugin
-  # fails open if the local API is briefly unreachable, so a crowdsec hiccup
-  # cannot take the whole ingress down.
+  # CrowdSec bouncer plugin. LAPI key from a file (not the Nix store); "live"
+  # mode fails open so a crowdsec hiccup can't take the ingress down.
   mkBouncer = appsec: {
     plugin.crowdsec-bouncer = {
       enabled = true;
@@ -72,10 +60,8 @@ let
     };
   };
 
-  # Two bouncer middlewares: the default enforces IP reputation + (optionally)
-  # AppSec/WAF; the "-noappsec" variant keeps the IP bouncer but skips WAF
-  # inspection, for routes whose protocol the OWASP rules would break
-  # (headscale control plane, ntfy push API). Only emitted when the bouncer is on.
+  # Default bouncer (IP rep + optional WAF) plus a "-noappsec" variant (IP rep
+  # only) for routes the WAF would break (headscale, ntfy).
   bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable ({
     crowdsec = mkBouncer cfg.crowdsecBouncer.appsec;
   } // lib.optionalAttrs cfg.crowdsecBouncer.appsec {
@@ -305,12 +291,8 @@ in {
       "d /var/log/traefik 0755 traefik traefik -"
     ];
 
-    # /var/lib/crowdsec is an NFS automount, so tmpfiles cannot reliably create
-    # its subdirs (it runs before the mount triggers). Without config/ and data/
-    # the crowdsec container fails to start with
-    #   "statfs /var/lib/crowdsec/config: no such file or directory".
-    # Accessing the path here triggers the automount, then mkdir creates the
-    # dirs on the share before the container runs.
+    # /var/lib/crowdsec is an NFS automount; create its subdirs here (tmpfiles
+    # runs before the mount triggers, so the container would fail on statfs).
     systemd.services.crowdsec-prepare-dirs = {
       description = "Create CrowdSec config/data dirs on the NFS share";
       before = [ "podman-crowdsec.service" ];
@@ -327,12 +309,8 @@ in {
       '';
     };
 
-    # lego (Traefik's ACME client) refuses to load acme.json if it is more
-    # permissive than 0600 and silently drops the whole cloudflare resolver:
-    #   "permissions 604 for .../acme.json are too open, please use 600"
-    # every router then reports "nonexistent certificate resolver" and falls
-    # back to the default self-signed cert. The store lives on the 0777 NFS
-    # share, which is how it ended up 604, so tighten it on every start.
+    # acme.json lives on the 0777 NFS share; lego drops the cloudflare resolver
+    # if it's more permissive than 0600, so tighten it on every start.
     systemd.services.traefik.preStart = ''
       f=/var/lib/traefik/acme/acme.json
       if [ -e "$f" ]; then
