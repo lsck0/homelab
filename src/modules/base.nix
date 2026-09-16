@@ -100,6 +100,20 @@
     powerManagement.cpuFreqGovernor = "powersave";
 
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
+
+    # Attic binary cache (vm-131) as an extra substituter, so any local Nix
+    # build on a VM or the CI runner reuses a closure built once instead of
+    # rebuilding. Pull is authenticated with a read-only token via netrc.
+    sops.secrets.attic-pull-token = {};
+    sops.templates."nix-netrc".content = ''
+      machine 10.100.0.131
+        password ${config.sops.placeholder.attic-pull-token}
+    '';
+    nix.settings = {
+      netrc-file = config.sops.templates."nix-netrc".path;
+      extra-substituters = [ "http://10.100.0.131:8080/homelab" ];
+      extra-trusted-public-keys = [ "homelab:OtKSPQnvWs0hIa5D2RxbBwENbAo9qkX3yAr5PoWvtyc=" ];
+    };
     system.stateVersion = "25.11";
   };
 }
