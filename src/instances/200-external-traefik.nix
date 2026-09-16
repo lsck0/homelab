@@ -3,7 +3,7 @@ let
   # Anubis PoW bot filter on the browser-facing routes: on = Traefik points at
   # the 272xx Anubis instance, off = straight to the upstream. Not for the
   # non-browser routes (headscale/ntfy/calendar/minecraft).
-  anubisEnable = true;
+  anubisEnable = false;
   fronted = anubisPort: upstream:
     if anubisEnable then "http://127.0.0.1:${toString anubisPort}" else upstream;
 in {
