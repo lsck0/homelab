@@ -1,4 +1,4 @@
-{ config, ... }: {
+{ config, pkgs, lib, ... }: {
   networking.hostName = "vm-133";
 
   # Lightweight LDAP directory — one user store other services can share
@@ -31,6 +31,68 @@
       LLDAP_JWT_SECRET_FILE = config.sops.secrets.lldap-jwt-secret.path;
       LLDAP_LDAP_USER_PASS_FILE = config.sops.secrets.lldap-admin-password.path;
     };
+  };
+
+  # luca's own password (reused from the Authelia admin secret) so the seeded
+  # user can log in through Authelia's LDAP backend.
+  sops.secrets.authelia-admin-pass = { owner = "lldap"; group = "lldap"; };
+
+  # Seed the directory: groups (admins, users) + the admin user luca. Idempotent
+  # — re-running ignores "already exists". Runs after lldap is up, via its HTTP
+  # API (admin token) plus lldap_set_password for the OPAQUE password flow.
+  systemd.services.lldap-bootstrap = {
+    description = "Seed lldap groups and users";
+    after = [ "lldap.service" ];
+    requires = [ "lldap.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.curl pkgs.jq pkgs.lldap pkgs.coreutils ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      Restart = "on-failure";
+      RestartSec = 10;
+    };
+    script = ''
+      set -euo pipefail
+      URL="http://127.0.0.1:17170"
+      ADMIN_PASS=$(cat ${config.sops.secrets.lldap-admin-password.path})
+      LUCA_PASS=$(cat ${config.sops.secrets.authelia-admin-pass.path})
+
+      # Wait for the API.
+      for _ in $(seq 1 60); do
+        curl -sf "$URL/health" >/dev/null 2>&1 && break
+        sleep 2
+      done
+
+      TOKEN=$(curl -sf -X POST "$URL/auth/simple/login" \
+        -H 'Content-Type: application/json' \
+        -d "{\"username\":\"admin\",\"password\":\"$ADMIN_PASS\"}" | jq -r '.token')
+      [ -n "$TOKEN" ] && [ "$TOKEN" != "null" ] || { echo "lldap admin login failed"; exit 1; }
+
+      gql() {
+        curl -sf -X POST "$URL/api/graphql" \
+          -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+          -d "$1"
+      }
+
+      # Groups (ignore "already exists").
+      gql '{"query":"mutation{createGroup(name:\"admins\"){id}}"}' || true
+      gql '{"query":"mutation{createGroup(name:\"users\"){id}}"}'  || true
+
+      # Admin user luca.
+      gql '{"query":"mutation($u:CreateUserInput!){createUser(user:$u){id}}","variables":{"u":{"id":"luca","email":"'${config.homelab.acmeEmail}'","displayName":"Luca"}}}' || true
+
+      # Password via the OPAQUE flow.
+      lldap_set_password --base-url "$URL" --token "$TOKEN" --username luca --password "$LUCA_PASS"
+
+      # Resolve the admins group id and add luca.
+      ADMINS_ID=$(gql '{"query":"{groups{id displayName}}"}' \
+        | jq -r '.data.groups[] | select(.displayName=="admins") | .id')
+      [ -n "$ADMINS_ID" ] || { echo "admins group not found"; exit 1; }
+      gql "{\"query\":\"mutation{addUserToGroup(userId:\\\"luca\\\",groupId:$ADMINS_ID){ok}}\"}" || true
+
+      echo "lldap seeded: luca in admins"
+    '';
   };
 
   # 3890 LDAP (LAN only), 17170 web UI (behind Traefik + Authelia).
