@@ -216,6 +216,27 @@ VM_IPS=$(terraform -chdir="$ROOT_DIR/src" output -raw vm_ips 2>/dev/null || echo
 DISABLED_VMS=$(terraform -chdir="$ROOT_DIR/src" output -raw disabled_vms 2>/dev/null || echo "")
 [ -n "$DISABLED_VMS" ] && echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')"
 
+# On-demand VMs are normally stopped (woken by the socket proxy on request and
+# shut down when idle). They must be running to receive a deploy, so start them
+# now; the on-demand proxy will idle them again afterwards.
+ON_DEMAND_VMS=$(terraform -chdir="$ROOT_DIR/src" output -raw on_demand_vms 2>/dev/null || echo "")
+if [ -n "$ON_DEMAND_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
+  echo ">>> Waking on-demand VMs for deploy: $(echo "$ON_DEMAND_VMS" | tr '\n' ' ')"
+  for vmid in $ON_DEMAND_VMS; do
+    st=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/status/current" -H "$PVE_AUTH" | jq -r '.data.status // "unknown"' 2>/dev/null)
+    [ "$st" = "running" ] || curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
+  done
+  # give them a moment to boot before pushing the SSH key via the guest agent
+  sleep 25
+  for vmid in $ON_DEMAND_VMS; do
+    payload=$(jq -cn --arg k "$PUBKEY" \
+      '{"command":["/bin/sh","-c","mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo \($k) > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"]}')
+    curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/agent/exec" \
+      -H "$PVE_AUTH" -H "Content-Type: application/json" -d "$payload" >/dev/null 2>&1 || true
+  done
+  sleep 3
+fi
+
 # Build all enabled closures in parallel
 echo ">>> Building all VM closures (parallel)..."
 BUILD_LOG=$(mktemp --suffix=.build.log); CLEANUP_FILES+=("$BUILD_LOG")
