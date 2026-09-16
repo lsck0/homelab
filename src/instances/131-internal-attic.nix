@@ -1,5 +1,8 @@
-{ config, ... }: {
+{ config, pkgs, ... }: {
   networking.hostName = "vm-131";
+
+  # attic client, for creating the cache + reading its public key on this host.
+  environment.systemPackages = [ pkgs.attic-client ];
 
   # Attic: a Nix binary cache shared across every VM and the Forgejo runner, so
   # a closure built once (during a deploy) is fetched, not rebuilt, everywhere
