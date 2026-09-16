@@ -58,7 +58,14 @@ let
 in {
   networking.hostName = "vm-128";
 
-  fileSystems = nasMount stateDir "authelia";
+  # State is on LOCAL disk, not the NAS. The auth gateway must not depend on
+  # NFS: with a `hard` mount a NAS stall wedges authelia in uninterruptible
+  # sleep (unkillable, port closed, 502 lab-wide), and with a `soft` mount the
+  # sqlite store risks corruption. The state is small (TOTP enrolments,
+  # sessions, generated keys) and a rebuild regenerates the keys.
+  systemd.tmpfiles.rules = [
+    "d ${stateDir} 0700 authelia-main authelia-main -"
+  ];
 
   sops.secrets.authelia-admin-pass = {};
   sops.secrets.nextcloud-oidc-secret = {};
@@ -67,7 +74,7 @@ in {
 
   # Authelia's own cryptographic material is generated here rather than kept in
   # sops: none of it has to match anything outside this VM, and it persists on
-  # the NAS so a rebuild does not invalidate existing sessions and TOTP enrolments.
+  # local disk so a rebuild regenerates it (sessions and TOTP re-enrol).
   systemd.services.authelia-bootstrap = {
     description = "Generate Authelia secrets, users and OIDC clients";
     before = [ "authelia-main.service" ];
