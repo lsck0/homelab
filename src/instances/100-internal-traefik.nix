@@ -10,6 +10,21 @@ let
 in {
   networking.hostName = "vm-100";
 
+  # On-demand internal services: occasional web UIs that boot on first request
+  # and idle-stop. Traefik points at the local proxy ports below. Excluded from
+  # InstanceDown (vm-103). Self-polling apps (paperless-ai, bazarr) and
+  # widget-polled *arr stay always-on.
+  sops.secrets.proxmox-api-token = {};
+  homelab.onDemand = {
+    enable = true;
+    node = "luca-server";
+    tokenFile = config.sops.secrets.proxmox-api-token.path;
+    services = {
+      actual  = { vmid = 135; listenPort = 26135; target = "10.100.0.135"; targetPort = 80; };
+      firefly = { vmid = 140; listenPort = 26140; target = "10.100.0.140"; targetPort = 8080; };
+    };
+  };
+
   fileSystems = (nasMount "/var/lib/crowdsec" "crowdsec-internal")
     // (nasMount "/var/lib/traefik/acme" "traefik-acme-internal");
 
@@ -99,10 +114,10 @@ in {
       nas.loadBalancer.servers              = [{ url = ip "105"; }];
       syncthing.loadBalancer.servers        = [{ url = "http://10.100.0.105:8384"; }];
       lldap.loadBalancer.servers            = [{ url = "http://10.100.0.133:17170"; }];
-      actual.loadBalancer.servers           = [{ url = ip "135"; }];
+      actual.loadBalancer.servers           = [{ url = "http://127.0.0.1:26135"; }]; # on-demand
       jellyseerr.loadBalancer.servers       = [{ url = ip "136"; }];
       bazarr.loadBalancer.servers           = [{ url = ip "137"; }];
-      firefly.loadBalancer.servers          = [{ url = "http://10.100.0.140:8080"; }];
+      firefly.loadBalancer.servers          = [{ url = "http://127.0.0.1:26140"; }]; # on-demand
       attic.loadBalancer.servers            = [{ url = "http://10.100.0.131:8080"; }];
       proxmox.loadBalancer.servers          = [{ url = "https://192.168.178.200:8006"; }];
       proxmox.loadBalancer.serversTransport = "proxmox-transport";

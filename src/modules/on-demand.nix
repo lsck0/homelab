@@ -97,7 +97,7 @@ in {
 
     node = lib.mkOption {
       type = lib.types.str;
-      default = "pve";
+      default = "luca-server";
       description = "Proxmox node name.";
     };
 
@@ -136,6 +136,7 @@ in {
       lib.nameValuePair "ondemand-${name}" {
         description = "On-demand proxy for ${name} (vm-${toString svc.vmid})";
         requires = [ "ondemand-${name}.socket" ];
+        wants = [ "network-online.target" ];
         after = [ "ondemand-${name}.socket" "network-online.target" ];
         serviceConfig = {
           ExecStartPre = wakeScript name svc;
