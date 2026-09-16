@@ -2,6 +2,18 @@
 let
   cfg = config.homelab.traefik;
 
+  # Cloudflare's published edge ranges. When the ingress sits behind Cloudflare
+  # (proxied DNS), the immediate peer is a rotating edge IP; trusting these lets
+  # Traefik take the real client IP from X-Forwarded-For and pass a STABLE one to
+  # the backends. Without it Anubis re-challenges every request (the edge IP
+  # changes each time) and CrowdSec bans Cloudflare instead of the attacker.
+  cloudflareRanges = [
+    "173.245.48.0/20" "103.21.244.0/22" "103.22.200.0/22" "103.31.4.0/22"
+    "141.101.64.0/18" "108.162.192.0/18" "190.93.240.0/20" "188.114.96.0/20"
+    "197.234.240.0/22" "198.41.128.0/17" "162.158.0.0/15" "104.16.0.0/13"
+    "104.24.0.0/14" "172.64.0.0/13" "131.0.72.0/22"
+  ];
+
   # Baseline response-header hardening attached to every websecure route: HSTS,
   # no MIME sniffing, deny framing, a referrer policy. Individual routers can
   # opt out by listing themselves in cfg.noSecureHeaders (e.g. an app that must
@@ -202,6 +214,11 @@ in {
       };
     };
 
+    trustCloudflare = lib.mkEnableOption ''
+      trusting Cloudflare edge ranges on the websecure entrypoint so the real
+      client IP (not the rotating edge IP) reaches the backends — required for
+      Anubis and CrowdSec to work correctly behind proxied Cloudflare DNS'';
+
     logLevel = lib.mkOption {
       type = lib.types.str;
       default = "WARN";
@@ -348,7 +365,12 @@ in {
             address = ":80";
             http.redirections.entryPoint = { to = "websecure"; scheme = "https"; permanent = true; };
           };
-          websecure.address = ":443";
+          websecure = {
+            address = ":443";
+          } // lib.optionalAttrs cfg.trustCloudflare {
+            forwardedHeaders.trustedIPs =
+              cloudflareRanges ++ [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
+          };
           metrics.address = ":8082";
         } // cfg.entryPoints;
         certificatesResolvers.cloudflare.acme = {
