@@ -7,7 +7,7 @@ let
   resticEnv = ''
     export RESTIC_REPOSITORY="${cfg.repoDir}"
     export RESTIC_PASSWORD_FILE="${cfg.passwordFile}"
-    export PATH="${lib.makeBinPath [ pkgs.restic pkgs.coreutils pkgs.curl ]}"
+    export PATH="${lib.makeBinPath [ pkgs.restic pkgs.coreutils pkgs.curl pkgs.jq ]}"
   '';
 
   backupScript = pkgs.writeShellScript "nas-backup" ''
@@ -86,6 +86,64 @@ let
     ''}
     echo ">>> Backup complete: $FILES files in latest snapshot"
   '';
+  # Restore/inspect helper installed on the NAS as `nas-restore`. Wraps restic
+  # with the repo + password already set, plus convenience subcommands. Restore
+  # is the half that matters — this makes it a one-liner and keeps it tested.
+  restoreScript = pkgs.writeShellScriptBin "nas-restore" ''
+    set -euo pipefail
+    ${resticEnv}
+    cmd="''${1:-help}"; shift || true
+    case "$cmd" in
+      list)     exec restic snapshots "$@" ;;
+      files)    # files <snapshot>  — list files in a snapshot
+                exec restic ls "''${1:-latest}" ;;
+      service)  # service <name> [age]  — restore /srv/nas/data/<name> IN PLACE.
+                # age 0 = latest (default), 1 = 2nd-latest, 2 = 3rd-latest, ...
+                name="''${1:?usage: nas-restore service <name> [age]  (e.g. minecraft, or paperless 1)}"
+                age="''${2:-0}"
+                path="${cfg.sourceDir}/data/$name"
+                id=$(restic snapshots --json | jq -r ".[-1-$age].id // empty")
+                [ -n "$id" ] || { echo "no snapshot at age $age"; exit 1; }
+                when=$(restic snapshots --json | jq -r ".[-1-$age].time")
+                echo ">>> Restore $path"
+                echo ">>> from snapshot $id (age $age, $when) — IN PLACE, overwrites current."
+                echo ">>> STOP the VM using $path first (e.g. minecraft=207, paperless=113)."
+                printf ">>> type 'yes' to proceed: "; read -r ok; [ "$ok" = yes ] || { echo aborted; exit 1; }
+                restic restore "$id" --target / --include "$path"
+                echo ">>> done: $path restored from $when" ;;
+      restore)  # restore <snapshot|latest> <target-dir> [--include PATH ...]
+                snap="''${1:?usage: nas-restore restore <snapshot|latest> <target> [--include PATH]}"; shift
+                tgt="''${1:?target dir required}"; shift || true
+                mkdir -p "$tgt"
+                echo ">>> restoring $snap -> $tgt (verify after)"
+                restic restore "$snap" --target "$tgt" "$@"
+                echo ">>> restored. Contents under $tgt/srv/nas" ;;
+      dump)     # dump <snapshot> <path-in-repo>  — single file/dir to stdout (tar)
+                exec restic dump "''${1:?snapshot}" "''${2:?path}" ;;
+      mount)    # mount <dir>  — browse snapshots as a filesystem (needs fuse)
+                d="''${1:?usage: nas-restore mount <dir>}"; mkdir -p "$d"
+                echo ">>> Ctrl-C to unmount"; exec restic mount "$d" ;;
+      check)    exec restic check --read-data "$@" ;;   # full re-read of all data
+      diff)     exec restic diff "''${1:?snapA}" "''${2:?snapB}" ;;
+      *) cat <<EOF
+nas-restore — restore/inspect the NAS restic backup
+
+  nas-restore list                         list snapshots (oldest first; last line = latest)
+  nas-restore service <name> [age]         restore /srv/nas/data/<name> in place; age 0=latest,1=2nd-latest
+                                           e.g.  nas-restore service minecraft      (last backup)
+                                                 nas-restore service paperless 1    (2nd-last)
+  nas-restore files [snapshot]             list files in a snapshot (default latest)
+  nas-restore restore <snap|latest> <dir>  restore into <dir> (add --include /srv/nas/data/firefly to scope)
+  nas-restore dump <snap> <path>           stream one file/dir (tar) to stdout
+  nas-restore mount <dir>                   browse all snapshots as a filesystem
+  nas-restore check                         full integrity re-read of the whole repo
+  nas-restore diff <snapA> <snapB>          what changed between two snapshots
+
+Repo: ${cfg.repoDir}
+EOF
+        ;;
+    esac
+  '';
 in {
   options.homelab.nasBackup = {
     enable = lib.mkEnableOption "Encrypted, verified restic backups of the NAS";
@@ -144,7 +202,7 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    environment.systemPackages = [ pkgs.restic ];
+    environment.systemPackages = [ pkgs.restic restoreScript ];
 
     systemd.tmpfiles.rules = [
       "d /srv/nas/BACKUPS 0700 root root -"

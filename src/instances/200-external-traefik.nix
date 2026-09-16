@@ -7,7 +7,7 @@ let
   # headless scrapers that ignore it are dropped before they reach the app.
   # Not applied to headscale (tailscale client API), ntfy (app polling),
   # calendar (TRMNL polling) or minecraft (raw TCP) — none are browsers.
-  anubisEnable = false;
+  anubisEnable = true;
   # Traefik server URL for a browser-facing service: the Anubis instance when
   # the filter is on, the original upstream when off.
   fronted = anubisPort: upstream:
