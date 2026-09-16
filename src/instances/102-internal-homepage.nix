@@ -191,6 +191,55 @@ let
               url: http://10.100.0.124
               username: "{{HOMEPAGE_VAR_KAVITA_USER}}"
               password: "{{HOMEPAGE_VAR_KAVITA_PASS}}"
+        - Paperless-AI:
+            icon: mdi-robot
+            href: https://paperless-ai.lsck0.dev
+            ping: http://10.100.0.125
+            description: Document AI
+        - Hermes:
+            icon: ollama
+            href: https://hermes.lsck0.dev
+            ping: http://10.100.0.126:11434
+            description: LLM Agent
+        - Calendar:
+            icon: mdi-calendar
+            href: https://cal.lsck0.dev
+            ping: http://10.100.0.129
+            description: Synced Calendar
+        - Syncthing:
+            icon: syncthing
+            href: https://sync.lsck0.dev
+            ping: http://10.100.0.105:8384
+            description: File Sync
+        - Attic:
+            icon: nixos
+            href: https://attic.lsck0.dev
+            ping: http://10.100.0.131:8080
+            description: Nix Cache
+        - LLDAP:
+            icon: mdi-account-group
+            href: https://lldap.lsck0.dev
+            ping: http://10.100.0.133:17170
+            description: Directory
+        - Jellyseerr:
+            icon: jellyseerr
+            href: https://requests.lsck0.dev
+            ping: http://10.100.0.136
+            description: Media Requests
+        - Bazarr:
+            icon: bazarr
+            href: https://subs.lsck0.dev
+            ping: http://10.100.0.137
+            description: Subtitles
+        - Actual Budget:
+            icon: actual-budget
+            href: https://budget.lsck0.dev
+            description: Budget (on-demand)
+        - Firefly III:
+            icon: firefly-iii
+            href: https://firefly.lsck0.dev
+            description: Finance (on-demand)
+
     - External:
         - Ext Traefik:
             icon: traefik

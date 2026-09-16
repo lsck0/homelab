@@ -358,6 +358,16 @@ in {
     };
   };
 
+  # Grafana's file provider only rescans reliably at startup, so a deploy that
+  # only changes a dashboard file (an /etc symlink) leaves it unloaded until the
+  # unit restarts. Tie the unit to the dashboard sources so it restarts when any
+  # of them change.
+  systemd.services.grafana.restartTriggers = [
+    ./dashboards/node-exporter.json
+    ./dashboards/homelab-overview.json
+    ./dashboards/traefik-http.json
+  ];
+
   # 3100 Loki push, 3200 Tempo, 4317/4318 OTLP trace ingest, 9093 Alertmanager.
   networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 9093 ];
 }
