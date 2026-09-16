@@ -39,15 +39,6 @@ in {
   homelab.traefik = {
     enable = true;
 
-    # Deny public access to a few internal-only services. Requests reaching this
-    # external ingress arrive from the Cloudflare edge (a public peer), so an
-    # ipAllowList of private ranges rejects every public hit. VPN and LAN clients
-    # reach these via split-horizon DNS straight to the internal Traefik and
-    # never touch this box, so they are unaffected.
-    middlewares.lan-only.ipAllowList.sourceRange = [
-      "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16"
-    ];
-
     # Public-facing ingress: turn CrowdSec from log-only into an enforcing
     # bouncer (community blocklist + local bans) on every route. AppSec/WAF is
     # enabled once the bouncer itself is verified.
@@ -80,13 +71,6 @@ in {
       # The calendar lives on the internal side; only this one host is relayed
       # through, so the TRMNL cloud can poll it without the DMZ reaching in.
       calendar-tls     = { rule = "Host(`cal.lsck0.dev`)";         service = "calendar";     entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-
-      # Internal-only services: reachable from LAN/VPN via split-horizon direct
-      # to internal Traefik, but denied here (public) by the lan-only middleware.
-      # Higher priority than the catch-all so these win and get the deny.
-      homepage-lan = { rule = "Host(`homepage.lsck0.dev`)"; service = "internal-relay"; entryPoints = [ "websecure" ]; priority = 100; middlewares = [ "lan-only" ]; tls.certResolver = "cloudflare"; };
-      status-lan   = { rule = "Host(`status.lsck0.dev`)";   service = "internal-relay"; entryPoints = [ "websecure" ]; priority = 100; middlewares = [ "lan-only" ]; tls.certResolver = "cloudflare"; };
-      tasks-lan    = { rule = "Host(`tasks.lsck0.dev`)";    service = "internal-relay"; entryPoints = [ "websecure" ]; priority = 100; middlewares = [ "lan-only" ]; tls.certResolver = "cloudflare"; };
 
       # Catch-all: any *.lsck0.dev host without a dedicated router above is an
       # internal service. Relay it to the internal Traefik (10.100.0.100), which
