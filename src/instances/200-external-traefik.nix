@@ -3,7 +3,7 @@ let
   # Anubis PoW bot filter on the browser-facing routes: on = Traefik points at
   # the 272xx Anubis instance, off = straight to the upstream. Not for the
   # non-browser routes (headscale/ntfy/calendar/minecraft).
-  anubisEnable = false;
+  anubisEnable = true;
   fronted = anubisPort: upstream:
     if anubisEnable then "http://127.0.0.1:${toString anubisPort}" else upstream;
 in {
@@ -45,6 +45,16 @@ in {
     crowdsecBouncer.enable = true;
     crowdsecBouncer.appsec = true;
     crowdsecBouncer.noAppsecRouters = [ "headscale-tls" "ntfy-tls" ];
+    # Never self-ban the LAN or the home network (real IPv6 prefix may rotate).
+    crowdsecBouncer.whitelistCidrs = [
+      "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "2003:f7:8f3a::/48"
+    ];
+
+    # Anubis reads X-Real-Ip first, which Traefik sets to the immediate peer (the
+    # Cloudflare edge, rotating per request) — so it re-challenged every request
+    # and broke CSS. Strip X-Real-Ip on the Anubis routes so Anubis falls back to
+    # X-Forwarded-For, which (via trustCloudflare) carries the stable real client.
+    middlewares.anubis-realip.headers.customRequestHeaders."X-Real-Ip" = "";
 
     # Bot filter per browser-facing route → its upstream (262xx on-demand proxy or the VM).
     anubis = {
@@ -62,11 +72,11 @@ in {
 
     routers = {
       headscale-tls    = { rule = "Host(`hs.lsck0.dev`)";          service = "headscale";    entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-      searxng-tls      = { rule = "Host(`search.lsck0.dev`)";      service = "searxng";      entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-      shlink-tls       = { rule = "Host(`shlink.lsck0.dev`)";      service = "shlink";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-      privatebin-tls   = { rule = "Host(`paste.lsck0.dev`)";       service = "privatebin";   entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-      share-tls        = { rule = "Host(`share.lsck0.dev`)";       service = "share";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-      hello-tls        = { rule = "Host(`hello.lsck0.dev`)";       service = "hello";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+      searxng-tls      = { rule = "Host(`search.lsck0.dev`)";      service = "searxng";      entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "anubis-realip" ]; };
+      shlink-tls       = { rule = "Host(`shlink.lsck0.dev`)";      service = "shlink";       entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "anubis-realip" ]; };
+      privatebin-tls   = { rule = "Host(`paste.lsck0.dev`)";       service = "privatebin";   entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "anubis-realip" ]; };
+      share-tls        = { rule = "Host(`share.lsck0.dev`)";       service = "share";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "anubis-realip" ]; };
+      hello-tls        = { rule = "Host(`hello.lsck0.dev`)";       service = "hello";        entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; middlewares = [ "anubis-realip" ]; };
       ntfy-tls         = { rule = "Host(`ntfy.lsck0.dev`)";        service = "ntfy";         entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       # The calendar lives on the internal side; only this one host is relayed
       # through, so the TRMNL cloud can poll it without the DMZ reaching in.

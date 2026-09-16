@@ -167,6 +167,16 @@ in {
           when appsec is enabled.
         '';
       };
+
+      whitelistCidrs = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = ''
+          CIDRs CrowdSec never bans (a whitelist parser). Use for the LAN and
+          your own home network so legit browsing can't self-ban. NOTE: a
+          dynamic ISP IPv6 prefix here may rotate and need updating.
+        '';
+      };
     };
 
     anubis = {
@@ -306,6 +316,18 @@ in {
         # string de-indentation cannot corrupt the YAML.
         ${pkgs.coreutils}/bin/printf 'source: file\nfilenames:\n  - /var/log/traefik/access.log\nlabels:\n  type: traefik\n' \
           > /var/lib/crowdsec/config/acquis.d/traefik.yaml
+        ${lib.optionalString (cfg.crowdsecBouncer.whitelistCidrs != []) ''
+          # Whitelist parser: CrowdSec never bans these CIDRs.
+          ${pkgs.coreutils}/bin/mkdir -p /var/lib/crowdsec/config/parsers/s02-enrich
+          ${pkgs.coreutils}/bin/printf '%s\n' \
+            'name: homelab/whitelist' \
+            'description: homelab trusted networks' \
+            'whitelist:' \
+            '  reason: homelab trusted networks' \
+            '  cidr:' \
+            ${lib.concatMapStringsSep " " (c: "'    - \"${c}\"'") cfg.crowdsecBouncer.whitelistCidrs} \
+            > /var/lib/crowdsec/config/parsers/s02-enrich/homelab-whitelist.yaml
+        ''}
       '';
     };
 
