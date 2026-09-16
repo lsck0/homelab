@@ -219,7 +219,11 @@ DISABLED_VMS=$(terraform -chdir="$ROOT_DIR/src" output -raw disabled_vms 2>/dev/
 # On-demand VMs are normally stopped (woken by the socket proxy on request and
 # shut down when idle). They must be running to receive a deploy, so start them
 # now; the on-demand proxy will idle them again afterwards.
-ON_DEMAND_VMS=$(terraform -chdir="$ROOT_DIR/src" output -raw on_demand_vms 2>/dev/null || echo "")
+# Derive on-demand VMIDs straight from the instance map, not a terraform output
+# (which needs a fresh `apply` to materialize and silently returns empty
+# otherwise — leaving idle VMs unwoken and their config drifting).
+ON_DEMAND_VMS=$(grep -E 'onDemand[[:space:]]*=[[:space:]]*true' "$ROOT_DIR/src/instances/main.tf" 2>/dev/null \
+  | grep -oE '^[[:space:]]*"[0-9]+"' | tr -dc '0-9\n')
 if [ -n "$ON_DEMAND_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
   echo ">>> Waking on-demand VMs for deploy: $(echo "$ON_DEMAND_VMS" | tr '\n' ' ')"
   # Start every stopped on-demand VM. sync always deploys ALL enabled VMs — the
@@ -231,20 +235,20 @@ if [ -n "$ON_DEMAND_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
       curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
     fi
   done
-  # Wait for each guest agent to answer (cold NixOS boot), THEN push the SSH key.
-  # Polling beats a fixed sleep: a slow boot no longer means a skipped deploy.
+  # Give cold VMs time to boot, then push the SSH key via the guest agent
+  # (best-effort — already-deployed VMs carry the key in their config; the push
+  # only matters for a fresh VM). The per-VM wait_for_ssh in the deploy loop
+  # does the real readiness gate with retries, so a slow boot still deploys.
+  sleep 45
+  payload=$(jq -cn --arg k "$PUBKEY" \
+    '{"command":["/bin/sh","-c","mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo \($k) > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"]}')
   for vmid in $ON_DEMAND_VMS; do
-    ready=0
-    for _ in $(seq 1 60); do   # up to ~180s
-      code=$(curl -sk -o /dev/null -w '%{http_code}' "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/agent/ping" -H "$PVE_AUTH" 2>/dev/null)
-      [ "$code" = "200" ] && { ready=1; break; }
+    for _ in $(seq 1 20); do   # retry the agent exec until the agent answers
+      code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/agent/exec" \
+        -H "$PVE_AUTH" -H "Content-Type: application/json" -d "$payload" 2>/dev/null)
+      [ "$code" = "200" ] && break
       sleep 3
     done
-    [ "$ready" = "1" ] || { echo ">>>   WARNING: vm-$vmid guest agent not ready; deploy may retry"; continue; }
-    payload=$(jq -cn --arg k "$PUBKEY" \
-      '{"command":["/bin/sh","-c","mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo \($k) > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"]}')
-    curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/agent/exec" \
-      -H "$PVE_AUTH" -H "Content-Type: application/json" -d "$payload" >/dev/null 2>&1 || true
   done
 fi
 

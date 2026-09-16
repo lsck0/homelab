@@ -364,9 +364,15 @@ in {
           web = {
             address = ":80";
             http.redirections.entryPoint = { to = "websecure"; scheme = "https"; permanent = true; };
+            # Bound how long a client may take to send a request — a client that
+            # dribbles headers forever (Slowloris) is dropped instead of holding
+            # a connection. writeTimeout is 0 (unbounded) so large media
+            # downloads/streams are not cut off.
+            transport.respondingTimeouts = { readTimeout = "120s"; writeTimeout = "0s"; idleTimeout = "180s"; };
           };
           websecure = {
             address = ":443";
+            transport.respondingTimeouts = { readTimeout = "120s"; writeTimeout = "0s"; idleTimeout = "180s"; };
           } // lib.optionalAttrs cfg.trustCloudflare {
             forwardedHeaders.trustedIPs =
               cloudflareRanges ++ [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
