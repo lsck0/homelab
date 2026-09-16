@@ -116,7 +116,6 @@
     "d /srv/nas/torrents 0775 nobody nogroup -"
     # per-service persistent data
     "d /srv/nas/data 0777 nobody nogroup -"
-    "d /srv/nas/data/authentik 0777 nobody nogroup -"
     "d /srv/nas/data/authelia 0777 nobody nogroup -"
     "d /srv/nas/data/calendar 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo 0777 nobody nogroup -"

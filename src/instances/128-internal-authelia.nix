@@ -1,4 +1,4 @@
-{ config, pkgs, lib, nasMount, ... }:
+{ config, pkgs, lib, ... }:
 let
   stateDir = "/var/lib/authelia-main";
   adminUser = "luca";
