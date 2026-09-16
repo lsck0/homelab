@@ -63,6 +63,7 @@ locals {
     "137" = { name = "137-internal-bazarr", type = "internal" }
     "138" = { name = "138-internal-recyclarr", type = "internal" }
     "139" = { name = "139-internal-mosquitto", type = "internal" }
+    "140" = { name = "140-internal-firefly", type = "internal" }
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-headscale", type = "external" }
