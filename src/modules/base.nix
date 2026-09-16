@@ -60,6 +60,11 @@
     # journal hostname) is what lets a Grafana dashboard filter to a single VM.
     # Runs everywhere except vm-103 itself, which would otherwise depend on its
     # own Loki being up before it could log.
+    # systemd creates /var/lib/promtail before start; without it promtail's
+    # namespaced start fails with "/var/lib/promtail: No such file or directory".
+    systemd.services.promtail.serviceConfig = lib.mkIf (config.networking.hostName != "vm-103") {
+      StateDirectory = "promtail";
+    };
     services.promtail = lib.mkIf (config.networking.hostName != "vm-103") {
       enable = true;
       configuration = {
