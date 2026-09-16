@@ -120,7 +120,7 @@ in {
           alert = "InstanceDown";
           # Only real VMs: down now, up sometime in the last 6h (the static /24
           # scrape otherwise flags ~480 phantom IPs).
-          expr = "up{job=\"homelab-node-exporter\"} == 0 and max_over_time(up{job=\"homelab-node-exporter\"}[6h]) > 0";
+          expr = "up{job=\"homelab-node-exporter\",instance!~\"(10\\.100\\.0\\.(135|140)|10\\.200\\.0\\.(202|204|205|207)):9100\"} == 0 and max_over_time(up{job=\"homelab-node-exporter\"}[6h]) > 0";
           for = "5m";
           labels.severity = "critical";
           annotations.summary = "{{ $labels.instance }} is down";
@@ -275,7 +275,7 @@ in {
                     # Only real VMs: currently down AND up at some point in the
                     # last 6h. Prometheus statically scrapes the whole /24, so
                     # without this the rule fires for ~480 phantom IPs.
-                    expr = "up{job=\"homelab-node-exporter\"} == 0 and max_over_time(up{job=\"homelab-node-exporter\"}[6h]) > 0";
+                    expr = "up{job=\"homelab-node-exporter\",instance!~\"(10\\.100\\.0\\.(135|140)|10\\.200\\.0\\.(202|204|205|207)):9100\"} == 0 and max_over_time(up{job=\"homelab-node-exporter\"}[6h]) > 0";
                     instant = true;
                   };
                 }

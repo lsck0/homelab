@@ -58,20 +58,20 @@ locals {
     "131" = { name = "131-internal-attic", type = "internal", disk = 40 }
     "132" = { name = "132-internal-smtp", type = "internal", enabled = false }
     "133" = { name = "133-internal-lldap", type = "internal" }
-    "135" = { name = "135-internal-actual", type = "internal" }
+    "135" = { name = "135-internal-actual", type = "internal", onDemand = true }
     "136" = { name = "136-internal-jellyseerr", type = "internal" }
     "137" = { name = "137-internal-bazarr", type = "internal" }
     "138" = { name = "138-internal-recyclarr", type = "internal" }
     "139" = { name = "139-internal-mosquitto", type = "internal" }
-    "140" = { name = "140-internal-firefly", type = "internal" }
+    "140" = { name = "140-internal-firefly", type = "internal", onDemand = true }
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
     "201" = { name = "201-external-headscale", type = "external" }
-    "202" = { name = "202-external-searxng", type = "external" }
+    "202" = { name = "202-external-searxng", type = "external", onDemand = true }
     "203" = { name = "203-external-shlink", type = "external" }
-    "204" = { name = "204-external-privatebin", type = "external" }
-    "205" = { name = "205-external-share", type = "external" }
-    "207" = { name = "207-external-minecraft", type = "external", memory = 20480, cores = 8 }
+    "204" = { name = "204-external-privatebin", type = "external", onDemand = true }
+    "205" = { name = "205-external-share", type = "external", onDemand = true }
+    "207" = { name = "207-external-minecraft", type = "external", memory = 20480, cores = 8, onDemand = true }
     "206" = { name = "206-external-ntfy", type = "external" }
     "208" = { name = "208-external-hello", type = "external" }
     "209" = { name = "209-external-tor-relay", type = "external", enabled = false }
@@ -143,4 +143,8 @@ output "vm_ips" {
 
 output "disabled_vms" {
   value = join("\n", [for k, v in local.instances : k if try(v.enabled, true) == false])
+}
+
+output "on_demand_vms" {
+  value = join("\n", [for k, v in local.instances : k if try(v.onDemand, false)])
 }
