@@ -57,11 +57,8 @@ let
 in {
   networking.hostName = "vm-128";
 
-  # State is on LOCAL disk, not the NAS. The auth gateway must not depend on
-  # NFS: with a `hard` mount a NAS stall wedges authelia in uninterruptible
-  # sleep (unkillable, port closed, 502 lab-wide), and with a `soft` mount the
-  # sqlite store risks corruption. The state is small (TOTP enrolments,
-  # sessions, generated keys) and a rebuild regenerates the keys.
+  # State on LOCAL disk, not NFS: a NAS stall must not wedge the auth gateway.
+  # It's small (TOTP enrolments, sessions, keys) and a rebuild regenerates it.
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0700 authelia-main authelia-main -"
   ];
