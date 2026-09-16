@@ -3,11 +3,9 @@ let
   subnetTargets = subnet:
     builtins.map (host: "${subnet}.${toString host}:9100") (lib.range 1 254);
 
-  # Telegram alerting. Grafana validates the contact point at startup and
-  # crashes if the bot token is empty, and Nix cannot read the sops value at
-  # build time — so this stays off until the token exists. To enable:
-  #   1. sops src/secrets.json  → fill telegram-bot-token and telegram-chat-id
-  #   2. flip this to true and redeploy
+  # Off until the token exists (Grafana crashes on an empty bot token, and Nix
+  # can't read sops at build). Enable: sops-fill telegram-bot-token +
+  # telegram-chat-id, flip this true, redeploy.
   enableTelegram = false;
 
   # ntfy topic for alerts — public but unguessable. Subscribe the phone to
