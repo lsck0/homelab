@@ -23,7 +23,7 @@ locals {
     # ── internal ──
     "100" = { name = "100-internal-traefik", type = "internal" }
     "102" = { name = "102-internal-homepage", type = "internal" }
-    "103" = { name = "103-internal-grafana", type = "internal", enabled = false }
+    "103" = { name = "103-internal-grafana", type = "internal" }
     "104" = { name = "104-internal-uptime-kuma", type = "internal" }
     "105" = { name = "105-internal-nas", type = "internal", memory = 2048, disk = 750 }
     "106" = { name = "106-internal-sccache", type = "internal" }

@@ -66,6 +66,9 @@
       iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.107 } tcp dport { 80, 443 } accept
       iifname "ens20" ip daddr 10.100.0.109 tcp dport { 80, 443, 5000 } accept
 
+      # allow DMZ VMs to ship logs to Loki on vm-103
+      iifname "ens20" ip daddr 10.100.0.103 tcp dport 3100 accept
+
       # allow DMZ to reach NAS (NFS for persistent data)
       iifname "ens20" ip daddr 10.100.0.105 tcp dport { 111, 2049 } accept
       iifname "ens20" ip daddr 10.100.0.105 udp dport { 111, 2049 } accept

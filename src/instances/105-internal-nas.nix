@@ -117,6 +117,7 @@
     # per-service persistent data
     "d /srv/nas/data 0777 nobody nogroup -"
     "d /srv/nas/data/authelia 0777 nobody nogroup -"
+    "d /srv/nas/data/loki 0777 nobody nogroup -"
     "d /srv/nas/data/calendar 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo-runner 0777 nobody nogroup -"

@@ -1,4 +1,4 @@
-{ lib, nasMount, ... }:
+{ lib, pkgs, nasMount, ... }:
 let
   subnetTargets = subnet:
     builtins.map (host: "${subnet}.${toString host}:9100") (lib.range 1 254);
@@ -6,7 +6,64 @@ in {
   networking.hostName = "vm-103";
 
   fileSystems = nasMount "/var/lib/grafana" "grafana"
-    // nasMount "/var/lib/prometheus2" "prometheus";
+    // nasMount "/var/lib/prometheus2" "prometheus"
+    // nasMount "/var/lib/loki" "loki";
+
+  # ── Loki: log aggregation for all VMs (promtail in base.nix pushes here) ────
+  services.loki = {
+    enable = true;
+    configuration = {
+      auth_enabled = false;
+      server.http_listen_port = 3100;
+      common = {
+        instance_addr = "127.0.0.1";
+        ring.kvstore.store = "inmemory";
+        replication_factor = 1;
+        path_prefix = "/var/lib/loki";
+      };
+      schema_config.configs = [{
+        from = "2024-01-01";
+        store = "tsdb";
+        object_store = "filesystem";
+        schema = "v13";
+        index = { prefix = "index_"; period = "24h"; };
+      }];
+      storage_config.filesystem.directory = "/var/lib/loki/chunks";
+      compactor = {
+        working_directory = "/var/lib/loki/compactor";
+        retention_enabled = true;
+        delete_request_store = "filesystem";
+      };
+      limits_config = {
+        retention_period = "336h"; # 14 days
+        volume_enabled = true;
+        reject_old_samples = false;
+      };
+    };
+  };
+
+  # ── Tempo: distributed tracing (OTLP), for services that emit spans ─────────
+  services.tempo = {
+    enable = true;
+    settings = {
+      server.http_listen_port = 3200;
+      distributor.receivers.otlp.protocols = {
+        grpc.endpoint = "0.0.0.0:4317";
+        http.endpoint = "0.0.0.0:4318";
+      };
+      ingester.lifecycler.ring = { replication_factor = 1; kvstore.store = "inmemory"; };
+      storage.trace = {
+        backend = "local";
+        local.path = "/var/lib/tempo/traces";
+        wal.path = "/var/lib/tempo/wal";
+      };
+    };
+  };
+
+  systemd.tmpfiles.rules = [
+    "d /var/lib/loki 0750 loki loki -"
+    "d /var/lib/tempo 0750 tempo tempo -"
+  ];
 
   services.prometheus = {
     enable = true;
@@ -67,6 +124,20 @@ in {
             uid = "prometheus";
             isDefault = true;
           }
+          {
+            name = "Loki";
+            type = "loki";
+            access = "proxy";
+            url = "http://127.0.0.1:3100";
+            uid = "loki";
+          }
+          {
+            name = "Tempo";
+            type = "tempo";
+            access = "proxy";
+            url = "http://127.0.0.1:3200";
+            uid = "tempo";
+          }
         ];
       };
       dashboards.settings = {
@@ -89,5 +160,6 @@ in {
     };
   };
 
-  networking.firewall.allowedTCPPorts = [ 80 9090 ];
+  # 3100 Loki push, 3200 Tempo, 4317/4318 OTLP trace ingest.
+  networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 ];
 }
