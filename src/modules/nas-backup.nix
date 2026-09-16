@@ -2,180 +2,171 @@
 let
   cfg = config.homelab.nasBackup;
 
+  # restic wrapper: one repo, one password file, a fixed exclude of the backup
+  # store itself. Everything else is passed per-invocation.
+  resticEnv = ''
+    export RESTIC_REPOSITORY="${cfg.repoDir}"
+    export RESTIC_PASSWORD_FILE="${cfg.passwordFile}"
+    export PATH="${lib.makeBinPath [ pkgs.restic pkgs.coreutils pkgs.curl ]}"
+  '';
+
   backupScript = pkgs.writeShellScript "nas-backup" ''
     set -uo pipefail
-    export PATH="${lib.makeBinPath [ pkgs.coreutils pkgs.gnutar pkgs.zstd pkgs.findutils pkgs.rsync pkgs.openssh ]}"
+    ${resticEnv}
 
-    TYPE="$1"
-    KEEP="$2"
-
-    BACKUP_ROOT="${cfg.backupDir}"
     SOURCE="${cfg.sourceDir}"
-    STAMP=$(date +%Y-%m-%d_%H%M)
-    DEST="$BACKUP_ROOT/$TYPE/$STAMP"
-    mkdir -p "$DEST"
+    TFDIR=/var/lib/node-exporter-textfile
+    ${pkgs.coreutils}/bin/mkdir -p "$TFDIR"
 
-    echo ">>> NAS $TYPE backup -> $DEST"
-    FAILED=0
-
-    backup_folder() {
-      local src="$1" label="$2"
-      [ -d "$src" ] || return 0
-      local out="$DEST/$label.tar.zst"
-      echo "  $src -> $label.tar.zst"
-      tar --create --use-compress-program="${pkgs.zstd}/bin/zstd -T0 -19" \
-        --ignore-failed-read --warning=no-file-changed \
-        --exclude='*.tmp' --exclude='lost+found' \
-        -f "$out" -C "$(dirname "$src")" "$(basename "$src")" || {
-        echo "  WARNING: $label backup had errors (partial archive kept)"
-        FAILED=1
-      }
+    fail() {
+      echo "BACKUP FAILED: $1" >&2
+      # Publish a stale/failed marker path? No — leave the last-success metric
+      # untouched so the dead-man rule fires, and hit the healthcheck /fail.
+      ${lib.optionalString (cfg.healthcheckUrl != "") ''
+        curl -fsS -m 15 "${cfg.healthcheckUrl}/fail" >/dev/null 2>&1 || true
+      ''}
+      exit 1
     }
 
-    for dir in "$SOURCE"/*/; do
-      name=$(basename "$dir")
-      case "$name" in
-        BACKUPS) ;;  # skip — this is the backup destination, not a source
-        data)
-          for sub in "$dir"*/; do
-            [ -d "$sub" ] || continue
-            backup_folder "$sub" "data-$(basename "$sub")"
-          done
-          ;;
-        *)
-          backup_folder "$dir" "$name"
-          ;;
-      esac
-    done
-
-    echo ">>> On-disk backup complete: $(du -sh "$DEST" | cut -f1)${if cfg.proxmoxBackupHost != null then "" else ""}"
-    [ "$FAILED" -eq 0 ] || echo "WARNING: Some archives had read errors (partial data backed up)"
-
-    # Rotate on-disk snapshots
-    cd "$BACKUP_ROOT/$TYPE"
-    ls -1dt */ 2>/dev/null | tail -n +$((KEEP + 1)) | while read -r old; do
-      echo ">>> Removing old snapshot: $old"
-      rm -rf "$old"
-    done
-
-    # Sync latest snapshot to Proxmox host as off-disk copy
-    ${lib.optionalString (cfg.proxmoxBackupHost != null) ''
-      REMOTE="${cfg.proxmoxBackupHost}"
-      REMOTE_DIR="${cfg.proxmoxBackupPath}/$TYPE/$STAMP"
-      echo ">>> Syncing to Proxmox host $REMOTE:$REMOTE_DIR ..."
-      ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
-        -i /etc/nas-backup-key \
-        "root@$REMOTE" "mkdir -p $REMOTE_DIR" 2>/dev/null \
-        && rsync -a --delete \
-          -e "ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 -i /etc/nas-backup-key" \
-          "$DEST/" "root@$REMOTE:$REMOTE_DIR/" \
-        && echo ">>> Remote sync complete" \
-        || echo "WARNING: Remote sync failed (local backup still intact)"
-
-      # Rotate remote snapshots
-      ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
-        -i /etc/nas-backup-key "root@$REMOTE" \
-        "cd ${cfg.proxmoxBackupPath}/$TYPE && ls -1dt */ 2>/dev/null | tail -n +$((KEEP + 1)) | xargs -r rm -rf" \
-        2>/dev/null || true
-    ''}
-
-    # Dead-man's-switch metric: publish a last-success timestamp for the node
-    # exporter's textfile collector. A Grafana rule alerts (to ntfy) if this
-    # goes stale, catching a backup box that dies silently — no external
-    # service needed. Written atomically so a scrape never sees a half file.
-    if [ "$FAILED" -eq 0 ]; then
-      TFDIR=/var/lib/node-exporter-textfile
-      ${pkgs.coreutils}/bin/mkdir -p "$TFDIR"
-      {
-        echo "# HELP homelab_backup_last_success_timestamp_seconds Unix time of last successful NAS backup."
-        echo "# TYPE homelab_backup_last_success_timestamp_seconds gauge"
-        echo "homelab_backup_last_success_timestamp_seconds{type=\"$TYPE\"} $(${pkgs.coreutils}/bin/date +%s)"
-      } > "$TFDIR/nas_backup_$TYPE.prom.tmp"
-      ${pkgs.coreutils}/bin/mv "$TFDIR/nas_backup_$TYPE.prom.tmp" "$TFDIR/nas_backup_$TYPE.prom"
+    # Repo is content-addressed + encrypted; init once (idempotent).
+    if ! restic cat config >/dev/null 2>&1; then
+      echo ">>> Initialising restic repo at ${cfg.repoDir}"
+      restic init || fail "restic init"
     fi
 
-    # Optional external dead-man ping (healthchecks.io or self-hosted).
+    # A stale lock (from a killed run) would block forever; drop locks older
+    # than an hour, then proceed.
+    restic unlock --remove-all >/dev/null 2>&1 || true
+
+    echo ">>> restic backup of $SOURCE"
+    restic backup "$SOURCE" \
+      --exclude "${cfg.repoDir}" \
+      ${lib.concatMapStringsSep " " (d: "--exclude '${d}'") cfg.excludePatterns} \
+      --tag scheduled --host nas \
+      || fail "restic backup"
+
+    # Retention: deduplicated, so a year of history is cheap. Prune reclaims
+    # space safely (never a blind delete of the newest data).
+    echo ">>> restic forget --prune"
+    restic forget \
+      --keep-last ${toString cfg.keepLast} \
+      --keep-daily ${toString cfg.keepDaily} \
+      --keep-weekly ${toString cfg.keepWeekly} \
+      --keep-monthly ${toString cfg.keepMonthly} \
+      --prune \
+      || fail "restic forget/prune"
+
+    # Integrity: verify structure every run and re-read a sample of the actual
+    # pack data (full re-read is expensive; a rolling subset catches bitrot).
+    echo ">>> restic check (subset read)"
+    restic check --read-data-subset=${cfg.checkSubset} || fail "restic check"
+
+    # Guard against a silently-empty backup: the latest snapshot must contain a
+    # non-trivial number of files, else something upstream vanished.
+    FILES=$(restic snapshots --json --latest 1 2>/dev/null \
+      | ${pkgs.jq}/bin/jq -r '.[0].summary.total_files_processed // 0')
+    if [ "''${FILES:-0}" -lt ${toString cfg.minFiles} ]; then
+      fail "latest snapshot only has ''${FILES} files (< ${toString cfg.minFiles}) — refusing to report success"
+    fi
+
+    # Dead-man's-switch metric for the node-exporter textfile collector; a
+    # Grafana rule alerts to ntfy if it goes stale. Written atomically.
+    {
+      echo "# HELP homelab_backup_last_success_timestamp_seconds Unix time of last successful NAS backup."
+      echo "# TYPE homelab_backup_last_success_timestamp_seconds gauge"
+      echo "homelab_backup_last_success_timestamp_seconds{type=\"daily\"} $(${pkgs.coreutils}/bin/date +%s)"
+      echo "# HELP homelab_backup_snapshot_files Files in the latest restic snapshot."
+      echo "# TYPE homelab_backup_snapshot_files gauge"
+      echo "homelab_backup_snapshot_files $FILES"
+    } > "$TFDIR/nas_backup.prom.tmp"
+    ${pkgs.coreutils}/bin/mv "$TFDIR/nas_backup.prom.tmp" "$TFDIR/nas_backup.prom"
+
     ${lib.optionalString (cfg.healthcheckUrl != "") ''
-      if [ "$FAILED" -eq 0 ]; then
-        ${pkgs.curl}/bin/curl -fsS -m 15 "${cfg.healthcheckUrl}" >/dev/null 2>&1 || true
-      else
-        ${pkgs.curl}/bin/curl -fsS -m 15 "${cfg.healthcheckUrl}/fail" >/dev/null 2>&1 || true
-      fi
+      curl -fsS -m 15 "${cfg.healthcheckUrl}" >/dev/null 2>&1 || true
     ''}
+    echo ">>> Backup complete: $FILES files in latest snapshot"
   '';
 in {
   options.homelab.nasBackup = {
-    enable = lib.mkEnableOption "Per-folder NAS backups with rotation";
+    enable = lib.mkEnableOption "Encrypted, verified restic backups of the NAS";
 
     sourceDir = lib.mkOption {
       type = lib.types.str;
       default = "/srv/nas";
+      description = "Tree to back up.";
     };
 
-    backupDir = lib.mkOption {
+    repoDir = lib.mkOption {
       type = lib.types.str;
-      default = "/srv/nas/BACKUPS";
+      default = "/srv/nas/BACKUPS/restic";
+      description = ''
+        Local restic repository. NOTE: on the same filesystem as the source, so
+        this alone does NOT survive a disk/host loss — it gives dedup, integrity
+        and long history. Add an off-site repo (restic copy to B2/S3/SFTP) for a
+        real 3-2-1 backup; see homelab.nasBackup.remoteRepo (TODO).
+      '';
     };
 
-    proxmoxBackupHost = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "Proxmox host IP to rsync backups to as secondary copy.";
-    };
-
-    proxmoxBackupPath = lib.mkOption {
+    passwordFile = lib.mkOption {
       type = lib.types.str;
-      default = "/var/lib/vz/nas-backups";
-      description = "Path on Proxmox host for off-disk backup copies.";
+      default = "/etc/restic-password";
+      description = "File holding the restic repository password (from sops).";
+    };
+
+    excludePatterns = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ "*.tmp" "lost+found" "*/BACKUPS/*" ];
+      description = "Extra restic exclude patterns (the repo dir is always excluded).";
+    };
+
+    keepLast    = lib.mkOption { type = lib.types.int; default = 3;  };
+    keepDaily   = lib.mkOption { type = lib.types.int; default = 7;  };
+    keepWeekly  = lib.mkOption { type = lib.types.int; default = 8;  };
+    keepMonthly = lib.mkOption { type = lib.types.int; default = 12; };
+
+    checkSubset = lib.mkOption {
+      type = lib.types.str;
+      default = "5%";
+      description = "Fraction of pack data re-read for bitrot detection each run.";
+    };
+
+    minFiles = lib.mkOption {
+      type = lib.types.int;
+      default = 50;
+      description = "Fail (don't report success) if the latest snapshot has fewer files — catches a silently-empty backup.";
     };
 
     healthcheckUrl = lib.mkOption {
       type = lib.types.str;
       default = "";
-      description = ''
-        Dead-man's-switch ping URL (healthchecks.io or self-hosted). Pinged on a
-        successful backup, and with /fail appended on failure. If nothing pings
-        it within the grace window the watcher alerts, so a backup box that dies
-        silently is caught. Empty disables it.
-      '';
+      description = "Optional dead-man ping URL; pinged on success, with /fail on failure.";
     };
   };
 
   config = lib.mkIf cfg.enable {
-    # Backup dirs are inside the NAS share — created here for idempotency.
-    # BACKUPS/ itself is excluded from the backup source to prevent circular archiving.
+    environment.systemPackages = [ pkgs.restic ];
+
     systemd.tmpfiles.rules = [
-      "d ${cfg.backupDir} 0755 root root -"
-      "d ${cfg.backupDir}/daily 0755 root root -"
-      "d ${cfg.backupDir}/weekly 0755 root root -"
-      "d ${cfg.backupDir}/monthly 0755 root root -"
+      "d /srv/nas/BACKUPS 0700 root root -"
+      "d ${cfg.repoDir} 0700 root root -"
     ];
 
-    systemd.services.nas-backup-daily = {
-      description = "Daily per-folder NAS backup";
-      serviceConfig = { Type = "oneshot"; ExecStart = "${backupScript} daily 3"; };  # keep 3 days
+    systemd.services.nas-backup = {
+      description = "Encrypted verified restic backup of the NAS";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = backupScript;
+        # A backup that overruns a day should not stack with the next.
+        TimeoutStartSec = "6h";
+      };
     };
-    systemd.timers.nas-backup-daily = {
+    systemd.timers.nas-backup = {
       wantedBy = [ "timers.target" ];
-      timerConfig = { OnCalendar = "*-*-* 00:00:00"; Persistent = true; };
-    };
-
-    systemd.services.nas-backup-weekly = {
-      description = "Weekly per-folder NAS backup";
-      serviceConfig = { Type = "oneshot"; ExecStart = "${backupScript} weekly 2"; };  # keep 2 weeks
-    };
-    systemd.timers.nas-backup-weekly = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = { OnCalendar = "Mon *-*-* 00:00:00"; Persistent = true; };
-    };
-
-    systemd.services.nas-backup-monthly = {
-      description = "Monthly per-folder NAS backup";
-      serviceConfig = { Type = "oneshot"; ExecStart = "${backupScript} monthly 1"; };  # keep 1 month
-    };
-    systemd.timers.nas-backup-monthly = {
-      wantedBy = [ "timers.target" ];
-      timerConfig = { OnCalendar = "*-*-01 00:00:00"; Persistent = true; };
+      timerConfig = {
+        OnCalendar = "*-*-* 02:00:00";
+        Persistent = true;
+        RandomizedDelaySec = "10m";
+      };
     };
   };
 }

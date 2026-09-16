@@ -1,13 +1,12 @@
 { config, pkgs, lib, ... }:
 let
   stateDir = "/var/lib/authelia-main";
-  adminUser = "luca";
 
   # Runtime-generated config fragments. OIDC client secrets have to be stored
   # hashed, and a hash of a sops secret cannot be computed at build time
   # without leaking the secret into the world-readable Nix store.
   oidcClientsFile = "${stateDir}/oidc-clients.yml";
-  usersFile = "${stateDir}/users_database.yml";
+  ldapFile = "${stateDir}/ldap.yml";
   secretsDir = "${stateDir}/secrets";
 
   oidcClients = [
@@ -67,7 +66,8 @@ in {
     "d ${stateDir} 0700 authelia-main authelia-main -"
   ];
 
-  sops.secrets.authelia-admin-pass = {};
+  # Bind password for the lldap backend (same secret lldap itself uses).
+  sops.secrets.lldap-admin-password = {};
   sops.secrets.nextcloud-oidc-secret = {};
   sops.secrets.vaultwarden-oidc-secret = {};
   sops.secrets.forgejo-oidc-secret = {};
@@ -101,21 +101,12 @@ in {
         openssl genrsa -out ${secretsDir}/oidc-issuer.pem 4096
       fi
 
-      # --- users database ---
-      ADMIN_PASS=$(cat ${config.sops.secrets.authelia-admin-pass.path})
-      ADMIN_HASH=$(authelia crypto hash generate argon2 --password "$ADMIN_PASS" --no-confirm \
-        | sed -n 's/^Digest: //p')
-      [ -n "$ADMIN_HASH" ] || { echo "Failed to hash admin password"; exit 1; }
-
-      cat > ${usersFile} <<EOF
-      users:
-        ${adminUser}:
-          disabled: false
-          displayname: "Luca"
-          password: "$ADMIN_HASH"
-          email: ${config.homelab.acmeEmail}
-          groups:
-            - admins
+      # --- LDAP bind password (kept out of the Nix store) ---
+      LDAP_PASS=$(cat ${config.sops.secrets.lldap-admin-password.path})
+      cat > ${ldapFile} <<EOF
+      authentication_backend:
+        ldap:
+          password: "$LDAP_PASS"
       EOF
 
       # --- OIDC clients ---
@@ -151,7 +142,7 @@ in {
       oidcIssuerPrivateKeyFile = "${secretsDir}/oidc-issuer.pem";
     };
 
-    settingsFiles = [ oidcClientsFile ];
+    settingsFiles = [ oidcClientsFile ldapFile ];
 
     settings = {
       theme = "dark";
@@ -159,21 +150,44 @@ in {
       log.level = "info";
       log.format = "text";
 
+      # lldap (vm-133) is the single identity store. The "lldap" implementation
+      # preset fills in the correct filters/attributes; only the bind password
+      # comes from the runtime fragment (ldapFile). Users and groups are managed
+      # in lldap's admin dashboard.
       authentication_backend = {
-        password_reset.disable = true;
-        # No LDAP, no database: a single YAML file the bootstrap unit writes.
-        file = {
-          path = usersFile;
-          watch = true;
+        password_reset.disable = false;
+        refresh_interval = "1m";
+        ldap = {
+          implementation = "lldap";
+          address = "ldap://10.100.0.133:3890";
+          base_dn = "dc=lsck0,dc=dev";
+          user = "uid=admin,ou=people,dc=lsck0,dc=dev";
         };
       };
 
+      # WebAuthn (FIDO2) is the strong second factor — a hardware key IS the
+      # identity. Users enrol their key in the Authelia portal; internal services
+      # then require it (two_factor).
+      webauthn = {
+        disable = false;
+        display_name = "lsck0.dev";
+        attestation_conveyance_preference = "indirect";
+        timeout = "60s";
+      };
+
+      # Everything internal demands two_factor (password from lldap + FIDO2).
+      # auth.lsck0.dev is bypassed so the portal itself is reachable to log in.
       access_control = {
         default_policy = "deny";
         rules = [
           {
+            domain = [ "auth.lsck0.dev" ];
+            policy = "bypass";
+          }
+          {
             domain = [ "*.lsck0.dev" "lsck0.dev" ];
-            policy = "one_factor";
+            subject = [ "group:admins" ];
+            policy = "two_factor";
           }
         ];
       };
