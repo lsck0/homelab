@@ -18,8 +18,57 @@ let
     };
   };
 
+  # Per-source-IP limits attached to every websecure route, as a first line of
+  # DoS defence in front of every service. Values are generous enough for normal
+  # browsing (a page load fans out to dozens of asset requests) but cap a single
+  # source's sustained rate and concurrency. Cloudflare-proxied traffic arrives
+  # with the client IP in X-Forwarded-For, so depth = 1 reads the real client
+  # rather than rate-limiting the whole Cloudflare edge as one address.
+  rateLimitAverage = 50;   # requests/second sustained per source IP
+  rateLimitBurst = 100;    # short spikes allowed above the average
+  inFlightAmount = 100;    # concurrent in-flight requests per source IP
+
+  limitMiddlewares = {
+    rate-limit.rateLimit = {
+      average = rateLimitAverage;
+      burst = rateLimitBurst;
+      period = "1s";
+      sourceCriterion.ipStrategy.depth = 1;
+    };
+    inflight-limit.inFlightReq = {
+      amount = inFlightAmount;
+      sourceCriterion.ipStrategy.depth = 1;
+    };
+  };
+
+  # CrowdSec bouncer middleware (plugin). Reads the LAPI key from a file so the
+  # key never lands in the world-readable Nix store. In "live" mode the plugin
+  # fails open if the local API is briefly unreachable, so a crowdsec hiccup
+  # cannot take the whole ingress down.
+  bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable {
+    crowdsec.plugin.crowdsec-bouncer = {
+      enabled = true;
+      crowdsecMode = "live";
+      crowdsecLapiScheme = "http";
+      crowdsecLapiHost = "127.0.0.1:8180";
+      crowdsecLapiKeyFile = config.sops.secrets.crowdsec-bouncer-key.path;
+      crowdsecAppsecEnabled = cfg.crowdsecBouncer.appsec;
+      crowdsecAppsecHost = "127.0.0.1:7422";
+      # Trust the router/Cloudflare hop so the plugin bans the real client IP
+      # from X-Forwarded-For, not the proxy in front of it.
+      forwardedHeadersTrustedIPs = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
+    };
+  };
+
+  # Default middleware chain prepended to every websecure router, in order:
+  # bouncer first (drop known-bad IPs before any work), then per-IP limits, then
+  # response-header hardening. Route-specific middlewares (auth, etc.) follow.
+  defaultMiddlewares =
+    lib.optional cfg.crowdsecBouncer.enable "crowdsec"
+    ++ [ "rate-limit" "inflight-limit" "secure-headers" ];
+
   # Ensure every websecure route has tls.certResolver = "cloudflare" unless
-  # overridden, and prepend the secure-headers middleware unless opted out.
+  # overridden, and prepend the default middleware chain unless opted out.
   routersWithTls = lib.mapAttrs (name: router:
     let
       eps = router.entryPoints or [];
@@ -30,10 +79,10 @@ let
           router // { tls = (router.tls or {}) // { certResolver = "cloudflare"; }; }
         else
           router;
-      wantsHeaders = needsTls && !(builtins.elem name cfg.noSecureHeaders);
+      wantsDefaults = needsTls && !(builtins.elem name cfg.noSecureHeaders);
     in
-    if wantsHeaders then
-      withTls // { middlewares = [ "secure-headers" ] ++ (withTls.middlewares or []); }
+    if wantsDefaults then
+      withTls // { middlewares = defaultMiddlewares ++ (withTls.middlewares or []); }
     else
       withTls
   ) cfg.routers;
@@ -83,6 +132,17 @@ in {
       description = "Router names that should NOT get the secure-headers middleware.";
     };
 
+    crowdsecBouncer = {
+      enable = lib.mkEnableOption ''
+        the CrowdSec bouncer as a Traefik plugin middleware on every route.
+        CrowdSec already parses the access logs; this turns its decisions into
+        actual blocks (community blocklist + local bans) instead of only logging'';
+
+      appsec = lib.mkEnableOption ''
+        the CrowdSec AppSec (WAF) component — inline request inspection with
+        OWASP-CRS-compatible rules, in addition to IP reputation blocking'';
+    };
+
     logLevel = lib.mkOption {
       type = lib.types.str;
       default = "WARN";
@@ -91,6 +151,11 @@ in {
 
   config = lib.mkIf cfg.enable {
     sops.secrets.cloudflare-token = {};
+    # Readable by the traefik user because the bouncer plugin (running inside
+    # traefik) reads the LAPI key from this file.
+    sops.secrets.crowdsec-bouncer-key = lib.mkIf cfg.crowdsecBouncer.enable {
+      owner = "traefik";
+    };
     sops.templates."traefik.env".content = ''
       CF_DNS_API_TOKEN=${config.sops.placeholder.cloudflare-token}
     '';
@@ -101,11 +166,63 @@ in {
         "/var/lib/crowdsec/config:/etc/crowdsec"
         "/var/lib/crowdsec/data:/var/lib/crowdsec/data"
         "/var/log/traefik:/var/log/traefik:ro"
-      ];
-      ports = [ "127.0.0.1:8180:8080" ];
+      ]
+      # AppSec acquisition config tells crowdsec to listen for inline request
+      # inspection on :7422, which the bouncer plugin forwards requests to.
+      ++ lib.optional cfg.crowdsecBouncer.appsec
+        "/var/lib/crowdsec/acquis-appsec.yaml:/etc/crowdsec/acquis.d/appsec.yaml:ro";
+      ports = [ "127.0.0.1:8180:8080" ]
+        ++ lib.optional cfg.crowdsecBouncer.appsec "127.0.0.1:7422:7422";
       environment = {
-        COLLECTIONS = "crowdsecurity/traefik crowdsecurity/http-cve";
+        COLLECTIONS = "crowdsecurity/traefik crowdsecurity/http-cve"
+          + lib.optionalString cfg.crowdsecBouncer.appsec
+            " crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules";
       };
+    };
+
+    # Register the bouncer with CrowdSec's local API using the shared key, so the
+    # plugin authenticates. Idempotent: skip if the bouncer already exists.
+    systemd.services.crowdsec-register-bouncer = lib.mkIf cfg.crowdsecBouncer.enable {
+      description = "Register the Traefik bouncer with CrowdSec";
+      after = [ "podman-crowdsec.service" ];
+      wantedBy = [ "multi-user.target" ];
+      path = [ pkgs.podman pkgs.coreutils pkgs.jq ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        Restart = "on-failure";
+        RestartSec = 15;
+      };
+      script = ''
+        KEY=$(cat ${config.sops.secrets.crowdsec-bouncer-key.path})
+        # Wait for the LAPI to answer.
+        for i in $(seq 1 60); do
+          podman exec crowdsec cscli lapi status >/dev/null 2>&1 && break
+          sleep 5
+        done
+        if podman exec crowdsec cscli bouncers list -o json 2>/dev/null \
+             | jq -e '.[]|select(.name=="traefik-bouncer")' >/dev/null; then
+          echo "bouncer already registered"
+        else
+          podman exec crowdsec cscli bouncers add traefik-bouncer -k "$KEY"
+        fi
+      '';
+    };
+
+    systemd.services.crowdsec-appsec-acquis = lib.mkIf cfg.crowdsecBouncer.appsec {
+      description = "Write CrowdSec AppSec acquisition config";
+      before = [ "podman-crowdsec.service" ];
+      requiredBy = [ "podman-crowdsec.service" ];
+      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+      script = ''
+        ${pkgs.coreutils}/bin/cat > /var/lib/crowdsec/acquis-appsec.yaml <<'EOF'
+        source: appsec
+        listen_addr: 0.0.0.0:7422
+        appsec_config: crowdsecurity/appsec-default
+        labels:
+          type: appsec
+        EOF
+      '';
     };
 
     systemd.tmpfiles.rules = [
@@ -151,12 +268,21 @@ in {
             resolvers = [ "1.1.1.1:53" "8.8.8.8:53" ];
           };
         };
+      }
+      # Only present when the bouncer is enabled: an empty `experimental` block
+      # makes Traefik fail to start ("experimental cannot be a standalone
+      # element"). Traefik downloads and caches the plugin at startup.
+      // lib.optionalAttrs cfg.crowdsecBouncer.enable {
+        experimental.plugins.crowdsec-bouncer = {
+          moduleName = "github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin";
+          version = "v1.4.5";
+        };
       };
       dynamicConfigOptions = {
         http = {
           routers = routersWithTls;
           services = cfg.services;
-          middlewares = cfg.middlewares // secureHeadersMiddleware;
+          middlewares = cfg.middlewares // secureHeadersMiddleware // limitMiddlewares // bouncerMiddleware;
         }
           // lib.optionalAttrs (cfg.serversTransports != {}) { serversTransports = cfg.serversTransports; };
       } // lib.optionalAttrs (cfg.tcp != {}) { tcp = cfg.tcp; };
