@@ -159,6 +159,16 @@ in {
       appsec = lib.mkEnableOption ''
         the CrowdSec AppSec (WAF) component — inline request inspection with
         OWASP-CRS-compatible rules, in addition to IP reputation blocking'';
+
+      noAppsecRouters = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = ''
+          Router names that keep the IP bouncer but skip AppSec/WAF inspection
+          (e.g. non-browser APIs the OWASP rules would break). Only meaningful
+          when appsec is enabled.
+        '';
+      };
     };
 
     anubis = {
