@@ -175,8 +175,10 @@ in {
         timeout = "60s";
       };
 
-      # Everything internal demands two_factor (password from lldap + FIDO2).
-      # auth.lsck0.dev is bypassed so the portal itself is reachable to log in.
+      # Everything internal demands two_factor (lldap password + TOTP/FIDO2).
+      # Single-user lab: any authenticated user is allowed — no group match
+      # required (a group:admins rule that lldap didn't resolve caused a
+      # deny→re-auth redirect loop). auth.lsck0.dev is bypassed to log in.
       access_control = {
         default_policy = "deny";
         rules = [
@@ -186,7 +188,6 @@ in {
           }
           {
             domain = [ "*.lsck0.dev" "lsck0.dev" ];
-            subject = [ "group:admins" ];
             policy = "two_factor";
           }
         ];

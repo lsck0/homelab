@@ -11,7 +11,7 @@ let
     "paperless" "paperless-ai" "hass" "jellyfin" "status" "huginn" "tasks"
     "hermes" "grafana" "wiki" "abs" "torrent" "music" "read" "prowlarr"
     "sonarr" "radarr" "nas" "proxmox" "traefik" "lldap" "attic" "budget"
-    "requests" "subs" "firefly" "smb" "sync" "sccache"
+    "requests" "subs" "firefly" "sync"
   ];
   # Unproxied (raw WAN IP) — L4 services CF can't proxy, plus a DNS-only
   # wildcard fallback kept fresh so no unlisted name goes stale.

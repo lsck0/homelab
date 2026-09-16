@@ -89,7 +89,30 @@
             { source_labels = [ "__journal__hostname" ]; target_label = "host"; }
             { source_labels = [ "__journal_priority_keyword" ]; target_label = "level"; }
           ];
-        }];
+        }]
+        # On the Traefik VMs, also ship the JSON access log with the client's
+        # country (Cloudflare's Cf-Ipcountry) so Grafana can draw the world map.
+        ++ lib.optional (config.homelab.traefik.enable or false) {
+          job_name = "traefik-access";
+          static_configs = [{
+            targets = [ "localhost" ];
+            labels = {
+              job = "traefik-access";
+              host = config.networking.hostName;
+              "__path__" = "/var/log/traefik/access.log";
+            };
+          }];
+          pipeline_stages = [
+            { json.expressions = {
+                country = "\"request_Cf-Ipcountry\"";
+                status = "DownstreamStatus";
+                method = "RequestMethod";
+                service = "ServiceName";
+              };
+            }
+            { labels = { country = ""; status = ""; method = ""; }; }
+          ];
+        };
       };
     };
 
