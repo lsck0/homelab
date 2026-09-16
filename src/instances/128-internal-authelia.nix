@@ -178,7 +178,7 @@ in {
         remember_me = "1M";
         cookies = [{
           domain = "lsck0.dev";
-          authelia_url = "https://auth2.lsck0.dev";
+          authelia_url = "https://auth.lsck0.dev";
           default_redirection_url = "https://homepage.lsck0.dev";
         }];
       };

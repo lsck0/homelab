@@ -36,14 +36,10 @@ let
             widget:
               type: traefik
               url: http://10.100.0.100:8080
-        - Authentik:
-            icon: authentik
+        - Authelia:
+            icon: authelia
             href: https://auth.lsck0.dev
-            ping: http://10.100.0.101
-            widget:
-              type: authentik
-              url: http://10.100.0.101
-              key: "{{HOMEPAGE_VAR_AUTHENTIK_KEY}}"
+            ping: http://10.100.0.128:9091
         - Grafana:
             icon: grafana
             href: https://grafana.lsck0.dev

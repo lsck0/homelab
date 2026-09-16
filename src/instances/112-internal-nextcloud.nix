@@ -68,7 +68,7 @@
         $OCC user_oidc:provider authentik \
           --clientid="nextcloud" \
           --clientsecret="$OIDC_SECRET" \
-          --discoveryuri="https://auth.lsck0.dev/application/o/nextcloud/.well-known/openid-configuration" \
+          --discoveryuri="https://auth.lsck0.dev/.well-known/openid-configuration" \
           --mapping-uid="preferred_username" \
           --mapping-display-name="name" \
           --mapping-email="email" \

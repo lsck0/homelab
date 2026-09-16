@@ -1,5 +1,22 @@
-{ ... }: {
+{ config, pkgs, ... }: {
   networking.hostName = "vm-126";
+
+  # NVIDIA RTX 2060 (Turing) passed through from the host (see main.tf hostpci).
+  # CUDA packages are unfree.
+  nixpkgs.config.allowUnfree = true;
+  # videoDrivers loads the kernel module even on a headless box; nouveau must be
+  # out of the way for the proprietary driver to bind.
+  services.xserver.videoDrivers = [ "nvidia" ];
+  boot.blacklistedKernelModules = [ "nouveau" ];
+  hardware.graphics.enable = true;
+  hardware.nvidia = {
+    modesetting.enable = true;
+    nvidiaSettings = false;
+    # Turing supports the open kernel modules, but the proprietary build is the
+    # safe default for a compute-only card.
+    open = false;
+    package = config.boot.kernelPackages.nvidiaPackages.stable;
+  };
 
   # Local inference endpoint for homelab agents. Serves NousResearch Hermes 3
   # over Ollama's OpenAI-compatible API, so any client that speaks OpenAI can
@@ -13,10 +30,8 @@
     port = 11434;
     openFirewall = true;
 
-    # No GPU is passed through to this VM yet, so inference runs on CPU and is
-    # slow — usable for batch work like Paperless tagging, painful for chat.
-    # Set this to "cuda" or "rocm" once a card is passed through.
-    acceleration = false;
+    # RTX 2060 passed through — run inference on CUDA.
+    acceleration = "cuda";
 
     loadModels = [ "hermes3:8b" ];
     # Drop models declared here but no longer wanted, so the disk does not

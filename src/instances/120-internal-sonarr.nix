@@ -25,7 +25,7 @@
     "d /var/lib/sonarr 0750 1000 1000 -"
   ];
 
-  # Disable built-in auth — authentik ForwardAuth handles access control
+  # Disable built-in auth — authelia ForwardAuth handles access control
   systemd.services.sonarr-disable-auth = {
     description = "Disable Sonarr built-in auth";
     after = [ "podman-sonarr.service" ];

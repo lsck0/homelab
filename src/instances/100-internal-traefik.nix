@@ -2,20 +2,11 @@
 let
   ip = id: "http://10.100.0.${id}:80";
 
-  # Which SSO gateway guards the protected routes. Both run side by side, so
-  # switching is a one-word change and rolling back costs one redeploy.
-  #
-  # Authentik (vm-101) needs Postgres, Redis, a server and a worker, and holds
-  # 4 GB. Authelia (vm-128) is a single Go process in about 100 MB.
-  #
-  # Before switching to "authelia":
-  #   1. Deploy vm-128 and log in once at auth2.lsck0.dev to confirm the
-  #      generated user database works.
-  #   2. Repoint the Nextcloud, Vaultwarden and Forgejo OIDC clients at
-  #      https://auth2.lsck0.dev — the client secrets are unchanged, only the
-  #      issuer moves.
-  #   3. Re-enrol TOTP. Authelia cannot read Authentik's enrolments.
-  sso = "authentik";
+  # SSO gateway guarding the protected routes. Authelia (vm-128) replaced
+  # Authentik: a single Go process in ~100 MB instead of Postgres + Redis +
+  # server + worker at 4 GB. It serves both ForwardAuth (this middleware) and
+  # OIDC (Nextcloud/Vaultwarden/Forgejo) at auth.lsck0.dev.
+  sso = "authelia";
 in {
   networking.hostName = "vm-100";
 
@@ -24,21 +15,6 @@ in {
 
   homelab.traefik = {
     enable = true;
-
-    middlewares.authentik = {
-      forwardAuth = {
-        address = "https://10.100.0.101:443/outpost.goauthentik.io/auth/traefik";
-        tls = { insecureSkipVerify = true; };
-        trustForwardHeader = true;
-        authResponseHeaders = [
-          "X-authentik-username"
-          "X-authentik-groups"
-          "X-authentik-email"
-          "X-authentik-name"
-          "X-authentik-uid"
-        ];
-      };
-    };
 
     middlewares.authelia = {
       forwardAuth = {
@@ -54,8 +30,7 @@ in {
     };
 
     routers = {
-      authentik-tls      = { rule = "Host(`auth.lsck0.dev`)";       service = "authentik";       entryPoints = [ "websecure" ]; };
-      authelia-tls       = { rule = "Host(`auth2.lsck0.dev`)";      service = "authelia";        entryPoints = [ "websecure" ]; };
+      authelia-tls       = { rule = "Host(`auth.lsck0.dev`)";       service = "authelia";        entryPoints = [ "websecure" ]; };
       traefik-dash-tls   = { rule = "Host(`traefik.lsck0.dev`)";    service = "api@internal";    entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       homepage-tls       = { rule = "Host(`homepage.lsck0.dev`)";   service = "homepage";        entryPoints = [ "websecure" ]; };
       uptime-kuma-tls    = { rule = "Host(`status.lsck0.dev`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; };
@@ -88,7 +63,6 @@ in {
     };
 
     services = {
-      authentik.loadBalancer.servers       = [{ url = ip "101"; }];
       authelia.loadBalancer.servers        = [{ url = "http://10.100.0.128:9091"; }];
       homepage.loadBalancer.servers        = [{ url = ip "102"; }];
       uptime-kuma.loadBalancer.servers      = [{ url = ip "104"; }];

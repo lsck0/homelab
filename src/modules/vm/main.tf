@@ -38,12 +38,36 @@ variable "enabled" {
   type    = bool
   default = true
 }
+variable "machine" {
+  type    = string
+  default = null # bpg default (i440fx); PCIe passthrough needs "q35"
+}
+variable "hostpci" {
+  # Proxmox hardware-mapping names to pass through, e.g. ["gpu"]. Mappings are
+  # used instead of raw PCI IDs because a Proxmox API token — even an
+  # Administrator one — may not set a raw hostpci ("only root can set hostpci
+  # config for non-mapped devices"); a mapped device is allowed. Requires
+  # machine = "q35" and the host bound to vfio-pci for the mapped devices.
+  type    = list(string)
+  default = []
+}
 
 resource "proxmox_virtual_environment_vm" "this" {
   name      = var.name
   node_name = var.target_node
   vm_id     = var.vm_id
   started   = var.enabled
+  machine   = var.machine
+
+  # One hostpciN entry per passed-through mapping.
+  dynamic "hostpci" {
+    for_each = var.hostpci
+    content {
+      device  = "hostpci${hostpci.key}"
+      mapping = hostpci.value
+      pcie    = true
+    }
+  }
 
   lifecycle {
     ignore_changes = [

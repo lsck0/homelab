@@ -22,7 +22,7 @@
       SHOW_PASSWORD_HINT = false;
       SSO_ENABLED = true;
       SSO_CLIENT_ID = "vaultwarden";
-      SSO_AUTHORITY = "https://auth.lsck0.dev/application/o/vaultwarden/";
+      SSO_AUTHORITY = "https://auth.lsck0.dev";
       SSO_PKCE = true;
       SSO_SIGNUPS_MATCH_EMAIL = true;
     };

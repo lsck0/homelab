@@ -78,7 +78,7 @@
       done
 
       OIDC_SECRET=$(cat ${config.sops.secrets.forgejo-oidc-secret.path})
-      DISCOVER_URL="https://auth.lsck0.dev/application/o/forgejo-oidc/.well-known/openid-configuration"
+      DISCOVER_URL="https://auth.lsck0.dev/.well-known/openid-configuration"
 
       # Check if auth source already exists via CLI
       AUTH_ID=$(podman exec -u git forgejo forgejo admin auth list 2>/dev/null \

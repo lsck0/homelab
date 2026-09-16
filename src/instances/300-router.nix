@@ -144,7 +144,7 @@
       lsck0.dev:53 {
         hosts {
           # internal services → internal Traefik
-          10.100.0.100 auth.lsck0.dev auth2.lsck0.dev homepage.lsck0.dev git.lsck0.dev registry.lsck0.dev
+          10.100.0.100 auth.lsck0.dev homepage.lsck0.dev git.lsck0.dev registry.lsck0.dev
           10.100.0.100 cloud.lsck0.dev vault.lsck0.dev paperless.lsck0.dev paperless-ai.lsck0.dev
           10.100.0.100 hass.lsck0.dev jellyfin.lsck0.dev status.lsck0.dev
           10.100.0.100 huginn.lsck0.dev tasks.lsck0.dev hermes.lsck0.dev cal.lsck0.dev

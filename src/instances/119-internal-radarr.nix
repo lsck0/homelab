@@ -25,7 +25,7 @@
     "d /var/lib/radarr 0750 1000 1000 -"
   ];
 
-  # Disable built-in auth — authentik ForwardAuth handles access control
+  # Disable built-in auth — authelia ForwardAuth handles access control
   systemd.services.radarr-disable-auth = {
     description = "Disable Radarr built-in auth";
     after = [ "podman-radarr.service" ];
