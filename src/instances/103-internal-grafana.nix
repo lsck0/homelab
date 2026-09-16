@@ -237,7 +237,10 @@ in {
                   datasourceUid = "prometheus";
                   model = {
                     refId = "A";
-                    expr = "up{job=\"homelab-node-exporter\"}";
+                    # Only real VMs: currently down AND up at some point in the
+                    # last 6h. Prometheus statically scrapes the whole /24, so
+                    # without this the rule fires for ~480 phantom IPs.
+                    expr = "up{job=\"homelab-node-exporter\"} == 0 and max_over_time(up{job=\"homelab-node-exporter\"}[6h]) > 0";
                     instant = true;
                   };
                 }
@@ -248,8 +251,9 @@ in {
                     refId = "C";
                     type = "threshold";
                     expression = "A";
+                    # A returns 1 for a real, currently-down target; fire on that.
                     conditions = [{
-                      evaluator = { type = "lt"; params = [ 1 ]; };
+                      evaluator = { type = "gt"; params = [ 0 ]; };
                     }];
                   };
                 }
