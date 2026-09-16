@@ -257,6 +257,41 @@ in {
               for = "5m";
               labels.severity = "critical";
               annotations.summary = "{{ $labels.instance }} node-exporter is down";
+            }
+            {
+              uid = "backup_stale";
+              title = "NAS backup stale (dead-man)";
+              condition = "C";
+              # No successful daily backup for > 26h. no_data also fires, so a
+              # backup box that stopped publishing the metric is caught too.
+              data = [
+                {
+                  refId = "A";
+                  relativeTimeRange = { from = 600; to = 0; };
+                  datasourceUid = "prometheus";
+                  model = {
+                    refId = "A";
+                    expr = "time() - max(homelab_backup_last_success_timestamp_seconds{type=\"daily\"})";
+                    instant = true;
+                  };
+                }
+                {
+                  refId = "C";
+                  datasourceUid = "__expr__";
+                  model = {
+                    refId = "C";
+                    type = "threshold";
+                    expression = "A";
+                    conditions = [{
+                      evaluator = { type = "gt"; params = [ 93600 ]; };
+                    }];
+                  };
+                }
+              ];
+              for = "10m";
+              noDataState = "Alerting";
+              labels.severity = "critical";
+              annotations.summary = "NAS daily backup has not succeeded in over 26h";
             }];
           }];
         };
