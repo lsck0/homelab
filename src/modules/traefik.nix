@@ -305,12 +305,23 @@ in {
         # blocklist. The file is bind-mounted into the crowdsec container.
         accessLog.filePath = "/var/log/traefik/access.log";
         api.dashboard = true;
+        # Prometheus metrics on a dedicated entrypoint (:8082), scraped by
+        # vm-103. Per-entrypoint/router/service labels drive the HTTP analytics
+        # dashboard (request rate, status codes, latency percentiles) with a
+        # service filter. Loopback+LAN only; not exposed publicly.
+        metrics.prometheus = {
+          entryPoint = "metrics";
+          addEntryPointsLabels = true;
+          addRoutersLabels = true;
+          addServicesLabels = true;
+        };
         entryPoints = {
           web = {
             address = ":80";
             http.redirections.entryPoint = { to = "websecure"; scheme = "https"; permanent = true; };
           };
           websecure.address = ":443";
+          metrics.address = ":8082";
         } // cfg.entryPoints;
         certificatesResolvers.cloudflare.acme = {
           email = config.homelab.acmeEmail;
@@ -356,6 +367,8 @@ in {
       };
     }) cfg.anubis.instances);
 
-    networking.firewall.allowedTCPPorts = [ 80 443 ];
+    # 8082 = Prometheus metrics, scraped by vm-103. Not port-forwarded, so it
+    # stays on the LAN/DMZ; the internet never reaches it.
+    networking.firewall.allowedTCPPorts = [ 80 443 8082 ];
   };
 }
