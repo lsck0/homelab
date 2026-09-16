@@ -53,7 +53,14 @@
     services.prometheus.exporters.node = {
       enable = true;
       openFirewall = true;
+      # Textfile collector lets services publish their own metrics (e.g. the
+      # backup writes a last-success timestamp here for the dead-man alert).
+      enabledCollectors = [ "textfile" ];
+      extraFlags = [ "--collector.textfile.directory=/var/lib/node-exporter-textfile" ];
     };
+    systemd.tmpfiles.rules = [
+      "d /var/lib/node-exporter-textfile 0755 root root -"
+    ];
     networking.firewall.allowedTCPPorts = [ 9100 ];
 
     # Ship every VM's journal to Loki on vm-103. The `host` label (from the
