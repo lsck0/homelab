@@ -15,6 +15,9 @@ in {
     configuration = {
       auth_enabled = false;
       server.http_listen_port = 3100;
+      # Tempo also runs on this VM and defaults its gRPC to 9095; move Loki's
+      # off it to avoid "bind: address already in use".
+      server.grpc_listen_port = 9096;
       common = {
         instance_addr = "127.0.0.1";
         ring.kvstore.store = "inmemory";
