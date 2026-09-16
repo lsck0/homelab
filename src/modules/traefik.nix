@@ -45,20 +45,30 @@ let
   # key never lands in the world-readable Nix store. In "live" mode the plugin
   # fails open if the local API is briefly unreachable, so a crowdsec hiccup
   # cannot take the whole ingress down.
-  bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable {
-    crowdsec.plugin.crowdsec-bouncer = {
+  mkBouncer = appsec: {
+    plugin.crowdsec-bouncer = {
       enabled = true;
       crowdsecMode = "live";
       crowdsecLapiScheme = "http";
       crowdsecLapiHost = "127.0.0.1:8180";
       crowdsecLapiKeyFile = config.sops.secrets.crowdsec-bouncer-key.path;
-      crowdsecAppsecEnabled = cfg.crowdsecBouncer.appsec;
+      crowdsecAppsecEnabled = appsec;
       crowdsecAppsecHost = "127.0.0.1:7422";
       # Trust the router/Cloudflare hop so the plugin bans the real client IP
       # from X-Forwarded-For, not the proxy in front of it.
       forwardedHeadersTrustedIPs = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
     };
   };
+
+  # Two bouncer middlewares: the default enforces IP reputation + (optionally)
+  # AppSec/WAF; the "-noappsec" variant keeps the IP bouncer but skips WAF
+  # inspection, for routes whose protocol the OWASP rules would break
+  # (headscale control plane, ntfy push API). Only emitted when the bouncer is on.
+  bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable ({
+    crowdsec = mkBouncer cfg.crowdsecBouncer.appsec;
+  } // lib.optionalAttrs cfg.crowdsecBouncer.appsec {
+    crowdsec-noappsec = mkBouncer false;
+  });
 
   # Default middleware chain prepended to every websecure router, in order:
   # bouncer first (drop known-bad IPs before any work), then per-IP limits, then
@@ -80,9 +90,17 @@ let
         else
           router;
       wantsDefaults = needsTls && !(builtins.elem name cfg.noSecureHeaders);
+      # Routes opted out of AppSec use the WAF-free bouncer variant but keep
+      # every other default middleware (IP bouncer, rate limits, headers).
+      chain =
+        if cfg.crowdsecBouncer.enable
+           && cfg.crowdsecBouncer.appsec
+           && builtins.elem name cfg.crowdsecBouncer.noAppsecRouters
+        then map (m: if m == "crowdsec" then "crowdsec-noappsec" else m) defaultMiddlewares
+        else defaultMiddlewares;
     in
     if wantsDefaults then
-      withTls // { middlewares = defaultMiddlewares ++ (withTls.middlewares or []); }
+      withTls // { middlewares = chain ++ (withTls.middlewares or []); }
     else
       withTls
   ) cfg.routers;
