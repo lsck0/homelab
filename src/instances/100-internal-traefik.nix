@@ -63,6 +63,7 @@ in {
       lldap-tls          = { rule = "Host(`lldap.lsck0.dev`)";      service = "lldap";           entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       actual-tls         = { rule = "Host(`budget.lsck0.dev`)";     service = "actual";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       jellyseerr-tls     = { rule = "Host(`requests.lsck0.dev`)";   service = "jellyseerr";      entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
+      bazarr-tls         = { rule = "Host(`subs.lsck0.dev`)";       service = "bazarr";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       # No SSO: nix clients authenticate to attic with their own token.
       attic-tls          = { rule = "Host(`attic.lsck0.dev`)";      service = "attic";           entryPoints = [ "websecure" ]; };
       proxmox-tls        = { rule = "Host(`proxmox.lsck0.dev`)";    service = "proxmox";         entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
@@ -99,6 +100,7 @@ in {
       lldap.loadBalancer.servers            = [{ url = "http://10.100.0.133:17170"; }];
       actual.loadBalancer.servers           = [{ url = ip "135"; }];
       jellyseerr.loadBalancer.servers       = [{ url = ip "136"; }];
+      bazarr.loadBalancer.servers           = [{ url = ip "137"; }];
       attic.loadBalancer.servers            = [{ url = "http://10.100.0.131:8080"; }];
       proxmox.loadBalancer.servers          = [{ url = "https://192.168.178.200:8006"; }];
       proxmox.loadBalancer.serversTransport = "proxmox-transport";
