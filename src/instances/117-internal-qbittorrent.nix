@@ -22,7 +22,7 @@
     };
   };
 
-  # Disable built-in auth — authentik ForwardAuth handles access control
+  # Disable built-in auth — authelia ForwardAuth handles access control
   systemd.services.qbittorrent-disable-auth = {
     description = "Disable qBittorrent built-in auth";
     after = [ "podman-qbittorrent.service" ];

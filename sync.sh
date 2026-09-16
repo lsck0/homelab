@@ -112,12 +112,28 @@ ssh-keyscan -p "$PROXMOX_SSH_PORT" -H "$PROXMOX_SSH_HOST" >> "$HOME/.ssh/known_h
   || { echo "ERROR: Cannot reach Proxmox at $PROXMOX_SSH_HOST:$PROXMOX_SSH_PORT"; exit 1; }
 
 SSH_CONFIG="$(mktemp --suffix=.ssh_config)"; CLEANUP_FILES+=("$SSH_CONFIG")
-cat > "$SSH_CONFIG" <<EOF
+
+# The router is a bastion for the 10.x subnets, but when the deployer already
+# has a route to them (e.g. the LAN gateway routes 10.100.0.0/24 to the router),
+# jumping through the router's single SSH -W forward just serializes every
+# closure copy through one powersave CPU. Probe a directly-routed hop first and
+# only fall back to the ProxyCommand when the subnet is not reachable directly.
+if timeout 4 bash -c "echo > /dev/tcp/10.100.0.100/22" 2>/dev/null; then
+  echo ">>> Internal subnet directly routable — deploying without the router bastion."
+  cat > "$SSH_CONFIG" <<EOF
+Host 10.*
+  StrictHostKeyChecking accept-new
+  UserKnownHostsFile /dev/null
+EOF
+else
+  echo ">>> Internal subnet not directly routable — deploying through the router bastion."
+  cat > "$SSH_CONFIG" <<EOF
 Host 10.*
   ProxyCommand $(command -v ssh) -F $SSH_CONFIG -o StrictHostKeyChecking=accept-new -W %h:%p root@$ROUTER_WAN_IP
   StrictHostKeyChecking accept-new
   UserKnownHostsFile /dev/null
 EOF
+fi
 BASTION_SSHOPTS=(-F "$SSH_CONFIG")
 export NIX_SSHOPTS="-F $SSH_CONFIG"
 

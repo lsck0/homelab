@@ -1,3 +1,11 @@
+terraform {
+  required_providers {
+    proxmox = {
+      source = "bpg/proxmox"
+    }
+  }
+}
+
 variable "target_node" { type = string }
 variable "proxmox_datastore" { type = string }
 variable "ssh_public_key" { type = string }
@@ -14,7 +22,6 @@ locals {
   instances = {
     # ── internal ──
     "100" = { name = "100-internal-traefik", type = "internal" }
-    "101" = { name = "101-internal-authentik", type = "internal", memory = 4096 }
     "102" = { name = "102-internal-homepage", type = "internal" }
     "103" = { name = "103-internal-grafana", type = "internal", enabled = false }
     "104" = { name = "104-internal-uptime-kuma", type = "internal" }
@@ -39,9 +46,14 @@ locals {
     "123" = { name = "123-internal-navidrome", type = "internal", enabled = false }
     "124" = { name = "124-internal-kavita", type = "internal", enabled = false }
     "125" = { name = "125-internal-paperless-ai", type = "internal", memory = 2048, enabled = false }
-    "126" = { name = "126-internal-hermes", type = "internal", memory = 12288, cores = 8, disk = 60, enabled = false }
+    # RTX 2060 (TU106) passthrough via the "gpu" hardware mapping below.
+    # Needs q35 and the host bound to vfio-pci (see scripts/pve-install.sh).
+    # Only the GPU function is assigned; the rest of the IOMMU group is held by
+    # vfio-pci on the host so the group stays viable. Compute only, no HDMI audio.
+    "126" = { name = "126-internal-hermes", type = "internal", memory = 12288, cores = 8, disk = 60, enabled = false,
+              machine = "q35", hostpci = ["gpu"] }
     "127" = { name = "127-internal-tor-router", type = "internal", enabled = false }
-    "128" = { name = "128-internal-authelia", type = "internal", enabled = false }
+    "128" = { name = "128-internal-authelia", type = "internal" }
     "129" = { name = "129-internal-calendar", type = "internal", enabled = false }
     # ── external ──
     "200" = { name = "200-external-traefik", type = "external" }
@@ -58,9 +70,23 @@ locals {
   }
 }
 
+# PCI hardware mapping for the RTX 2060. A mapping (not a raw PCI id) is what
+# lets the Terraform API token attach the GPU to a VM; raw hostpci is root-only.
+resource "proxmox_virtual_environment_hardware_mapping_pci" "gpu" {
+  name = "gpu"
+  map = [{
+    node = var.target_node
+    id   = "10de:1f08"
+    path = "0000:2b:00.0"
+  }]
+}
+
 module "vm" {
   source   = "../modules/vm"
   for_each = local.instances
+
+  # The GPU mapping must exist before a VM can reference it by name.
+  depends_on = [proxmox_virtual_environment_hardware_mapping_pci.gpu]
 
   vm_id        = tonumber(each.key)
   name         = each.value.name
@@ -72,6 +98,8 @@ module "vm" {
   enabled      = try(each.value.enabled, true)
   image_id     = var.nixos_image_id
   ssh_key      = var.ssh_public_key
+  machine      = try(each.value.machine, null)
+  hostpci      = try(each.value.hostpci, [])
 
   bridge = (
     each.value.type == "router" ? var.wan_bridge :

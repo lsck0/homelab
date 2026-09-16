@@ -161,7 +161,7 @@
     "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
   ];
 
-  # FileBrowser web UI — authentik handles auth via traefik
+  # FileBrowser web UI — authelia handles auth via traefik
   virtualisation.oci-containers.containers.filebrowser = {
     image = "filebrowser/filebrowser:latest";
     ports = [ "80:8080" ];

@@ -116,6 +116,19 @@ in {
       "d /var/log/traefik 0750 root root -"
     ];
 
+    # lego (Traefik's ACME client) refuses to load acme.json if it is more
+    # permissive than 0600 and silently drops the whole cloudflare resolver:
+    #   "permissions 604 for .../acme.json are too open, please use 600"
+    # every router then reports "nonexistent certificate resolver" and falls
+    # back to the default self-signed cert. The store lives on the 0777 NFS
+    # share, which is how it ended up 604, so tighten it on every start.
+    systemd.services.traefik.preStart = ''
+      f=/var/lib/traefik/acme/acme.json
+      if [ -e "$f" ]; then
+        ${pkgs.coreutils}/bin/chmod 600 "$f"
+      fi
+    '';
+
     services.traefik = {
       enable = true;
       environmentFiles = [ config.sops.templates."traefik.env".path ];

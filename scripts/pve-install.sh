@@ -67,6 +67,41 @@ fi
 
 ifreload -a || true
 
+# ── GPU passthrough (NVIDIA RTX 2060 / TU106) ────────────────────────────────
+# Bind the GPU and its HDMI-audio function to vfio-pci so a VM can claim them.
+# Whole IOMMU group must be bound to vfio-pci for the group to be assignable,
+# even though only the VGA function is assigned to the VM:
+#   10de:1f08 VGA, 10de:10f9 audio, 10de:1ada USB, 10de:1adb UCSI.
+# Idempotent; needs a reboot.
+GPU_IDS="10de:1f08,10de:10f9,10de:1ada,10de:1adb"
+
+# AMD host: enable the IOMMU in passthrough mode on the GRUB kernel cmdline.
+if ! grep -q "amd_iommu=on" /etc/default/grub; then
+    echo ">>> Enabling IOMMU on kernel cmdline..."
+    sed -i 's/\(GRUB_CMDLINE_LINUX_DEFAULT="[^"]*\)"/\1 amd_iommu=on iommu=pt"/' /etc/default/grub
+    UPDATE_BOOT=1
+fi
+
+# Load the vfio stack at boot.
+if [ ! -f /etc/modules-load.d/vfio.conf ]; then
+    printf 'vfio\nvfio_iommu_type1\nvfio_pci\n' > /etc/modules-load.d/vfio.conf
+    UPDATE_BOOT=1
+fi
+
+# Claim the GPU for vfio-pci and keep the host's nouveau/nvidia drivers off it.
+if [ ! -f /etc/modprobe.d/vfio.conf ]; then
+    echo "options vfio-pci ids=${GPU_IDS}" > /etc/modprobe.d/vfio.conf
+    printf 'blacklist nouveau\nblacklist nvidia\nblacklist nvidiafb\nblacklist snd_hda_intel\n' > /etc/modprobe.d/blacklist-gpu.conf
+    UPDATE_BOOT=1
+fi
+
+if [ "${UPDATE_BOOT:-0}" = "1" ]; then
+    echo ">>> Updating GRUB + initramfs for GPU passthrough (reboot required)..."
+    update-initramfs -u -k all >/dev/null 2>&1 || true
+    update-grub >/dev/null 2>&1 || true
+    echo ">>> GPU passthrough staged. REBOOT the Proxmox host to bind vfio-pci."
+fi
+
 # Proxmox host metrics exporter for Prometheus/Grafana.
 export DEBIAN_FRONTEND=noninteractive
 apt-get update >/dev/null
