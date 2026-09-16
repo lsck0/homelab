@@ -346,27 +346,11 @@ in {
     };
   };
 
-  environment.etc = {
-    "grafana-dashboards/node-exporter.json" = {
-      source = ./dashboards/node-exporter.json;
-    };
-    "grafana-dashboards/homelab-overview.json" = {
-      source = ./dashboards/homelab-overview.json;
-    };
-    "grafana-dashboards/traefik-http.json" = {
-      source = ./dashboards/traefik-http.json;
-    };
-  };
+  # One consolidated board: world map + HTTP + system + logs.
+  environment.etc."grafana-dashboards/homelab.json".source = ./dashboards/homelab.json;
 
-  # Grafana's file provider only rescans reliably at startup, so a deploy that
-  # only changes a dashboard file (an /etc symlink) leaves it unloaded until the
-  # unit restarts. Tie the unit to the dashboard sources so it restarts when any
-  # of them change.
-  systemd.services.grafana.restartTriggers = [
-    ./dashboards/node-exporter.json
-    ./dashboards/homelab-overview.json
-    ./dashboards/traefik-http.json
-  ];
+  # Grafana's file provider only rescans at startup; restart when the dashboard changes.
+  systemd.services.grafana.restartTriggers = [ ./dashboards/homelab.json ];
 
   # 3100 Loki push, 3200 Tempo, 4317/4318 OTLP trace ingest, 9093 Alertmanager.
   networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 9093 ];
