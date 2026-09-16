@@ -79,7 +79,22 @@ let
         2>/dev/null || true
     ''}
 
-    # Dead-man's-switch: ping on success, /fail on any archive error.
+    # Dead-man's-switch metric: publish a last-success timestamp for the node
+    # exporter's textfile collector. A Grafana rule alerts (to ntfy) if this
+    # goes stale, catching a backup box that dies silently — no external
+    # service needed. Written atomically so a scrape never sees a half file.
+    if [ "$FAILED" -eq 0 ]; then
+      TFDIR=/var/lib/node-exporter-textfile
+      ${pkgs.coreutils}/bin/mkdir -p "$TFDIR"
+      {
+        echo "# HELP homelab_backup_last_success_timestamp_seconds Unix time of last successful NAS backup."
+        echo "# TYPE homelab_backup_last_success_timestamp_seconds gauge"
+        echo "homelab_backup_last_success_timestamp_seconds{type=\"$TYPE\"} $(${pkgs.coreutils}/bin/date +%s)"
+      } > "$TFDIR/nas_backup_$TYPE.prom.tmp"
+      ${pkgs.coreutils}/bin/mv "$TFDIR/nas_backup_$TYPE.prom.tmp" "$TFDIR/nas_backup_$TYPE.prom"
+    fi
+
+    # Optional external dead-man ping (healthchecks.io or self-hosted).
     ${lib.optionalString (cfg.healthcheckUrl != "") ''
       if [ "$FAILED" -eq 0 ]; then
         ${pkgs.curl}/bin/curl -fsS -m 15 "${cfg.healthcheckUrl}" >/dev/null 2>&1 || true
