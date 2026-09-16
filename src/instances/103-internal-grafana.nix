@@ -1,9 +1,22 @@
-{ lib, pkgs, nasMount, ... }:
+{ config, lib, pkgs, nasMount, ... }:
 let
   subnetTargets = subnet:
     builtins.map (host: "${subnet}.${toString host}:9100") (lib.range 1 254);
 in {
   networking.hostName = "vm-103";
+
+  # Telegram alerting. Bot token + chat id come from sops via an env file that
+  # Grafana reads; the provisioned contact point references them with
+  # $__env{...} so the secret never lands in the world-readable Nix store.
+  # Fill the two values with: sops src/secrets.json
+  sops.secrets.telegram-bot-token = {};
+  sops.secrets.telegram-chat-id = {};
+  sops.templates."grafana-telegram.env".content = ''
+    TELEGRAM_BOT_TOKEN=${config.sops.placeholder.telegram-bot-token}
+    TELEGRAM_CHAT_ID=${config.sops.placeholder.telegram-chat-id}
+  '';
+  systemd.services.grafana.serviceConfig.EnvironmentFile =
+    config.sops.templates."grafana-telegram.env".path;
 
   fileSystems = nasMount "/var/lib/grafana" "grafana"
     // nasMount "/var/lib/prometheus2" "prometheus"
@@ -150,6 +163,77 @@ in {
             options.path = "/etc/grafana-dashboards";
           }
         ];
+      };
+      alerting = {
+        contactPoints.settings = {
+          apiVersion = 1;
+          contactPoints = [{
+            orgId = 1;
+            name = "telegram";
+            receivers = [{
+              uid = "telegram_cp";
+              type = "telegram";
+              settings = {
+                bottoken = "$__env{TELEGRAM_BOT_TOKEN}";
+                chatid = "$__env{TELEGRAM_CHAT_ID}";
+              };
+              disableResolveMessage = false;
+            }];
+          }];
+        };
+        policies.settings = {
+          apiVersion = 1;
+          policies = [{
+            orgId = 1;
+            receiver = "telegram";
+            group_by = [ "grafana_folder" "alertname" ];
+            group_wait = "30s";
+            group_interval = "5m";
+            repeat_interval = "4h";
+          }];
+        };
+        rules.settings = {
+          apiVersion = 1;
+          groups = [{
+            orgId = 1;
+            name = "homelab";
+            folder = "Homelab";
+            interval = "1m";
+            rules = [{
+              uid = "instance_down";
+              title = "Instance down";
+              condition = "C";
+              # A node-exporter target that has been unreachable for 5m.
+              data = [
+                {
+                  refId = "A";
+                  relativeTimeRange = { from = 600; to = 0; };
+                  datasourceUid = "prometheus";
+                  model = {
+                    refId = "A";
+                    expr = "up{job=\"homelab-node-exporter\"}";
+                    instant = true;
+                  };
+                }
+                {
+                  refId = "C";
+                  datasourceUid = "__expr__";
+                  model = {
+                    refId = "C";
+                    type = "threshold";
+                    expression = "A";
+                    conditions = [{
+                      evaluator = { type = "lt"; params = [ 1 ]; };
+                    }];
+                  };
+                }
+              ];
+              for = "5m";
+              labels.severity = "critical";
+              annotations.summary = "{{ $labels.instance }} node-exporter is down";
+            }];
+          }];
+        };
       };
     };
   };
