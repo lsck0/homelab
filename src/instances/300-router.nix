@@ -1,12 +1,8 @@
 { config, pkgs, lib, ... }:
 let
-  # Every browser-facing *.lsck0.dev hostname gets a Cloudflare-PROXIED A record
-  # so it resolves to the Cloudflare edge (not the raw WAN IP). LAN clients then
-  # reach services through the edge without needing NAT hairpin, and remote
-  # clients work identically — no per-device DNS config anywhere. Traffic lands
-  # on WAN:443 → external Traefik, which serves the external services directly
-  # and relays every other (internal) host to the internal Traefik behind
-  # Authelia. Free-plan Cloudflare cannot proxy a wildcard, hence per-host.
+  # Cloudflare-PROXIED A records (per host — free plan can't proxy a wildcard):
+  # resolve to the edge, so LAN + remote both reach WAN:443 → external Traefik
+  # with no hairpin and no per-device DNS.
   proxiedHosts = [
     # external services (served directly by external Traefik)
     "hs" "search" "shlink" "paste" "share" "hello" "ntfy" "cal"
@@ -17,10 +13,8 @@ let
     "sonarr" "radarr" "nas" "proxmox" "traefik" "lldap" "attic" "budget"
     "requests" "subs" "firefly" "smb" "sync" "sccache"
   ];
-  # Records that must stay unproxied (raw WAN IP): Cloudflare only proxies
-  # HTTP(S). Minecraft (TCP), WireGuard (UDP) and the Tor ORPort are L4.
-  # The wildcard is kept fresh as a DNS-only fallback so an unlisted name never
-  # resolves to a stale IP (it previously pointed at an old WAN address).
+  # Unproxied (raw WAN IP) — L4 services CF can't proxy, plus a DNS-only
+  # wildcard fallback kept fresh so no unlisted name goes stale.
   rawHosts = [ "wg" "mc" "tor" "*" ];
   # domain:proxied entries the DDNS loop consumes.
   ddnsDomains = lib.concatStringsSep " " (
@@ -30,11 +24,8 @@ let
 in {
   networking.hostName = "luca-router";
 
-  # Advertise the hostname over mDNS on the FritzBox LAN. ens18 is a static IP
-  # (no DHCP), so the FritzBox never receives a DHCP hostname and shows the
-  # stale install-time name ("nixos"). Publishing luca-router.local via avahi on
-  # ens18 lets FRITZ!OS resolve and display the correct name. Restricted to
-  # ens18 so mDNS is not exposed on the internal/DMZ subnets.
+  # mDNS on ens18 only, so the FritzBox shows "luca-router" (ens18 is static, so
+  # it never sends a DHCP hostname and otherwise shows the install-time "nixos").
   services.avahi = {
     enable = true;
     allowInterfaces = [ "ens18" ];
