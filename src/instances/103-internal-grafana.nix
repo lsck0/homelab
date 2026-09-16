@@ -110,6 +110,14 @@ in {
             ];
         }];
       }
+      {
+        # Traefik's own Prometheus endpoint (:8082) on both ingresses. Feeds the
+        # HTTP analytics dashboard: request rate, status codes, latency.
+        job_name = "traefik";
+        static_configs = [{
+          targets = [ "10.100.0.100:8082" "10.200.0.200:8082" ];
+        }];
+      }
     ];
     # Prometheus-native alerting path (in addition to Grafana unified alerting).
     alertmanagers = [{ static_configs = [{ targets = [ "127.0.0.1:9093" ]; }]; }];
@@ -344,6 +352,9 @@ in {
     };
     "grafana-dashboards/homelab-overview.json" = {
       source = ./dashboards/homelab-overview.json;
+    };
+    "grafana-dashboards/traefik-http.json" = {
+      source = ./dashboards/traefik-http.json;
     };
   };
 
