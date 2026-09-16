@@ -111,6 +111,41 @@ in {
         }];
       }
     ];
+    # Prometheus-native alerting path (in addition to Grafana unified alerting).
+    alertmanagers = [{ static_configs = [{ targets = [ "127.0.0.1:9093" ]; }]; }];
+    rules = [ (builtins.toJSON {
+      groups = [{
+        name = "homelab";
+        rules = [{
+          alert = "InstanceDown";
+          # Only real VMs: down now, up sometime in the last 6h (the static /24
+          # scrape otherwise flags ~480 phantom IPs).
+          expr = "up{job=\"homelab-node-exporter\"} == 0 and max_over_time(up{job=\"homelab-node-exporter\"}[6h]) > 0";
+          for = "5m";
+          labels.severity = "critical";
+          annotations.summary = "{{ $labels.instance }} is down";
+        }];
+      }];
+    }) ];
+  };
+
+  # Alertmanager — routes Prometheus alerts to ntfy (vm-206, public).
+  services.prometheus.alertmanager = {
+    enable = true;
+    port = 9093;
+    configuration = {
+      route = {
+        receiver = "ntfy";
+        group_by = [ "alertname" ];
+        group_wait = "30s";
+        group_interval = "5m";
+        repeat_interval = "4h";
+      };
+      receivers = [{
+        name = "ntfy";
+        webhook_configs = [{ url = "https://ntfy.lsck0.dev/${ntfyAlertTopic}"; }];
+      }];
+    };
   };
 
   services.grafana = {
@@ -312,6 +347,6 @@ in {
     };
   };
 
-  # 3100 Loki push, 3200 Tempo, 4317/4318 OTLP trace ingest.
-  networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 ];
+  # 3100 Loki push, 3200 Tempo, 4317/4318 OTLP trace ingest, 9093 Alertmanager.
+  networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 9093 ];
 }
