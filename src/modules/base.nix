@@ -1,4 +1,4 @@
-{ pkgs, lib, modulesPath, ... }: {
+{ config, pkgs, lib, modulesPath, ... }: {
   imports = [
     (modulesPath + "/profiles/qemu-guest.nix")
     ./docker-stack.nix
@@ -55,6 +55,31 @@
       openFirewall = true;
     };
     networking.firewall.allowedTCPPorts = [ 9100 ];
+
+    # Ship every VM's journal to Loki on vm-103. The `host` label (from the
+    # journal hostname) is what lets a Grafana dashboard filter to a single VM.
+    # Runs everywhere except vm-103 itself, which would otherwise depend on its
+    # own Loki being up before it could log.
+    services.promtail = lib.mkIf (config.networking.hostName != "vm-103") {
+      enable = true;
+      configuration = {
+        server = { http_listen_port = 9080; grpc_listen_port = 0; };
+        positions.filename = "/var/lib/promtail/positions.yaml";
+        clients = [{ url = "http://10.100.0.103:3100/loki/api/v1/push"; }];
+        scrape_configs = [{
+          job_name = "journal";
+          journal = {
+            max_age = "12h";
+            labels = { job = "systemd-journal"; };
+          };
+          relabel_configs = [
+            { source_labels = [ "__journal__systemd_unit" ]; target_label = "unit"; }
+            { source_labels = [ "__journal__hostname" ]; target_label = "host"; }
+            { source_labels = [ "__journal_priority_keyword" ]; target_label = "level"; }
+          ];
+        }];
+      };
+    };
 
     # Prefer IPv4 — internal VMs have no IPv6 routing
     networking.enableIPv6 = false;
