@@ -142,15 +142,21 @@ in {
           RemainAfterExit = true;
         };
         script = ''
-          set -e
           # Wait for Docker daemon to accept API calls
           for i in $(seq 1 30); do
             docker info >/dev/null 2>&1 && break
             sleep 1
           done
-          if ! docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null | grep -q active; then
-            docker swarm init
+          # Self-heal: only an "active" swarm is usable. Any other state (a stale
+          # "pending"/"locked" swarm after a reboot makes `swarm init` fail with
+          # "already part of a swarm") is reset. Never fail the unit — the stack
+          # service surfaces real errors.
+          state=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || echo unknown)
+          if [ "$state" != "active" ]; then
+            docker swarm leave --force >/dev/null 2>&1 || true
+            docker swarm init >/dev/null 2>&1 || true
           fi
+          exit 0
         '';
       };
     })

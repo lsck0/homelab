@@ -38,19 +38,27 @@
       "datasource": { "type": "loki", "uid": "loki" },
       "gridPos": { "h": 11, "w": 16, "x": 0, "y": 1 },
       "targets": [{ "refId": "A", "expr": "sum by (country) (count_over_time({job=\"traefik-access\", country=~\".+\"} [$__range]))", "instant": true }],
+      "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "continuous-YlOrRd" } } },
       "options": {
-        "view": { "id": "zero", "lat": 20, "lon": 0, "zoom": 1.5 },
-        "basemap": { "type": "default", "name": "Basemap" },
+        "view": { "id": "zero", "lat": 25, "lon": 10, "zoom": 1.6 },
+        "basemap": { "type": "osm-standard", "name": "OpenStreetMap" },
+        "controls": { "showZoom": true, "showAttribution": true, "showScale": false, "mouseWheelZoom": true, "showLegend": true },
+        "tooltip": { "mode": "details" },
         "layers": [
           {
             "type": "markers",
             "name": "By country",
             "location": { "mode": "lookup", "lookup": "country", "gazetteer": "public/gazetteer/countries.json" },
+            "tooltip": true,
             "config": {
+              "showLegend": true,
               "style": {
-                "size": { "field": "Value", "min": 4, "max": 30 },
-                "color": { "field": "Value", "fixed": "dark-red" },
-                "opacity": 0.6
+                "size": { "field": "Value", "fixed": 5, "min": 6, "max": 40 },
+                "color": { "field": "Value" },
+                "opacity": 0.75,
+                "symbol": { "mode": "fixed", "fixed": "img/icons/marker/circle.svg" },
+                "textConfig": { "fontSize": 12, "offsetY": -14, "textAlign": "center", "textBaseline": "middle" },
+                "text": { "field": "country" }
               }
             }
           }
