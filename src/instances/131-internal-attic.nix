@@ -1,14 +1,14 @@
-{ config, nasMount, ... }: {
+{ config, ... }: {
   networking.hostName = "vm-131";
 
   # Attic: a Nix binary cache shared across every VM and the Forgejo runner, so
   # a closure built once (during a deploy) is fetched, not rebuilt, everywhere
   # else. sccache only covers Rust; this covers all Nix builds.
   #
-  # Chunks live on the NAS (large, and worth backing up); the sqlite metadata
-  # db stays on local disk to avoid NFS locking issues.
-  fileSystems = nasMount "/var/lib/atticd/storage" "attic";
-
+  # Storage is on the VM's local 40 GB disk. atticd runs under a DynamicUser
+  # StateDirectory, and mounting NFS inside that dir fails with "Device or
+  # resource busy" (the id-mapped mount clashes); a NAS stall would also wedge
+  # the cache. Local disk sidesteps both.
   sops.secrets.attic-server-token = {};
   sops.templates."atticd.env".content = ''
     ATTIC_SERVER_TOKEN_HS256_SECRET_BASE64=${config.sops.placeholder.attic-server-token}
@@ -20,6 +20,7 @@
     settings = {
       listen = "0.0.0.0:8080";
       database.url = "sqlite:///var/lib/atticd/db.sqlite?mode=rwc";
+      # Under atticd's StateDirectory (/var/lib/atticd), created automatically.
       storage = {
         type = "local";
         path = "/var/lib/atticd/storage";
@@ -33,10 +34,6 @@
       };
     };
   };
-
-  systemd.tmpfiles.rules = [
-    "d /var/lib/atticd 0750 atticd atticd -"
-  ];
 
   networking.firewall.allowedTCPPorts = [ 8080 ];
 }
