@@ -1,1 +1,0 @@
-baseline: /random -> HTTP 500 (39 bytes, variance 2) | /.well-known/random -> HTTP 500 | catch-all=0

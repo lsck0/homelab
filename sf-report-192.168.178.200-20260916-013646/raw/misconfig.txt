@@ -1,7 +1,0 @@
-== CORS ==
-
-== Host-header injection ==
-
-== Cache poisoning (unkeyed input) ==
-
-== .well-known / security.txt ==
