@@ -39,6 +39,15 @@ in {
   homelab.traefik = {
     enable = true;
 
+    # Deny public access to internal-only services that have no auth of their own
+    # and are headless (so Authelia's browser redirect can't gate them). Requests
+    # here arrive from the Cloudflare edge (a public peer), so an ipAllowList of
+    # private ranges rejects every public hit; LAN/VPN clients reach these via
+    # split-horizon straight to the internal Traefik and never touch this box.
+    middlewares.internal-only.ipAllowList.sourceRange = [
+      "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16"
+    ];
+
     # Public-facing ingress: turn CrowdSec from log-only into an enforcing
     # bouncer (community blocklist + local bans) on every route. AppSec/WAF is
     # enabled once the bouncer itself is verified.
@@ -71,6 +80,10 @@ in {
       # The calendar lives on the internal side; only this one host is relayed
       # through, so the TRMNL cloud can poll it without the DMZ reaching in.
       calendar-tls     = { rule = "Host(`cal.lsck0.dev`)";         service = "calendar";     entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+
+      # Docker registry: headless, no auth of its own, internal-only. Deny on the
+      # public path; CI runner and swarm nodes reach it via split-horizon.
+      registry-block = { rule = "Host(`registry.lsck0.dev`)"; service = "internal-relay"; entryPoints = [ "websecure" ]; priority = 100; middlewares = [ "internal-only" ]; tls.certResolver = "cloudflare"; };
 
       # Catch-all: any *.lsck0.dev host without a dedicated router above is an
       # internal service. Relay it to the internal Traefik (10.100.0.100), which
