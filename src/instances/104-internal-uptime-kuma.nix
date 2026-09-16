@@ -189,7 +189,7 @@ in {
         ${pkgs.podman}/bin/podman cp ${setupJs} uptime-kuma:/tmp/setup.js
         ${pkgs.podman}/bin/podman exec uptime-kuma node /tmp/setup.js
 
-        # disable built-in auth (authentik ForwardAuth handles access control)
+        # disable built-in auth (authelia ForwardAuth handles access control)
         ${pkgs.podman}/bin/podman exec uptime-kuma sqlite3 /app/data/kuma.db \
           "INSERT OR REPLACE INTO setting (key, value) VALUES ('disableAuth', 'true');"
       '';
