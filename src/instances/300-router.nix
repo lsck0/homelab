@@ -183,11 +183,11 @@
           10.100.0.100 prowlarr.lsck0.dev sonarr.lsck0.dev radarr.lsck0.dev
           10.100.0.100 nas.lsck0.dev proxmox.lsck0.dev traefik.lsck0.dev registry-ui.lsck0.dev
           10.100.0.105 smb.lsck0.dev sync.lsck0.dev
-          10.100.0.100 lldap.lsck0.dev attic.lsck0.dev
+          10.100.0.100 lldap.lsck0.dev attic.lsck0.dev budget.lsck0.dev requests.lsck0.dev
           10.100.0.106 sccache.lsck0.dev
           # external services → external Traefik
           10.200.0.200 hs.lsck0.dev search.lsck0.dev shlink.lsck0.dev paste.lsck0.dev share.lsck0.dev
-          10.200.0.200 mc.lsck0.dev hello.lsck0.dev
+          10.200.0.200 mc.lsck0.dev hello.lsck0.dev ntfy.lsck0.dev
           fallthrough
         }
         template IN SRV _minecraft._tcp.mc.lsck0.dev {
@@ -239,7 +239,7 @@
       # Internal services resolve via CoreDNS only — no public DNS exposure.
       # tor.lsck0.dev must stay unproxied: the relay publishes this address to
       # the Tor consensus and it has to resolve to the real public IP.
-      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false tor.lsck0.dev:false cal.lsck0.dev:true hs.lsck0.dev:true search.lsck0.dev:true shlink.lsck0.dev:true paste.lsck0.dev:true share.lsck0.dev:false hello.lsck0.dev:true"
+      DOMAINS="wg.lsck0.dev:false mc.lsck0.dev:false tor.lsck0.dev:false cal.lsck0.dev:true hs.lsck0.dev:true search.lsck0.dev:true shlink.lsck0.dev:true paste.lsck0.dev:true share.lsck0.dev:false hello.lsck0.dev:true ntfy.lsck0.dev:true"
 
       for ENTRY in $DOMAINS; do
         DOMAIN="''${ENTRY%%:*}"
