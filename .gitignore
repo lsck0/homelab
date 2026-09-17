@@ -9,8 +9,9 @@
 result
 result-*
 
-# Secrets — only the age private key is excluded; certs and other secrets are tracked
-secrets/age.txt
+# key material stays local; only the homelab CA certificate is public
+secrets/*
+!secrets/homelab-ca.pem
 
 # OS
 .DS_Store

@@ -1,240 +1,154 @@
 { config, lib, pkgs, ... }:
 let
-  cfg = config.homelab.dockerStack;
-  hasGit = cfg.gitRepo != null;
-  workDir = "/var/lib/docker-stacks/${cfg.stackName}";
-  composeDir = if hasGit then "${workDir}/repo/${cfg.composePath}" else workDir;
-  composeFile = "${composeDir}/${cfg.composeFilename}";
-  composeEtcFile = "/etc/docker-stacks/${cfg.stackName}/${cfg.composeFilename}";
+  cfg = config.homelab.swarm;
 
-  gitCloneScript = pkgs.writeShellScript "docker-stack-git-sync-${cfg.stackName}" ''
-    set -euo pipefail
-    export PATH="${lib.makeBinPath ([ pkgs.git pkgs.coreutils pkgs.diffutils ]
-      ++ lib.optional (!cfg.useSwarm) pkgs.docker-compose
-      ++ lib.optional cfg.useSwarm pkgs.docker)}"
+  stackFile = name: pkgs.writeText "stack-${name}.yaml" cfg.stacks.${name};
 
-    REPO_DIR="${workDir}/repo"
-    HASH_FILE="${workDir}/.last-hash"
+  # log in to every registry that has credentials, then deploy all stacks.
+  # --resolve-image always pins each service to the tag's current digest, so a
+  # re-deploy only changes (and rolling-updates) services whose image was
+  # pushed since the last run. Unchanged services are left alone.
+  deployScript = pkgs.writeShellScript "swarm-deploy" ''
+    set -uo pipefail
+    export PATH="${lib.makeBinPath [ pkgs.docker pkgs.coreutils pkgs.gnugrep pkgs.gawk ]}"
+    rc=0
 
-    # Clone or fetch
-    if [ ! -d "$REPO_DIR/.git" ]; then
-      git clone ${lib.optionalString (cfg.gitBranch != null) "-b ${cfg.gitBranch}"} \
-        "${cfg.gitRepo}" "$REPO_DIR"
-    else
-      git -C "$REPO_DIR" fetch origin
-      BRANCH=$(git -C "$REPO_DIR" rev-parse --abbrev-ref HEAD)
-      git -C "$REPO_DIR" reset --hard "origin/$BRANCH"
-    fi
-
-    # Check if compose file changed
-    NEW_HASH=$(sha256sum "${composeFile}" | cut -d' ' -f1)
-    OLD_HASH=$(cat "$HASH_FILE" 2>/dev/null || echo "")
-
-    if [ "$NEW_HASH" != "$OLD_HASH" ]; then
-      echo "Compose file changed, redeploying..."
-      ${if cfg.useSwarm then ''
-      docker stack deploy -c "${composeFile}" --resolve-image always --prune ${cfg.stackName}
-      '' else ''
-      docker-compose -f "${composeFile}" -p "${cfg.stackName}" pull --quiet
-      docker-compose -f "${composeFile}" -p "${cfg.stackName}" up -d --remove-orphans
-      ''}
-      echo "$NEW_HASH" > "$HASH_FILE"
-    else
-      echo "No changes detected."
-    fi
+    # A tag whose newest build failed its healthcheck was rolled back. Deploying
+    # it again every poll would loop update -> rollback forever; wait for a new
+    # push instead (the tag's digest changes).
+    rolled_back_build() { # stack
+      local svc cur prev img digest state
+      for svc in $(docker stack services "$1" --format '{{.Name}}' 2>/dev/null); do
+        state=$(docker service inspect "$svc" --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{end}}')
+        # never interrupt a rollout or rollback that is still running.
+        case "$state" in updating|rollback_started) echo "$svc: $state, skipping this round"; return 0 ;; esac
+        [ "$state" = rollback_completed ] || continue
+        # swarm drops PreviousSpec on rollback; the failed build's digest is on
+        # its failed tasks.
+        cur=$(docker service inspect "$svc" --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
+        prev=$(docker service ps "$svc" --no-trunc --format '{{.Image}}|{{.Error}}' \
+          | awk -F'|' -v cur="$cur" '$2 != "" && $1 != cur { print $1; exit }')
+        [ -n "$prev" ] || continue
+        img=''${prev%@*}
+        docker pull -q "$img" >/dev/null 2>&1 || continue
+        digest=$(docker image inspect "$img" --format '{{range .RepoDigests}}{{println .}}{{end}}' | grep -m1 -F "''${img%:*}@")
+        if [ "''${prev#*@}" = "''${digest#*@}" ]; then
+          echo "$svc: $img is still the build that was rolled back, not redeploying"
+          return 0
+        fi
+      done
+      return 1
+    }
+    ${lib.concatStrings (lib.mapAttrsToList (registry: auth: ''
+      docker login ${registry} --username ${lib.escapeShellArg auth.username} \
+        --password-stdin < ${auth.passwordFile} >/dev/null || { echo "login to ${registry} failed"; rc=1; }
+    '') cfg.registries)}
+    for name in "$@"; do
+      rolled_back_build "$name" && continue
+      docker stack deploy --detach=true --with-registry-auth --resolve-image always --prune \
+        -c "/etc/swarm-stacks/$name.yaml" "$name" || { echo "deploy of $name failed"; rc=1; }
+    done
+    exit $rc
   '';
 in {
-  options.homelab.dockerStack = {
-    enable = lib.mkEnableOption "Docker Compose stack deployment";
+  options.homelab.swarm = {
+    enable = lib.mkEnableOption "single-node Docker Swarm with CI-driven stacks";
 
-    stackName = lib.mkOption {
-      type = lib.types.str;
-      description = "Name for the docker compose project.";
+    stacks = lib.mkOption {
+      type = lib.types.attrsOf lib.types.lines;
+      default = {};
+      description = ''
+        Swarm stacks as inline compose YAML, keyed by stack name. For zero-downtime
+        updates give each service a healthcheck and
+        `deploy.update_config.order: start-first`.
+      '';
     };
 
-    # Mode 1: inline compose
-    composeFile = lib.mkOption {
-      type = lib.types.nullOr lib.types.lines;
-      default = null;
-      description = "Inline Docker Compose YAML content.";
+    registries = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule {
+        options = {
+          username = lib.mkOption { type = lib.types.str; };
+          passwordFile = lib.mkOption {
+            type = lib.types.str;
+            description = "Runtime path to the password/token (e.g. a sops secret).";
+          };
+        };
+      });
+      default = {};
+      example = lib.literalExpression ''
+        { "ghcr.io" = { username = "lsck0"; passwordFile = config.sops.secrets.ghcr-token.path; }; }
+      '';
+      description = "Credentials for private registries, keyed by registry host. Public images need none.";
     };
-
-    # Mode 2: git-sourced compose
-    gitRepo = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "Git repository URL containing the compose file.";
-    };
-
-    gitBranch = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "Branch to track. Defaults to the repo's default branch.";
-    };
-
-    composePath = lib.mkOption {
-      type = lib.types.str;
-      default = ".";
-      description = "Path within the repo to the directory containing the compose file.";
-    };
-
-    composeFilename = lib.mkOption {
-      type = lib.types.str;
-      default = "docker-compose.yaml";
-      description = "Exact filename of the compose file (e.g. docker-compose.yaml, compose.yml).";
-    };
-
-    pollInterval = lib.mkOption {
-      type = lib.types.str;
-      default = "5m";
-      description = "How often to poll the git repo for changes (systemd calendar syntax).";
-    };
-
-    useSwarm = lib.mkEnableOption "Docker Swarm mode (docker stack deploy instead of docker-compose)";
 
     updateInterval = lib.mkOption {
       type = lib.types.str;
-      default = "5m";
-      description = "How often to check for new images and redeploy (Swarm mode only).";
-    };
-
-    # Shared options
-    registryMirrors = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [];
-      description = "Docker registry mirrors (e.g. internal registry).";
+      default = "1m";
+      description = "How often to check registries for new image digests and roll them out.";
     };
   };
 
-  config = lib.mkIf cfg.enable (lib.mkMerge [
-    {
-      assertions = [
-        {
-          assertion = (cfg.composeFile != null) != (cfg.gitRepo != null);
-          message = "dockerStack: set exactly one of composeFile (inline) or gitRepo (git-sourced).";
-        }
-      ];
+  config = lib.mkIf cfg.enable {
+    virtualisation.docker.enable = true;
 
-      virtualisation.docker = {
-        enable = true;
-        daemon.settings = lib.mkIf (cfg.registryMirrors != []) {
-          registry-mirrors = cfg.registryMirrors;
-          insecure-registries = cfg.registryMirrors;
-        };
-      };
+    environment.etc = lib.mapAttrs' (name: _:
+      lib.nameValuePair "swarm-stacks/${name}.yaml" { source = stackFile name; }
+    ) cfg.stacks;
 
-      systemd.tmpfiles.rules = [
-        "d ${workDir} 0750 root root -"
-      ];
-    }
-
-    # Swarm init (shared between inline and git modes)
-    (lib.mkIf cfg.useSwarm {
-      systemd.services."docker-swarm-init" = {
-        description = "Initialize Docker Swarm";
-        after = [ "docker.service" ];
-        requires = [ "docker.service" ];
-        requiredBy = [ "docker-stack-${cfg.stackName}.service" ];
-        before = [ "docker-stack-${cfg.stackName}.service" ];
-        path = [ pkgs.docker pkgs.coreutils ];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-        };
-        script = ''
-          # Wait for Docker daemon to accept API calls
-          for i in $(seq 1 30); do
-            docker info >/dev/null 2>&1 && break
-            sleep 1
-          done
-          # Self-heal: only an "active" swarm is usable. Any other state (a stale
-          # "pending"/"locked" swarm after a reboot makes `swarm init` fail with
-          # "already part of a swarm") is reset. Never fail the unit — the stack
-          # service surfaces real errors.
-          state=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || echo unknown)
-          if [ "$state" != "active" ]; then
-            docker swarm leave --force >/dev/null 2>&1 || true
-            docker swarm init >/dev/null 2>&1 || true
-          fi
-          exit 0
-        '';
-      };
-    })
-
-    # Mode 1: inline compose file
-    (lib.mkIf (!hasGit) {
-      environment.etc."docker-stacks/${cfg.stackName}/${cfg.composeFilename}".text = cfg.composeFile;
-
-      systemd.services."docker-stack-${cfg.stackName}" = {
-        description = "Docker ${if cfg.useSwarm then "Swarm" else "Compose"} stack: ${cfg.stackName}";
-        after = [ "docker.service" "network-online.target" ];
-        wants = [ "docker.service" "network-online.target" ];
-        wantedBy = [ "multi-user.target" ];
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-        } // (if cfg.useSwarm then {
-          ExecStart = "${pkgs.docker}/bin/docker stack deploy -c ${composeEtcFile} --resolve-image always --prune ${cfg.stackName}";
-          ExecStop = "${pkgs.docker}/bin/docker stack rm ${cfg.stackName}";
-        } else {
-          ExecStart = "${pkgs.docker-compose}/bin/docker-compose -f ${composeEtcFile} -p ${cfg.stackName} up -d --remove-orphans";
-          ExecStop = "${pkgs.docker-compose}/bin/docker-compose -f ${composeEtcFile} -p ${cfg.stackName} down";
-        });
-      };
-    })
-
-    # Swarm update timer (inline mode) — periodically re-deploys to pick up new images
-    (lib.mkIf (!hasGit && cfg.useSwarm) {
-      systemd.services."docker-stack-${cfg.stackName}-update" = {
-        description = "Update Swarm stack: ${cfg.stackName}";
-        after = [ "docker-stack-${cfg.stackName}.service" ];
-        path = [ pkgs.docker ];
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = "${pkgs.docker}/bin/docker stack deploy -c ${composeEtcFile} --resolve-image always --prune ${cfg.stackName}";
-        };
-      };
-
-      systemd.timers."docker-stack-${cfg.stackName}-update" = {
-        description = "Poll registry for ${cfg.stackName} image updates";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnBootSec = cfg.updateInterval;
-          OnUnitActiveSec = cfg.updateInterval;
-        };
-      };
-    })
-
-    # Mode 2: git-sourced compose file with polling
-    (lib.mkIf hasGit {
-      environment.systemPackages = [ pkgs.git ];
-
-      # Git SSH key for private repos (optional, place at /var/lib/docker-stacks/<name>/deploy_key)
-      programs.ssh.extraConfig = ''
-        Host docker-stack-${cfg.stackName}
-          IdentityFile ${workDir}/deploy_key
-          StrictHostKeyChecking accept-new
+    systemd.services.docker-swarm-init = {
+      description = "Initialize Docker Swarm";
+      after = [ "docker.service" ];
+      requires = [ "docker.service" ];
+      path = [ pkgs.docker pkgs.coreutils pkgs.iproute2 pkgs.gawk ];
+      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+      script = ''
+        for i in $(seq 1 30); do
+          docker info >/dev/null 2>&1 && break
+          sleep 1
+        done
+        # self-heal: only an "active" swarm is usable. Any other state (a stale
+        # "pending"/"locked" swarm after a reboot makes `swarm init` fail with
+        # "already part of a swarm") is reset.
+        state=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || echo unknown)
+        if [ "$state" != "active" ]; then
+          docker swarm leave --force >/dev/null 2>&1 || true
+          # explicit advertise address: init refuses to guess on hosts with
+          # more than one address.
+          addr=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
+          docker swarm init ''${addr:+--advertise-addr "$addr"} || true
+        fi
+        # fail loudly here instead of in every deploy.
+        [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" = active ] || { echo "swarm is not active"; exit 1; }
       '';
+    };
 
-      systemd.services."docker-stack-${cfg.stackName}" = {
-        description = "Docker Compose stack (git): ${cfg.stackName}";
-        after = [ "docker.service" "network-online.target" ];
-        wants = [ "docker.service" "network-online.target" ];
-        wantedBy = [ "multi-user.target" ];
-        serviceConfig = {
-          Type = "oneshot";
-          ExecStart = gitCloneScript;
-        };
+    # deploy on boot and whenever a stack definition changes (restartTriggers).
+    systemd.services.swarm-deploy = {
+      description = "Deploy Swarm stacks";
+      after = [ "docker-swarm-init.service" "network-online.target" ];
+      requires = [ "docker-swarm-init.service" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
+      restartTriggers = map stackFile (lib.attrNames cfg.stacks);
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "${deployScript} ${lib.concatStringsSep " " (lib.attrNames cfg.stacks)}";
       };
+    };
 
-      systemd.timers."docker-stack-${cfg.stackName}" = {
-        description = "Poll git for ${cfg.stackName} compose changes";
-        wantedBy = [ "timers.target" ];
-        timerConfig = {
-          OnBootSec = "1m";
-          OnUnitActiveSec = cfg.pollInterval;
-        };
+    # CD: poll registries; a new digest behind a tag triggers a rolling update.
+    systemd.services.swarm-update = {
+      description = "Roll out new images for Swarm stacks";
+      after = [ "swarm-deploy.service" ];
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = "${deployScript} ${lib.concatStringsSep " " (lib.attrNames cfg.stacks)}";
       };
-    })
-  ]);
+    };
+    systemd.timers.swarm-update = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = { OnBootSec = "2m"; OnUnitActiveSec = cfg.updateInterval; };
+    };
+  };
 }

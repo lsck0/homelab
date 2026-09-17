@@ -15,7 +15,7 @@ trap 'rm -f "${CLEANUP_FILES[@]}"' EXIT
 
 echo ">>> SYNCING HARDWARE + OS..."
 
-# Abort if branch is behind upstream (unpulled changes exist)
+# abort if branch is behind upstream (unpulled changes exist)
 git -C "$ROOT_DIR" fetch origin --quiet 2>/dev/null || true
 BEHIND=$(git -C "$ROOT_DIR" rev-list "HEAD..@{u}" --count 2>/dev/null || echo "0")
 if [ "$BEHIND" -gt 0 ]; then
@@ -23,8 +23,9 @@ if [ "$BEHIND" -gt 0 ]; then
   exit 1
 fi
 
-# ── Helpers ───────────────────────────────────────────────────
-
+# ─────────────────────────────────────────────────────────────────────────────
+# HELPERS
+# ─────────────────────────────────────────────────────────────────────────────
 read_tfvar() {
   jq -r --arg k "$1" 'if has($k) and .[$k] != null then .[$k] else empty end' "$ACTIVE_TFVARS_PATH"
 }
@@ -33,7 +34,7 @@ load_tfvars() {
   if [ -f "$TFVARS_PATH" ]; then
     ACTIVE_TFVARS_PATH="$TFVARS_PATH"; return 0
   fi
-  [ -f "$TFVARS_ENC_PATH" ] || { echo "ERROR: Missing tfvars. Run ./scripts/init.sh first."; exit 1; }
+  [ -f "$TFVARS_ENC_PATH" ] || { echo "ERROR: Missing tfvars. Run ./src/scripts/init.sh first."; exit 1; }
   command -v sops >/dev/null || { echo "ERROR: sops not installed."; exit 1; }
   ACTIVE_TFVARS_PATH="$(mktemp --suffix=.tfvars.json)"
   CLEANUP_FILES+=("$ACTIVE_TFVARS_PATH")
@@ -79,16 +80,17 @@ deploy_nixos() {
   nix copy --extra-experimental-features "nix-command flakes" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
     || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
 
-  # Use 'switch' — activates config in-place, restarts changed services, no reboot needed.
-  # Reboot manually only when kernel changes (rare).
+  # use 'switch', activates config in-place, restarts changed services, no reboot needed.
+  # reboot manually only when kernel changes (rare).
   ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
     "nix-env -p /nix/var/nix/profiles/system --set '${toplevel}' \
      && '${toplevel}/bin/switch-to-configuration' switch"
   echo ">>> $name deployed."
 }
 
-# ── Main ──────────────────────────────────────────────────────
-
+# ─────────────────────────────────────────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────────────────────────────────────────
 load_tfvars
 
 # Git pull (skip if local changes)
@@ -116,20 +118,20 @@ ssh-keyscan -p "$PROXMOX_SSH_PORT" -H "$PROXMOX_SSH_HOST" >> "$HOME/.ssh/known_h
 
 SSH_CONFIG="$(mktemp --suffix=.ssh_config)"; CLEANUP_FILES+=("$SSH_CONFIG")
 
-# The router is a bastion for the 10.x subnets, but when the deployer already
+# the router is a bastion for the 10.x subnets, but when the deployer already
 # has a route to them (e.g. the LAN gateway routes 10.100.0.0/24 to the router),
 # jumping through the router's single SSH -W forward just serializes every
 # closure copy through one powersave CPU. Probe a directly-routed hop first and
 # only fall back to the ProxyCommand when the subnet is not reachable directly.
 if timeout 4 bash -c "echo > /dev/tcp/10.100.0.100/22" 2>/dev/null; then
-  echo ">>> Internal subnet directly routable — deploying without the router bastion."
+  echo ">>> Internal subnet directly routable: deploying without the router bastion."
   cat > "$SSH_CONFIG" <<EOF
 Host 10.*
   StrictHostKeyChecking accept-new
   UserKnownHostsFile /dev/null
 EOF
 else
-  echo ">>> Internal subnet not directly routable — deploying through the router bastion."
+  echo ">>> Internal subnet not directly routable: deploying through the router bastion."
   cat > "$SSH_CONFIG" <<EOF
 Host 10.*
   ProxyCommand $(command -v ssh) -F $SSH_CONFIG -o StrictHostKeyChecking=accept-new -W %h:%p root@$ROUTER_WAN_IP
@@ -140,7 +142,7 @@ fi
 BASTION_SSHOPTS=(-F "$SSH_CONFIG")
 export NIX_SSHOPTS="-F $SSH_CONFIG"
 
-# SSH key — generate if missing, push to all VMs via QEMU agent
+# SSH key: generate if missing, push to all VMs via QEMU agent
 [ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/id_ed25519" -C "homelab@$(hostname)" >/dev/null
 PUBKEY=$(cat "$HOME/.ssh/id_ed25519.pub")
 PROXMOX_API_TOKEN_ID="$(read_tfvar proxmox_api_token_id)"
@@ -161,24 +163,24 @@ if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
   done
   sleep 3
 
-  # Vzdump backup jobs — always PUT (upsert: creates or updates schedule/settings)
-  for job_spec in "homelab-daily|105,207|00:00|3" "homelab-weekly|105,207|Mon 00:00|2" "homelab-monthly|105,207|*-*-01 00:00|1"; do
-    IFS='|' read -r jid jvms jsched jkeep <<< "$job_spec"
-    # Try update first; if 404, create
-    RESULT=$(curl -sk -X PUT "$PVE_API/cluster/backup/$jid" -H "$PVE_AUTH" \
-      --data-urlencode "vmid=$jvms" --data-urlencode "schedule=$jsched" \
-      --data-urlencode "storage=local" --data-urlencode "mode=snapshot" --data-urlencode "compress=zstd" \
-      --data-urlencode "maxfiles=$jkeep" --data-urlencode "enabled=1" --data-urlencode "node=$PROXMOX_NODE" 2>&1)
-    if echo "$RESULT" | grep -q '"errors"'; then
-      RESULT=$(curl -sk -X POST "$PVE_API/cluster/backup" -H "$PVE_AUTH" \
-        --data-urlencode "id=$jid" --data-urlencode "vmid=$jvms" --data-urlencode "schedule=$jsched" \
-        --data-urlencode "storage=local" --data-urlencode "mode=snapshot" --data-urlencode "compress=zstd" \
-        --data-urlencode "maxfiles=$jkeep" --data-urlencode "enabled=1" --data-urlencode "node=$PROXMOX_NODE" 2>&1)
-      echo "$RESULT" | grep -q '"errors"' && echo "WARNING: Failed to upsert vzdump job $jid" || echo ">>> Created vzdump job $jid"
-    else
-      echo ">>> Vzdump job $jid: schedule=$jsched maxfiles=$jkeep"
+  # whole-VM vzdump jobs used to dump vm-108 (750 GB NAS disk) and vm-208 to
+  # `local`, the host's root disk, daily/weekly/monthly: enough to fill it.
+  # NAS data is backed up by Kopia (vm-106) and VM configs are declarative, so
+  # remove the jobs. Existing dump files are NOT deleted here.
+  for jid in homelab-daily homelab-weekly homelab-monthly; do
+    if curl -sk "$PVE_API/cluster/backup/$jid" -H "$PVE_AUTH" | jq -e '.data.id' >/dev/null 2>&1; then
+      curl -sk -X DELETE "$PVE_API/cluster/backup/$jid" -H "$PVE_AUTH" >/dev/null \
+        && echo ">>> Removed vzdump job $jid (see /var/lib/vz/dump for old dumps)"
     fi
   done
+fi
+
+# Hermes (vm-113) gets root on the Proxmox host too (best-effort)
+HERMES_PUB="$ROOT_DIR/src/modules/hermes.pub"
+if [ -f "$HERMES_PUB" ]; then
+  "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+    "grep -qxF '$(cat "$HERMES_PUB")' /root/.ssh/authorized_keys || echo '$(cat "$HERMES_PUB")' >> /root/.ssh/authorized_keys" \
+    2>/dev/null || echo "WARNING: Could not install the Hermes key on Proxmox."
 fi
 
 # Proxmox host power savings (idempotent, best-effort)
@@ -188,7 +190,7 @@ fi
    echo ">>> Proxmox: CPU powersave, HDD spin-down 30min"' \
   2>/dev/null || true
 
-# Golden image
+# golden image
 if ! "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
   [ -f "$ROOT_DIR/images/nixos.img" ] || { echo "ERROR: Golden image missing. Run: sudo nix build ./src#cloud-image"; exit 1; }
   echo ">>> Uploading golden image..."
@@ -198,6 +200,12 @@ fi
 
 # Terraform
 [ -d "$ROOT_DIR/src/.terraform" ] || terraform -chdir="$ROOT_DIR/src" init
+# VM ids were renumbered to follow instances.tf; applying against the old state
+# would recreate every VM. The migration renames them in place first.
+if terraform -chdir="$ROOT_DIR/src" state list 2>/dev/null | grep -q '^module\.instances\.'; then
+  echo "ERROR: Terraform state still has the old VM ids. Run src/scripts/renumber.sh first."
+  exit 1
+fi
 TF_STAMP="$ROOT_DIR/src/.tf-last-apply"
 if [ ! -f "$TF_STAMP" ] || find "$ROOT_DIR/src" -maxdepth 2 \( -name '*.tf' -o -name '*.tfvars*' \) -newer "$TF_STAMP" | grep -q .; then
   echo ">>> Terraform: applying..."
@@ -212,21 +220,28 @@ else
   echo ">>> Terraform: no changes."
 fi
 
-VM_IPS=$(terraform -chdir="$ROOT_DIR/src" output -raw vm_ips 2>/dev/null || echo "")
-DISABLED_VMS=$(terraform -chdir="$ROOT_DIR/src" output -raw disabled_vms 2>/dev/null || echo "")
+# inventory for the Nix side (src/inventory.json): evaluated from the Terraform
+# config itself, so it is current even when apply was skipped.
+INVENTORY="$ROOT_DIR/src/inventory.json"
+INVENTORY_NEW=$(echo 'jsonencode(local.inventory)' \
+  | terraform -chdir="$ROOT_DIR/src" console -var-file="$ACTIVE_TFVARS_PATH" \
+  | jq -r 'fromjson' | jq -S .) || { echo "ERROR: Could not evaluate the Terraform inventory."; exit 1; }
+if [ "$INVENTORY_NEW" != "$(cat "$INVENTORY" 2>/dev/null)" ]; then
+  echo "$INVENTORY_NEW" > "$INVENTORY"
+  echo ">>> Inventory updated: src/inventory.json"
+fi
+
+VM_IPS=$(jq -r 'to_entries[] | "\(.key)=\(.value.ip)"' "$INVENTORY")
+DISABLED_VMS=$(jq -r 'to_entries[] | select(.value.enabled == "false") | .key' "$INVENTORY")
 [ -n "$DISABLED_VMS" ] && echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')"
 
-# On-demand VMs are normally stopped (woken by the socket proxy on request and
+# on-demand VMs are normally stopped (woken by the socket proxy on request and
 # shut down when idle). They must be running to receive a deploy, so start them
-# now; the on-demand proxy will idle them again afterwards.
-# Derive on-demand VMIDs straight from the instance map, not a terraform output
-# (which needs a fresh `apply` to materialize and silently returns empty
-# otherwise — leaving idle VMs unwoken and their config drifting).
-ON_DEMAND_VMS=$(grep -E 'onDemand[[:space:]]*=[[:space:]]*true' "$ROOT_DIR/src/instances/main.tf" 2>/dev/null \
-  | grep -oE '^[[:space:]]*"[0-9]+"' | tr -dc '0-9\n')
+# now; the on-demand reaper powers them off again after their cooldown.
+ON_DEMAND_VMS=$(jq -r 'to_entries[] | select(.value.enabled == "onDemand") | .key' "$INVENTORY")
 if [ -n "$ON_DEMAND_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
   echo ">>> Waking on-demand VMs for deploy: $(echo "$ON_DEMAND_VMS" | tr '\n' ' ')"
-  # Start every stopped on-demand VM. sync always deploys ALL enabled VMs — the
+  # start every stopped on-demand VM. sync always deploys ALL enabled VMs: the
   # on-demand idle-stop is only for user request traffic, config must never drift.
   for vmid in $ON_DEMAND_VMS; do
     st=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/status/current" -H "$PVE_AUTH" | jq -r '.data.status // "unknown"' 2>/dev/null)
@@ -235,8 +250,8 @@ if [ -n "$ON_DEMAND_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
       curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
     fi
   done
-  # Give cold VMs time to boot, then push the SSH key via the guest agent
-  # (best-effort — already-deployed VMs carry the key in their config; the push
+  # give cold VMs time to boot, then push the SSH key via the guest agent
+  # (best-effort: already-deployed VMs carry the key in their config; the push
   # only matters for a fresh VM). The per-VM wait_for_ssh in the deploy loop
   # does the real readiness gate with retries, so a slow boot still deploys.
   sleep 45
@@ -252,7 +267,11 @@ if [ -n "$ON_DEMAND_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
   done
 fi
 
-# Build all enabled closures in parallel
+# Nix flakes only see files git knows about: stage new/renamed configs (and
+# the inventory) before building. Everything is committed at the end anyway.
+git -C "$ROOT_DIR" add -A src
+
+# build all enabled closures in parallel
 echo ">>> Building all VM closures (parallel)..."
 BUILD_LOG=$(mktemp --suffix=.build.log); CLEANUP_FILES+=("$BUILD_LOG")
 (
@@ -276,7 +295,7 @@ BUILD_LOG=$(mktemp --suffix=.build.log); CLEANUP_FILES+=("$BUILD_LOG")
 ) > "$BUILD_LOG" 2>&1 &
 BUILD_PID=$!
 
-# Deploy router first (it's the SSH bastion for all other VMs)
+# deploy router first (it's the SSH bastion for all other VMs)
 echo ">>> Deploying 300-router to $ROUTER_WAN_IP..."
 deploy_nixos "300-router" "$ROUTER_WAN_IP" || { echo "WARNING: Router deploy failed"; DEPLOY_FAILURE=1; }
 
@@ -284,7 +303,7 @@ if [ "$DEPLOY_FAILURE" -eq 0 ]; then
   echo ">>> Waiting for router bastion..."
   wait_for_ssh "$ROUTER_WAN_IP" 30 5 || { echo "ERROR: Router unreachable after deploy."; exit 1; }
 
-  echo ">>> Verifying bastion → internal subnet..."
+  echo ">>> Verifying bastion -> internal subnet..."
   for _ in $(seq 1 12); do
     ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" root@10.100.0.100 true 2>/dev/null && break
     sleep 5
@@ -298,7 +317,7 @@ if [ "$DEPLOY_FAILURE" -eq 0 ]; then
   done
 fi
 
-# Wait for builds
+# wait for builds
 echo ">>> Waiting for builds..."
 if ! wait "$BUILD_PID"; then
   cat "$BUILD_LOG"; echo "ERROR: Build failed."; exit 1
@@ -306,7 +325,7 @@ fi
 cat "$BUILD_LOG"
 echo ">>> All builds complete."
 
-# Deploy all other VMs (parallel, max 3)
+# deploy all other VMs in parallel (HOMELAB_PARALLEL, default 6)
 MAX_PARALLEL="${HOMELAB_PARALLEL:-6}"
 DEPLOY_PIDS=(); DEPLOY_NAMES=()
 

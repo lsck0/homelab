@@ -1,5 +1,8 @@
 name: hello
 
+# Build on the Forgejo runner (vm-115), push to the internal registry. vm-209
+# polls the tag every minute and rolls the new digest out with a start-first
+# update (no downtime).
 on:
   push:
     branches: [master]
@@ -17,7 +20,10 @@ jobs:
             --network=host \
             --build-arg SCCACHE_REDIS=redis://sccache.lsck0.dev \
             -t registry.lsck0.dev/hello:latest \
+            -t registry.lsck0.dev/hello:${{ github.sha }} \
             .
 
       - name: Push to registry
-        run: docker push registry.lsck0.dev/hello:latest
+        run: |
+          docker push registry.lsck0.dev/hello:latest
+          docker push registry.lsck0.dev/hello:${{ github.sha }}

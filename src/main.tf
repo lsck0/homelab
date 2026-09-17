@@ -7,7 +7,9 @@ terraform {
   }
 }
 
-# ── Proxmox Connection ────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# PROXMOX CONNECTION
+# ─────────────────────────────────────────────────────────────────────────────
 variable "proxmox_api_url" { type = string }
 variable "proxmox_api_token_id" { type = string }
 variable "proxmox_api_token_secret" {
@@ -41,14 +43,18 @@ variable "proxmox_ssh_password" {
   default   = null
 }
 
-# ── VM Defaults ───────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# VM DEFAULTS
+# ─────────────────────────────────────────────────────────────────────────────
 variable "ssh_public_key" { type = string }
 variable "nixos_image_id" {
   type    = string
   default = "local:iso/nixos.img"
 }
 
-# ── Network Bridges ──────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# NETWORK BRIDGES
+# ─────────────────────────────────────────────────────────────────────────────
 variable "wan_bridge" {
   type    = string
   default = "vmbr0"
@@ -62,7 +68,9 @@ variable "external_bridge" {
   default = "vmbr200"
 }
 
-# ── Subnets ──────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# SUBNETS
+# ─────────────────────────────────────────────────────────────────────────────
 variable "internal_subnet" {
   type    = string
   default = "10.100.0.0/24"
@@ -72,7 +80,9 @@ variable "external_subnet" {
   default = "10.200.0.0/24"
 }
 
-# ── Router VM (vm-300) ───────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# ROUTER VM (VM-300)
+# ─────────────────────────────────────────────────────────────────────────────
 variable "router_internal_ip" {
   type    = string
   default = "10.100.0.1"
@@ -97,28 +107,4 @@ provider "proxmox" {
       port    = var.proxmox_ssh_port
     }
   }
-}
-
-module "instances" {
-  source = "./instances"
-
-  target_node        = var.target_node
-  proxmox_datastore  = var.proxmox_datastore
-  ssh_public_key     = var.ssh_public_key
-  nixos_image_id     = var.nixos_image_id
-  wan_bridge         = var.wan_bridge
-  internal_bridge    = var.internal_bridge
-  internal_subnet    = var.internal_subnet
-  router_internal_ip = var.router_internal_ip
-  external_bridge    = var.external_bridge
-  external_subnet    = var.external_subnet
-  router_external_ip = var.router_external_ip
-}
-
-output "vm_ips" {
-  value = module.instances.vm_ips
-}
-
-output "disabled_vms" {
-  value = module.instances.disabled_vms
 }

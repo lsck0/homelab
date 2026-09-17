@@ -1,7 +1,7 @@
 { config, lib, ... }:
 let
   hostname = config.networking.hostName;
-  # Parse "vm-123" → 123, or null if not matching
+  # parse "vm-135" -> 123, or null if not matching
   match = builtins.match "vm-([0-9]+)" hostname;
   vmId = if match != null then lib.toInt (builtins.head match) else null;
   type =

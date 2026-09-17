@@ -1,0 +1,46 @@
+{ pkgs, nasMount, nasPath, ... }: {
+  networking.hostName = "vm-131";
+
+  # Bazarr: subtitles for the Radarr/Sonarr libraries. Same /data/media path
+  # as the *arrs (so their file paths resolve) and writable (subtitles are
+  # written next to the media). Sonarr/Radarr connections are set by vm-132.
+  # behind Authelia at subs.lsck0.dev.
+  fileSystems = nasMount "/var/lib/bazarr" "bazarr"
+    // nasPath "/data/media" "media"
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+
+  virtualisation.oci-containers.containers.bazarr = {
+    image = "lscr.io/linuxserver/bazarr:latest";
+    ports = [ "80:6767" ];
+    volumes = [
+      "/var/lib/bazarr:/config"
+      "/data/media:/data/media"
+    ];
+    environment = {
+      PUID = "1000";
+      PGID = "1000";
+      TZ = "Europe/Berlin";
+    };
+  };
+
+  systemd.tmpfiles.rules = [
+    "d /var/lib/bazarr 0750 1000 1000 -"
+  ];
+
+  systemd.services.bazarr-token = {
+    description = "Export Bazarr API key";
+    after = [ "podman-bazarr.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.yq-go pkgs.coreutils ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
+    script = ''
+      conf=/var/lib/bazarr/config/config.yaml
+      for i in $(seq 1 90); do [ -f $conf ] && break; sleep 2; done
+      key=$(yq '.auth.apikey' $conf)
+      [ -n "$key" ] && [ "$key" != null ] || exit 1
+      echo -n "$key" > /var/lib/homepage-tokens/bazarr-key.token
+    '';
+  };
+
+  networking.firewall.allowedTCPPorts = [ 80 ];
+}

@@ -1,90 +1,118 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, inventory, ... }:
 let
   cfg = config.homelab.onDemand;
 
-  # Talks to the Proxmox API as the host this module runs on. The token file
-  # holds the full "USER@REALM!TOKENID=SECRET" string.
+  vmOf = svc: inventory.${toString svc.vmid};
+  isOnDemand = svc: (vmOf svc).enabled == "onDemand";
+  active = lib.filterAttrs (_: isOnDemand) cfg.services;
+
+  # several routes can share one VM (e.g. NAS web UI + Syncthing). The VM may
+  # only go down when none of its proxies is serving.
+  siblingsBusy = svc: lib.concatStrings (lib.mapAttrsToList (n: s:
+    lib.optionalString (s.vmid == svc.vmid) ''
+      systemctl is-active --quiet ondemand-${n}.service && exit 0
+    '') active);
+
+  # "15m" -> 900. Cooldowns live in instances.tf; keep the format simple so the
+  # proxy idle timeout and the reaper agree on the same number.
+  toSeconds = s:
+    let m = builtins.match "([0-9]+)(s|m|h|d)" s;
+        unit = { s = 1; m = 60; h = 3600; d = 86400; };
+    in if m == null then throw "on-demand cooldown '${s}' must look like 30s, 15m, 2h or 1d"
+       else lib.toInt (builtins.elemAt m 0) * unit.${builtins.elemAt m 1};
+
+  apiEnv = svc: ''
+    TOKEN=$(cat ${cfg.tokenFile})
+    API="${cfg.apiUrl}/nodes/${cfg.node}/qemu/${toString svc.vmid}"
+    pve() { curl -sfk --max-time 20 -H "Authorization: PVEAPIToken=$TOKEN" "$@"; }
+    vm_status() { pve "$API/status/current" | jq -r '.data.status // "unknown"'; }
+  '';
+
   wakeScript = name: svc: pkgs.writeShellScript "ondemand-wake-${name}" ''
     set -euo pipefail
     export PATH="${lib.makeBinPath [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.netcat-gnu ]}"
+    ${apiEnv svc}
 
-    TOKEN=$(cat ${cfg.tokenFile})
-    API="${cfg.apiUrl}/nodes/${cfg.node}/qemu/${toString svc.vmid}"
-
-    STATUS=$(curl -sk -H "Authorization: PVEAPIToken=$TOKEN" "$API/status/current" \
-      | jq -r '.data.status // "unknown"')
-
-    if [ "$STATUS" != "running" ]; then
-      echo "vm-${toString svc.vmid} is $STATUS, starting for ${name}"
-      curl -sk -X POST -H "Authorization: PVEAPIToken=$TOKEN" "$API/status/start" >/dev/null
-    fi
-
-    # Hold the queued client connection until the service actually answers.
-    # TCP-open is not enough: an app can accept connections before it can serve,
-    # returning 500s on the first requests. For HTTP services, wait for a real
-    # (non-5xx) response so the client's first request always succeeds.
-    for _ in $(seq 1 ${toString svc.bootTimeout}); do
-      if nc -z -w 2 ${svc.target} ${toString svc.targetPort}; then
+    # keep the client waiting until the app really answers. An open port is not
+    # enough, apps often return 5xx for a while after starting.
+    for i in $(seq 1 ${toString svc.bootTimeout}); do
+      # check the power state every 10s, the VM might be shutting down right now.
+      # API errors just mean we try again next round.
+      if [ $((i % 10)) -eq 1 ]; then
+        STATUS=$(vm_status || echo unknown)
+        if [ "$STATUS" = "stopped" ]; then
+          echo "vm-${toString svc.vmid} is stopped, starting for ${name}"
+          pve -X POST "$API/status/start" >/dev/null || echo "start request failed, retrying"
+        fi
+      fi
+      if nc -z -w 2 ${(vmOf svc).ip} ${toString svc.targetPort}; then
         ${if svc.httpCheck then ''
-        code=$(curl -sk -o /dev/null -w '%{http_code}' -m 3 "http://${svc.target}:${toString svc.targetPort}/" 2>/dev/null || echo 000)
-        # Any real HTTP answer that is not a 5xx / connection failure means ready.
+        code=$(curl -sk -o /dev/null -w '%{http_code}' -m 3 "http://${(vmOf svc).ip}:${toString svc.targetPort}/" 2>/dev/null || echo 000)
         case "$code" in 000|5??) : ;; *) exit 0 ;; esac
         '' else "exit 0"}
       fi
       sleep 1
     done
 
-    echo "vm-${toString svc.vmid} not ready at ${svc.target}:${toString svc.targetPort} in ${toString svc.bootTimeout}s"
+    echo "vm-${toString svc.vmid} not ready at ${(vmOf svc).ip}:${toString svc.targetPort} in ${toString svc.bootTimeout}s"
     exit 1
   '';
 
   sleepScript = name: svc: pkgs.writeShellScript "ondemand-sleep-${name}" ''
     set -euo pipefail
-    export PATH="${lib.makeBinPath [ pkgs.curl pkgs.coreutils ]}"
+    export PATH="${lib.makeBinPath [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ]}"
 
-    # Only power down after a clean idle exit. A crash or a failed wake must
+    # only power down after a clean idle exit. A crash or a failed wake must
     # leave the VM alone, otherwise a boot loop would keep shutting it off.
     [ "''${SERVICE_RESULT:-}" = "success" ] || exit 0
+    ${siblingsBusy svc}
+    ${apiEnv svc}
 
-    TOKEN=$(cat ${cfg.tokenFile})
-    API="${cfg.apiUrl}/nodes/${cfg.node}/qemu/${toString svc.vmid}"
-
-    echo "${name} idle, shutting down vm-${toString svc.vmid}"
-    curl -sk -X POST -H "Authorization: PVEAPIToken=$TOKEN" "$API/status/shutdown" >/dev/null
+    echo "${name} idle for ${(vmOf svc).cooldown}, shutting down vm-${toString svc.vmid}"
+    pve -X POST "$API/status/shutdown" >/dev/null
   '';
 
-  serviceType = lib.types.submodule ({ ... }: {
+  # the proxy only powers a VM off after it served a connection. A VM that was
+  # started some other way (sync.sh deploy, Hermes, the Proxmox UI) and never
+  # got a request would run forever; the reaper stops it after the cooldown.
+  reaperScript = pkgs.writeShellScript "ondemand-reaper" ''
+    set -uo pipefail
+    export PATH="${lib.makeBinPath [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ]}"
+    now=$(date +%s)
+    ${lib.concatStrings (lib.mapAttrsToList (name: svc: ''
+      (
+        ${apiEnv svc}
+        cooldown=${toString (toSeconds (vmOf svc).cooldown)}
+        ${siblingsBusy svc}
+        cur=$(pve "$API/status/current")
+        [ "$(echo "$cur" | jq -r '.data.status // ""')" = running ] || exit 0
+        uptime=$(echo "$cur" | jq -r '.data.uptime // 0')
+        last=$(systemctl show -p InactiveEnterTimestamp --value ondemand-${name}.service)
+        last=$([ -n "$last" ] && date -d "$last" +%s 2>/dev/null || echo 0)
+        if [ "$uptime" -ge "$cooldown" ] && [ $((now - last)) -ge "$cooldown" ]; then
+          echo "vm-${toString svc.vmid} (${name}) up ''${uptime}s without connections, shutting down"
+          pve -X POST "$API/status/shutdown" >/dev/null
+        fi
+      )
+    '') active)}
+  '';
+
+  serviceType = lib.types.submodule ({ config, ... }: {
     options = {
       vmid = lib.mkOption {
         type = lib.types.int;
-        description = "Proxmox VM ID to start and stop.";
-      };
-
-      listenAddress = lib.mkOption {
-        type = lib.types.str;
-        default = "127.0.0.1";
-        description = "Address the activation proxy listens on.";
-      };
-
-      listenPort = lib.mkOption {
-        type = lib.types.port;
-        description = "Port the activation proxy listens on. Point the reverse proxy here instead of at the VM.";
-      };
-
-      target = lib.mkOption {
-        type = lib.types.str;
-        description = "IP of the on-demand VM.";
+        description = "Proxmox VM ID (key in instances.tf). IP, enabled state and cooldown come from the inventory.";
       };
 
       targetPort = lib.mkOption {
         type = lib.types.port;
-        description = "Port on the on-demand VM to forward to.";
+        description = "Port on the VM to forward to.";
       };
 
-      idleTimeout = lib.mkOption {
-        type = lib.types.str;
-        default = "30m";
-        description = "How long the VM stays up after the last connection closes.";
+      listenPort = lib.mkOption {
+        type = lib.types.port;
+        default = 20000 + config.vmid;
+        description = "Local port of the activation proxy. Must be unique per host; set it explicitly when two services share a VM.";
       };
 
       bootTimeout = lib.mkOption {
@@ -103,6 +131,11 @@ let
 in {
   options.homelab.onDemand = {
     enable = lib.mkEnableOption "socket-activated VMs that boot on first request";
+
+    side = lib.mkOption {
+      type = lib.types.enum [ "internal" "external" ];
+      description = "Which subnet's onDemand VMs this host fronts. Every onDemand VM on that side must have a service entry.";
+    };
 
     apiUrl = lib.mkOption {
       type = lib.types.str;
@@ -127,25 +160,49 @@ in {
     services = lib.mkOption {
       type = lib.types.attrsOf serviceType;
       default = {};
-      description = "On-demand services, keyed by name.";
+      description = "Services that may run on demand, keyed by name. Only VMs with enabled = \"onDemand\" get a proxy.";
+    };
+
+    address = lib.mkOption {
+      type = lib.types.attrsOf lib.types.str;
+      readOnly = true;
+      description = ''
+        host:port to reach each service: the local activation proxy when the VM
+        is onDemand, the VM itself when it is always on. Point Traefik here so
+        flipping `enabled` in instances.tf needs no other change.
+      '';
     };
   };
 
-  config = lib.mkIf (cfg.enable && cfg.services != {}) {
-    # systemd holds the client connection in the socket queue while the VM
-    # boots, so the first request waits instead of being refused — as long as
-    # the client's own timeout is longer than the boot.
+  config = lib.mkIf cfg.enable {
+    homelab.onDemand.address = lib.mapAttrs (_: svc:
+      if isOnDemand svc then "127.0.0.1:${toString svc.listenPort}"
+      else "${(vmOf svc).ip}:${toString svc.targetPort}"
+    ) cfg.services;
+
+    assertions =
+      (lib.mapAttrsToList (name: svc: {
+        assertion = inventory ? ${toString svc.vmid};
+        message = "homelab.onDemand.services.${name}: vm ${toString svc.vmid} is not in instances.tf";
+      }) cfg.services)
+      ++ (lib.mapAttrsToList (id: vm: {
+        assertion = vm.type != cfg.side || vm.enabled != "onDemand"
+          || lib.any (svc: toString svc.vmid == id) (lib.attrValues cfg.services);
+        message = "vm ${id} (${vm.name}) is onDemand but has no homelab.onDemand.services entry on the ${cfg.side} Traefik";
+      }) inventory);
+
+    # the first connection waits in the socket queue while the VM boots.
     systemd.sockets = lib.mapAttrs' (name: svc:
       lib.nameValuePair "ondemand-${name}" {
         description = "On-demand activation socket for ${name}";
         wantedBy = [ "sockets.target" ];
         socketConfig = {
-          ListenStream = "${svc.listenAddress}:${toString svc.listenPort}";
-          # One proxy process for all connections, not one per connection.
+          ListenStream = "127.0.0.1:${toString svc.listenPort}";
+          # one proxy process for all connections, not one per connection.
           Accept = false;
         };
       }
-    ) cfg.services;
+    ) active;
 
     systemd.services = lib.mapAttrs' (name: svc:
       lib.nameValuePair "ondemand-${name}" {
@@ -155,18 +212,29 @@ in {
         after = [ "ondemand-${name}.socket" "network-online.target" ];
         serviceConfig = {
           # start-pre holds the client while the VM boots; systemd's default 90s
-          # start timeout would kill the wake before a cold VM answers. Give the
-          # wake its full bootTimeout plus margin.
+          # start timeout would kill the wake before a cold VM answers.
           TimeoutStartSec = svc.bootTimeout + 60;
           ExecStartPre = wakeScript name svc;
           ExecStart = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd"
-            + " --exit-idle-time=${svc.idleTimeout}"
-            + " ${svc.target}:${toString svc.targetPort}";
+            + " --exit-idle-time=${(vmOf svc).cooldown}"
+            + " ${(vmOf svc).ip}:${toString svc.targetPort}";
           ExecStopPost = sleepScript name svc;
           # A failed wake should not blacklist the unit; the next connection retries.
           Restart = "no";
         };
       }
-    ) cfg.services;
+    ) active // lib.optionalAttrs (active != {}) {
+      ondemand-reaper = {
+        description = "Shut down idle on-demand VMs that never got a connection";
+        serviceConfig = { Type = "oneshot"; ExecStart = reaperScript; };
+      };
+    };
+
+    systemd.timers = lib.optionalAttrs (active != {}) {
+      ondemand-reaper = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = { OnBootSec = "5m"; OnUnitActiveSec = "2m"; };
+      };
+    };
   };
 }

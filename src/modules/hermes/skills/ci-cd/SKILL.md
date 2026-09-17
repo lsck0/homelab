@@ -1,0 +1,46 @@
+---
+name: ci-cd
+description: Deploy apps: registry, Swarm stacks, rollouts, rollback.
+version: 1.0.0
+author: homelab
+license: MIT
+platforms: [linux]
+metadata:
+  hermes:
+    tags: [Homelab, CI, CD, Docker, Swarm]
+    related_skills: [homelab-ops, git-forgejo]
+---
+
+# CI/CD
+
+Flow: push to Forgejo or GitHub -> CI builds an image -> pushes to a registry ->
+vm-209 (10.200.0.209, Docker Swarm) polls every minute and rolls out a new
+digest with start-first updates (no downtime; failed healthcheck = rollback).
+
+- Forgejo -> `registry.lsck0.dev/<app>:latest` (internal registry vm-116).
+  Template: `example/.forgejo/workflows/hello.yml` in the homelab repo.
+- GitHub -> `ghcr.io/<owner>/<app>:latest`. Template: `example/.github/workflows/hello.yml`.
+- Any registry works; private images need credentials in `homelab.swarm.registries` (Nix).
+
+## On vm-209
+
+- Stacks/services: `ssh 10.200.0.209 'docker stack ls; docker service ls'`
+- Rollout state: `docker service ps <stack>_web --no-trunc | head`
+- Logs: `docker service logs --tail 100 <stack>_web`
+- Force a pull + rollout now: `systemctl start swarm-update` (journal: `journalctl -u swarm-update -n 30`)
+- Roll back to the previous version: `docker service rollback <stack>_web`
+- Pin a specific build: `docker service update --image registry.lsck0.dev/<app>:<sha> <stack>_web`
+  (the next poll moves it back to `latest`; tell the owner to push a revert instead for a lasting pin).
+
+## Adding a new app
+
+Needs Nix changes the owner deploys: a stack in `src/instances/209-external-hello.nix`
+(image, published port, healthcheck) and a route in `src/modules/routes.nix`
+(`external.<app> = { host; vmid = 209; port; }`). Draft both snippets for the owner.
+
+## Registry (vm-116)
+
+- Catalog: `curl -s http://10.100.0.116:5000/v2/_catalog`, tags `curl -s http://10.100.0.116:5000/v2/<app>/tags/list`.
+- Delete a tag: get digest with `curl -sI -H "Accept: application/vnd.docker.distribution.manifest.v2+json" http://10.100.0.116:5000/v2/<app>/manifests/<tag>`, then `curl -X DELETE http://10.100.0.116:5000/v2/<app>/manifests/<digest>`;
+  reclaim space: `ssh 10.100.0.116 podman exec registry bin/registry garbage-collect /etc/docker/registry/config.yml`.
+- UI: https://registry-ui.lsck0.dev.

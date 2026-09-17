@@ -1,0 +1,32 @@
+name: hello
+
+# Build on GitHub, push to GHCR. vm-209 polls the tag every minute and rolls the
+# new digest out with a start-first update (no downtime). Make the package
+# public (or add registry credentials on vm-209) so the swarm can pull it.
+on:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/hello:latest
+            ghcr.io/${{ github.repository_owner }}/hello:${{ github.sha }}
