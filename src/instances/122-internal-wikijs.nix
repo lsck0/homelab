@@ -29,5 +29,7 @@
     };
   };
 
-  networking.firewall.allowedTCPPorts = [ 80 5432 ];
+  networking.firewall.allowedTCPPorts = [ 80 ];
+  # Postgres only for the container (podman bridge), not the subnet
+  networking.firewall.interfaces.podman0.allowedTCPPorts = [ 5432 ];
 }
