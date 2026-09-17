@@ -189,7 +189,7 @@ in {
 
       ENV_FILE="/var/lib/homepage/homepage.env"
       : > "$ENV_FILE"
-      for f in /var/lib/homepage-tokens/*.token; do
+      for f in /var/lib/homepage-tokens/*.token /var/lib/homepage-tokens/external/*.token; do
         [ -f "$f" ] || continue
         name="$(basename "$f" .token)"
         varname="HOMEPAGE_VAR_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"

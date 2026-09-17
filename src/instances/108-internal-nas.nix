@@ -1,8 +1,11 @@
-{ ... }: {
+{ lib, dmzShares, ... }: {
   networking.hostName = "vm-108";
 
   # backups: Kopia on vm-106 snapshots this tree (see 106-internal-kopia.nix).
 
+  # DMZ exports come from dmzShares (modules/nas.nix), one share per VM address.
+  # subtree_check: all shares live on one filesystem, and without it a root
+  # client can forge file handles that reach outside its share.
   services.nfs.server = {
     enable = true;
     exports = ''
@@ -11,9 +14,10 @@
       /srv/nas/public     10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/torrents   10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/data       10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
-      /srv/nas/data       10.200.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas            10.100.0.106(rw,sync,no_subtree_check,no_root_squash)
-    '';
+    '' + lib.concatStrings (lib.mapAttrsToList (id: shares: lib.concatMapStrings (s: ''
+      /srv/nas/data/${s} 10.200.0.${id}(rw,sync,subtree_check,no_root_squash)
+    '') shares) dmzShares);
   };
 
   services.samba = {
@@ -123,7 +127,6 @@
     "d /srv/nas/data/calendar 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo-runner 0777 nobody nogroup -"
-    "d /srv/nas/data/headscale 0777 nobody nogroup -"
     "d /srv/nas/data/registry 0777 nobody nogroup -"
     "d /srv/nas/data/vaultwarden 0777 nobody nogroup -"
     "d /srv/nas/data/nextcloud 0777 nobody nogroup -"
@@ -137,13 +140,7 @@
     "d /srv/nas/data/navidrome 0777 nobody nogroup -"
     "d /srv/nas/data/kavita 0777 nobody nogroup -"
     "d /srv/nas/data/uptime-kuma 0777 nobody nogroup -"
-    "d /srv/nas/data/shlink 0777 nobody nogroup -"
-    "d /srv/nas/data/privatebin 0777 nobody nogroup -"
-    "d /srv/nas/data/share 0777 nobody nogroup -"
     "d /srv/nas/data/traefik-acme-internal 0777 nobody nogroup -"
-    "d /srv/nas/data/traefik-acme-external 0777 nobody nogroup -"
-    "d /srv/nas/data/minecraft 0777 nobody nogroup -"
-    "d /srv/nas/data/minecraft-modpacks 0777 nobody nogroup -"
     "d /srv/nas/data/paperless 0777 nobody nogroup -"
     "d /srv/nas/data/paperless-ai 0777 nobody nogroup -"
     "d /srv/nas/data/qbittorrent 0777 nobody nogroup -"
@@ -155,9 +152,6 @@
     "d /srv/nas/data/homepage 0777 nobody nogroup -"
     "d /srv/nas/data/homepage-tokens 0777 nobody nogroup -"
     "d /srv/nas/data/crowdsec-internal 0777 nobody nogroup -"
-    "d /srv/nas/data/crowdsec-external 0777 nobody nogroup -"
-    "d /srv/nas/data/searxng 0777 nobody nogroup -"
-    "d /srv/nas/data/tor-relay-keys 0777 nobody nogroup -"
     "d /srv/nas/data/lidarr 0777 nobody nogroup -"
     "d /srv/nas/data/bookshelf 0777 nobody nogroup -"
     "d /srv/nas/data/suwayomi 0777 nobody nogroup -"
@@ -165,7 +159,7 @@
     "d /srv/nas/data/hermes 0777 nobody nogroup -"
     "d /var/lib/filebrowser 0750 1000 1000 -"
     "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
-  ];
+  ] ++ map (s: "d /srv/nas/data/${s} 0777 nobody nogroup -") (lib.unique (lib.concatLists (lib.attrValues dmzShares)));
 
   # FileBrowser web UI: authelia handles auth via traefik
   virtualisation.oci-containers.containers.filebrowser = {

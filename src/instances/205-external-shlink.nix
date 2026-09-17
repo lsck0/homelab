@@ -1,7 +1,7 @@
 { pkgs, nasMount, ... }: {
   networking.hostName = "vm-205";
   fileSystems = nasMount "/var/lib/shlink" "shlink"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens/external";
 
   virtualisation.oci-containers.containers.shlink = {
     image = "shlinkio/shlink:latest";
