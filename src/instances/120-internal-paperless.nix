@@ -1,4 +1,4 @@
-{ pkgs, nasMount, nasPath, ... }: {
+{ config, nasMount, nasPath, ... }: {
   networking.hostName = "vm-120";
 
   fileSystems = nasMount "/var/lib/paperless" "paperless"
@@ -10,8 +10,7 @@
     address = "0.0.0.0";
     port = 8080;
     settings = {
-      # Authelia ForwardAuth gates access; auto-login skips Paperless' own login
-      PAPERLESS_AUTO_LOGIN_USERNAME = "admin";
+      # Authelia ForwardAuth gates access and passes the user in Remote-User
       PAPERLESS_ENABLE_HTTP_REMOTE_USER = "true";
       PAPERLESS_HTTP_REMOTE_USER_HEADER_NAME = "HTTP_REMOTE_USER";
       PAPERLESS_URL = "https://paperless.lsck0.dev";
@@ -22,78 +21,30 @@
     };
   };
 
-  # promote remote-users to superuser (retries until users exist)
-  systemd.services.paperless-promote-admin = {
-    description = "Promote Paperless users to superuser";
+  # the owner's account (the lldap user Authelia passes in Remote-User, see
+  # 102-internal-lldap.nix) as superuser, and the API token Homepage, Hermes
+  # and paperless-ai use. Remote-user logins create plain users, so the
+  # account is created here first. Idempotent.
+  systemd.services.paperless-setup = {
+    description = "Create the Paperless owner account and API token";
     after = [ "paperless-web.service" ];
+    wants = [ "paperless-web.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.paperless-ngx ];
-    serviceConfig = {
-      Type = "oneshot";
-      User = "paperless";
-      Group = "paperless";
-      WorkingDirectory = "/var/lib/paperless";
-      Restart = "on-failure";
-      RestartSec = 30;
-    };
-    environment = {
-      PAPERLESS_URL = "https://paperless.lsck0.dev";
-    };
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
     script = ''
-      # wait for web service to be ready
-      sleep 10
-      PROMOTED=$(paperless-ngx shell -c "
-      from django.contrib.auth.models import User
-      users = User.objects.filter(is_superuser=False)
-      count = 0
-      for u in users:
-          u.is_staff = True
-          u.is_superuser = True
-          u.save()
-          print(f'Promoted {u.username} to superuser')
-          count += 1
-      print(f'TOTAL:{count}')
-      " 2>/dev/null)
-      echo "$PROMOTED"
-      # if no users exist yet, exit 1 to trigger restart
-      if echo "$PROMOTED" | grep -q "TOTAL:0"; then
-        echo "No users yet, will retry..."
-        exit 1
-      fi
-    '';
-  };
-
-  # generate API token for Homepage widget
-  systemd.services.paperless-homepage-token = {
-    description = "Generate Paperless API token for Homepage";
-    after = [ "paperless-web.service" ];
-    wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.paperless-ngx ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
-    script = ''
-      TOKEN_FILE="/var/lib/homepage-tokens/paperless-key.token"
-      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
-      sleep 10
-
-      export PAPERLESS_URL="https://paperless.lsck0.dev"
-      TOKEN=$(sudo -u paperless -E ${pkgs.paperless-ngx}/bin/paperless-ngx shell -c "
+      TOKEN=$(${config.services.paperless.manage} shell -c "
       from django.contrib.auth.models import User
       from rest_framework.authtoken.models import Token
-      user, created = User.objects.get_or_create(
-          username='homepage-bot',
-          defaults={'is_staff': True, 'is_superuser': True, 'email': 'homepage@internal'}
-      )
-      token, _ = Token.objects.get_or_create(user=user)
-      print(token.key)
-      " 2>/dev/null | tail -1)
-
-      if [ -n "$TOKEN" ]; then
-        echo -n "$TOKEN" > "$TOKEN_FILE"
-        echo "Paperless Homepage token created"
-      fi
+      owner, _ = User.objects.get_or_create(username='luca')
+      owner.is_staff = owner.is_superuser = True
+      owner.save()
+      bot, _ = User.objects.get_or_create(username='homepage-bot', defaults={'email': 'homepage@internal'})
+      bot.is_staff = bot.is_superuser = True
+      bot.save()
+      print(Token.objects.get_or_create(user=bot)[0].key)
+      " | tail -1)
+      [ -n "$TOKEN" ] || { echo "no API token from paperless-manage"; exit 1; }
+      echo -n "$TOKEN" > /var/lib/homepage-tokens/paperless-key.token
     '';
   };
 

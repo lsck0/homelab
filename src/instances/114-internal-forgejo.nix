@@ -46,7 +46,7 @@
       RemainAfterExit = true;
     };
     script = ''
-      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/v1/settings/api
+      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
 
       # skip if users already exist
       COUNT=$(podman exec -u git forgejo forgejo admin user list 2>/dev/null | grep -c '^[0-9]' || echo 0)
@@ -74,7 +74,7 @@
       RemainAfterExit = true;
     };
     script = ''
-      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/v1/settings/api
+      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
 
       OIDC_SECRET=$(cat ${config.sops.secrets.forgejo-oidc-secret.path})
       DISCOVER_URL="https://auth.lsck0.dev/.well-known/openid-configuration"
@@ -132,7 +132,7 @@
         esac
       fi
 
-      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/v1/settings/api
+      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
 
       # create a local bot user for API access
       podman exec -u git forgejo forgejo admin user create \

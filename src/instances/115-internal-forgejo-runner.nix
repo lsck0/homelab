@@ -50,7 +50,7 @@
         /var/lib/forgejo-runner/config.yaml
 
       # wait for Forgejo API
-      ${retry} 90 2 curl -sf https://git.lsck0.dev/api/v1/settings/api
+      ${retry} 90 2 curl -sf https://git.lsck0.dev/api/healthz
 
       # validate existing registration by pinging Forgejo with runner credentials.
       # if ping fails the token is stale (e.g. after a Forgejo DB reset), re-register.
