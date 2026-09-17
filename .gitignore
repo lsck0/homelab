@@ -28,3 +28,6 @@ images/
 *.qcow2
 *.sock
 *.tfvars.json
+
+# rollback copy written by src/scripts/renumber.sh
+*.tfstate.pre-renumber
