@@ -32,7 +32,7 @@
     wantedBy = [ "multi-user.target" ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
     script = ''
-      TOKEN=$(${config.services.paperless.manage} shell -c "
+      TOKEN=$(${config.services.paperless.manage}/bin/paperless-manage shell -c "
       from django.contrib.auth.models import User
       from rest_framework.authtoken.models import Token
       owner, _ = User.objects.get_or_create(username='luca')
