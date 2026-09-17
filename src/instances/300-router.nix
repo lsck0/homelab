@@ -1,19 +1,16 @@
 { config, pkgs, lib, ... }:
 let
-  # Cloudflare-PROXIED A records (per host — free plan can't proxy a wildcard):
-  # resolve to the edge, so LAN + remote both reach WAN:443 → external Traefik
-  # with no hairpin and no per-device DNS.
-  proxiedHosts = [
-    # external services (served directly by external Traefik)
-    "hs" "search" "shlink" "paste" "share" "hello" "ntfy" "cal"
-    # internal services (relayed to internal Traefik, gated by Authelia)
-    "auth" "homepage" "git" "registry" "registry-ui" "cloud" "vault"
-    "paperless" "paperless-ai" "hass" "jellyfin" "status" "huginn" "tasks"
-    "hermes" "grafana" "wiki" "abs" "torrent" "music" "read" "prowlarr"
-    "sonarr" "radarr" "nas" "proxmox" "traefik" "lldap" "attic" "budget"
-    "requests" "subs" "firefly" "sync"
-  ];
-  # Unproxied (raw WAN IP) — L4 services CF can't proxy, plus a DNS-only
+  routes = import ../modules/routes.nix;
+  hostsOf = side: lib.unique (map (r: r.host) (lib.attrValues routes.${side}));
+  # hosts served by internal Traefik that are not a VM route.
+  internalExtraHosts = [ "traefik" "proxmox" ];
+
+  # Cloudflare-PROXIED A records (per host: free plan can't proxy a wildcard):
+  # resolve to the edge, so LAN + remote both reach WAN:443 -> external Traefik
+  # with no hairpin and no per-device DNS. Internal hosts are relayed to
+  # internal Traefik and gated by Authelia.
+  proxiedHosts = hostsOf "external" ++ hostsOf "internal" ++ internalExtraHosts;
+  # unproxied (raw WAN IP), L4 services CF can't proxy, plus a DNS-only
   # wildcard fallback kept fresh so no unlisted name goes stale.
   rawHosts = [ "wg" "mc" "tor" "*" ];
   # domain:proxied entries the DDNS loop consumes.
@@ -39,8 +36,10 @@ in {
     };
   };
 
-  # ── Network Interfaces ──────────────────────────────────────
-  # ens18 = WAN    → static lease from FritzBox
+  # ─────────────────────────────────────────────────────────────────────────────
+  # NETWORK INTERFACES
+  # ─────────────────────────────────────────────────────────────────────────────
+  # ens18 = WAN    -> static lease from FritzBox
   # ens19 = Internal LAN  (10.100.0.0/24)
   # ens20 = External DMZ  (10.200.0.0/24)
   # wg0   = WireGuard VPN (10.0.0.0/24)
@@ -54,18 +53,22 @@ in {
 
   boot.kernel.sysctl."net.ipv4.ip_forward" = 1;
 
-  # ── NAT + Port Forwarding ──────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
+  # NAT + PORT FORWARDING
+  # ─────────────────────────────────────────────────────────────────────────────
   networking.nat = {
     enable = true;
     externalInterface = "ens18";
     internalInterfaces = [ "ens19" "ens20" "wg0" ];
-    # forwardPorts left empty — NixOS forwardPorts matches ALL inbound traffic on ens18,
-    # hijacking LAN→10.100.0.x:443 to external traefik. Custom nftables below restrict
+    # forwardPorts left empty, NixOS forwardPorts matches ALL inbound traffic on ens18,
+    # hijacking LAN->10.100.0.x:443 to external traefik. Custom nftables below restrict
     # DNAT to traffic destined for the router's own WAN IP only.
     forwardPorts = [];
   };
 
-  # ── Firewall ────────────────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
+  # FIREWALL
+  # ─────────────────────────────────────────────────────────────────────────────
   networking.nftables.enable = true;
   networking.firewall = {
     enable = true;
@@ -91,43 +94,46 @@ in {
     extraForwardRules = ''
       ct state established,related accept
 
-      # WAN → all internal networks: allow
+      # WAN -> all internal networks: allow
       iifname "ens18" accept
 
-      # Internal LAN → anywhere: allow
+      # internal LAN -> anywhere: allow
       iifname "ens19" accept
 
-      # WireGuard VPN → anywhere: allow
+      # WireGuard VPN -> anywhere: allow
       iifname "wg0" accept
 
       # allow DMZ to reach internal Traefik, Git, and Registry (for CI/CD + image pulls)
-      iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.107 } tcp dport { 80, 443 } accept
-      iifname "ens20" ip daddr 10.100.0.109 tcp dport { 80, 443, 5000 } accept
+      iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.114 } tcp dport { 80, 443 } accept
+      iifname "ens20" ip daddr 10.100.0.116 tcp dport { 80, 443, 5000 } accept
 
-      # allow DMZ VMs to ship logs to Loki on vm-103
-      iifname "ens20" ip daddr 10.100.0.103 tcp dport 3100 accept
+      # allow DMZ VMs to ship logs to Loki on vm-104 and syslog to Wazuh on vm-107
+      iifname "ens20" ip daddr 10.100.0.104 tcp dport 3100 accept
+      iifname "ens20" ip daddr 10.100.0.107 udp dport 514 accept
 
       # allow DMZ to reach NAS (NFS for persistent data)
-      iifname "ens20" ip daddr 10.100.0.105 tcp dport { 111, 2049 } accept
-      iifname "ens20" ip daddr 10.100.0.105 udp dport { 111, 2049 } accept
+      iifname "ens20" ip daddr 10.100.0.108 tcp dport { 111, 2049 } accept
+      iifname "ens20" ip daddr 10.100.0.108 udp dport { 111, 2049 } accept
 
-      # External DMZ → internal LAN: BLOCK
+      # external DMZ -> internal LAN: BLOCK
       iifname "ens20" oifname "ens19" counter drop
 
       # allow external Traefik to reach the Proxmox API for on-demand VM wake.
-      # Narrow: only vm-200, only the hypervisor, only the API port. The token is
+      # narrow: only vm-200, only the hypervisor, only the API port. The token is
       # scoped to VM.PowerMgmt/VM.Audit. Must precede the management-net drop.
       iifname "ens20" ip saddr 10.200.0.200 ip daddr 192.168.178.200 tcp dport 8006 accept
 
-      # External DMZ → local/management network: BLOCK
+      # external DMZ -> local/management network: BLOCK
       iifname "ens20" oifname "ens18" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } counter drop
 
-      # External DMZ → internet: allow
+      # external DMZ -> internet: allow
       iifname "ens20" accept
     '';
   };
 
-  # ── Port Forwards (DNAT only for router's own WAN IP) ─────
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PORT FORWARDS (DNAT ONLY FOR ROUTER'S OWN WAN IP)
+  # ─────────────────────────────────────────────────────────────────────────────
   networking.nftables.tables.port-forwards = {
     family = "ip";
     content = ''
@@ -137,13 +143,15 @@ in {
         ip daddr 192.168.178.29 tcp dport 10100 dnat to 10.100.0.100:443
         ip daddr 192.168.178.29 tcp dport 10200 dnat to 10.200.0.200:443
         ip daddr 192.168.178.29 tcp dport 25565 dnat to 10.200.0.200:25565
-        # Tor relay ORPort — must also be forwarded on the FritzBox.
-        ip daddr 192.168.178.29 tcp dport 9001 dnat to 10.200.0.209:9001
+        # Tor relay ORPort: must also be forwarded on the FritzBox.
+        ip daddr 192.168.178.29 tcp dport 9001 dnat to 10.200.0.202:9001
       }
     '';
   };
 
-  # ── DHCP Server (Kea) ──────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
+  # DHCP SERVER (KEA)
+  # ─────────────────────────────────────────────────────────────────────────────
   services.kea.dhcp4 = {
     enable = true;
     settings = {
@@ -181,8 +189,10 @@ in {
     };
   };
 
-  # ── DNS blocklist + DoT upstream (blocky) ──────────────────────
-  # Loopback-only; CoreDNS forwards `.` here. Blocks ads/trackers/malware and
+  # ─────────────────────────────────────────────────────────────────────────────
+  # DNS BLOCKLIST + DOT UPSTREAM (BLOCKY)
+  # ─────────────────────────────────────────────────────────────────────────────
+  # loopback-only; CoreDNS forwards `.` here. Blocks ads/trackers/malware and
   # encrypts upstream queries over DNS-over-TLS to Cloudflare/Quad9.
   services.blocky = {
     enable = true;
@@ -192,7 +202,7 @@ in {
         "tcp-tls:1.1.1.1:853"
         "tcp-tls:9.9.9.9:853"
       ];
-      # Resolve the DoT hostnames' bootstrap without a chicken-and-egg loop.
+      # resolve the DoT hostnames' bootstrap without a chicken-and-egg loop.
       bootstrapDns = [
         { upstream = "tcp-tls:1.1.1.1:853"; ips = [ "1.1.1.1" ]; }
       ];
@@ -208,29 +218,23 @@ in {
     };
   };
 
-  # ── DNS Server (CoreDNS) ─────────────────────────────────────
-  # All services use *.lsck0.dev — internal DNS resolves to local traefik IPs
+  # ─────────────────────────────────────────────────────────────────────────────
+  # DNS SERVER (COREDNS)
+  # ─────────────────────────────────────────────────────────────────────────────
+  # all services use *.lsck0.dev: internal DNS resolves to local traefik IPs
   services.resolved.enable = false;
   services.coredns = {
     enable = true;
     config = ''
       lsck0.dev:53 {
         hosts {
-          # internal services → internal Traefik
-          10.100.0.100 auth.lsck0.dev homepage.lsck0.dev git.lsck0.dev registry.lsck0.dev
-          10.100.0.100 cloud.lsck0.dev vault.lsck0.dev paperless.lsck0.dev paperless-ai.lsck0.dev
-          10.100.0.100 hass.lsck0.dev jellyfin.lsck0.dev status.lsck0.dev
-          10.100.0.100 huginn.lsck0.dev tasks.lsck0.dev hermes.lsck0.dev cal.lsck0.dev
-          10.100.0.100 grafana.lsck0.dev wiki.lsck0.dev abs.lsck0.dev
-          10.100.0.100 torrent.lsck0.dev music.lsck0.dev read.lsck0.dev
-          10.100.0.100 prowlarr.lsck0.dev sonarr.lsck0.dev radarr.lsck0.dev
-          10.100.0.100 nas.lsck0.dev proxmox.lsck0.dev traefik.lsck0.dev registry-ui.lsck0.dev
-          10.100.0.105 smb.lsck0.dev sync.lsck0.dev
-          10.100.0.100 lldap.lsck0.dev attic.lsck0.dev budget.lsck0.dev requests.lsck0.dev subs.lsck0.dev firefly.lsck0.dev
-          10.100.0.106 sccache.lsck0.dev
-          # external services → external Traefik
-          10.200.0.200 hs.lsck0.dev search.lsck0.dev shlink.lsck0.dev paste.lsck0.dev share.lsck0.dev
-          10.200.0.200 mc.lsck0.dev hello.lsck0.dev ntfy.lsck0.dev
+          # internal services -> internal Traefik
+          ${lib.concatMapStringsSep "\n    " (h: "10.100.0.100 ${h}.lsck0.dev") (hostsOf "internal" ++ internalExtraHosts)}
+          # direct: SMB/NFS on the NAS, sccache (Redis protocol)
+          10.100.0.108 smb.lsck0.dev
+          10.100.0.110 sccache.lsck0.dev
+          # external services -> external Traefik
+          ${lib.concatMapStringsSep "\n    " (h: "10.200.0.200 ${h}.lsck0.dev") (hostsOf "external" ++ [ "mc" ])}
           fallthrough
         }
         template IN SRV _minecraft._tcp.mc.lsck0.dev {
@@ -239,7 +243,7 @@ in {
       }
 
       .:53 {
-        # Forward to local blocky (ad/tracker/malware blocklists + DoT upstream)
+        # forward to local blocky (ad/tracker/malware blocklists + DoT upstream)
         # first; fall back to plain 1.1.1.1/8.8.8.8 if blocky is down, so DNS
         # for the whole LAN never depends on blocky staying up.
         forward . 127.0.0.1:5335 1.1.1.1 8.8.8.8 {
@@ -251,12 +255,14 @@ in {
     '';
   };
 
-  # After first boot, get server pubkey: wg show wg0 public-key
+  # after first boot, get server pubkey: wg show wg0 public-key
   # Generate client config: endpoint = <public-ip>:51820, DNS = 10.0.0.1
   sops.secrets.wireguard-private-key = {};
   sops.secrets.cloudflare-token = {};
 
-  # ── DDNS (Cloudflare) ──────────────────────────────────────
+  # ─────────────────────────────────────────────────────────────────────────────
+  # DDNS (CLOUDFLARE)
+  # ─────────────────────────────────────────────────────────────────────────────
   systemd.services.ddns-cloudflare = {
     description = "Update vpn.lsck0.dev A record with current public IP";
     after = [ "network-online.target" ];
@@ -277,7 +283,7 @@ in {
         "https://api.cloudflare.com/client/v4/zones?name=$ZONE_NAME" | jq -r '.result[0].id')
       { [ -z "$ZONE_ID" ] || [ "$ZONE_ID" = "null" ]; } && { echo "Failed to get zone ID"; exit 1; }
 
-      # format: "domain:proxied" — built from proxiedHosts/rawHosts in Nix so
+      # format: "domain:proxied", built from proxiedHosts/rawHosts in Nix so
       # this list is the single source of truth for public DNS. Every HTTP
       # service (internal + external) is proxied; L4 services stay raw.
       DOMAINS="${ddnsDomains}"
@@ -321,10 +327,12 @@ in {
       OnUnitActiveSec = "5min";
     };
   };
-  # ── WireGuard VPN ───────────────────────────────────────────
-  # Client config MUST include: DNS = 10.0.0.1
+  # ─────────────────────────────────────────────────────────────────────────────
+  # WIREGUARD VPN
+  # ─────────────────────────────────────────────────────────────────────────────
+  # client config MUST include: DNS = 10.0.0.1
   # This enables split-horizon DNS so *.lsck0.dev resolves to internal IPs over VPN.
-  # Port 53 is already open on wg0 (see firewall above).
+  # port 53 is already open on wg0 (see firewall above).
   networking.wireguard.interfaces.wg0 = {
     ips = [ "10.0.0.1/24" ];
     listenPort = 51820;
@@ -347,7 +355,7 @@ in {
 
   virtualisation.docker.enable = lib.mkForce false;
 
-  # Wake-on-LAN: wake luca-pc from VPN
+  # wake-on-LAN: wake luca-pc from VPN
   # Usage: ssh root@10.0.0.1 wol-pc
   environment.etc."profile.d/wol.sh".text = ''
     alias wol-pc='wakeonlan -i 192.168.178.255 10:ff:e0:e4:04:4a'

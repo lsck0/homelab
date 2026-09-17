@@ -2,7 +2,7 @@
 let
   cfg = config.homelab.traefik;
 
-  # Cloudflare edge ranges — trusted so Traefik reads the real client IP from
+  # Cloudflare edge ranges: trusted so Traefik reads the real client IP from
   # XFF (else Anubis re-challenges every request and CrowdSec bans the edge).
   cloudflareRanges = [
     "173.245.48.0/20" "103.21.244.0/22" "103.22.200.0/22" "103.31.4.0/22"
@@ -11,7 +11,7 @@ let
     "104.24.0.0/14" "172.64.0.0/13" "131.0.72.0/22"
   ];
 
-  # Response-header hardening on every websecure route (opt out via noSecureHeaders).
+  # response-header hardening on every websecure route (opt out via noSecureHeaders).
   secureHeadersMiddleware = {
     secure-headers.headers = {
       stsSeconds = 31536000;
@@ -24,7 +24,7 @@ let
     };
   };
 
-  # Per-source-IP DoS limits on every websecure route (depth=1 reads the real
+  # per-source-IP DoS limits on every websecure route (depth=1 reads the real
   # client from XFF, not the Cloudflare edge).
   rateLimitAverage = 50;   # requests/second sustained per source IP
   rateLimitBurst = 100;    # short spikes allowed above the average
@@ -54,13 +54,13 @@ let
       crowdsecLapiKeyFile = config.sops.secrets.crowdsec-bouncer-key.path;
       crowdsecAppsecEnabled = appsec;
       crowdsecAppsecHost = "127.0.0.1:7422";
-      # Trust the router/Cloudflare hop so the plugin bans the real client IP
+      # trust the router/Cloudflare hop so the plugin bans the real client IP
       # from X-Forwarded-For, not the proxy in front of it.
       forwardedHeadersTrustedIPs = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
     };
   };
 
-  # Default bouncer (IP rep + optional WAF) plus a "-noappsec" variant (IP rep
+  # default bouncer (IP rep + optional WAF) plus a "-noappsec" variant (IP rep
   # only) for routes the WAF would break (headscale, ntfy).
   bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable ({
     crowdsec = mkBouncer cfg.crowdsecBouncer.appsec;
@@ -68,14 +68,14 @@ let
     crowdsec-noappsec = mkBouncer false;
   });
 
-  # Default middleware chain prepended to every websecure router, in order:
+  # default middleware chain prepended to every websecure router, in order:
   # bouncer first (drop known-bad IPs before any work), then per-IP limits, then
   # response-header hardening. Route-specific middlewares (auth, etc.) follow.
   defaultMiddlewares =
     lib.optional cfg.crowdsecBouncer.enable "crowdsec"
     ++ [ "rate-limit" "inflight-limit" "secure-headers" ];
 
-  # Ensure every websecure route has tls.certResolver = "cloudflare" unless
+  # ensure every websecure route has tls.certResolver = "cloudflare" unless
   # overridden, and prepend the default middleware chain unless opted out.
   routersWithTls = lib.mapAttrs (name: router:
     let
@@ -88,7 +88,7 @@ let
         else
           router;
       wantsDefaults = needsTls && !(builtins.elem name cfg.noSecureHeaders);
-      # Routes opted out of AppSec use the WAF-free bouncer variant but keep
+      # routes opted out of AppSec use the WAF-free bouncer variant but keep
       # every other default middleware (IP bouncer, rate limits, headers).
       chain =
         if cfg.crowdsecBouncer.enable
@@ -155,7 +155,7 @@ in {
         actual blocks (community blocklist + local bans) instead of only logging'';
 
       appsec = lib.mkEnableOption ''
-        the CrowdSec AppSec (WAF) component — inline request inspection with
+        the CrowdSec AppSec (WAF) component: inline request inspection with
         OWASP-CRS-compatible rules, in addition to IP reputation blocking'';
 
       noAppsecRouters = lib.mkOption {
@@ -212,7 +212,7 @@ in {
 
     trustCloudflare = lib.mkEnableOption ''
       trusting Cloudflare edge ranges on the websecure entrypoint so the real
-      client IP (not the rotating edge IP) reaches the backends — required for
+      client IP (not the rotating edge IP) reaches the backends: required for
       Anubis and CrowdSec to work correctly behind proxied Cloudflare DNS'';
 
     logLevel = lib.mkOption {
@@ -223,7 +223,7 @@ in {
 
   config = lib.mkIf cfg.enable {
     sops.secrets.cloudflare-token = {};
-    # Readable by the traefik user because the bouncer plugin (running inside
+    # readable by the traefik user because the bouncer plugin (running inside
     # traefik) reads the LAPI key from this file.
     sops.secrets.crowdsec-bouncer-key = lib.mkIf cfg.crowdsecBouncer.enable {
       owner = "traefik";
@@ -252,7 +252,7 @@ in {
       };
     };
 
-    # Register the bouncer with CrowdSec's local API using the shared key, so the
+    # register the bouncer with CrowdSec's local API using the shared key, so the
     # plugin authenticates. Idempotent: skip if the bouncer already exists.
     systemd.services.crowdsec-register-bouncer = lib.mkIf cfg.crowdsecBouncer.enable {
       description = "Register the Traefik bouncer with CrowdSec";
@@ -267,7 +267,7 @@ in {
       };
       script = ''
         KEY=$(cat ${config.sops.secrets.crowdsec-bouncer-key.path})
-        # Wait for the LAPI to answer.
+        # wait for the LAPI to answer.
         for i in $(seq 1 60); do
           podman exec crowdsec cscli lapi status >/dev/null 2>&1 && break
           sleep 5
@@ -310,14 +310,14 @@ in {
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script = ''
         ${pkgs.coreutils}/bin/mkdir -p /var/lib/crowdsec/config/acquis.d /var/lib/crowdsec/data
-        # Tell CrowdSec to read the Traefik access log so its traefik/http-cve
+        # tell CrowdSec to read the Traefik access log so its traefik/http-cve
         # scenarios fire on real traffic. The path is inside the container
         # (the log dir is bind-mounted there). printf, not a heredoc, so Nix
         # string de-indentation cannot corrupt the YAML.
         ${pkgs.coreutils}/bin/printf 'source: file\nfilenames:\n  - /var/log/traefik/access.log\nlabels:\n  type: traefik\n' \
           > /var/lib/crowdsec/config/acquis.d/traefik.yaml
         ${lib.optionalString (cfg.crowdsecBouncer.whitelistCidrs != []) ''
-          # Whitelist parser: CrowdSec never bans these CIDRs.
+          # whitelist parser: CrowdSec never bans these CIDRs.
           ${pkgs.coreutils}/bin/mkdir -p /var/lib/crowdsec/config/parsers/s02-enrich
           ${pkgs.coreutils}/bin/printf '%s\n' \
             'name: homelab/whitelist' \
@@ -355,7 +355,7 @@ in {
         };
         api.dashboard = true;
         # Prometheus metrics on a dedicated entrypoint (:8082), scraped by
-        # vm-103. Per-entrypoint/router/service labels drive the HTTP analytics
+        # vm-104. Per-entrypoint/router/service labels drive the HTTP analytics
         # dashboard (request rate, status codes, latency percentiles) with a
         # service filter. Loopback+LAN only; not exposed publicly.
         metrics.prometheus = {
@@ -368,7 +368,7 @@ in {
           web = {
             address = ":80";
             http.redirections.entryPoint = { to = "websecure"; scheme = "https"; permanent = true; };
-            # Bound how long a client may take to send a request — a client that
+            # bound how long a client may take to send a request: a client that
             # dribbles headers forever (Slowloris) is dropped instead of holding
             # a connection. writeTimeout is 0 (unbounded) so large media
             # downloads/streams are not cut off.
@@ -392,7 +392,7 @@ in {
           };
         };
       }
-      # Only present when the bouncer is enabled: an empty `experimental` block
+      # only present when the bouncer is enabled: an empty `experimental` block
       # makes Traefik fail to start ("experimental cannot be a standalone
       # element"). Traefik downloads and caches the plugin at startup.
       // lib.optionalAttrs cfg.crowdsecBouncer.enable {
@@ -412,22 +412,22 @@ in {
     };
 
     # Anubis instances: one per browser-facing upstream, each bound to loopback.
-    # The default baked-in bot policy (challenge Mozilla UAs, allow well-known /
+    # the default baked-in bot policy (challenge Mozilla UAs, allow well-known /
     # robots / API-JSON) is sufficient; only the bind, target and difficulty vary.
-    services.anubis.instances = lib.mkIf cfg.anubis.enable (lib.mapAttrs (name: a: {
+    services.anubis.instances = lib.mkIf cfg.anubis.enable (lib.mapAttrs (_name: a: {
       settings = {
         BIND = "127.0.0.1:${toString a.listenPort}";
         BIND_NETWORK = "tcp";
         TARGET = a.upstream;
         DIFFICULTY = a.difficulty;
-        # Unique loopback metrics port per instance; Prometheus can scrape later.
+        # unique loopback metrics port per instance; Prometheus can scrape later.
         METRICS_BIND = "127.0.0.1:${toString (a.listenPort + 1000)}";
         METRICS_BIND_NETWORK = "tcp";
         SERVE_ROBOTS_TXT = true;
       };
     }) cfg.anubis.instances);
 
-    # 8082 = Prometheus metrics, scraped by vm-103. Not port-forwarded, so it
+    # 8082 = Prometheus metrics, scraped by vm-104. Not port-forwarded, so it
     # stays on the LAN/DMZ; the internet never reaches it.
     networking.firewall.allowedTCPPorts = [ 80 443 8082 ];
   };
