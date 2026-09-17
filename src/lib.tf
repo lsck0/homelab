@@ -15,30 +15,38 @@
 #   disk     = GiB (default 8)
 #   machine  = "q35" for PCIe passthrough (default bpg/i440fx)
 #   hostpci  = Proxmox hardware-mapping names to pass through, e.g. ["gpu"]
+#   boot_order = start order when the Proxmox host boots (default 3). Every VM
+#                needs the router and most mount the NAS, so those two go first.
 
 locals {
   defaults = {
-    enabled  = true
-    cooldown = "30m"
-    memory   = 1024
-    cores    = 2
-    disk     = 8
-    machine  = null
-    hostpci  = []
+    enabled    = true
+    cooldown   = "30m"
+    memory     = 1024
+    cores      = 2
+    disk       = 8
+    machine    = null
+    hostpci    = []
+    boot_order = 3
   }
+
+  # pause after each VM that boots before the default group, so the router and
+  # the NAS are serving before their clients start.
+  boot_wait_seconds = 30
 
   vms = {
     for id, i in local.instances : id => {
-      name     = i.name
-      type     = i.type
+      name = i.name
+      type = i.type
       # as a string, the for-expression would unify bool and string anyway
-      enabled  = tostring(try(i.enabled, local.defaults.enabled))
-      cooldown = try(i.cooldown, local.defaults.cooldown)
-      memory   = try(i.memory, local.defaults.memory)
-      cores    = try(i.cores, local.defaults.cores)
-      disk     = try(i.disk, local.defaults.disk)
-      machine  = try(i.machine, local.defaults.machine)
-      hostpci  = try(i.hostpci, local.defaults.hostpci)
+      enabled    = tostring(try(i.enabled, local.defaults.enabled))
+      cooldown   = try(i.cooldown, local.defaults.cooldown)
+      memory     = try(i.memory, local.defaults.memory)
+      cores      = try(i.cores, local.defaults.cores)
+      disk       = try(i.disk, local.defaults.disk)
+      machine    = try(i.machine, local.defaults.machine)
+      hostpci    = try(i.hostpci, local.defaults.hostpci)
+      boot_order = try(i.boot_order, local.defaults.boot_order)
 
       bridge        = i.type == "router" ? var.wan_bridge : i.type == "external" ? var.external_bridge : var.internal_bridge
       extra_bridges = i.type == "router" ? [var.internal_bridge, var.external_bridge] : []
@@ -96,7 +104,14 @@ resource "proxmox_virtual_environment_vm" "vm" {
   # onDemand VMs start once so the first deploy reaches them; the on-demand
   # proxy powers them off after the cooldown.
   started = each.value.enabled != "false"
+  # onDemand VMs stay off at host boot until a request wakes them.
+  on_boot = each.value.enabled == "true"
   machine = each.value.machine
+
+  startup {
+    order    = each.value.boot_order
+    up_delay = each.value.boot_order < local.defaults.boot_order ? local.boot_wait_seconds : 0
+  }
 
   # one hostpciN entry per passed-through mapping. Requires machine = "q35"
   # and the host bound to vfio-pci for the mapped devices.

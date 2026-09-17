@@ -55,6 +55,7 @@ locals {
       enabled = true,
       name = "108-internal-nas",
       type = "internal",
+      boot_order = 2,
       memory = 2048,
       disk = 750,
     }
@@ -286,6 +287,7 @@ locals {
       enabled = true,
       name = "luca-router",
       type = "router",
+      boot_order = 1,
     }
   }
 }
