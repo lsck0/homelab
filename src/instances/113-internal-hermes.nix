@@ -44,24 +44,48 @@ let
     exec cat "${T}/external/$1.token"
   '';
 
-  # push the current hermes/<topic> branch of a homelab clone; the hermes-pr
-  # workflow on GitHub opens the pull request. Master is protected server-side.
+  # GitHub App (src/scripts/hermes-secrets.sh): may push branches and open pull
+  # requests on lsck0/homelab, not workflows; master is protected by a ruleset.
+  githubApp = lib.importJSON ../modules/hermes/github-app.json;
+  githubAppToken = pkgs.writeShellApplication {
+    name = "github-app-token";
+    runtimeInputs = [ pkgs.openssl pkgs.curl pkgs.jq pkgs.coreutils ];
+    text = builtins.readFile ../scripts/github-app-token.sh;
+  };
+  labGithubToken = pkgs.writeShellScriptBin "lab-github-token" ''
+    exec ${githubAppToken}/bin/github-app-token ${toString githubApp.id} ${config.sops.secrets.hermes-github-app-key.path}
+  '';
+  # git credential helper for https://github.com: a fresh installation token
+  gitCredential = pkgs.writeShellScript "git-credential-lab-github" ''
+    [ "''${1:-}" = get ] || exit 0
+    printf 'username=x-access-token\npassword=%s\n' "$(${labGithubToken}/bin/lab-github-token)"
+  '';
+
+  # push the current hermes/<topic> branch of the homelab clone and open (or
+  # find) its pull request, titled and described from the commit messages.
   labPr = pkgs.writeShellScriptBin "lab-pr" ''
     set -euo pipefail
-    export PATH="${lib.makeBinPath [ pkgs.git pkgs.openssh pkgs.curl pkgs.jq pkgs.coreutils ]}:$PATH"
+    export PATH="${lib.makeBinPath [ pkgs.git pkgs.curl pkgs.jq pkgs.coreutils labGithubToken ]}:$PATH"
+    api=https://api.github.com/repos/lsck0/homelab
     branch=$(git symbolic-ref --short HEAD)
     [[ "$branch" =~ ^hermes/[a-z0-9._-]+$ ]] || { echo "lab-pr: branch must be hermes/<topic> (lowercase), not $branch" >&2; exit 1; }
     [ -z "$(git status --porcelain)" ] || { echo "lab-pr: commit or discard your changes first" >&2; exit 1; }
     git fetch -q origin master
     [ "$(git rev-list --count origin/master..HEAD)" -gt 0 ] || { echo "lab-pr: no commits on top of master" >&2; exit 1; }
-    git push -q --force-with-lease -u origin HEAD
-    # the workflow needs a few seconds; the public API needs no token
-    for _ in $(seq 1 20); do
-      url=$(curl -sf "https://api.github.com/repos/lsck0/homelab/pulls?state=open&head=lsck0:$branch" | jq -r '.[0].html_url // empty' || true)
-      [ -n "$url" ] && { echo "pull request: $url"; exit 0; }
-      sleep 3
-    done
-    echo "pushed $branch; the pull request appears at https://github.com/lsck0/homelab/pulls shortly"
+    # GitHub's "create a pull request" hint on stderr is noise here
+    git push -q --force-with-lease -u origin HEAD 2>&1 | { grep -v '^remote:' || true; } >&2
+
+    token=$(lab-github-token)
+    gh() { curl -sf -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$@"; }
+    url=$(gh "$api/pulls?state=open&head=lsck0:$branch" | jq -r '.[0].html_url // empty')
+    if [ -z "$url" ]; then
+      body=$(printf '%s\n\n---\nOpened by Hermes (vm-113). Deploy after merging with `./sync.sh`.\n' \
+        "$(git log --reverse --format='%B%n---' origin/master..HEAD | sed '$d')")
+      url=$(gh -X POST "$api/pulls" -d "$(jq -cn --arg head "$branch" --arg body "$body" \
+        --arg title "$(git log --reverse --format=%s origin/master..HEAD | head -1)" \
+        '{base: "master", head: $head, title: $title, body: $body}')" | jq -r .html_url)
+    fi
+    echo "pull request: $url"
   '';
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -150,7 +174,7 @@ in {
   # ─────────────────────────────────────────────────────────────────────────────
   sops.secrets = {
     hermes-ssh-key = { owner = "hermes"; mode = "0400"; };
-    hermes-github-key = { owner = "hermes"; mode = "0400"; };
+    hermes-github-app-key = { owner = "hermes"; mode = "0400"; };
     hermes-llm-api-key = {};
     telegram-bot-token = {};
     telegram-chat-id = {};
@@ -176,20 +200,14 @@ in {
       IdentityFile ${sshKey}
       IdentitiesOnly yes
       StrictHostKeyChecking accept-new
-
-    # push access to hermes/* branches of lsck0/homelab (deploy key)
-    Host github.com
-      User git
-      IdentityFile ${config.sops.secrets.hermes-github-key.path}
-      IdentitiesOnly yes
-      StrictHostKeyChecking yes
   '';
-  programs.ssh.knownHosts."github.com".publicKey =
-    "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl";
 
   programs.git = {
     enable = true;
-    config.user = { name = "Hermes"; email = "hermes@lsck0.dev"; };
+    config = {
+      user = { name = "Hermes"; email = "hermes@lsck0.dev"; };
+      credential."https://github.com".helper = "${gitCredential}";
+    };
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
@@ -225,7 +243,7 @@ in {
     };
 
     extraPackages = with pkgs; [
-      pve vm labToken labPr config.nix.package
+      pve vm labToken labPr labGithubToken config.nix.package
       openssh curl jq yq-go git gnugrep gnused coreutils findutils netcat-gnu
       poppler-utils python3
     ];

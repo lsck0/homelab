@@ -3,17 +3,19 @@
 #
 #   hermes-ssh-key       generated here, public key goes to src/modules/hermes.pub
 #                        (root on every VM and the Proxmox host)
-#   hermes-github-key    generated here, registered as a write deploy key on the
-#                        GitHub repo so Hermes can push hermes/* branches; the
-#                        hermes-pr workflow opens a pull request for each
+#   hermes-github-app-key  private key of the GitHub App Hermes uses to push
+#                        hermes/* branches and open pull requests; created here
+#                        in your browser (app id in src/modules/hermes/github-app.json)
 #   hermes-llm-api-key   Anthropic API key (prompted)
 #   telegram-bot-token   from @BotFather (prompted if empty)
 #   telegram-chat-id     your numeric Telegram user id (prompted if empty;
 #                        message @userinfobot to get it)
 #
-# The GitHub side needs `gh` logged in as the repo owner. It is idempotent:
-# deploy key, a ruleset that lets only repo admins update master (Hermes
-# cannot bypass it), and permission for Actions to open pull requests.
+# The GitHub side needs `gh` logged in as the repo owner and a browser. The app
+# may write contents and pull requests but not workflows. A deploy key would not
+# do: on a personal repo it bypasses every ruleset, so Hermes could push master.
+# The protect-master ruleset lets only repo admins update master, which the
+# app is not.
 #
 # Existing non-empty values are kept. Pass --force to re-enter them. Without a
 # terminal the prompted secrets are skipped.
@@ -27,7 +29,7 @@ REPO="lsck0/homelab"
 export SOPS_AGE_KEY_FILE="$ROOT_DIR/secrets/age.txt"
 FORCE="${1:-}"
 
-for tool in sops jq ssh-keygen gh; do
+for tool in sops jq ssh-keygen gh python3 openssl curl; do
   command -v "$tool" >/dev/null || { echo "ERROR: $tool is required."; exit 1; }
 done
 
@@ -49,27 +51,73 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GITHUB (PULL REQUESTS)
+# GITHUB APP (PULL REQUESTS)
 # ─────────────────────────────────────────────────────────────────────────────
-if [ -z "$(current hermes-github-key)" ] || [ "$FORCE" = --force ]; then
-  ssh-keygen -q -t ed25519 -N "" -C "hermes@vm-113 github" -f "$tmp/github"
-  put hermes-github-key "$(cat "$tmp/github")"
-  echo ">>> hermes-github-key generated"
+APP_JSON="$ROOT_DIR/src/modules/hermes/github-app.json"
+if [ -z "$(current hermes-github-app-key)" ] || [ ! -f "$APP_JSON" ] || [ "$FORCE" = --force ]; then
+  # manifest flow: a local page posts the manifest to GitHub, you confirm, and
+  # GitHub redirects back here with a code that converts into the app's key.
+  python3 - "$REPO" "$tmp/app.json" <<'PY'
+import html, http.server, json, secrets, subprocess, sys, urllib.parse, urllib.request
+repo, out = sys.argv[1], sys.argv[2]
+state = secrets.token_urlsafe(24)
+manifest = {
+    "name": f"{repo.replace('/', '-')}-hermes",
+    "url": f"https://github.com/{repo}",
+    "hook_attributes": {"url": f"https://github.com/{repo}", "active": False},
+    "public": False,
+    "default_permissions": {"contents": "write", "pull_requests": "write", "metadata": "read"},
+    "default_events": [],
+}
+done = False
+class Handler(http.server.BaseHTTPRequestHandler):
+    def reply(self, code, body, location=None):
+        self.send_response(code)
+        if location: self.send_header("Location", location)
+        self.send_header("Content-Type", "text/html"); self.end_headers(); self.wfile.write(body.encode())
+    def do_GET(self):
+        global done
+        url = urllib.parse.urlparse(self.path); query = urllib.parse.parse_qs(url.query)
+        if url.path == "/":
+            return self.reply(200, f"""<form method="post" action="https://github.com/settings/apps/new?state={state}">
+<input type="hidden" name="manifest" value="{html.escape(json.dumps(manifest))}"></form>
+<script>document.forms[0].submit()</script>""")
+        if url.path != "/created" or query.get("state") != [state] or "code" not in query:
+            return self.reply(400, "unexpected request")
+        request = urllib.request.Request(f"https://api.github.com/app-manifests/{query['code'][0]}/conversions",
+                                         method="POST", headers={"Accept": "application/vnd.github+json"})
+        app = json.load(urllib.request.urlopen(request))
+        with open(out, "w") as f:
+            json.dump({"id": app["id"], "slug": app["slug"], "pem": app["pem"]}, f)
+        done = True
+        self.reply(302, "", f"https://github.com/apps/{app['slug']}/installations/new")
+    def log_message(self, *args): pass
+server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+base = f"http://127.0.0.1:{server.server_address[1]}"
+manifest["redirect_url"] = f"{base}/created"
+print(f">>> Open {base}/ , create the app, then install it on {repo} only", flush=True)
+subprocess.run(["xdg-open", f"{base}/"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+server.timeout = 900
+while not done:
+    server.handle_request()
+PY
+  put hermes-github-app-key "$(jq -r .pem "$tmp/app.json")"
+  jq '{id, slug}' "$tmp/app.json" > "$APP_JSON"
+  git -C "$ROOT_DIR" add "$APP_JSON"
+  echo ">>> GitHub App $(jq -r .slug "$APP_JSON") created"
 fi
-{ current hermes-github-key; echo; } > "$tmp/github"; chmod 600 "$tmp/github"
-github_pub=$(ssh-keygen -y -f "$tmp/github" | cut -d' ' -f1-2)
 
-# the deploy key, replacing an older Hermes key
-keys=$(gh api "repos/$REPO/keys")
-if jq -e --arg k "$github_pub" 'any(.[]; .key == $k)' <<< "$keys" >/dev/null; then
-  echo ">>> deploy key already registered"
-else
-  for id in $(jq -r '.[] | select(.title == "hermes") | .id' <<< "$keys"); do
-    gh api -X DELETE "repos/$REPO/keys/$id" >/dev/null
-  done
-  gh api "repos/$REPO/keys" -f title=hermes -f key="$github_pub" -F read_only=false >/dev/null
-  echo ">>> deploy key registered (write)"
-fi
+{ current hermes-github-app-key; echo; } > "$tmp/app.pem"; chmod 600 "$tmp/app.pem"
+for i in $(seq 1 180); do
+  "$SCRIPT_DIR/github-app-token.sh" "$(jq -r .id "$APP_JSON")" "$tmp/app.pem" "$REPO" > "$tmp/token" 2>/dev/null && break
+  [ "$i" = 1 ] && echo ">>> waiting for the app to be installed on $REPO: https://github.com/apps/$(jq -r .slug "$APP_JSON")/installations/new"
+  [ "$i" = 180 ] && { echo "ERROR: app not installed on $REPO"; exit 1; }
+  sleep 5
+done
+selection=$(curl -sf -H "Authorization: Bearer $(cat "$tmp/token")" https://api.github.com/installation/repositories \
+  | jq -r '[.repositories[].full_name] | join(" ")')
+[ "$selection" = "$REPO" ] || echo "WARNING: the app can reach $selection; limit its installation to $REPO"
+echo ">>> GitHub App installed on $REPO"
 
 # master: only repo admins (the owner, sync.sh) may update or delete it
 ruleset=$(jq -n '{
@@ -85,10 +133,6 @@ else
   gh api -X POST "repos/$REPO/rulesets" --input - <<< "$ruleset" >/dev/null
 fi
 echo ">>> ruleset protect-master active"
-
-gh api -X PUT "repos/$REPO/actions/permissions/workflow" \
-  -f default_workflow_permissions=read -F can_approve_pull_request_reviews=true >/dev/null
-echo ">>> Actions may open pull requests"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PROMPTED

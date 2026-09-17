@@ -13,7 +13,8 @@
 # Each scenario is one chat turn, like a Telegram message, followed by checks on
 # what the agent actually did.
 #
-# Usage: src/tests/hermes-agent.sh [scenario...]   (minecraft backup media bill | telegram)
+#   GitHub                   lab-pr pushes to a local bare copy of this repo
+# Usage: src/tests/hermes-agent.sh [scenario...]   (minecraft backup media bill repo | telegram)
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,7 +24,7 @@ if [ -z "${HERMES_TEST_SHELL:-}" ]; then
     -c env HERMES_TEST_SHELL=1 bash "${BASH_SOURCE[0]}" "$@"
 fi
 
-SCENARIOS=${*:-minecraft backup media bill}
+SCENARIOS=${*:-minecraft backup media bill repo}
 W=$(mktemp -d /tmp/hermes-test.XXXXXX)
 NET=hermestest
 FAILED=0
@@ -154,6 +155,20 @@ sed -i "s|@ENVBIN@|$ENV/bin|" "$W/shims/ssh"
 chmod +x "$W"/shims/*
 echo -n fake-paperless-token > "$W/tokens/paperless-key.token"
 echo -n fake-firefly-token > "$W/tokens/firefly-token.token"
+
+# the repo: a bare copy stands in for GitHub; lab-pr pushes there and answers
+# with a fake pull request URL. Git identity as configured on vm-113.
+git clone -q --bare --no-local "$SRC/.." "$W/remote.git"   # a copy: chmod below must not touch this repo
+MASTER=$(git -C "$W/remote.git" rev-parse master)
+nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.113-internal-hermes.config.programs.git.config" \
+  | jq -r 'map(.user // empty) | add | "[user]\n\tname = \(.name)\n\temail = \(.email)"' > "$W/home/.gitconfig"
+printf '[url "/work/remote.git"]\n\tinsteadOf = https://github.com/lsck0/homelab.git\n[safe]\n\tdirectory = *\n' >> "$W/home/.gitconfig"
+cat > "$W/shims/lab-pr" <<'EOF'
+#!/bin/sh
+/work/shims/_log lab-pr "$(git symbolic-ref --short HEAD)"
+git push -q -u origin HEAD && echo "pull request: https://github.com/lsck0/homelab/pull/99"
+EOF
+chmod -R 777 "$W/remote.git"; chmod +x "$W/shims/lab-pr"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RECORDING MOCK FOR PAPERLESS + FIREFLY
@@ -296,6 +311,22 @@ for s in $SCENARIOS; do
       echo "$body" | jq -e '.transactions[0].date | tostring | startswith("2026-09")' >/dev/null && ok "bill: date September 2026" || fail "bill: wrong date"
       echo "$body" | jq -e '.transactions[0].type == "withdrawal"' >/dev/null && ok "bill: withdrawal" || fail "bill: not a withdrawal"
       echo "$tx" | jq -e '.auth | test("Bearer fake-firefly-token")' >/dev/null && ok "bill: Firefly token used" || fail "bill: Firefly token missing"
+    fi
+    ;;
+  repo)
+    ask repo "Make Firefly's on-demand cooldown 1 hour in the homelab repo and open a PR for it."
+    branch=$(git -C "$W/remote.git" for-each-ref --format='%(refname:short)' 'refs/heads/hermes/*' | head -1)
+    [ -n "$branch" ] && ok "repo: pushed $branch" || fail "repo: no hermes/* branch pushed"
+    [ "$(git -C "$W/remote.git" rev-parse master)" = "$MASTER" ] && ok "repo: master untouched" || fail "repo: master changed"
+    called 'lab-pr hermes/' && ok "repo: lab-pr opened the pull request" || fail "repo: lab-pr not used"
+    if [ -n "$branch" ]; then
+      git -C "$W/remote.git" diff "master...$branch" | sed -n '1,30p' | sed 's/^/      /'
+      [ "$(git -C "$W/remote.git" diff --name-only "master...$branch")" = src/instances.tf ] \
+        && ok "repo: only src/instances.tf changed" || fail "repo: unexpected files changed"
+      git -C "$W/remote.git" show "$branch:src/instances.tf" | grep -A4 '"123" = {' | grep -q 'cooldown = "1h"' \
+        && ok "repo: vm-123 cooldown is 1h" || fail "repo: vm-123 cooldown not 1h"
+      git -C "$W/remote.git" log --format=%s "master..$branch" | grep -qE '^[a-z]+(\([a-z0-9-]+\))?!?: ' \
+        && ok "repo: conventional commit" || fail "repo: commit message not conventional"
     fi
     ;;
   telegram)

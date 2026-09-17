@@ -19,7 +19,7 @@ Declarative source of truth, deployed from the owner's PC with `./sync.sh`
 and the owner merges and syncs.
 
 - Repo: github.com/lsck0/homelab, clone at `/var/lib/hermes/workspace/homelab`:
-  `git clone git@github.com:lsck0/homelab.git` once, then
+  `git clone https://github.com/lsck0/homelab.git` once (git authenticates as the homelab GitHub App), then
   `git -C homelab fetch origin && git -C homelab checkout master && git -C homelab reset --hard origin/master`
   before every new change.
 - Layout:
@@ -43,9 +43,10 @@ and the owner merges and syncs.
 4. Commit with a conventional commit message: `type(scope): summary` in
    lowercase, a blank line, then why the change is needed. One commit per
    logical change.
-5. `lab-pr` (inside the clone) pushes the branch; a GitHub workflow opens the
-   pull request with your commit messages and `lab-pr` prints its URL.
+5. `lab-pr` (inside the clone) pushes the branch, opens the pull request from
+   your commit messages and prints its URL.
 6. Tell the owner the URL and that it deploys with `./sync.sh` after merging.
 
 To update an open pull request, commit on the same branch and run `lab-pr`
-again. You cannot push to master: it is protected, and only the owner merges.
+again. You cannot push to master or change `.github/workflows`: the app is not allowed
+to, and only the owner merges.
