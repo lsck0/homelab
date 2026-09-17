@@ -1,28 +1,27 @@
-{ config, pkgs, nasMount, ... }:
+{ config, lib, nasMount, ... }:
 let
-  ip = id: "http://10.100.0.${id}:80";
+  routes = (import ../modules/routes.nix).internal;
+  address = config.homelab.onDemand.address;
 
-  # SSO gateway guarding the protected routes. Authelia (vm-128) replaced
-  # Authentik: a single Go process in ~100 MB instead of Postgres + Redis +
-  # server + worker at 4 GB. It serves both ForwardAuth (this middleware) and
-  # OIDC (Nextcloud/Vaultwarden/Forgejo) at auth.lsck0.dev.
+  # SSO gateway guarding the protected routes. Authelia (vm-101) serves both
+  # ForwardAuth (this middleware) and OIDC (Forgejo/Nextcloud/Vaultwarden).
   sso = "authelia";
 in {
   networking.hostName = "vm-100";
 
-  # On-demand internal services: occasional web UIs that boot on first request
-  # and idle-stop. Traefik points at the local proxy ports below. Excluded from
-  # InstanceDown (vm-103). Self-polling apps (paperless-ai, bazarr) and
-  # widget-polled *arr stay always-on.
+  # every backend goes through homelab.onDemand: VMs with enabled = "onDemand"
+  # in instances.tf get a wake proxy on this host, the rest are reached directly.
   sops.secrets.proxmox-api-token = {};
   homelab.onDemand = {
     enable = true;
-    node = "luca-server";
+    side = "internal";
     tokenFile = config.sops.secrets.proxmox-api-token.path;
-    services = {
-      actual  = { vmid = 135; listenPort = 26135; target = "10.100.0.135"; targetPort = 80; };
-      firefly = { vmid = 140; listenPort = 26140; target = "10.100.0.140"; targetPort = 8080; };
-    };
+    # one local proxy port per route (20000 + position), since routes can share a VM.
+    services = lib.listToAttrs (lib.imap0 (i: name: lib.nameValuePair name {
+      inherit (routes.${name}) vmid;
+      targetPort = routes.${name}.port;
+      listenPort = 20000 + i;
+    }) (lib.attrNames routes));
   };
 
   fileSystems = (nasMount "/var/lib/crowdsec" "crowdsec-internal")
@@ -33,7 +32,7 @@ in {
 
     middlewares.authelia = {
       forwardAuth = {
-        address = "http://10.100.0.128:9091/api/authz/forward-auth";
+        address = "http://10.100.0.101:9091/api/authz/forward-auth";
         trustForwardHeader = true;
         authResponseHeaders = [
           "Remote-User"
@@ -44,88 +43,26 @@ in {
       };
     };
 
-    routers = {
-      authelia-tls       = { rule = "Host(`auth.lsck0.dev`)";       service = "authelia";        entryPoints = [ "websecure" ]; };
-      traefik-dash-tls   = { rule = "Host(`traefik.lsck0.dev`)";    service = "api@internal";    entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      homepage-tls       = { rule = "Host(`homepage.lsck0.dev`)";   service = "homepage";        entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      uptime-kuma-tls    = { rule = "Host(`status.lsck0.dev`)";     service = "uptime-kuma";     entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      forgejo-tls        = { rule = "Host(`git.lsck0.dev`)";        service = "forgejo";         entryPoints = [ "websecure" ]; };
-      registry-tls       = { rule = "Host(`registry.lsck0.dev`)";   service = "registry-api";    entryPoints = [ "websecure" ]; };
-      registry-ui-tls    = { rule = "Host(`registry-ui.lsck0.dev`)"; service = "registry-ui";    entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      # No SSO: TaskChampion is a headless sync API. The taskwarrior CLI cannot
-      # complete Authelia's browser redirect; it authenticates with its own
-      # client UUID and the replica is end-to-end encrypted. Exposed like attic.
-      taskchampion-tls   = { rule = "Host(`tasks.lsck0.dev`)";      service = "taskchampion";    entryPoints = [ "websecure" ]; };
-      vaultwarden-tls    = { rule = "Host(`vault.lsck0.dev`)";      service = "vaultwarden";     entryPoints = [ "websecure" ]; };
-      nextcloud-tls      = { rule = "Host(`cloud.lsck0.dev`)";      service = "nextcloud";       entryPoints = [ "websecure" ]; };
-      qbittorrent-tls    = { rule = "Host(`torrent.lsck0.dev`)";    service = "qbittorrent";     entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      prowlarr-tls       = { rule = "Host(`prowlarr.lsck0.dev`)";   service = "prowlarr";        entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      sonarr-tls         = { rule = "Host(`sonarr.lsck0.dev`)";     service = "sonarr";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      radarr-tls         = { rule = "Host(`radarr.lsck0.dev`)";     service = "radarr";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      jellyfin-tls       = { rule = "Host(`jellyfin.lsck0.dev`)";   service = "jellyfin";        entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      audiobookshelf-tls = { rule = "Host(`abs.lsck0.dev`)";        service = "audiobookshelf";  entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      paperless-tls      = { rule = "Host(`paperless.lsck0.dev`)";  service = "paperless";       entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      paperless-ai-tls   = { rule = "Host(`paperless-ai.lsck0.dev`)"; service = "paperless-ai"; entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      hermes-tls         = { rule = "Host(`hermes.lsck0.dev`)";      service = "hermes";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      # No SSO: the TRMNL cloud polls this and cannot log in. The feed URLs
-      # carry an unguessable token instead.
-      calendar-tls       = { rule = "Host(`cal.lsck0.dev`)";         service = "calendar";        entryPoints = [ "websecure" ]; };
-      wikijs-tls         = { rule = "Host(`wiki.lsck0.dev`)";       service = "wikijs";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      huginn-tls         = { rule = "Host(`huginn.lsck0.dev`)";     service = "huginn";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      homeassistant-tls  = { rule = "Host(`hass.lsck0.dev`)";       service = "homeassistant";   entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      grafana-tls        = { rule = "Host(`grafana.lsck0.dev`)";    service = "grafana";         entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      navidrome-tls      = { rule = "Host(`music.lsck0.dev`)";      service = "navidrome";       entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      kavita-tls         = { rule = "Host(`read.lsck0.dev`)";       service = "kavita";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      nas-tls            = { rule = "Host(`nas.lsck0.dev`)";        service = "nas";             entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      syncthing-tls      = { rule = "Host(`sync.lsck0.dev`)";       service = "syncthing";       entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      lldap-tls          = { rule = "Host(`lldap.lsck0.dev`)";      service = "lldap";           entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      actual-tls         = { rule = "Host(`budget.lsck0.dev`)";     service = "actual";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      jellyseerr-tls     = { rule = "Host(`requests.lsck0.dev`)";   service = "jellyseerr";      entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      bazarr-tls         = { rule = "Host(`subs.lsck0.dev`)";       service = "bazarr";          entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      firefly-tls        = { rule = "Host(`firefly.lsck0.dev`)";    service = "firefly";         entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
-      # No SSO: nix clients authenticate to attic with their own token.
-      attic-tls          = { rule = "Host(`attic.lsck0.dev`)";      service = "attic";           entryPoints = [ "websecure" ]; };
-      proxmox-tls        = { rule = "Host(`proxmox.lsck0.dev`)";    service = "proxmox";         entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
+    routers = lib.mapAttrs' (name: r: lib.nameValuePair "${name}-tls" ({
+      rule = "Host(`${r.host}.lsck0.dev`)";
+      service = name;
+      entryPoints = [ "websecure" ];
+    } // lib.optionalAttrs (r.sso or true) { middlewares = [ sso ]; })) routes // {
+      traefik-dash-tls = { rule = "Host(`traefik.lsck0.dev`)";  service = "api@internal"; entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
+      proxmox-tls      = { rule = "Host(`proxmox.lsck0.dev`)";  service = "proxmox";      entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
     };
 
-    services = {
-      authelia.loadBalancer.servers        = [{ url = "http://10.100.0.128:9091"; }];
-      homepage.loadBalancer.servers        = [{ url = ip "102"; }];
-      uptime-kuma.loadBalancer.servers      = [{ url = ip "104"; }];
-      grafana.loadBalancer.servers          = [{ url = ip "103"; }];
-      forgejo.loadBalancer.servers          = [{ url = ip "107"; }];
-      registry-api.loadBalancer.servers     = [{ url = "http://10.100.0.109:5000"; }];
-      registry-ui.loadBalancer.servers      = [{ url = ip "109"; }];
-      taskchampion.loadBalancer.servers     = [{ url = "http://10.100.0.110:8080"; }];
-      vaultwarden.loadBalancer.servers      = [{ url = "http://10.100.0.111:8080"; }];
-      nextcloud.loadBalancer.servers        = [{ url = ip "112"; }];
-      qbittorrent.loadBalancer.servers      = [{ url = ip "117"; }];
-      prowlarr.loadBalancer.servers         = [{ url = ip "118"; }];
-      sonarr.loadBalancer.servers           = [{ url = ip "120"; }];
-      radarr.loadBalancer.servers           = [{ url = ip "119"; }];
-      jellyfin.loadBalancer.servers         = [{ url = ip "121"; }];
-      audiobookshelf.loadBalancer.servers   = [{ url = ip "122"; }];
-      paperless.loadBalancer.servers        = [{ url = "http://10.100.0.113:8080"; }];
-      paperless-ai.loadBalancer.servers     = [{ url = ip "125"; }];
-      hermes.loadBalancer.servers           = [{ url = "http://10.100.0.126:11434"; }];
-      calendar.loadBalancer.servers         = [{ url = ip "129"; }];
-      wikijs.loadBalancer.servers           = [{ url = ip "116"; }];
-      huginn.loadBalancer.servers           = [{ url = ip "114"; }];
-      homeassistant.loadBalancer.servers    = [{ url = ip "115"; }];
-      navidrome.loadBalancer.servers        = [{ url = ip "123"; }];
-      kavita.loadBalancer.servers           = [{ url = ip "124"; }];
-      nas.loadBalancer.servers              = [{ url = ip "105"; }];
-      syncthing.loadBalancer.servers        = [{ url = "http://10.100.0.105:8384"; }];
-      lldap.loadBalancer.servers            = [{ url = "http://10.100.0.133:17170"; }];
-      actual.loadBalancer.servers           = [{ url = "http://127.0.0.1:26135"; }]; # on-demand
-      jellyseerr.loadBalancer.servers       = [{ url = ip "136"; }];
-      bazarr.loadBalancer.servers           = [{ url = ip "137"; }];
-      firefly.loadBalancer.servers          = [{ url = "http://127.0.0.1:26140"; }]; # on-demand
-      attic.loadBalancer.servers            = [{ url = "http://10.100.0.131:8080"; }];
-      proxmox.loadBalancer.servers          = [{ url = "https://192.168.178.200:8006"; }];
-      proxmox.loadBalancer.serversTransport = "proxmox-transport";
+    services = lib.mapAttrs (name: r: {
+      loadBalancer = {
+        servers = [{ url = "${r.scheme or "http"}://${address.${name}}"; }];
+      } // lib.optionalAttrs ((r.scheme or "http") == "https") { serversTransport = "self-signed"; };
+    }) routes // {
+      proxmox.loadBalancer = {
+        servers = [{ url = "https://192.168.178.200:8006"; }];
+        serversTransport = "self-signed";
+      };
     };
 
-    serversTransports.proxmox-transport.insecureSkipVerify = true;
+    serversTransports.self-signed.insecureSkipVerify = true;
   };
 }

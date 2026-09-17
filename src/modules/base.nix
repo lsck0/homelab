@@ -5,8 +5,8 @@
     ./nas.nix
     ./network.nix
     ./traefik.nix
-    ./nas-backup.nix
     ./on-demand.nix
+    ./servarr.nix
   ];
 
   options.homelab.acmeEmail = lib.mkOption {
@@ -33,11 +33,13 @@
     };
 
     services.qemuGuest.enable = true;
-    # Use simple eth0 naming so cloud-init network config matches
+    # use simple eth0 naming so cloud-init network config matches
     networking.usePredictableInterfaceNames = false;
     users.users.root.openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
-    ];
+    ]
+    # Hermes (vm-113) has root everywhere. Written by src/scripts/hermes-secrets.sh.
+    ++ lib.optional (builtins.pathExists ./hermes.pub) (lib.removeSuffix "\n" (builtins.readFile ./hermes.pub));
 
     services.openssh = {
       enable = true;
@@ -53,7 +55,7 @@
     services.prometheus.exporters.node = {
       enable = true;
       openFirewall = true;
-      # Textfile collector lets services publish their own metrics (e.g. the
+      # textfile collector lets services publish their own metrics (e.g. the
       # backup writes a last-success timestamp here for the dead-man alert).
       enabledCollectors = [ "textfile" ];
       extraFlags = [ "--collector.textfile.directory=/var/lib/node-exporter-textfile" ];
@@ -63,21 +65,21 @@
     ];
     networking.firewall.allowedTCPPorts = [ 9100 ];
 
-    # Ship every VM's journal to Loki on vm-103. The `host` label (from the
+    # ship every VM's journal to Loki on vm-104. The `host` label (from the
     # journal hostname) is what lets a Grafana dashboard filter to a single VM.
-    # Runs everywhere except vm-103 itself, which would otherwise depend on its
+    # runs everywhere except vm-104 itself, which would otherwise depend on its
     # own Loki being up before it could log.
     # systemd creates /var/lib/promtail before start; without it promtail's
     # namespaced start fails with "/var/lib/promtail: No such file or directory".
-    systemd.services.promtail.serviceConfig = lib.mkIf (config.networking.hostName != "vm-103") {
+    systemd.services.promtail.serviceConfig = lib.mkIf (config.networking.hostName != "vm-104") {
       StateDirectory = "promtail";
     };
-    services.promtail = lib.mkIf (config.networking.hostName != "vm-103") {
+    services.promtail = lib.mkIf (config.networking.hostName != "vm-104") {
       enable = true;
       configuration = {
         server = { http_listen_port = 9080; grpc_listen_port = 0; };
         positions.filename = "/var/lib/promtail/positions.yaml";
-        clients = [{ url = "http://10.100.0.103:3100/loki/api/v1/push"; }];
+        clients = [{ url = "http://10.100.0.104:3100/loki/api/v1/push"; }];
         scrape_configs = [{
           job_name = "journal";
           journal = {
@@ -90,7 +92,7 @@
             { source_labels = [ "__journal_priority_keyword" ]; target_label = "level"; }
           ];
         }]
-        # On the Traefik VMs, also ship the JSON access log with the client's
+        # on the Traefik VMs, also ship the JSON access log with the client's
         # country (Cloudflare's Cf-Ipcountry) so Grafana can draw the world map.
         ++ lib.optional (config.homelab.traefik.enable or false) {
           job_name = "traefik-access";
@@ -116,25 +118,35 @@
       };
     };
 
-    # Prefer IPv4 — internal VMs have no IPv6 routing
+    # journal -> Wazuh (vm-107) over syslog for intrusion detection. UDP so a
+    # down Wazuh never blocks logging.
+    services.rsyslogd = lib.mkIf (config.networking.hostName != "vm-107") {
+      enable = true;
+      defaultConfig = "";
+      extraConfig = ''
+        *.info @10.100.0.107:514
+      '';
+    };
+
+    # prefer IPv4: internal VMs have no IPv6 routing
     networking.enableIPv6 = false;
 
-    # Reduce idle CPU power; has no effect on throughput
+    # reduce idle CPU power; has no effect on throughput
     powerManagement.cpuFreqGovernor = "powersave";
 
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
 
-    # Attic binary cache (vm-131) as an extra substituter, so any local Nix
+    # attic binary cache (vm-109) as an extra substituter, so any local Nix
     # build on a VM or the CI runner reuses a closure built once instead of
     # rebuilding. Pull is authenticated with a read-only token via netrc.
     sops.secrets.attic-pull-token = {};
     sops.templates."nix-netrc".content = ''
-      machine 10.100.0.131
+      machine 10.100.0.109
         password ${config.sops.placeholder.attic-pull-token}
     '';
     nix.settings = {
       netrc-file = config.sops.templates."nix-netrc".path;
-      extra-substituters = [ "http://10.100.0.131:8080/homelab" ];
+      extra-substituters = [ "http://10.100.0.109:8080/homelab" ];
       extra-trusted-public-keys = [ "homelab:OtKSPQnvWs0hIa5D2RxbBwENbAo9qkX3yAr5PoWvtyc=" ];
     };
     system.stateVersion = "25.11";

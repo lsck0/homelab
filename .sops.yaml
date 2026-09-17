@@ -1,4 +1,4 @@
-# sops configuration — points to the age public key used for encryption.
+# sops configuration: points to the age public key used for encryption.
 # The matching private key (secrets/age.txt) is gitignored and must be
 # provisioned onto each VM at /var/lib/sops-nix/key.txt by sync.sh.
 #
