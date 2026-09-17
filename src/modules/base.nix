@@ -6,6 +6,7 @@
     ./network.nix
     ./traefik.nix
     ./on-demand.nix
+    ./retry.nix
     ./servarr.nix
   ];
 

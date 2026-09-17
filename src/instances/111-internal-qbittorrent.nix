@@ -1,4 +1,4 @@
-{ pkgs, lib, nasMount, nasPath, ... }:
+{ pkgs, lib, nasMount, nasPath, retry, ... }:
 let
   # hosts that may use the WebUI API without a login: internal Traefik (itself
   # behind Authelia), the *arr VMs, the wiring VM and Hermes. Explicit /32s, so
@@ -64,11 +64,7 @@ in {
     };
     script = ''
       conf="/var/lib/qbittorrent/qBittorrent/qBittorrent.conf"
-      for i in $(seq 1 60); do
-        [ -f "$conf" ] && break
-        sleep 2
-      done
-      [ ! -f "$conf" ] && exit 1
+      ${retry} 60 2 test -f "$conf"
 
       # bootstrap only: loopback without login, so the Tor-proxy unit below can
       # push the real settings (incl. the API client whitelist) over the API.
@@ -102,11 +98,7 @@ in {
       # run curl inside the container: only there is the request really from
       # loopback (WebUI\LocalHostAuth=false), a published port is not.
       curl() { podman exec qbittorrent curl "$@"; }
-      for i in $(seq 1 60); do
-        curl -fsS "$API/app/version" >/dev/null 2>&1 && break
-        sleep 2
-      done
-      curl -fsS "$API/app/version" >/dev/null || { echo "qBittorrent API unreachable"; exit 1; }
+      ${retry} 60 2 podman exec qbittorrent curl -fsS "$API/app/version"
 
       # WebUI login for everything off the whitelist. Homepage and the *arr
       # download clients read it from the token files.

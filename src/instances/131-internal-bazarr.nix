@@ -1,4 +1,4 @@
-{ pkgs, nasMount, nasPath, ... }: {
+{ pkgs, nasMount, nasPath, retry, ... }: {
   networking.hostName = "vm-131";
 
   # Bazarr: subtitles for the Radarr/Sonarr libraries. Same /data/media path
@@ -35,7 +35,7 @@
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
     script = ''
       conf=/var/lib/bazarr/config/config.yaml
-      for i in $(seq 1 90); do [ -f $conf ] && break; sleep 2; done
+      ${retry} 90 2 test -f $conf
       key=$(yq '.auth.apikey' $conf)
       [ -n "$key" ] && [ "$key" != null ] || exit 1
       echo -n "$key" > /var/lib/homepage-tokens/bazarr-key.token

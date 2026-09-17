@@ -1,4 +1,4 @@
-{ lib, pkgs, inventory, nasMount, ... }:
+{ lib, pkgs, inventory, nasMount, retry, ... }:
 let
   # one HTTP monitor per route (modules/routes.nix) whose VM is always on.
   # on-demand VMs sleep by design and disabled ones are off, so neither is
@@ -170,10 +170,7 @@ in {
       Type = "oneshot";
       RemainAfterExit = true;
       ExecStart = pkgs.writeShellScript "uptime-kuma-monitors" ''
-        for i in $(seq 1 90); do
-          if ${pkgs.curl}/bin/curl -sf http://127.0.0.1:80 >/dev/null 2>&1; then break; fi
-          sleep 2
-        done
+        ${retry} 90 2 ${pkgs.curl}/bin/curl -sf http://127.0.0.1:80
         sleep 5
 
         pass=/var/lib/uptime-kuma/admin-pass

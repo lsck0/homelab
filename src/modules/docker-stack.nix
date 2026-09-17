@@ -1,4 +1,4 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, retry, ... }:
 let
   cfg = config.homelab.swarm;
 
@@ -51,6 +51,8 @@ let
     exit $rc
   '';
 in {
+  imports = [ ./retry.nix ];
+
   options.homelab.swarm = {
     enable = lib.mkEnableOption "single-node Docker Swarm with CI-driven stacks";
 
@@ -102,10 +104,7 @@ in {
       path = [ pkgs.docker pkgs.coreutils pkgs.iproute2 pkgs.gawk ];
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script = ''
-        for i in $(seq 1 30); do
-          docker info >/dev/null 2>&1 && break
-          sleep 1
-        done
+        ${retry} 30 1 docker info
         # self-heal: only an "active" swarm is usable. Any other state (a stale
         # "pending"/"locked" swarm after a reboot makes `swarm init` fail with
         # "already part of a swarm") is reset.
