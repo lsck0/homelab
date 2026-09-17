@@ -52,6 +52,14 @@ wait_for_ssh() {
   echo "ERROR: SSH not reachable at $ip"; return 1
 }
 
+vm_wake() { # vmid: start the VM unless it is running
+  local st
+  st=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu/$1/status/current" -H "$PVE_AUTH" | jq -r '.data.status // "unknown"' 2>/dev/null)
+  [ "$st" = "running" ] && return 0
+  echo ">>>   starting vm-$1 ($st)"
+  curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$1/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
+}
+
 deploy_nixos() {
   local name="$1" ip="$2"
   echo ">>> Deploying $name to $ip..."
@@ -232,13 +240,7 @@ if [ -n "$ON_DEMAND_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
   echo ">>> Waking on-demand VMs for deploy: $(echo "$ON_DEMAND_VMS" | tr '\n' ' ')"
   # start every stopped on-demand VM. sync always deploys ALL enabled VMs: the
   # on-demand idle-stop is only for user request traffic, config must never drift.
-  for vmid in $ON_DEMAND_VMS; do
-    st=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/status/current" -H "$PVE_AUTH" | jq -r '.data.status // "unknown"' 2>/dev/null)
-    if [ "$st" != "running" ]; then
-      echo ">>>   starting vm-$vmid ($st)"
-      curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
-    fi
-  done
+  for vmid in $ON_DEMAND_VMS; do vm_wake "$vmid"; done
   # give cold VMs time to boot. The per-VM wait_for_ssh in the deploy loop does
   # the real readiness gate with retries, so a slow boot still deploys.
   sleep 45
@@ -350,6 +352,10 @@ for f in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix; do
     reap; [ "${#DEPLOY_PIDS[@]}" -ge "$MAX_PARALLEL" ] && sleep 2
   done
 
+  # the reaper may have stopped an on-demand VM again while the closures built
+  if [ -n "$PROXMOX_API_TOKEN_ID" ] && echo "$ON_DEMAND_VMS" | grep -qx "$vm_id"; then
+    vm_wake "$vm_id"
+  fi
   deploy_nixos "$name" "$ip" &
   DEPLOY_PIDS+=("$!"); DEPLOY_NAMES+=("$name")
 done
