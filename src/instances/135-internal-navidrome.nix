@@ -33,38 +33,45 @@
     "d /var/lib/navidrome 0750 1000 1000 -"
   ];
 
-  # generate Subsonic API credentials for Homepage widget
+  # admin with a generated password, and its Subsonic credentials for the Homepage widget
   systemd.services.navidrome-homepage-token = {
-    description = "Generate Navidrome credentials for Homepage";
+    description = "Initialise Navidrome admin and export Subsonic credentials for Homepage";
     after = [ "podman-navidrome.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.coreutils pkgs.gnugrep ];
+    path = [ pkgs.curl pkgs.coreutils pkgs.jq pkgs.openssl ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
-      TOKEN_FILE="/var/lib/homepage-tokens/navidrome-user.token"
-      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && \
-        [ -f "/var/lib/homepage-tokens/navidrome-token.token" ] && exit 0
-
-      # wait for Navidrome to be ready
+      N=http://127.0.0.1:80
+      T=/var/lib/homepage-tokens
       for i in $(seq 1 90); do
-        curl -sf http://127.0.0.1:80/ping >/dev/null 2>&1 && break
+        curl -sf $N/ping >/dev/null 2>&1 && break
         sleep 2
       done
 
-      # create admin user via first-run endpoint (returns Subsonic credentials)
-      RESP=$(curl -sf -X POST "http://127.0.0.1:80/auth/createAdmin" \
-        -H "Content-Type: application/json" \
-        -d '{"username":"admin","password":"admin"}' 2>/dev/null || true)
+      [ -s $T/navidrome-pass.token ] || openssl rand -hex 16 | tr -d '\n' > $T/navidrome-pass.token
+      PASS=$(cat $T/navidrome-pass.token)
+      json() { jq -cn --arg p "$1" "$2"; }
+      login() { # password
+        curl -sf -X POST $N/auth/login -H "Content-Type: application/json" -d "$(json "$1" '{username:"admin", password:$p}')"
+      }
 
-      SALT=$(echo "$RESP" | grep -oP '"subsonicSalt"\s*:\s*"\K[^"]+' || true)
-      TOKEN=$(echo "$RESP" | grep -oP '"subsonicToken"\s*:\s*"\K[^"]+' || true)
+      # first-run endpoint, refused once an admin exists
+      curl -sf -X POST $N/auth/createAdmin -H "Content-Type: application/json" \
+        -d "$(json "$PASS" '{username:"admin", password:$p}')" >/dev/null || true
 
-      if [ -n "$SALT" ] && [ -n "$TOKEN" ]; then
-        echo -n "admin" > /var/lib/homepage-tokens/navidrome-user.token
-        echo -n "$TOKEN" > /var/lib/homepage-tokens/navidrome-token.token
-        echo -n "$SALT" > /var/lib/homepage-tokens/navidrome-salt.token
-        echo "Navidrome Homepage credentials created"
+      RESP=$(login "$PASS" || true)
+      # installs from before generated passwords still have admin/admin.
+      if [ -z "$RESP" ] && OLD=$(login admin); then
+        curl -sf -X PUT "$N/api/user/$(echo "$OLD" | jq -r .id)" \
+          -H "x-nd-authorization: Bearer $(echo "$OLD" | jq -r .token)" -H "Content-Type: application/json" \
+          -d "$(json "$PASS" '{userName:"admin", name:"admin", isAdmin:true, password:$p, currentPassword:"admin", changePassword:true}')" >/dev/null
+        RESP=$(login "$PASS" || true)
+        echo "admin moved off the default password"
       fi
+      [ -n "$RESP" ] || { echo "Navidrome admin login failed"; exit 1; }
+      echo -n admin > $T/navidrome-user.token
+      echo "$RESP" | jq -j .subsonicToken > $T/navidrome-token.token
+      echo "$RESP" | jq -j .subsonicSalt > $T/navidrome-salt.token
     '';
   };
 

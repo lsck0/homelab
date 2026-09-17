@@ -42,7 +42,7 @@ in {
     description = "Generate Home Assistant token for Homepage";
     after = [ "podman-homeassistant.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.coreutils pkgs.gnugrep
+    path = [ pkgs.curl pkgs.coreutils pkgs.gnugrep pkgs.jq pkgs.openssl
       (pkgs.python3.withPackages (ps: [ ps.websockets ]))
     ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
@@ -58,12 +58,14 @@ in {
         sleep 2
       done
 
-      # complete onboarding if needed
+      # onboarding is the only unattended way to a token: HA has no password
+      # grant, so an onboarded instance without a token file needs a manual one.
       ONBOARD=$(curl -sf http://127.0.0.1:80/api/onboarding 2>/dev/null || true)
       if echo "$ONBOARD" | grep -q '"done":false'; then
+        [ -s /var/lib/homepage-tokens/hass-pass.token ] || openssl rand -hex 16 | tr -d '\n' > /var/lib/homepage-tokens/hass-pass.token
         AUTH_CODE=$(curl -sf -X POST "http://127.0.0.1:80/api/onboarding/users" \
           -H "Content-Type: application/json" \
-          -d '{"client_id":"http://127.0.0.1:80/","name":"Admin","username":"admin","password":"admin","language":"en"}' 2>/dev/null \
+          -d "$(jq -cn --rawfile p /var/lib/homepage-tokens/hass-pass.token '{client_id:"http://127.0.0.1:80/", name:"Admin", username:"admin", password:$p, language:"en"}')" 2>/dev/null \
           | grep -oP '"auth_code"\s*:\s*"\K[^"]+' || true)
         [ -z "$AUTH_CODE" ] && exit 1
 
@@ -82,10 +84,8 @@ in {
           -H "Content-Type: application/json" \
           -d '{"client_id":"http://127.0.0.1:80/"}' 2>/dev/null || true
       else
-        # already onboarded: authenticate
-        ACCESS_TOKEN=$(curl -sf -X POST "http://127.0.0.1:80/auth/token" \
-          -d "grant_type=password&username=admin&password=admin&client_id=http://127.0.0.1:80/" 2>/dev/null \
-          | grep -oP '"access_token"\s*:\s*"\K[^"]+' || true)
+        echo "Home Assistant is onboarded but $TOKEN_FILE is missing: create a long-lived token in the UI" >&2
+        exit 1
       fi
       [ -z "$ACCESS_TOKEN" ] && exit 1
 

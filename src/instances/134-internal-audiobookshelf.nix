@@ -28,37 +28,44 @@
     "d /var/lib/audiobookshelf/metadata 0750 1000 1000 -"
   ];
 
-  # generate API token for Homepage widget
+  # admin with a generated password, and its API token for the Homepage widget
   systemd.services.audiobookshelf-homepage-token = {
-    description = "Export Audiobookshelf API token for Homepage";
+    description = "Initialise Audiobookshelf admin and export its API token for Homepage";
     after = [ "podman-audiobookshelf.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.coreutils pkgs.gnugrep ];
+    path = [ pkgs.curl pkgs.coreutils pkgs.jq pkgs.openssl ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
-      TOKEN_FILE="/var/lib/homepage-tokens/audiobookshelf-key.token"
-      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
-      # wait for ABS to be ready
+      A=http://127.0.0.1:80
+      T=/var/lib/homepage-tokens
       for i in $(seq 1 90); do
-        curl -sf http://127.0.0.1:80/healthcheck >/dev/null 2>&1 && break
+        curl -sf $A/healthcheck >/dev/null 2>&1 && break
         sleep 2
       done
-      # initialize if not yet set up
-      STATUS=$(curl -sf http://127.0.0.1:80/status 2>/dev/null || true)
-      if echo "$STATUS" | grep -q '"isInit":false'; then
-        curl -sf -X POST "http://127.0.0.1:80/init" \
-          -H "Content-Type: application/json" \
-          -d '{"newRoot":{"username":"admin","password":"admin"}}' 2>/dev/null || true
+
+      [ -s $T/audiobookshelf-pass.token ] || openssl rand -hex 16 | tr -d '\n' > $T/audiobookshelf-pass.token
+      PASS=$(cat $T/audiobookshelf-pass.token)
+      json() { jq -cn --arg p "$1" "$2"; }
+      login() { # password
+        curl -sf -X POST $A/login -H "Content-Type: application/json" \
+          -d "$(json "$1" '{username:"admin", password:$p}')" | jq -r '.user.token // empty'
+      }
+
+      if curl -sf $A/status | jq -e '.isInit == false' >/dev/null; then
+        curl -sf -X POST $A/init -H "Content-Type: application/json" \
+          -d "$(json "$PASS" '{newRoot:{username:"admin", password:$p}}')"
       fi
-      # login and extract token
-      TOKEN=$(curl -sf -X POST "http://127.0.0.1:80/login" \
-        -H "Content-Type: application/json" \
-        -d '{"username":"admin","password":"admin"}' 2>/dev/null \
-        | grep -oP '"token"\s*:\s*"\K[^"]+' || true)
-      if [ -n "$TOKEN" ]; then
-        echo -n "$TOKEN" > "$TOKEN_FILE"
-        echo "Audiobookshelf Homepage token created"
+
+      TOKEN=$(login "$PASS")
+      # installs from before generated passwords still have admin/admin.
+      if [ -z "$TOKEN" ] && OLD=$(login admin) && [ -n "$OLD" ]; then
+        curl -sf -X PATCH $A/api/me/password -H "Authorization: Bearer $OLD" -H "Content-Type: application/json" \
+          -d "$(json "$PASS" '{password:"admin", newPassword:$p}')"
+        TOKEN=$(login "$PASS")
+        echo "admin moved off the default password"
       fi
+      [ -n "$TOKEN" ] || { echo "Audiobookshelf admin login failed"; exit 1; }
+      echo -n "$TOKEN" > $T/audiobookshelf-key.token
     '';
   };
 

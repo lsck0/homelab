@@ -4,6 +4,32 @@ let
   # behind Authelia), the *arr VMs, the wiring VM and Hermes. Explicit /32s, so
   # an arbitrary LAN host cannot rewrite download paths across the NFS mounts.
   apiClients = map (id: "10.100.0.${toString id}/32") [ 100 113 129 130 132 134 135 ];
+
+  # route all traffic through the Tor SOCKS5 gateway on vm-112.
+  #
+  # Tor carries TCP only, so DHT, PEX and LSD are turned off here: they are UDP
+  # or LAN broadcast and would otherwise bypass the proxy and expose the real
+  # WAN address. That also means peers are only discovered through trackers,
+  # and inbound connections cannot arrive at all, so swarms will be small and
+  # slow. A WireGuard VPN is the better tool if the goal is throughput.
+  prefs = pkgs.writeText "qbittorrent-prefs.json" (builtins.toJSON {
+    proxy_type = "SOCKS5";
+    proxy_ip = "10.100.0.112";
+    proxy_port = 9050;
+    proxy_auth_enabled = false;
+    proxy_hostname_lookup = true;
+    proxy_bittorrent = true;
+    proxy_peer_connections = true;
+    proxy_misc = true;
+    proxy_rss = true;
+    anonymous_mode = true;
+    save_path = "/data/torrents";
+    bypass_auth_subnet_whitelist_enabled = true;
+    bypass_auth_subnet_whitelist = lib.concatStringsSep ", " apiClients;
+    dht = false;
+    pex = false;
+    lsd = false;
+  });
 in {
   networking.hostName = "vm-111";
 
@@ -60,18 +86,11 @@ in {
     '';
   };
 
-  # route all qBittorrent traffic through the Tor SOCKS5 gateway on vm-112.
-  #
-  # Tor carries TCP only, so DHT, PEX and LSD are turned off here: they are UDP
-  # or LAN broadcast and would otherwise bypass the proxy and expose the real
-  # WAN address. That also means peers are only discovered through trackers,
-  # and inbound connections cannot arrive at all, so swarms will be small and
-  # slow. A WireGuard VPN is the better tool if the goal is throughput.
   systemd.services.qbittorrent-tor-proxy = {
-    description = "Configure qBittorrent: Tor SOCKS5 proxy, save path, API whitelist";
+    description = "Configure qBittorrent: Tor SOCKS5 proxy, save path, API whitelist, WebUI password";
     after = [ "podman-qbittorrent.service" "qbittorrent-disable-auth.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.podman ];
+    path = [ pkgs.podman pkgs.jq pkgs.openssl ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -89,24 +108,14 @@ in {
       done
       curl -fsS "$API/app/version" >/dev/null || { echo "qBittorrent API unreachable"; exit 1; }
 
-      curl -fsS -X POST "$API/app/setPreferences" --data-urlencode 'json={
-        "proxy_type": "SOCKS5",
-        "proxy_ip": "10.100.0.112",
-        "proxy_port": 9050,
-        "proxy_auth_enabled": false,
-        "proxy_hostname_lookup": true,
-        "proxy_bittorrent": true,
-        "proxy_peer_connections": true,
-        "proxy_misc": true,
-        "proxy_rss": true,
-        "anonymous_mode": true,
-        "save_path": "/data/torrents",
-        "bypass_auth_subnet_whitelist_enabled": true,
-        "bypass_auth_subnet_whitelist": "${lib.concatStringsSep ", " apiClients}",
-        "dht": false,
-        "pex": false,
-        "lsd": false
-      }'
+      # WebUI login for everything off the whitelist. Homepage and the *arr
+      # download clients read it from the token files.
+      T=/var/lib/homepage-tokens
+      [ -s $T/qbittorrent-pass.token ] || openssl rand -hex 16 | tr -d '\n' > $T/qbittorrent-pass.token
+      echo -n admin > $T/qbittorrent-user.token
+
+      prefs=$(jq -c --rawfile p $T/qbittorrent-pass.token '. + { web_ui_username: "admin", web_ui_password: $p }' ${prefs})
+      curl -fsS -X POST "$API/app/setPreferences" --data-urlencode "json=$prefs"
       echo "qBittorrent proxied via Tor (10.100.0.112:9050)"
     '';
   };
@@ -114,22 +123,6 @@ in {
   systemd.tmpfiles.rules = [
     "d /var/lib/qbittorrent 0750 1000 1000 -"
   ];
-
-  # export qBittorrent credentials for Homepage widget
-  systemd.services.qbittorrent-homepage-token = {
-    description = "Export qBittorrent credentials for Homepage";
-    after = [ "podman-qbittorrent.service" "qbittorrent-disable-auth.service" ];
-    wantedBy = [ "multi-user.target" ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
-    script = ''
-      TOKEN_FILE="/var/lib/homepage-tokens/qbittorrent-user.token"
-      [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
-      # with auth disabled for local subnet, credentials don't matter
-      # but the widget requires them
-      echo -n "admin" > /var/lib/homepage-tokens/qbittorrent-user.token
-      echo -n "adminadmin" > /var/lib/homepage-tokens/qbittorrent-pass.token
-    '';
-  };
 
   networking.firewall.allowedTCPPorts = [ 80 6881 ];
   networking.firewall.allowedUDPPorts = [ 6881 ];
