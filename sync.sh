@@ -152,17 +152,6 @@ PVE_API="https://$PROXMOX_SSH_HOST:8006/api2/json"
 PVE_AUTH="Authorization: PVEAPIToken=$PROXMOX_API_TOKEN_ID=$PROXMOX_API_TOKEN_SECRET"
 
 if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
-  echo ">>> Pushing SSH key to all running VMs..."
-  VMIDS=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu" -H "$PVE_AUTH" \
-    | jq -r '.data[] | select(.status=="running") | .vmid' 2>/dev/null || true)
-  for vmid in $VMIDS; do
-    payload=$(jq -cn --arg k "$PUBKEY" \
-      '{"command":["/bin/sh","-c","mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo \($k) > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && systemctl disable --now cloud-init 2>/dev/null; true"]}')
-    curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/agent/exec" \
-      -H "$PVE_AUTH" -H "Content-Type: application/json" -d "$payload" >/dev/null 2>&1 || true
-  done
-  sleep 3
-
   # whole-VM vzdump jobs used to dump vm-108 (750 GB NAS disk) and vm-208 to
   # `local`, the host's root disk, daily/weekly/monthly: enough to fill it.
   # NAS data is backed up by Kopia (vm-106) and VM configs are declarative, so
@@ -250,15 +239,21 @@ if [ -n "$ON_DEMAND_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
       curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
     fi
   done
-  # give cold VMs time to boot, then push the SSH key via the guest agent
-  # (best-effort: already-deployed VMs carry the key in their config; the push
-  # only matters for a fresh VM). The per-VM wait_for_ssh in the deploy loop
-  # does the real readiness gate with retries, so a slow boot still deploys.
+  # give cold VMs time to boot. The per-VM wait_for_ssh in the deploy loop does
+  # the real readiness gate with retries, so a slow boot still deploys.
   sleep 45
+fi
+
+# push the SSH key to every running VM via the guest agent. After apply, so VMs
+# created in this run get it too: their cloud-init key is not this machine's.
+if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
+  echo ">>> Pushing SSH key to all running VMs..."
   payload=$(jq -cn --arg k "$PUBKEY" \
-    '{"command":["/bin/sh","-c","mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo \($k) > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys"]}')
-  for vmid in $ON_DEMAND_VMS; do
-    for _ in $(seq 1 20); do   # retry the agent exec until the agent answers
+    '{"command":["/bin/sh","-c","mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo \($k) > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && systemctl disable --now cloud-init 2>/dev/null; true"]}')
+  VMIDS=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu" -H "$PVE_AUTH" \
+    | jq -r '.data[] | select(.status=="running") | .vmid' 2>/dev/null || true)
+  for vmid in $VMIDS; do
+    for _ in $(seq 1 20); do   # a fresh VM's agent takes a while to answer
       code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/agent/exec" \
         -H "$PVE_AUTH" -H "Content-Type: application/json" -d "$payload" 2>/dev/null)
       [ "$code" = "200" ] && break
