@@ -4,7 +4,7 @@
   fileSystems = nasMount "/var/lib/registry" "registry";
 
   virtualisation.oci-containers.containers.registry = {
-    image = "registry:2";
+    image = "registry:2.8.3";
     ports = [ "5000:5000" ];
     volumes = [ "/var/lib/registry:/var/lib/registry" ];
     environment = {
@@ -14,7 +14,7 @@
   };
 
   virtualisation.oci-containers.containers.registry-ui = {
-    image = "joxit/docker-registry-ui:latest";
+    image = "joxit/docker-registry-ui:2.6.0";
     ports = [ "80:80" ];
     environment = {
       REGISTRY_TITLE = "Homelab Registry";

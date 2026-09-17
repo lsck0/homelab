@@ -3,7 +3,7 @@
   fileSystems = nasMount "/var/lib/pingvin-share" "share";
 
   virtualisation.oci-containers.containers.share = {
-    image = "stonith404/pingvin-share:latest";
+    image = "stonith404/pingvin-share:v1.13.0";
     ports = [ "80:3000" ];
     volumes = [ "/var/lib/pingvin-share:/opt/app/backend/data" ];
     environment = {

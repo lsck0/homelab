@@ -163,7 +163,7 @@
 
   # FileBrowser web UI: authelia handles auth via traefik
   virtualisation.oci-containers.containers.filebrowser = {
-    image = "filebrowser/filebrowser:latest";
+    image = "filebrowser/filebrowser:v2.63.3";
     ports = [ "80:8080" ];
     volumes = [
       "/srv/nas:/srv"

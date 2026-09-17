@@ -8,7 +8,7 @@
   sops.secrets.forgejo-admin-pass = {};
 
   virtualisation.oci-containers.containers.forgejo = {
-    image = "codeberg.org/forgejo/forgejo:7";
+    image = "codeberg.org/forgejo/forgejo:7.0.16";
     ports = [ "80:3000" "2222:22" ];
     volumes = [ "/var/lib/forgejo:/data" ];
     extraOptions = [ "--add-host=auth.lsck0.dev:10.100.0.100" ];

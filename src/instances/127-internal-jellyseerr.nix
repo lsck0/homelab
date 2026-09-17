@@ -10,7 +10,7 @@
   virtualisation.oci-containers.containers.jellyseerr = {
     # the old fallenbagel/jellyseerr image is frozen at 2.7 and cannot log in
     # to Jellyfin 12; the project continues as Seerr.
-    image = "ghcr.io/seerr-team/seerr:latest";
+    image = "ghcr.io/seerr-team/seerr:v3.4.1";
     extraOptions = [ "--init" ];
     ports = [ "80:5055" ];
     volumes = [ "/var/lib/jellyseerr:/app/config" ];

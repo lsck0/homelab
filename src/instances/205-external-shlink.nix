@@ -4,7 +4,7 @@
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens/external";
 
   virtualisation.oci-containers.containers.shlink = {
-    image = "shlinkio/shlink:latest";
+    image = "shlinkio/shlink:5.0.2";
     ports = [ "80:8080" ];
     volumes = [ "/var/lib/shlink:/etc/shlink/data" ];
     environment = {

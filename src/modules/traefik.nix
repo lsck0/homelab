@@ -233,7 +233,7 @@ in {
     '';
 
     virtualisation.oci-containers.containers.crowdsec = {
-      image = "crowdsecurity/crowdsec:latest";
+      image = "crowdsecurity/crowdsec:v1.7.7";
       volumes = [
         "/var/lib/crowdsec/config:/etc/crowdsec"
         "/var/lib/crowdsec/data:/var/lib/crowdsec/data"

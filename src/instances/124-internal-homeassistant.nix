@@ -21,7 +21,7 @@ in {
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   virtualisation.oci-containers.containers.homeassistant = {
-    image = "ghcr.io/home-assistant/home-assistant:stable";
+    image = "ghcr.io/home-assistant/home-assistant:2026.9.2";
     ports = [ "80:8123" ];
     volumes = [
       "/var/lib/homeassistant:/config"

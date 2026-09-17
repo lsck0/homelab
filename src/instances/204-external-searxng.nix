@@ -30,7 +30,7 @@
   };
 
   virtualisation.oci-containers.containers.searxng = {
-    image = "searxng/searxng:latest";
+    image = "searxng/searxng:2026.9.16-461f174b0";
     ports = [ "80:8080" ];
     volumes = [ "/var/lib/searxng:/etc/searxng" ];
     environment = {
