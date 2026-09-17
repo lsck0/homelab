@@ -92,7 +92,7 @@
   },
   "113": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "ip": "10.100.0.113",
     "name": "113-internal-hermes",
     "type": "internal"

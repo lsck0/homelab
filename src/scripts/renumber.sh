@@ -24,7 +24,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="$ROOT_DIR/src"
 EXECUTE=0
-[ "${1:-}" = "--execute" ] && EXECUTE=1
+FROM_STEP=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --execute) EXECUTE=1 ;;
+    # resume after an interrupted run; steps 1-4 must never run twice, ids are reused
+    --from-step) FROM_STEP="${2:?--from-step needs a number}"; shift ;;
+    *) echo "usage: $0 [--execute] [--from-step N]"; exit 1 ;;
+  esac
+  shift
+done
 
 # old new
 MAP="
@@ -90,22 +99,26 @@ if [ "$EXECUTE" = 1 ]; then
   PVE_HOST=$(jq -r '.proxmox_ssh_host' "$TFVARS")
   PVE_PASS=$(jq -r '.proxmox_ssh_password // empty' "$TFVARS")
   if [ -n "$PVE_PASS" ]; then
-    export SSHPASS="$PVE_PASS"; PVE=(sshpass -e ssh -o StrictHostKeyChecking=accept-new "root@$PVE_HOST")
+    export SSHPASS="$PVE_PASS"; PVE=(sshpass -e ssh -n -o StrictHostKeyChecking=accept-new "root@$PVE_HOST")
   else
-    PVE=(ssh -o StrictHostKeyChecking=accept-new "root@$PVE_HOST")
+    PVE=(ssh -n -o StrictHostKeyChecking=accept-new "root@$PVE_HOST")
   fi
 else
   PVE=(ssh "root@<proxmox>")
 fi
-VMSSH=(ssh -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes)
+VMSSH=(ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes)
 pve() { run "${PVE[@]}" "$@"; }
 pve_out() { [ "$EXECUTE" = 1 ] && "${PVE[@]}" "$@" || true; }
+# dry run: pretend every VM exists so the whole plan is printed
+exists_on_pve() { [ "$EXECUTE" = 1 ] || return 0; "${PVE[@]}" qm status "$1" >/dev/null 2>&1; }
+# never started by this script: rebinding a gpu the host still drives can take the whole host down
+has_hostpci() { [ "$EXECUTE" = 1 ] || return 1; "${PVE[@]}" "grep -q '^hostpci' /etc/pve/qemu-server/$1.conf"; }
 
 echo ">>> Renumbering plan (old -> new):"
-while read -r old new; do
+while read -r old new <&3; do
   [ -n "$old" ] || continue
   printf '    %s -> %s  %s\n' "$old" "$new" "$(name_of "$new")"
-done <<< "$MAP"
+done 3<<< "$MAP"
 echo "    destroy: $REMOVED (removed from instances.tf)"
 
 if [ "$EXECUTE" = 1 ]; then
@@ -118,13 +131,16 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. NEW CONFIGS AS NEXT BOOT GENERATION
 # ─────────────────────────────────────────────────────────────────────────────
+if [ "$FROM_STEP" -le 1 ]; then
 echo ">>> 1. Installing new configs (next boot) at the old addresses"
-exists_on_pve() { pve_out qm status "$1" >/dev/null 2>&1; }
-while read -r old new; do
+while read -r old new <&3; do
   [ -n "$old" ] || continue
   name=$(name_of "$new"); oldip=$(ip_of "$old")
   if [ "$EXECUTE" = 1 ] && ! exists_on_pve "$old"; then
     echo "    $name: vm $old does not exist on Proxmox, created later by sync.sh"; continue
+  fi
+  if has_hostpci "$old"; then
+    echo "    $name: vm $old has pci passthrough, only renamed; deploy it with sync.sh once passthrough works"; continue
   fi
   echo "    $name: vm $old ($oldip)"
   if [ "$EXECUTE" = 1 ]; then
@@ -148,24 +164,29 @@ while read -r old new; do
     run nix copy --to "ssh-ng://root@$oldip" "<toplevel>"
     run "${VMSSH[@]}" "root@$oldip" "switch-to-configuration boot"
   fi
-done <<< "$MAP"
+done 3<<< "$MAP"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. STOP
 # ─────────────────────────────────────────────────────────────────────────────
+if [ "$FROM_STEP" -le 2 ]; then
 echo ">>> 2. Shutting down renumbered VMs"
-while read -r old _; do
+while read -r old _ <&3; do
   [ -n "$old" ] || continue
   pve "qm shutdown $old --timeout 180 || qm stop $old || true"
-done <<< "$MAP"
+done 3<<< "$MAP"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. REMOVED VMS
 # ─────────────────────────────────────────────────────────────────────────────
+if [ "$FROM_STEP" -le 3 ]; then
 echo ">>> 3. Destroying removed VMs"
 for id in $REMOVED; do
   pve "qm stop $id 2>/dev/null; qm destroy $id --purge 2>/dev/null || true"
 done
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. RENAME ON PROXMOX
@@ -208,16 +229,34 @@ renum() {
   echo "vm $old -> $new"
 }
 '
+if [ "$FROM_STEP" -le 4 ]; then
 echo ">>> 4. Renaming VMs on Proxmox (via temporary ids 9xxx)"
-while read -r old new; do [ -n "$old" ] && pve "$RENAME_FN renum $old 9$new"; done <<< "$MAP"
-while read -r old new; do [ -n "$old" ] && pve "$RENAME_FN renum 9$new $new"; done <<< "$MAP"
+while read -r old new <&3; do [ -n "$old" ] && pve "$RENAME_FN renum $old 9$new"; done 3<<< "$MAP"
+while read -r old new <&3; do [ -n "$old" ] && pve "$RENAME_FN renum 9$new $new"; done 3<<< "$MAP"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 5. TERRAFORM STATE
 # ─────────────────────────────────────────────────────────────────────────────
+# every renumbered VM must now exist under its new id and nothing under its old
+# one; importing before that would attach the wrong VMs to the new keys
+if [ "$EXECUTE" = 1 ]; then
+  bad=""
+  new_ids=" $(awk 'NF {printf "%s ", $2}' <<< "$MAP")"
+  while read -r old new <&3; do
+    [ -n "$old" ] || continue
+    exists_on_pve "$new" || bad="$bad missing:$new"
+    # an old id that is also some other VM's new id is supposed to exist
+    case "$new_ids" in *" $old "*) continue ;; esac
+    ! exists_on_pve "$old" || bad="$bad still-old:$old"
+  done 3<<< "$MAP"
+  [ -z "$bad" ] || { echo "ERROR: rename incomplete:$bad. Terraform state untouched."; exit 1; }
+fi
+
 echo ">>> 5. Rewriting Terraform state"
 TF=(terraform -chdir="$SRC")
-run cp "$SRC/terraform.tfstate" "$SRC/terraform.tfstate.pre-renumber"
+# keep the very first copy: a re-run must not overwrite the original state
+[ -e "$SRC/terraform.tfstate.pre-renumber" ] || run cp "$SRC/terraform.tfstate" "$SRC/terraform.tfstate.pre-renumber"
 run "${TF[@]}" init -input=false
 for addr in $("${TF[@]}" state list 2>/dev/null | grep -E 'proxmox_virtual_environment_vm' || true); do
   run "${TF[@]}" state rm "$addr"
@@ -248,11 +287,15 @@ fi
 # 6. START
 # ─────────────────────────────────────────────────────────────────────────────
 echo ">>> 6. Starting VMs with their new ids"
-while read -r _ new; do
+start_failed=""
+while read -r _ new <&3; do
   [ -n "$new" ] || continue
   state=$(jq -r --arg id "$new" '.[$id].enabled' "$SRC/inventory.json")
   [ "$state" = false ] && continue
-  pve "qm start $new"
-done <<< "$MAP"
+  has_hostpci "$new" && { echo "    vm $new has pci passthrough, not started"; continue; }
+  # one VM that does not start (e.g. gpu passthrough not ready) must not leave the rest down
+  pve "qm start $new" || start_failed="$start_failed $new"
+done 3<<< "$MAP"
+[ -z "$start_failed" ] || echo "WARNING: could not start:$start_failed (check with qm start <id> on the host)"
 
 echo ">>> Done. Run ./sync.sh (router + all VMs get their final config; onDemand VMs power off after their cooldown)."
