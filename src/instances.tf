@@ -82,7 +82,8 @@ locals {
     }
 
     "113" = { # GPU LLM agent: Hermes (Telegram) + Ollama on the passed-through RTX 2060
-      enabled = true,
+      # off until the host binds the gpu to vfio-pci (still on nouveau) and hermes-llm-api-key is in sops
+      enabled = false,
       name = "113-internal-hermes",
       type = "internal",
       memory = 12288,
