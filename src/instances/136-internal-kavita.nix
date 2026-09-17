@@ -48,27 +48,36 @@
     description = "Initialise Kavita admin, libraries and Homepage credentials";
     after = [ "podman-kavita.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.coreutils pkgs.jq ];
+    path = [ pkgs.curl pkgs.coreutils pkgs.jq pkgs.openssl ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 60; };
     script = ''
       K=http://127.0.0.1:80
       T=/var/lib/homepage-tokens
+      [ -s $T/kavita-pass.token ] || openssl rand -hex 12 | tr -d '\n' > $T/kavita-pass.token
+      PASS=$(cat $T/kavita-pass.token)
+      json() { jq -cn --arg p "$1" "$2"; }
+      login() { # password
+        curl -sf -X POST "$K/api/Account/login" -H "Content-Type: application/json" \
+          -d "$(json "$1" '{username:"admin", password:$p}')" | jq -r '.token // empty'
+      }
       # first registered user becomes admin; later calls are refused. Kavita
       # answers HTTP long before login works (first-start migrations): retry.
-      login() {
-        curl -s -X POST "$K/api/Account/register" -H "Content-Type: application/json" \
-          -d '{"username":"admin","password":"Admin123!","email":"admin@internal"}' >/dev/null || true
-        curl -sf -X POST "$K/api/Account/login" -H "Content-Type: application/json" \
-          -d '{"username":"admin","password":"Admin123!"}' | jq -r '.token // empty'
-      }
       JWT=""
       for i in $(seq 1 60); do
-        JWT=$(login || true); [ -n "$JWT" ] && break
+        curl -s -X POST "$K/api/Account/register" -H "Content-Type: application/json" \
+          -d "$(json "$PASS" '{username:"admin", password:$p, email:"admin@internal"}')" >/dev/null || true
+        JWT=$(login "$PASS" || true); [ -n "$JWT" ] && break
+        # installs from before generated passwords still have the old default.
+        OLD=$(login 'Admin123!' || true)
+        if [ -n "$OLD" ]; then
+          curl -sf -X POST "$K/api/Account/reset-password" -H "Authorization: Bearer $OLD" -H "Content-Type: application/json" \
+            -d "$(json "$PASS" '{userName:"admin", password:$p, oldPassword:"Admin123!"}')" >/dev/null \
+            && echo "admin moved off the default password" && continue
+        fi
         sleep 5
       done
       [ -n "$JWT" ] || { echo "Kavita login failed"; exit 1; }
       echo -n admin > $T/kavita-user.token
-      echo -n 'Admin123!' > $T/kavita-pass.token
 
       existing=$(curl -sf "$K/api/Library/libraries" -H "Authorization: Bearer $JWT" | jq -r '.[].name')
       add() { # name type metadataProvider folder   (type: 0 manga, 2 book; provider: 2 Hardcover, 3 Mangabaka)

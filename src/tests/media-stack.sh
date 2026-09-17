@@ -17,7 +17,7 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 if [ -z "${MEDIA_TEST_SHELL:-}" ]; then
   exec nix shell --inputs-from "$SRC" \
     nixpkgs#bash nixpkgs#curl nixpkgs#jq nixpkgs#yq-go nixpkgs#gnused nixpkgs#gnugrep \
-    nixpkgs#coreutils nixpkgs#openssl nixpkgs#findutils \
+    nixpkgs#coreutils nixpkgs#openssl nixpkgs#findutils nixpkgs#python3 \
     -c env MEDIA_TEST_SHELL=1 bash "${BASH_SOURCE[0]}" "$@"
 fi
 
@@ -110,8 +110,11 @@ run_unit 111-internal-qbittorrent qbittorrent-disable-auth "$Q" \
   "s#systemctl start podman-qbittorrent.service#docker start ${P}qbittorrent#"
 # the API whitelist lists the lab VMs; here the *arrs live on the test subnet.
 # Tor egress is left configured as in the lab (no real downloads happen).
-run_unit 111-internal-qbittorrent qbittorrent-tor-proxy \
-  "s#\"bypass_auth_subnet_whitelist\": \"[^\"]*\"#\"bypass_auth_subnet_whitelist\": \"$SUBNET\"#" \
+nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.111-internal-qbittorrent.config.systemd.units.\"qbittorrent-tor-proxy.service\".unit"
+QPREFS=$(nixeval 111-internal-qbittorrent systemd.services.qbittorrent-tor-proxy.script | grep -o '/nix/store/[^ ]*-qbittorrent-prefs.json')
+jq --arg s "$SUBNET" '.bypass_auth_subnet_whitelist = $s' "$QPREFS" > "$W/qbittorrent-prefs.json"
+run_unit 111-internal-qbittorrent qbittorrent-tor-proxy "$TOK" \
+  "s#$QPREFS#$W/qbittorrent-prefs.json#" \
   "s#podman exec qbittorrent#podman exec ${P}qbittorrent#"
 
 for app in prowlarr:128-internal-prowlarr radarr:129-internal-radarr sonarr:130-internal-sonarr \
@@ -124,6 +127,15 @@ done
 run_unit 133-internal-jellyfin jellyfin-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:18096#g"
 run_unit 127-internal-jellyseerr jellyseerr-token "$TOK" "s#/var/lib/jellyseerr#$W/jellyseerr#g"
 run_unit 131-internal-bazarr bazarr-token "$TOK" "s#/var/lib/bazarr#$W/bazarr#g"
+# an install from before generated passwords: admin with the old default, which
+# the unit must move to the generated one.
+for i in $(seq 1 60); do
+  curl -s -X POST http://127.0.0.1:15000/api/Account/register -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"Admin123!","email":"admin@internal"}' >/dev/null || true
+  curl -sf -X POST http://127.0.0.1:15000/api/Account/login -H "Content-Type: application/json" \
+    -d '{"username":"admin","password":"Admin123!"}' >/dev/null && break
+  sleep 5
+done
 run_unit 136-internal-kavita kavita-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:15000#g"
 
 echo ">>> Exported tokens: $(cd "$W/tokens" && echo *)"
@@ -197,11 +209,23 @@ check "jellyseerr: sonarr anime folder set" sh -c "curl -sf -H 'X-Api-Key: $jk' 
 bk=$(key bazarr-key)
 check "bazarr: radarr + sonarr enabled" sh -c "curl -sf -H 'X-API-KEY: $bk' http://127.0.0.1:16767/api/system/settings | jq -e '.general.use_radarr and .general.use_sonarr'"
 
+# every test client is on the API whitelist, where any login succeeds: check
+# the stored PBKDF2 hash (qBittorrent: SHA-512, 100000 rounds) instead.
+qbit_password_is() {
+  python3 - "$W/qbittorrent/qBittorrent/qBittorrent.conf" "$1" <<'PY'
+import base64, hashlib, re, sys
+salt, key = (base64.b64decode(x) for x in re.search(r'Password_PBKDF2="@ByteArray\(([^:]+):([^)]+)\)"', open(sys.argv[1]).read()).groups())
+sys.exit(hashlib.pbkdf2_hmac("sha512", sys.argv[2].encode(), salt, 100000, len(key)) != key)
+PY
+}
+check "qbittorrent: WebUI password is the generated one" qbit_password_is "$(key qbittorrent-pass)"
+
 jfk=$(key jellyfin-key)
 check "jellyfin: Movies/Shows/Anime libraries" sh -c "curl -sf -H 'Authorization: MediaBrowser Token=\"$jfk\"' http://127.0.0.1:18096/Library/VirtualFolders | jq -e '[.[].Name] | contains([\"Movies\",\"Shows\",\"Anime\"])'"
 check "jellyfin: janitorr user can delete" sh -c "curl -sf -H 'Authorization: MediaBrowser Token=\"$jfk\"' http://127.0.0.1:18096/Users | jq -e 'any(.[]; .Name==\"janitorr\" and .Policy.EnableContentDeletion)'"
 
-check "kavita: Manga + Books libraries" sh -c "jwt=\$(curl -sf -X POST http://127.0.0.1:15000/api/Account/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"Admin123!\"}' | jq -r .token); \
+check "kavita: old default password refused" sh -c "! curl -sf -X POST http://127.0.0.1:15000/api/Account/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"Admin123!\"}'"
+check "kavita: Manga + Books libraries" sh -c "jwt=\$(curl -sf -X POST http://127.0.0.1:15000/api/Account/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"$(key kavita-pass)\"}' | jq -r .token); \
   curl -sf -H \"Authorization: Bearer \$jwt\" http://127.0.0.1:15000/api/Library/libraries | jq -e '[.[].name] | contains([\"Manga\",\"Books\"])'"
 
 echo ">>> Idempotence: second arr-wire run must change nothing"

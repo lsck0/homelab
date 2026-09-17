@@ -181,10 +181,16 @@ in {
         curl -sf -X POST $J/Users/AuthenticateByName -H "Content-Type: application/json" -H "$HDR" \
           -d "$(jq -cn --arg p "$1" '{Username:"admin", Pw:$p}')" | jq -r '.AccessToken // empty'
       }
-      # older installs were created with admin/admin.
-      TOKEN=$(login "$ADMIN_PASS"); [ -n "$TOKEN" ] || TOKEN=$(login admin)
-      [ -n "$TOKEN" ] || { echo "Jellyfin admin login failed"; exit 1; }
+      TOKEN=$(login "$ADMIN_PASS")
       api() { curl -sf -H "Authorization: MediaBrowser Token=\"$TOKEN\"" -H "Content-Type: application/json" "$@"; }
+      # older installs were created with admin/admin: move them to the generated password.
+      if [ -z "$TOKEN" ] && TOKEN=$(login admin) && [ -n "$TOKEN" ]; then
+        ADMIN_ID=$(api $J/Users/Me | jq -r .Id)
+        api -X POST "$J/Users/$ADMIN_ID/Password" -d "$(jq -cn --arg p "$ADMIN_PASS" '{CurrentPw:"admin", NewPw:$p}')"
+        TOKEN=$(login "$ADMIN_PASS")
+        echo "admin moved off the default password"
+      fi
+      [ -n "$TOKEN" ] || { echo "Jellyfin admin login failed"; exit 1; }
 
       # API key shared by Homepage, Janitorr, Jellyseerr wiring and Hermes.
       KEY=$(api $J/Auth/Keys | jq -r '[.Items[] | select(.AppName=="homelab")][0].AccessToken // empty')

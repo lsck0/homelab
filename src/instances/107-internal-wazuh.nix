@@ -34,8 +34,8 @@ in {
 
   # Wazuh single-node (manager + indexer + dashboard) from the official
   # wazuh-docker release. State lives in Docker volumes on the local disk.
-  # dashboard https://wazuh.lsck0.dev behind Authelia; its own login is the
-  # upstream default admin / SecretPassword (reachable only via Traefik).
+  # dashboard https://wazuh.lsck0.dev behind Authelia; its own login is admin
+  # with the password in /var/lib/wazuh/admin-pass, generated on first setup.
   virtualisation.docker.enable = true;
   boot.kernel.sysctl."vm.max_map_count" = 262144;
 
@@ -44,7 +44,7 @@ in {
     after = [ "docker.service" "network-online.target" ];
     requires = [ "docker.service" ];
     wants = [ "network-online.target" ];
-    path = [ pkgs.git pkgs.docker pkgs.docker-compose pkgs.gnugrep pkgs.gawk pkgs.coreutils ];
+    path = [ pkgs.git pkgs.docker pkgs.docker-compose pkgs.gnugrep pkgs.gnused pkgs.gawk pkgs.coreutils pkgs.openssl pkgs.apacheHttpd ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
       if [ ! -d ${dir}/.git ]; then
@@ -61,9 +61,29 @@ in {
           awk '/<remote>/ && !done { print ENVIRON["BLOCK"]; done=1 } { print }' $conf > $conf.tmp
         mv $conf.tmp $conf
       fi
-      mkdir -p /var/lib/wazuh
-      echo -n SecretPassword > /var/lib/wazuh/admin-pass
-      chmod 600 /var/lib/wazuh/admin-pass
+
+      # replace the upstream demo passwords of the dashboard login (admin) and
+      # the dashboard's indexer user (kibanaserver). The indexer seeds its users
+      # from internal_users.yml on first start only, so this runs before it.
+      mkdir -p /var/lib/wazuh && chmod 700 /var/lib/wazuh
+      for u in admin kibanaserver; do
+        [ -s /var/lib/wazuh/$u-pass ] || openssl rand -hex 16 | tr -d '\n' > /var/lib/wazuh/$u-pass
+      done
+      if grep -q 'INDEXER_PASSWORD=SecretPassword' docker-compose.yml; then
+        if docker volume inspect single-node_wazuh-indexer-data >/dev/null 2>&1; then
+          echo "indexer already initialised with the demo passwords: rotate them by hand" >&2
+          exit 1
+        fi
+        A=$(cat /var/lib/wazuh/admin-pass); K=$(cat /var/lib/wazuh/kibanaserver-pass)
+        users=config/wazuh_indexer/internal_users.yml
+        ADMIN=$(htpasswd -nbBC 12 "" "$A" | cut -d: -f2) KIBANA=$(htpasswd -nbBC 12 "" "$K" | cut -d: -f2) awk '
+          /^[a-z_-]+:$/ { user = $0 }
+          /^  hash:/ && user == "admin:"        { print "  hash: \"" ENVIRON["ADMIN"] "\"";  next }
+          /^  hash:/ && user == "kibanaserver:" { print "  hash: \"" ENVIRON["KIBANA"] "\""; next }
+          { print }' $users > $users.tmp
+        mv $users.tmp $users
+        sed -i "s/INDEXER_PASSWORD=SecretPassword/INDEXER_PASSWORD=$A/; s/DASHBOARD_PASSWORD=kibanaserver/DASHBOARD_PASSWORD=$K/" docker-compose.yml
+      fi
     '';
   };
 

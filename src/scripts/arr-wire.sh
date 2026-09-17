@@ -41,14 +41,15 @@ later() { echo "$1"; pending=1; }
 # wire_servarr <name> <base url> <api version> <category field> <category> <root folder>...
 wire_servarr() {
   local name=$1 url=$2 v=$3 catfield=$4 cat=$5; shift 5
-  local k a body
+  local k a body qpass
   k=$(key "$name-key") || { later "$name: API key not exported yet"; return; }
+  qpass=$(key qbittorrent-pass) || { later "$name: qBittorrent password not exported yet"; return; }
   a="$url/api/$v"
   api GET "$a/system/status" "$k" >/dev/null || { later "$name: unreachable"; return; }
 
   if ! api GET "$a/downloadclient" "$k" | jq -e 'any(.[]; .implementation == "QBittorrent")' >/dev/null; then
     body=$(api GET "$a/downloadclient/schema" "$k" | jq -c --arg cf "$catfield" --arg cat "$cat" \
-      --arg qh "$QBIT_HOST" --arg qp "$QBIT_PORT" '
+      --arg qh "$QBIT_HOST" --arg qp "$QBIT_PORT" --arg qpass "$qpass" '
       first(.[] | select(.implementation == "QBittorrent"))
       | .name = "qBittorrent" | .enable = true | .priority = 1
       | .removeCompletedDownloads = true | .removeFailedDownloads = true
@@ -56,7 +57,7 @@ wire_servarr() {
           if .name == "host" then .value = $qh
           elif .name == "port" then .value = ($qp | tonumber)
           elif .name == "username" then .value = "admin"
-          elif .name == "password" then .value = "adminadmin"
+          elif .name == "password" then .value = $qpass
           elif .name == $cf then .value = $cat
           else . end)')
     if api POST "$a/downloadclient?forceSave=true" "$k" "$body" >/dev/null; then

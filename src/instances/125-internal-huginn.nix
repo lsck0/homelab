@@ -1,4 +1,4 @@
-{ nasMount, ... }: {
+{ pkgs, nasMount, ... }: {
   networking.hostName = "vm-125";
 
   fileSystems = nasMount "/var/lib/huginn" "huginn"
@@ -17,7 +17,7 @@
       local all all trust
       host all all 127.0.0.1/32 trust
       host all all ::1/128 trust
-      host all all 10.0.0.0/8 trust
+      host huginn huginn 10.88.0.0/16 trust
     '';
   };
 
@@ -25,6 +25,7 @@
     image = "ghcr.io/huginn/huginn:latest";
     ports = [ "80:3000" ];
     volumes = [ "/var/lib/huginn:/var/lib/huginn" ];
+    environmentFiles = [ "/var/lib/huginn/seed.env" ];
     environment = {
       DOMAIN = "huginn.lsck0.dev";
       DATABASE_ADAPTER = "postgresql";
@@ -33,14 +34,28 @@
       DATABASE_NAME = "huginn";
       DATABASE_USERNAME = "huginn";
       SEED_USERNAME = "akadmin";
-      SEED_PASSWORD = "changeme123!";
       REQUIRE_CONFIRMED_EMAIL = "false";
     };
+  };
+
+  # SEED_PASSWORD for the first admin, generated once
+  systemd.services.huginn-seed = {
+    before = [ "podman-huginn.service" ];
+    requiredBy = [ "podman-huginn.service" ];
+    path = [ pkgs.openssl pkgs.coreutils ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      f=/var/lib/huginn/seed.env
+      [ -s $f ] || echo "SEED_PASSWORD=$(openssl rand -hex 16)" > $f
+      chmod 600 $f
+    '';
   };
 
   systemd.tmpfiles.rules = [
     "d /var/lib/huginn 0750 1000 1000 -"
   ];
 
-  networking.firewall.allowedTCPPorts = [ 80 5432 ];
+  networking.firewall.allowedTCPPorts = [ 80 ];
+  # Postgres only for the container (podman bridge), not the subnet
+  networking.firewall.interfaces.podman0.allowedTCPPorts = [ 5432 ];
 }

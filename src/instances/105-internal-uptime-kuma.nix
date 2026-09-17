@@ -41,14 +41,24 @@ let
         setTimeout(() => reject(new Error("connect timeout")), 15000);
       });
 
+      const password = process.env.KUMA_PASS;
+      if (!password) throw new Error("KUMA_PASS is not set");
       try {
-        await send("setup", "admin", "changeme123!");
+        await send("setup", "admin", password);
         console.log("Admin created");
       } catch (e) {
         console.log("Setup:", e.message);
       }
 
-      await send("login", { username: "admin", password: "changeme123!", token: "" });
+      try {
+        await send("login", { username: "admin", password, token: "" });
+      } catch (e) {
+        // installs from before generated passwords still have the old default.
+        const old = "changeme123!";
+        await send("login", { username: "admin", password: old, token: "" });
+        await send("changePassword", { currentPassword: old, newPassword: password });
+        console.log("admin moved off the default password");
+      }
       console.log("Logged in");
 
       const existing = await new Promise((resolve) => {
@@ -166,8 +176,12 @@ in {
         done
         sleep 5
 
+        pass=/var/lib/uptime-kuma/admin-pass
+        [ -s $pass ] || ${pkgs.openssl}/bin/openssl rand -hex 16 | tr -d '\n' > $pass
+        chmod 600 $pass
+
         ${pkgs.podman}/bin/podman cp ${setupJs} uptime-kuma:/tmp/setup.js
-        ${pkgs.podman}/bin/podman exec uptime-kuma node /tmp/setup.js
+        ${pkgs.podman}/bin/podman exec -e KUMA_PASS="$(cat $pass)" uptime-kuma node /tmp/setup.js
 
         # disable built-in auth (authelia ForwardAuth handles access control)
         ${pkgs.podman}/bin/podman exec uptime-kuma sqlite3 /app/data/kuma.db \
