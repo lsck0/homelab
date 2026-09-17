@@ -368,9 +368,9 @@ done
 if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git -C "$ROOT_DIR" add -A
   if ! git -C "$ROOT_DIR" diff --cached --quiet; then
-    last=$(git -C "$ROOT_DIR" show -s --format=%s 2>/dev/null || true)
-    next=1
-    [[ "$last" =~ Generation:\ ([0-9]+) ]] && next=$((BASH_REMATCH[1] + 1))
+    # highest generation so far, not the last commit: hand-written commits sit in between
+    last=$(git -C "$ROOT_DIR" log --format=%s | sed -n 's/^Generation: \([0-9]\+\)$/\1/p' | sort -n | tail -1)
+    next=$(( ${last:-0} + 1 ))
     echo ">>> Git: committing Generation: $next"
     git -C "$ROOT_DIR" commit -m "Generation: $next"
     git -C "$ROOT_DIR" push || echo "WARNING: git push failed."
