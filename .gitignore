@@ -9,9 +9,8 @@
 result
 result-*
 
-# key material stays local; only the homelab CA certificate is public
-secrets/*
-!secrets/homelab-ca.pem
+# key material and certificates stay local
+secrets/
 
 # OS
 .DS_Store

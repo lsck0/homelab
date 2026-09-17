@@ -25,8 +25,8 @@ Severity: **High** = real exposure / data-loss. **Medium** = should fix. **Low**
   when vm-111 is enabled.
 - **S5 (High) Committed private key**: `secrets/server-key.pem` (key of the `*.lsck0.dev`
   certificate signed by the homelab CA) was tracked since Generation 77 and is public in git
-  history. Untracked and gitignored now (`secrets/*` except the CA certificate); nothing in the
-  config uses it. Remove the homelab CA from every device that trusts it, or rotate the CA.
+  history. Untracked and gitignored now, together with the unused CA certificate (`secrets/`);
+  nothing in the config uses either. Remove the homelab CA from every device that trusts it, or rotate the CA.
 - **S7 (Low) docker.sock exposure**: swarm/registry VMs mount the socket; contain blast radius.
 - **P2 (Medium) DBs on NFS**: some service DBs live on the NAS share; Kopia snapshots are
   file-level, not transaction-consistent. Add per-VM `pg_dump`/`sqlite .backup` before archiving.
