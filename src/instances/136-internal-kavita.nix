@@ -9,7 +9,7 @@
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   virtualisation.oci-containers.containers.kavita = {
-    image = "jvmilazz0/kavita:latest";
+    image = "jvmilazz0/kavita:0.9.1";
     ports = [ "80:5000" ];
     volumes = [
       "/var/lib/kavita:/kavita/config"
@@ -22,7 +22,7 @@
   # Hermes; new chapters of library manga are checked every 6h and downloaded
   # as CBZ straight into Kavita's manga library.
   virtualisation.oci-containers.containers.suwayomi = {
-    image = "ghcr.io/suwayomi/suwayomi-server:stable";
+    image = "ghcr.io/suwayomi/suwayomi-server:v2.3.2243";
     ports = [ "4567:4567" ];
     volumes = [
       "/var/lib/suwayomi/data:/home/suwayomi/.local/share/Tachidesk"

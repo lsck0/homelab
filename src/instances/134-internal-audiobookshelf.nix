@@ -8,13 +8,13 @@
   # Bookshelf (maintained Readarr fork, Hardcover metadata): ebook manager.
   # downloads into /data/media/books, which Kavita serves. Wired by vm-132.
   homelab.servarr.bookshelf = {
-    image = "ghcr.io/pennydreadful/bookshelf:hardcover";
+    image = "ghcr.io/pennydreadful/bookshelf:hardcover-v0.4.21.182";
     port = 8787;
     hostPort = 8787;
   };
 
   virtualisation.oci-containers.containers.audiobookshelf = {
-    image = "ghcr.io/advplyr/audiobookshelf:latest";
+    image = "ghcr.io/advplyr/audiobookshelf:2.36.1";
     ports = [ "80:80" ];
     volumes = [
       "/srv/audiobooks:/audiobooks"

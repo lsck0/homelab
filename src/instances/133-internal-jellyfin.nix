@@ -109,7 +109,7 @@ in {
 
   virtualisation.oci-containers.containers = {
     jellyfin = {
-      image = "jellyfin/jellyfin:latest";
+      image = "jellyfin/jellyfin:12.1";
       ports = [ "80:8096" ];
       volumes = [
         "/var/lib/jellyfin/config:/config"
@@ -120,7 +120,7 @@ in {
     };
 
     janitorr-stats = {
-      image = "ghcr.io/schaka/janitorr-stats:stable-sqlite";
+      image = "ghcr.io/schaka/janitorr-stats:v0.2.6-sqlite";
       volumes = [
         "/var/lib/janitorr/stats.yml:/work/config/application.yml:ro"
         "/var/lib/janitorr/stats:/data"
@@ -129,7 +129,7 @@ in {
     };
 
     janitorr = {
-      image = "ghcr.io/schaka/janitorr:jvm-stable";
+      image = "ghcr.io/schaka/janitorr:jvm-v2.2.1";
       user = "1000:1000";
       dependsOn = [ "janitorr-stats" ];
       volumes = [

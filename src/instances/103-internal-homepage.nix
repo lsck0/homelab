@@ -211,7 +211,7 @@ in {
   ];
 
   virtualisation.oci-containers.containers.homepage = {
-    image = "ghcr.io/gethomepage/homepage:latest";
+    image = "ghcr.io/gethomepage/homepage:v1.12.3";
     ports = [ "80:3000" ];
     volumes = [
       "/var/lib/homepage:/app/config"

@@ -8,13 +8,13 @@
   # Lidarr: music manager. Downloads into /data/media/music, which Navidrome
   # serves. Wired to qBittorrent/Prowlarr by vm-132.
   homelab.servarr.lidarr = {
-    image = "lscr.io/linuxserver/lidarr:latest";
+    image = "lscr.io/linuxserver/lidarr:3.1.0.4875-ls41";
     port = 8686;
     hostPort = 8686;
   };
 
   virtualisation.oci-containers.containers.navidrome = {
-    image = "deluan/navidrome:latest";
+    image = "deluan/navidrome:0.64.0";
     ports = [ "80:4533" ];
     volumes = [
       "/var/lib/navidrome:/data"

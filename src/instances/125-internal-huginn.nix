@@ -22,7 +22,7 @@
   };
 
   virtualisation.oci-containers.containers.huginn = {
-    image = "ghcr.io/huginn/huginn:latest";
+    image = "ghcr.io/huginn/huginn:f2cc19148df9a4785d789d30f0b10d1d9c2dae10";
     ports = [ "80:3000" ];
     volumes = [ "/var/lib/huginn:/var/lib/huginn" ];
     environmentFiles = [ "/var/lib/huginn/seed.env" ];

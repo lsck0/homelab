@@ -157,7 +157,7 @@ in {
   fileSystems = nasMount "/var/lib/uptime-kuma" "uptime-kuma";
 
   virtualisation.oci-containers.containers.uptime-kuma = {
-    image = "louislam/uptime-kuma:latest";
+    image = "louislam/uptime-kuma:1.23.17";
     ports = [ "80:3001" ];
     volumes = [ "/var/lib/uptime-kuma:/app/data" ];
   };
