@@ -1,6 +1,12 @@
 { pkgs, ... }:
 let
   version = "4.14.7";
+  src = pkgs.fetchFromGitHub {
+    owner = "wazuh";
+    repo = "wazuh-docker";
+    rev = "v${version}";
+    hash = "sha256-kM5irCpAVkAdqdIce8Q4MdmMgaBg6set9BSI3W7mPiQ=";
+  };
   dir = "/opt/wazuh-docker";
   stack = "${dir}/single-node";
 
@@ -40,15 +46,20 @@ in {
   boot.kernel.sysctl."vm.max_map_count" = 262144;
 
   systemd.services.wazuh-setup = {
-    description = "Fetch wazuh-docker ${version}, generate certificates, enable syslog input";
+    description = "Install wazuh-docker ${version}, generate certificates, enable syslog input";
     after = [ "docker.service" "network-online.target" ];
     requires = [ "docker.service" ];
     wants = [ "network-online.target" ];
-    path = [ pkgs.git pkgs.docker pkgs.docker-compose pkgs.gnugrep pkgs.gnused pkgs.gawk pkgs.coreutils pkgs.openssl pkgs.apacheHttpd ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    # the certificate generator pulls an image: retry while DNS or the registry is not up yet
+    startLimitIntervalSec = 0;
+    path = [ pkgs.docker pkgs.docker-compose pkgs.gnugrep pkgs.gnused pkgs.gawk pkgs.coreutils pkgs.openssl pkgs.apacheHttpd ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
     script = ''
-      if [ ! -d ${dir}/.git ]; then
-        git clone --depth 1 -b v${version} https://github.com/wazuh/wazuh-docker ${dir}
+      # a writable copy: setup edits the manager config, users and compose file in place
+      if [ ! -f ${dir}/single-node/docker-compose.yml ]; then
+        mkdir -p ${dir}
+        cp -r ${src}/. ${dir}/
+        chmod -R u+w ${dir}
       fi
       cd ${stack}
       if [ ! -f config/wazuh_indexer_ssl_certs/root-ca.pem ]; then
