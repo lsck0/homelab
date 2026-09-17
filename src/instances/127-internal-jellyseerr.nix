@@ -1,4 +1,4 @@
-{ pkgs, nasMount, ... }: {
+{ pkgs, nasMount, retry, ... }: {
   networking.hostName = "vm-127";
 
   # Seerr (formerly Jellyseerr), request movies, series and anime; approved requests go to
@@ -32,7 +32,7 @@
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
     script = ''
       conf=/var/lib/jellyseerr/settings.json
-      for i in $(seq 1 90); do [ -f $conf ] && break; sleep 2; done
+      ${retry} 90 2 test -f $conf
       key=$(jq -r '.main.apiKey // empty' $conf)
       [ -n "$key" ] || exit 1
       echo -n "$key" > /var/lib/homepage-tokens/jellyseerr-key.token

@@ -1,4 +1,4 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, retry, ... }:
 let
   cfg = config.homelab.traefik;
 
@@ -267,11 +267,7 @@ in {
       };
       script = ''
         KEY=$(cat ${config.sops.secrets.crowdsec-bouncer-key.path})
-        # wait for the LAPI to answer.
-        for i in $(seq 1 60); do
-          podman exec crowdsec cscli lapi status >/dev/null 2>&1 && break
-          sleep 5
-        done
+        ${retry} 60 5 podman exec crowdsec cscli lapi status
         if podman exec crowdsec cscli bouncers list -o json 2>/dev/null \
              | jq -e '.[]|select(.name=="traefik-bouncer")' >/dev/null; then
           echo "bouncer already registered"

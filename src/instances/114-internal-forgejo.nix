@@ -1,4 +1,4 @@
-{ config, pkgs, nasMount, ... }: {
+{ config, pkgs, nasMount, retry, ... }: {
   networking.hostName = "vm-114";
 
   fileSystems = nasMount "/var/lib/forgejo" "forgejo"
@@ -46,11 +46,7 @@
       RemainAfterExit = true;
     };
     script = ''
-      # wait for API
-      for i in $(seq 1 60); do
-        curl -sf http://127.0.0.1:80/api/v1/settings/api >/dev/null 2>&1 && break
-        sleep 2
-      done
+      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/v1/settings/api
 
       # skip if users already exist
       COUNT=$(podman exec -u git forgejo forgejo admin user list 2>/dev/null | grep -c '^[0-9]' || echo 0)
@@ -78,11 +74,7 @@
       RemainAfterExit = true;
     };
     script = ''
-      # wait for Forgejo API
-      for i in $(seq 1 60); do
-        if curl -sf http://127.0.0.1:80/api/v1/settings/api >/dev/null 2>&1; then break; fi
-        sleep 2
-      done
+      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/v1/settings/api
 
       OIDC_SECRET=$(cat ${config.sops.secrets.forgejo-oidc-secret.path})
       DISCOVER_URL="https://auth.lsck0.dev/.well-known/openid-configuration"
@@ -140,11 +132,7 @@
         esac
       fi
 
-      # wait for Forgejo API
-      for i in $(seq 1 60); do
-        curl -sf http://127.0.0.1:80/api/v1/settings/api >/dev/null 2>&1 && break
-        sleep 2
-      done
+      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/v1/settings/api
 
       # create a local bot user for API access
       podman exec -u git forgejo forgejo admin user create \
@@ -180,11 +168,7 @@
       RemainAfterExit = true;
     };
     script = ''
-      # wait for Forgejo to be ready
-      for i in $(seq 1 60); do
-        podman exec -u git forgejo forgejo admin user list >/dev/null 2>&1 && break
-        sleep 2
-      done
+      ${retry} 60 2 podman exec -u git forgejo forgejo admin user list
 
       # always regenerate token (they're one-use for registration)
       TOKEN=$(podman exec -u git forgejo forgejo actions generate-runner-token 2>/dev/null || true)

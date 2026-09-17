@@ -1,4 +1,4 @@
-{ pkgs, nasMount, nasMedia, ... }: {
+{ pkgs, nasMount, nasMedia, retry, ... }: {
   networking.hostName = "vm-135";
 
   fileSystems = nasMount "/var/lib/navidrome" "navidrome"
@@ -43,10 +43,7 @@
     script = ''
       N=http://127.0.0.1:80
       T=/var/lib/homepage-tokens
-      for i in $(seq 1 90); do
-        curl -sf $N/ping >/dev/null 2>&1 && break
-        sleep 2
-      done
+      ${retry} 90 2 curl -sf $N/ping
 
       [ -s $T/navidrome-pass.token ] || openssl rand -hex 16 | tr -d '\n' > $T/navidrome-pass.token
       PASS=$(cat $T/navidrome-pass.token)

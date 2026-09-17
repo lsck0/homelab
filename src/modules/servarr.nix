@@ -1,4 +1,4 @@
-{ config, lib, pkgs, nasMount, nasPath, ... }:
+{ config, lib, pkgs, nasMount, nasPath, retry, ... }:
 let
   cfg = config.homelab.servarr;
   tokens = "/var/lib/homepage-tokens";
@@ -67,8 +67,7 @@ in {
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script = ''
         conf=/var/lib/${name}/config.xml
-        for i in $(seq 1 90); do [ -f "$conf" ] && break; sleep 2; done
-        [ -f "$conf" ] || { echo "$conf not created"; exit 1; }
+        ${retry} 90 2 test -f "$conf"
 
         # edit while stopped: the app may write its config back on shutdown.
         if ! grep -q '<AuthenticationMethod>External</AuthenticationMethod>' "$conf"; then

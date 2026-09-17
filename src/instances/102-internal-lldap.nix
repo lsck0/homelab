@@ -1,4 +1,4 @@
-{ config, pkgs, ... }: {
+{ config, pkgs, retry, ... }: {
   networking.hostName = "vm-102";
 
   # lightweight LDAP directory: one user store other services can share
@@ -58,11 +58,7 @@
       ADMIN_PASS=$(cat ${config.sops.secrets.lldap-admin-password.path})
       LUCA_PASS=$(cat ${config.sops.secrets.authelia-admin-pass.path})
 
-      # wait for the API.
-      for _ in $(seq 1 60); do
-        curl -sf "$URL/health" >/dev/null 2>&1 && break
-        sleep 2
-      done
+      ${retry} 60 2 curl -sf "$URL/health"
 
       TOKEN=$(curl -sf -X POST "$URL/auth/simple/login" \
         -H 'Content-Type: application/json' \

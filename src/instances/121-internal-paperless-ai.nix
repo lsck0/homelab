@@ -1,4 +1,4 @@
-{ pkgs, nasMount, ... }:
+{ pkgs, nasMount, retry, ... }:
 let
   # local inference on the Hermes VM (vm-113). No external AI provider, no API key.
   ollamaUrl = "http://10.100.0.113:11434";
@@ -27,11 +27,7 @@ in {
       TOKEN_FILE="/var/lib/homepage-tokens/paperless-key.token"
       # vm-120 generates the token on first boot; wait for it rather than
       # writing a config that silently cannot talk to Paperless.
-      for i in $(seq 1 60); do
-        [ -s "$TOKEN_FILE" ] && break
-        sleep 5
-      done
-      [ -s "$TOKEN_FILE" ] || { echo "Paperless API token not available"; exit 1; }
+      ${retry} 60 5 test -s "$TOKEN_FILE" || { echo "Paperless API token not available"; exit 1; }
 
       mkdir -p /var/lib/paperless-ai
       umask 077
