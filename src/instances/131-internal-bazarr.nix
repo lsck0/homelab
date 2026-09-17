@@ -10,7 +10,7 @@
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   virtualisation.oci-containers.containers.bazarr = {
-    image = "lscr.io/linuxserver/bazarr:latest";
+    image = "lscr.io/linuxserver/bazarr:v1.6.1-ls364";
     ports = [ "80:6767" ];
     volumes = [
       "/var/lib/bazarr:/config"

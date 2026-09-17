@@ -17,7 +17,7 @@
   };
 
   virtualisation.oci-containers.containers.wikijs = {
-    image = "ghcr.io/requarks/wiki:2";
+    image = "ghcr.io/requarks/wiki:2.5.314";
     ports = [ "80:3000" ];
     environment = {
       DB_TYPE = "postgres";

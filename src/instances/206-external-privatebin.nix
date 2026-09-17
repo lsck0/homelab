@@ -4,7 +4,7 @@
   fileSystems = nasMount "/var/lib/privatebin" "privatebin";
 
   virtualisation.oci-containers.containers.privatebin = {
-    image = "privatebin/nginx-fpm-alpine:latest";
+    image = "privatebin/nginx-fpm-alpine:2.0.4";
     ports = [ "80:8080" ];
     volumes = [ "/var/lib/privatebin:/srv/data" ];
   };

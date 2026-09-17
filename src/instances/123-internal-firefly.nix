@@ -28,13 +28,13 @@
 
   virtualisation.oci-containers.containers = {
     firefly-db = {
-      image = "docker.io/library/postgres:16-alpine";
+      image = "docker.io/library/postgres:16.15-alpine";
       volumes = [ "/var/lib/firefly/db:/var/lib/postgresql/data" ];
       environmentFiles = [ config.sops.templates."firefly-db.env".path ];
       extraOptions = [ "--network=host" ];
     };
     firefly = {
-      image = "docker.io/fireflyiii/core:latest";
+      image = "docker.io/fireflyiii/core:version-6.7.2";
       dependsOn = [ "firefly-db" ];
       # host network: firefly listens on :8080, reaches postgres on 127.0.0.1:5432.
       volumes = [ "/var/lib/firefly/upload:/var/www/html/storage/upload" ];

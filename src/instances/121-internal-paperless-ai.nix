@@ -58,7 +58,7 @@ in {
   };
 
   virtualisation.oci-containers.containers.paperless-ai = {
-    image = "docker.io/clusterzx/paperless-ai:latest";
+    image = "docker.io/clusterzx/paperless-ai:3.0.9";
     ports = [ "80:3000" ];
     volumes = [ "/var/lib/paperless-ai:/app/data" ];
     environment = {

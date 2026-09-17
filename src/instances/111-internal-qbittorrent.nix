@@ -38,7 +38,7 @@ in {
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   virtualisation.oci-containers.containers.qbittorrent = {
-    image = "lscr.io/linuxserver/qbittorrent:latest";
+    image = "lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls476";
     ports = [ "80:8080" "6881:6881" "6881:6881/udp" ];
     volumes = [
       "/var/lib/qbittorrent:/config"
