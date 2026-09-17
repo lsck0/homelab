@@ -189,6 +189,8 @@ locals {
       name     = v.name
       type     = v.type
       ip       = v.ip
+      prefix   = tonumber(v.prefix)
+      gateway  = v.gateway
       enabled  = v.enabled
       cooldown = v.cooldown
     }
