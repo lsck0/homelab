@@ -38,8 +38,10 @@ let
   '';
 
   labToken = pkgs.writeShellScriptBin "lab-token" ''
-    if [ -z "''${1:-}" ]; then ls ${T} | sed 's/\.token$//'; exit 0; fi
-    exec cat "${T}/$1.token"
+    # tokens written by DMZ VMs sit in external/, the only part they can reach
+    if [ -z "''${1:-}" ]; then cd ${T} && ls *.token external/*.token | sed 's|^external/||; s/\.token$//'; exit 0; fi
+    [ -f "${T}/$1.token" ] && exec cat "${T}/$1.token"
+    exec cat "${T}/external/$1.token"
   '';
 
   # ─────────────────────────────────────────────────────────────────────────────
