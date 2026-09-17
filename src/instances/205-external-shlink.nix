@@ -1,4 +1,4 @@
-{ pkgs, nasMount, ... }: {
+{ pkgs, nasMount, retry, ... }: {
   networking.hostName = "vm-205";
   fileSystems = nasMount "/var/lib/shlink" "shlink"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens/external";
@@ -33,11 +33,7 @@
       TOKEN_FILE="/var/lib/homepage-tokens/shlink-key.token"
       [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
 
-      # wait for Shlink to be ready
-      for i in $(seq 1 60); do
-        podman exec shlink shlink api-key:list 2>/dev/null && break
-        sleep 2
-      done
+      ${retry} 60 2 podman exec shlink shlink api-key:list
 
       KEY=$(podman exec shlink shlink api-key:generate --no-interaction 2>/dev/null | grep -oP '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
       if [ -n "$KEY" ]; then

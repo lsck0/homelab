@@ -1,4 +1,4 @@
-{ pkgs, nasMount, nasPath, ... }: {
+{ pkgs, nasMount, nasPath, retry, ... }: {
   networking.hostName = "vm-134";
 
   fileSystems = nasMount "/var/lib/audiobookshelf" "audiobookshelf"
@@ -38,10 +38,7 @@
     script = ''
       A=http://127.0.0.1:80
       T=/var/lib/homepage-tokens
-      for i in $(seq 1 90); do
-        curl -sf $A/healthcheck >/dev/null 2>&1 && break
-        sleep 2
-      done
+      ${retry} 90 2 curl -sf $A/healthcheck
 
       [ -s $T/audiobookshelf-pass.token ] || openssl rand -hex 16 | tr -d '\n' > $T/audiobookshelf-pass.token
       PASS=$(cat $T/audiobookshelf-pass.token)

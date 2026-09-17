@@ -1,4 +1,4 @@
-{ pkgs, nasMount, nasPath, ... }:
+{ pkgs, nasMount, nasPath, retry, ... }:
 let
   T = "/var/lib/homepage-tokens";
 
@@ -161,7 +161,7 @@ in {
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 60; };
     script = ''
       J=http://127.0.0.1:80
-      for i in $(seq 1 90); do curl -sf $J/health >/dev/null && break; sleep 2; done
+      ${retry} 90 2 curl -sf $J/health
 
       [ -s ${T}/jellyfin-admin-pass.token ] || openssl rand -hex 16 | tr -d '\n' > ${T}/jellyfin-admin-pass.token
       ADMIN_PASS=$(cat ${T}/jellyfin-admin-pass.token)
