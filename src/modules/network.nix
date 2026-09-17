@@ -1,29 +1,18 @@
-{ config, lib, ... }:
+{ config, lib, inventory, ... }:
 let
-  hostname = config.networking.hostName;
-  # parse "vm-135" -> 123, or null if not matching
-  match = builtins.match "vm-([0-9]+)" hostname;
-  vmId = if match != null then lib.toInt (builtins.head match) else null;
-  type =
-    if vmId != null && vmId >= 100 && vmId < 200 then "internal"
-    else if vmId != null && vmId >= 200 && vmId < 300 then "external"
-    else null;
-  subnet =
-    if type == "internal" then "10.100.0"
-    else if type == "external" then "10.200.0"
-    else null;
-  gateway =
-    if type == "internal" then "10.100.0.1"
-    else if type == "external" then "10.200.0.1"
-    else null;
+  # "vm-135" -> the inventory entry for 135 (address from src/lib.tf); null for
+  # hosts outside the inventory naming, like the router, which configures itself.
+  match = builtins.match "vm-([0-9]+)" config.networking.hostName;
+  vm = if match == null then null else inventory.${builtins.head match} or null;
 in {
-  config = lib.mkIf (subnet != null) {
+  config = lib.mkIf (vm != null) {
     networking.useDHCP = lib.mkDefault false;
-    networking.interfaces.eth0.ipv4.addresses = [{
-      address = "${subnet}.${toString vmId}";
-      prefixLength = 24;
-    }];
-    networking.defaultGateway = { address = gateway; interface = "eth0"; };
-    networking.nameservers = [ gateway ];
+    networking.interfaces.eth0.ipv4.addresses = [{ address = vm.ip; prefixLength = vm.prefix; }];
+    networking.defaultGateway = { address = vm.gateway; interface = "eth0"; };
+    networking.nameservers = [ vm.gateway ];
+
+    # a fresh VM boots as "nixos"; switching does not rename the running kernel,
+    # so logs shipped by hostname (rsyslog -> Wazuh) would say nixos until reboot.
+    system.activationScripts.hostname = "echo ${config.networking.hostName} > /proc/sys/kernel/hostname";
   };
 }
