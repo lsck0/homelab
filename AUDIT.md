@@ -47,6 +47,9 @@ Severity: **High** = real exposure / data-loss. **Medium** = should fix. **Low**
   file-level, not transaction-consistent. Add per-VM `pg_dump`/`sqlite .backup` before archiving.
 - **S8 (Medium) Hermes has root everywhere**: by design (owner request). Blast radius of a
   prompt injection (e.g. a malicious document or web page) is the whole lab. Telegram access is
-  limited to the owner's user id; Kopia keeps restorable history.
+  limited to the owner's user id; Kopia keeps restorable history. Its repo access is a GitHub
+  App on this repo only: branches and pull requests, no workflows, and the protect-master
+  ruleset refuses its pushes to master (checked), so sync.sh never pulls unreviewed code.
+  A deploy key was tried and dropped: on a personal repo it bypasses every ruleset.
 - **Anubis (Low)**: disabled, it can't see the real client behind Cloudflare (edge-IP churn).
 - **No off-site backup**: Kopia is local-only until a B2/S3/SFTP target is chosen (3-2-1 gap).
