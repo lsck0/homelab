@@ -149,12 +149,10 @@ wire_jellyseerr() {
   jar=$(mktemp); trap 'rm -f "$jar"' RETURN
   js() { curl -sf -c "$jar" -b "$jar" -H "Content-Type: application/json" "$@"; }
 
-  for pass in "$(key jellyfin-admin-pass)" admin; do
-    js -X POST "$S/auth/jellyfin" -d "$(jq -cn --arg p "$pass" \
-      --arg h "$JELLYFIN_HOST" --argjson port "$JELLYFIN_PORT" \
-      '{username: "admin", password: $p, hostname: $h, port: $port, useSsl: false,
-        urlBase: "", email: "admin@lsck0.dev", serverType: 2}')" >/dev/null && break
-  done
+  js -X POST "$S/auth/jellyfin" -d "$(jq -cn --arg p "$(key jellyfin-admin-pass)" \
+    --arg h "$JELLYFIN_HOST" --argjson port "$JELLYFIN_PORT" \
+    '{username: "admin", password: $p, hostname: $h, port: $port, useSsl: false,
+      urlBase: "", email: "admin@lsck0.dev", serverType: 2}')" >/dev/null || true
   js "$S/auth/me" >/dev/null || { later "jellyseerr: Jellyfin login failed"; return; }
 
   js "$S/settings/jellyfin/library?sync=true" >/dev/null
