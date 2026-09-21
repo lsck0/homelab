@@ -56,7 +56,7 @@ ALLDAY_CELL_EVENTS = int(os.environ.get("CALENDAR_ALLDAY_CELL_EVENTS", "2"))
 # night is empty on every calendar here, and an event outside the window still
 # widens it (below) rather than being hidden. 08:00-24:00 by request.
 GRID_START_MIN = int(os.environ.get("CALENDAR_GRID_START_MIN", "480"))
-GRID_END_MIN = int(os.environ.get("CALENDAR_GRID_END_MIN", "960"))
+GRID_END_MIN = int(os.environ.get("CALENDAR_GRID_END_MIN", "1260"))
 # Smallest block, as a percentage of the grid height. Percent positions are
 # exact but text is not: a 30-minute block is ~15px tall and one line of text
 # needs about that, so two back-to-back meetings drew on top of each other and
