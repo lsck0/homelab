@@ -31,6 +31,10 @@ images/
 
 # rollback copy written by src/scripts/renumber.sh
 *.tfstate.pre-renumber*
+# terraform's own state copies: the previous state on every apply, plus one
+# per `state mv` during a renumber. Regenerated locally, never worth a commit.
+terraform.tfstate.backup
+*.tfstate.*.backup
 
 # the pasted task list; scratch, not part of the repo
 errors.txt
