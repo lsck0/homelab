@@ -98,20 +98,32 @@
   };
 
   systemd.tmpfiles.rules = [
-    "d /srv/nas 0775 nobody nogroup -"
+    # root, not nobody: systemd-tmpfiles refuses to descend when ownership
+    # changes from one non-root user to another ("Detected unsafe path
+    # transition"), so a nobody-owned /srv/nas silently blocked every rule
+    # for the 1000-owned media tree below it. A root-owned parent is exempt.
+    # Nothing writes into /srv/nas itself; every share is a subdirectory.
+    "d /srv/nas 0755 root root -"
     "d /srv/nas/public 0775 nobody nogroup -"
-    "d /srv/nas/media 0775 nobody nogroup -"
-    "d /srv/nas/media/tv 0775 nobody nogroup -"
-    "d /srv/nas/media/movies 0775 nobody nogroup -"
-    "d /srv/nas/media/audiobooks 0775 nobody nogroup -"
-    "d /srv/nas/media/music 0775 nobody nogroup -"
-    "d /srv/nas/media/manga 0775 nobody nogroup -"
-    "d /srv/nas/media/anime 0775 nobody nogroup -"
-    "d /srv/nas/media/books 0775 nobody nogroup -"
-    "d /srv/nas/media/leaving-soon 0775 nobody nogroup -"
+    # 1000, not nobody: every container that writes here (the *arr stack and
+    # qbittorrent, via homelab.servarr and 111) runs as PUID 1000, which
+    # LinuxServer images call "abc". Against a 0775 tree owned by 65534 they
+    # could read but not write, and Radarr refused its own root folder with
+    #   Folder '/data/media/movies/' is not writable by user 'abc'
+    # The readers (Jellyfin, Audiobookshelf, Kavita, Navidrome) only need the
+    # o+rx that 0775 already gives them.
+    "d /srv/nas/media 0775 1000 1000 -"
+    "d /srv/nas/media/tv 0775 1000 1000 -"
+    "d /srv/nas/media/movies 0775 1000 1000 -"
+    "d /srv/nas/media/audiobooks 0775 1000 1000 -"
+    "d /srv/nas/media/music 0775 1000 1000 -"
+    "d /srv/nas/media/manga 0775 1000 1000 -"
+    "d /srv/nas/media/anime 0775 1000 1000 -"
+    "d /srv/nas/media/books 0775 1000 1000 -"
+    "d /srv/nas/media/leaving-soon 0775 1000 1000 -"
     "d /srv/nas/BACKUPS 0700 root root -"
     "d /srv/nas/documents 0775 nobody nogroup -"
-    "d /srv/nas/torrents 0775 nobody nogroup -"
+    "d /srv/nas/torrents 0775 1000 1000 -"
     # per-service persistent data
     "d /srv/nas/data 0777 nobody nogroup -"
     # nightly database dumps (modules/db-backup.nix), one subdir per VM. This is
