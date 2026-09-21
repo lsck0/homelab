@@ -56,7 +56,7 @@ ALLDAY_CELL_EVENTS = int(os.environ.get("CALENDAR_ALLDAY_CELL_EVENTS", "2"))
 # night is empty on every calendar here, and an event outside the window still
 # widens it (below) rather than being hidden. 08:00-24:00 by request.
 GRID_START_MIN = int(os.environ.get("CALENDAR_GRID_START_MIN", "480"))
-GRID_END_MIN = int(os.environ.get("CALENDAR_GRID_END_MIN", "1440"))
+GRID_END_MIN = int(os.environ.get("CALENDAR_GRID_END_MIN", "960"))
 # Smallest block, as a percentage of the grid height. Percent positions are
 # exact but text is not: a 30-minute block is ~15px tall and one line of text
 # needs about that, so two back-to-back meetings drew on top of each other and
@@ -384,16 +384,26 @@ def week(calendars, offset):
     # is wasted space on your panel.
     grid_start, grid_end = GRID_START_MIN, GRID_END_MIN
 
-    # ...but never hide an event: if something falls outside the window, widen
-    # it to the hour rather than drawing that event off-screen.
-    starts = [e["start_min"] for d in days for e in d["timed_events"]]
-    ends = [e["end_min"] for d in days for e in d["timed_events"]]
-    if starts:
-        grid_start = min(grid_start, (min(starts) // 60) * 60)
-        grid_end = max(grid_end, -(-max(ends) // 60) * 60)
+    # The window is exactly what was asked for. An earlier version widened it
+    # to swallow any outlier, which meant one 21:00 meeting rescaled the whole
+    # week and 08:00-16:00 silently became 08:00-21:00.
+    #
+    # Nothing is dropped silently instead: an event that starts after the
+    # window is counted per day and in the footer, and one that merely runs
+    # past the end is clipped to it.
     grid_start, grid_end = max(0, grid_start), min(1440, grid_end)
     if grid_end - grid_start < 240:
         grid_end = min(1440, grid_start + 240)
+
+    for d in days:
+        inside, later = [], 0
+        for e in d["timed_events"]:
+            if e["end_min"] <= grid_start or e["start_min"] >= grid_end:
+                later += 1
+            else:
+                inside.append(e)
+        d["timed_events"] = assign_lanes(inside) if later else inside
+        d["later"] = later
 
     span = grid_end - grid_start
     for d in days:
@@ -443,10 +453,13 @@ def week(calendars, offset):
         "end": sunday.isoformat(),
         "total_events": sum(len(d["events"]) for d in days),
         "has_all_day": any(d["all_day_events"] for d in days),
+        "later": sum(d["later"] for d in days),
         "max_overlap": max([d["max_lanes"] for d in days], default=1),
         "grid": {
             "start_min": grid_start,
             "end_min": grid_end,
+            "start_label": f"{grid_start // 60:02d}:00",
+            "end_label": f"{grid_end // 60:02d}:00",
             "hours": hours,
         },
         "days": days,
@@ -475,6 +488,7 @@ def day_view(calendars, offset=0):
         "total_events": len(match["events"]),
         "max_overlap": match["max_lanes"],
         "has_all_day": bool(match["all_day_events"]),
+        "later": match.get("later", 0),
         "grid": grid["grid"],
         "day": match,
         # the week template iterates `days`; expose the single day the same way
