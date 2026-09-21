@@ -199,7 +199,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 </div>
 <div class="title_bar">
 <span class="title">{% if view == 'day' %}{{ weekday }}{% elsif offset == 0 %}This week{% elsif offset == -1 %}Last week{% elsif offset == 1 %}Next week{% else %}Week {{ week_number }}{% endif %}</span>
-<span class="instance">{{ label }} &middot; {{ total_events }} {% if total_events == 1 %}event{% else %}events{% endif %}{% if max_overlap > 1 %} &middot; up to {{ max_overlap }} at once{% endif %}</span>
+<span class="instance">{{ label }} &middot; {{ total_events }} {% if total_events == 1 %}event{% else %}events{% endif %}{% if later > 0 %} &middot; {{ later }} outside {{ grid.start_label }}&ndash;{{ grid.end_label }}{% endif %}{% if max_overlap > 1 %} &middot; up to {{ max_overlap }} at once{% endif %}</span>
 </div>
 
 {% else %}
