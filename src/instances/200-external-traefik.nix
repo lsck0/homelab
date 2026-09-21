@@ -107,7 +107,7 @@ in {
     cloudflareOnly.enable = true;
     cloudflareOnly.exemptRouters =
       map (name: "${name}-tls") (lib.attrNames (lib.filterAttrs (_: r: !(r.proxied or true)) routes))
-      ++ [ "calendar-tls" "wellknown-tls" "labyrinth-tls" ]
+      ++ [ "calendar-tls" "terminal-tls" "wellknown-tls" "labyrinth-tls" ]
       # already restricted to private ranges by the internal-only middleware.
       ++ map (name: "${name}-block") (lib.attrNames blockedInternal);
 
@@ -129,6 +129,10 @@ in {
       # the calendar lives on the internal side; only this one host is relayed
       # through, so the TRMNL cloud can poll it without the DMZ reaching in.
       calendar-tls   = { rule = "Host(`cal.lsck0.dev`)"; service = "calendar"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+      # same for the terminal's stats feed. It needs its own router rather than
+      # the catch-all below because the catch-all is Cloudflare-only, and this
+      # host is DNS-only so the TRMNL cloud reaches it directly.
+      terminal-tls   = { rule = "Host(`terminal.lsck0.dev`)"; service = "calendar"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
 
       # catch-all (lowest priority): any *.lsck0.dev not matched above is an
       # internal service: relay to internal Traefik (routes by Host, Authelia-gated).

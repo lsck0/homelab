@@ -30,6 +30,15 @@ let
     dht = false;
     pex = false;
     lsd = false;
+    # one download at a time. Everything goes through a single Tor circuit, so
+    # parallel torrents split one slow pipe and all of them crawl; serialising
+    # them means the first finishes at whatever speed the circuit allows.
+    # Seeding is not capped, only active downloads.
+    queueing_enabled = true;
+    max_active_downloads = 1;
+    max_active_torrents = 6;
+    max_active_uploads = 5;
+    dont_count_slow_torrents = true;
   });
 in {
   networking.hostName = "vm-111";

@@ -17,9 +17,9 @@ Overlapping events are positioned, not listed: calendar-sync packs each day's
 clashes into lanes and ships top/height/left/width percentages, because Liquid
 cannot do the interval arithmetic. Two things at once sit side by side.
 
-Monochrome e-ink has no colour to spend on categories, so the source is carried
-by the left border: solid = Work, dashed = University, dotted = Private, plus
-the label in small caps.
+The source is named in words on each block. An earlier version also coded it
+into the left border style, which was unreadable at this size and mislabelled
+itself anyway, so the border is now uniform.
 
 Kept flat, one tag per line. Do not run "Fix indentation" on it.
 {%- endcomment -%}
@@ -69,8 +69,9 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .tg-adcell .ev-m { font-size: 13px; }
 
 .tg-col { position: relative; flex: 1 1 0; min-width: 0; border: 2px solid #000; overflow: hidden; }
-.tg-col--weekend { background: repeating-linear-gradient(45deg,#fff,#fff 6px,#ededed 6px,#ededed 7px); }
-.tg-line { position: absolute; left: 0; right: 0; border-top: 1px solid #c8c8c8; }
+.tg-col--weekend { background: #f2f2f2; }
+.tg-line { position: absolute; left: 0; right: 0; border-top: 1px solid #e4e4e4; }
+.tg-line--major { border-top-color: #b0b0b0; }
 
 /* On a 24h axis a 30-minute event is ~13px tall, which fits the time and clips
    everything else. Give every block room for its text even when that is taller
@@ -103,7 +104,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .mo-cell { flex: 1 1 0; min-width: 0; border: 2px solid #000; padding: 2px 4px; display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
 .mo-cell--other { border-color: #b4b4b4; }
 .mo-cell--other .mo-n { color: #b4b4b4; }
-.mo-cell--weekend { background: repeating-linear-gradient(45deg,#fff,#fff 6px,#ededed 6px,#ededed 7px); }
+.mo-cell--weekend { background: #f2f2f2; }
 .mo-n { font-size: 17px; font-weight: 700; line-height: 1; }
 .mo-cell--today .mo-n { background: #000; color: #fff; padding: 1px 5px; align-self: flex-start; }
 .mo-e { font-size: 13px; line-height: 1.18; border-left: 4px solid #000; padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -123,7 +124,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 <div class="mo-cell{% if d.is_today %} mo-cell--today{% endif %}{% if d.other_month %} mo-cell--other{% endif %}{% if d.is_weekend %} mo-cell--weekend{% endif %}">
 <span class="mo-n">{{ d.day }}</span>
 {% for ev in d.events %}
-<div class="mo-e" style="border-left-style:{{ ev.border_style }}">{% unless ev.all_day %}<b>{{ ev.time }}</b> {% endunless %}{{ ev.summary }}</div>
+<div class="mo-e">{% unless ev.all_day %}<b>{{ ev.time }}</b> {% endunless %}{{ ev.summary }}</div>
 {% endfor %}
 {% if d.more > 0 %}<div class="mo-more">+{{ d.more }} more</div>{% endif %}
 </div>
@@ -135,7 +136,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 </div>
 <div class="title_bar">
 <span class="title">{{ label }}</span>
-<span class="instance">{{ total_events }} {% if total_events == 1 %}event{% else %}events{% endif %} &middot; Work solid &middot; University dashed &middot; Private dotted</span>
+<span class="instance">{{ total_events }} {% if total_events == 1 %}event{% else %}events{% endif %}</span>
 </div>
 
 {% elsif view == 'day' or view == 'week' %}
@@ -156,7 +157,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 {% for d in days %}
 <div class="tg-adcell">
 {% for ev in d.all_day_events %}
-<div class="ev" style="border-left-style:{{ ev.border_style }}"><span class="ev-s">{{ ev.summary }}</span></div>
+<div class="ev"><span class="ev-s">{{ ev.summary }}</span></div>
 {% endfor %}
 {% if d.all_day_more > 0 %}<div class="ev-m"><b>+{{ d.all_day_more }} more</b></div>{% endif %}
 </div>
@@ -173,10 +174,10 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 {% for d in days %}
 <div class="tg-col{% if d.is_today %} tg-col--today{% endif %}{% if d.weekday == 'Sat' or d.weekday == 'Sun' %} tg-col--weekend{% endif %}">
 {% for h in grid.hours %}
-<div class="tg-line" style="top:{{ h.top_pct }}%"></div>
+<div class="tg-line{% if h.major %} tg-line--major{% endif %}" style="top:{{ h.top_pct }}%"></div>
 {% endfor %}
 {% for ev in d.timed_events %}
-<div class="tg-ev{{ wide }}{% unless is_day %}{% if ev.compact %} tg-ev--compact{% endif %}{% endunless %}" style="border-left-style:{{ ev.border_style }};top:{{ ev.top_pct }}%;height:{{ ev.height_pct }}%;left:{{ ev.left_pct }}%;width:{{ ev.width_pct }}%">
+<div class="tg-ev{{ wide }}{% unless is_day %}{% if ev.compact %} tg-ev--compact{% endif %}{% endunless %}" style="top:{{ ev.top_pct }}%;height:{{ ev.height_pct }}%;left:{{ ev.left_pct }}%;width:{{ ev.width_pct }}%">
 {% if is_day %}
 <div class="ev-t">{{ ev.time }}&ndash;{{ ev.end_time }}</div>
 <div class="ev-s">{{ ev.summary }}</div>
@@ -198,7 +199,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 </div>
 <div class="title_bar">
 <span class="title">{% if view == 'day' %}{{ weekday }}{% elsif offset == 0 %}This week{% elsif offset == -1 %}Last week{% elsif offset == 1 %}Next week{% else %}Week {{ week_number }}{% endif %}</span>
-<span class="instance">{{ label }} &middot; {{ total_events }} {% if total_events == 1 %}event{% else %}events{% endif %}{% if view == 'week' %} &middot; Work solid &middot; Uni dashed &middot; Private dotted{% elsif max_overlap > 1 %} &middot; up to {{ max_overlap }} at once{% endif %}</span>
+<span class="instance">{{ label }} &middot; {{ total_events }} {% if total_events == 1 %}event{% else %}events{% endif %}{% if max_overlap > 1 %} &middot; up to {{ max_overlap }} at once{% endif %}</span>
 </div>
 
 {% else %}
