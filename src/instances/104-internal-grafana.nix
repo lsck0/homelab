@@ -1,5 +1,23 @@
-{ config, lib, inventory, nasMount, ... }:
+{ config, pkgs, lib, inventory, nasMount, ... }:
 let
+  # ---- TRMNL terminal feeds -----------------------------------------------
+  # This VM is where the dashboards live, so it is also where the e-ink
+  # terminal gets its data: Prometheus is local, which is the whole reason the
+  # collector sits here rather than on its own host. Feeds are plain JSON under
+  # an unguessable token, served on their own port and relayed out by the
+  # external Traefik, because the TRMNL cloud polls them and cannot log in.
+  terminalDir = "/var/lib/terminal";
+  terminalPublic = "${terminalDir}/public";
+  terminalPort = 8081;
+
+  # the collector needs to know which VMs are meant to exist; Prometheus alone
+  # cannot tell a retired target from a VM that is down right now.
+  terminalInventory = pkgs.writeText "inventory.json" (builtins.toJSON inventory);
+
+  statsSync = pkgs.writers.writePython3Bin "stats-sync" {
+    flakeIgnore = [ "E501" ];
+  } (builtins.readFile ../scripts/stats-sync.py);
+
   # only real VMs: down now, up sometime in the last 6h (the static /24 scrape
   # otherwise flags ~480 phantom IPs). On-demand VMs (instances.tf) sleep by
   # design and are excluded.
@@ -111,7 +129,10 @@ in {
 
   fileSystems = nasMount "/var/lib/grafana" "grafana"
     // nasMount "/var/lib/prometheus2" "prometheus"
-    // nasMount "/var/lib/loki" "loki";
+    // nasMount "/var/lib/loki" "loki"
+    # the terminal collector signs in to the qBittorrent API with the same
+    # generated password the *arr stack uses
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   # Loki: log aggregation for all VMs (promtail in base.nix pushes here)
   services.loki = {
@@ -393,10 +414,75 @@ in {
   # (:3200) have no authentication at all. Only the ingress and the ops hosts
   # may reach those three; 3100/4317/4318 stay open because every VM pushes
   # logs and traces into them.
-  homelab.ingressOnly.ports = [ 80 9090 3200 ];
+  homelab.ingressOnly.ports = [ 80 9090 3200 terminalPort ];
   # the desktop status widget (arch-dotfiles quickshell homelab-status.py)
   # scrapes Prometheus straight from the LAN. That is read-only telemetry, so
   # it gets an exception; Grafana's :80 does not, because it trusts Remote-User
   # and anything that can reach it can forge an admin session.
   homelab.ingressOnly.portSources."9090" = [ "192.168.178.0/24" ];
+
+  # ---- TRMNL terminal feeds -------------------------------------------------
+  services.nginx = {
+    enable = true;
+    virtualHosts.terminal = {
+      listen = [{ addr = "0.0.0.0"; port = terminalPort; }];
+      root = terminalPublic;
+      extraConfig = ''
+        autoindex off;
+        default_type application/json;
+        add_header Cache-Control "no-store";
+      '';
+    };
+  };
+
+  systemd.services.terminal-token = {
+    description = "Create the terminal feed directory and its access token";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "nginx.service" "terminal-sync.service" ];
+    path = [ pkgs.coreutils pkgs.openssl ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = ''
+      mkdir -p ${terminalDir}
+      if [ ! -s ${terminalDir}/token ]; then
+        openssl rand -hex 24 | tr -d '\n' > ${terminalDir}/token
+      fi
+      TOKEN=$(cat ${terminalDir}/token)
+      mkdir -p ${terminalPublic}/$TOKEN
+      # the collector runs as nginx and writes into the token directory, so
+      # nginx has to own the whole path, not just the leaf
+      chown -R nginx:nginx ${terminalDir}
+      chmod 750 ${terminalDir}
+      echo "terminal feed: https://terminal.lsck0.dev/$TOKEN/stats.json"
+    '';
+  };
+
+  systemd.services.terminal-sync = {
+    description = "Collect homelab stats for the TRMNL terminal";
+    after = [ "terminal-token.service" "network-online.target" ];
+    requires = [ "terminal-token.service" ];
+    wants = [ "network-online.target" ];
+    path = [ statsSync pkgs.coreutils ];
+    environment = {
+      STATS_PROMETHEUS = "http://127.0.0.1:9090";
+      STATS_INVENTORY = "${terminalInventory}";
+    };
+    serviceConfig = {
+      Type = "oneshot";
+      User = "nginx";
+      Group = "nginx";
+    };
+    script = ''
+      stats-sync ${terminalPublic}/$(cat ${terminalDir}/token)
+    '';
+  };
+
+  systemd.timers.terminal-sync = {
+    description = "Refresh the TRMNL terminal feed";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "2m";
+      OnUnitActiveSec = "2m";
+      Unit = "terminal-sync.service";
+    };
+  };
 }

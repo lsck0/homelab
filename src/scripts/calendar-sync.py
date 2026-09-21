@@ -54,9 +54,9 @@ ALLDAY_CELL_EVENTS = int(os.environ.get("CALENDAR_ALLDAY_CELL_EVENTS", "2"))
 # full day: on a 480px panel 24 rows left ~13px per hour, so the hour labels
 # overlapped each other and every event was shorter than its own text. The
 # night is empty on every calendar here, and an event outside the window still
-# widens it (below) rather than being hidden.
-GRID_START_MIN = int(os.environ.get("CALENDAR_GRID_START_MIN", "420"))
-GRID_END_MIN = int(os.environ.get("CALENDAR_GRID_END_MIN", "1320"))
+# widens it (below) rather than being hidden. 08:00-24:00 by request.
+GRID_START_MIN = int(os.environ.get("CALENDAR_GRID_START_MIN", "480"))
+GRID_END_MIN = int(os.environ.get("CALENDAR_GRID_END_MIN", "1440"))
 # Smallest block, as a percentage of the grid height. Percent positions are
 # exact but text is not: a 30-minute block is ~15px tall and one line of text
 # needs about that, so two back-to-back meetings drew on top of each other and
