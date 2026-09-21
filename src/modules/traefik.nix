@@ -11,6 +11,20 @@ let
     "104.24.0.0/14" "172.64.0.0/13" "131.0.72.0/22"
   ];
 
+  # the v6 half of the same published list (api.cloudflare.com/client/v4/ips).
+  # Unused while the zone has no AAAA records - Cloudflare can only reach an
+  # IPv4 origin - but listed so adding one later does not silently lock the edge
+  # out. Refresh both lists from that endpoint if Cloudflare ever changes them.
+  cloudflareRangesV6 = [
+    "2400:cb00::/32" "2606:4700::/32" "2803:f800::/32" "2405:b500::/32"
+    "2405:8100::/32" "2a06:98c0::/29" "2c0f:f248::/32"
+  ];
+
+  # LAN, DMZ and the WireGuard mesh. Always allowed alongside Cloudflare so a
+  # lockout is impossible from inside, and so the Uptime Kuma and Homepage
+  # probes keep reaching the ingress.
+  privateRanges = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "127.0.0.1/32" ];
+
   # response-header hardening on every websecure route (opt out via noSecureHeaders).
   secureHeadersMiddleware = {
     secure-headers.headers = {
@@ -50,6 +64,14 @@ let
       attempts = 4;
       initialInterval = "500ms";
     };
+  } // lib.optionalAttrs cfg.cloudflareOnly.enable {
+    # Proxying a hostname only protects it if the origin refuses everyone else.
+    # The zone publishes a DNS-only wildcard, so the WAN address is public and
+    # anyone could otherwise skip the edge entirely by connecting here with the
+    # right SNI. This makes Cloudflare an actual chokepoint for the hosts that
+    # are supposed to be behind it.
+    cloudflare-only.ipAllowList.sourceRange =
+      cloudflareRanges ++ cloudflareRangesV6 ++ privateRanges;
   } // lib.optionalAttrs (cfg.bodyLimit > 0) {
     # cap on the request body. Traefik can only enforce this by buffering, so
     # it is deliberately NOT in the default chain: it would break streaming
@@ -212,7 +234,9 @@ let
             && builtins.elem name cfg.crowdsecBouncer.noAppsecRouters
          then map (m: if m == "crowdsec" then "crowdsec-noappsec" else m) defaultMiddlewares
          else defaultMiddlewares)
-        ++ lib.optional (cfg.bodyLimit > 0 && builtins.elem name cfg.bodyLimitRouters) "body-limit";
+        ++ lib.optional (cfg.bodyLimit > 0 && builtins.elem name cfg.bodyLimitRouters) "body-limit"
+        ++ lib.optional (cfg.cloudflareOnly.enable
+                         && !(builtins.elem name cfg.cloudflareOnly.exemptRouters)) "cloudflare-only";
     in
     if wantsDefaults then
       withTls // { middlewares = chain ++ (withTls.middlewares or []); }
@@ -263,6 +287,24 @@ in {
       type = lib.types.listOf lib.types.str;
       default = [];
       description = "Router names that should NOT get the secure-headers middleware.";
+    };
+
+    cloudflareOnly = {
+      enable = lib.mkEnableOption ''
+        refusing requests that did not arrive through Cloudflare on every
+        websecure router except those in exemptRouters. LAN, DMZ and WireGuard
+        are always allowed, so this cannot lock you out from inside'';
+
+      exemptRouters = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = ''
+          Routers that must stay reachable directly: every host whose DNS record
+          is not proxied (see `proxied` in modules/routes.nix). Restricting one
+          of those would take it off the internet entirely, since nothing
+          forwards it through the edge.
+        '';
+      };
     };
 
     bodyLimit = lib.mkOption {

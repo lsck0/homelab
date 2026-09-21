@@ -30,7 +30,6 @@ GENERATED=(
   firefly-db-password
   crowdsec-bouncer-key
   ntfy-admin-password ntfy-grafana-password ntfy-hermes-password
-  wazuh-admin-password
   # unguessable URL path segments: the read feed and the push endpoint.
   calendar-token calendar-upload-token
 )

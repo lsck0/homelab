@@ -45,7 +45,21 @@ in {
     extraSources = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
-      description = "Additional CIDRs allowed to reach the guarded ports.";
+      description = "Additional CIDRs allowed to reach every guarded port.";
+    };
+
+    portSources = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.listOf lib.types.str);
+      default = { };
+      example = lib.literalExpression ''{ "9090" = [ "192.168.178.0/24" ]; }'';
+      description = ''
+        Extra CIDRs allowed to reach one specific port, keyed by port number.
+
+        For ports where the risk differs per port on the same host: Grafana's
+        :80 trusts the Remote-User header and must stay behind the ingress,
+        while Prometheus on :9090 is read-only telemetry that a desktop widget
+        can reasonably scrape from the LAN.
+      '';
     };
   };
 
@@ -59,6 +73,18 @@ in {
       # a fresh VM boots as "nixos"; switching does not rename the running kernel,
       # so logs shipped by hostname (rsyslog -> Wazuh) would say nixos until reboot.
       system.activationScripts.hostname = "echo ${config.networking.hostName} > /proc/sys/kernel/hostname";
+
+      # network-setup adds the default route and gives up permanently if the
+      # interface is not up yet ("Error: Device for nexthop is not up"), which
+      # leaves the VM with no address and unreachable until someone notices.
+      # vm-121 sat like that through two syncs. Retry instead of one-shot.
+      systemd.services.network-setup = {
+        startLimitIntervalSec = 0;
+        serviceConfig = {
+          Restart = "on-failure";
+          RestartSec = 5;
+        };
+      };
     })
 
     (lib.mkIf (cfg.ports != [ ]) {
@@ -86,6 +112,9 @@ in {
           iptables -A homelab-ingress -s ${s} -j RETURN
         '') trustedSources}
         ${lib.concatMapStrings (p: ''
+          ${lib.concatMapStrings (s: ''
+            iptables -A homelab-ingress -p tcp --dport ${toString p} -s ${s} -j RETURN
+          '') (cfg.portSources.${toString p} or [])}
           iptables -A homelab-ingress -p tcp --dport ${toString p} -j nixos-fw-refuse
         '') cfg.ports}
         iptables -A homelab-ingress -j RETURN

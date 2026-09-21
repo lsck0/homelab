@@ -23,6 +23,15 @@
 #   group   lldap group a user must be in for an auth = "sso" route.
 #           "users" = every lab account, "admins" = the owner's accounts.
 #
+#   proxied whether the Cloudflare A record for this host is orange-clouded.
+#           Default true. The rule: a service Authelia stands in front of goes
+#           through Cloudflare and gets its DDoS absorption; a service that is
+#           public by design and defended by Anubis + the bot labyrinth is
+#           DNS-only, because behind the edge Anubis only ever sees a rotating
+#           Cloudflare address and re-challenges every single request.
+#           Setting this is not enough on its own - 300-router.nix publishes the
+#           record from here, so change it and redeploy the router.
+#
 #   publicRelay  whether the external Traefik relays this internal host in from
 #                the internet. Defaults to false for auth = "token" (those have
 #                no interactive login) and true otherwise. LAN and the Headscale
@@ -53,7 +62,7 @@
     nextcloud      = { host = "cloud";       vmid = 119; port = 80;    auth = "own"; };
     # the TRMNL cloud polls this and cannot log in. The feed URLs carry an
     # unguessable token instead, so this one token route stays public.
-    calendar       = { host = "cal";         vmid = 120; port = 80;    auth = "token"; publicRelay = true; };
+    calendar       = { host = "cal";         vmid = 120; port = 80;    auth = "token"; publicRelay = true; proxied = false; };
     paperless      = { host = "paperless";   vmid = 121; port = 8080; };
     paperless-ai   = { host = "paperless-ai"; vmid = 122; port = 80;   group = "admins"; };
     wikijs         = { host = "wiki";        vmid = 123; port = 80; };
@@ -79,18 +88,18 @@
 
   external = {
     headscale  = { host = "hs";       vmid = 201; port = 80; };
-    searxng    = { host = "search";   vmid = 204; port = 80; };
-    shlink     = { host = "shlink";   vmid = 205; port = 80; };
-    privatebin = { host = "paste";    vmid = 206; port = 80; };
-    share      = { host = "share";    vmid = 207; port = 80; };
+    searxng    = { host = "search";   vmid = 204; port = 80; proxied = false; };
+    shlink     = { host = "shlink";   vmid = 205; port = 80; proxied = false; };
+    privatebin = { host = "paste";    vmid = 206; port = 80; proxied = false; };
+    share      = { host = "share";    vmid = 207; port = 80; proxied = false; };
     ntfy       = { host = "ntfy";     vmid = 203; port = 80; };
     # CI/CD targets on the swarm host: hello <- Forgejo, hello-gh <- GitHub.
-    hello      = { host = "hello";    vmid = 209; port = 80; };
+    hello      = { host = "hello";    vmid = 209; port = 80; proxied = false; };
     # no image exists yet: example/.github/workflows/hello.yml is a template to
     # copy into an app repo, not an active workflow here, so nothing has ever
     # pushed ghcr.io/lsck0/hello and the swarm task stays "Rejected: No such
     # image". Kept as the wiring for a GitHub-built app, but not monitored -
     # an uptime check on it is a permanent false alarm.
-    hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; monitor = false; };
+    hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; monitor = false; proxied = false; };
   };
 }

@@ -394,4 +394,9 @@ in {
   # may reach those three; 3100/4317/4318 stay open because every VM pushes
   # logs and traces into them.
   homelab.ingressOnly.ports = [ 80 9090 3200 ];
+  # the desktop status widget (arch-dotfiles quickshell homelab-status.py)
+  # scrapes Prometheus straight from the LAN. That is read-only telemetry, so
+  # it gets an exception; Grafana's :80 does not, because it trusts Remote-User
+  # and anything that can reach it can forge an admin session.
+  homelab.ingressOnly.portSources."9090" = [ "192.168.178.0/24" ];
 }

@@ -42,6 +42,53 @@ LOCAL_TZ = ZoneInfo(os.environ.get("CALENDAR_TZ", "Europe/Berlin"))
 # tell a plugin "show me last week", so each offset is served as its own static
 # file and gets its own plugin instance in the playlist.
 WEEK_OFFSETS = [int(o) for o in os.environ.get("CALENDAR_WEEK_OFFSETS", "-1,0,1").split(",")]
+# how many events a month cell shows before collapsing the rest into "+n".
+# Six rows share 434px, so a cell holds its date plus two lines and the
+# "+n more"; a third line was drawn half outside the cell and clipped.
+MONTH_CELL_EVENTS = int(os.environ.get("CALENDAR_MONTH_CELL_EVENTS", "2"))
+# All-day events sit above the time grid and push it down, so a day with eight
+# of them would leave no room for the hours. Show a few, count the rest.
+ALLDAY_CELL_EVENTS = int(os.environ.get("CALENDAR_ALLDAY_CELL_EVENTS", "2"))
+# The time axis spans this window, every hour drawn, so a given hour is always
+# at the same height and the screen reads at a glance. 07:00-22:00, not the
+# full day: on a 480px panel 24 rows left ~13px per hour, so the hour labels
+# overlapped each other and every event was shorter than its own text. The
+# night is empty on every calendar here, and an event outside the window still
+# widens it (below) rather than being hidden.
+GRID_START_MIN = int(os.environ.get("CALENDAR_GRID_START_MIN", "420"))
+GRID_END_MIN = int(os.environ.get("CALENDAR_GRID_END_MIN", "1320"))
+# Smallest block, as a percentage of the grid height. Percent positions are
+# exact but text is not: a 30-minute block is ~15px tall and one line of text
+# needs about that, so two back-to-back meetings drew on top of each other and
+# the first one vanished. Blocks grow to this and push the ones below them
+# down. The day view has one wide column and can afford more.
+WEEK_MIN_BLOCK_PCT = float(os.environ.get("CALENDAR_WEEK_MIN_BLOCK_PCT", "4.7"))
+DAY_MIN_BLOCK_PCT = float(os.environ.get("CALENDAR_DAY_MIN_BLOCK_PCT", "9.5"))
+
+# Display names for the sources. The key is the source name (the part before
+# "|" in calendar-sources, or an uploaded file's stem); the value is what the
+# screen shows. A source with no mapping falls back to its own name.
+SOURCE_LABELS = dict(
+    pair.split("=", 1)
+    for pair in os.environ.get(
+        "CALENDAR_SOURCE_LABELS", "proton=Private,uni=University,work=Work"
+    ).split(",")
+    if "=" in pair
+)
+
+# Monochrome e-ink has no colour to spend on categories, so each source gets a
+# border style instead. Assigned in the order sources are first seen, so adding
+# or renaming one keeps working without touching the template.
+BORDER_STYLES = ["solid", "dashed", "dotted", "double"]
+_border_assigned = {}
+
+
+def border_style(name):
+    if name not in _border_assigned:
+        _border_assigned[name] = BORDER_STYLES[len(_border_assigned) % len(BORDER_STYLES)]
+    return _border_assigned[name]
+
+
 USER_AGENT = "homelab-calendar-sync/1"
 KRAKEN_API = "https://api.kraken.com"
 
@@ -166,23 +213,94 @@ def upcoming(calendars, horizon_days):
     return events[:MAX_EVENTS]
 
 
-def event_row(name, event):
+def minutes_into(day, value):
+    """Local minutes from midnight of `day`, clamped to that day."""
+    if not isinstance(value, datetime):
+        return None
+    delta = value.astimezone(LOCAL_TZ) - datetime.combine(day, datetime.min.time(), LOCAL_TZ)
+    return max(0, min(1440, int(delta.total_seconds() // 60)))
+
+
+def event_row(name, event, day=None):
     """One event as the template consumes it."""
     start = event.get("DTSTART")
     stop = event.get("DTEND")
     start_value = start.dt if start is not None else None
+    stop_value = stop.dt if stop is not None else None
     all_day = isinstance(start_value, date) and not isinstance(start_value, datetime)
-    return {
+
+    row = {
         "source": name,
-        "summary": str(event.get("SUMMARY", "")),
+        "source_label": SOURCE_LABELS.get(name, name.title()),
+        "border_style": border_style(name),
+        # some invites in the work feed carry no SUMMARY at all; without a
+        # placeholder the block renders as an empty box on the screen.
+        "summary": str(event.get("SUMMARY", "")).strip() or "(no title)",
         "location": str(event.get("LOCATION", "")),
         "start": to_iso(start_value) if start_value is not None else None,
-        "end": to_iso(stop.dt) if stop is not None else None,
+        "end": to_iso(stop_value) if stop_value is not None else None,
         "all_day": all_day,
         # pre-rendered so the Liquid template does not have to parse a timestamp
         "time": "" if all_day or start_value is None
                 else start_value.astimezone(LOCAL_TZ).strftime("%H:%M"),
     }
+
+    # Minute offsets let the template lay the week out as a real time grid, so
+    # two things at once sit side by side instead of stacking into a list that
+    # hides the clash. Liquid cannot do date arithmetic, hence doing it here.
+    if day is not None and not all_day:
+        begin = minutes_into(day, start_value)
+        finish = minutes_into(day, stop_value) if stop_value is not None else None
+        if begin is not None:
+            if finish is None or finish <= begin:
+                finish = min(1440, begin + 30)   # zero-length or missing DTEND
+            row["start_min"] = begin
+            row["end_min"] = finish
+            midnight = datetime.combine(day, datetime.min.time(), LOCAL_TZ)
+            row["end_time"] = (midnight + timedelta(minutes=finish)).strftime("%H:%M")
+    return row
+
+
+def assign_lanes(events):
+    """Give overlapping events side-by-side columns.
+
+    Greedy sweep: an event reuses the first lane whose previous occupant has
+    already ended, otherwise it opens a new one. `lanes` is then the width of
+    the densest cluster the event belongs to, so a pair that clashes each takes
+    half the day's width while an unclashed event still spans the whole column.
+    """
+    timed = [e for e in events if "start_min" in e]
+    timed.sort(key=lambda e: (e["start_min"], -(e["end_min"] - e["start_min"])))
+
+    lane_ends = []          # end minute of the last event placed in each lane
+    cluster = []            # events in the current run of overlapping activity
+    cluster_end = None
+
+    def close(group, width):
+        for member in group:
+            member["lanes"] = width
+
+    for ev in timed:
+        if cluster_end is not None and ev["start_min"] >= cluster_end:
+            close(cluster, len(lane_ends))
+            cluster, lane_ends, cluster_end = [], [], None
+
+        placed = False
+        for i, end in enumerate(lane_ends):
+            if end <= ev["start_min"]:
+                lane_ends[i] = ev["end_min"]
+                ev["lane"] = i
+                placed = True
+                break
+        if not placed:
+            ev["lane"] = len(lane_ends)
+            lane_ends.append(ev["end_min"])
+
+        cluster.append(ev)
+        cluster_end = ev["end_min"] if cluster_end is None else max(cluster_end, ev["end_min"])
+
+    close(cluster, len(lane_ends))
+    return timed
 
 
 def local_day(value):
@@ -190,6 +308,28 @@ def local_day(value):
     if isinstance(value, datetime):
         return value.astimezone(LOCAL_TZ).date()
     return value
+
+
+def enforce_min_height(events, min_pct):
+    """Grow every block to a readable minimum and push the later ones down.
+
+    Works per lane, so events that genuinely overlap in time keep their
+    side-by-side placement and only a lane's own sequence is nudged.
+    """
+    lanes = {}
+    for e in events:
+        lanes.setdefault(e.get("lane", 0), []).append(e)
+    for lane in lanes.values():
+        lane.sort(key=lambda e: e["top_pct"])
+        bottom = 0.0
+        for e in lane:
+            top = max(e["top_pct"], bottom)
+            height = max(e["height_pct"], min_pct)
+            if top + height > 100.0:
+                top = max(0.0, 100.0 - height)
+            e["top_pct"] = round(top, 3)
+            e["height_pct"] = round(min(height, 100.0 - top), 3)
+            bottom = e["top_pct"] + e["height_pct"]
 
 
 def week(calendars, offset):
@@ -214,17 +354,79 @@ def week(calendars, offset):
                 continue
             day = local_day(dtstart.dt)
             if day in by_day:
-                by_day[day].append(event_row(name, event))
+                by_day[day].append(event_row(name, event, day))
 
     days = []
     for day in sorted(by_day):
         rows = sorted(by_day[day], key=lambda e: (not e["all_day"], e["time"]))
+        timed = assign_lanes(rows)
         days.append({
             "date": day.isoformat(),
             "day": day.day,
             "weekday": day.strftime("%a"),
             "is_today": day == today,
             "events": rows,
+            "all_day_events": [e for e in rows if e["all_day"]][:ALLDAY_CELL_EVENTS],
+            "all_day_more": max(0, len([e for e in rows if e["all_day"]]) - ALLDAY_CELL_EVENTS),
+            "timed_events": timed,
+            # how many columns this day needs: the template does not have to
+            # work it out, and an empty day still reports 1.
+            "max_lanes": max([e.get("lanes", 1) for e in timed], default=1),
+        })
+
+    # The axis spans the whole configured day, every hour drawn, rather than
+    # cropping to the hours that happen to be busy. A cropped axis silently
+    # rescales: the same meeting sits at a different height each day, so the
+    # screen cannot be read at a glance. A fixed day means 09:00 is always in
+    # the same place, and an empty morning reads as an empty morning.
+    #
+    # GRID_START/GRID_END default to the full 24 hours; narrow them if the night
+    # is wasted space on your panel.
+    grid_start, grid_end = GRID_START_MIN, GRID_END_MIN
+
+    # ...but never hide an event: if something falls outside the window, widen
+    # it to the hour rather than drawing that event off-screen.
+    starts = [e["start_min"] for d in days for e in d["timed_events"]]
+    ends = [e["end_min"] for d in days for e in d["timed_events"]]
+    if starts:
+        grid_start = min(grid_start, (min(starts) // 60) * 60)
+        grid_end = max(grid_end, -(-max(ends) // 60) * 60)
+    grid_start, grid_end = max(0, grid_start), min(1440, grid_end)
+    if grid_end - grid_start < 240:
+        grid_end = min(1440, grid_start + 240)
+
+    span = grid_end - grid_start
+    for d in days:
+        for e in d["timed_events"]:
+            top = (e["start_min"] - grid_start) / span * 100
+            height = (e["end_min"] - e["start_min"]) / span * 100
+            lanes = e.get("lanes", 1) or 1
+            e["top_pct"] = round(max(0.0, min(100.0, top)), 3)
+            e["height_pct"] = round(max(2.2, min(100.0 - e["top_pct"], height)), 3)
+            e["left_pct"] = round(e.get("lane", 0) / lanes * 100, 3)
+            e["width_pct"] = round(100 / lanes, 3)
+            e["overlapping"] = lanes > 1
+            # How much text the block can hold. Three lines (time, title,
+            # source) need ~35px; in the week a minute is ~0.47px, so anything
+            # under 90 minutes printed three lines into a box too short for
+            # them and the title was the line that got clipped away. Short
+            # blocks get one line instead, "10:00 Standup", and keep their
+            # source in the left border style. The day view has one wide
+            # column and always shows all three.
+            dur = e["end_min"] - e["start_min"]
+            e["compact"] = dur < 90
+            e["tall"] = dur >= 150
+        enforce_min_height(d["timed_events"], WEEK_MIN_BLOCK_PCT)
+
+    hours = []
+    for m in range(grid_start, grid_end + 1, 60):
+        hours.append({
+            "label": f"{m // 60:02d}:00",
+            "hour": m // 60,
+            # the week packs 24 rows into one screen; labelling every other one
+            # keeps the axis readable. The day view has room for all of them.
+            "major": (m // 60) % 2 == 0,
+            "top_pct": round((m - grid_start) / span * 100, 3),
         })
 
     same_month = monday.strftime("%b") == sunday.strftime("%b")
@@ -232,6 +434,7 @@ def week(calendars, offset):
              else f"{monday.day} {monday.strftime('%b')} – {sunday.day} {sunday.strftime('%b %Y')}")
 
     return {
+        "view": "week",
         "offset": offset,
         "label": label,
         "week_number": monday.isocalendar().week,
@@ -239,7 +442,100 @@ def week(calendars, offset):
         "start": monday.isoformat(),
         "end": sunday.isoformat(),
         "total_events": sum(len(d["events"]) for d in days),
+        "has_all_day": any(d["all_day_events"] for d in days),
+        "max_overlap": max([d["max_lanes"] for d in days], default=1),
+        "grid": {
+            "start_min": grid_start,
+            "end_min": grid_end,
+            "hours": hours,
+        },
         "days": days,
+    }
+
+
+def day_view(calendars, offset=0):
+    """One day as a time grid. Same lane packing as the week, more room per event."""
+    grid = week(calendars, 0)
+    today = datetime.now(LOCAL_TZ).date()
+    want = (today + timedelta(days=offset)).isoformat()
+
+    match = next((d for d in grid["days"] if d["date"] == want), None)
+    if match is None:                      # offset fell outside the current week
+        grid = week(calendars, 1 if offset > 0 else -1)
+        match = next((d for d in grid["days"] if d["date"] == want), grid["days"][0])
+
+    enforce_min_height(match["timed_events"], DAY_MIN_BLOCK_PCT)
+    stamp = datetime.fromisoformat(match["date"])
+    return {
+        "view": "day",
+        "offset": offset,
+        "label": stamp.strftime("%A, %-d %B %Y"),
+        "weekday": stamp.strftime("%A"),
+        "is_today": match["is_today"],
+        "total_events": len(match["events"]),
+        "max_overlap": match["max_lanes"],
+        "has_all_day": bool(match["all_day_events"]),
+        "grid": grid["grid"],
+        "day": match,
+        # the week template iterates `days`; expose the single day the same way
+        # so one markup renders both views without special-casing the shape.
+        "days": [match],
+    }
+
+
+def month_view(calendars, offset=0):
+    """A Monday-first month grid: every cell a day, every day its events.
+
+    Built from the week builder so a cell's events are packed and ordered
+    exactly as they are everywhere else; the month view just does not have the
+    vertical room to draw them against a time axis.
+    """
+    today = datetime.now(LOCAL_TZ).date()
+    first = date(today.year + (today.month + offset - 1) // 12,
+                 (today.month + offset - 1) % 12 + 1, 1)
+    grid_start = first - timedelta(days=first.weekday())
+    last = date(first.year + first.month // 12, first.month % 12 + 1, 1) - timedelta(days=1)
+    grid_end = last + timedelta(days=6 - last.weekday())
+
+    # collect every day in the displayed range from the weeks it spans
+    by_date = {}
+    probe = grid_start
+    while probe <= grid_end:
+        offset_weeks = (probe - (today - timedelta(days=today.weekday()))).days // 7
+        for d in week(calendars, offset_weeks)["days"]:
+            by_date[d["date"]] = d
+        probe += timedelta(days=7)
+
+    weeks = []
+    cursor = grid_start
+    while cursor <= grid_end:
+        row = {"week_number": cursor.isocalendar().week, "days": []}
+        for _ in range(7):
+            src = by_date.get(cursor.isoformat())
+            events = src["events"] if src else []
+            row["days"].append({
+                "date": cursor.isoformat(),
+                "day": cursor.day,
+                "weekday": cursor.strftime("%a"),
+                "is_today": cursor == today,
+                "other_month": cursor.month != first.month,
+                "is_weekend": cursor.weekday() >= 5,
+                "count": len(events),
+                # only the first few fit in a month cell; the rest become "+n".
+                "events": events[:MONTH_CELL_EVENTS],
+                "more": max(0, len(events) - MONTH_CELL_EVENTS),
+            })
+            cursor += timedelta(days=1)
+        weeks.append(row)
+
+    return {
+        "view": "month",
+        "offset": offset,
+        "label": first.strftime("%B %Y"),
+        "month": first.month,
+        "year": first.year,
+        "total_events": sum(d["count"] for w in weeks for d in w["days"] if not d["other_month"]),
+        "weeks": weeks,
     }
 
 
@@ -341,7 +637,8 @@ def main():
     key = read_secret(os.environ.get("KRAKEN_KEY_FILE"))
     secret = read_secret(os.environ.get("KRAKEN_SECRET_FILE"))
 
-    payload = {
+    # `payload` is rebound by the per-view loop below; keep a stable handle.
+    out_payload = payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "sources": [name for name, _ in sources],
         "events": upcoming(calendars, HORIZON_DAYS),
@@ -373,7 +670,16 @@ def main():
         write_atomic(os.path.join(out_dir, name), json.dumps(grid, indent=2))
         weeks.append(f"{name}:{grid['total_events']}")
 
-    log(f"wrote {len(payload['events'])} events from {len(calendars)} sources; weeks {' '.join(weeks)}")
+    for name, payload in [("day.json", day_view(calendars, 0)),
+                          ("day-next.json", day_view(calendars, 1)),
+                          ("month.json", month_view(calendars, 0)),
+                          ("month-next.json", month_view(calendars, 1))]:
+        payload["generated_at"] = out_payload["generated_at"]
+        payload["sources"] = out_payload["sources"]
+        write_atomic(os.path.join(out_dir, name), json.dumps(payload, indent=2))
+        weeks.append(f"{name}:{payload['total_events']}")
+
+    log(f"wrote {len(out_payload['events'])} events from {len(calendars)} sources; views {' '.join(weeks)}")
     return 0
 
 
