@@ -1,0 +1,143 @@
+{%- comment -%}
+Homelab status for the TRMNL terminal. One polling URL:
+
+  https://terminal.lsck0.dev/<token>/stats.json
+
+Everything is precomputed by src/scripts/stats-sync.py: Liquid cannot do
+arithmetic worth relying on, so percentages, human-readable rates and the bar
+widths all arrive ready to render.
+
+Monochrome e-ink, 800x480. No colour to spend, so state is carried by shape:
+a filled square is up, a hollow one is down, a struck-through name is a VM
+that is switched off on purpose.
+
+Kept flat, one tag per line. Do not run "Fix indentation" on it.
+{%- endcomment -%}
+
+<style>
+/* TRMNL's .layout centres and pads a single child, which renders a full-bleed
+   dashboard as a narrow column in the middle of the screen. */
+.layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
+/* vh, not %: the renderer gives .layout no definite height, so a percentage
+   chain collapses to zero and absolutely positioned children disappear. */
+.hl { display: flex; flex-direction: column; height: calc(100vh - 58px); width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
+
+/* ---- headline numbers ------------------------------------------------- */
+.hl-top { display: flex; gap: 6px; flex: 0 0 auto; }
+.hl-stat { flex: 1 1 0; border: 2px solid #000; padding: 2px 7px; min-width: 0; }
+.hl-stat--bad { background: #000; }
+.hl-stat--bad .hl-k, .hl-stat--bad .hl-v { color: #fff; }
+.hl-k { font-size: 12px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; }
+.hl-v { font-size: 25px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.hl-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- services --------------------------------------------------------- */
+.hl-mid { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
+.hl-svc { flex: 1 1 0; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 10px; min-width: 0; border: 2px solid #000; padding: 3px 6px; overflow: hidden; }
+.hl-row { width: calc(33.33% - 7px); display: flex; align-items: center; gap: 4px; font-size: 12px; line-height: 1.32; min-width: 0; }
+.hl-dot { width: 7px; height: 7px; flex: 0 0 auto; border: 1px solid #000; background: #000; }
+.hl-dot--off { background: #fff; }
+.hl-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hl-row--disabled .hl-name { text-decoration: line-through; }
+/* the two bars share one track so a busy VM reads at a glance without numbers */
+.hl-bars { flex: 0 0 34px; display: flex; flex-direction: column; gap: 1px; }
+.hl-bar { height: 3px; background: #d2d2d2; }
+.hl-bar span { display: block; height: 100%; background: #000; }
+.hl-pct { flex: 0 0 26px; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* ---- side panels ------------------------------------------------------ */
+.hl-side { flex: 0 0 216px; display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+.hl-panel { border: 2px solid #000; padding: 3px 7px; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.hl-panel--grow { flex: 1 1 auto; }
+.hl-h { font-size: 12px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; border-bottom: 1px solid #000; margin-bottom: 2px; display: flex; justify-content: space-between; }
+.hl-line { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; line-height: 1.3; }
+.hl-line b { font-variant-numeric: tabular-nums; }
+.hl-t { font-size: 12px; line-height: 1.25; margin-top: 2px; }
+.hl-t-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.hl-t-meta { display: flex; justify-content: space-between; font-size: 11px; }
+.hl-prog { height: 4px; background: #d2d2d2; margin-top: 1px; }
+.hl-prog span { display: block; height: 100%; background: #000; }
+.hl-empty { font-size: 12px; }
+</style>
+
+{% if view == 'stats' %}
+<div class="layout">
+<div class="hl">
+
+<div class="hl-top">
+<div class="hl-stat{% if summary.down.size > 0 %} hl-stat--bad{% endif %}">
+<div class="hl-k">Services</div>
+<div class="hl-v">{{ summary.up }}/{{ summary.total }}</div>
+</div>
+<div class="hl-stat">
+<div class="hl-k">Network in</div>
+<div class="hl-v">{{ network.rx }}</div>
+</div>
+<div class="hl-stat">
+<div class="hl-k">Network out</div>
+<div class="hl-v">{{ network.tx }}</div>
+</div>
+<div class="hl-stat">
+<div class="hl-k">Torrents</div>
+<div class="hl-v">{{ torrents.downloading }}/{{ torrents.total }}</div>
+</div>
+</div>
+
+<div class="hl-mid">
+
+<div class="hl-svc">
+{% for s in services %}
+<div class="hl-row{% if s.disabled %} hl-row--disabled{% endif %}">
+<span class="hl-dot{% unless s.online %} hl-dot--off{% endunless %}"></span>
+<span class="hl-name">{{ s.name }}</span>
+<span class="hl-bars"><span class="hl-bar"><span style="width:{{ s.cpu_pct }}%"></span></span><span class="hl-bar"><span style="width:{{ s.mem_pct }}%"></span></span></span>
+<span class="hl-pct">{{ s.mem_pct }}%</span>
+</div>
+{% endfor %}
+</div>
+
+<div class="hl-side">
+
+<div class="hl-panel">
+<div class="hl-h"><span>Traffic</span><span>top</span></div>
+{% for t in network.top %}
+<div class="hl-line"><span>{{ t.vm }}</span><b>{{ t.rate }}</b></div>
+{% endfor %}
+</div>
+
+<div class="hl-panel hl-panel--grow">
+<div class="hl-h"><span>Torrents</span><span>&darr;{{ torrents.dl }} &uarr;{{ torrents.ul }}</span></div>
+{% if torrents.available %}
+<div class="hl-line"><span>down / seed / paused</span><b>{{ torrents.downloading }} / {{ torrents.seeding }} / {{ torrents.paused }}</b></div>
+{% for t in torrents.items %}
+<div class="hl-t">
+<div class="hl-t-name">{{ t.name }}</div>
+<div class="hl-prog"><span style="width:{{ t.pct }}%"></span></div>
+<div class="hl-t-meta"><span>{{ t.pct }}% &middot; {{ t.size }}</span><span>{{ t.speed }}{% if t.eta != '' %} &middot; {{ t.eta }}{% endif %}</span></div>
+</div>
+{% endfor %}
+{% if torrents.total == 0 %}<div class="hl-empty">nothing queued</div>{% endif %}
+{% else %}
+<div class="hl-empty">qBittorrent unreachable</div>
+{% endif %}
+</div>
+
+</div>
+</div>
+
+</div>
+</div>
+<div class="title_bar">
+<span class="title">Homelab</span>
+<span class="instance">{{ label }}{% if summary.down.size > 0 %} &middot; down: {{ summary.down | join: ", " }}{% endif %}{% if services_more > 0 %} &middot; +{{ services_more }} more{% endif %}</span>
+</div>
+
+{% else %}
+<div class="layout">
+<div class="markdown">
+<span class="title">Homelab: no data</span>
+<div class="content">No `view` in the payload. Check the plugin's Polling URL points at stats.json on terminal.lsck0.dev.</div>
+</div>
+</div>
+<div class="title_bar"><span class="title">Homelab</span><span class="instance">waiting for data</span></div>
+{% endif %}
