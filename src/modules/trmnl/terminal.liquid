@@ -34,16 +34,18 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 /* ---- services --------------------------------------------------------- */
 .hl-mid { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
 .hl-svc { flex: 1 1 0; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 10px; min-width: 0; border: 2px solid #000; padding: 3px 6px; overflow: hidden; }
-.hl-row { width: calc(33.33% - 7px); display: flex; align-items: center; gap: 4px; font-size: 12px; line-height: 1.32; min-width: 0; }
-.hl-dot { width: 7px; height: 7px; flex: 0 0 auto; border: 1px solid #000; background: #000; }
+/* 16 rows of 48 services have to fit the panel exactly: taller and the last
+   row is cut off, shorter and a third of the panel is blank. */
+.hl-row { width: calc(33.33% - 7px); display: flex; align-items: center; gap: 4px; font-size: 14px; line-height: 1.46; min-width: 0; }
+.hl-dot { width: 8px; height: 8px; flex: 0 0 auto; border: 1px solid #000; background: #000; }
 .hl-dot--off { background: #fff; }
 .hl-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hl-row--disabled .hl-name { text-decoration: line-through; }
 /* the two bars share one track so a busy VM reads at a glance without numbers */
-.hl-bars { flex: 0 0 34px; display: flex; flex-direction: column; gap: 1px; }
-.hl-bar { height: 3px; background: #d2d2d2; }
+.hl-bars { flex: 0 0 26px; display: flex; flex-direction: column; gap: 2px; }
+.hl-bar { height: 4px; background: #d2d2d2; }
 .hl-bar span { display: block; height: 100%; background: #000; }
-.hl-pct { flex: 0 0 26px; text-align: right; font-size: 11px; font-variant-numeric: tabular-nums; }
+.hl-pct { flex: 0 0 44px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
 
 /* ---- side panels ------------------------------------------------------ */
 .hl-side { flex: 0 0 216px; display: flex; flex-direction: column; gap: 5px; min-height: 0; }
@@ -66,7 +68,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 
 <div class="hl-top">
 <div class="hl-stat{% if summary.down.size > 0 %} hl-stat--bad{% endif %}">
-<div class="hl-k">Services</div>
+<div class="hl-k">Services &middot; cpu/mem</div>
 <div class="hl-v">{{ summary.up }}/{{ summary.total }}</div>
 </div>
 <div class="hl-stat">
@@ -91,7 +93,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 <span class="hl-dot{% unless s.online %} hl-dot--off{% endunless %}"></span>
 <span class="hl-name">{{ s.name }}</span>
 <span class="hl-bars"><span class="hl-bar"><span style="width:{{ s.cpu_pct }}%"></span></span><span class="hl-bar"><span style="width:{{ s.mem_pct }}%"></span></span></span>
-<span class="hl-pct">{{ s.mem_pct }}%</span>
+<span class="hl-pct">{{ s.cpu_pct }}/{{ s.mem_pct }}</span>
 </div>
 {% endfor %}
 </div>
@@ -102,6 +104,13 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 <div class="hl-h"><span>Traffic</span><span>top</span></div>
 {% for t in network.top %}
 <div class="hl-line"><span>{{ t.vm }}</span><b>{{ t.rate }}</b></div>
+{% endfor %}
+</div>
+
+<div class="hl-panel">
+<div class="hl-h"><span>Disks</span><span>{{ storage.free_total }} free</span></div>
+{% for d in storage.top %}
+<div class="hl-line"><span>{{ d.vm }}{% unless d.mount == '/' %} {{ d.mount }}{% endunless %}</span><b>{{ d.pct }}%</b></div>
 {% endfor %}
 </div>
 

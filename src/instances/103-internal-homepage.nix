@@ -110,6 +110,10 @@ let
             icon: nixos
             ping: http://10.100.0.1
             description: NixOS Gateway
+        - Terminal:
+            icon: mdi-tablet-dashboard
+            href: https://trmnl.com/dashboard
+            description: E-ink dashboard (TRMNL)
   '' + lib.concatMapStrings groupYaml groups);
 
   settingsYaml = pkgs.writeText "settings.yaml" ''

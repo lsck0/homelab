@@ -428,11 +428,18 @@ in {
 
       cookieDomain = lib.mkOption {
         type = lib.types.str;
-        default = "lsck0.dev";
+        default = "";
         description = ''
-          Domain of the Anubis clearance cookie. Set to the apex so one solved
-          challenge covers every host; a per-host cookie re-challenges on every
-          subdomain and on sub-resource requests.
+          Domain for the Anubis cookies, or "" to leave them scoped to the host
+          that set them, which is the default and what you want.
+
+          Setting the apex here looks like it saves a challenge per subdomain,
+          but every instance is a separate process with its own cookie names on
+          that one domain, including the short-lived
+          techaro.lol-anubis-cookie-verification probe. They overwrite each
+          other, the probe never comes back intact, and Anubis answers by
+          issuing another challenge: hello.lsck0.dev and share.lsck0.dev
+          reloaded dozens of times a second and never let anyone in.
         '';
       };
     };
@@ -695,10 +702,6 @@ in {
         # and not the rotating edge address.
         USE_REMOTE_ADDRESS = false;
 
-        # one clearance cookie for the whole domain: without this each host
-        # issues its own challenge, and sub-resources on another host (or a
-        # second tab) re-challenge, which is what made pages load without CSS.
-        COOKIE_DOMAIN = cfg.anubis.cookieDomain;
         COOKIE_SECURE = true;
 
         # Every instance signs the clearance cookie with the SAME key. Anubis
@@ -708,6 +711,8 @@ in {
         # clobbering it in turn: hello.lsck0.dev and share.lsck0.dev sat in an
         # endless redirect loop. A restart had the same effect on a single host.
         ED25519_PRIVATE_KEY_HEX_FILE = config.sops.secrets.anubis-ed25519-key.path;
+      } // lib.optionalAttrs (cfg.anubis.cookieDomain != "") {
+        COOKIE_DOMAIN = cfg.anubis.cookieDomain;
       };
     }) cfg.anubis.instances);
 

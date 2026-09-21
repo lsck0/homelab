@@ -145,6 +145,32 @@ def network():
     }
 
 
+def storage():
+    """The fullest real filesystems in the lab. Virtual and network mounts are
+    excluded: tmpfs is RAM, and an NFS mount would report the NAS once per
+    client that has it mounted."""
+    real = ('fstype!~"tmpfs|ramfs|overlay|squashfs|nfs.*|fuse.*|autofs",'
+            'mountpoint!~"/nix/store|/run.*|/var/lib/docker.*|/var/lib/containers.*"')
+    rows = promql(
+        f'topk(5, 100 * (1 - node_filesystem_avail_bytes{{{real}}}'
+        f' / node_filesystem_size_bytes{{{real}}}))')
+    free = by_instance(promql(f'node_filesystem_avail_bytes{{{real}}}'))
+
+    out = []
+    for r in rows:
+        m = r["metric"]
+        try:
+            pct = round(float(r["value"][1]))
+        except (TypeError, ValueError):
+            continue
+        out.append({
+            "vm": m.get("vm", "?"),
+            "mount": m.get("mountpoint", "?"),
+            "pct": min(100, max(0, pct)),
+        })
+    return {"top": out, "free_total": human_size(sum(free.values()))}
+
+
 def qb_session():
     """Sign in with the generated password the *arr stack also uses, rather
     than relying on the subnet whitelist: the whitelist skips the login for
@@ -286,6 +312,7 @@ def main():
     rows, summary = services()
     net = network()
     tor = torrents()
+    disks = storage()
 
     now = datetime.now(timezone.utc).astimezone()
     payload = {
@@ -296,6 +323,7 @@ def main():
         "services": rows[:SERVICE_ROWS],
         "services_more": max(0, len(rows) - SERVICE_ROWS),
         "network": net,
+        "storage": disks,
         "torrents": tor,
     }
 
