@@ -60,15 +60,24 @@ let
   ];
 
   stateOf = e: inventory.${toString routes.${e.route}.vmid}.enabled or "false";
-  entryYaml = e: let r = routes.${e.route}; state = stateOf e; in lib.concatMapStrings (l: l + "\n") ([
+
+  # Every declared service is listed, in declaration order, whatever state its
+  # VM is in. A card that vanishes when its VM is switched off hides exactly
+  # the thing worth seeing, and leaves the remaining cards looking shuffled.
+  # The dot carries the state instead: every entry is pinged, so a disabled or
+  # sleeping VM shows up red rather than disappearing.
+  stateSuffix = state:
+    if state == "onDemand" then " (on-demand)"
+    else if state == "false" then " (disabled)"
+    else "";
+  entryYaml = e: let r = routes.${e.route}; state = stateOf e; in lib.concatMapStrings (l: l + "\n") [
     "    - ${e.name}:"
     "        icon: ${e.icon}"
     "        href: https://${r.host}.lsck0.dev"
-    "        description: ${e.desc}${lib.optionalString (state == "onDemand") " (on-demand)"}"
-  ] ++ lib.optional (state == "true")
-    "        ping: ${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}");
-  groupYaml = g: let shown = lib.filter (e: stateOf e != "false") g.entries; in
-    lib.optionalString (shown != []) ("- ${g.name}:\n" + lib.concatMapStrings entryYaml shown);
+    "        description: ${e.desc}${stateSuffix state}"
+    "        ping: ${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}"
+  ];
+  groupYaml = g: "- ${g.name}:\n" + lib.concatMapStrings entryYaml g.entries;
 
   servicesYaml = pkgs.writeText "services.yaml" (''
     - Infra:

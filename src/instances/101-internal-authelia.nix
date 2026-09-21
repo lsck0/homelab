@@ -115,6 +115,17 @@ let
 in {
   networking.hostName = "vm-101";
 
+  # session store for Authelia, see session.redis below. Unix socket only: no
+  # TCP listener, so nothing on the network can reach it.
+  services.redis.servers.authelia = {
+    enable = true;
+    port = 0;
+    unixSocket = "/run/redis-authelia/redis.sock";
+    unixSocketPerm = 660;
+  };
+  users.users.authelia-main.extraGroups = [ "redis-authelia" ];
+  systemd.services.authelia-main.after = [ "redis-authelia.service" ];
+
   # state on LOCAL disk, not NFS: a NAS stall must not wedge the auth gateway.
   # it's small (TOTP enrolments, sessions, keys) and a rebuild regenerates it.
   systemd.tmpfiles.rules = [
@@ -277,6 +288,16 @@ in {
           authelia_url = "https://auth.lsck0.dev";
           default_redirection_url = "https://homepage.lsck0.dev";
         }];
+
+        # Without this Authelia keeps sessions in memory, so every restart of
+        # the service signs everyone out of every host at once and the next
+        # page visited asks for the password again. A deploy that touches
+        # vm-101 is enough to do it. Redis on a local socket outlives the
+        # restart; nothing else uses it and it never leaves the VM.
+        redis = {
+          host = "/run/redis-authelia/redis.sock";
+          port = 0;
+        };
       };
 
       storage.local.path = "${stateDir}/db.sqlite3";

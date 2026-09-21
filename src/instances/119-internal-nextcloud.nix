@@ -41,6 +41,11 @@
       overwriteprotocol = "https";
       overwritehost = "cloud.lsck0.dev";
       allow_user_to_change_display_name = false;
+      # auth.lsck0.dev resolves to 10.100.0.100 on the inside. Nextcloud's HTTP
+      # client refuses private addresses by default, so the user_oidc discovery
+      # call never left the box and the login failed with "Could not reach the
+      # OpenID Connect provider" while curl from the same host returned 200.
+      allow_local_remote_servers = true;
       user_oidc = {
         single_logout = false;
       };
