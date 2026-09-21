@@ -1,4 +1,4 @@
-{ pkgs, nasMount, nasMedia, nasPath, ... }: {
+{ config, pkgs, nasMount, nasMedia, nasPath, ... }: {
   networking.hostName = "vm-137";
 
   fileSystems = nasMount "/var/lib/kavita" "kavita"
@@ -91,6 +91,45 @@
       }
       add Manga 0 3 /manga
       add Books 2 2 /books
+    '';
+  };
+
+  # Kavita's OIDC client is registered in Authelia (101-internal-authelia.nix)
+  # but Kavita itself shipped with it switched off, so read.lsck0.dev only ever
+  # offered its own login. Kavita reads OIDC from appsettings.json, not from an
+  # API, so the file is patched in place and the container restarted.
+  sops.secrets.kavita-oidc-secret = {};
+  systemd.services.kavita-oidc = {
+    description = "Point Kavita at Authelia (OpenID Connect)";
+    after = [ "kavita-setup.service" ];
+    requires = [ "kavita-setup.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.python3 pkgs.systemd pkgs.coreutils ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 60; };
+    script = ''
+      python3 - "${config.sops.secrets.kavita-oidc-secret.path}" <<'PY'
+      import json, sys, pathlib
+      cfg = pathlib.Path("/var/lib/kavita/appsettings.json")
+      d = json.loads(cfg.read_text())
+      o = d.setdefault("OpenIdConnectSettings", {})
+      want = {
+          "Authority": "https://auth.lsck0.dev",
+          "ClientId": "kavita",
+          "Secret": pathlib.Path(sys.argv[1]).read_text().strip(),
+          "Enabled": True,
+      }
+      if all(o.get(k) == v for k, v in want.items()):
+          print("unchanged")
+          raise SystemExit(0)
+      o.update(want)
+      cfg.write_text(json.dumps(d, indent=2))
+      print("changed")
+      PY
+      # only bounce the container when the file actually moved
+      if [ "$(python3 -c "import json;print(json.load(open('/var/lib/kavita/appsettings.json'))['OpenIdConnectSettings']['Enabled'])")" = True ]; then
+        systemctl try-restart podman-kavita.service
+        echo "Kavita OpenID Connect points at Authelia"
+      fi
     '';
   };
 
