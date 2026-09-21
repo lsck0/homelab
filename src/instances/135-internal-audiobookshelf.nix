@@ -87,7 +87,7 @@
           authOpenIDClientID: "audiobookshelf",
           authOpenIDClientSecret: $s,
           authOpenIDButtonText: "Sign in with Authelia",
-          authOpenIDAutoLaunch: false,
+          authOpenIDAutoLaunch: true,
           authOpenIDAutoRegister: true,
           authOpenIDMatchExistingBy: "username",
           authOpenIDSubfolderForRedirectURLs: ""
