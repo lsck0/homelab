@@ -30,6 +30,10 @@ in {
   homelab.traefik = {
     enable = true;
 
+    # jellyfin-plugin-sso completes the login inside a hidden same-origin
+    # iframe, which X-Frame-Options: DENY blocks.
+    sameOriginFrameRouters = [ "jellyfin-tls" ];
+
     middlewares = {
       authelia.forwardAuth = {
         address = "http://10.100.0.101:9091/api/authz/forward-auth";

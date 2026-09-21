@@ -26,16 +26,24 @@ let
   privateRanges = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "127.0.0.1/32" ];
 
   # response-header hardening on every websecure route (opt out via noSecureHeaders).
+  baseSecureHeaders = {
+    stsSeconds = 31536000;
+    stsIncludeSubdomains = true;
+    stsPreload = true;
+    contentTypeNosniff = true;
+    browserXssFilter = true;
+    referrerPolicy = "strict-origin-when-cross-origin";
+  };
+
   secureHeadersMiddleware = {
-    secure-headers.headers = {
-      stsSeconds = 31536000;
-      stsIncludeSubdomains = true;
-      stsPreload = true;
-      contentTypeNosniff = true;
-      browserXssFilter = true;
-      frameDeny = true;
-      referrerPolicy = "strict-origin-when-cross-origin";
-    };
+    secure-headers.headers = baseSecureHeaders // { frameDeny = true; };
+    # X-Frame-Options: SAMEORIGIN instead of DENY, for apps that frame
+    # themselves. jellyfin-plugin-sso finishes its login by loading
+    # /web/index.html in a hidden same-origin iframe to seed the client's
+    # credentials; under DENY that frame never loads and the page sits on
+    # "Logging in..." for ever.
+    secure-headers-sameorigin.headers =
+      baseSecureHeaders // { customFrameOptionsValue = "SAMEORIGIN"; };
   };
 
   # per-source-IP DoS limits on every websecure route (depth=1 reads the real
@@ -228,7 +236,10 @@ let
       wantsDefaults = needsTls && !(builtins.elem name cfg.noSecureHeaders);
       # routes opted out of AppSec use the WAF-free bouncer variant but keep
       # every other default middleware (IP bouncer, rate limits, headers).
-      chain =
+      sameOriginFrames = builtins.elem name cfg.sameOriginFrameRouters;
+      frameSwap = m:
+        if sameOriginFrames && m == "secure-headers" then "secure-headers-sameorigin" else m;
+      chain = map frameSwap (
         (if cfg.crowdsecBouncer.enable
             && cfg.crowdsecBouncer.appsec
             && builtins.elem name cfg.crowdsecBouncer.noAppsecRouters
@@ -236,7 +247,7 @@ let
          else defaultMiddlewares)
         ++ lib.optional (cfg.bodyLimit > 0 && builtins.elem name cfg.bodyLimitRouters) "body-limit"
         ++ lib.optional (cfg.cloudflareOnly.enable
-                         && !(builtins.elem name cfg.cloudflareOnly.exemptRouters)) "cloudflare-only";
+                         && !(builtins.elem name cfg.cloudflareOnly.exemptRouters)) "cloudflare-only");
     in
     if wantsDefaults then
       withTls // { middlewares = chain ++ (withTls.middlewares or []); }
@@ -269,6 +280,15 @@ in {
       type = lib.types.attrsOf lib.types.anything;
       default = {};
       description = "Traefik TCP config (routers + services).";
+    };
+
+    sameOriginFrameRouters = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = ''
+        Routers that get X-Frame-Options: SAMEORIGIN instead of DENY, for apps
+        that legitimately frame their own pages. Everything else keeps DENY.
+      '';
     };
 
     middlewares = lib.mkOption {
