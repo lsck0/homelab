@@ -117,6 +117,15 @@ in {
           }' docker-compose.yml > docker-compose.yml.tmp
         mv docker-compose.yml.tmp docker-compose.yml
       fi
+
+      # The block above only fires while the compose file still carries the
+      # upstream demo password. An install that was already rewritten with some
+      # other value skips it silently, and the dashboard login then differs from
+      # the Authelia one without anything saying so. Say so.
+      if ! grep -qF "INDEXER_PASSWORD=$(cat /var/lib/wazuh/admin-pass)" docker-compose.yml; then
+        echo "WARNING: the indexer admin password is NOT the Authelia one." >&2
+        echo "WARNING: rotate it with src/scripts/wazuh-rotate-admin.sh (needs the admin cert)." >&2
+      fi
     '';
   };
 
