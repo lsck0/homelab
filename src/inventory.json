@@ -163,7 +163,7 @@
   },
   "118": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.118",
     "name": "118-internal-vaultwarden",
@@ -172,7 +172,7 @@
   },
   "119": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.119",
     "name": "119-internal-nextcloud",
@@ -208,7 +208,7 @@
   },
   "123": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.123",
     "name": "123-internal-wikijs",
@@ -217,7 +217,7 @@
   },
   "124": {
     "cooldown": "30m",
-    "enabled": "onDemand",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.124",
     "name": "124-internal-firefly",
@@ -244,7 +244,7 @@
   },
   "127": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.127",
     "name": "127-internal-mosquitto",
@@ -379,7 +379,7 @@
   },
   "204": {
     "cooldown": "30m",
-    "enabled": "onDemand",
+    "enabled": "true",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.204",
     "name": "204-external-searxng",
@@ -397,7 +397,7 @@
   },
   "206": {
     "cooldown": "30m",
-    "enabled": "onDemand",
+    "enabled": "true",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.206",
     "name": "206-external-privatebin",
@@ -406,7 +406,7 @@
   },
   "207": {
     "cooldown": "30m",
-    "enabled": "onDemand",
+    "enabled": "true",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.207",
     "name": "207-external-share",
@@ -414,8 +414,8 @@
     "type": "external"
   },
   "208": {
-    "cooldown": "15m",
-    "enabled": "onDemand",
+    "cooldown": "30m",
+    "enabled": "false",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.208",
     "name": "208-external-minecraft",
