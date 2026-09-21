@@ -20,6 +20,13 @@
 #                      are not relayed to the internet unless publicRelay.
 #             "portal" Authelia itself: must be reachable to log in.
 #
+#   loginRedirect  { path, to }: the internal Traefik rewrites this exact path
+#                  to `to` on the same host. Used to skip an app's own login
+#                  screen and drop straight into its Authelia OIDC flow, so a
+#                  browser that already holds an Authelia session never sees a
+#                  second login. Only for auth = "own" apps that have an OIDC
+#                  entry point of their own.
+#
 #   group   lldap group a user must be in for an auth = "sso" route.
 #           "users" = every lab account, "admins" = the owner's accounts.
 #
@@ -53,7 +60,8 @@
     attic          = { host = "attic";       vmid = 109; port = 8080;  auth = "token"; };
     qbittorrent    = { host = "torrent";     vmid = 111; port = 80;    group = "media"; };
     # Forgejo signs in through Authelia OIDC; git clients use tokens/SSH.
-    forgejo        = { host = "git";         vmid = 114; port = 80;    auth = "own"; };
+    forgejo        = { host = "git";         vmid = 114; port = 80;    auth = "own";
+                       loginRedirect = { path = "/user/login"; to = "/user/oauth2/authelia"; }; };
     # headless API: docker clients cannot follow a browser login. Not relayed
     # publicly, and the external Traefik denies the host explicitly as well.
     registry-api   = { host = "registry";    vmid = 117; port = 5000;  auth = "token"; };
@@ -77,7 +85,8 @@
     # Jellyfin authenticates against lldap (LDAP plugin), Audiobookshelf and
     # Kavita through Authelia OIDC: same account as everything else, and their
     # own apps can still log in, which ForwardAuth would break.
-    jellyfin       = { host = "jellyfin";    vmid = 134; port = 80;    auth = "own"; };
+    jellyfin       = { host = "jellyfin";    vmid = 134; port = 80;    auth = "own";
+                       loginRedirect = { path = "/"; to = "/sso/OID/start/authelia"; }; };
     audiobookshelf = { host = "abs";         vmid = 135; port = 80;    auth = "own"; };
     bookshelf      = { host = "books";       vmid = 135; port = 8787;  group = "admins"; };
     navidrome      = { host = "music";       vmid = 136; port = 80;    group = "media"; };

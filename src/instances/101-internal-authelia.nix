@@ -64,6 +64,15 @@ let
       ];
     }
     {
+      id = "jellyfin";
+      name = "Jellyfin";
+      secretName = "jellyfin-oidc-secret";
+      # jellyfin-plugin-sso posts the secret, as Authelia's own Jellyfin
+      # integration note says.
+      tokenAuthMethod = "client_secret_post";
+      redirectUris = [ "https://jellyfin.lsck0.dev/sso/OID/redirect/authelia" ];
+    }
+    {
       id = "kavita";
       name = "Kavita";
       secretName = "kavita-oidc-secret";
@@ -122,6 +131,7 @@ in {
   sops.secrets.forgejo-oidc-secret = {};
   sops.secrets.audiobookshelf-oidc-secret = {};
   sops.secrets.kavita-oidc-secret = {};
+  sops.secrets.jellyfin-oidc-secret = {};
 
   # Authelia's own cryptographic material is generated here rather than kept in
   # sops: none of it has to match anything outside this VM, and it persists on

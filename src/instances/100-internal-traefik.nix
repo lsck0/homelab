@@ -30,8 +30,8 @@ in {
   homelab.traefik = {
     enable = true;
 
-    middlewares.authelia = {
-      forwardAuth = {
+    middlewares = {
+      authelia.forwardAuth = {
         address = "http://10.100.0.101:9091/api/authz/forward-auth";
         trustForwardHeader = true;
         authResponseHeaders = [
@@ -41,7 +41,16 @@ in {
           "Remote-Name"
         ];
       };
-    };
+    }
+    # one per route that declares loginRedirect: send the app's own login page
+    # at its Authelia OIDC entry point instead, so a browser that already holds
+    # an Authelia session becomes an app session with nothing to click.
+    // lib.mapAttrs' (name: r: lib.nameValuePair "${name}-login" {
+      redirectRegex = {
+        regex = "^https://${r.host}\\.lsck0\\.dev${lib.escapeRegex r.loginRedirect.path}$";
+        replacement = "https://${r.host}.lsck0.dev${r.loginRedirect.to}";
+      };
+    }) (lib.filterAttrs (_: r: r ? loginRedirect) routes);
 
     # auth = "sso" gets Authelia ForwardAuth; "own", "token" and "portal" carry
     # their own authentication (see the header of modules/routes.nix).
@@ -49,7 +58,8 @@ in {
       rule = "Host(`${r.host}.lsck0.dev`)";
       service = name;
       entryPoints = [ "websecure" ];
-    } // lib.optionalAttrs ((r.auth or "sso") == "sso") { middlewares = [ sso ]; })) routes // {
+    } // lib.optionalAttrs ((r.auth or "sso") == "sso") { middlewares = [ sso ]; }
+      // lib.optionalAttrs (r ? loginRedirect) { middlewares = [ "${name}-login" ]; })) routes // {
       traefik-dash-tls = { rule = "Host(`traefik.lsck0.dev`)";  service = "api@internal"; entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       proxmox-tls      = { rule = "Host(`proxmox.lsck0.dev`)";  service = "proxmox";      entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
     };
