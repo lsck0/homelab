@@ -27,7 +27,7 @@ metadata:
 
 - Health: `ssh 10.100.0.112 'systemctl status tor; curl -s --socks5-hostname 10.100.0.112:9050 https://check.torproject.org/api/ip'`.
 
-## Prowlarr (vm-128, http://10.100.0.128/api/v1, key `prowlarr-key`)
+## Prowlarr (vm-129, http://10.100.0.129/api/v1, key `prowlarr-key`)
 
 - Indexers: `GET /indexer`; test all `POST /indexer/testall`.
 - Add a public indexer: take the entry from `GET /indexer/schema` whose `definitionName`
@@ -35,4 +35,4 @@ metadata:
   the owner's credentials in the fields.
 - Manual search across indexers: `GET /search?query=<q>&type=search`.
 - Apps (sync to Radarr/Sonarr/Lidarr/Bookshelf): `GET /applications`; force sync `POST /command {"name":"ApplicationIndexerSync"}`.
-- Wiring is maintained by `arr-wire` on vm-132 (`ssh 10.100.0.132 'systemctl start arr-wire; journalctl -u arr-wire -n 40'`).
+- Wiring is maintained by `arr-wire` on vm-133 (`ssh 10.100.0.133 'systemctl start arr-wire; journalctl -u arr-wire -n 40'`).

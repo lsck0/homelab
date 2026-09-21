@@ -1,8 +1,6 @@
 #define HTTPSERVER_IMPL
 #include "httpserver.h"
 
-#define PORT 8000
-
 static void handle_request(struct http_request_s *req) {
   struct http_response_s *res = http_response_init();
   http_response_status(res, 200);
@@ -12,7 +10,7 @@ static void handle_request(struct http_request_s *req) {
 }
 
 int main(void) {
-  struct http_server_s *server = http_server_init(PORT, handle_request);
+  struct http_server_s *server = http_server_init(8000, handle_request);
   http_server_listen(server);
   return 0;
 }

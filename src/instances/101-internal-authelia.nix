@@ -2,6 +2,25 @@
 let
   stateDir = "/var/lib/authelia-main";
 
+  # the access rules are generated from modules/routes.nix, so adding a service
+  # there is all it takes to gate it. Every auth = "sso" route emits two rules
+  # in order: allow its lldap group, then deny everyone else. Without the deny,
+  # a user outside the group would fall through to the catch-all at the end and
+  # be let in anyway.
+  routes = (import ../modules/routes.nix).internal;
+  ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
+  routeRules = lib.concatLists (lib.mapAttrsToList (_: r: [
+    {
+      domain = [ "${r.host}.lsck0.dev" ];
+      policy = "two_factor";
+      subject = [ [ "group:${r.group or "users"}" ] ];
+    }
+    {
+      domain = [ "${r.host}.lsck0.dev" ];
+      policy = "deny";
+    }
+  ]) ssoRoutes);
+
   # runtime-generated config fragments. OIDC client secrets have to be stored
   # hashed, and a hash of a sops secret cannot be computed at build time
   # without leaking the secret into the world-readable Nix store.
@@ -26,12 +45,29 @@ let
       id = "forgejo";
       name = "Forgejo";
       secretName = "forgejo-oidc-secret";
-      # Forgejo derives the callback path from the auth source name, so both
-      # the existing authentik source and a new authelia one are accepted.
+      # Forgejo derives the callback path from the auth source name. The source
+      # is called "authelia" now; the old "authentik" path stays registered so
+      # accounts linked to the previous source still sign in.
       redirectUris = [
         "https://git.lsck0.dev/user/oauth2/authelia/callback"
         "https://git.lsck0.dev/user/oauth2/authentik/callback"
       ];
+    }
+    {
+      id = "audiobookshelf";
+      name = "Audiobookshelf";
+      secretName = "audiobookshelf-oidc-secret";
+      redirectUris = [
+        "https://abs.lsck0.dev/auth/openid/callback"
+        # the mobile app completes the flow on a private-use URI scheme.
+        "audiobookshelf://oauth"
+      ];
+    }
+    {
+      id = "kavita";
+      name = "Kavita";
+      secretName = "kavita-oidc-secret";
+      redirectUris = [ "https://read.lsck0.dev/signin-oidc" ];
     }
   ];
 
@@ -42,7 +78,9 @@ let
     "        client_name: ${c.name}"
     "        client_secret: '$CLIENT_HASH_${c.id}'"
     "        public: false"
-    "        authorization_policy: one_factor"
+    # same bar as the ForwardAuth routes: an OIDC login must not be a cheaper
+    # way into Forgejo or Vaultwarden than the SSO portal.
+    "        authorization_policy: two_factor"
     "        require_pkce: false"
     "        consent_mode: implicit"
     "        token_endpoint_auth_method: client_secret_post"
@@ -63,11 +101,19 @@ in {
     "d ${stateDir} 0700 authelia-main authelia-main -"
   ];
 
+  # ...but "a rebuild regenerates it" only covers the keys. The TOTP and WebAuthn
+  # enrolments live in this SQLite file and nothing else has a copy, so losing
+  # vm-101's disk would mean re-enrolling every second factor. Kopia only
+  # snapshots the NAS, so the database is dumped onto it nightly.
+  homelab.dbBackup.databases.authelia.sqlite = "${stateDir}/db.sqlite3";
+
   # bind password for the lldap backend (same secret lldap itself uses).
   sops.secrets.lldap-admin-password = {};
   sops.secrets.nextcloud-oidc-secret = {};
   sops.secrets.vaultwarden-oidc-secret = {};
   sops.secrets.forgejo-oidc-secret = {};
+  sops.secrets.audiobookshelf-oidc-secret = {};
+  sops.secrets.kavita-oidc-secret = {};
 
   # Authelia's own cryptographic material is generated here rather than kept in
   # sops: none of it has to match anything outside this VM, and it persists on
@@ -173,9 +219,15 @@ in {
       };
 
       # everything internal demands two_factor (lldap password + TOTP/FIDO2).
-      # single-user lab: any authenticated user is allowed: no group match
-      # required (a group:admins rule that lldap didn't resolve caused a
-      # deny->re-auth redirect loop). auth.lsck0.dev is bypassed to log in.
+      # Per-service authorisation comes from lldap group membership: routeRules
+      # above turns each route's `group` into an allow rule plus a deny rule, so
+      # revoking a service for a person is a group edit in the lldap dashboard
+      # and takes effect within refresh_interval.
+      #
+      # lldap is seeded with the groups the routes reference (admins, users,
+      # media) and the owner is in all of them, so a group that fails to resolve
+      # cannot lock the portal out the way an unseeded group:admins once did.
+      # auth.lsck0.dev is bypassed so logging in is always possible.
       access_control = {
         default_policy = "deny";
         rules = [
@@ -183,9 +235,13 @@ in {
             domain = [ "auth.lsck0.dev" ];
             policy = "bypass";
           }
+        ] ++ routeRules ++ [
+          # anything with a route but no entry in routes.nix (the Traefik
+          # dashboard, proxmox.lsck0.dev) still needs an authenticated admin.
           {
             domain = [ "*.lsck0.dev" "lsck0.dev" ];
             policy = "two_factor";
+            subject = [ [ "group:admins" ] ];
           }
         ];
       };

@@ -1,5 +1,5 @@
 { ... }: {
-  networking.hostName = "vm-126";
+  networking.hostName = "vm-127";
 
   # mosquitto MQTT broker: the message bus for Home Assistant, Zigbee2MQTT and
   # ESPHome. Broker only; Zigbee2MQTT/ESPHome need a USB radio passed through

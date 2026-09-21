@@ -1,16 +1,33 @@
 { config, lib, nasMount, ... }:
 let
-  routes = (import ../modules/routes.nix).external;
+  allRoutes = import ../modules/routes.nix;
+  routes = allRoutes.external;
   address = config.homelab.onDemand.address;
+
+  # internal hosts that must NOT be reachable from the internet: headless
+  # routes whose only credential is an API token, so a browser cannot log in
+  # and Authelia cannot protect them. The catch-all below would otherwise relay
+  # them like any other internal name. LAN and the Headscale mesh still reach
+  # them directly through split-horizon DNS.
+  # (calendar opts back in with publicRelay: the TRMNL cloud has to poll it.)
+  blockedInternal = lib.filterAttrs
+    (_: r: !(r.publicRelay or ((r.auth or "sso") != "token")))
+    allRoutes.internal;
 
   # Anubis PoW bot filter on the browser-facing routes: on = Traefik points at
   # the Anubis instance, off = straight to the upstream. Not for the non-browser
   # routes (headscale/ntfy/calendar/minecraft).
-  # off: behind Cloudflare, Anubis only ever sees the rotating edge IP (the real
-  # client isn't recoverable here), so it re-challenges every request and breaks
-  # CSS. External is protected by CrowdSec + AppSec WAF + rate-limits instead.
-  # the module stays wired: flip on if the client-IP handling is ever solved.
-  anubisEnable = false;
+  #
+  # This was off because Anubis only ever saw the Cloudflare edge address and
+  # therefore re-challenged every request, which loaded pages without their CSS.
+  # Both halves of that are now fixed in modules/traefik.nix: the instances run
+  # with USE_REMOTE_ADDRESS=false so they take the client from the X-Real-Ip
+  # Traefik sets (already the real visitor, because trustCloudflare makes the
+  # edge ranges trusted on this entrypoint), and COOKIE_DOMAIN is the apex so
+  # one solved challenge covers every host and every sub-resource.
+  #
+  # Kill switch: set this back to false and redeploy vm-200.
+  anubisEnable = true;
   anubisRoutes = [ "searxng" "shlink" "privatebin" "share" "hello" "hello-gh" ];
   anubisPort = name: 27000 + lib.lists.findFirstIndex (n: n == name) 0 anubisRoutes;
   upstream = name: "http://${address.${name}}";
@@ -68,6 +85,19 @@ in {
       });
     };
 
+    # robots.txt + llms.txt on every public host, and iocaine for the crawlers
+    # that ignore both. Anubis stops headless clients that cannot run the
+    # challenge; this catches the ones that identify themselves honestly and
+    # crawl anyway, and costs them rather than us.
+    botDefense.enable = true;
+
+    # cap request bodies on the routes that only ever take small posts. Left
+    # out on purpose: share and privatebin exist to receive files, and
+    # internal-relay carries Nextcloud and Paperless uploads. Traefik has to
+    # buffer a body to measure it, so a limit there would stall those.
+    bodyLimit = 32 * 1024 * 1024;
+    bodyLimitRouters = [ "searxng-tls" "shlink-tls" "hello-tls" "hello-gh-tls" ];
+
     entryPoints.minecraft.address = ":25565";
 
     routers = lib.mapAttrs' (name: r: lib.nameValuePair "${name}-tls" {
@@ -80,10 +110,6 @@ in {
       # through, so the TRMNL cloud can poll it without the DMZ reaching in.
       calendar-tls   = { rule = "Host(`cal.lsck0.dev`)"; service = "calendar"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
 
-      # Docker registry: headless, no auth of its own, internal-only. Deny on the
-      # public path; CI runner and swarm nodes reach it via split-horizon.
-      registry-block = { rule = "Host(`registry.lsck0.dev`)"; service = "internal-relay"; entryPoints = [ "websecure" ]; priority = 100; middlewares = [ "internal-only" ]; tls.certResolver = "cloudflare"; };
-
       # catch-all (lowest priority): any *.lsck0.dev not matched above is an
       # internal service: relay to internal Traefik (routes by Host, Authelia-gated).
       # one wildcard cert covers all names.
@@ -95,7 +121,18 @@ in {
         tls.certResolver = "cloudflare";
         tls.domains = [{ main = "lsck0.dev"; sans = [ "*.lsck0.dev" ]; }];
       };
-    };
+    }
+    # one higher-priority router per token-only internal host, carrying the
+    # private-range allowlist: every request off the internet arrives from the
+    # Cloudflare edge and is rejected there.
+    // lib.mapAttrs' (name: r: lib.nameValuePair "${name}-block" {
+      rule = "Host(`${r.host}.lsck0.dev`)";
+      service = "internal-relay";
+      entryPoints = [ "websecure" ];
+      priority = 100;
+      middlewares = [ "internal-only" ];
+      tls.certResolver = "cloudflare";
+    }) blockedInternal;
 
     services = lib.mapAttrs (name: _: {
       loadBalancer.servers = [{

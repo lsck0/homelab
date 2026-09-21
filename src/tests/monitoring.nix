@@ -1,7 +1,10 @@
 # vm-104 alerting: the provisioned Grafana "Instance down" rule is Normal while
-# everything is up (not "No data"), fires when a node-exporter goes down, and
-# Prometheus' own InstanceDown rule agrees. Alertmanager starts with the
-# Telegram receiver config.
+# everything is up (not "No data") and fires when a node-exporter goes down.
+#
+# Grafana unified alerting is the only delivery path. Prometheus' Alertmanager
+# used to evaluate the same rule and notify the same ntfy topic and Telegram
+# chat, which delivered every alert twice; the test asserts it is gone, so
+# re-adding a second path fails here instead of in the owner's notifications.
 { pkgs, lib, ... }:
 pkgs.testers.runNixOSTest {
   name = "monitoring";
@@ -42,11 +45,13 @@ pkgs.testers.runNixOSTest {
     vm_104.wait_for_unit("grafana.service")
     vm_104.wait_for_open_port(80)
 
-    with subtest("Alertmanager runs with the Telegram receiver"):
-        vm_104.wait_for_unit("alertmanager.service")
-        vm_104.wait_until_succeeds(
-            "curl -sf http://127.0.0.1:9093/api/v2/status | jq -e '.config.original | test(\"telegram_configs\") and test(\"chat_id: 12345\")'",
-            timeout=120)
+    with subtest("there is exactly one alerting path: no Alertmanager"):
+        vm_104.fail("systemctl list-unit-files | grep -q '^alertmanager.service'")
+        vm_104.fail("curl -sf --max-time 5 http://127.0.0.1:9093/api/v2/status")
+        # and Prometheus has no alerting rules of its own to send anywhere.
+        vm_104.wait_for_unit("prometheus.service")
+        vm_104.succeed(
+            "curl -sf http://127.0.0.1:9090/api/v1/rules | jq -e '.data.groups | length == 0'")
 
     with subtest("target is scraped"):
         vm_104.wait_until_succeeds(
@@ -59,26 +64,28 @@ pkgs.testers.runNixOSTest {
         print("state while up:", state)
         assert state[0] == "inactive" and state[1] == "ok", state
 
-    with subtest("node-exporter down: Grafana and Prometheus alert"):
+    with subtest("node-exporter down: Grafana alerts"):
         target.succeed("systemctl stop prometheus-node-exporter.service")
         vm_104.wait_until_succeeds(
             "curl -sf -H 'Remote-User: admin' http://127.0.0.1:80/api/prometheus/grafana/api/v1/rules"
             " | jq -e '.data.groups[].rules[] | select(.name==\"Instance down\") | .state == \"firing\"'", timeout=900)
         print("state while down:", rule_state())
-        vm_104.wait_until_succeeds(
-            "curl -sf http://127.0.0.1:9090/api/v1/alerts | jq -e '.data.alerts[] | select(.labels.alertname==\"InstanceDown\")'",
-            timeout=900)
 
-    with subtest("the firing alert is sent to Telegram (and ntfy)"):
+    with subtest("the firing alert is sent to Telegram and ntfy, once each"):
         # no internet in the test VM: a failed delivery attempt through the
         # telegram integration proves the routing.
         cps = vm_104.succeed("curl -sf -H 'Remote-User: admin' http://127.0.0.1:80/api/v1/provisioning/contact-points")
         print(cps)
         assert '"telegram"' in cps and '"webhook"' in cps, cps
+        # one receiver of each type, not two of either: a second one would mean
+        # the duplicate-notification bug is back.
+        assert cps.count('"telegram"') == 1 and cps.count('"webhook"') == 1, cps
+        # the Telegram receiver carries the HTML template, not Grafana's default.
+        assert "parse_mode" in cps and "FIRING" in cps, cps
+        # ntfy is published to as a real user with its message template.
+        assert "template=yes" in cps and "grafana" in cps, cps
         vm_104.wait_until_succeeds(
             "journalctl -u grafana | grep -i 'notif' | grep -qi telegram", timeout=300)
-        vm_104.wait_until_succeeds(
-            "journalctl -u alertmanager | grep -i 'notify' | grep -qi telegram", timeout=300)
 
     with subtest("back up: resolves"):
         target.succeed("systemctl start prometheus-node-exporter.service")

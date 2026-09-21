@@ -19,5 +19,5 @@ metadata:
   OpenAI-compatible `/v1/chat/completions`.
 - Pull a model for a one-off job: `POST /api/pull {"model":"<name>"}`. Declared models are
   synced from Nix (`loadModels` in `113-internal-hermes.nix`), extra ones are removed on redeploy.
-- Uses: your fallback model when the cloud API fails; paperless-ai (vm-121) tagging.
+- Uses: your fallback model when the cloud API fails; paperless-ai (vm-122) tagging.
 - Offload heavy private work (summarising many documents) here instead of the cloud model.

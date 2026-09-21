@@ -141,10 +141,10 @@ cat > "$W/shims/curl" <<'EOF'
 #!/bin/bash
 out=()
 for a in "$@"; do
-  a=${a//http:\/\/10.100.0.130:80/http://sonarr:8989}
-  a=${a//http:\/\/10.100.0.130/http://sonarr:8989}
-  a=${a//http:\/\/10.100.0.120:8080/http://mock:8000/paperless}
-  a=${a//http:\/\/10.100.0.123:8080/http://mock:8000/firefly}
+  a=${a//http:\/\/10.100.0.131:80/http://sonarr:8989}
+  a=${a//http:\/\/10.100.0.131/http://sonarr:8989}
+  a=${a//http:\/\/10.100.0.121:8080/http://mock:8000/paperless}
+  a=${a//http:\/\/10.100.0.124:8080/http://mock:8000/firefly}
   out+=("$a")
 done
 case "$*" in *10.100.0.*|*10.200.0.*) /work/shims/_log curl "$@" ;; esac
@@ -273,12 +273,12 @@ for s in $SCENARIOS; do
     ask backup "Paperless broke yesterday evening around 20:00. Restore it from the last backup before that."
     yesterday=$(date -d yesterday +%F); good_id=$(printf 'snap%028d' 1)
     called 'nas-restore (list|files)|kopia.*snapshot list' && ok "backup: listed snapshots" || fail "backup: did not list snapshots"
-    called 'vm stop 120' && ok "backup: stopped vm-120 first" || fail "backup: did not stop vm-120"
+    called 'vm stop 120' && ok "backup: stopped vm-121 first" || fail "backup: did not stop vm-121"
     called 'nas-restore service paperless [^ ]+ --yes' && ok "backup: restored paperless" || fail "backup: did not run nas-restore service paperless"
     if called 'vm stop 120' && called 'nas-restore service paperless'; then
-      [ "$(line_of 'vm stop 120')" -lt "$(line_of 'nas-restore service paperless')" ] && ok "backup: stop before restore" || fail "backup: restored while vm-120 running"
+      [ "$(line_of 'vm stop 120')" -lt "$(line_of 'nas-restore service paperless')" ] && ok "backup: stop before restore" || fail "backup: restored while vm-121 running"
     fi
-    called 'vm start 120' && ok "backup: started vm-120 again" || fail "backup: did not start vm-120 again"
+    called 'vm start 120' && ok "backup: started vm-121 again" || fail "backup: did not start vm-121 again"
     called "nas-restore service paperless ($good_id|$yesterday)( |\$)" \
       && ok "backup: restored yesterday's 02:00 snapshot by id/date" || fail "backup: wrong or age-based snapshot selection"
     ;;
@@ -324,7 +324,7 @@ for s in $SCENARIOS; do
       [ "$(git -C "$W/remote.git" diff --name-only "master...$branch")" = src/instances.tf ] \
         && ok "repo: only src/instances.tf changed" || fail "repo: unexpected files changed"
       git -C "$W/remote.git" show "$branch:src/instances.tf" | grep -A4 '"123" = {' | grep -q 'cooldown = "1h"' \
-        && ok "repo: vm-123 cooldown is 1h" || fail "repo: vm-123 cooldown not 1h"
+        && ok "repo: vm-124 cooldown is 1h" || fail "repo: vm-124 cooldown not 1h"
       git -C "$W/remote.git" log --format=%s "master..$branch" | grep -qE '^[a-z]+(\([a-z0-9-]+\))?!?: ' \
         && ok "repo: conventional commit" || fail "repo: commit message not conventional"
     fi

@@ -1,5 +1,5 @@
 { pkgs, nasMount, nasMedia, nasPath, ... }: {
-  networking.hostName = "vm-136";
+  networking.hostName = "vm-137";
 
   fileSystems = nasMount "/var/lib/kavita" "kavita"
     // nasMedia "/srv/manga" "manga"
@@ -95,4 +95,8 @@
   };
 
   networking.firewall.allowedTCPPorts = [ 80 4567 ];
+
+  # Suwayomi has no authentication at all; Kavita keeps its own login, so only
+  # Suwayomi's port is restricted to the Authelia-gated ingress.
+  homelab.ingressOnly.ports = [ 4567 ];
 }

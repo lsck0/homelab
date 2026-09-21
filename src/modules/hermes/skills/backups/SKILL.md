@@ -17,6 +17,25 @@ Kopia snapshots the whole NAS tree `/srv/nas` daily at 02:00 (keeps 3 latest,
 7 daily, 8 weekly, 12 monthly, 2 annual). Every service keeps its persistent
 data in `/srv/nas/data/<service>`. Web UI for the owner: https://backup.lsck0.dev
 
+## Databases are dumped, not snapshotted
+
+A file copy of a live database is not a restorable backup, so at 01:30 - before
+the snapshot - every VM with a database dumps it through its own engine into
+`/srv/nas/data/db-dumps/<vm>/<name>/` (`src/modules/db-backup.nix`): SQLite via
+`.backup`, Postgres via `pg_dump`. 14 dumps are kept per database, and the
+snapshot then carries them off the VM.
+
+To restore a database, restore the dump file and load it - do **not** restore
+the live data directory over a running service:
+
+- Postgres: `zstd -dc <dump>.sql.zst | psql -U postgres` (the dumps are taken
+  with `--clean --if-exists`, so they drop and recreate their own objects).
+- SQLite: `zstd -d <dump>.sqlite.zst -o <target>.sqlite3` with the service
+  stopped, then start it.
+
+This is also the only copy of two things: the Authelia second-factor enrolments
+and the whole lldap directory both live on local disk, not on the NAS.
+
 All commands run on vm-106 with `terminal`: `ssh 10.100.0.106 nas-restore ...`
 
 ## Restore a service

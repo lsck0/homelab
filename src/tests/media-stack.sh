@@ -194,6 +194,13 @@ for id in $(api http://127.0.0.1:19696/api/v1/applications "$pk" | jq -r '.[].id
   check "prowlarr: app $name connection test" curl -sf -X POST -H "X-Api-Key: $pk" -H "Content-Type: application/json" \
     --data "$body" http://127.0.0.1:19696/api/v1/applications/test
 done
+check "prowlarr: qBittorrent download client present (so Grab works)" \
+  sh -c "curl -sf -H 'X-Api-Key: $pk' http://127.0.0.1:19696/api/v1/downloadclient | jq -e 'any(.[]; .implementation==\"QBittorrent\" and .enable)'"
+check "prowlarr: Tor indexer proxy present" \
+  sh -c "curl -sf -H 'X-Api-Key: $pk' http://127.0.0.1:19696/api/v1/indexerproxy | jq -e 'any(.[]; .implementation==\"Socks5\")'"
+check "prowlarr: every indexer carries the tor tag" \
+  sh -c "t=\$(curl -sf -H 'X-Api-Key: $pk' http://127.0.0.1:19696/api/v1/tag | jq -r '.[] | select(.label==\"tor\") | .id');
+         [ -n \"\$t\" ] && curl -sf -H 'X-Api-Key: $pk' http://127.0.0.1:19696/api/v1/indexer | jq -e --argjson t \"\$t\" 'all(.[]; (.tags // []) | index(\$t))'"
 echo "  info  prowlarr indexers: $(api http://127.0.0.1:19696/api/v1/indexer "$pk" | jq -r '[.[].definitionName] | join(", ")')"
 check "prowlarr: nyaasi (anime) indexer present" sh -c "curl -sf -H 'X-Api-Key: $pk' http://127.0.0.1:19696/api/v1/indexer | jq -e 'any(.[]; .definitionName==\"nyaasi\")'"
 check "radarr: indexers synced from Prowlarr" sh -c "sleep 30; curl -sf -H 'X-Api-Key: $(key radarr-key)' http://127.0.0.1:17878/api/v3/indexer | jq -e 'length>0'"
@@ -239,8 +246,8 @@ echo ">>> Janitorr with the config NixOS renders"
 mkdir -p "$W/janitorr/logs" "$W/janitorr/stats"; chmod -R 777 "$W/janitorr"
 run_unit 133-internal-jellyfin janitorr-config "$TOK" "s#/var/lib/janitorr#$W/janitorr#g" "s#chown 1000:1000#true#"
 for f in application.yml stats.yml; do
-  sed -i -e 's#http://10.100.0.130#http://sonarr:8989#; s#http://10.100.0.129#http://radarr:7878#' \
-         -e 's#http://10.100.0.133#http://jellyfin:8096#; s#http://10.100.0.127#http://jellyseerr:5055#' \
+  sed -i -e 's#http://10.100.0.131#http://sonarr:8989#; s#http://10.100.0.130#http://radarr:7878#' \
+         -e 's#http://10.100.0.134#http://jellyfin:8096#; s#http://10.100.0.128#http://jellyseerr:5055#' \
          -e 's#http://127.0.0.1:8081#http://janitorr-stats:8081#' "$W/janitorr/$f"
 done
 chmod 644 "$W/janitorr/"*.yml

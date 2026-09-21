@@ -1,6 +1,7 @@
 { config, pkgs, lib, modulesPath, ... }: {
   imports = [
     (modulesPath + "/profiles/qemu-guest.nix")
+    ./db-backup.nix
     ./docker-stack.nix
     ./nas.nix
     ./network.nix

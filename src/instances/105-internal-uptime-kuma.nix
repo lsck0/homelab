@@ -4,7 +4,9 @@ let
   # on-demand VMs sleep by design and disabled ones are off, so neither is
   # monitored (a probe would also wake nothing: it goes straight to the VM).
   routes = import ../modules/routes.nix;
-  alwaysOn = r: (inventory.${toString r.vmid}.enabled or "false") == "true";
+  # a route with monitor = false is deliberately not probed (see routes.nix).
+  alwaysOn = r: (inventory.${toString r.vmid}.enabled or "false") == "true"
+    && (r.monitor or true);
   httpMonitors = lib.concatLists (lib.mapAttrsToList (_: side:
     lib.mapAttrsToList (_: r: {
       name = r.host;
@@ -192,4 +194,8 @@ in {
   ];
 
   networking.firewall.allowedTCPPorts = [ 80 ];
+
+  # built-in auth is switched off (disableAuth), so the only path in must be the
+  # Authelia-gated Traefik route.
+  homelab.ingressOnly.ports = [ 80 ];
 }

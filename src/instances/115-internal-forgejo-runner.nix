@@ -17,7 +17,7 @@
     user = "root:root";
     extraOptions = [
       "--add-host=git.lsck0.dev:10.100.0.100"
-      "--add-host=registry.lsck0.dev:10.100.0.116"
+      "--add-host=registry.lsck0.dev:10.100.0.117"
       "--add-host=sccache.lsck0.dev:10.100.0.110"
     ];
     environment = {
@@ -46,7 +46,7 @@
       # patch config: mount Docker socket in job containers (needed for docker build/push in CI)
       sed -i 's|docker_host: "-"|docker_host: "automount"|' /var/lib/forgejo-runner/config.yaml
       # ensure job containers can resolve internal hostnames (match exact key under container section)
-      sed -i '/^container:/,/^[^ ]/{s|^  options: .*|  options: "--add-host=git.lsck0.dev:10.100.0.100 --add-host=registry.lsck0.dev:10.100.0.116 --add-host=sccache.lsck0.dev:10.100.0.110"|}' \
+      sed -i '/^container:/,/^[^ ]/{s|^  options: .*|  options: "--add-host=git.lsck0.dev:10.100.0.100 --add-host=registry.lsck0.dev:10.100.0.117 --add-host=sccache.lsck0.dev:10.100.0.110"|}' \
         /var/lib/forgejo-runner/config.yaml
 
       # wait for Forgejo API

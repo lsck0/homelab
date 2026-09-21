@@ -84,12 +84,23 @@ else
 fi
 
 
+# the age key belongs to the dotfiles repo, which is the source of truth for all
+# key material. Link it rather than keeping a second copy here; only generate a
+# fresh one when the dotfiles repo has none (a brand-new lab).
 AGE_KEY="$ROOT_DIR/secrets/age.txt"
-if [ ! -f "$AGE_KEY" ]; then
-    echo ">>> Generating age key for sops-nix..."
-    mkdir -p "$ROOT_DIR/secrets"
-    age-keygen -o "$AGE_KEY" 2>/dev/null
-    chmod 600 "$AGE_KEY"
+AGE_KEY_SOURCE="${AGE_KEY_SOURCE:-$HOME/projects/arch-dotfiles/configs/secrets/age.txt}"
+mkdir -p "$ROOT_DIR/secrets"
+if [ ! -r "$AGE_KEY" ]; then
+    if [ -r "$AGE_KEY_SOURCE" ]; then
+        echo ">>> Linking the age key from $AGE_KEY_SOURCE"
+        ln -sfn "$AGE_KEY_SOURCE" "$AGE_KEY"
+    else
+        echo ">>> Generating age key for sops-nix at $AGE_KEY_SOURCE..."
+        mkdir -p "$(dirname "$AGE_KEY_SOURCE")"
+        age-keygen -o "$AGE_KEY_SOURCE" 2>/dev/null
+        chmod 600 "$AGE_KEY_SOURCE"
+        ln -sfn "$AGE_KEY_SOURCE" "$AGE_KEY"
+    fi
     AGE_PUB=$(age-keygen -y "$AGE_KEY")
     sed -i "s|AGE_PUBLIC_KEY_PLACEHOLDER|${AGE_PUB}|" "$ROOT_DIR/.sops.yaml"
 fi
@@ -132,6 +143,10 @@ if [ ! -f "$SECRETS_FILE" ]; then
     echo ">>> Secrets generated and encrypted."
     echo ">>> NOTE: fill the external tokens with: sops src/secrets.json"
 fi
+
+# add whatever the configs have grown since (and drop what they no longer read).
+# The list above is only the bootstrap set; secrets-sync.sh is the source of truth.
+"$ROOT_DIR/src/scripts/secrets-sync.sh" --apply
 
 
 mkdir -p "$ROOT_DIR/images"

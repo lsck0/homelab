@@ -13,12 +13,12 @@ metadata:
 
 # Home automation
 
-## MQTT (vm-126, 10.100.0.126:1883, anonymous on the LAN)
+## MQTT (vm-127, 10.100.0.127:1883, anonymous on the LAN)
 
-- Publish: `mosquitto_pub -h 10.100.0.126 -t <topic> -m '<payload>'` (install on demand: `nix shell nixpkgs#mosquitto`, or run it on vm-126 via ssh).
-- Watch: `ssh 10.100.0.126 "mosquitto_sub -t '#' -v -W 10"`.
+- Publish: `mosquitto_pub -h 10.100.0.127 -t <topic> -m '<payload>'` (install on demand: `nix shell nixpkgs#mosquitto`, or run it on vm-127 via ssh).
+- Watch: `ssh 10.100.0.127 "mosquitto_sub -t '#' -v -W 10"`.
 
-## Home Assistant (vm-124, http://10.100.0.124, currently enabled = false)
+## Home Assistant (vm-125, http://10.100.0.125, currently enabled = false)
 
 If enabled: token `lab-token hass-key`, header `Authorization: Bearer <token>`.
 - States: `GET /api/states`, one entity `GET /api/states/<entity_id>`.

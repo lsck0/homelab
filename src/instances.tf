@@ -25,7 +25,7 @@ locals {
       name = "103-internal-homepage",
       type = "internal",
     }
-    "104" = { # observability: Prometheus + Loki + Tempo + Alertmanager + Grafana
+    "104" = { # observability: Prometheus + Loki + Tempo + Grafana (Grafana owns alerting)
       enabled = true,
       name = "104-internal-grafana",
       type = "internal",
@@ -83,7 +83,9 @@ locals {
     }
 
     "113" = { # GPU LLM agent: Hermes (Telegram) + Ollama on the passed-through RTX 2060
-      # off until the host binds the gpu to vfio-pci (still on nouveau) and hermes-llm-api-key is in sops
+      # off until the host binds the gpu to vfio-pci (still on nouveau). The model
+      # chain falls back to free tiers and then to this VM's own Ollama, so an
+      # empty hermes-llm-api-key no longer blocks it.
       enabled = false,
       name = "113-internal-hermes",
       type = "internal",
@@ -104,120 +106,128 @@ locals {
       name = "115-internal-forgejo-runner",
       type = "internal",
     }
-    "116" = { # Docker image registry + UI (internal-only)
+    "116" = { # CI runners for GitHub repos (ephemeral, one systemd unit per replica)
       enabled = true,
-      name = "116-internal-registry",
+      name = "116-internal-github-runner",
+      type = "internal",
+      memory = 4096,
+      cores = 4,
+      disk = 40,
+    }
+    "117" = { # Docker image registry + UI (internal-only)
+      enabled = true,
+      name = "117-internal-registry",
       type = "internal",
     }
 
-    "117" = { # password manager (Bitwarden-compatible)
+    "118" = { # password manager (Bitwarden-compatible)
       enabled = false,
-      name = "117-internal-vaultwarden",
+      name = "118-internal-vaultwarden",
       type = "internal",
     }
-    "118" = { # files / groupware cloud
+    "119" = { # files / groupware cloud
       enabled = false,
-      name = "118-internal-nextcloud",
+      name = "119-internal-nextcloud",
       type = "internal",
     }
-    "119" = { # synced calendar feeds (Outlook/StudIP/Proton -> TRMNL)
-      enabled = false,
-      name = "119-internal-calendar",
-      type = "internal",
-    }
-    "120" = { # document management (paperless-ngx)
+    "120" = { # synced calendar feeds (Outlook/StudIP/Proton -> TRMNL)
       enabled = true,
-      name = "120-internal-paperless",
+      name = "120-internal-calendar",
+      type = "internal",
+    }
+    "121" = { # document management (paperless-ngx)
+      enabled = true,
+      name = "121-internal-paperless",
       type = "internal",
       memory = 2048,
     }
-    "121" = { # AI auto-tagging for paperless
+    "122" = { # AI auto-tagging for paperless
       enabled = false,
-      name = "121-internal-paperless-ai",
+      name = "122-internal-paperless-ai",
       type = "internal",
       memory = 2048,
     }
-    "122" = { # wiki / knowledge base
+    "123" = { # wiki / knowledge base
       enabled = false,
-      name = "122-internal-wikijs",
+      name = "123-internal-wikijs",
       type = "internal",
     }
-    "123" = { # Firefly III personal finance
+    "124" = { # Firefly III personal finance
       enabled = "onDemand",
       cooldown = "30m",
-      name = "123-internal-firefly",
+      name = "124-internal-firefly",
       type = "internal",
     }
 
-    "124" = { # home automation hub
+    "125" = { # home automation hub
       enabled = false,
-      name = "124-internal-homeassistant",
+      name = "125-internal-homeassistant",
       type = "internal",
     }
-    "125" = { # automation agents / scraping
+    "126" = { # automation agents / scraping
       enabled = false,
-      name = "125-internal-huginn",
+      name = "126-internal-huginn",
       type = "internal",
     }
-    "126" = { # MQTT broker (Home Assistant / IoT)
+    "127" = { # MQTT broker (Home Assistant / IoT)
       enabled = true,
-      name = "126-internal-mosquitto",
+      name = "127-internal-mosquitto",
       type = "internal",
     }
 
-    "127" = { # media requests: movies, series, anime (-> Radarr/Sonarr)
+    "128" = { # media requests: movies, series, anime (-> Radarr/Sonarr)
       enabled = true,
-      name = "127-internal-jellyseerr",
+      name = "128-internal-jellyseerr",
       type = "internal",
     }
-    "128" = { # indexer manager, syncs indexers into every *arr
+    "129" = { # indexer manager, syncs indexers into every *arr
       enabled = true,
-      name = "128-internal-prowlarr",
+      name = "129-internal-prowlarr",
       type = "internal",
     }
-    "129" = { # movie library manager
+    "130" = { # movie library manager
       enabled = true,
-      name = "129-internal-radarr",
+      name = "130-internal-radarr",
       type = "internal",
     }
-    "130" = { # series + anime library manager
+    "131" = { # series + anime library manager
       enabled = true,
-      name = "130-internal-sonarr",
+      name = "131-internal-sonarr",
       type = "internal",
     }
-    "131" = { # subtitle downloader for *arr
+    "132" = { # subtitle downloader for *arr
       enabled = true,
-      name = "131-internal-bazarr",
+      name = "132-internal-bazarr",
       type = "internal",
     }
-    "132" = { # TRaSH-guide sync + *arr/qBittorrent/Prowlarr wiring
+    "133" = { # TRaSH-guide sync + *arr/qBittorrent/Prowlarr wiring
       enabled = true,
-      name = "132-internal-recyclarr",
+      name = "133-internal-recyclarr",
       type = "internal",
     }
-    "133" = { # media streaming + Janitorr (deletes media unwatched for months)
+    "134" = { # media streaming + Janitorr (deletes media unwatched for months)
       enabled = true,
-      name = "133-internal-jellyfin",
+      name = "134-internal-jellyfin",
       type = "internal",
       memory = 4096,
       cores = 4,
       disk = 16,
     }
-    "134" = { # audiobooks/podcasts + Bookshelf (ebook manager)
+    "135" = { # audiobooks/podcasts + Bookshelf (ebook manager)
       enabled = true,
-      name = "134-internal-audiobookshelf",
+      name = "135-internal-audiobookshelf",
       type = "internal",
       memory = 2048,
     }
-    "135" = { # music streaming (Subsonic API) + Lidarr (music manager)
+    "136" = { # music streaming (Subsonic API) + Lidarr (music manager)
       enabled = true,
-      name = "135-internal-navidrome",
+      name = "136-internal-navidrome",
       type = "internal",
       memory = 2048,
     }
-    "136" = { # manga/ebook reader + Suwayomi (manga downloader)
+    "137" = { # manga/ebook reader + Suwayomi (manga downloader)
       enabled = true,
-      name = "136-internal-kavita",
+      name = "137-internal-kavita",
       type = "internal",
       memory = 2048,
     }

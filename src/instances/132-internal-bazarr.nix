@@ -1,9 +1,9 @@
 { pkgs, nasMount, nasPath, retry, ... }: {
-  networking.hostName = "vm-131";
+  networking.hostName = "vm-132";
 
   # Bazarr: subtitles for the Radarr/Sonarr libraries. Same /data/media path
   # as the *arrs (so their file paths resolve) and writable (subtitles are
-  # written next to the media). Sonarr/Radarr connections are set by vm-132.
+  # written next to the media). Sonarr/Radarr connections are set by vm-133.
   # behind Authelia at subs.lsck0.dev.
   fileSystems = nasMount "/var/lib/bazarr" "bazarr"
     // nasPath "/data/media" "media"
@@ -43,4 +43,10 @@
   };
 
   networking.firewall.allowedTCPPorts = [ 80 ];
+
+  # Bazarr's own login is off (Authelia gates the route); vm-133 drives its API.
+  homelab.ingressOnly = {
+    ports = [ 80 ];
+    extraSources = [ "10.100.0.133/32" ];
+  };
 }

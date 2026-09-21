@@ -26,30 +26,30 @@ Extract: payee/vendor, total amount, currency, invoice date, due date,
 invoice number, short description, and a category guess (Groceries, Rent,
 Utilities, Insurance, Subscriptions, ...). If the total is unreadable, ask.
 
-## 2. Upload to Paperless (vm-120)
+## 2. Upload to Paperless (vm-121)
 
 ```
 curl -sf -H "Authorization: Token $(lab-token paperless-key)" \
   -F document=@<file> -F title="<Payee> <YYYY-MM-DD> <amount> <currency>" \
   -F created=<YYYY-MM-DD> \
-  http://10.100.0.120:8080/api/documents/post_document/
+  http://10.100.0.121:8080/api/documents/post_document/
 ```
 The reply is a task UUID. Poll
-`GET http://10.100.0.120:8080/api/tasks/?task_id=<uuid>` until `status` is
+`GET http://10.100.0.121:8080/api/tasks/?task_id=<uuid>` until `status` is
 `SUCCESS`; `related_document` is the document id. Link:
 `https://paperless.lsck0.dev/documents/<id>/details`. Optionally set tags /
 correspondent with `PATCH /api/documents/<id>/`.
 
-## 3. Book it in Firefly III (vm-123, on demand)
+## 3. Book it in Firefly III (vm-124, on demand)
 
-1. `vm start 123`, then wait until `curl -s -o /dev/null http://10.100.0.123:8080/` answers.
+1. `vm start 123`, then wait until `curl -s -o /dev/null http://10.100.0.124:8080/` answers.
 2. Token: `lab-token firefly-token`. If it does not exist, the owner has not
    registered in Firefly yet (https://firefly.lsck0.dev); tell them and stop here.
 3. Asset account to pay from: `GET /api/v1/accounts?type=asset`, use the
    default/first one unless the bill says otherwise.
 4. Create the transaction:
 ```
-curl -sf -X POST http://10.100.0.123:8080/api/v1/transactions \
+curl -sf -X POST http://10.100.0.124:8080/api/v1/transactions \
   -H "Authorization: Bearer $(lab-token firefly-token)" \
   -H "Content-Type: application/json" -H "Accept: application/json" \
   -d '{"transactions":[{"type":"withdrawal","date":"<YYYY-MM-DD>","amount":"<12.34>",

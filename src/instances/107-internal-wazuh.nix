@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ config, pkgs, ... }:
 let
   version = "4.14.7";
   src = pkgs.fetchFromGitHub {
@@ -41,7 +41,11 @@ in {
   # Wazuh single-node (manager + indexer + dashboard) from the official
   # wazuh-docker release. State lives in Docker volumes on the local disk.
   # dashboard https://wazuh.lsck0.dev behind Authelia; its own login is admin
-  # with the password in /var/lib/wazuh/admin-pass, generated on first setup.
+  # with the same password as the Authelia account (sops: authelia-admin-pass),
+  # so the dashboard's second login stops being a separate credential.
+  # kibanaserver is the dashboard's own service account, never typed by a human,
+  # so it keeps a generated password.
+  sops.secrets.authelia-admin-pass = {};
   virtualisation.docker.enable = true;
   boot.kernel.sysctl."vm.max_map_count" = 262144;
 
@@ -77,9 +81,11 @@ in {
       # the dashboard's indexer user (kibanaserver). The indexer seeds its users
       # from internal_users.yml on first start only, so this runs before it.
       mkdir -p /var/lib/wazuh && chmod 700 /var/lib/wazuh
-      for u in admin kibanaserver; do
-        [ -s /var/lib/wazuh/$u-pass ] || openssl rand -hex 16 | tr -d '\n' > /var/lib/wazuh/$u-pass
-      done
+      # the human-facing account shares the Authelia password.
+      cp ${config.sops.secrets.authelia-admin-pass.path} /var/lib/wazuh/admin-pass
+      chmod 600 /var/lib/wazuh/admin-pass
+      [ -s /var/lib/wazuh/kibanaserver-pass ] \
+        || openssl rand -hex 16 | tr -d '\n' > /var/lib/wazuh/kibanaserver-pass
       if grep -q 'INDEXER_PASSWORD=SecretPassword' docker-compose.yml; then
         if docker volume inspect single-node_wazuh-indexer-data >/dev/null 2>&1; then
           echo "indexer already initialised with the demo passwords: rotate them by hand" >&2
@@ -93,7 +99,23 @@ in {
           /^  hash:/ && user == "kibanaserver:" { print "  hash: \"" ENVIRON["KIBANA"] "\""; next }
           { print }' $users > $users.tmp
         mv $users.tmp $users
-        sed -i "s/INDEXER_PASSWORD=SecretPassword/INDEXER_PASSWORD=$A/; s/DASHBOARD_PASSWORD=kibanaserver/DASHBOARD_PASSWORD=$K/" docker-compose.yml
+        # Not sed: the admin password is the Authelia one and may contain "/"
+        # (ends the s/// replacement) or a trailing "\" (escapes the delimiter),
+        # either of which makes sed fail and leaves the demo password in place.
+        # ENVIRON avoids awk's -v escape processing, and index/substr does a
+        # literal replacement, so "&" and "\" in the value stay verbatim.
+        A="$A" K="$K" awk '
+          function repl(line, needle, val,   p) {
+            p = index(line, needle)
+            if (p == 0) return line
+            return substr(line, 1, p - 1) val substr(line, p + length(needle))
+          }
+          {
+            $0 = repl($0, "INDEXER_PASSWORD=SecretPassword", "INDEXER_PASSWORD=" ENVIRON["A"])
+            $0 = repl($0, "DASHBOARD_PASSWORD=kibanaserver", "DASHBOARD_PASSWORD=" ENVIRON["K"])
+            print
+          }' docker-compose.yml > docker-compose.yml.tmp
+        mv docker-compose.yml.tmp docker-compose.yml
       fi
     '';
   };

@@ -21,7 +21,7 @@ in {
   # Radarr/Sonarr/Lidarr/Prowlarr/Bookshelf all share one shape: a linuxserver-
   # style container, config on the NAS, auth delegated to Authelia, and an API
   # key exported to the NAS token dir. That key is what Homepage widgets,
-  # the *arr wiring on vm-132, Janitorr, Jellyseerr and Hermes use.
+  # the *arr wiring on vm-133, Janitorr, Jellyseerr and Hermes use.
   #
   # media layout (same path in every container, so imports can be moved and
   # Janitorr/Jellyfin see the files where the *arrs put them):
@@ -87,5 +87,16 @@ in {
     }) cfg;
 
     networking.firewall.allowedTCPPorts = lib.mapAttrsToList (_: app: app.hostPort) cfg;
+
+    # these apps have AuthenticationRequired=DisabledForLocalAddresses, so a
+    # direct call to the VM's port skips Authelia entirely. Only the ingress,
+    # the monitoring hosts and the other media VMs (which drive each other's
+    # APIs: arr-wire on vm-133, Prowlarr app sync, Janitorr, Jellyseerr) may
+    # reach them.
+    homelab.ingressOnly = {
+      ports = lib.mapAttrsToList (_: app: app.hostPort) cfg;
+      extraSources = map (id: "10.100.0.${toString id}/32")
+        [ 111 128 129 130 131 132 133 134 135 136 137 ];
+    };
   };
 }

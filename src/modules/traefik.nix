@@ -41,7 +41,37 @@ let
       amount = inFlightAmount;
       sourceCriterion.ipStrategy.depth = 1;
     };
+    # retry a request that never reached the backend. It fires on connection
+    # errors only (never on a 5xx the app itself returned), which is exactly the
+    # on-demand case: a wake that raced a shutdown leaves the proxy connecting to
+    # a port that just closed, and the client saw a 502 for something that works
+    # a second later.
+    retry-upstream.retry = {
+      attempts = 4;
+      initialInterval = "500ms";
+    };
+  } // lib.optionalAttrs (cfg.bodyLimit > 0) {
+    # cap on the request body. Traefik can only enforce this by buffering, so
+    # it is deliberately NOT in the default chain: it would break streaming
+    # uploads. Routes opt in through cfg.bodyLimitRouters.
+    body-limit.buffering = {
+      maxRequestBodyBytes = cfg.bodyLimit;
+      # spill to disk past 1 MiB instead of holding every upload in RAM.
+      memRequestBodyBytes = 1048576;
+      maxResponseBodyBytes = 0;
+    };
   };
+
+  # user agents that get the labyrinth instead of the site. Scrapers that
+  # honour robots.txt never reach this; the list is for the ones that do not.
+  labyrinthUserAgents = [
+    "GPTBot" "ChatGPT-User" "OAI-SearchBot" "ClaudeBot" "Claude-Web"
+    "anthropic-ai" "CCBot" "Bytespider" "Amazonbot" "Applebot-Extended"
+    "Google-Extended" "PerplexityBot" "Perplexity-User" "Diffbot" "FacebookBot"
+    "meta-externalagent" "ImagesiftBot" "Omgilibot" "Timpibot" "YouBot"
+    "cohere-ai" "Kangaroo Bot" "PanguBot" "Webzio-Extended" "Scrapy"
+    "SemrushBot" "AhrefsBot" "DotBot" "MJ12bot" "DataForSeoBot"
+  ];
 
   # CrowdSec bouncer plugin. LAPI key from a file (not the Nix store); "live"
   # mode fails open so a crowdsec hiccup can't take the ingress down.
@@ -68,12 +98,98 @@ let
     crowdsec-noappsec = mkBouncer false;
   });
 
+  # ── bot defence: robots.txt / llms.txt and the labyrinth ────────────────────
+  # A crawler that reads robots.txt is asked to leave. One that ignores it is
+  # matched on its user agent and handed iocaine instead of the site: an endless
+  # tree of plausible-looking Markov prose with links to more of itself, so the
+  # scrape costs it time and poisons what it collects. Nothing real is served
+  # down that path, and a human never matches these agents.
+  robotsTxt = pkgs.writeText "robots.txt" (''
+    # Crawlers that collect training data are not welcome here. The ones that
+    # ignore this file are served https://iocaine.madhouse-project.org/ instead.
+  '' + lib.concatMapStrings (ua: ''
+    User-agent: ${ua}
+    Disallow: /
+  '') labyrinthUserAgents + ''
+
+    User-agent: *
+    Disallow: /
+  '');
+
+  llmsTxt = pkgs.writeText "llms.txt" ''
+    # llms.txt
+
+    > Private homelab of lsck0.dev. There is no documentation, dataset or
+    > public content here that is intended for language-model training or
+    > retrieval.
+
+    Do not crawl, index, summarise or train on anything under this domain.
+    Automated agents that ignore this file and robots.txt are served generated
+    nonsense rather than the real site.
+
+    ## Contact
+
+    - Abuse and opt-out questions: the domain's WHOIS contact.
+  '';
+
+  wellKnownRoot = pkgs.runCommand "lsck0-wellknown" { } ''
+    mkdir -p $out/.well-known
+    cp ${robotsTxt} $out/robots.txt
+    cp ${llmsTxt} $out/llms.txt
+    cp ${llmsTxt} $out/.well-known/llms.txt
+  '';
+
+  # public-domain prose for the Markov generator. Pinned by hash, so the build
+  # is reproducible and does not depend on Gutenberg staying up.
+  corpus = pkgs.fetchurl {
+    url = "https://www.gutenberg.org/cache/epub/2701/pg2701.txt";
+    hash = "sha256-kHQg22xLaMcOKYjNKtnIz3kThmegG2M3bRjdF/7xoYs=";
+  };
+  # iocaine wants a one-word-per-line list as well; derive it from the corpus
+  # instead of fetching a second file.
+  wordList = pkgs.runCommand "iocaine-words" { } ''
+    tr -cs '[:alpha:]' '\n' < ${corpus} | tr '[:upper:]' '[:lower:]' \
+      | ${pkgs.gnugrep}/bin/grep -E '^[a-z]{3,}$' | sort -u > $out
+  '';
+
+  iocaineConfig = pkgs.writeText "iocaine.toml" ''
+    bind = ["127.0.0.1:${toString cfg.botDefense.listenPort}"]
+
+    [sources]
+    markov = ["${corpus}"]
+    words = "${wordList}"
+  '';
+
+  labyrinthRule = "HeaderRegexp(`User-Agent`, `(?i).*(${lib.concatStringsSep "|" labyrinthUserAgents}).*`)";
+
+  botDefenseRouters = lib.optionalAttrs cfg.botDefense.enable {
+    # served on every host, ahead of everything else and with no auth in front:
+    # a crawler has to be able to read the file that tells it to go away.
+    wellknown-tls = {
+      rule = "Path(`/robots.txt`) || Path(`/llms.txt`) || Path(`/.well-known/llms.txt`)";
+      service = "wellknown";
+      entryPoints = [ "websecure" ];
+      priority = 10000;
+    };
+    labyrinth-tls = {
+      rule = labyrinthRule;
+      service = "labyrinth";
+      entryPoints = [ "websecure" ];
+      priority = 9000;
+    };
+  };
+
+  botDefenseServices = lib.optionalAttrs cfg.botDefense.enable {
+    wellknown.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString cfg.botDefense.wellKnownPort}"; }];
+    labyrinth.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString cfg.botDefense.listenPort}"; }];
+  };
+
   # default middleware chain prepended to every websecure router, in order:
   # bouncer first (drop known-bad IPs before any work), then per-IP limits, then
   # response-header hardening. Route-specific middlewares (auth, etc.) follow.
   defaultMiddlewares =
     lib.optional cfg.crowdsecBouncer.enable "crowdsec"
-    ++ [ "rate-limit" "inflight-limit" "secure-headers" ];
+    ++ [ "rate-limit" "inflight-limit" "retry-upstream" "secure-headers" ];
 
   # ensure every websecure route has tls.certResolver = "cloudflare" unless
   # overridden, and prepend the default middleware chain unless opted out.
@@ -91,17 +207,18 @@ let
       # routes opted out of AppSec use the WAF-free bouncer variant but keep
       # every other default middleware (IP bouncer, rate limits, headers).
       chain =
-        if cfg.crowdsecBouncer.enable
-           && cfg.crowdsecBouncer.appsec
-           && builtins.elem name cfg.crowdsecBouncer.noAppsecRouters
-        then map (m: if m == "crowdsec" then "crowdsec-noappsec" else m) defaultMiddlewares
-        else defaultMiddlewares;
+        (if cfg.crowdsecBouncer.enable
+            && cfg.crowdsecBouncer.appsec
+            && builtins.elem name cfg.crowdsecBouncer.noAppsecRouters
+         then map (m: if m == "crowdsec" then "crowdsec-noappsec" else m) defaultMiddlewares
+         else defaultMiddlewares)
+        ++ lib.optional (cfg.bodyLimit > 0 && builtins.elem name cfg.bodyLimitRouters) "body-limit";
     in
     if wantsDefaults then
       withTls // { middlewares = chain ++ (withTls.middlewares or []); }
     else
       withTls
-  ) cfg.routers;
+  ) (cfg.routers // botDefenseRouters);
 in {
   options.homelab.traefik = {
     enable = lib.mkEnableOption "Traefik reverse proxy with ACME and CrowdSec";
@@ -146,6 +263,44 @@ in {
       type = lib.types.listOf lib.types.str;
       default = [];
       description = "Router names that should NOT get the secure-headers middleware.";
+    };
+
+    bodyLimit = lib.mkOption {
+      type = lib.types.int;
+      default = 0;
+      description = ''
+        Maximum request body in bytes for the routers listed in
+        bodyLimitRouters. 0 disables the middleware entirely.
+
+        Traefik can only enforce a body cap by buffering the request, which
+        would stall large uploads, so this is never in the default chain: name
+        the routes that should carry it.
+      '';
+    };
+
+    bodyLimitRouters = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [];
+      description = "Router names that get the body-limit middleware.";
+    };
+
+    botDefense = {
+      enable = lib.mkEnableOption ''
+        robots.txt and llms.txt on every host, plus the iocaine labyrinth for
+        crawlers that ignore them: a matching user agent is served endless
+        generated prose instead of the real backend'';
+
+      listenPort = lib.mkOption {
+        type = lib.types.port;
+        default = 42069;
+        description = "Loopback port iocaine binds.";
+      };
+
+      wellKnownPort = lib.mkOption {
+        type = lib.types.port;
+        default = 8083;
+        description = "Loopback port of the nginx that serves robots.txt and llms.txt.";
+      };
     };
 
     crowdsecBouncer = {
@@ -207,6 +362,16 @@ in {
         });
         default = {};
         description = "Anubis bot-filter instances keyed by name.";
+      };
+
+      cookieDomain = lib.mkOption {
+        type = lib.types.str;
+        default = "lsck0.dev";
+        description = ''
+          Domain of the Anubis clearance cookie. Set to the apex so one solved
+          challenge covers every host; a per-host cookie re-challenges on every
+          subdomain and on sub-resource requests.
+        '';
       };
     };
 
@@ -342,12 +507,18 @@ in {
       staticConfigOptions = {
         log.level = cfg.logLevel;
         # JSON access log to a file: CrowdSec parses it, and promtail ships it to
-        # Loki. Keep Cf-Ipcountry so the Grafana world map can plot request
-        # origins (Cloudflare sets it on every proxied request).
+        # Loki. Cf-Ipcountry (Cloudflare sets it on every proxied request) drives
+        # the world map; User-Agent and Referer drive the "who is calling this"
+        # panels. ClientHost is in the log by default and carries the real client
+        # IP because the Cloudflare ranges are trusted on the entrypoint.
         accessLog = {
           filePath = "/var/log/traefik/access.log";
           format = "json";
-          fields.headers.names."Cf-Ipcountry" = "keep";
+          fields.headers.names = {
+            "Cf-Ipcountry" = "keep";
+            "User-Agent" = "keep";
+            "Referer" = "keep";
+          };
         };
         api.dashboard = true;
         # Prometheus metrics on a dedicated entrypoint (:8082), scraped by
@@ -400,11 +571,41 @@ in {
       dynamicConfigOptions = {
         http = {
           routers = routersWithTls;
-          services = cfg.services;
+          services = cfg.services // botDefenseServices;
           middlewares = cfg.middlewares // secureHeadersMiddleware // limitMiddlewares // bouncerMiddleware;
         }
           // lib.optionalAttrs (cfg.serversTransports != {}) { serversTransports = cfg.serversTransports; };
       } // lib.optionalAttrs (cfg.tcp != {}) { tcp = cfg.tcp; };
+    };
+
+    # robots.txt / llms.txt, and iocaine for the crawlers that ignore them.
+    services.nginx = lib.mkIf cfg.botDefense.enable {
+      enable = true;
+      recommendedGzipSettings = true;
+      virtualHosts."wellknown" = {
+        listen = [{ addr = "127.0.0.1"; port = cfg.botDefense.wellKnownPort; }];
+        locations."/".root = wellKnownRoot;
+      };
+    };
+
+    systemd.services.iocaine = lib.mkIf cfg.botDefense.enable {
+      description = "iocaine: generated nonsense served to AI scrapers";
+      wantedBy = [ "multi-user.target" ];
+      after = [ "network.target" ];
+      serviceConfig = {
+        ExecStart = "${pkgs.iocaine}/bin/iocaine --config-file ${iocaineConfig} start";
+        Restart = "always";
+        RestartSec = 10;
+        DynamicUser = true;
+        # it only reads two files out of the Nix store and answers on loopback.
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        PrivateDevices = true;
+        NoNewPrivileges = true;
+        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ];
+        SystemCallFilter = [ "@system-service" ];
+      };
     };
 
     # Anubis instances: one per browser-facing upstream, each bound to loopback.
@@ -419,7 +620,24 @@ in {
         # unique loopback metrics port per instance; Prometheus can scrape later.
         METRICS_BIND = "127.0.0.1:${toString (a.listenPort + 1000)}";
         METRICS_BIND_NETWORK = "tcp";
-        SERVE_ROBOTS_TXT = true;
+        # robots.txt is served centrally for every host (botDefense), and that
+        # router outranks the Anubis routes, so Anubis must not answer it too.
+        SERVE_ROBOTS_TXT = false;
+
+        # Anubis reaches this instance over loopback, so its socket peer is
+        # always 127.0.0.1. Reading the client from the forwarded headers is
+        # what makes the proof-of-work cookie stick to one visitor instead of
+        # re-challenging on every request. Traefik sets X-Real-Ip to the address
+        # it considers the client, and because the Cloudflare ranges are trusted
+        # on the websecure entrypoint (trustCloudflare) that is the real visitor
+        # and not the rotating edge address.
+        USE_REMOTE_ADDRESS = false;
+
+        # one clearance cookie for the whole domain: without this each host
+        # issues its own challenge, and sub-resources on another host (or a
+        # second tab) re-challenge, which is what made pages load without CSS.
+        COOKIE_DOMAIN = cfg.anubis.cookieDomain;
+        COOKIE_SECURE = true;
       };
     }) cfg.anubis.instances);
 
