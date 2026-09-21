@@ -61,12 +61,15 @@ wait_for_ssh() {
   echo "ERROR: SSH not reachable at $ip"; return 1
 }
 
-vm_wake() { # vmid: start the VM unless it is running
+# vmid: start the VM unless it is running. Returns 1 when it had to issue a
+# start, so the caller knows whether anything needs time to boot.
+vm_wake() {
   local st
   st=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu/$1/status/current" -H "$PVE_AUTH" | jq -r '.data.status // "unknown"' 2>/dev/null)
   [ "$st" = "running" ] && return 0
   echo ">>>   starting vm-$1 ($st)"
   curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$1/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
+  return 1
 }
 
 deploy_nixos() {
@@ -272,20 +275,24 @@ fi
 
 VM_IPS=$(jq -r 'to_entries[] | "\(.key)=\(.value.ip)"' "$INVENTORY")
 DISABLED_VMS=$(jq -r 'to_entries[] | select(.value.enabled == "false") | .key' "$INVENTORY")
-[ -n "$DISABLED_VMS" ] && echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')"
+[ -n "$DISABLED_VMS" ] && echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')" || true
 
-# on-demand VMs are normally stopped (woken by the socket proxy on request and
-# shut down when idle). They must be running to receive a deploy, so start them
-# now; the on-demand reaper powers them off again after their cooldown.
-ON_DEMAND_VMS=$(jq -r 'to_entries[] | select(.value.enabled == "onDemand") | .key' "$INVENTORY")
-if [ -n "$ON_DEMAND_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
-  echo ">>> Waking on-demand VMs for deploy: $(echo "$ON_DEMAND_VMS" | tr '\n' ' ')"
-  # start every stopped on-demand VM. sync always deploys ALL enabled VMs: the
-  # on-demand idle-stop is only for user request traffic, config must never drift.
-  for vmid in $ON_DEMAND_VMS; do vm_wake "$vmid"; done
-  # give cold VMs time to boot. The per-VM wait_for_ssh in the deploy loop does
-  # the real readiness gate with retries, so a slow boot still deploys.
-  sleep 45
+# Every VM that is not disabled has to be running to receive a deploy.
+#
+# on-demand VMs are stopped by design (woken by the socket proxy on request,
+# reaped when idle). An enabled = true VM should already be up, but nothing
+# guarantees it: terraform applies with -refresh=false and never reads real
+# power state, so a VM stopped out of band stays stopped and fails every sync
+# from then on. vm-204 sat off for a day that way, shut down by the reaper
+# before it was switched from onDemand to always-on.
+WAKE_VMS=$(jq -r 'to_entries[] | select(.value.enabled != "false") | .key' "$INVENTORY")
+if [ -n "$WAKE_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
+  WOKE=0
+  for vmid in $WAKE_VMS; do vm_wake "$vmid" || WOKE=1; done
+  # give cold VMs time to boot, but only when one was actually started. The
+  # per-VM wait_for_ssh in the deploy loop does the real readiness gate with
+  # retries, so a slow boot still deploys.
+  [ "$WOKE" = 1 ] && sleep 45 || true
 fi
 
 # push the SSH key to every running VM via the guest agent. After apply, so VMs
@@ -395,8 +402,8 @@ for f in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix; do
   done
 
   # the reaper may have stopped an on-demand VM again while the closures built
-  if [ -n "$PROXMOX_API_TOKEN_ID" ] && echo "$ON_DEMAND_VMS" | grep -qx "$vm_id"; then
-    vm_wake "$vm_id"
+  if [ -n "$PROXMOX_API_TOKEN_ID" ] && echo "$WAKE_VMS" | grep -qx "$vm_id"; then
+    vm_wake "$vm_id" || true
   fi
   deploy_nixos "$name" "$ip" &
   DEPLOY_PIDS+=("$!"); DEPLOY_NAMES+=("$name")
