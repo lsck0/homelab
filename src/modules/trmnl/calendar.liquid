@@ -1,0 +1,212 @@
+{%- comment -%}
+One TRMNL markup for all three calendar views. It branches on `view` in the
+payload, so every instance gets the same markup and only the Polling URL differs:
+
+  day        https://cal.lsck0.dev/<token>/day.json
+  tomorrow   https://cal.lsck0.dev/<token>/day-next.json
+  this week  https://cal.lsck0.dev/<token>/week.json
+  last week  https://cal.lsck0.dev/<token>/week-prev.json
+  next week  https://cal.lsck0.dev/<token>/week-next.json
+  month      https://cal.lsck0.dev/<token>/month.json
+  next month https://cal.lsck0.dev/<token>/month-next.json
+
+Exactly ONE url per instance: TRMNL merges several into one payload for one
+screen, which breaks the top-level keys and cannot give you separate screens.
+
+Overlapping events are positioned, not listed: calendar-sync packs each day's
+clashes into lanes and ships top/height/left/width percentages, because Liquid
+cannot do the interval arithmetic. Two things at once sit side by side.
+
+Monochrome e-ink has no colour to spend on categories, so the source is carried
+by the left border: solid = Work, dashed = University, dotted = Private, plus
+the label in small caps.
+
+Kept flat, one tag per line. Do not run "Fix indentation" on it.
+{%- endcomment -%}
+
+<style>
+/* TRMNL's own .layout centres and pads a single child, which rendered the day
+   view as a narrow column floating in the middle of the screen. This plugin
+   draws a full-bleed grid, so neutralise that wrapper. */
+.layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
+/* vh, not 100%: the renderer gives .layout no definite height, so a
+   percentage chain collapses to zero and every absolutely positioned
+   event disappears - which rendered the whole screen blank. */
+.cal { display: flex; flex-direction: column; height: calc(100vh - 58px); width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
+.cal-row { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
+
+/* ---- shared event chip ---------------------------------------------- */
+.ev { border-left: 6px solid #000; padding: 1px 0 2px 6px; overflow: hidden; background: #fff; }
+.ev-t { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ev-s { font-size: 19px; line-height: 1.12; overflow-wrap: anywhere; }
+.ev-m { font-size: 14px; line-height: 1.15; overflow-wrap: anywhere; }
+.ev-src { font-size: 13px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; }
+
+/* ---- time grid (day + week) ------------------------------------------
+   Three rows that share one column template, so the hour axis and the event
+   area are the same box. Previously the axis spanned the full height while
+   events were positioned inside a shorter body below the day header, so every
+   block was drawn at the wrong time. */
+.tg-row { display: flex; gap: 6px; width: 100%; }
+.tg-row--grid { flex: 1 1 auto; min-height: 0; }
+.tg-gutter { width: 54px; flex: 0 0 54px; }
+.tg-gutter--label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; align-self: center; }
+/* one line each, capped: "Flo Abwesend (Studium)" wrapped to five lines per
+   day and pushed the time grid down to a third of the screen. */
+.tg-row--allday { flex: 0 0 auto; max-height: 56px; overflow: hidden; }
+.tg-axis { position: relative; }
+.tg-h { position: absolute; right: 6px; font-size: 14px; font-weight: 700; transform: translateY(-50%); }
+
+.tg-hd { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; justify-content: space-between; padding: 3px 7px; border: 2px solid #000; }
+.tg-hd--today { background: #000; }
+.tg-hd--today .tg-dow, .tg-hd--today .tg-dom { color: #fff; }
+.tg-dow { font-size: 17px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
+.tg-dom { font-size: 26px; font-weight: 700; line-height: .9; }
+
+.tg-adcell { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 1px 3px; border-left: 2px solid #000; border-right: 2px solid #000; overflow: hidden; }
+.tg-adcell .ev { padding: 0 0 0 5px; }
+.tg-adcell .ev-s { display: block; font-size: 15px; line-height: 1.18; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-adcell .ev-m { font-size: 13px; }
+
+.tg-col { position: relative; flex: 1 1 0; min-width: 0; border: 2px solid #000; overflow: hidden; }
+.tg-col--weekend { background: repeating-linear-gradient(45deg,#fff,#fff 6px,#ededed 6px,#ededed 7px); }
+.tg-line { position: absolute; left: 0; right: 0; border-top: 1px solid #c8c8c8; }
+
+/* On a 24h axis a 30-minute event is ~13px tall, which fits the time and clips
+   everything else. Give every block room for its text even when that is taller
+   than its duration. */
+.tg-ev { position: absolute; box-sizing: border-box; border: 2px solid #000; border-left-width: 5px; padding: 0 2px; overflow: hidden; background: #fff; display: flex; flex-direction: column; justify-content: center; line-height: 1.04; }
+.tg-ev .ev-t { font-size: 12px; white-space: nowrap; flex: 0 0 auto; }
+/* do not let the title shrink away: the source line below it would win the
+   space and the block would show a time and a category but no event. */
+/* one line: three lines of text only fit a 90-minute block if the title
+   is one of them, and a wrapped title pushed the source out of the box. */
+.tg-ev .ev-s { font-size: 13px; flex: 0 0 auto; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+
+.tg-ev .ev-src { font-size: 10px; flex: 0 0 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* calendar-sync already grew every block to a readable minimum and pushed
+   the later ones down, so the height here is honest and no min-height is
+   needed; thin edges keep the one line inside it. */
+.tg-ev--compact { justify-content: flex-start; border-top-width: 1px; border-bottom-width: 1px; }
+.tg-ev--compact .ev-s { display: block; font-size: 11px; line-height: 1.18; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* the day view has one wide column, so put it all on a single readable row */
+.tg-ev--wide { flex-direction: row; align-items: center; gap: 10px; }
+.tg-ev--wide .ev-t { font-size: 19px; flex: 0 0 auto; }
+.tg-ev--wide .ev-s { font-size: 22px; -webkit-line-clamp: 1; flex: 1 1 auto; }
+.tg-ev--wide .ev-src { font-size: 14px; flex: 0 0 auto; margin-left: auto; }
+
+/* ---- month ----------------------------------------------------------- */
+.mo { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; min-height: 0; gap: 3px; box-sizing: border-box; }
+.mo-dows { display: flex; gap: 4px; }
+.mo-dow { flex: 1 1 0; font-size: 15px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; text-align: center; }
+.mo-wk { display: flex; gap: 4px; flex: 1 1 0; min-height: 0; }
+.mo-cell { flex: 1 1 0; min-width: 0; border: 2px solid #000; padding: 2px 4px; display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+.mo-cell--other { border-color: #b4b4b4; }
+.mo-cell--other .mo-n { color: #b4b4b4; }
+.mo-cell--weekend { background: repeating-linear-gradient(45deg,#fff,#fff 6px,#ededed 6px,#ededed 7px); }
+.mo-n { font-size: 17px; font-weight: 700; line-height: 1; }
+.mo-cell--today .mo-n { background: #000; color: #fff; padding: 1px 5px; align-self: flex-start; }
+.mo-e { font-size: 13px; line-height: 1.18; border-left: 4px solid #000; padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mo-more { font-size: 12px; font-weight: 700; }
+</style>
+
+{% if view == 'month' %}
+<div class="layout">
+<div class="cal">
+<div class="mo">
+<div class="mo-dows">
+<span class="mo-dow">Mon</span><span class="mo-dow">Tue</span><span class="mo-dow">Wed</span><span class="mo-dow">Thu</span><span class="mo-dow">Fri</span><span class="mo-dow">Sat</span><span class="mo-dow">Sun</span>
+</div>
+{% for wk in weeks %}
+<div class="mo-wk">
+{% for d in wk.days %}
+<div class="mo-cell{% if d.is_today %} mo-cell--today{% endif %}{% if d.other_month %} mo-cell--other{% endif %}{% if d.is_weekend %} mo-cell--weekend{% endif %}">
+<span class="mo-n">{{ d.day }}</span>
+{% for ev in d.events %}
+<div class="mo-e" style="border-left-style:{{ ev.border_style }}">{% unless ev.all_day %}<b>{{ ev.time }}</b> {% endunless %}{{ ev.summary }}</div>
+{% endfor %}
+{% if d.more > 0 %}<div class="mo-more">+{{ d.more }} more</div>{% endif %}
+</div>
+{% endfor %}
+</div>
+{% endfor %}
+</div>
+</div>
+</div>
+<div class="title_bar">
+<span class="title">{{ label }}</span>
+<span class="instance">{{ total_events }} {% if total_events == 1 %}event{% else %}events{% endif %} &middot; Work solid &middot; University dashed &middot; Private dotted</span>
+</div>
+
+{% elsif view == 'day' or view == 'week' %}
+{% assign is_day = false %}{% assign wide = '' %}{% if view == 'day' %}{% assign is_day = true %}{% assign wide = ' tg-ev--wide' %}{% endif %}
+<div class="layout">
+<div class="cal">
+
+<div class="tg-row tg-row--head">
+<div class="tg-gutter"></div>
+{% for d in days %}
+<div class="tg-hd{% if d.is_today %} tg-hd--today{% endif %}"><span class="tg-dow">{{ d.weekday }}</span><span class="tg-dom">{{ d.day }}</span></div>
+{% endfor %}
+</div>
+
+{% if has_all_day %}
+<div class="tg-row tg-row--allday">
+<div class="tg-gutter tg-gutter--label">all day</div>
+{% for d in days %}
+<div class="tg-adcell">
+{% for ev in d.all_day_events %}
+<div class="ev" style="border-left-style:{{ ev.border_style }}"><span class="ev-s">{{ ev.summary }}</span></div>
+{% endfor %}
+{% if d.all_day_more > 0 %}<div class="ev-m"><b>+{{ d.all_day_more }} more</b></div>{% endif %}
+</div>
+{% endfor %}
+</div>
+{% endif %}
+
+<div class="tg-row tg-row--grid">
+<div class="tg-gutter tg-axis">
+{% for h in grid.hours %}
+{% if view == 'day' or h.major %}<div class="tg-h" style="top:{{ h.top_pct }}%">{{ h.label }}</div>{% endif %}
+{% endfor %}
+</div>
+{% for d in days %}
+<div class="tg-col{% if d.is_today %} tg-col--today{% endif %}{% if d.weekday == 'Sat' or d.weekday == 'Sun' %} tg-col--weekend{% endif %}">
+{% for h in grid.hours %}
+<div class="tg-line" style="top:{{ h.top_pct }}%"></div>
+{% endfor %}
+{% for ev in d.timed_events %}
+<div class="tg-ev{{ wide }}{% unless is_day %}{% if ev.compact %} tg-ev--compact{% endif %}{% endunless %}" style="border-left-style:{{ ev.border_style }};top:{{ ev.top_pct }}%;height:{{ ev.height_pct }}%;left:{{ ev.left_pct }}%;width:{{ ev.width_pct }}%">
+{% if is_day %}
+<div class="ev-t">{{ ev.time }}&ndash;{{ ev.end_time }}</div>
+<div class="ev-s">{{ ev.summary }}</div>
+<div class="ev-m ev-src">{{ ev.source_label }}</div>
+{% elsif ev.compact %}
+<div class="ev-s"><b>{{ ev.time }}</b> {{ ev.summary }}</div>
+{% else %}
+<div class="ev-t">{{ ev.time }}</div>
+<div class="ev-s">{{ ev.summary }}</div>
+{% if ev.tall %}<div class="ev-m ev-src">{{ ev.source_label }}</div>{% endif %}
+{% endif %}
+</div>
+{% endfor %}
+</div>
+{% endfor %}
+</div>
+
+</div>
+</div>
+<div class="title_bar">
+<span class="title">{% if view == 'day' %}{{ weekday }}{% elsif offset == 0 %}This week{% elsif offset == -1 %}Last week{% elsif offset == 1 %}Next week{% else %}Week {{ week_number }}{% endif %}</span>
+<span class="instance">{{ label }} &middot; {{ total_events }} {% if total_events == 1 %}event{% else %}events{% endif %}{% if view == 'week' %} &middot; Work solid &middot; Uni dashed &middot; Private dotted{% elsif max_overlap > 1 %} &middot; up to {{ max_overlap }} at once{% endif %}</span>
+</div>
+
+{% else %}
+<div class="layout">
+<div class="markdown">
+<span class="title">Calendar: no data</span>
+<div class="content">No `view` in the payload. Check the plugin's Polling URL points at one of day.json / week.json / month.json on cal.lsck0.dev.</div>
+</div>
+</div>
+<div class="title_bar"><span class="title">Calendar</span><span class="instance">waiting for data</span></div>
+{% endif %}

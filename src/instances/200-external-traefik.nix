@@ -91,6 +91,19 @@ in {
     # crawl anyway, and costs them rather than us.
     botDefense.enable = true;
 
+    # Cloudflare is only a chokepoint if the origin turns away everyone else.
+    # Exempt exactly the hosts whose DNS record is not proxied (`proxied` in
+    # routes.nix): nothing forwards those through the edge, so restricting them
+    # would take them off the internet. robots.txt/llms.txt and the labyrinth
+    # stay open too - a crawler has to be able to read the file telling it to go
+    # away, and one that ignores it should still reach the maze.
+    cloudflareOnly.enable = true;
+    cloudflareOnly.exemptRouters =
+      map (name: "${name}-tls") (lib.attrNames (lib.filterAttrs (_: r: !(r.proxied or true)) routes))
+      ++ [ "calendar-tls" "wellknown-tls" "labyrinth-tls" ]
+      # already restricted to private ranges by the internal-only middleware.
+      ++ map (name: "${name}-block") (lib.attrNames blockedInternal);
+
     # cap request bodies on the routes that only ever take small posts. Left
     # out on purpose: share and privatebin exist to receive files, and
     # internal-relay carries Nextcloud and Paperless uploads. Traefik has to

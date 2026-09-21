@@ -144,20 +144,36 @@ in {
     '';
   };
 
+  # the NixOS nginx unit runs with ProtectSystem=strict, so the whole filesystem
+  # is read-only to it apart from an allowlist. Without this the DAV PUT fails
+  # with "open() ... failed (30: Read-only file system)" and returns 500.
+  systemd.services.nginx.serviceConfig.ReadWritePaths = [ incomingDir ];
+
   # promote a pushed file to uploads/ as soon as it parses, then re-render so
   # the screen reflects the push within seconds instead of at the next timer.
-  systemd.paths.calendar-upload = {
-    wantedBy = [ "multi-user.target" ];
-    pathConfig = {
-      DirectoryNotEmpty = "${incomingDir}";
-      MakeDirectory = false;
+  # A timer, not a systemd.path: the PUT lands in incoming/<token>/, and
+  # DirectoryNotEmpty on incoming/ is satisfied permanently by that token
+  # directory, so it never fires again after the first boot. Watching the token
+  # directory itself is not possible either, since its name is a secret and unit
+  # files are built into the world-readable Nix store. A minute of latency on a
+  # calendar push is not worth more machinery than this.
+  systemd.timers.calendar-upload = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "1min";
+      OnUnitActiveSec = "1min";
+      AccuracySec = "10s";
     };
   };
   systemd.services.calendar-upload = {
     description = "Validate a pushed .ics and re-render the calendar";
-    path = [ promote pkgs.coreutils pkgs.findutils ];
+    path = [ promote pkgs.coreutils pkgs.findutils pkgs.systemd ];
     serviceConfig = { Type = "oneshot"; };
     script = ''
+      # nothing pushed since the last run: do not re-render, or the timer would
+      # refetch every remote calendar once a minute instead of every 15.
+      [ -n "$(find ${incomingDir} -mindepth 2 -maxdepth 2 -name '*.ics' -print -quit)" ] || exit 0
+
       # the PUT lands in the token directory; collect from any of them.
       find ${incomingDir} -mindepth 2 -maxdepth 2 -name '*.ics' -exec mv -t ${incomingDir} {} + 2>/dev/null || true
       calendar-promote ${incomingDir} ${uploadDir} || true
@@ -200,6 +216,10 @@ in {
       # whose parent directory is missing, so a wrong token cannot write.
       locations."~ ^/upload/[^/]+/(${lib.concatStringsSep "|" uploadNames})\\.ics$" = {
         root = incomingDir;
+        # must be emitted before `~ \.ics$`: nginx takes the first matching
+        # regex location, and that one also matches /upload/<token>/work.ics,
+        # which answered a PUT with 405 from the static file handler.
+        priority = 100;
         extraConfig = ''
           limit_except PUT { deny all; }
           dav_methods PUT;

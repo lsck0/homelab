@@ -5,14 +5,34 @@ let
   # hosts served by internal Traefik that are not a VM route.
   internalExtraHosts = [ "traefik" "proxmox" ];
 
-  # Cloudflare-PROXIED A records (per host: free plan can't proxy a wildcard):
-  # resolve to the edge, so LAN + remote both reach WAN:443 -> external Traefik
-  # with no hairpin and no per-device DNS. Internal hosts are relayed to
-  # internal Traefik and gated by Authelia.
-  proxiedHosts = hostsOf "external" ++ hostsOf "internal" ++ internalExtraHosts;
-  # unproxied (raw WAN IP), L4 services CF can't proxy, plus a DNS-only
-  # wildcard fallback kept fresh so no unlisted name goes stale.
-  rawHosts = [ "wg" "mc" "tor" "*" ];
+  # Whether a host is Cloudflare-PROXIED comes from `proxied` in routes.nix, so
+  # the ingress policy lives next to the route rather than in a list here.
+  #
+  #   proxied   Authelia stands in front, so the edge's DDoS absorption is worth
+  #             having and the rotating edge address costs nothing: Traefik only
+  #             needs the Host header to route, and Authelia only needs a cookie.
+  #   DNS-only  public by design and defended by Anubis. Behind the edge Anubis
+  #             sees a different Cloudflare address on every request and issues a
+  #             fresh challenge each time, so the proof-of-work never sticks.
+  #             Going direct is what makes it work at all.
+  #
+  # Concealing the origin is not a consideration either way: the DNS-only
+  # wildcard below already answers every unlisted name with the WAN address.
+  routeHosts = side: lib.mapAttrsToList (_: r: {
+    inherit (r) host;
+    proxied = r.proxied or true;
+  }) routes.${side};
+  allRouteHosts = routeHosts "internal" ++ routeHosts "external"
+    ++ map (h: { host = h; proxied = true; }) internalExtraHosts;
+
+  proxiedHosts = lib.unique (map (r: r.host) (lib.filter (r: r.proxied) allRouteHosts));
+  # unproxied (raw WAN IP): the Anubis-fronted routes, the L4 services Cloudflare
+  # cannot proxy, plus a DNS-only wildcard kept fresh so no unlisted name goes
+  # stale.
+  rawHosts = lib.unique (
+    map (r: r.host) (lib.filter (r: !r.proxied) allRouteHosts)
+    ++ [ "wg" "mc" "tor" "*" ]
+  );
   # domain:proxied entries the DDNS loop consumes.
   ddnsDomains = lib.concatStringsSep " " (
     (map (h: "${h}.lsck0.dev:true") proxiedHosts)
