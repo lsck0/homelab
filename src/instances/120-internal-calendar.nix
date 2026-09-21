@@ -129,15 +129,18 @@ in {
       TOKEN=$(cat ${config.sops.secrets.calendar-upload-token.path})
       [ -n "$TOKEN" ] || { echo "calendar-upload-token is empty"; exit 1; }
       DIR="${incomingDir}/$TOKEN"
-      mkdir -p "$DIR" ${uploadDir}
+      mkdir -p "$DIR" "${incomingDir}/.tmp" ${uploadDir}
       # drop stale token directories after a rotation.
       for dir in ${incomingDir}/*; do
         [ -d "$dir" ] || continue
         [ "$dir" = "$DIR" ] || rm -rf "$dir"
       done
       chown -R nginx:nginx ${incomingDir}
+      chown nginx:nginx ${uploadDir}
       chmod 700 ${incomingDir}
       chmod 700 "$DIR"
+      # calendar-sync (root) reads the promoted files back as file:// sources.
+      chmod 755 ${uploadDir}
     '';
   };
 
@@ -211,11 +214,14 @@ in {
     };
   };
 
+  # Only the root-owned directory is a tmpfiles rule. The nginx-owned ones are
+  # created by calendar-upload-dir below instead: /var/lib/calendar is an NFS
+  # mount whose root is owned by `nobody`, and systemd-tmpfiles refuses to
+  # descend into a child with a different owner -- "Detected unsafe path
+  # transition ... (owned by nobody) -> ... (owned by nginx)", which fails the
+  # whole nas-tmpfiles unit and with it the deploy.
   systemd.tmpfiles.rules = [
     "d ${publicDir} 0755 root root -"
-    "d ${incomingDir} 0700 nginx nginx -"
-    "d ${incomingDir}/.tmp 0700 nginx nginx -"
-    "d ${uploadDir} 0755 nginx nginx -"
   ];
 
   networking.firewall.allowedTCPPorts = [ 80 ];
