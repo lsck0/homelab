@@ -104,7 +104,10 @@ locals {
       type    = "internal",
     }
     "116" = { # CI runners for GitHub repos (ephemeral, one systemd unit per replica)
-      enabled = true,
+      # off until the github-runner-token secret is filled: without it every
+      # runner unit dies on start and sync.sh exits 1 for the whole lab.
+      #   sops set src/secrets.json '["github-runner-token"]' '"ghp_..."'
+      enabled = false,
       name    = "116-internal-github-runner",
       type    = "internal",
       memory  = 4096,
