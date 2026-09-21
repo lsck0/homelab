@@ -271,6 +271,20 @@ in {
 
       # lldap's DN layout: users under ou=people, groups under ou=groups. The
       # admin filter promotes members of the `admins` group to Jellyfin admins.
+      # Jellyfin builds the OIDC redirect_uri from the request scheme, and it
+      # only believes X-Forwarded-Proto from a proxy it knows. Without this it
+      # sent redirect_uri=http://... and Authelia rejected it as unregistered.
+      NET=$(api $J/System/Configuration/network | jq -c '
+        .KnownProxies = ["10.100.0.100"]
+        | .PublishedServerUriBySubnet = ["all=https://jellyfin.lsck0.dev"]')
+      if [ "$NET" != "$(api $J/System/Configuration/network | jq -c .)" ]; then
+        api -X POST $J/System/Configuration/network -d "$NET" >/dev/null
+        systemctl restart podman-jellyfin.service
+        ${retry} 90 2 curl -sf $J/health
+        TOKEN=$(login)
+        echo "Jellyfin now trusts the internal Traefik as a proxy"
+      fi
+
       api -X POST "$J/Plugins/$ID/Configuration" -d "$(jq -cn \
         --arg pass "$(cat ${config.sops.secrets.lldap-admin-password.path})" '{
         LdapServer: "10.100.0.102",
@@ -293,6 +307,95 @@ in {
       }')" >/dev/null \
         && echo "Jellyfin authenticates against lldap" \
         || echo "writing the LDAP plugin configuration failed; configure it in the Jellyfin UI"
+    '';
+  };
+
+  # Second identity path, for browsers only: jellyfin-plugin-sso turns an
+  # existing Authelia session into a Jellyfin session with no password prompt.
+  # The internal Traefik sends the bare host straight at /sso/OID/start/authelia
+  # (loginRedirect in modules/routes.nix), so a signed-in browser never sees a
+  # Jellyfin login screen at all.
+  #
+  # LDAP-Auth above stays: TV and phone apps cannot run a browser OIDC flow, so
+  # they keep signing in with the same lldap credential.
+  #
+  # The plugin is NOT in the official Jellyfin catalogue, so its own manifest is
+  # added as a second repository. That is third-party code in the login path;
+  # it is pinned to the upstream release manifest and nothing else uses it.
+  sops.secrets.jellyfin-oidc-secret = {};
+  systemd.services.jellyfin-sso = {
+    description = "Install and configure jellyfin-plugin-sso against Authelia";
+    after = [ "jellyfin-ldap.service" ];
+    requires = [ "jellyfin-setup.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 120; };
+    script = ''
+      J=http://127.0.0.1:80
+      ${retry} 90 2 curl -sf $J/health
+
+      HDR='Authorization: MediaBrowser Client="homelab", Device="setup", DeviceId="homelab-setup", Version="1.0"'
+      login() {
+        curl -sf -X POST $J/Users/AuthenticateByName -H "Content-Type: application/json" -H "$HDR" \
+          -d "$(jq -cn --arg p "$(cat ${T}/jellyfin-admin-pass.token)" '{Username:"admin", Pw:$p}')" \
+          | jq -r '.AccessToken // empty'
+      }
+      TOKEN=$(login)
+      [ -n "$TOKEN" ] || { echo "Jellyfin admin login failed"; exit 1; }
+      api() { curl -sf -H "Authorization: MediaBrowser Token=\"$TOKEN\"" -H "Content-Type: application/json" "$@"; }
+
+      MANIFEST=https://raw.githubusercontent.com/9p4/jellyfin-plugin-sso/manifest-release/manifest.json
+      if ! api $J/Repositories | jq -e --arg u "$MANIFEST" 'any(.[]; .Url == $u)' >/dev/null; then
+        REPOS=$(api $J/Repositories | jq -c --arg u "$MANIFEST" '. + [{Name:"jellyfin-plugin-sso", Url:$u, Enabled:true}]')
+        api -X POST $J/Repositories -d "$REPOS" >/dev/null && echo "SSO plugin repository added"
+      fi
+
+      plugin_id() { api $J/Plugins | jq -r '[.[] | select(.Name | test("SSO"; "i"))][0].Id // empty'; }
+      ID=$(plugin_id)
+      if [ -z "$ID" ]; then
+        echo "installing the SSO Authentication plugin"
+        api -X POST "$J/Packages/Installed/SSO%20Authentication" >/dev/null \
+          || { echo "plugin install request failed; Jellyfin keeps its own login"; exit 1; }
+        systemctl restart podman-jellyfin.service
+        ${retry} 90 2 curl -sf $J/health
+        TOKEN=$(login)
+        for _ in $(seq 1 30); do ID=$(plugin_id); [ -n "$ID" ] && break; sleep 5; done
+        # exit non-zero, unlike the LDAP unit used to: a slow install then gets
+        # retried instead of leaving the feature silently off forever.
+        [ -n "$ID" ] || { echo "SSO plugin did not appear after restart"; exit 1; }
+      fi
+
+      api -X POST "$J/Plugins/$ID/Configuration" -d "$(jq -cn \
+        --arg secret "$(cat ${config.sops.secrets.jellyfin-oidc-secret.path})" '{
+        SamlConfigs: {},
+        OidConfigs: {
+          authelia: {
+            OidEndpoint: "https://auth.lsck0.dev",
+            OidClientId: "jellyfin",
+            OidSecret: $secret,
+            Enabled: true,
+            EnableAuthorization: true,
+            EnableAllFolders: true,
+            EnabledFolders: [],
+            AdminRoles: ["admins"],
+            Roles: ["media"],
+            EnableFolderRoles: false,
+            RoleClaim: "groups",
+            OidScopes: ["groups"],
+            CanonicalLinks: {},
+            DisableHttps: false,
+            # the plugin defaults to Pushed Authorization Requests, which this
+            # Authelia client is not registered for:
+            #   Error preparing login: Unauthorized - Failed to push
+            #   authorization parameters
+            DisablePushedAuthorization: true,
+            DoNotValidateEndpoints: false,
+            DoNotValidateIssuerName: false
+          }
+        }
+      }')" >/dev/null \
+        && echo "Jellyfin SSO points at Authelia" \
+        || { echo "writing the SSO plugin configuration failed"; exit 1; }
     '';
   };
 
