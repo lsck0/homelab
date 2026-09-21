@@ -67,6 +67,8 @@ let
       id = "kavita";
       name = "Kavita";
       secretName = "kavita-oidc-secret";
+      # ASP.NET Core's OpenIdConnectHandler sends the secret in the body.
+      tokenAuthMethod = "client_secret_post";
       redirectUris = [ "https://read.lsck0.dev/signin-oidc" ];
     }
   ];
@@ -83,7 +85,13 @@ let
     "        authorization_policy: two_factor"
     "        require_pkce: false"
     "        consent_mode: implicit"
-    "        token_endpoint_auth_method: client_secret_post"
+    # client_secret_basic is the OAuth 2.0 default and what Vaultwarden,
+    # Nextcloud's user_oidc and Forgejo all send. Authelia rejects the request
+    # outright when the registration names a different method:
+    #   invalid_client ... the OAuth 2.0 client registration does not allow
+    #   this method
+    # Overridable per client because .NET (Kavita) posts the secret instead.
+    "        token_endpoint_auth_method: ${c.tokenAuthMethod or "client_secret_basic"}"
     "        redirect_uris:"
   ] ++ map (u: "          - ${u}") c.redirectUris ++ [
     "        scopes:"

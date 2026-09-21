@@ -78,7 +78,11 @@
 
   systemd.tmpfiles.rules = [
     "d /var/lib/firefly 0750 1000 1000 -"
-    "d /var/lib/firefly/db 0750 999 999 -"
+    # 70, not 999: postgres:*-alpine runs as uid 70. With 999 the container
+    # owned the directory but none of the files inside it, and every query
+    # failed with
+    #   could not open file "global/pg_filenode.map": Permission denied
+    "d /var/lib/firefly/db 0750 70 70 -"
     "d /var/lib/firefly/upload 0750 1000 1000 -"
   ];
 

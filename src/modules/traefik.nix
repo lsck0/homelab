@@ -680,8 +680,23 @@ in {
         # second tab) re-challenge, which is what made pages load without CSS.
         COOKIE_DOMAIN = cfg.anubis.cookieDomain;
         COOKIE_SECURE = true;
+
+        # Every instance signs the clearance cookie with the SAME key. Anubis
+        # generates a random one per process when this is unset, and with one
+        # cookie shared across the whole domain (above) each instance then
+        # rejected the cookie the previous one issued and re-challenged,
+        # clobbering it in turn: hello.lsck0.dev and share.lsck0.dev sat in an
+        # endless redirect loop. A restart had the same effect on a single host.
+        ED25519_PRIVATE_KEY_HEX_FILE = config.sops.secrets.anubis-ed25519-key.path;
       };
     }) cfg.anubis.instances);
+
+    # readable by the anubis group: the instances run as DynamicUser but share
+    # that static group.
+    sops.secrets.anubis-ed25519-key = {
+      group = "anubis";
+      mode = "0440";
+    };
 
     # 8082 = Prometheus metrics, scraped by vm-104. Not port-forwarded, so it
     # stays on the LAN/DMZ; the internet never reaches it.
