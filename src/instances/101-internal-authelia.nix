@@ -45,6 +45,9 @@ let
       id = "forgejo";
       name = "Forgejo";
       secretName = "forgejo-oidc-secret";
+      # Forgejo's go-oauth2 client posts the secret, verified against
+      # 7.0.16+gitea-1.21.11.
+      tokenAuthMethod = "client_secret_post";
       # Forgejo derives the callback path from the auth source name. The source
       # is called "authelia" now; the old "authentik" path stays registered so
       # accounts linked to the previous source still sign in.

@@ -56,6 +56,13 @@ in {
 
   homelab.traefik = {
     enable = true;
+
+    # the relay re-applies its own headers on top of the internal Traefik's, so
+    # the SAMEORIGIN exemption for jellyfin-plugin-sso has to be set here too.
+    # internal-relay is a single catch-all router for every internal host, so
+    # jellyfin gets its own higher-priority copy below rather than loosening
+    # X-Frame-Options for all of them.
+    sameOriginFrameRouters = [ "jellyfin-relay" ];
     # behind Cloudflare: take the real client IP from X-Forwarded-For so Anubis
     # and CrowdSec see a stable client, not the rotating edge IP.
     trustCloudflare = true;
@@ -131,6 +138,19 @@ in {
         service = "internal-relay";
         entryPoints = [ "websecure" ];
         priority = 1;
+        tls.certResolver = "cloudflare";
+        tls.domains = [{ main = "lsck0.dev"; sans = [ "*.lsck0.dev" ]; }];
+      };
+
+      # same upstream as internal-relay, but outranks it so the SAMEORIGIN
+      # header applies to Jellyfin alone. Its SSO plugin finishes the login in
+      # a hidden same-origin iframe that X-Frame-Options: DENY blocks, which
+      # leaves the browser sitting on "Logging in..." for ever.
+      jellyfin-relay = {
+        rule = "Host(`jellyfin.lsck0.dev`)";
+        service = "internal-relay";
+        entryPoints = [ "websecure" ];
+        priority = 10;
         tls.certResolver = "cloudflare";
         tls.domains = [{ main = "lsck0.dev"; sans = [ "*.lsck0.dev" ]; }];
       };
