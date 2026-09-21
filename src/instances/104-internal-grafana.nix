@@ -1,4 +1,4 @@
-{ config, lib, pkgs, inventory, nasMount, ... }:
+{ config, lib, inventory, nasMount, ... }:
 let
   # only real VMs: down now, up sometime in the last 6h (the static /24 scrape
   # otherwise flags ~480 phantom IPs). On-demand VMs (instances.tf) sleep by
@@ -35,7 +35,34 @@ let
   # needs telegram-bot-token + telegram-chat-id in sops (src/scripts/hermes-secrets.sh).
   enableTelegram = true;
 
-  # alert delivery: ntfy always, the Hermes Telegram bot with enableTelegram.
+  # ntfy topic for alerts. ntfy (vm-203) requires a login now, so Grafana
+  # publishes as the `grafana` user; subscribe the phone with the `luca`
+  # account. Change the topic name to rotate it.
+  ntfyAlertTopic = "homelab-alerts";
+
+  # ntfy renders these Go templates against Grafana's webhook JSON body
+  # (?template=yes), so the phone shows a readable line instead of raw JSON.
+  ntfyQuery = lib.concatStringsSep "&" [
+    "template=yes"
+    "title=${lib.escapeURL "{{if eq .status \"firing\"}}FIRING{{else}}RESOLVED{{end}}: {{.commonLabels.alertname}}"}"
+    "message=${lib.escapeURL "{{range .alerts}}{{.labels.vm}}{{if .annotations.summary}} - {{.annotations.summary}}{{end}}\n{{end}}"}"
+    "tags=${lib.escapeURL "rotating_light"}"
+  ];
+
+  # Telegram message: one compact HTML block per alert instead of Grafana's
+  # default wall of text. Firing and resolved are visually distinct.
+  telegramMessage = ''
+    {{ if eq .Status "firing" }}🔴 <b>FIRING</b>{{ else }}✅ <b>RESOLVED</b>{{ end }} · <b>{{ .CommonLabels.alertname }}</b>
+    {{ range .Alerts }}
+    {{ if .Labels.vm }}<code>{{ .Labels.vm }}</code>{{ else if .Labels.instance }}<code>{{ .Labels.instance }}</code>{{ end }}{{ if .Labels.severity }} [{{ .Labels.severity }}]{{ end }}
+    {{ if .Annotations.summary }}{{ .Annotations.summary }}{{ end }}
+    {{ if .Annotations.description }}<i>{{ .Annotations.description }}</i>{{ end }}
+    {{ end }}
+    <a href="https://grafana.lsck0.dev/alerting/list">open Grafana</a>'';
+
+  # single delivery path: Grafana unified alerting only. Prometheus' own
+  # Alertmanager used to evaluate the same InstanceDown rule and notify the
+  # same ntfy topic and Telegram chat, so every alert arrived twice.
   contactPoints = {
     apiVersion = 1;
     contactPoints = [{
@@ -45,8 +72,11 @@ let
         uid = "ntfy_cp";
         type = "webhook";
         settings = {
-          url = "https://ntfy.lsck0.dev/${ntfyAlertTopic}";
+          url = "https://ntfy.lsck0.dev/${ntfyAlertTopic}?${ntfyQuery}";
           httpMethod = "POST";
+          # ntfy denies anonymous publishing now (see 203-external-ntfy.nix).
+          username = "grafana";
+          password = config.sops.placeholder.ntfy-grafana-password;
         };
         disableResolveMessage = false;
       }] ++ lib.optional enableTelegram {
@@ -55,33 +85,28 @@ let
         settings = {
           bottoken = config.sops.placeholder.telegram-bot-token;
           chatid = config.sops.placeholder.telegram-chat-id;
+          parse_mode = "HTML";
+          message = telegramMessage;
+          disable_web_page_preview = true;
         };
         disableResolveMessage = false;
       };
     }];
   };
-
-  # ntfy topic for alerts: public but unguessable. Subscribe the phone to
-  # https://ntfy.lsck0.dev/<this>. Change it to rotate.
-  ntfyAlertTopic = "lsck0-homelab-a7f3k9d2xq";
 in {
   networking.hostName = "vm-104";
 
-  # bot token + chat id come from sops: rendered into Grafana's contact point
-  # file and Alertmanager's environment at activation, never into the Nix store.
-  sops.secrets = lib.mkIf enableTelegram {
+  # bot token, chat id and the ntfy publisher password come from sops: rendered
+  # into Grafana's contact point file at activation, never into the Nix store.
+  sops.secrets = {
+    ntfy-grafana-password = {};
+  } // lib.optionalAttrs enableTelegram {
     telegram-bot-token = {};
     telegram-chat-id = {};
   };
-  sops.templates = lib.mkIf enableTelegram {
-    "grafana-contact-points.yaml" = {
-      owner = "grafana";
-      content = builtins.toJSON contactPoints;
-    };
-    "alertmanager-telegram.env".content = ''
-      TELEGRAM_BOT_TOKEN=${config.sops.placeholder.telegram-bot-token}
-      TELEGRAM_CHAT_ID=${config.sops.placeholder.telegram-chat-id}
-    '';
+  sops.templates."grafana-contact-points.yaml" = {
+    owner = "grafana";
+    content = builtins.toJSON contactPoints;
   };
 
   fileSystems = nasMount "/var/lib/grafana" "grafana"
@@ -145,6 +170,10 @@ in {
   systemd.tmpfiles.rules = [
     "d /var/lib/loki 0750 loki loki -"
     "d /var/lib/tempo 0750 tempo tempo -"
+    # /var/lib/grafana is a 0777 NFS share, so the database inherits 0644 and
+    # Grafana logs "SQLite database file has broader permissions than it should"
+    # on every start. Tighten the file itself (z = only if it exists).
+    "z /var/lib/grafana/data/grafana.db 0640 grafana grafana -"
   ];
 
   services.prometheus = {
@@ -172,48 +201,9 @@ in {
         }];
       }
     ];
-    # Prometheus-native alerting path (in addition to Grafana unified alerting).
-    alertmanagers = [{ static_configs = [{ targets = [ "127.0.0.1:9093" ]; }]; }];
-    rules = [ (builtins.toJSON {
-      groups = [{
-        name = "homelab";
-        rules = [{
-          alert = "InstanceDown";
-          expr = instanceDownExpr;
-          for = "5m";
-          labels.severity = "critical";
-          annotations.summary = "{{ $labels.instance }} is down";
-        }];
-      }];
-    }) ];
-  };
-
-  # Alertmanager: routes Prometheus alerts to ntfy (vm-203, public) and, with
-  # enableTelegram, to the Hermes bot. configText (not `configuration`) because
-  # chat_id must stay an unquoted integer after envsubst fills in the secrets.
-  services.prometheus.alertmanager = {
-    enable = true;
-    port = 9093;
-    # the file only becomes valid after envsubst at start.
-    checkConfig = !enableTelegram;
-    environmentFile = lib.mkIf enableTelegram config.sops.templates."alertmanager-telegram.env".path;
-    configText = lib.concatStringsSep "\n" ([
-      "route:"
-      "  receiver: homelab"
-      "  group_by: [alertname]"
-      "  group_wait: 30s"
-      "  group_interval: 5m"
-      "  repeat_interval: 4h"
-      "receivers:"
-      "  - name: homelab"
-      "    webhook_configs:"
-      "      - url: https://ntfy.lsck0.dev/${ntfyAlertTopic}"
-    ] ++ lib.optionals enableTelegram [
-      "    telegram_configs:"
-      "      - bot_token: $TELEGRAM_BOT_TOKEN"
-      "        chat_id: $TELEGRAM_CHAT_ID"
-      "        send_resolved: true"
-    ]) + "\n";
+    # no Prometheus-native alerting path: Grafana unified alerting below owns
+    # every rule and every notification. Running both meant the same
+    # InstanceDown rule notified the same ntfy topic and Telegram chat twice.
   };
 
   services.grafana = {
@@ -281,17 +271,15 @@ in {
           }
         ];
       };
-      # alerting is always on and delivers to ntfy (vm-203, public, works when
-      # the LAN is down) with no credentials needed: subscribe the phone app to
-      # https://ntfy.lsck0.dev/${ntfyAlertTopic}. Telegram is added as a second
-      # channel once its token is filled (enableTelegram).
+      # alerting is always on and delivers to ntfy (vm-203, public, so it still
+      # works when the LAN is down): subscribe the phone app to
+      # https://ntfy.lsck0.dev/${ntfyAlertTopic} with the `luca` ntfy account.
+      # Telegram is the second channel (enableTelegram).
       alerting = {
         # rendered by sops at activation with the secrets filled in. Not via
         # $__env{}: Grafana re-parses substituted values, turning the numeric
         # Telegram chat id into a number, and then refuses to start.
-        contactPoints.path = if enableTelegram
-          then config.sops.templates."grafana-contact-points.yaml".path
-          else pkgs.writeText "contact-points.yaml" (builtins.toJSON contactPoints);
+        contactPoints.path = config.sops.templates."grafana-contact-points.yaml".path;
         policies.settings = {
           apiVersion = 1;
           policies = [{
@@ -346,7 +334,8 @@ in {
               noDataState = "OK";
               execErrState = "Error";
               labels.severity = "critical";
-              annotations.summary = "{{ $labels.instance }} node-exporter is down";
+              annotations.summary = "{{ $labels.vm }} ({{ $labels.instance }}) stopped answering";
+              annotations.description = "node-exporter on this VM has been unreachable for 5 minutes. Check `vm status <id>` on Proxmox and the VM's journal.";
             }
             {
               uid = "backup_stale";
@@ -382,6 +371,7 @@ in {
               noDataState = "Alerting";
               labels.severity = "critical";
               annotations.summary = "NAS daily backup has not succeeded in over 26h";
+              annotations.description = "Kopia on vm-106 has not completed a snapshot of /srv/nas. Check `systemctl status kopia-server` and https://backup.lsck0.dev.";
             }];
           }];
         };
@@ -395,6 +385,13 @@ in {
   # Grafana's file provider only rescans at startup; restart when the dashboard changes.
   systemd.services.grafana.restartTriggers = [ ../modules/dashboards/homelab.json ];
 
-  # 3100 Loki push, 3200 Tempo, 4317/4318 OTLP trace ingest, 9093 Alertmanager.
-  networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 9093 ];
+  # 3100 Loki push, 3200 Tempo, 4317/4318 OTLP trace ingest.
+  networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 ];
+
+  # Grafana trusts the Remote-User header (auth.proxy), so anyone who can reach
+  # :80 directly can forge it and land as Admin. Prometheus (:9090) and Tempo
+  # (:3200) have no authentication at all. Only the ingress and the ops hosts
+  # may reach those three; 3100/4317/4318 stay open because every VM pushes
+  # logs and traces into them.
+  homelab.ingressOnly.ports = [ 80 9090 3200 ];
 }

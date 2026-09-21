@@ -6,7 +6,16 @@ export SHELL=/bin/bash
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TFVARS_PATH="$ROOT_DIR/src/terraform.tfvars"
 TFVARS_ENC_PATH="$ROOT_DIR/src/terraform.tfvars.sops.json"
+# the age key is owned by the dotfiles repo; secrets/age.txt here is normally a
+# symlink to it. Fall back to the dotfiles path so a fresh clone works without
+# copying key material around.
 AGE_KEY="$ROOT_DIR/secrets/age.txt"
+AGE_KEY_SOURCE="${AGE_KEY_SOURCE:-$HOME/projects/arch-dotfiles/configs/secrets/age.txt}"
+if [ ! -r "$AGE_KEY" ] && [ -r "$AGE_KEY_SOURCE" ]; then
+  mkdir -p "$ROOT_DIR/secrets"
+  ln -sfn "$AGE_KEY_SOURCE" "$AGE_KEY"
+  echo ">>> age key linked from $AGE_KEY_SOURCE"
+fi
 ACTIVE_TFVARS_PATH=""
 ROUTER_WAN_IP="192.168.178.29"
 DEPLOY_FAILURE=0
@@ -119,6 +128,22 @@ else
   SSH_CMD=(ssh -p "$PROXMOX_SSH_PORT" -o StrictHostKeyChecking=accept-new)
 fi
 
+# The bpg provider imports every new VM's disk over SSH to the hypervisor, and
+# main.tf only falls back to the ssh-agent when proxmox_ssh_password is empty.
+# Rotating the host's root password below would therefore break disk imports on
+# the very run that rotates it, so make sure the deployer's key is in an agent
+# and let the provider use that instead of a password.
+if [ -f "$HOME/.ssh/id_ed25519" ]; then
+  if ! ssh-add -l >/dev/null 2>&1; then
+    eval "$(ssh-agent -s)" >/dev/null
+    CLEANUP_AGENT=1
+  fi
+  ssh-add -l 2>/dev/null | grep -q id_ed25519 \
+    || ssh-add "$HOME/.ssh/id_ed25519" </dev/null >/dev/null 2>&1 \
+    || echo "WARNING: could not add the deploy key to the ssh-agent."
+fi
+trap '[ "${CLEANUP_AGENT:-0}" = 1 ] && ssh-agent -k >/dev/null 2>&1; rm -f "${CLEANUP_FILES[@]}"' EXIT
+
 mkdir -p "$HOME/.ssh" && touch "$HOME/.ssh/known_hosts"
 ssh-keygen -R "[$PROXMOX_SSH_HOST]:$PROXMOX_SSH_PORT" >/dev/null 2>&1 || true
 ssh-keyscan -p "$PROXMOX_SSH_PORT" -H "$PROXMOX_SSH_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null \
@@ -172,12 +197,29 @@ if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
   done
 fi
 
-# Hermes (vm-113) gets root on the Proxmox host too (best-effort)
-HERMES_PUB="$ROOT_DIR/src/modules/hermes.pub"
-if [ -f "$HERMES_PUB" ]; then
+# Hermes (vm-113) and this deployer get root on the Proxmox host too. The
+# deployer's key has to go in before the root password is rotated below,
+# otherwise the password in tfvars goes stale and the next sync cannot log in.
+for pub in "$ROOT_DIR/src/modules/hermes.pub" "$HOME/.ssh/id_ed25519.pub"; do
+  [ -f "$pub" ] || continue
   "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
-    "grep -qxF '$(cat "$HERMES_PUB")' /root/.ssh/authorized_keys || echo '$(cat "$HERMES_PUB")' >> /root/.ssh/authorized_keys" \
-    2>/dev/null || echo "WARNING: Could not install the Hermes key on Proxmox."
+    "mkdir -p /root/.ssh && chmod 700 /root/.ssh && touch /root/.ssh/authorized_keys
+     grep -qxF '$(cat "$pub")' /root/.ssh/authorized_keys || echo '$(cat "$pub")' >> /root/.ssh/authorized_keys" \
+    2>/dev/null || echo "WARNING: Could not install $(basename "$pub") on Proxmox."
+done
+
+# Proxmox root (PAM) login = the Authelia password, so the PVE web UI is not a
+# separate credential. Piped over stdin so it never appears in the host's ps.
+if PVE_ROOT_PASS=$(SOPS_AGE_KEY_FILE="$AGE_KEY" sops --decrypt \
+     --extract '["authelia-admin-pass"]' "$ROOT_DIR/src/secrets.json" 2>/dev/null) \
+   && [ -n "$PVE_ROOT_PASS" ]; then
+  if printf 'root:%s\n' "$PVE_ROOT_PASS" \
+       | "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "chpasswd" 2>/dev/null; then
+    echo ">>> Proxmox: root password set to the Authelia password."
+  else
+    echo "WARNING: could not set the Proxmox root password."
+  fi
+  unset PVE_ROOT_PASS
 fi
 
 # Proxmox host power savings (idempotent, best-effort)

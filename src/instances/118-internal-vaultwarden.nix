@@ -1,5 +1,5 @@
 { config, nasMount, ... }: {
-  networking.hostName = "vm-117";
+  networking.hostName = "vm-118";
 
   fileSystems = nasMount "/var/lib/bitwarden_rs" "vaultwarden";
 

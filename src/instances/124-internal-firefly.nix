@@ -1,5 +1,5 @@
 { config, pkgs, nasMount, ... }: {
-  networking.hostName = "vm-123";
+  networking.hostName = "vm-124";
 
   # Firefly III: self-hosted personal finance.
   # app + its own Postgres, both containers on this VM; data on the NAS so it is
@@ -41,6 +41,15 @@
       environmentFiles = [ config.sops.templates."firefly.env".path ];
       extraOptions = [ "--network=host" ];
     };
+  };
+
+  # /var/lib/firefly/db is a live Postgres data directory on the NAS. A file-level
+  # snapshot of one restores as a database that has to replay WAL it may not have
+  # a consistent copy of, so take a real pg_dump instead. Runs inside the
+  # container because that is where the client and the socket are.
+  homelab.dbBackup.databases.firefly = {
+    command = "podman exec firefly-db pg_dump -U firefly --clean --if-exists firefly";
+    path = [ pkgs.podman ];
   };
 
   # personal access token for Hermes (logs bills as transactions). Needs the

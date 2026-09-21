@@ -3,7 +3,7 @@ let
   # hosts that may use the WebUI API without a login: internal Traefik (itself
   # behind Authelia), the *arr VMs, the wiring VM and Hermes. Explicit /32s, so
   # an arbitrary LAN host cannot rewrite download paths across the NFS mounts.
-  apiClients = map (id: "10.100.0.${toString id}/32") [ 100 113 129 130 132 134 135 ];
+  apiClients = map (id: "10.100.0.${toString id}/32") [ 100 113 130 131 133 135 136 ];
 
   # route all traffic through the Tor SOCKS5 gateway on vm-112.
   #
@@ -118,4 +118,12 @@ in {
 
   networking.firewall.allowedTCPPorts = [ 80 6881 ];
   networking.firewall.allowedUDPPorts = [ 6881 ];
+
+  # the WebUI skips its login for the whitelisted API clients, so the port
+  # itself must not be reachable from anywhere else. 6881 (peer traffic) stays
+  # open. apiClients is the same list the whitelist uses.
+  homelab.ingressOnly = {
+    ports = [ 80 ];
+    extraSources = apiClients;
+  };
 }

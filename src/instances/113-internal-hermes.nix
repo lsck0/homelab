@@ -176,6 +176,8 @@ in {
     hermes-ssh-key = { owner = "hermes"; mode = "0400"; };
     hermes-github-app-key = { owner = "hermes"; mode = "0400"; };
     hermes-llm-api-key = {};
+    hermes-gemini-api-key = {};
+    hermes-glm-api-key = {};
     telegram-bot-token = {};
     telegram-chat-id = {};
     proxmox-api-token = { owner = "hermes"; mode = "0400"; };
@@ -188,6 +190,11 @@ in {
       TELEGRAM_ALLOWED_USERS=${config.sops.placeholder.telegram-chat-id}
       GATEWAY_ALLOW_ALL_USERS=false
       TELEGRAM_HOME_CHANNEL=${config.sops.placeholder.telegram-chat-id}
+      # free-tier keys for the fallback chain below. Empty is fine: a provider
+      # without a credential is skipped ("provider not configured") and the chain
+      # moves to the next one.
+      GEMINI_API_KEY=${config.sops.placeholder.hermes-gemini-api-key}
+      GLM_API_KEY=${config.sops.placeholder.hermes-glm-api-key}
     '';
   };
 
@@ -219,16 +226,41 @@ in {
     environmentFiles = [ config.sops.templates."hermes.env".path ];
 
     settings = {
+      # paid Anthropic first, free tiers next, the local card last.
+      #
+      # A Claude Pro/Max *subscription* is not usable as an inference route in
+      # this hermes-agent revision: its provider list has `anthropic`
+      # (ANTHROPIC_API_KEY) but no Anthropic OAuth route. The subscription-style
+      # OAuth providers it does have are `nous` (Nous Portal, free tier) and
+      # `openai-codex` (ChatGPT/Codex). So the primary is the Anthropic API key
+      # in sops, and `nous` sits directly behind it as the free OAuth route.
       model = {
         provider = "anthropic";
         default = "claude-sonnet-5";
       };
-      # local model when the API is down or out of credit.
-      fallback_model = {
-        provider = "custom";
-        model = "qwen3:8b";
-        base_url = "http://127.0.0.1:11434/v1";
-      };
+
+      # tried in order when the primary is rate-limited, out of credit or
+      # unauthenticated. An entry whose credential is missing is skipped, so the
+      # chain degrades to whatever is actually configured and always ends on the
+      # GPU in this VM, which needs no credential and no internet at all.
+      fallback_providers = [
+        # Nous Portal free tier. Needs a one-off `hermes auth add nous` as the
+        # hermes user on this VM; until then this entry is skipped.
+        { provider = "nous"; model = "nous/welcome"; }
+        # Google AI Studio free tier (GEMINI_API_KEY).
+        { provider = "gemini"; model = "gemini-2.5-flash"; }
+        # z.ai GLM free tier (GLM_API_KEY).
+        { provider = "zai"; model = "glm-4.6-flash"; }
+        # local Ollama on the passed-through RTX 2060. Last resort, always there.
+        {
+          provider = "custom";
+          model = "qwen3:8b";
+          base_url = "http://127.0.0.1:11434/v1";
+        }
+      ];
+
+      # fail over quickly instead of retrying a dead primary three times.
+      agent.api_max_retries = 1;
       # full access: the owner granted root on the lab; no per-command prompts.
       approvals.mode = "off";
       # only the owner: TELEGRAM_ALLOWED_USERS holds the owner's numeric user id

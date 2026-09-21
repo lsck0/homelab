@@ -1,4 +1,4 @@
-{ pkgs, nasMount, nasPath, retry, ... }:
+{ config, pkgs, nasMount, nasPath, retry, ... }:
 let
   T = "/var/lib/homepage-tokens";
 
@@ -44,13 +44,13 @@ let
     clients:
       sonarr:
         enabled: true
-        url: "http://10.100.0.130"
+        url: "http://10.100.0.131"
         api-key: "@SONARR@"
         delete-empty-shows: true
         determine-age-by: most_recent
       radarr:
         enabled: true
-        url: "http://10.100.0.129"
+        url: "http://10.100.0.130"
         api-key: "@RADARR@"
         only-delete-files: false
         determine-age-by: most_recent
@@ -58,7 +58,7 @@ let
         enabled: false
       jellyfin:
         enabled: true
-        url: "http://10.100.0.133"
+        url: "http://10.100.0.134"
         api-key: "@JELLYFIN@"
         username: janitorr
         password: "@JANITORR_PASS@"
@@ -71,7 +71,7 @@ let
         enabled: false
       jellyseerr:
         enabled: true
-        url: "http://10.100.0.127"
+        url: "http://10.100.0.128"
         api-key: "@JELLYSEERR@"
         match-server: false
       jellystat:
@@ -85,7 +85,7 @@ let
 
   statsConfig = pkgs.writeText "janitorr-stats.yml.tmpl" ''
     jellyfin:
-      base-url: http://10.100.0.133
+      base-url: http://10.100.0.134
       api-key: "@JELLYFIN@"
       poll-interval: 60s
     quarkus:
@@ -97,7 +97,7 @@ let
           url: jdbc:sqlite:/data/janitorr-stats.db
   '';
 in {
-  networking.hostName = "vm-133";
+  networking.hostName = "vm-134";
 
   # /data/media rw on the VM (Janitorr writes the leaving-soon links),
   # read-only inside the Jellyfin container.
@@ -220,6 +220,79 @@ in {
       fi
       POLICY=$(api "$J/Users/$UID_J" | jq -c '.Policy | .IsAdministrator=true | .EnableContentDeletion=true | .IsHidden=true')
       api -X POST "$J/Users/$UID_J/Policy" -d "$POLICY"
+    '';
+  };
+
+  # Jellyfin authenticates against lldap, so the lab account is the Jellyfin
+  # account and no separate password exists. ForwardAuth is not an option here:
+  # the TV and phone apps cannot follow the Authelia portal redirect, and
+  # Jellyfin has no forward-auth support of its own. The LDAP-Auth plugin is
+  # therefore the way Jellyfin joins the single identity store.
+  #
+  # Installing a plugin needs a server restart before its configuration
+  # endpoint exists, which is why this runs as its own unit after the setup one.
+  # Failures are logged, not fatal: the generated admin account stays usable.
+  sops.secrets.lldap-admin-password = {};
+  systemd.services.jellyfin-ldap = {
+    description = "Point Jellyfin authentication at lldap (LDAP-Auth plugin)";
+    after = [ "jellyfin-setup.service" ];
+    requires = [ "jellyfin-setup.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 120; };
+    script = ''
+      J=http://127.0.0.1:80
+      ${retry} 90 2 curl -sf $J/health
+
+      HDR='Authorization: MediaBrowser Client="homelab", Device="setup", DeviceId="homelab-setup", Version="1.0"'
+      TOKEN=$(curl -sf -X POST $J/Users/AuthenticateByName -H "Content-Type: application/json" -H "$HDR" \
+        -d "$(jq -cn --arg p "$(cat ${T}/jellyfin-admin-pass.token)" '{Username:"admin", Pw:$p}')" \
+        | jq -r '.AccessToken // empty')
+      [ -n "$TOKEN" ] || { echo "Jellyfin admin login failed"; exit 1; }
+      api() { curl -sf -H "Authorization: MediaBrowser Token=\"$TOKEN\"" -H "Content-Type: application/json" "$@"; }
+
+      plugin_id() { api $J/Plugins | jq -r '[.[] | select(.Name | test("LDAP"; "i"))][0].Id // empty'; }
+
+      ID=$(plugin_id)
+      if [ -z "$ID" ]; then
+        echo "installing the LDAP Authentication plugin"
+        api -X POST "$J/Packages/Installed/LDAP%20Authentication" >/dev/null \
+          || { echo "plugin install request failed; leaving Jellyfin on local accounts"; exit 0; }
+        # the plugin is only loaded, and its configuration endpoint only exists,
+        # after a restart.
+        systemctl restart podman-jellyfin.service
+        ${retry} 90 2 curl -sf $J/health
+        TOKEN=$(curl -sf -X POST $J/Users/AuthenticateByName -H "Content-Type: application/json" -H "$HDR" \
+          -d "$(jq -cn --arg p "$(cat ${T}/jellyfin-admin-pass.token)" '{Username:"admin", Pw:$p}')" \
+          | jq -r '.AccessToken // empty')
+        for _ in $(seq 1 30); do ID=$(plugin_id); [ -n "$ID" ] && break; sleep 5; done
+        [ -n "$ID" ] || { echo "plugin did not appear after restart"; exit 0; }
+      fi
+
+      # lldap's DN layout: users under ou=people, groups under ou=groups. The
+      # admin filter promotes members of the `admins` group to Jellyfin admins.
+      api -X POST "$J/Plugins/$ID/Configuration" -d "$(jq -cn \
+        --arg pass "$(cat ${config.sops.secrets.lldap-admin-password.path})" '{
+        LdapServer: "10.100.0.102",
+        LdapPort: 3890,
+        UseSsl: false,
+        UseStartTls: false,
+        SkipSslVerify: true,
+        LdapBindUser: "uid=admin,ou=people,dc=lsck0,dc=dev",
+        LdapBindPassword: $pass,
+        LdapBaseDn: "ou=people,dc=lsck0,dc=dev",
+        LdapSearchFilter: "(objectClass=person)",
+        LdapAdminFilter: "(memberOf=cn=admins,ou=groups,dc=lsck0,dc=dev)",
+        LdapSearchAttributes: "uid, cn, mail, displayName",
+        LdapUsernameAttribute: "uid",
+        LdapPasswordAttribute: "userPassword",
+        CreateUsersFromLdap: true,
+        AllowPassChange: false,
+        EnableAllFolders: true,
+        EnabledFolders: []
+      }')" >/dev/null \
+        && echo "Jellyfin authenticates against lldap" \
+        || echo "writing the LDAP plugin configuration failed; configure it in the Jellyfin UI"
     '';
   };
 

@@ -4,13 +4,13 @@ let
   ollamaUrl = "http://10.100.0.113:11434";
   ollamaModel = "qwen3:8b";
 in {
-  networking.hostName = "vm-121";
+  networking.hostName = "vm-122";
 
   fileSystems = nasMount "/var/lib/paperless-ai" "paperless-ai"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   # paperless-ai reads its settings from /app/data/.env, which the setup wizard
-  # normally writes. Seed it from the Paperless API token vm-120 already exports,
+  # normally writes. Seed it from the Paperless API token vm-121 already exports,
   # so the stack comes up configured without a manual wizard pass.
   systemd.services.paperless-ai-config = {
     description = "Seed paperless-ai configuration";
@@ -25,14 +25,14 @@ in {
     };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/paperless-key.token"
-      # vm-120 generates the token on first boot; wait for it rather than
+      # vm-121 generates the token on first boot; wait for it rather than
       # writing a config that silently cannot talk to Paperless.
       ${retry} 60 5 test -s "$TOKEN_FILE" || { echo "Paperless API token not available"; exit 1; }
 
       mkdir -p /var/lib/paperless-ai
       umask 077
       cat > /var/lib/paperless-ai/.env <<EOF
-      PAPERLESS_API_URL=http://10.100.0.120:8080/api
+      PAPERLESS_API_URL=http://10.100.0.121:8080/api
       PAPERLESS_API_TOKEN=$(cat "$TOKEN_FILE")
       AI_PROVIDER=ollama
       OLLAMA_API_URL=${ollamaUrl}

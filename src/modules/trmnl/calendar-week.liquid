@@ -1,0 +1,71 @@
+{%- comment -%}
+TRMNL private plugin markup for one week of the merged calendar.
+
+Paste this into the plugin's "Markup" editor (Full layout). It renders whatever
+JSON the plugin's polling URL returns, so the same markup serves all three week
+instances; only the URL differs:
+
+  last week     https://cal.lsck0.dev/<calendar-token>/week-prev.json
+  this week     https://cal.lsck0.dev/<calendar-token>/week.json
+  next week     https://cal.lsck0.dev/<calendar-token>/week-next.json
+
+The `view` wrapper classes from TRMNL's public-plugin docs are deliberately
+absent: the in-browser editor supplies them.
+{%- endcomment -%}
+
+<style>
+  .wk { display: flex; gap: 6px; height: 100%; }
+  .wk-day {
+    flex: 1 1 0;
+    min-width: 0;
+    border: 1px solid black;
+    padding: 6px 7px;
+    display: flex;
+    flex-direction: column;
+  }
+  /* today is filled rather than outlined: on e-ink, weight reads faster than colour */
+  .wk-day--today { background: black; color: white; }
+  .wk-day--today .wk-ev { border-color: white; }
+  .wk-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+  .wk-dow { font-size: 21px; text-transform: uppercase; letter-spacing: .06em; }
+  .wk-num { font-size: 27px; font-weight: 700; line-height: 1; }
+  .wk-ev { border-top: 1px solid black; padding: 4px 0; }
+  .wk-time { font-size: 19px; font-weight: 700; }
+  .wk-sum { font-size: 21px; line-height: 1.2; overflow-wrap: anywhere; }
+  .wk-loc { font-size: 17px; opacity: .75; overflow-wrap: anywhere; }
+  .wk-src { font-size: 15px; text-transform: uppercase; letter-spacing: .08em; opacity: .7; }
+  .wk-empty { font-size: 17px; opacity: .45; margin-top: auto; margin-bottom: auto; text-align: center; }
+</style>
+
+<div class="layout">
+  <div class="wk">
+    {% for day in days %}
+      <div class="wk-day{% if day.is_today %} wk-day--today{% endif %}">
+        <div class="wk-head">
+          <span class="wk-dow">{{ day.weekday }}</span>
+          <span class="wk-num">{{ day.day }}</span>
+        </div>
+
+        {% if day.events.size == 0 %}
+          <div class="wk-empty">—</div>
+        {% else %}
+          {% for ev in day.events %}
+            <div class="wk-ev">
+              <div class="wk-time">{% if ev.all_day %}ALL DAY{% else %}{{ ev.time }}{% endif %}</div>
+              <div class="wk-sum">{{ ev.summary }}</div>
+              {% if ev.location != "" %}<div class="wk-loc">{{ ev.location }}</div>{% endif %}
+              <div class="wk-src">{{ ev.source }}</div>
+            </div>
+          {% endfor %}
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="title_bar">
+  <span class="title">
+    {% if offset == 0 %}This week{% elsif offset == -1 %}Last week{% elsif offset == 1 %}Next week{% else %}Week {{ week_number }}{% endif %}
+  </span>
+  <span class="instance">{{ label }} · KW{{ week_number }} · {{ total_events }} events</span>
+</div>

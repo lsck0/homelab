@@ -9,8 +9,8 @@
 #   1. builds the new configs and installs them on the VM at its OLD address as
 #      the next boot generation (`switch-to-configuration boot`, no switch now)
 #   2. shuts the VM down
-#   3. destroys the VMs removed from instances.tf (110, 132, 135), their ids
-#      are reused
+#   3. destroys the VMs removed from instances.tf (REMOVED, empty in this
+#      migration), so their ids can be reused
 #   4. renames the VM on Proxmox in place: disk volumes (LVM/LVM-thin, ZFS, dir)
 #      and config, through temporary ids 9xxx so no two VMs collide
 #   5. rewrites Terraform state: drops the old addresses and imports every VM
@@ -36,51 +36,39 @@ while [ $# -gt 0 ]; do
 done
 
 # old new
+#
+# Current migration: 116 was freed for 116-internal-github-runner, which has to
+# sit directly after the Forgejo runner (115), so every internal VM from the old
+# registry (116) upwards moves one place up. Highest id first, and the script
+# routes every rename through a temporary 9xxx id anyway, so the shift cannot
+# collide with itself.
+#
+# 116 itself is not listed: it is a brand-new VM with no disk to rename, and
+# sync.sh creates it afterwards.
 MAP="
-128 101
-133 102
-102 103
-103 104
-104 105
-105 108
-131 109
-106 110
-117 111
-127 112
-126 113
-107 114
-108 115
-109 116
-111 117
-112 118
-129 119
-113 120
-125 121
-116 122
-140 123
-115 124
-114 125
-139 126
-136 127
-118 128
-119 129
-120 130
-137 131
-138 132
-121 133
-122 134
-123 135
-124 136
-209 202
-206 203
-202 204
-203 205
-204 206
-205 207
-207 208
-208 209
+136 137
+135 136
+134 135
+133 134
+132 133
+131 132
+130 131
+129 130
+128 129
+127 128
+126 127
+125 126
+124 125
+123 124
+122 123
+121 122
+120 121
+119 120
+118 119
+117 118
+116 117
 "
-REMOVED="110 132 135"
+REMOVED=""
 NODE=luca-server
 
 ip_of() { if [ "$1" -ge 200 ]; then echo "10.200.0.$1"; else echo "10.100.0.$1"; fi; }
@@ -119,11 +107,12 @@ while read -r old new <&3; do
   [ -n "$old" ] || continue
   printf '    %s -> %s  %s\n' "$old" "$new" "$(name_of "$new")"
 done 3<<< "$MAP"
-echo "    destroy: $REMOVED (removed from instances.tf)"
+# `&& echo` alone would make an empty REMOVED a failed command under set -e.
+if [ -n "$REMOVED" ]; then echo "    destroy: $REMOVED (removed from instances.tf)"; fi
 
 if [ "$EXECUTE" = 1 ]; then
   echo
-  echo "This stops the whole lab, destroys VMs $REMOVED and renames VM disks on Proxmox."
+  echo "This stops the whole lab${REMOVED:+, destroys VMs $REMOVED} and renames VM disks on Proxmox."
   read -r -p "Type 'renumber' to continue: " answer
   [ "$answer" = renumber ] || { echo "Aborted."; exit 1; }
 fi
@@ -255,8 +244,16 @@ fi
 
 echo ">>> 5. Rewriting Terraform state"
 TF=(terraform -chdir="$SRC")
-# keep the very first copy: a re-run must not overwrite the original state
-[ -e "$SRC/terraform.tfstate.pre-renumber" ] || run cp "$SRC/terraform.tfstate" "$SRC/terraform.tfstate.pre-renumber"
+# one rollback copy per migration, stamped. `--from-step` re-runs of the SAME
+# migration must not overwrite it (the state is already partly rewritten by
+# then), but a later migration must not silently inherit the previous one's copy
+# either - that copy describes ids that no longer exist.
+BACKUP="$SRC/terraform.tfstate.pre-renumber-$(date +%Y%m%d)"
+if [ -e "$BACKUP" ]; then
+  echo "    keeping the existing rollback copy $(basename "$BACKUP")"
+else
+  run cp "$SRC/terraform.tfstate" "$BACKUP"
+fi
 run "${TF[@]}" init -input=false
 for addr in $("${TF[@]}" state list 2>/dev/null | grep -E 'proxmox_virtual_environment_vm' || true); do
   run "${TF[@]}" state rm "$addr"
@@ -276,7 +273,7 @@ if [ "$EXECUTE" = 1 ]; then
   if echo "$plan" | grep -qE 'must be replaced|will be destroyed'; then
     echo "ERROR: the plan destroys or replaces a VM. VMs are renamed but stopped; nothing else"
     echo "was changed. Fix the diff (terraform -chdir=src plan) before starting them. The old"
-    echo "state is in src/terraform.tfstate.pre-renumber."
+    echo "state is in src/terraform.tfstate.pre-renumber-<date>."
     exit 1
   fi
 else

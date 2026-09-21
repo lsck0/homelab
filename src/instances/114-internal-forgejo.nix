@@ -79,16 +79,29 @@
       OIDC_SECRET=$(cat ${config.sops.secrets.forgejo-oidc-secret.path})
       DISCOVER_URL="https://auth.lsck0.dev/.well-known/openid-configuration"
 
-      # the source is still named "authentik" (pre-Authelia): the name is part of
-      # the callback URL registered in Authelia, so renaming breaks logins.
-      # check if auth source already exists via CLI
-      AUTH_ID=$(podman exec -u git forgejo forgejo admin auth list 2>/dev/null \
-        | grep -w authentik | awk '{print $1}')
+      # The sign-in button is labelled with the auth source's name, which is why
+      # the login page used to say "authentik" long after Authelia replaced it.
+      # Forgejo also derives the callback path from that name, so a rename would
+      # normally invalidate the redirect URI: Authelia has both
+      # /user/oauth2/{authelia,authentik}/callback registered
+      # (101-internal-authelia.nix), so renaming the source in place is safe and
+      # keeps every already-linked account working.
+      sources=$(podman exec -u git forgejo forgejo admin auth list 2>/dev/null || true)
+      AUTH_ID=$(echo "$sources" | grep -w authelia  | awk '{print $1}')
+      OLD_ID=$(echo "$sources"  | grep -w authentik | awk '{print $1}')
+
+      if [ -z "$AUTH_ID" ] && [ -n "$OLD_ID" ]; then
+        echo "renaming the authentik OAuth2 source to authelia (id=$OLD_ID)"
+        AUTH_ID="$OLD_ID"
+        podman exec -u git forgejo forgejo admin auth update-oauth \
+          --id "$AUTH_ID" --name authelia || true
+      fi
 
       if [ -n "$AUTH_ID" ]; then
         echo "OAuth2 source exists (id=$AUTH_ID), updating..."
         podman exec -u git forgejo forgejo admin auth update-oauth \
           --id "$AUTH_ID" \
+          --name authelia \
           --secret "$OIDC_SECRET" \
           --auto-discover-url "$DISCOVER_URL" \
           2>/dev/null || true
@@ -97,7 +110,7 @@
 
       # create via Forgejo CLI inside container
       podman exec -u git forgejo forgejo admin auth add-oauth \
-        --name authentik \
+        --name authelia \
         --provider openidConnect \
         --key forgejo \
         --secret "$OIDC_SECRET" \

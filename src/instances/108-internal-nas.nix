@@ -114,6 +114,10 @@
     "d /srv/nas/torrents 0775 nobody nogroup -"
     # per-service persistent data
     "d /srv/nas/data 0777 nobody nogroup -"
+    # nightly database dumps (modules/db-backup.nix), one subdir per VM. This is
+    # what makes the Kopia snapshot contain a restorable copy of the databases
+    # rather than a byte copy of live data directories.
+    "d /srv/nas/data/db-dumps 0777 nobody nogroup -"
     "d /srv/nas/data/authelia 0777 nobody nogroup -"
     "d /srv/nas/data/loki 0777 nobody nogroup -"
     "d /srv/nas/data/attic 0777 nobody nogroup -"
@@ -201,4 +205,10 @@
 
   networking.firewall.allowedTCPPorts = [ 80 2049 111 8384 22000 ];
   networking.firewall.allowedUDPPorts = [ 2049 111 22000 21027 ];
+
+  # FileBrowser runs with FB_NOAUTH and the Syncthing GUI has its own auth
+  # disabled, both because Authelia gates their routes. NFS (2049/111), SMB and
+  # the Syncthing sync protocol (22000) are untouched: they are the actual file
+  # services and carry their own access control.
+  homelab.ingressOnly.ports = [ 80 8384 ];
 }

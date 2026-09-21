@@ -1,5 +1,5 @@
 { pkgs, config, nasMount, ... }: {
-  networking.hostName = "vm-118";
+  networking.hostName = "vm-119";
 
   fileSystems = nasMount "/var/lib/nextcloud" "nextcloud"
     // nasMount "/var/lib/postgresql" "nextcloud-db"
@@ -118,4 +118,18 @@
   };
 
   networking.firewall.allowedTCPPorts = [ 80 ];
+
+  # /var/lib/postgresql is a live data directory on the NAS: Kopia's file copy of
+  # one is not a backup (it can catch a checkpoint mid-flight). pg_dumpall runs
+  # through Postgres itself and produces something restorable.
+  homelab.dbBackup.databases.nextcloud = {
+    command = "${config.services.postgresql.package}/bin/pg_dumpall -U postgres --clean --if-exists";
+    path = [ config.services.postgresql.package ];
+  };
+  systemd.services.db-backup-nextcloud = {
+    after = [ "postgresql.service" ];
+    requires = [ "postgresql.service" ];
+    serviceConfig.User = "postgres";
+  };
+
 }

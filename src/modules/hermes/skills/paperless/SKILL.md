@@ -11,7 +11,7 @@ metadata:
     related_skills: [homelab-ops, bills]
 ---
 
-# Paperless-ngx (vm-120, http://10.100.0.120:8080, https://paperless.lsck0.dev)
+# Paperless-ngx (vm-121, http://10.100.0.121:8080, https://paperless.lsck0.dev)
 
 Header: `Authorization: Token $(lab-token paperless-key)`. API docs: `/api/schema/view/`.
 

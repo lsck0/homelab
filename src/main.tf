@@ -98,9 +98,17 @@ provider "proxmox" {
   insecure  = var.proxmox_insecure
 
   ssh {
+    # The provider imports every new VM's disk over SSH. Password auth is the
+    # fallback, not the default: sync.sh rotates the host's root password, so a
+    # password in tfvars goes stale on the run that rotates it and disk imports
+    # start failing. With no password it uses the ssh-agent, which sync.sh
+    # populates with the deploy key.
+    #
+    # "" has to become null rather than being passed through: the provider
+    # validates the field as "not an empty string" and fails to configure at all.
     agent    = var.proxmox_ssh_password == null || var.proxmox_ssh_password == ""
     username = var.proxmox_ssh_user
-    password = var.proxmox_ssh_password
+    password = var.proxmox_ssh_password == "" ? null : var.proxmox_ssh_password
     node {
       name    = var.target_node
       address = var.proxmox_ssh_host

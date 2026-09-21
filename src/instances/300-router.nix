@@ -51,7 +51,34 @@ in {
   networking.interfaces.ens19.ipv4.addresses = [{ address = "10.100.0.1"; prefixLength = 24; }];
   networking.interfaces.ens20.ipv4.addresses = [{ address = "10.200.0.1"; prefixLength = 24; }];
 
-  boot.kernel.sysctl."net.ipv4.ip_forward" = 1;
+  boot.kernel.sysctl = {
+    "net.ipv4.ip_forward" = 1;
+
+    # ── volumetric / spoofing hardening on the edge ──────────────────────────
+    # SYN cookies answer a SYN flood without keeping half-open state, so the
+    # backlog cannot be exhausted; the larger backlog and fewer SYN-ACK retries
+    # shorten how long a half-open entry occupies it.
+    "net.ipv4.tcp_syncookies" = 1;
+    "net.ipv4.tcp_max_syn_backlog" = 4096;
+    "net.ipv4.tcp_synack_retries" = 2;
+    # loose reverse-path filter: drop packets whose source address has no route
+    # at all. Loose (2) rather than strict (1) on purpose - strict mode drops
+    # legitimate traffic as soon as routing is asymmetric, which is easy to hit
+    # with WireGuard.
+    "net.ipv4.conf.all.rp_filter" = 2;
+    "net.ipv4.conf.default.rp_filter" = 2;
+    # no source routing, no redirects: both let a remote host steer traffic.
+    "net.ipv4.conf.all.accept_source_route" = 0;
+    "net.ipv4.conf.all.accept_redirects" = 0;
+    "net.ipv4.conf.all.send_redirects" = 0;
+    "net.ipv4.conf.default.accept_redirects" = 0;
+    # do not be an amplifier.
+    "net.ipv4.icmp_echo_ignore_broadcasts" = 1;
+    "net.ipv4.icmp_ignore_bogus_error_responses" = 1;
+    # headroom so a flood fills the conntrack table more slowly than it fills
+    # the per-source meters below.
+    "net.netfilter.nf_conntrack_max" = 262144;
+  };
 
   # ─────────────────────────────────────────────────────────────────────────────
   # NAT + PORT FORWARDING
@@ -91,6 +118,23 @@ in {
       allowedUDPPorts = [ 53 ];
     };
 
+    # per-source limits on traffic from the internet, applied before anything
+    # reaches a service. Only drops: no accept rule here, so the normal
+    # allowedTCPPorts logic still decides what is permitted.
+    #
+    # `meter` keys the limit on the source address, so one noisy host cannot
+    # consume the budget of everybody else. Traefik has its own per-IP rate and
+    # in-flight limits (modules/traefik.nix) for layer 7; these two cover the
+    # layers below it, where Traefik never sees the packet.
+    extraInputRules = ''
+      iifname "ens18" tcp flags & (fin|syn|rst|ack) == syn \
+        meter wan-syn size 65535 { ip saddr limit rate over 50/second burst 100 packets } \
+        counter drop
+      iifname "ens18" ct state new \
+        meter wan-conns size 65535 { ip saddr ct count over 200 } \
+        counter drop
+    '';
+
     extraForwardRules = ''
       ct state established,related accept
 
@@ -105,7 +149,7 @@ in {
 
       # allow DMZ to reach internal Traefik, Git, and Registry (for CI/CD + image pulls)
       iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.114 } tcp dport { 80, 443 } accept
-      iifname "ens20" ip daddr 10.100.0.116 tcp dport { 80, 443, 5000 } accept
+      iifname "ens20" ip daddr 10.100.0.117 tcp dport { 80, 443, 5000 } accept
 
       # allow DMZ VMs to ship logs to Loki on vm-104 and syslog to Wazuh on vm-107
       iifname "ens20" ip daddr 10.100.0.104 tcp dport 3100 accept

@@ -1,5 +1,5 @@
 { config, nasMount, nasPath, ... }: {
-  networking.hostName = "vm-120";
+  networking.hostName = "vm-121";
 
   fileSystems = nasMount "/var/lib/paperless" "paperless"
     // nasPath "/var/lib/paperless/consume" "documents"
@@ -48,5 +48,18 @@
     '';
   };
 
+  # the documents themselves are plain files the snapshot handles, but the index
+  # that maps them to correspondents, tags and dates is SQLite: dump it rather
+  # than trusting a byte copy taken while the consumer is writing.
+  homelab.dbBackup.databases.paperless.sqlite = "/var/lib/paperless/db.sqlite3";
+
   networking.firewall.allowedTCPPorts = [ 8080 ];
+
+  # PAPERLESS_ENABLE_HTTP_REMOTE_USER makes Paperless trust the Remote-User
+  # header, so a direct caller could forge it and become the owner. Only the
+  # ingress, the ops hosts and paperless-ai (vm-122, API token) may reach it.
+  homelab.ingressOnly = {
+    ports = [ 8080 ];
+    extraSources = [ "10.100.0.122/32" ];
+  };
 }

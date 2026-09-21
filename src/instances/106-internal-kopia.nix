@@ -175,10 +175,8 @@ in {
     timerConfig = { OnBootSec = "10m"; OnUnitActiveSec = "15m"; };
   };
 
-  # internal Traefik (Authelia in front), Homepage and Uptime Kuma pings only.
-  networking.firewall.extraCommands = ''
-    iptables -A nixos-fw -p tcp -s 10.100.0.100 --dport 51515 -j nixos-fw-accept
-    iptables -A nixos-fw -p tcp -s 10.100.0.103 --dport 51515 -j nixos-fw-accept
-    iptables -A nixos-fw -p tcp -s 10.100.0.105 --dport 51515 -j nixos-fw-accept
-  '';
+  # the Kopia server runs --without-password: internal Traefik (Authelia in
+  # front), Homepage and the Uptime Kuma probe are the only callers allowed.
+  networking.firewall.allowedTCPPorts = [ 51515 ];
+  homelab.ingressOnly.ports = [ 51515 ];
 }

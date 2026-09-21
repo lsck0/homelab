@@ -43,11 +43,13 @@ in {
       };
     };
 
+    # auth = "sso" gets Authelia ForwardAuth; "own", "token" and "portal" carry
+    # their own authentication (see the header of modules/routes.nix).
     routers = lib.mapAttrs' (name: r: lib.nameValuePair "${name}-tls" ({
       rule = "Host(`${r.host}.lsck0.dev`)";
       service = name;
       entryPoints = [ "websecure" ];
-    } // lib.optionalAttrs (r.sso or true) { middlewares = [ sso ]; })) routes // {
+    } // lib.optionalAttrs ((r.auth or "sso") == "sso") { middlewares = [ sso ]; })) routes // {
       traefik-dash-tls = { rule = "Host(`traefik.lsck0.dev`)";  service = "api@internal"; entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       proxmox-tls      = { rule = "Host(`proxmox.lsck0.dev`)";  service = "proxmox";      entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
     };

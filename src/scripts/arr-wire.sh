@@ -4,9 +4,10 @@
 # and converges as VMs come up. API keys come from the NAS token dir, where
 # each VM exports its own.
 #
-#   qBittorrent  <- download client in Radarr/Sonarr/Lidarr/Bookshelf
+#   qBittorrent  <- download client in Prowlarr/Radarr/Sonarr/Lidarr/Bookshelf
 #   root folders   movies, tv + anime, music, books under /data/media
 #   Prowlarr     -> apps (full indexer sync) + default public indexers
+#                   + Tor SOCKS5 indexer proxy applied to every indexer
 #   Jellyseerr   -> Jellyfin login, libraries, Radarr + Sonarr (anime folder)
 #   Bazarr       -> Radarr + Sonarr, English profile
 #
@@ -15,14 +16,17 @@
 
 T=${TOKEN_DIR:-/var/lib/homepage-tokens}
 QBIT_HOST=${QBIT_HOST:-10.100.0.111};       QBIT_PORT=${QBIT_PORT:-80}
-PROWLARR_HOST=${PROWLARR_HOST:-10.100.0.128}; PROWLARR_PORT=${PROWLARR_PORT:-80}
-RADARR_HOST=${RADARR_HOST:-10.100.0.129};     RADARR_PORT=${RADARR_PORT:-80}
-SONARR_HOST=${SONARR_HOST:-10.100.0.130};     SONARR_PORT=${SONARR_PORT:-80}
-JELLYFIN_HOST=${JELLYFIN_HOST:-10.100.0.133}; JELLYFIN_PORT=${JELLYFIN_PORT:-80}
-BOOKSHELF_HOST=${BOOKSHELF_HOST:-10.100.0.134}; BOOKSHELF_PORT=${BOOKSHELF_PORT:-8787}
-LIDARR_HOST=${LIDARR_HOST:-10.100.0.135};     LIDARR_PORT=${LIDARR_PORT:-8686}
-JELLYSEERR_URL=${JELLYSEERR_URL:-http://10.100.0.127}
-BAZARR_URL=${BAZARR_URL:-http://10.100.0.131}
+PROWLARR_HOST=${PROWLARR_HOST:-10.100.0.129}; PROWLARR_PORT=${PROWLARR_PORT:-80}
+RADARR_HOST=${RADARR_HOST:-10.100.0.130};     RADARR_PORT=${RADARR_PORT:-80}
+SONARR_HOST=${SONARR_HOST:-10.100.0.131};     SONARR_PORT=${SONARR_PORT:-80}
+JELLYFIN_HOST=${JELLYFIN_HOST:-10.100.0.134}; JELLYFIN_PORT=${JELLYFIN_PORT:-80}
+BOOKSHELF_HOST=${BOOKSHELF_HOST:-10.100.0.135}; BOOKSHELF_PORT=${BOOKSHELF_PORT:-8787}
+LIDARR_HOST=${LIDARR_HOST:-10.100.0.136};     LIDARR_PORT=${LIDARR_PORT:-8686}
+JELLYSEERR_URL=${JELLYSEERR_URL:-http://10.100.0.128}
+BAZARR_URL=${BAZARR_URL:-http://10.100.0.132}
+# vm-112's isolated SOCKS port (the torrent client uses 9050 with shared
+# circuits; indexers get per-destination circuits on 9055).
+TOR_HOST=${TOR_HOST:-10.100.0.112};           TOR_PORT=${TOR_PORT:-9055}
 pending=0
 
 key() { cat "$T/$1.token" 2>/dev/null; }
@@ -118,6 +122,38 @@ wire_prowlarr() {
     fi
   done
 
+  # Tor SOCKS5 in front of the indexers. A Prowlarr proxy only applies to the
+  # indexers that carry the same tag, so the tag is created first and then put
+  # on every indexer, including ones added by hand in the UI later.
+  local tag proxies ind id
+  tag=$(api GET "$P/tag" "$pk" | jq -r '.[] | select(.label == "tor") | .id')
+  if [ -z "$tag" ]; then
+    tag=$(api POST "$P/tag" "$pk" '{"label":"tor"}' | jq -r '.id // empty')
+  fi
+  if [ -n "$tag" ]; then
+    proxies=$(api GET "$P/indexerproxy" "$pk")
+    if ! echo "$proxies" | jq -e 'any(.[]; .implementation == "Socks5")' >/dev/null; then
+      body=$(api GET "$P/indexerproxy/schema" "$pk" | jq -c --argjson t "$tag" \
+        --arg h "$TOR_HOST" --arg p "$TOR_PORT" '
+        first(.[] | select(.implementation == "Socks5"))
+        | .name = "tor" | .tags = [$t]
+        | .fields |= map(
+            if .name == "host" then .value = $h
+            elif .name == "port" then .value = ($p | tonumber)
+            else . end)')
+      if api POST "$P/indexerproxy?forceSave=true" "$pk" "$body" >/dev/null; then
+        echo "prowlarr: added Tor SOCKS5 indexer proxy ($TOR_HOST:$TOR_PORT)"
+      else
+        # same reasoning as the indexers below: a proxy that is momentarily
+        # unreachable must not keep the whole stack reported as "pending"
+        # forever. Retried on the next run.
+        echo "prowlarr: Tor indexer proxy not added (is vm-112 up?), retried next run"
+      fi
+    fi
+  else
+    later "prowlarr: could not create the tor tag"
+  fi
+
   have=$(api GET "$P/indexer" "$pk" | jq -r '.[].definitionName')
   for def in $INDEXERS; do
     echo "$have" | grep -qx "$def" && continue
@@ -133,6 +169,17 @@ wire_prowlarr() {
       echo "prowlarr: indexer $def unreachable, skipped (retried next run)"
     fi
   done
+
+  # after the indexers exist: put the tor tag on any that lack it, so indexers
+  # added here or by hand in the UI all egress through vm-112.
+  if [ -n "$tag" ]; then
+    for id in $(api GET "$P/indexer" "$pk" | jq -r --argjson t "$tag" \
+                  '.[] | select((.tags // []) | index($t) | not) | .id'); do
+      ind=$(api GET "$P/indexer/$id" "$pk" | jq -c --argjson t "$tag" '.tags = ((.tags // []) + [$t])')
+      api PUT "$P/indexer/$id" "$pk" "$ind" >/dev/null \
+        && echo "prowlarr: indexer $id now goes through Tor"
+    done
+  fi
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -211,6 +258,10 @@ wire_bazarr() {
   fi
 }
 
+# Prowlarr needs its own download client: "Grab" in its search UI hands the
+# release to Prowlarr, not to an *arr, so without one the button silently does
+# nothing. No root folders: Prowlarr does not manage files.
+wire_servarr prowlarr  "http://$PROWLARR_HOST:$PROWLARR_PORT"   v1 category     prowlarr
 wire_servarr radarr    "http://$RADARR_HOST:$RADARR_PORT"       v3 movieCategory radarr    /data/media/movies
 wire_servarr sonarr    "http://$SONARR_HOST:$SONARR_PORT"       v3 tvCategory    sonarr    /data/media/tv /data/media/anime
 wire_servarr lidarr    "http://$LIDARR_HOST:$LIDARR_PORT"       v1 musicCategory lidarr    /data/media/music

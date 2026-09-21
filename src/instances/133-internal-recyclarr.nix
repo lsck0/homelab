@@ -18,19 +18,19 @@ let
   recyclarrTemplate = pkgs.writeText "recyclarr.yml.tmpl" ''
     radarr:
       main:
-        base_url: http://10.100.0.129
+        base_url: http://10.100.0.130
         api_key: @RADARR@
         quality_definition:
           type: movie
     sonarr:
       main:
-        base_url: http://10.100.0.130
+        base_url: http://10.100.0.131
         api_key: @SONARR@
         quality_definition:
           type: series
   '';
 in {
-  networking.hostName = "vm-132";
+  networking.hostName = "vm-133";
 
   # media automation host, no web UI:
   #   arr-wire   connects qBittorrent/Prowlarr/Jellyseerr/Bazarr to the *arrs

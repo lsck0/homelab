@@ -31,8 +31,31 @@ metadata:
 - Alerts: `podman exec crowdsec cscli alerts list`; metrics `cscli metrics`.
 - LAN, VPN and the home IPv6 prefix are whitelisted.
 
+## Bots (vm-200 only)
+
+- `robots.txt` and `llms.txt` are served for every host by a local nginx, on a
+  router with priority 10000 so nothing shadows them.
+- A request whose User-Agent matches a known scraper is routed to **iocaine**
+  (`systemctl status iocaine`, loopback :42069) instead of the real backend: it
+  answers with generated prose and links to more of itself. The agent list is
+  `labyrinthUserAgents` in `src/modules/traefik.nix`.
+- **Anubis** proof-of-work sits in front of the browser-facing public routes
+  (searxng, shlink, privatebin, share, hello, hello-gh). Instances listen on
+  127.0.0.1:270xx and Traefik points at them, so `ss -ltnp` shows Traefik talking
+  to loopback rather than to the VM. It reads the client from `X-Real-Ip` and
+  issues one clearance cookie for `lsck0.dev`.
+- If a real client is being challenged in a loop, the kill switch is
+  `anubisEnable = false` in `src/instances/200-external-traefik.nix` plus a
+  deploy of vm-200. Say so rather than editing it yourself.
+
 ## Typical problems
 
 - 404 from Traefik: no route for that host (check routes.nix / router list).
 - 502/504: backend down; check the VM (`vm status <id>`, `podman ps`) or on-demand wake logs.
-- 403 on vm-200: WAF or `internal-only` middleware (registry is blocked publicly by design).
+  A single 502 on an on-demand service right after it was shut down is expected
+  to be retried away: every route carries a `retry-upstream` middleware.
+- 403 on vm-200: WAF or `internal-only` middleware. `registry` and `attic` are
+  blocked publicly by design (headless, token-only, no browser login).
+- A page loads without CSS, or every request re-challenges: Anubis client-IP or
+  cookie problem, see above.
+- A browser gets nonsense prose: its User-Agent matched the labyrinth list.

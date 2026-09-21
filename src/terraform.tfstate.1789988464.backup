@@ -1,7 +1,7 @@
 {
   "version": 4,
   "terraform_version": "1.15.9",
-  "serial": 721,
+  "serial": 553,
   "lineage": "b31a1ff5-dc5a-489c-5dff-35368e30610b",
   "outputs": {
     "inventory": {
@@ -155,16 +155,16 @@
           "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.116",
-          "name": "116-internal-github-runner",
+          "name": "116-internal-registry",
           "prefix": 24,
           "type": "internal"
         },
         "117": {
           "cooldown": "30m",
-          "enabled": "true",
+          "enabled": "false",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.117",
-          "name": "117-internal-registry",
+          "name": "117-internal-vaultwarden",
           "prefix": 24,
           "type": "internal"
         },
@@ -173,7 +173,7 @@
           "enabled": "false",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.118",
-          "name": "118-internal-vaultwarden",
+          "name": "118-internal-nextcloud",
           "prefix": 24,
           "type": "internal"
         },
@@ -182,25 +182,25 @@
           "enabled": "false",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.119",
-          "name": "119-internal-nextcloud",
+          "name": "119-internal-calendar",
           "prefix": 24,
           "type": "internal"
         },
         "120": {
           "cooldown": "30m",
-          "enabled": "false",
+          "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.120",
-          "name": "120-internal-calendar",
+          "name": "120-internal-paperless",
           "prefix": 24,
           "type": "internal"
         },
         "121": {
           "cooldown": "30m",
-          "enabled": "true",
+          "enabled": "false",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.121",
-          "name": "121-internal-paperless",
+          "name": "121-internal-paperless-ai",
           "prefix": 24,
           "type": "internal"
         },
@@ -209,25 +209,25 @@
           "enabled": "false",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.122",
-          "name": "122-internal-paperless-ai",
+          "name": "122-internal-wikijs",
           "prefix": 24,
           "type": "internal"
         },
         "123": {
           "cooldown": "30m",
-          "enabled": "false",
+          "enabled": "onDemand",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.123",
-          "name": "123-internal-wikijs",
+          "name": "123-internal-firefly",
           "prefix": 24,
           "type": "internal"
         },
         "124": {
           "cooldown": "30m",
-          "enabled": "onDemand",
+          "enabled": "false",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.124",
-          "name": "124-internal-firefly",
+          "name": "124-internal-homeassistant",
           "prefix": 24,
           "type": "internal"
         },
@@ -236,16 +236,16 @@
           "enabled": "false",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.125",
-          "name": "125-internal-homeassistant",
+          "name": "125-internal-huginn",
           "prefix": 24,
           "type": "internal"
         },
         "126": {
           "cooldown": "30m",
-          "enabled": "false",
+          "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.126",
-          "name": "126-internal-huginn",
+          "name": "126-internal-mosquitto",
           "prefix": 24,
           "type": "internal"
         },
@@ -254,7 +254,7 @@
           "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.127",
-          "name": "127-internal-mosquitto",
+          "name": "127-internal-jellyseerr",
           "prefix": 24,
           "type": "internal"
         },
@@ -263,7 +263,7 @@
           "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.128",
-          "name": "128-internal-jellyseerr",
+          "name": "128-internal-prowlarr",
           "prefix": 24,
           "type": "internal"
         },
@@ -272,7 +272,7 @@
           "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.129",
-          "name": "129-internal-prowlarr",
+          "name": "129-internal-radarr",
           "prefix": 24,
           "type": "internal"
         },
@@ -281,7 +281,7 @@
           "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.130",
-          "name": "130-internal-radarr",
+          "name": "130-internal-sonarr",
           "prefix": 24,
           "type": "internal"
         },
@@ -290,7 +290,7 @@
           "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.131",
-          "name": "131-internal-sonarr",
+          "name": "131-internal-bazarr",
           "prefix": 24,
           "type": "internal"
         },
@@ -299,7 +299,7 @@
           "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.132",
-          "name": "132-internal-bazarr",
+          "name": "132-internal-recyclarr",
           "prefix": 24,
           "type": "internal"
         },
@@ -308,7 +308,7 @@
           "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.133",
-          "name": "133-internal-recyclarr",
+          "name": "133-internal-jellyfin",
           "prefix": 24,
           "type": "internal"
         },
@@ -317,7 +317,7 @@
           "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.134",
-          "name": "134-internal-jellyfin",
+          "name": "134-internal-audiobookshelf",
           "prefix": 24,
           "type": "internal"
         },
@@ -326,7 +326,7 @@
           "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.135",
-          "name": "135-internal-audiobookshelf",
+          "name": "135-internal-navidrome",
           "prefix": 24,
           "type": "internal"
         },
@@ -335,16 +335,7 @@
           "enabled": "true",
           "gateway": "10.100.0.1",
           "ip": "10.100.0.136",
-          "name": "136-internal-navidrome",
-          "prefix": 24,
-          "type": "internal"
-        },
-        "137": {
-          "cooldown": "30m",
-          "enabled": "true",
-          "gateway": "10.100.0.1",
-          "ip": "10.100.0.137",
-          "name": "137-internal-kavita",
+          "name": "136-internal-kavita",
           "prefix": 24,
           "type": "internal"
         },
@@ -895,18 +886,6 @@
               "type": "string"
             }
           ],
-          "137": [
-            "object",
-            {
-              "cooldown": "string",
-              "enabled": "string",
-              "gateway": "string",
-              "ip": "string",
-              "name": "string",
-              "prefix": "number",
-              "type": "string"
-            }
-          ],
           "200": [
             "object",
             {
@@ -1079,866 +1058,6 @@
       "name": "vm",
       "provider": "provider[\"registry.terraform.io/bpg/proxmox\"]",
       "instances": [
-        {
-          "index_key": "100",
-          "schema_version": 0,
-          "attributes": {
-            "acpi": true,
-            "agent": [
-              {
-                "enabled": true,
-                "timeout": "15m",
-                "trim": false,
-                "type": "virtio"
-              }
-            ],
-            "audio_device": [],
-            "bios": "seabios",
-            "boot_order": null,
-            "cdrom": [],
-            "clone": [],
-            "cpu": [
-              {
-                "affinity": "",
-                "architecture": "",
-                "cores": 2,
-                "flags": [],
-                "hotplugged": 0,
-                "limit": 0,
-                "numa": false,
-                "sockets": 1,
-                "type": "host",
-                "units": 1024
-              }
-            ],
-            "description": "",
-            "disk": [
-              {
-                "aio": "io_uring",
-                "backup": true,
-                "cache": "none",
-                "datastore_id": "local-lvm",
-                "discard": "on",
-                "file_format": "raw",
-                "file_id": "",
-                "interface": "scsi0",
-                "iothread": false,
-                "path_in_datastore": "vm-100-disk-0",
-                "replicate": true,
-                "serial": "",
-                "size": 8,
-                "speed": [],
-                "ssd": true
-              }
-            ],
-            "efi_disk": [],
-            "hook_script_file_id": null,
-            "hostpci": [],
-            "id": "100",
-            "initialization": [
-              {
-                "datastore_id": "local-lvm",
-                "dns": [],
-                "interface": "ide2",
-                "ip_config": [
-                  {
-                    "ipv4": [
-                      {
-                        "address": "10.100.0.100/24",
-                        "gateway": "10.100.0.1"
-                      }
-                    ],
-                    "ipv6": []
-                  }
-                ],
-                "meta_data_file_id": "",
-                "network_data_file_id": "",
-                "type": "",
-                "upgrade": false,
-                "user_account": [
-                  {
-                    "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
-                    ],
-                    "password": "",
-                    "username": "root"
-                  }
-                ],
-                "user_data_file_id": "",
-                "vendor_data_file_id": ""
-              }
-            ],
-            "ipv4_addresses": [
-              [
-                "127.0.0.1"
-              ],
-              [
-                "10.100.0.100"
-              ],
-              [
-                "10.88.0.1"
-              ],
-              []
-            ],
-            "ipv6_addresses": [
-              [],
-              [],
-              [],
-              []
-            ],
-            "keyboard_layout": "en-us",
-            "kvm_arguments": "",
-            "mac_addresses": [
-              "00:00:00:00:00:00",
-              "BC:24:11:00:D0:19",
-              "26:5A:86:13:79:6A",
-              "D2:F5:5A:9E:69:8B"
-            ],
-            "machine": "",
-            "memory": [
-              {
-                "dedicated": 1024,
-                "floating": 0,
-                "hugepages": "",
-                "keep_hugepages": false,
-                "shared": 0
-              }
-            ],
-            "migrate": false,
-            "name": "100-internal-traefik",
-            "network_device": [
-              {
-                "bridge": "vmbr100",
-                "disconnected": false,
-                "enabled": true,
-                "firewall": false,
-                "mac_address": "BC:24:11:00:D0:19",
-                "model": "virtio",
-                "mtu": 0,
-                "queues": 0,
-                "rate_limit": 0,
-                "trunks": "",
-                "vlan_id": 0
-              }
-            ],
-            "network_interface_names": [
-              "lo",
-              "eth0",
-              "podman0",
-              "veth0"
-            ],
-            "node_name": "luca-server",
-            "numa": [],
-            "on_boot": true,
-            "operating_system": [],
-            "pool_id": null,
-            "protection": false,
-            "reboot": false,
-            "scsi_hardware": "virtio-scsi-pci",
-            "serial_device": [],
-            "smbios": [],
-            "started": true,
-            "startup": [
-              {
-                "down_delay": -1,
-                "order": 3,
-                "up_delay": 0
-              }
-            ],
-            "stop_on_destroy": false,
-            "tablet_device": true,
-            "tags": [],
-            "template": false,
-            "timeout_clone": 1800,
-            "timeout_create": 1800,
-            "timeout_migrate": 1800,
-            "timeout_move_disk": 1800,
-            "timeout_reboot": 1800,
-            "timeout_shutdown_vm": 1800,
-            "timeout_start_vm": 1800,
-            "timeout_stop_vm": 300,
-            "tpm_state": [],
-            "usb": [],
-            "vga": [],
-            "vm_id": 100,
-            "watchdog": []
-          },
-          "sensitive_attributes": [
-            [
-              {
-                "type": "get_attr",
-                "value": "initialization"
-              },
-              {
-                "type": "index",
-                "value": {
-                  "value": 0,
-                  "type": "number"
-                }
-              },
-              {
-                "type": "get_attr",
-                "value": "user_account"
-              },
-              {
-                "type": "index",
-                "value": {
-                  "value": 0,
-                  "type": "number"
-                }
-              },
-              {
-                "type": "get_attr",
-                "value": "password"
-              }
-            ]
-          ],
-          "identity_schema_version": 0,
-          "private": "bnVsbA==",
-          "dependencies": [
-            "proxmox_virtual_environment_hardware_mapping_pci.gpu"
-          ]
-        },
-        {
-          "index_key": "101",
-          "schema_version": 0,
-          "attributes": {
-            "acpi": true,
-            "agent": [
-              {
-                "enabled": true,
-                "timeout": "15m",
-                "trim": false,
-                "type": "virtio"
-              }
-            ],
-            "audio_device": [],
-            "bios": "seabios",
-            "boot_order": null,
-            "cdrom": [],
-            "clone": [],
-            "cpu": [
-              {
-                "affinity": "",
-                "architecture": "",
-                "cores": 2,
-                "flags": [],
-                "hotplugged": 0,
-                "limit": 0,
-                "numa": false,
-                "sockets": 1,
-                "type": "host",
-                "units": 1024
-              }
-            ],
-            "description": "",
-            "disk": [
-              {
-                "aio": "io_uring",
-                "backup": true,
-                "cache": "none",
-                "datastore_id": "local-lvm",
-                "discard": "on",
-                "file_format": "raw",
-                "file_id": "",
-                "interface": "scsi0",
-                "iothread": false,
-                "path_in_datastore": "vm-101-disk-0",
-                "replicate": true,
-                "serial": "",
-                "size": 8,
-                "speed": [],
-                "ssd": true
-              }
-            ],
-            "efi_disk": [],
-            "hook_script_file_id": null,
-            "hostpci": [],
-            "id": "101",
-            "initialization": [
-              {
-                "datastore_id": "local-lvm",
-                "dns": [],
-                "interface": "ide2",
-                "ip_config": [
-                  {
-                    "ipv4": [
-                      {
-                        "address": "10.100.0.128/24",
-                        "gateway": "10.100.0.1"
-                      }
-                    ],
-                    "ipv6": []
-                  }
-                ],
-                "meta_data_file_id": "",
-                "network_data_file_id": "",
-                "type": "",
-                "upgrade": false,
-                "user_account": [
-                  {
-                    "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
-                    ],
-                    "password": "",
-                    "username": "root"
-                  }
-                ],
-                "user_data_file_id": "",
-                "vendor_data_file_id": ""
-              }
-            ],
-            "ipv4_addresses": [
-              [
-                "127.0.0.1"
-              ],
-              [
-                "10.100.0.101"
-              ]
-            ],
-            "ipv6_addresses": [
-              [],
-              []
-            ],
-            "keyboard_layout": "en-us",
-            "kvm_arguments": "",
-            "mac_addresses": [
-              "00:00:00:00:00:00",
-              "BC:24:11:61:2C:A0"
-            ],
-            "machine": "",
-            "memory": [
-              {
-                "dedicated": 1024,
-                "floating": 0,
-                "hugepages": "",
-                "keep_hugepages": false,
-                "shared": 0
-              }
-            ],
-            "migrate": false,
-            "name": "101-internal-authelia",
-            "network_device": [
-              {
-                "bridge": "vmbr100",
-                "disconnected": false,
-                "enabled": true,
-                "firewall": false,
-                "mac_address": "BC:24:11:61:2C:A0",
-                "model": "virtio",
-                "mtu": 0,
-                "queues": 0,
-                "rate_limit": 0,
-                "trunks": "",
-                "vlan_id": 0
-              }
-            ],
-            "network_interface_names": [
-              "lo",
-              "eth0"
-            ],
-            "node_name": "luca-server",
-            "numa": [],
-            "on_boot": true,
-            "operating_system": [],
-            "pool_id": null,
-            "protection": false,
-            "reboot": false,
-            "scsi_hardware": "virtio-scsi-pci",
-            "serial_device": [],
-            "smbios": [],
-            "started": true,
-            "startup": [
-              {
-                "down_delay": -1,
-                "order": 3,
-                "up_delay": 0
-              }
-            ],
-            "stop_on_destroy": false,
-            "tablet_device": true,
-            "tags": [],
-            "template": false,
-            "timeout_clone": 1800,
-            "timeout_create": 1800,
-            "timeout_migrate": 1800,
-            "timeout_move_disk": 1800,
-            "timeout_reboot": 1800,
-            "timeout_shutdown_vm": 1800,
-            "timeout_start_vm": 1800,
-            "timeout_stop_vm": 300,
-            "tpm_state": [],
-            "usb": [],
-            "vga": [],
-            "vm_id": 101,
-            "watchdog": []
-          },
-          "sensitive_attributes": [
-            [
-              {
-                "type": "get_attr",
-                "value": "initialization"
-              },
-              {
-                "type": "index",
-                "value": {
-                  "value": 0,
-                  "type": "number"
-                }
-              },
-              {
-                "type": "get_attr",
-                "value": "user_account"
-              },
-              {
-                "type": "index",
-                "value": {
-                  "value": 0,
-                  "type": "number"
-                }
-              },
-              {
-                "type": "get_attr",
-                "value": "password"
-              }
-            ]
-          ],
-          "identity_schema_version": 0,
-          "private": "bnVsbA==",
-          "dependencies": [
-            "proxmox_virtual_environment_hardware_mapping_pci.gpu"
-          ]
-        },
-        {
-          "index_key": "102",
-          "schema_version": 0,
-          "attributes": {
-            "acpi": true,
-            "agent": [
-              {
-                "enabled": true,
-                "timeout": "15m",
-                "trim": false,
-                "type": "virtio"
-              }
-            ],
-            "audio_device": [],
-            "bios": "seabios",
-            "boot_order": null,
-            "cdrom": [],
-            "clone": [],
-            "cpu": [
-              {
-                "affinity": "",
-                "architecture": "",
-                "cores": 2,
-                "flags": [],
-                "hotplugged": 0,
-                "limit": 0,
-                "numa": false,
-                "sockets": 1,
-                "type": "host",
-                "units": 1024
-              }
-            ],
-            "description": "",
-            "disk": [
-              {
-                "aio": "io_uring",
-                "backup": true,
-                "cache": "none",
-                "datastore_id": "local-lvm",
-                "discard": "on",
-                "file_format": "raw",
-                "file_id": "",
-                "interface": "scsi0",
-                "iothread": false,
-                "path_in_datastore": "vm-102-disk-0",
-                "replicate": true,
-                "serial": "",
-                "size": 8,
-                "speed": [],
-                "ssd": true
-              }
-            ],
-            "efi_disk": [],
-            "hook_script_file_id": null,
-            "hostpci": [],
-            "id": "102",
-            "initialization": [
-              {
-                "datastore_id": "local-lvm",
-                "dns": [],
-                "interface": "ide2",
-                "ip_config": [
-                  {
-                    "ipv4": [
-                      {
-                        "address": "10.100.0.133/24",
-                        "gateway": "10.100.0.1"
-                      }
-                    ],
-                    "ipv6": []
-                  }
-                ],
-                "meta_data_file_id": "",
-                "network_data_file_id": "",
-                "type": "",
-                "upgrade": false,
-                "user_account": [
-                  {
-                    "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
-                    ],
-                    "password": "",
-                    "username": "root"
-                  }
-                ],
-                "user_data_file_id": "",
-                "vendor_data_file_id": ""
-              }
-            ],
-            "ipv4_addresses": [
-              [
-                "127.0.0.1"
-              ],
-              [
-                "10.100.0.102"
-              ]
-            ],
-            "ipv6_addresses": [
-              [],
-              []
-            ],
-            "keyboard_layout": "en-us",
-            "kvm_arguments": "",
-            "mac_addresses": [
-              "00:00:00:00:00:00",
-              "BC:24:11:0A:B7:B2"
-            ],
-            "machine": "",
-            "memory": [
-              {
-                "dedicated": 1024,
-                "floating": 0,
-                "hugepages": "",
-                "keep_hugepages": false,
-                "shared": 0
-              }
-            ],
-            "migrate": false,
-            "name": "102-internal-lldap",
-            "network_device": [
-              {
-                "bridge": "vmbr100",
-                "disconnected": false,
-                "enabled": true,
-                "firewall": false,
-                "mac_address": "BC:24:11:0A:B7:B2",
-                "model": "virtio",
-                "mtu": 0,
-                "queues": 0,
-                "rate_limit": 0,
-                "trunks": "",
-                "vlan_id": 0
-              }
-            ],
-            "network_interface_names": [
-              "lo",
-              "eth0"
-            ],
-            "node_name": "luca-server",
-            "numa": [],
-            "on_boot": true,
-            "operating_system": [],
-            "pool_id": null,
-            "protection": false,
-            "reboot": false,
-            "scsi_hardware": "virtio-scsi-pci",
-            "serial_device": [],
-            "smbios": [],
-            "started": true,
-            "startup": [
-              {
-                "down_delay": -1,
-                "order": 3,
-                "up_delay": 0
-              }
-            ],
-            "stop_on_destroy": false,
-            "tablet_device": true,
-            "tags": [],
-            "template": false,
-            "timeout_clone": 1800,
-            "timeout_create": 1800,
-            "timeout_migrate": 1800,
-            "timeout_move_disk": 1800,
-            "timeout_reboot": 1800,
-            "timeout_shutdown_vm": 1800,
-            "timeout_start_vm": 1800,
-            "timeout_stop_vm": 300,
-            "tpm_state": [],
-            "usb": [],
-            "vga": [],
-            "vm_id": 102,
-            "watchdog": []
-          },
-          "sensitive_attributes": [
-            [
-              {
-                "type": "get_attr",
-                "value": "initialization"
-              },
-              {
-                "type": "index",
-                "value": {
-                  "value": 0,
-                  "type": "number"
-                }
-              },
-              {
-                "type": "get_attr",
-                "value": "user_account"
-              },
-              {
-                "type": "index",
-                "value": {
-                  "value": 0,
-                  "type": "number"
-                }
-              },
-              {
-                "type": "get_attr",
-                "value": "password"
-              }
-            ]
-          ],
-          "identity_schema_version": 0,
-          "private": "bnVsbA==",
-          "dependencies": [
-            "proxmox_virtual_environment_hardware_mapping_pci.gpu"
-          ]
-        },
-        {
-          "index_key": "103",
-          "schema_version": 0,
-          "attributes": {
-            "acpi": true,
-            "agent": [
-              {
-                "enabled": true,
-                "timeout": "15m",
-                "trim": false,
-                "type": "virtio"
-              }
-            ],
-            "audio_device": [],
-            "bios": "seabios",
-            "boot_order": null,
-            "cdrom": [],
-            "clone": [],
-            "cpu": [
-              {
-                "affinity": "",
-                "architecture": "",
-                "cores": 2,
-                "flags": [],
-                "hotplugged": 0,
-                "limit": 0,
-                "numa": false,
-                "sockets": 1,
-                "type": "host",
-                "units": 1024
-              }
-            ],
-            "description": "",
-            "disk": [
-              {
-                "aio": "io_uring",
-                "backup": true,
-                "cache": "none",
-                "datastore_id": "local-lvm",
-                "discard": "on",
-                "file_format": "raw",
-                "file_id": "",
-                "interface": "scsi0",
-                "iothread": false,
-                "path_in_datastore": "vm-103-disk-0",
-                "replicate": true,
-                "serial": "",
-                "size": 8,
-                "speed": [],
-                "ssd": true
-              }
-            ],
-            "efi_disk": [],
-            "hook_script_file_id": null,
-            "hostpci": [],
-            "id": "103",
-            "initialization": [
-              {
-                "datastore_id": "local-lvm",
-                "dns": [],
-                "interface": "ide2",
-                "ip_config": [
-                  {
-                    "ipv4": [
-                      {
-                        "address": "10.100.0.102/24",
-                        "gateway": "10.100.0.1"
-                      }
-                    ],
-                    "ipv6": []
-                  }
-                ],
-                "meta_data_file_id": "",
-                "network_data_file_id": "",
-                "type": "",
-                "upgrade": false,
-                "user_account": [
-                  {
-                    "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
-                    ],
-                    "password": "",
-                    "username": "root"
-                  }
-                ],
-                "user_data_file_id": "",
-                "vendor_data_file_id": ""
-              }
-            ],
-            "ipv4_addresses": [
-              [
-                "127.0.0.1"
-              ],
-              [
-                "10.100.0.103"
-              ],
-              [
-                "10.88.0.1"
-              ],
-              []
-            ],
-            "ipv6_addresses": [
-              [],
-              [],
-              [],
-              []
-            ],
-            "keyboard_layout": "en-us",
-            "kvm_arguments": "",
-            "mac_addresses": [
-              "00:00:00:00:00:00",
-              "BC:24:11:C3:A2:BC",
-              "2E:AF:50:C0:FC:84",
-              "3E:FB:B2:D2:15:63"
-            ],
-            "machine": "",
-            "memory": [
-              {
-                "dedicated": 1024,
-                "floating": 0,
-                "hugepages": "",
-                "keep_hugepages": false,
-                "shared": 0
-              }
-            ],
-            "migrate": false,
-            "name": "103-internal-homepage",
-            "network_device": [
-              {
-                "bridge": "vmbr100",
-                "disconnected": false,
-                "enabled": true,
-                "firewall": false,
-                "mac_address": "BC:24:11:C3:A2:BC",
-                "model": "virtio",
-                "mtu": 0,
-                "queues": 0,
-                "rate_limit": 0,
-                "trunks": "",
-                "vlan_id": 0
-              }
-            ],
-            "network_interface_names": [
-              "lo",
-              "eth0",
-              "podman0",
-              "veth0"
-            ],
-            "node_name": "luca-server",
-            "numa": [],
-            "on_boot": true,
-            "operating_system": [],
-            "pool_id": null,
-            "protection": false,
-            "reboot": false,
-            "scsi_hardware": "virtio-scsi-pci",
-            "serial_device": [],
-            "smbios": [],
-            "started": true,
-            "startup": [
-              {
-                "down_delay": -1,
-                "order": 3,
-                "up_delay": 0
-              }
-            ],
-            "stop_on_destroy": false,
-            "tablet_device": true,
-            "tags": [],
-            "template": false,
-            "timeout_clone": 1800,
-            "timeout_create": 1800,
-            "timeout_migrate": 1800,
-            "timeout_move_disk": 1800,
-            "timeout_reboot": 1800,
-            "timeout_shutdown_vm": 1800,
-            "timeout_start_vm": 1800,
-            "timeout_stop_vm": 300,
-            "tpm_state": [],
-            "usb": [],
-            "vga": [],
-            "vm_id": 103,
-            "watchdog": []
-          },
-          "sensitive_attributes": [
-            [
-              {
-                "type": "get_attr",
-                "value": "initialization"
-              },
-              {
-                "type": "index",
-                "value": {
-                  "value": 0,
-                  "type": "number"
-                }
-              },
-              {
-                "type": "get_attr",
-                "value": "user_account"
-              },
-              {
-                "type": "index",
-                "value": {
-                  "value": 0,
-                  "type": "number"
-                }
-              },
-              {
-                "type": "get_attr",
-                "value": "password"
-              }
-            ]
-          ],
-          "identity_schema_version": 0,
-          "private": "bnVsbA==",
-          "dependencies": [
-            "proxmox_virtual_environment_hardware_mapping_pci.gpu"
-          ]
-        },
         {
           "index_key": "104",
           "schema_version": 0,
@@ -2261,7 +1380,7 @@
             "mac_addresses": [
               "00:00:00:00:00:00",
               "BC:24:11:45:CD:E0",
-              "BA:72:65:9F:60:14",
+              "5E:F6:66:8C:D9:BD",
               "9A:5D:16:86:E1:9B"
             ],
             "machine": "",
@@ -2410,7 +1529,7 @@
                 "datastore_id": "local-lvm",
                 "discard": "on",
                 "file_format": "raw",
-                "file_id": "",
+                "file_id": "local:iso/nixos.img",
                 "interface": "scsi0",
                 "iothread": false,
                 "path_in_datastore": "vm-106-disk-0",
@@ -2463,12 +1582,17 @@
                 "127.0.0.1"
               ],
               [
-                "10.100.0.106"
+                "10.100.0.106",
+                "10.100.0.242"
               ]
             ],
             "ipv6_addresses": [
-              [],
-              []
+              [
+                "::1"
+              ],
+              [
+                "fe80::be24:11ff:fe16:42fe"
+              ]
             ],
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
@@ -2527,7 +1651,7 @@
             ],
             "stop_on_destroy": false,
             "tablet_device": true,
-            "tags": [],
+            "tags": null,
             "template": false,
             "timeout_clone": 1800,
             "timeout_create": 1800,
@@ -2620,7 +1744,7 @@
                 "datastore_id": "local-lvm",
                 "discard": "on",
                 "file_format": "raw",
-                "file_id": "",
+                "file_id": "local:iso/nixos.img",
                 "interface": "scsi0",
                 "iothread": false,
                 "path_in_datastore": "vm-107-disk-0",
@@ -2673,12 +1797,17 @@
                 "127.0.0.1"
               ],
               [
-                "10.100.0.107"
+                "10.100.0.107",
+                "10.100.0.243"
               ]
             ],
             "ipv6_addresses": [
-              [],
-              []
+              [
+                "::1"
+              ],
+              [
+                "fe80::be24:11ff:feda:d002"
+              ]
             ],
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
@@ -2737,7 +1866,7 @@
             ],
             "stop_on_destroy": false,
             "tablet_device": true,
-            "tags": [],
+            "tags": null,
             "template": false,
             "timeout_clone": 1800,
             "timeout_create": 1800,
@@ -2901,7 +2030,7 @@
             "mac_addresses": [
               "00:00:00:00:00:00",
               "BC:24:11:2D:72:EA",
-              "7E:7D:A3:0E:72:0F",
+              "42:7D:C9:7B:87:A0",
               "96:2D:24:89:61:6C"
             ],
             "machine": "",
@@ -3541,7 +2670,7 @@
             "mac_addresses": [
               "00:00:00:00:00:00",
               "BC:24:11:2D:35:45",
-              "26:C1:B5:F8:84:33",
+              "92:FA:DE:7A:03:4A",
               "6A:56:CF:9E:FD:B2"
             ],
             "machine": "",
@@ -4178,7 +3307,7 @@
             "mac_addresses": [
               "00:00:00:00:00:00",
               "BC:24:11:A8:A2:96",
-              "8E:0A:54:16:CF:92",
+              "A6:72:45:33:EC:2A",
               "56:71:4D:BA:16:39"
             ],
             "machine": "",
@@ -4398,8 +3527,8 @@
             "mac_addresses": [
               "00:00:00:00:00:00",
               "BC:24:11:F9:79:35",
-              "6A:CA:85:3A:0E:94",
-              "CA:58:B0:92:46:7C"
+              "A6:19:0A:72:AA:F9",
+              "12:CD:60:E7:EE:AE"
             ],
             "machine": "",
             "memory": [
@@ -4432,7 +3561,7 @@
               "lo",
               "eth0",
               "docker0",
-              "vethb2facee"
+              "veth6ba55ab"
             ],
             "node_name": "luca-server",
             "numa": [],
@@ -4508,7 +3637,6 @@
         },
         {
           "index_key": "116",
-          "status": "tainted",
           "schema_version": 0,
           "attributes": {
             "acpi": true,
@@ -4529,8 +3657,8 @@
               {
                 "affinity": "",
                 "architecture": "",
-                "cores": 4,
-                "flags": null,
+                "cores": 2,
+                "flags": [],
                 "hotplugged": 0,
                 "limit": 0,
                 "numa": false,
@@ -4539,7 +3667,7 @@
                 "units": 1024
               }
             ],
-            "description": null,
+            "description": "",
             "disk": [
               {
                 "aio": "io_uring",
@@ -4548,13 +3676,13 @@
                 "datastore_id": "local-lvm",
                 "discard": "on",
                 "file_format": "raw",
-                "file_id": "local:iso/nixos.img",
+                "file_id": "",
                 "interface": "scsi0",
                 "iothread": false,
-                "path_in_datastore": "",
+                "path_in_datastore": "vm-116-disk-0",
                 "replicate": true,
                 "serial": "",
-                "size": 40,
+                "size": 8,
                 "speed": [],
                 "ssd": true
               }
@@ -4567,12 +3695,12 @@
               {
                 "datastore_id": "local-lvm",
                 "dns": [],
-                "interface": "",
+                "interface": "ide2",
                 "ip_config": [
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.116/24",
+                        "address": "10.100.0.109/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -4586,7 +3714,7 @@
                 "user_account": [
                   {
                     "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
                     ],
                     "password": "",
                     "username": "root"
@@ -4596,15 +3724,39 @@
                 "vendor_data_file_id": ""
               }
             ],
-            "ipv4_addresses": null,
-            "ipv6_addresses": null,
+            "ipv4_addresses": [
+              [
+                "127.0.0.1"
+              ],
+              [
+                "10.100.0.116"
+              ],
+              [
+                "10.88.0.1"
+              ],
+              [],
+              []
+            ],
+            "ipv6_addresses": [
+              [],
+              [],
+              [],
+              [],
+              []
+            ],
             "keyboard_layout": "en-us",
-            "kvm_arguments": null,
-            "mac_addresses": null,
-            "machine": null,
+            "kvm_arguments": "",
+            "mac_addresses": [
+              "00:00:00:00:00:00",
+              "BC:24:11:E8:89:43",
+              "E2:D4:98:D6:25:F4",
+              "BE:68:FA:63:1F:3A",
+              "26:2E:68:AE:B0:46"
+            ],
+            "machine": "",
             "memory": [
               {
-                "dedicated": 4096,
+                "dedicated": 1024,
                 "floating": 0,
                 "hugepages": "",
                 "keep_hugepages": false,
@@ -4612,14 +3764,14 @@
               }
             ],
             "migrate": false,
-            "name": "116-internal-github-runner",
+            "name": "116-internal-registry",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "",
+                "mac_address": "BC:24:11:E8:89:43",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -4628,7 +3780,13 @@
                 "vlan_id": 0
               }
             ],
-            "network_interface_names": null,
+            "network_interface_names": [
+              "lo",
+              "eth0",
+              "podman0",
+              "veth0",
+              "veth1"
+            ],
             "node_name": "luca-server",
             "numa": [],
             "on_boot": true,
@@ -4649,7 +3807,7 @@
             ],
             "stop_on_destroy": false,
             "tablet_device": true,
-            "tags": null,
+            "tags": [],
             "template": false,
             "timeout_clone": 1800,
             "timeout_create": 1800,
@@ -4766,7 +3924,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.109/24",
+                        "address": "10.100.0.111/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -4790,34 +3948,12 @@
                 "vendor_data_file_id": ""
               }
             ],
-            "ipv4_addresses": [
-              [
-                "127.0.0.1"
-              ],
-              [
-                "10.100.0.117"
-              ],
-              [
-                "10.88.0.1"
-              ],
-              [],
-              []
-            ],
-            "ipv6_addresses": [
-              [],
-              [],
-              [],
-              [],
-              []
-            ],
+            "ipv4_addresses": [],
+            "ipv6_addresses": [],
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
             "mac_addresses": [
-              "00:00:00:00:00:00",
-              "BC:24:11:E8:89:43",
-              "76:D0:DA:F4:A8:17",
-              "BE:68:FA:63:1F:3A",
-              "26:2E:68:AE:B0:46"
+              "BC:24:11:59:8A:67"
             ],
             "machine": "",
             "memory": [
@@ -4830,14 +3966,14 @@
               }
             ],
             "migrate": false,
-            "name": "117-internal-registry",
+            "name": "117-internal-vaultwarden",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:E8:89:43",
+                "mac_address": "BC:24:11:59:8A:67",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -4846,16 +3982,10 @@
                 "vlan_id": 0
               }
             ],
-            "network_interface_names": [
-              "lo",
-              "eth0",
-              "podman0",
-              "veth0",
-              "veth1"
-            ],
+            "network_interface_names": [],
             "node_name": "luca-server",
             "numa": [],
-            "on_boot": true,
+            "on_boot": false,
             "operating_system": [],
             "pool_id": null,
             "protection": false,
@@ -4863,7 +3993,7 @@
             "scsi_hardware": "virtio-scsi-pci",
             "serial_device": [],
             "smbios": [],
-            "started": true,
+            "started": false,
             "startup": [
               {
                 "down_delay": -1,
@@ -4990,7 +4120,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.111/24",
+                        "address": "10.100.0.112/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -5019,7 +4149,7 @@
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
             "mac_addresses": [
-              "BC:24:11:59:8A:67"
+              "BC:24:11:65:DE:D4"
             ],
             "machine": "",
             "memory": [
@@ -5032,14 +4162,14 @@
               }
             ],
             "migrate": false,
-            "name": "118-internal-vaultwarden",
+            "name": "118-internal-nextcloud",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:59:8A:67",
+                "mac_address": "BC:24:11:65:DE:D4",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -5186,7 +4316,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.112/24",
+                        "address": "10.100.0.129/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -5200,7 +4330,7 @@
                 "user_account": [
                   {
                     "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
                     ],
                     "password": "",
                     "username": "root"
@@ -5215,7 +4345,7 @@
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
             "mac_addresses": [
-              "BC:24:11:65:DE:D4"
+              "BC:24:11:FB:C9:7B"
             ],
             "machine": "",
             "memory": [
@@ -5228,14 +4358,14 @@
               }
             ],
             "migrate": false,
-            "name": "119-internal-nextcloud",
+            "name": "119-internal-calendar",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:65:DE:D4",
+                "mac_address": "BC:24:11:FB:C9:7B",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -5382,7 +4512,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.129/24",
+                        "address": "10.100.0.113/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -5396,7 +4526,7 @@
                 "user_account": [
                   {
                     "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
                     ],
                     "password": "",
                     "username": "root"
@@ -5406,17 +4536,28 @@
                 "vendor_data_file_id": ""
               }
             ],
-            "ipv4_addresses": [],
-            "ipv6_addresses": [],
+            "ipv4_addresses": [
+              [
+                "127.0.0.1"
+              ],
+              [
+                "10.100.0.120"
+              ]
+            ],
+            "ipv6_addresses": [
+              [],
+              []
+            ],
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
             "mac_addresses": [
-              "BC:24:11:FB:C9:7B"
+              "00:00:00:00:00:00",
+              "BC:24:11:20:64:9C"
             ],
             "machine": "",
             "memory": [
               {
-                "dedicated": 1024,
+                "dedicated": 2048,
                 "floating": 0,
                 "hugepages": "",
                 "keep_hugepages": false,
@@ -5424,14 +4565,14 @@
               }
             ],
             "migrate": false,
-            "name": "120-internal-calendar",
+            "name": "120-internal-paperless",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:FB:C9:7B",
+                "mac_address": "BC:24:11:20:64:9C",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -5440,10 +4581,13 @@
                 "vlan_id": 0
               }
             ],
-            "network_interface_names": [],
+            "network_interface_names": [
+              "lo",
+              "eth0"
+            ],
             "node_name": "luca-server",
             "numa": [],
-            "on_boot": false,
+            "on_boot": true,
             "operating_system": [],
             "pool_id": null,
             "protection": false,
@@ -5451,7 +4595,7 @@
             "scsi_hardware": "virtio-scsi-pci",
             "serial_device": [],
             "smbios": [],
-            "started": false,
+            "started": true,
             "startup": [
               {
                 "down_delay": -1,
@@ -5578,7 +4722,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.113/24",
+                        "address": "10.100.0.125/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -5592,7 +4736,7 @@
                 "user_account": [
                   {
                     "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
                     ],
                     "password": "",
                     "username": "root"
@@ -5606,7 +4750,9 @@
             "ipv6_addresses": [],
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
-            "mac_addresses": [],
+            "mac_addresses": [
+              "BC:24:11:80:A5:7B"
+            ],
             "machine": "",
             "memory": [
               {
@@ -5618,14 +4764,14 @@
               }
             ],
             "migrate": false,
-            "name": "121-internal-paperless",
+            "name": "121-internal-paperless-ai",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:20:64:9C",
+                "mac_address": "BC:24:11:80:A5:7B",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -5637,7 +4783,7 @@
             "network_interface_names": [],
             "node_name": "luca-server",
             "numa": [],
-            "on_boot": true,
+            "on_boot": false,
             "operating_system": [],
             "pool_id": null,
             "protection": false,
@@ -5645,7 +4791,7 @@
             "scsi_hardware": "virtio-scsi-pci",
             "serial_device": [],
             "smbios": [],
-            "started": true,
+            "started": false,
             "startup": [
               {
                 "down_delay": -1,
@@ -5772,7 +4918,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.125/24",
+                        "address": "10.100.0.116/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -5786,7 +4932,7 @@
                 "user_account": [
                   {
                     "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
                     ],
                     "password": "",
                     "username": "root"
@@ -5801,12 +4947,12 @@
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
             "mac_addresses": [
-              "BC:24:11:80:A5:7B"
+              "BC:24:11:83:99:86"
             ],
             "machine": "",
             "memory": [
               {
-                "dedicated": 2048,
+                "dedicated": 1024,
                 "floating": 0,
                 "hugepages": "",
                 "keep_hugepages": false,
@@ -5814,14 +4960,14 @@
               }
             ],
             "migrate": false,
-            "name": "122-internal-paperless-ai",
+            "name": "122-internal-wikijs",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:80:A5:7B",
+                "mac_address": "BC:24:11:83:99:86",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -5968,7 +5114,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.116/24",
+                        "address": "10.100.0.140/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -5982,7 +5128,7 @@
                 "user_account": [
                   {
                     "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
                     ],
                     "password": "",
                     "username": "root"
@@ -5992,12 +5138,23 @@
                 "vendor_data_file_id": ""
               }
             ],
-            "ipv4_addresses": [],
-            "ipv6_addresses": [],
+            "ipv4_addresses": [
+              [
+                "127.0.0.1"
+              ],
+              [
+                "10.100.0.123"
+              ]
+            ],
+            "ipv6_addresses": [
+              [],
+              []
+            ],
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
             "mac_addresses": [
-              "BC:24:11:83:99:86"
+              "00:00:00:00:00:00",
+              "BC:24:11:71:D3:3F"
             ],
             "machine": "",
             "memory": [
@@ -6010,14 +5167,14 @@
               }
             ],
             "migrate": false,
-            "name": "123-internal-wikijs",
+            "name": "123-internal-firefly",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:83:99:86",
+                "mac_address": "BC:24:11:71:D3:3F",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -6026,7 +5183,10 @@
                 "vlan_id": 0
               }
             ],
-            "network_interface_names": [],
+            "network_interface_names": [
+              "lo",
+              "eth0"
+            ],
             "node_name": "luca-server",
             "numa": [],
             "on_boot": false,
@@ -6037,7 +5197,7 @@
             "scsi_hardware": "virtio-scsi-pci",
             "serial_device": [],
             "smbios": [],
-            "started": false,
+            "started": true,
             "startup": [
               {
                 "down_delay": -1,
@@ -6164,7 +5324,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.140/24",
+                        "address": "10.100.0.115/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -6178,7 +5338,7 @@
                 "user_account": [
                   {
                     "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
                     ],
                     "password": "",
                     "username": "root"
@@ -6188,23 +5348,12 @@
                 "vendor_data_file_id": ""
               }
             ],
-            "ipv4_addresses": [
-              [
-                "127.0.0.1"
-              ],
-              [
-                "10.100.0.124"
-              ]
-            ],
-            "ipv6_addresses": [
-              [],
-              []
-            ],
+            "ipv4_addresses": [],
+            "ipv6_addresses": [],
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
             "mac_addresses": [
-              "00:00:00:00:00:00",
-              "BC:24:11:71:D3:3F"
+              "BC:24:11:8F:09:D0"
             ],
             "machine": "",
             "memory": [
@@ -6217,14 +5366,14 @@
               }
             ],
             "migrate": false,
-            "name": "124-internal-firefly",
+            "name": "124-internal-homeassistant",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:71:D3:3F",
+                "mac_address": "BC:24:11:8F:09:D0",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -6233,10 +5382,7 @@
                 "vlan_id": 0
               }
             ],
-            "network_interface_names": [
-              "lo",
-              "eth0"
-            ],
+            "network_interface_names": [],
             "node_name": "luca-server",
             "numa": [],
             "on_boot": false,
@@ -6247,7 +5393,7 @@
             "scsi_hardware": "virtio-scsi-pci",
             "serial_device": [],
             "smbios": [],
-            "started": true,
+            "started": false,
             "startup": [
               {
                 "down_delay": -1,
@@ -6374,7 +5520,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.115/24",
+                        "address": "10.100.0.114/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -6403,7 +5549,7 @@
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
             "mac_addresses": [
-              "BC:24:11:8F:09:D0"
+              "BC:24:11:99:2B:69"
             ],
             "machine": "",
             "memory": [
@@ -6416,14 +5562,14 @@
               }
             ],
             "migrate": false,
-            "name": "125-internal-homeassistant",
+            "name": "125-internal-huginn",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:8F:09:D0",
+                "mac_address": "BC:24:11:99:2B:69",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -6570,7 +5716,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.114/24",
+                        "address": "10.100.0.139/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -6584,7 +5730,7 @@
                 "user_account": [
                   {
                     "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
                     ],
                     "password": "",
                     "username": "root"
@@ -6594,12 +5740,23 @@
                 "vendor_data_file_id": ""
               }
             ],
-            "ipv4_addresses": [],
-            "ipv6_addresses": [],
+            "ipv4_addresses": [
+              [
+                "127.0.0.1"
+              ],
+              [
+                "10.100.0.126"
+              ]
+            ],
+            "ipv6_addresses": [
+              [],
+              []
+            ],
             "keyboard_layout": "en-us",
             "kvm_arguments": "",
             "mac_addresses": [
-              "BC:24:11:99:2B:69"
+              "00:00:00:00:00:00",
+              "BC:24:11:4A:AD:5D"
             ],
             "machine": "",
             "memory": [
@@ -6612,14 +5769,14 @@
               }
             ],
             "migrate": false,
-            "name": "126-internal-huginn",
+            "name": "126-internal-mosquitto",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:99:2B:69",
+                "mac_address": "BC:24:11:4A:AD:5D",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -6628,10 +5785,13 @@
                 "vlan_id": 0
               }
             ],
-            "network_interface_names": [],
+            "network_interface_names": [
+              "lo",
+              "eth0"
+            ],
             "node_name": "luca-server",
             "numa": [],
-            "on_boot": false,
+            "on_boot": true,
             "operating_system": [],
             "pool_id": null,
             "protection": false,
@@ -6639,7 +5799,7 @@
             "scsi_hardware": "virtio-scsi-pci",
             "serial_device": [],
             "smbios": [],
-            "started": false,
+            "started": true,
             "startup": [
               {
                 "down_delay": -1,
@@ -6766,7 +5926,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.139/24",
+                        "address": "10.100.0.136/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -6796,9 +5956,15 @@
               ],
               [
                 "10.100.0.127"
-              ]
+              ],
+              [
+                "10.88.0.1"
+              ],
+              []
             ],
             "ipv6_addresses": [
+              [],
+              [],
               [],
               []
             ],
@@ -6806,7 +5972,9 @@
             "kvm_arguments": "",
             "mac_addresses": [
               "00:00:00:00:00:00",
-              "BC:24:11:4A:AD:5D"
+              "BC:24:11:9B:B0:5A",
+              "5A:F1:F2:96:DA:3F",
+              "0A:47:73:3D:00:59"
             ],
             "machine": "",
             "memory": [
@@ -6819,14 +5987,14 @@
               }
             ],
             "migrate": false,
-            "name": "127-internal-mosquitto",
+            "name": "127-internal-jellyseerr",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:4A:AD:5D",
+                "mac_address": "BC:24:11:9B:B0:5A",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -6837,7 +6005,9 @@
             ],
             "network_interface_names": [
               "lo",
-              "eth0"
+              "eth0",
+              "podman0",
+              "veth0"
             ],
             "node_name": "luca-server",
             "numa": [],
@@ -6976,7 +6146,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.136/24",
+                        "address": "10.100.0.118/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -6990,7 +6160,7 @@
                 "user_account": [
                   {
                     "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
                     ],
                     "password": "",
                     "username": "root"
@@ -7022,9 +6192,9 @@
             "kvm_arguments": "",
             "mac_addresses": [
               "00:00:00:00:00:00",
-              "BC:24:11:9B:B0:5A",
-              "12:04:5E:05:94:38",
-              "0A:47:73:3D:00:59"
+              "BC:24:11:38:19:87",
+              "86:89:B5:02:7F:5C",
+              "DA:53:02:DF:27:9F"
             ],
             "machine": "",
             "memory": [
@@ -7037,14 +6207,14 @@
               }
             ],
             "migrate": false,
-            "name": "128-internal-jellyseerr",
+            "name": "128-internal-prowlarr",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:9B:B0:5A",
+                "mac_address": "BC:24:11:38:19:87",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -7196,7 +6366,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.118/24",
+                        "address": "10.100.0.119/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -7242,9 +6412,9 @@
             "kvm_arguments": "",
             "mac_addresses": [
               "00:00:00:00:00:00",
-              "BC:24:11:38:19:87",
-              "5A:3E:FB:3D:C1:F1",
-              "DA:53:02:DF:27:9F"
+              "BC:24:11:FC:77:AE",
+              "AE:2A:BD:29:3B:AA",
+              "EA:84:5F:15:54:55"
             ],
             "machine": "",
             "memory": [
@@ -7257,14 +6427,14 @@
               }
             ],
             "migrate": false,
-            "name": "129-internal-prowlarr",
+            "name": "129-internal-radarr",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:38:19:87",
+                "mac_address": "BC:24:11:FC:77:AE",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -7416,7 +6586,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.119/24",
+                        "address": "10.100.0.120/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -7462,9 +6632,9 @@
             "kvm_arguments": "",
             "mac_addresses": [
               "00:00:00:00:00:00",
-              "BC:24:11:FC:77:AE",
-              "8A:D8:DE:42:71:C2",
-              "EA:84:5F:15:54:55"
+              "BC:24:11:D3:4D:DF",
+              "56:AB:31:BC:5E:8E",
+              "42:19:83:1E:8D:90"
             ],
             "machine": "",
             "memory": [
@@ -7477,14 +6647,14 @@
               }
             ],
             "migrate": false,
-            "name": "130-internal-radarr",
+            "name": "130-internal-sonarr",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:FC:77:AE",
+                "mac_address": "BC:24:11:D3:4D:DF",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -7636,7 +6806,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.120/24",
+                        "address": "10.100.0.137/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -7650,7 +6820,7 @@
                 "user_account": [
                   {
                     "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
                     ],
                     "password": "",
                     "username": "root"
@@ -7682,9 +6852,9 @@
             "kvm_arguments": "",
             "mac_addresses": [
               "00:00:00:00:00:00",
-              "BC:24:11:D3:4D:DF",
-              "62:F3:EA:E4:30:87",
-              "42:19:83:1E:8D:90"
+              "BC:24:11:B8:80:06",
+              "86:C2:C9:AA:0A:76",
+              "B6:DA:9C:5C:D5:0F"
             ],
             "machine": "",
             "memory": [
@@ -7697,14 +6867,14 @@
               }
             ],
             "migrate": false,
-            "name": "131-internal-sonarr",
+            "name": "131-internal-bazarr",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:D3:4D:DF",
+                "mac_address": "BC:24:11:B8:80:06",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -7856,7 +7026,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.137/24",
+                        "address": "10.100.0.138/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -7886,15 +7056,9 @@
               ],
               [
                 "10.100.0.132"
-              ],
-              [
-                "10.88.0.1"
-              ],
-              []
+              ]
             ],
             "ipv6_addresses": [
-              [],
-              [],
               [],
               []
             ],
@@ -7902,9 +7066,7 @@
             "kvm_arguments": "",
             "mac_addresses": [
               "00:00:00:00:00:00",
-              "BC:24:11:B8:80:06",
-              "F6:14:FD:C6:20:53",
-              "B6:DA:9C:5C:D5:0F"
+              "BC:24:11:D9:C5:97"
             ],
             "machine": "",
             "memory": [
@@ -7917,14 +7079,14 @@
               }
             ],
             "migrate": false,
-            "name": "132-internal-bazarr",
+            "name": "132-internal-recyclarr",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:B8:80:06",
+                "mac_address": "BC:24:11:D9:C5:97",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -7935,9 +7097,7 @@
             ],
             "network_interface_names": [
               "lo",
-              "eth0",
-              "podman0",
-              "veth0"
+              "eth0"
             ],
             "node_name": "luca-server",
             "numa": [],
@@ -8033,7 +7193,7 @@
               {
                 "affinity": "",
                 "architecture": "",
-                "cores": 2,
+                "cores": 4,
                 "flags": [],
                 "hotplugged": 0,
                 "limit": 0,
@@ -8058,7 +7218,7 @@
                 "path_in_datastore": "vm-133-disk-0",
                 "replicate": true,
                 "serial": "",
-                "size": 8,
+                "size": 16,
                 "speed": [],
                 "ssd": true
               }
@@ -8076,7 +7236,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.138/24",
+                        "address": "10.100.0.121/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -8090,7 +7250,7 @@
                 "user_account": [
                   {
                     "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
+                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
                     ],
                     "password": "",
                     "username": "root"
@@ -8106,9 +7266,15 @@
               ],
               [
                 "10.100.0.133"
-              ]
+              ],
+              [
+                "10.88.0.1"
+              ],
+              []
             ],
             "ipv6_addresses": [
+              [],
+              [],
               [],
               []
             ],
@@ -8116,12 +7282,14 @@
             "kvm_arguments": "",
             "mac_addresses": [
               "00:00:00:00:00:00",
-              "BC:24:11:D9:C5:97"
+              "BC:24:11:69:E7:48",
+              "4A:03:96:71:CD:ED",
+              "62:E2:65:F3:2C:68"
             ],
             "machine": "",
             "memory": [
               {
-                "dedicated": 1024,
+                "dedicated": 4096,
                 "floating": 0,
                 "hugepages": "",
                 "keep_hugepages": false,
@@ -8129,14 +7297,14 @@
               }
             ],
             "migrate": false,
-            "name": "133-internal-recyclarr",
+            "name": "133-internal-jellyfin",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:D9:C5:97",
+                "mac_address": "BC:24:11:69:E7:48",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -8147,7 +7315,9 @@
             ],
             "network_interface_names": [
               "lo",
-              "eth0"
+              "eth0",
+              "podman0",
+              "veth0"
             ],
             "node_name": "luca-server",
             "numa": [],
@@ -8243,7 +7413,7 @@
               {
                 "affinity": "",
                 "architecture": "",
-                "cores": 4,
+                "cores": 2,
                 "flags": [],
                 "hotplugged": 0,
                 "limit": 0,
@@ -8268,7 +7438,7 @@
                 "path_in_datastore": "vm-134-disk-0",
                 "replicate": true,
                 "serial": "",
-                "size": 16,
+                "size": 8,
                 "speed": [],
                 "ssd": true
               }
@@ -8286,7 +7456,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.121/24",
+                        "address": "10.100.0.122/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -8320,9 +7490,11 @@
               [
                 "10.88.0.1"
               ],
+              [],
               []
             ],
             "ipv6_addresses": [
+              [],
               [],
               [],
               [],
@@ -8332,14 +7504,15 @@
             "kvm_arguments": "",
             "mac_addresses": [
               "00:00:00:00:00:00",
-              "BC:24:11:69:E7:48",
-              "D2:39:3F:32:DF:D5",
-              "62:E2:65:F3:2C:68"
+              "BC:24:11:44:8B:F1",
+              "92:04:2E:29:80:E8",
+              "5A:89:B5:55:63:4F",
+              "96:70:E9:39:F4:8A"
             ],
             "machine": "",
             "memory": [
               {
-                "dedicated": 4096,
+                "dedicated": 2048,
                 "floating": 0,
                 "hugepages": "",
                 "keep_hugepages": false,
@@ -8347,14 +7520,14 @@
               }
             ],
             "migrate": false,
-            "name": "134-internal-jellyfin",
+            "name": "134-internal-audiobookshelf",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:69:E7:48",
+                "mac_address": "BC:24:11:44:8B:F1",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -8367,7 +7540,8 @@
               "lo",
               "eth0",
               "podman0",
-              "veth0"
+              "veth0",
+              "veth1"
             ],
             "node_name": "luca-server",
             "numa": [],
@@ -8506,7 +7680,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.122/24",
+                        "address": "10.100.0.123/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -8554,10 +7728,10 @@
             "kvm_arguments": "",
             "mac_addresses": [
               "00:00:00:00:00:00",
-              "BC:24:11:44:8B:F1",
-              "2A:43:BF:DB:75:3C",
-              "5A:89:B5:55:63:4F",
-              "96:70:E9:39:F4:8A"
+              "BC:24:11:2F:F3:C1",
+              "1E:4F:E0:2C:AE:8F",
+              "A2:4E:5D:FC:DA:B6",
+              "86:6F:0D:BA:78:3F"
             ],
             "machine": "",
             "memory": [
@@ -8570,14 +7744,14 @@
               }
             ],
             "migrate": false,
-            "name": "135-internal-audiobookshelf",
+            "name": "135-internal-navidrome",
             "network_device": [
               {
                 "bridge": "vmbr100",
                 "disconnected": false,
                 "enabled": true,
                 "firewall": false,
-                "mac_address": "BC:24:11:44:8B:F1",
+                "mac_address": "BC:24:11:2F:F3:C1",
                 "model": "virtio",
                 "mtu": 0,
                 "queues": 0,
@@ -8730,7 +7904,7 @@
                   {
                     "ipv4": [
                       {
-                        "address": "10.100.0.123/24",
+                        "address": "10.100.0.124/24",
                         "gateway": "10.100.0.1"
                       }
                     ],
@@ -8778,232 +7952,8 @@
             "kvm_arguments": "",
             "mac_addresses": [
               "00:00:00:00:00:00",
-              "BC:24:11:2F:F3:C1",
-              "E2:0B:D3:C5:0C:38",
-              "A2:4E:5D:FC:DA:B6",
-              "86:6F:0D:BA:78:3F"
-            ],
-            "machine": "",
-            "memory": [
-              {
-                "dedicated": 2048,
-                "floating": 0,
-                "hugepages": "",
-                "keep_hugepages": false,
-                "shared": 0
-              }
-            ],
-            "migrate": false,
-            "name": "136-internal-navidrome",
-            "network_device": [
-              {
-                "bridge": "vmbr100",
-                "disconnected": false,
-                "enabled": true,
-                "firewall": false,
-                "mac_address": "BC:24:11:2F:F3:C1",
-                "model": "virtio",
-                "mtu": 0,
-                "queues": 0,
-                "rate_limit": 0,
-                "trunks": "",
-                "vlan_id": 0
-              }
-            ],
-            "network_interface_names": [
-              "lo",
-              "eth0",
-              "podman0",
-              "veth0",
-              "veth1"
-            ],
-            "node_name": "luca-server",
-            "numa": [],
-            "on_boot": true,
-            "operating_system": [],
-            "pool_id": null,
-            "protection": false,
-            "reboot": false,
-            "scsi_hardware": "virtio-scsi-pci",
-            "serial_device": [],
-            "smbios": [],
-            "started": true,
-            "startup": [
-              {
-                "down_delay": -1,
-                "order": 3,
-                "up_delay": 0
-              }
-            ],
-            "stop_on_destroy": false,
-            "tablet_device": true,
-            "tags": [],
-            "template": false,
-            "timeout_clone": 1800,
-            "timeout_create": 1800,
-            "timeout_migrate": 1800,
-            "timeout_move_disk": 1800,
-            "timeout_reboot": 1800,
-            "timeout_shutdown_vm": 1800,
-            "timeout_start_vm": 1800,
-            "timeout_stop_vm": 300,
-            "tpm_state": [],
-            "usb": [],
-            "vga": [],
-            "vm_id": 136,
-            "watchdog": []
-          },
-          "sensitive_attributes": [
-            [
-              {
-                "type": "get_attr",
-                "value": "initialization"
-              },
-              {
-                "type": "index",
-                "value": {
-                  "value": 0,
-                  "type": "number"
-                }
-              },
-              {
-                "type": "get_attr",
-                "value": "user_account"
-              },
-              {
-                "type": "index",
-                "value": {
-                  "value": 0,
-                  "type": "number"
-                }
-              },
-              {
-                "type": "get_attr",
-                "value": "password"
-              }
-            ]
-          ],
-          "identity_schema_version": 0,
-          "private": "bnVsbA==",
-          "dependencies": [
-            "proxmox_virtual_environment_hardware_mapping_pci.gpu"
-          ]
-        },
-        {
-          "index_key": "137",
-          "schema_version": 0,
-          "attributes": {
-            "acpi": true,
-            "agent": [
-              {
-                "enabled": true,
-                "timeout": "15m",
-                "trim": false,
-                "type": "virtio"
-              }
-            ],
-            "audio_device": [],
-            "bios": "seabios",
-            "boot_order": null,
-            "cdrom": [],
-            "clone": [],
-            "cpu": [
-              {
-                "affinity": "",
-                "architecture": "",
-                "cores": 2,
-                "flags": [],
-                "hotplugged": 0,
-                "limit": 0,
-                "numa": false,
-                "sockets": 1,
-                "type": "host",
-                "units": 1024
-              }
-            ],
-            "description": "",
-            "disk": [
-              {
-                "aio": "io_uring",
-                "backup": true,
-                "cache": "none",
-                "datastore_id": "local-lvm",
-                "discard": "on",
-                "file_format": "raw",
-                "file_id": "",
-                "interface": "scsi0",
-                "iothread": false,
-                "path_in_datastore": "vm-137-disk-0",
-                "replicate": true,
-                "serial": "",
-                "size": 8,
-                "speed": [],
-                "ssd": true
-              }
-            ],
-            "efi_disk": [],
-            "hook_script_file_id": null,
-            "hostpci": [],
-            "id": "137",
-            "initialization": [
-              {
-                "datastore_id": "local-lvm",
-                "dns": [],
-                "interface": "ide2",
-                "ip_config": [
-                  {
-                    "ipv4": [
-                      {
-                        "address": "10.100.0.124/24",
-                        "gateway": "10.100.0.1"
-                      }
-                    ],
-                    "ipv6": []
-                  }
-                ],
-                "meta_data_file_id": "",
-                "network_data_file_id": "",
-                "type": "",
-                "upgrade": false,
-                "user_account": [
-                  {
-                    "keys": [
-                      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMaEzQwqI8/q2+VBkeTMEnYo4+jW5vS59QsMftwltoQh homelab-deploy@luca-pc"
-                    ],
-                    "password": "",
-                    "username": "root"
-                  }
-                ],
-                "user_data_file_id": "",
-                "vendor_data_file_id": ""
-              }
-            ],
-            "ipv4_addresses": [
-              [
-                "127.0.0.1"
-              ],
-              [
-                "10.100.0.137"
-              ],
-              [
-                "10.88.0.1"
-              ],
-              [],
-              []
-            ],
-            "ipv6_addresses": [
-              [],
-              [],
-              [],
-              [],
-              []
-            ],
-            "keyboard_layout": "en-us",
-            "kvm_arguments": "",
-            "mac_addresses": [
-              "00:00:00:00:00:00",
               "BC:24:11:3E:AC:22",
-              "26:13:31:E0:21:C1",
+              "82:B2:A9:3F:58:3A",
               "2A:70:42:DF:03:C7",
               "02:EA:BD:6F:2C:68"
             ],
@@ -9018,7 +7968,7 @@
               }
             ],
             "migrate": false,
-            "name": "137-internal-kavita",
+            "name": "136-internal-kavita",
             "network_device": [
               {
                 "bridge": "vmbr100",
@@ -9074,7 +8024,7 @@
             "tpm_state": [],
             "usb": [],
             "vga": [],
-            "vm_id": 137,
+            "vm_id": 136,
             "watchdog": []
           },
           "sensitive_attributes": [
@@ -9225,7 +8175,7 @@
             "mac_addresses": [
               "00:00:00:00:00:00",
               "BC:24:11:B5:16:81",
-              "7E:DB:25:7B:A0:51",
+              "7E:37:23:CF:84:1C",
               "36:15:3A:EE:64:D9"
             ],
             "machine": "",
@@ -10061,7 +9011,7 @@
             "mac_addresses": [
               "00:00:00:00:00:00",
               "BC:24:11:6A:08:4E",
-              "02:E2:CB:86:79:2D",
+              "92:5B:9B:D3:F7:CF",
               "86:5B:5D:24:47:B6"
             ],
             "machine": "",
@@ -10281,7 +9231,7 @@
             "mac_addresses": [
               "00:00:00:00:00:00",
               "BC:24:11:59:FC:00",
-              "3E:66:52:37:FD:40",
+              "DA:67:01:EF:07:D1",
               "9A:51:15:9C:B6:38"
             ],
             "machine": "",
@@ -10501,7 +9451,7 @@
             "mac_addresses": [
               "00:00:00:00:00:00",
               "BC:24:11:C7:4A:E4",
-              "1A:E3:3F:1C:14:9D",
+              "7A:E6:4A:E9:3B:6A",
               "CA:3A:9D:64:7D:C5"
             ],
             "machine": "",
@@ -10721,7 +9671,7 @@
             "mac_addresses": [
               "00:00:00:00:00:00",
               "BC:24:11:CB:9E:41",
-              "F6:C5:1C:BE:DB:5A",
+              "A2:ED:46:D6:3A:AB",
               "3A:94:51:FD:EA:C0"
             ],
             "machine": "",
@@ -10924,15 +9874,9 @@
               ],
               [
                 "10.200.0.208"
-              ],
-              [
-                "10.88.0.1"
-              ],
-              []
+              ]
             ],
             "ipv6_addresses": [
-              [],
-              [],
               [],
               []
             ],
@@ -10940,9 +9884,7 @@
             "kvm_arguments": "",
             "mac_addresses": [
               "00:00:00:00:00:00",
-              "BC:24:11:D7:72:D4",
-              "0A:63:12:7B:64:87",
-              "6A:07:49:B4:80:27"
+              "BC:24:11:D7:72:D4"
             ],
             "machine": "",
             "memory": [
@@ -10973,9 +9915,7 @@
             ],
             "network_interface_names": [
               "lo",
-              "eth0",
-              "podman0",
-              "veth0"
+              "eth0"
             ],
             "node_name": "luca-server",
             "numa": [],
@@ -11146,10 +10086,10 @@
                 "10.200.0.209"
               ],
               [
-                "172.17.0.1"
+                "172.18.0.1"
               ],
               [
-                "172.18.0.1"
+                "172.17.0.1"
               ],
               [],
               []
@@ -11167,10 +10107,10 @@
             "mac_addresses": [
               "00:00:00:00:00:00",
               "BC:24:11:B4:DD:7A",
-              "0A:35:4C:35:03:DB",
-              "B2:53:F2:08:A3:C3",
-              "D6:17:7D:56:21:B3",
-              "7E:51:1D:11:F8:F5"
+              "CA:A5:BB:4F:5E:59",
+              "EA:48:EB:BD:28:6E",
+              "EE:10:12:29:32:AE",
+              "52:1D:29:D4:20:BC"
             ],
             "machine": "",
             "memory": [
@@ -11202,10 +10142,10 @@
             "network_interface_names": [
               "lo",
               "eth0",
-              "docker0",
               "docker_gwbridge",
-              "veth93cdd26",
-              "veth7e2a5ac"
+              "docker0",
+              "veth3ba9948",
+              "vethfabcd3f"
             ],
             "node_name": "luca-server",
             "numa": [],

@@ -1,54 +1,80 @@
-# <host>.lsck0.dev -> backend. Used by both Traefiks and by the router for
-# DDNS and split-horizon DNS.
+# <host>.lsck0.dev -> backend. Used by both Traefiks, by Authelia to build its
+# access rules, and by the router for DDNS and split-horizon DNS.
 #
 #   host    subdomain of lsck0.dev
 #   vmid    backend VM (key in instances.tf)
 #   port    backend port on that VM
-#   sso     Authelia ForwardAuth in front (internal only, default true)
 #   scheme  "http" (default) or "https" (self-signed backend, verify skipped)
+#
+#   auth    how the route is authenticated. Nothing is reachable without one of
+#           these; there is no unauthenticated route on the internal side.
+#             "sso"    (default) Authelia ForwardAuth on the internal Traefik.
+#                      The lldap group in `group` decides who gets in, so a
+#                      service is switched on and off per person by editing
+#                      group membership in the lldap dashboard.
+#             "own"    the app runs its own login, backed by Authelia OIDC or
+#                      lldap. No ForwardAuth (it would double-prompt), and the
+#                      app is responsible for rejecting anonymous callers.
+#             "token"  headless: a client presents an API token or holds an
+#                      unguessable URL. Browsers cannot log in here, so these
+#                      are not relayed to the internet unless publicRelay.
+#             "portal" Authelia itself: must be reachable to log in.
+#
+#   group   lldap group a user must be in for an auth = "sso" route.
+#           "users" = every lab account, "admins" = the owner's accounts.
+#
+#   publicRelay  whether the external Traefik relays this internal host in from
+#                the internet. Defaults to false for auth = "token" (those have
+#                no interactive login) and true otherwise. LAN and the Headscale
+#                mesh always reach every internal host via split-horizon DNS.
 {
   internal = {
-    authelia       = { host = "auth";        vmid = 101; port = 9091;  sso = false; };
-    lldap          = { host = "lldap";       vmid = 102; port = 17170; };
+    authelia       = { host = "auth";        vmid = 101; port = 9091;  auth = "portal"; };
+    # the directory itself: only the owner may edit accounts and groups.
+    lldap          = { host = "lldap";       vmid = 102; port = 17170; group = "admins"; };
     homepage       = { host = "homepage";    vmid = 103; port = 80; };
-    grafana        = { host = "grafana";     vmid = 104; port = 80; };
+    grafana        = { host = "grafana";     vmid = 104; port = 80;    group = "admins"; };
     uptime-kuma    = { host = "status";      vmid = 105; port = 80; };
-    kopia          = { host = "backup";      vmid = 106; port = 51515; };
-    wazuh          = { host = "wazuh";       vmid = 107; port = 443; scheme = "https"; };
-    nas            = { host = "nas";         vmid = 108; port = 80; };
-    syncthing      = { host = "sync";        vmid = 108; port = 8384; };
-    # no SSO: nix clients authenticate to attic with their own token.
-    attic          = { host = "attic";       vmid = 109; port = 8080;  sso = false; };
-    qbittorrent    = { host = "torrent";     vmid = 111; port = 80; };
-    # Forgejo is SSO-only through its own OIDC login; git clients use tokens/SSH.
-    forgejo        = { host = "git";         vmid = 114; port = 80;    sso = false; };
-    # headless API: docker clients cannot follow a browser login. The external
-    # Traefik blocks this host from the internet.
-    registry-api   = { host = "registry";    vmid = 116; port = 5000;  sso = false; };
-    registry-ui    = { host = "registry-ui"; vmid = 116; port = 80; };
-    vaultwarden    = { host = "vault";       vmid = 117; port = 8080;  sso = false; };
-    nextcloud      = { host = "cloud";       vmid = 118; port = 80;    sso = false; };
-    # no SSO: the TRMNL cloud polls this and cannot log in. The feed URLs
-    # carry an unguessable token instead.
-    calendar       = { host = "cal";         vmid = 119; port = 80;    sso = false; };
-    paperless      = { host = "paperless";   vmid = 120; port = 8080; };
-    paperless-ai   = { host = "paperless-ai"; vmid = 121; port = 80; };
-    wikijs         = { host = "wiki";        vmid = 122; port = 80; };
-    firefly        = { host = "firefly";     vmid = 123; port = 8080; };
-    homeassistant  = { host = "hass";        vmid = 124; port = 80; };
-    huginn         = { host = "huginn";      vmid = 125; port = 80; };
-    jellyseerr     = { host = "requests";    vmid = 127; port = 80; };
-    prowlarr       = { host = "prowlarr";    vmid = 128; port = 80; };
-    radarr         = { host = "radarr";      vmid = 129; port = 80; };
-    sonarr         = { host = "sonarr";      vmid = 130; port = 80; };
-    bazarr         = { host = "subs";        vmid = 131; port = 80; };
-    jellyfin       = { host = "jellyfin";    vmid = 133; port = 80; };
-    audiobookshelf = { host = "abs";         vmid = 134; port = 80; };
-    bookshelf      = { host = "books";       vmid = 134; port = 8787; };
-    navidrome      = { host = "music";       vmid = 135; port = 80; };
-    lidarr         = { host = "lidarr";      vmid = 135; port = 8686; };
-    kavita         = { host = "read";        vmid = 136; port = 80; };
-    suwayomi       = { host = "manga";       vmid = 136; port = 4567; };
+    kopia          = { host = "backup";      vmid = 106; port = 51515; group = "admins"; };
+    wazuh          = { host = "wazuh";       vmid = 107; port = 443;   group = "admins"; scheme = "https"; };
+    nas            = { host = "nas";         vmid = 108; port = 80;    group = "admins"; };
+    syncthing      = { host = "sync";        vmid = 108; port = 8384;  group = "admins"; };
+    # nix clients authenticate to attic with their own token, so no browser
+    # login is possible; not relayed from the internet.
+    attic          = { host = "attic";       vmid = 109; port = 8080;  auth = "token"; };
+    qbittorrent    = { host = "torrent";     vmid = 111; port = 80;    group = "media"; };
+    # Forgejo signs in through Authelia OIDC; git clients use tokens/SSH.
+    forgejo        = { host = "git";         vmid = 114; port = 80;    auth = "own"; };
+    # headless API: docker clients cannot follow a browser login. Not relayed
+    # publicly, and the external Traefik denies the host explicitly as well.
+    registry-api   = { host = "registry";    vmid = 117; port = 5000;  auth = "token"; };
+    registry-ui    = { host = "registry-ui"; vmid = 117; port = 80;    group = "admins"; };
+    vaultwarden    = { host = "vault";       vmid = 118; port = 8080;  auth = "own"; };
+    nextcloud      = { host = "cloud";       vmid = 119; port = 80;    auth = "own"; };
+    # the TRMNL cloud polls this and cannot log in. The feed URLs carry an
+    # unguessable token instead, so this one token route stays public.
+    calendar       = { host = "cal";         vmid = 120; port = 80;    auth = "token"; publicRelay = true; };
+    paperless      = { host = "paperless";   vmid = 121; port = 8080; };
+    paperless-ai   = { host = "paperless-ai"; vmid = 122; port = 80;   group = "admins"; };
+    wikijs         = { host = "wiki";        vmid = 123; port = 80; };
+    firefly        = { host = "firefly";     vmid = 124; port = 8080;  group = "admins"; };
+    homeassistant  = { host = "hass";        vmid = 125; port = 80; };
+    huginn         = { host = "huginn";      vmid = 126; port = 80;    group = "admins"; };
+    jellyseerr     = { host = "requests";    vmid = 128; port = 80;    group = "media"; };
+    prowlarr       = { host = "prowlarr";    vmid = 129; port = 80;    group = "admins"; };
+    radarr         = { host = "radarr";      vmid = 130; port = 80;    group = "admins"; };
+    sonarr         = { host = "sonarr";      vmid = 131; port = 80;    group = "admins"; };
+    bazarr         = { host = "subs";        vmid = 132; port = 80;    group = "admins"; };
+    # Jellyfin authenticates against lldap (LDAP plugin), Audiobookshelf and
+    # Kavita through Authelia OIDC: same account as everything else, and their
+    # own apps can still log in, which ForwardAuth would break.
+    jellyfin       = { host = "jellyfin";    vmid = 134; port = 80;    auth = "own"; };
+    audiobookshelf = { host = "abs";         vmid = 135; port = 80;    auth = "own"; };
+    bookshelf      = { host = "books";       vmid = 135; port = 8787;  group = "admins"; };
+    navidrome      = { host = "music";       vmid = 136; port = 80;    group = "media"; };
+    lidarr         = { host = "lidarr";      vmid = 136; port = 8686;  group = "admins"; };
+    kavita         = { host = "read";        vmid = 137; port = 80;    auth = "own"; };
+    suwayomi       = { host = "manga";       vmid = 137; port = 4567;  group = "media"; };
   };
 
   external = {
@@ -60,6 +86,11 @@
     ntfy       = { host = "ntfy";     vmid = 203; port = 80; };
     # CI/CD targets on the swarm host: hello <- Forgejo, hello-gh <- GitHub.
     hello      = { host = "hello";    vmid = 209; port = 80; };
-    hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; };
+    # no image exists yet: example/.github/workflows/hello.yml is a template to
+    # copy into an app repo, not an active workflow here, so nothing has ever
+    # pushed ghcr.io/lsck0/hello and the swarm task stays "Rejected: No such
+    # image". Kept as the wiring for a GitHub-built app, but not monitored -
+    # an uptime check on it is a permanent false alarm.
+    hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; monitor = false; };
   };
 }

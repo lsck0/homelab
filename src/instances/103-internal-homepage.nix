@@ -229,4 +229,8 @@ in {
   ];
 
   networking.firewall.allowedTCPPorts = [ 80 ];
+
+  # Homepage has no login of its own and carries every service's API key in its
+  # widgets, so only the ingress (which puts Authelia in front) may reach it.
+  homelab.ingressOnly.ports = [ 80 ];
 }

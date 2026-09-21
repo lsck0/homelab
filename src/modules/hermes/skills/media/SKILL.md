@@ -20,12 +20,12 @@ through Prowlarr. Media nobody watched for ~4 months is deleted by Janitorr
 
 | Kind | Manager (API) | Key | Folder | Player |
 |---|---|---|---|---|
-| Movies | Radarr `http://10.100.0.129/api/v3` | `radarr-key` | `/data/media/movies` | Jellyfin |
-| Series | Sonarr `http://10.100.0.130/api/v3` | `sonarr-key` | `/data/media/tv` | Jellyfin |
+| Movies | Radarr `http://10.100.0.130/api/v3` | `radarr-key` | `/data/media/movies` | Jellyfin |
+| Series | Sonarr `http://10.100.0.131/api/v3` | `sonarr-key` | `/data/media/tv` | Jellyfin |
 | Anime | Sonarr, `seriesType: "anime"` | `sonarr-key` | `/data/media/anime` | Jellyfin |
-| Music | Lidarr `http://10.100.0.135:8686/api/v1` | `lidarr-key` | `/data/media/music` | Navidrome |
-| Ebooks | Bookshelf `http://10.100.0.134:8787/api/v1` (Readarr API) | `bookshelf-key` | `/data/media/books` | Kavita |
-| Manga | Suwayomi `http://10.100.0.136:4567/api/graphql` | none | `/data/media/manga` | Kavita |
+| Music | Lidarr `http://10.100.0.136:8686/api/v1` | `lidarr-key` | `/data/media/music` | Navidrome |
+| Ebooks | Bookshelf `http://10.100.0.135:8787/api/v1` (Readarr API) | `bookshelf-key` | `/data/media/books` | Kavita |
+| Manga | Suwayomi `http://10.100.0.137:4567/api/graphql` | none | `/data/media/manga` | Kavita |
 
 Send the key as header `X-Api-Key: $(lab-token <key>)`. Use `terminal` with
 `curl` + `jq`.
@@ -75,7 +75,7 @@ For one album: `GET /api/v1/album/lookup?term=<album>`, add the artist with
 
 ## Manga (Suwayomi GraphQL, no auth)
 
-POST JSON `{"query": "..."}` to `http://10.100.0.136:4567/api/graphql`.
+POST JSON `{"query": "..."}` to `http://10.100.0.137:4567/api/graphql`.
 1. Sources: `{ sources { nodes { id displayName lang } } }` (sources are
    installed extensions; if none fit, install one:
    `{ extensions(condition:{isInstalled:false}) { nodes { pkgName name lang } } }` then
@@ -90,4 +90,4 @@ query fails, introspect the schema (`{ __schema { mutationType { fields { name }
 ## Status
 
 - What is downloading: Sonarr/Radarr `GET /api/v3/queue`, Lidarr `GET /api/v1/queue`.
-- Force a Jellyfin library scan: `curl -X POST -H "Authorization: MediaBrowser Token=\"$(lab-token jellyfin-key)\"" http://10.100.0.133/Library/Refresh`.
+- Force a Jellyfin library scan: `curl -X POST -H "Authorization: MediaBrowser Token=\"$(lab-token jellyfin-key)\"" http://10.100.0.134/Library/Refresh`.

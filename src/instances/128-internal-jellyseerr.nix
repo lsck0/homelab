@@ -1,9 +1,9 @@
 { pkgs, nasMount, retry, ... }: {
-  networking.hostName = "vm-127";
+  networking.hostName = "vm-128";
 
   # Seerr (formerly Jellyseerr), request movies, series and anime; approved requests go to
   # Radarr/Sonarr (anime -> Sonarr anime folder). Connected to Jellyfin and the
-  # *arrs by vm-132. Behind Authelia at requests.lsck0.dev.
+  # *arrs by vm-133. Behind Authelia at requests.lsck0.dev.
   fileSystems = nasMount "/var/lib/jellyseerr" "jellyseerr"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
@@ -22,6 +22,10 @@
 
   systemd.tmpfiles.rules = [
     "d /var/lib/jellyseerr 0750 1000 1000 -"
+    # the Seerr image runs as node:node (uid 1000); the old fallenbagel image
+    # ran as root and left root-owned db/ and logs/ behind, which made every
+    # start crash with EACCES on the log file. Z = recursive chown.
+    "Z /var/lib/jellyseerr - 1000 1000 -"
   ];
 
   systemd.services.jellyseerr-token = {

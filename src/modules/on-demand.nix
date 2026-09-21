@@ -35,6 +35,14 @@ let
 
     # keep the client waiting until the app really answers. An open port is not
     # enough, apps often return 5xx for a while after starting.
+    #
+    # Two consecutive good checks are required, one second apart. A single one is
+    # not enough: when a connection arrives while the VM is still shutting down
+    # (the previous proxy's ExecStopPost asked for a shutdown moments earlier),
+    # the port is briefly still accepting, this script would declare the backend
+    # ready, and systemd-socket-proxyd would then hit "Failed to connect to
+    # remote host: Connection refused" - which is the 502 the clients saw.
+    good=0
     for i in $(seq 1 ${toString svc.bootTimeout}); do
       # check the power state every 10s, the VM might be shutting down right now.
       # API errors just mean we try again next round.
@@ -43,14 +51,20 @@ let
         if [ "$STATUS" = "stopped" ]; then
           echo "vm-${toString svc.vmid} is stopped, starting for ${name}"
           pve -X POST "$API/status/start" >/dev/null || echo "start request failed, retrying"
+          # a start was just requested: anything that answered before it is the
+          # old instance on its way out, so do not count it.
+          good=0
         fi
       fi
       if nc -z -w 2 ${(vmOf svc).ip} ${toString svc.targetPort}; then
         ${if svc.httpCheck then ''
         code=$(curl -sk -o /dev/null -w '%{http_code}' -m 3 "http://${(vmOf svc).ip}:${toString svc.targetPort}/" 2>/dev/null || echo 000)
-        case "$code" in 000|5??) : ;; *) exit 0 ;; esac
-        '' else "exit 0"}
+        case "$code" in 000|5??) good=0 ;; *) good=$((good + 1)) ;; esac
+        '' else "good=$((good + 1))"}
+      else
+        good=0
       fi
+      [ "$good" -ge 2 ] && exit 0
       sleep 1
     done
 

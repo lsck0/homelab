@@ -1,12 +1,19 @@
-{ pkgs, nasMount, nasPath, retry, ... }: {
-  networking.hostName = "vm-134";
+{ config, pkgs, nasMount, nasPath, retry, ... }: {
+  networking.hostName = "vm-135";
+
+  # Audiobookshelf signs in through Authelia (OIDC client in
+  # 101-internal-authelia.nix), so the account is the lldap one and there is no
+  # second password to remember. Local login stays enabled as a break-glass
+  # path: ForwardAuth is not usable here because the mobile apps cannot follow
+  # the portal redirect.
+  sops.secrets.audiobookshelf-oidc-secret = {};
 
   fileSystems = nasMount "/var/lib/audiobookshelf" "audiobookshelf"
     // nasPath "/srv/audiobooks" "media/audiobooks"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   # Bookshelf (maintained Readarr fork, Hardcover metadata): ebook manager.
-  # downloads into /data/media/books, which Kavita serves. Wired by vm-132.
+  # downloads into /data/media/books, which Kavita serves. Wired by vm-133.
   homelab.servarr.bookshelf = {
     image = "ghcr.io/pennydreadful/bookshelf:hardcover-v0.4.21.182";
     port = 8787;
@@ -63,6 +70,30 @@
       fi
       [ -n "$TOKEN" ] || { echo "Audiobookshelf admin login failed"; exit 1; }
       echo -n "$TOKEN" > $T/audiobookshelf-key.token
+
+      # point the OpenID login at Authelia. Endpoints are spelled out rather
+      # than discovered because Audiobookshelf stores them individually.
+      SECRET=$(cat ${config.sops.secrets.audiobookshelf-oidc-secret.path})
+      curl -sf -X PATCH $A/api/auth-settings \
+        -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+        -d "$(jq -cn --arg s "$SECRET" '{
+          authActiveAuthMethods: ["local", "openid"],
+          authOpenIDIssuerURL: "https://auth.lsck0.dev",
+          authOpenIDAuthorizationURL: "https://auth.lsck0.dev/api/oidc/authorization",
+          authOpenIDTokenURL: "https://auth.lsck0.dev/api/oidc/token",
+          authOpenIDUserInfoURL: "https://auth.lsck0.dev/api/oidc/userinfo",
+          authOpenIDJwksURL: "https://auth.lsck0.dev/jwks.json",
+          authOpenIDLogoutURL: "https://auth.lsck0.dev/logout",
+          authOpenIDClientID: "audiobookshelf",
+          authOpenIDClientSecret: $s,
+          authOpenIDButtonText: "Sign in with Authelia",
+          authOpenIDAutoLaunch: false,
+          authOpenIDAutoRegister: true,
+          authOpenIDMatchExistingBy: "username",
+          authOpenIDSubfolderForRedirectURLs: ""
+        }')" >/dev/null \
+        && echo "Audiobookshelf OpenID pointed at Authelia" \
+        || echo "Audiobookshelf OpenID setup failed; local login still works"
     '';
   };
 
