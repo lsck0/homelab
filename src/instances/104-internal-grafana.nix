@@ -407,7 +407,7 @@ in {
   systemd.services.grafana.restartTriggers = [ ../modules/dashboards/homelab.json ];
 
   # 3100 Loki push, 3200 Tempo, 4317/4318 OTLP trace ingest.
-  networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 ];
+  networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 terminalPort ];
 
   # Grafana trusts the Remote-User header (auth.proxy), so anyone who can reach
   # :80 directly can forge it and land as Admin. Prometheus (:9090) and Tempo
