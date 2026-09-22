@@ -18,9 +18,11 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 /* TRMNL's .layout centres and pads a single child, which renders a full-bleed
    dashboard as a narrow column in the middle of the screen. */
 .layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
-/* vh, not %: the renderer gives .layout no definite height, so a percentage
-   chain collapses to zero and absolutely positioned children disappear. */
-.hl { display: flex; flex-direction: column; height: calc(100vh - 58px); width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
+/* Fixed height, not 100vh: the panel is 800x480 and the title bar takes the
+   rest, but the markup editor previews in a much taller box, where 100vh
+   stretched every row until only three weeks of the month fitted on screen.
+   max-height keeps it honest if the render box is ever shorter. */
+.hl { display: flex; flex-direction: column; height: 422px; max-height: calc(100vh - 58px); width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
 
 /* ---- headline numbers ------------------------------------------------- */
 .hl-top { display: flex; gap: 6px; flex: 0 0 auto; }

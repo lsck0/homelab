@@ -29,10 +29,11 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
    view as a narrow column floating in the middle of the screen. This plugin
    draws a full-bleed grid, so neutralise that wrapper. */
 .layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
-/* vh, not 100%: the renderer gives .layout no definite height, so a
-   percentage chain collapses to zero and every absolutely positioned
-   event disappears - which rendered the whole screen blank. */
-.cal { display: flex; flex-direction: column; height: calc(100vh - 58px); width: 100%; gap: 0; padding: 8px 10px 4px; box-sizing: border-box; }
+/* Fixed height, not 100vh: the panel is 800x480 and the title bar takes the
+   rest, but the markup editor previews in a much taller box, where 100vh
+   stretched every row until only three weeks of the month fitted on screen.
+   max-height keeps it honest if the render box is ever shorter. */
+.cal { display: flex; flex-direction: column; height: 422px; max-height: calc(100vh - 58px); width: 100%; gap: 0; padding: 8px 10px 4px; box-sizing: border-box; }
 .cal-row { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
 /* the all-day band sits between the headers and the grid, so it needs the
    same hairline separating it from both */
