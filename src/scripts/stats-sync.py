@@ -28,11 +28,13 @@ TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/homepage-tokens")
 # line underneath instead. Enable more than 32 and the surplus falls into the
 # footer's "+n more", which is the same overflow the footer always reported.
 SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "32"))
-TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "3"))
-# The three side panels share 347px. Sending more rows than a panel can draw
-# does not show more, it clips the last one in half, so each list is cut to
-# what its panel holds: 17px a line for the two flat lists, 36px a torrent.
-REQUEST_ROWS = int(os.environ.get("STATS_REQUEST_ROWS", "5"))
+TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "6"))
+# Sending more rows than a panel can draw does not show more, it clips the
+# last one in half, so every list is cut to what its own panel holds. Requests
+# sits in the clients band with the other eight-row lists; disks and torrents
+# share the 343px side column at 17px a line and 36px a torrent.
+REQUEST_ROWS = int(os.environ.get("STATS_REQUEST_ROWS", "8"))
+REQUEST_WINDOW = os.environ.get("STATS_REQUEST_WINDOW", "3h")
 DISK_ROWS = int(os.environ.get("STATS_DISK_ROWS", "3"))
 # longest torrent name the panel can hold on one line
 NAME_CHARS = int(os.environ.get("STATS_NAME_CHARS", "42"))
@@ -160,10 +162,16 @@ def services():
         })
 
     expected = [r for r in rows if not r["disabled"]]
+    # Each headline tile carries a second line, and the CPU tile's is the VM
+    # doing the work: the host percentage alone says the lab is busy without
+    # saying who is making it busy.
+    busiest = max(expected, key=lambda r: r["cpu_pct"], default=None)
     return rows, {
         "up": sum(1 for r in expected if r["online"]),
         "total": len(expected),
         "down": [r["name"] for r in expected if not r["online"] and not r["on_demand"]],
+        "off": len(rows) - len(expected),
+        "busiest": {"name": busiest["name"], "cpu_pct": busiest["cpu_pct"]} if busiest else None,
     }
 
 
@@ -227,12 +235,21 @@ def totals():
 
 
 def requests():
-    """Requests per minute per route, and which side of the house they came in
-    on. Traefik reports the router and the instance that served it, so
+    """Requests per route, and which side of the house they came in on.
+
+    Traefik reports the router and the instance that served it, so
     10.100.0.100 is a request that arrived over the LAN or the Headscale mesh
     and 10.200.0.200 is one relayed in off the internet. There is no client
-    address in these metrics, so that split is as far as "from where" goes."""
-    rows = promql('sum by (router, instance) (rate(traefik_router_requests_total[15m]))')
+    address in these metrics, so that split is as far as "from where" goes.
+
+    A count over a window rather than a rate, because this sits in the clients
+    band beside four other counts. The window is three hours: over fifteen
+    minutes only six routes had been touched at all and the column ran out of
+    rows, and a per-minute rate over three hours renders a route that served
+    three requests as "0.0".
+    """
+    rows = promql(f'sum by (router, instance)'
+                  f' (increase(traefik_router_requests_total[{REQUEST_WINDOW}]))')
     by_router = {}
     for r in rows:
         name = r["metric"].get("router", "")
@@ -244,27 +261,34 @@ def requests():
             if name.endswith(suffix):
                 name = name[: -len(suffix)]
         try:
-            rpm = float(r["value"][1]) * 60
+            hits = float(r["value"][1])
         except (TypeError, ValueError):
             continue
         external = r["metric"].get("instance", "").startswith("10.200.")
         e = by_router.setdefault(name, {"name": name, "int": 0.0, "ext": 0.0})
-        e["ext" if external else "int"] += rpm
+        e["ext" if external else "int"] += hits
 
     out = []
     for e in by_router.values():
         total = e["int"] + e["ext"]
-        if total < 0.05:
+        if total < 1:
             continue
         out.append({
             "name": e["name"],
-            "rpm": f"{total:.1f}" if total < 10 else f"{total:.0f}",
+            "rate": total,
+            "rpm": human_count(total),
             # where it came from, in one word, rather than two more columns
             "origin": "ext" if e["ext"] > e["int"] else ("int" if e["int"] else "ext"),
             "mixed": e["int"] > 0 and e["ext"] > 0,
         })
-    out.sort(key=lambda x: float(x["rpm"]), reverse=True)
-    return out[:REQUEST_ROWS]
+    out.sort(key=lambda x: -x["rate"])
+    out = out[:REQUEST_ROWS]
+    # this list lives in the clients band now, whose rows all carry a bar of
+    # their share of the busiest row in the column
+    top = out[0]["rate"] if out else 0
+    for e in out:
+        e["pct"] = round(100 * e.pop("rate") / top) if top else 0
+    return out
 
 
 # Traefik logs the User-Agent verbatim, which is thousands of distinct strings
@@ -398,8 +422,18 @@ def clients():
     visitors = scalar_logql(
         f'count(count by (ip) (count_over_time({sel} | json ip="ClientHost" [{w}])))')
 
+    # the method label is on the stream too, so the two that matter cost
+    # nothing and fill the column to the eight rows the band draws
+    by_method = {}
+    for r in logql(f'sum by (method) (count_over_time({sel}[{w}]))'):
+        try:
+            by_method[r["metric"].get("method") or "?"] = float(r["value"][1])
+        except (KeyError, TypeError, ValueError):
+            continue
+
     rows = [("requests", total), ("visitors", visitors)]
     rows.extend((c, by_status.get(c, 0.0)) for c in ("2xx", "3xx", "4xx", "5xx"))
+    rows.extend((m, by_method.get(m, 0.0)) for m in ("GET", "POST"))
     traffic = bars(rows, scale=total)
     # the first two rows are not a share of the requests, so they get no bar
     for row in traffic[:2]:
