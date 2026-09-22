@@ -145,6 +145,74 @@ def network():
     }
 
 
+def totals():
+    """Lab-wide CPU and memory. Weighted by core and by byte rather than an
+    average of per-VM percentages, which would let an idle single-core VM
+    cancel out a loaded eight-core one."""
+    def scalar(res, default=0.0):
+        try:
+            return float(res[0]["value"][1])
+        except (IndexError, KeyError, TypeError, ValueError):
+            return default
+
+    busy = scalar(promql(
+        '100 * (1 - (sum(rate(node_cpu_seconds_total{mode="idle"}[5m]))'
+        ' / sum(rate(node_cpu_seconds_total[5m]))))'))
+    cores = scalar(promql('count(count by (instance, cpu) (node_cpu_seconds_total))'))
+    mem_total = scalar(promql('sum(node_memory_MemTotal_bytes)'))
+    mem_free = scalar(promql('sum(node_memory_MemAvailable_bytes)'))
+    used = mem_total - mem_free
+
+    return {
+        "cpu_pct": min(100, max(0, round(busy))),
+        "cores": int(cores),
+        "mem_pct": round(used / mem_total * 100) if mem_total else 0,
+        "mem_used": human_size(used),
+        "mem_total": human_size(mem_total),
+    }
+
+
+def requests():
+    """Requests per minute per route, and which side of the house they came in
+    on. Traefik reports the router and the instance that served it, so
+    10.100.0.100 is a request that arrived over the LAN or the Headscale mesh
+    and 10.200.0.200 is one relayed in off the internet. There is no client
+    address in these metrics, so that split is as far as "from where" goes."""
+    rows = promql('sum by (router, instance) (rate(traefik_router_requests_total[15m]))')
+    by_router = {}
+    for r in rows:
+        name = r["metric"].get("router", "")
+        if not name:
+            continue
+        # "forgejo-tls@file" is the router; the suffixes are Traefik's own
+        name = name.split("@")[0]
+        for suffix in ("-tls", "-relay", "-block"):
+            if name.endswith(suffix):
+                name = name[: -len(suffix)]
+        try:
+            rpm = float(r["value"][1]) * 60
+        except (TypeError, ValueError):
+            continue
+        external = r["metric"].get("instance", "").startswith("10.200.")
+        e = by_router.setdefault(name, {"name": name, "int": 0.0, "ext": 0.0})
+        e["ext" if external else "int"] += rpm
+
+    out = []
+    for e in by_router.values():
+        total = e["int"] + e["ext"]
+        if total < 0.05:
+            continue
+        out.append({
+            "name": e["name"],
+            "rpm": f"{total:.1f}" if total < 10 else f"{total:.0f}",
+            # where it came from, in one word, rather than two more columns
+            "origin": "ext" if e["ext"] > e["int"] else ("int" if e["int"] else "ext"),
+            "mixed": e["int"] > 0 and e["ext"] > 0,
+        })
+    out.sort(key=lambda x: float(x["rpm"]), reverse=True)
+    return out[:6]
+
+
 def storage():
     """The fullest real filesystems in the lab. Virtual and network mounts are
     excluded: tmpfs is RAM, and an NFS mount would report the NAS once per
@@ -313,6 +381,8 @@ def main():
     net = network()
     tor = torrents()
     disks = storage()
+    load = totals()
+    reqs = requests()
 
     now = datetime.now(timezone.utc).astimezone()
     payload = {
@@ -323,13 +393,16 @@ def main():
         "services": rows[:SERVICE_ROWS],
         "services_more": max(0, len(rows) - SERVICE_ROWS),
         "network": net,
+        "totals": load,
+        "requests": reqs,
         "storage": disks,
         "torrents": tor,
     }
 
     os.makedirs(out_dir, exist_ok=True)
     write_atomic(os.path.join(out_dir, "stats.json"), json.dumps(payload, indent=2))
-    print(f"{summary['up']}/{summary['total']} up, "
+    print(f"{summary['up']}/{summary['total']} up, cpu {load['cpu_pct']}%, "
+          f"mem {load['mem_used']}/{load['mem_total']}, {len(reqs)} busy routes, "
           f"{tor['total']} torrents, rx {net['rx']} tx {net['tx']}")
     return 0
 
