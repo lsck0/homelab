@@ -40,11 +40,15 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 
 /* ---- services --------------------------------------------------------- */
 .hl-mid { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
-.hl-svc { flex: 1 1 0; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 10px; min-width: 0; border: 2px solid #000; padding: 3px 6px; overflow: hidden; }
-/* 17 rows of 51 services have to fit the panel exactly: taller and the last
-   row is cut off, shorter and a third of the panel is blank. The panel is
-   347px, so a row may take 20px. */
-.hl-row { width: calc(33.33% - 7px); display: flex; align-items: center; gap: 4px; font-size: 14px; line-height: 1.42; min-width: 0; }
+.hl-left { flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 5px; }
+.hl-svc { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 10px; min-width: 0; min-height: 0; border: 2px solid #000; padding: 3px 6px; overflow: hidden; }
+/* Four columns of thirteen, which is 52 slots for 49 VMs. Three columns of
+   seventeen also held them, but it took the whole 347px and left nothing for
+   the clients strip. A quarter column is 128px, so the numeric percentages
+   had to go; the two bars carry the same reading without the 38px. The grid
+   keeps 260px of the 347, which is 18px a row: at 1.42 the thirteenth row
+   fell outside the panel and took the router with it. */
+.hl-row { width: calc(25% - 8px); display: flex; align-items: center; gap: 4px; font-size: 14px; line-height: 1.3; min-width: 0; }
 .hl-dot { width: 8px; height: 8px; flex: 0 0 auto; border: 1px solid #000; background: #000; }
 .hl-dot--off { background: #fff; }
 .hl-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -53,7 +57,18 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .hl-bars { flex: 0 0 22px; display: flex; flex-direction: column; gap: 2px; }
 .hl-bar { height: 4px; background: #d2d2d2; }
 .hl-bar span { display: block; height: 100%; background: #000; }
-.hl-pct { flex: 0 0 38px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* ---- who is calling ---------------------------------------------------- */
+/* The Prometheus metrics know nothing about clients, so these three lists
+   come from Traefik's access log by way of Loki: the country Cloudflare
+   stamped on the request, the browser family, and the hostname asked for. */
+.hl-who { flex: 0 0 82px; border: 2px solid #000; padding: 3px 7px; display: flex; gap: 12px; min-height: 0; overflow: hidden; }
+.hl-who-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.hl-who-h { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid #000; margin-bottom: 1px; display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; }
+.hl-who-h i { font-style: normal; font-weight: 400; color: #555; }
+.hl-who-l { display: flex; justify-content: space-between; gap: 6px; font-size: 12px; line-height: 1.17; }
+.hl-who-l span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hl-who-l b { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
 
 /* ---- side panels ------------------------------------------------------ */
 .hl-side { flex: 0 0 216px; min-width: 0; display: flex; flex-direction: column; gap: 5px; min-height: 0; }
@@ -110,15 +125,43 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 
 <div class="hl-mid">
 
+<div class="hl-left">
+
 <div class="hl-svc">
 {% for s in services %}
 <div class="hl-row{% if s.disabled %} hl-row--disabled{% endif %}">
 <span class="hl-dot{% unless s.online %} hl-dot--off{% endunless %}"></span>
 <span class="hl-name">{{ s.name }}</span>
 <span class="hl-bars"><span class="hl-bar"><span style="width:{{ s.cpu_pct }}%"></span></span><span class="hl-bar"><span style="width:{{ s.mem_pct }}%"></span></span></span>
-<span class="hl-pct">{{ s.cpu_pct }}/{{ s.mem_pct }}</span>
 </div>
 {% endfor %}
+</div>
+
+<div class="hl-who">
+{% if clients.available %}
+<div class="hl-who-col">
+<div class="hl-who-h"><span>From</span><i>{{ clients.window }}</i></div>
+{% for c in clients.countries %}
+<div class="hl-who-l"><span>{{ c.name }}</span><b>{{ c.count }}</b></div>
+{% endfor %}
+</div>
+<div class="hl-who-col">
+<div class="hl-who-h"><span>Clients</span></div>
+{% for a in clients.agents %}
+<div class="hl-who-l"><span>{{ a.name }}</span><b>{{ a.count }}</b></div>
+{% endfor %}
+</div>
+<div class="hl-who-col">
+<div class="hl-who-h"><span>Asking for</span></div>
+{% for h in clients.hosts %}
+<div class="hl-who-l"><span>{{ h.name }}</span><b>{{ h.count }}</b></div>
+{% endfor %}
+</div>
+{% else %}
+<div class="hl-who-col"><div class="hl-who-h"><span>Who is calling</span></div><div class="hl-who-l"><span>no access log in Loki</span></div></div>
+{% endif %}
+</div>
+
 </div>
 
 <div class="hl-side">

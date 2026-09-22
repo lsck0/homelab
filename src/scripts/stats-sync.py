@@ -18,14 +18,15 @@ import urllib.request
 from datetime import datetime, timezone
 
 PROMETHEUS = os.environ.get("STATS_PROMETHEUS", "http://10.100.0.105:9090")
+LOKI = os.environ.get("STATS_LOKI", "http://10.100.0.105:3100")
 QBITTORRENT = os.environ.get("STATS_QBITTORRENT", "http://10.100.0.112")
 INVENTORY = os.environ.get("STATS_INVENTORY", "/var/lib/homelab-stats/inventory.json")
 TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/homepage-tokens")
-# how many rows the screen can hold before the rest is summarised. Three
-# columns of seventeen, which is every declared VM with two slots spare: the
+# how many rows the screen can hold before the rest is summarised. Four
+# columns of thirteen, which is every declared VM with three slots spare: the
 # router is the last entry by id, so a tighter budget cut the one host whose
 # state matters most.
-SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "51"))
+SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "52"))
 TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "3"))
 # The three side panels share 347px. Sending more rows than a panel can draw
 # does not show more, it clips the last one in half, so each list is cut to
@@ -34,6 +35,15 @@ REQUEST_ROWS = int(os.environ.get("STATS_REQUEST_ROWS", "5"))
 DISK_ROWS = int(os.environ.get("STATS_DISK_ROWS", "3"))
 # longest torrent name the panel can hold on one line
 NAME_CHARS = int(os.environ.get("STATS_NAME_CHARS", "42"))
+# The "who is calling" strip. Only the external ingress is counted: vm-200
+# relays into vm-100, so a request off the internet is logged by both and
+# summing the two double-counts it. A day's window, because an hour of a
+# private lab is mostly whatever the owner happened to open.
+CLIENT_INGRESS = os.environ.get("STATS_CLIENT_INGRESS", "vm-200")
+CLIENT_WINDOW = os.environ.get("STATS_CLIENT_WINDOW", "24h")
+CLIENT_ROWS = int(os.environ.get("STATS_CLIENT_ROWS", "4"))
+# public suffix to drop from hostnames, which are all under one domain
+CLIENT_DOMAIN = os.environ.get("STATS_CLIENT_DOMAIN", ".lsck0.dev")
 TIMEOUT = 8
 
 
@@ -116,12 +126,23 @@ def services():
     mem = by_instance(promql(
         '(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100'))
 
+    # strip the "134-internal-" prefix the inventory carries, and where that
+    # leaves two VMs called the same thing - the two Traefiks - put the id
+    # back, or the grid shows one name twice and says nothing about which is
+    # which. Grafana's relabelling solves the same collision with the zone,
+    # but a quarter column has no room for "traefik-external".
+    short = {k: v["name"].split("-", 2)[-1] for k, v in inv.items()}
+    taken = {}
+    for n in short.values():
+        taken[n] = taken.get(n, 0) + 1
+
     rows = []
     for vmid, vm in sorted(inv.items(), key=lambda kv: int(kv[0])):
         inst = scrape_instance(vm)
         enabled = vm.get("enabled", "true")
-        # strip the "134-internal-" prefix the inventory carries
-        name = vm["name"].split("-", 2)[-1]
+        name = short[vmid]
+        if taken[name] > 1:
+            name = f"{name} {vmid}"
         online = up.get(inst, 0) >= 1
         rows.append({
             "vmid": vmid,
@@ -243,6 +264,102 @@ def requests():
         })
     out.sort(key=lambda x: float(x["rpm"]), reverse=True)
     return out[:REQUEST_ROWS]
+
+
+# Traefik logs the User-Agent verbatim, which is thousands of distinct strings
+# and useless as a series label, so Loki folds it into a family before the
+# count. Order matters: Edge and Chrome both claim Safari, and Edge claims
+# Chrome, so the most specific test comes first. `contains` rather than a
+# regex because this Loki has no regexMatch:
+#   invalid template for label 'agent': function "regexMatch" not defined
+AGENT_FAMILY = (
+    '{{ if or (contains "bot" .ua) (contains "Bot" .ua) (contains "crawl" .ua)'
+    ' (contains "spider" .ua) }}bot'
+    '{{ else if contains "Edg/" .ua }}Edge'
+    '{{ else if contains "Chrome/" .ua }}Chrome'
+    '{{ else if contains "Firefox/" .ua }}Firefox'
+    '{{ else if contains "Safari/" .ua }}Safari'
+    '{{ else if or (contains "Go-http" .ua) (contains "connect-go" .ua) }}Go'
+    '{{ else if or (contains "curl" .ua) (contains "Wget" .ua) }}curl'
+    '{{ else }}other{{ end }}'
+)
+
+
+def logql(query):
+    """One instant query against Loki. Same contract as promql: the dashboard
+    loses a panel rather than an update."""
+    url = LOKI + "/loki/api/v1/query?" + urllib.parse.urlencode({"query": query})
+    try:
+        with urllib.request.urlopen(url, timeout=TIMEOUT) as r:
+            body = json.load(r)
+    except (urllib.error.URLError, socket.timeout, ValueError) as e:
+        print(f"loki query failed ({query[:40]}...): {e}", file=sys.stderr)
+        return []
+    if body.get("status") != "success":
+        return []
+    return body["data"]["result"]
+
+
+def human_count(n):
+    if n < 1000:
+        return str(int(n))
+    if n < 10000:
+        return f"{n / 1000:.1f}k"
+    if n < 1000000:
+        return f"{n / 1000:.0f}k"
+    return f"{n / 1000000:.1f}M"
+
+
+def ranked(results, label, fallback="?"):
+    """Loki vector -> the label's value and a rounded count, largest first."""
+    out = []
+    for r in results:
+        try:
+            out.append((r["metric"].get(label) or fallback, float(r["value"][1])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    out.sort(key=lambda kv: -kv[1])
+    return [{"name": n, "count": human_count(c)} for n, c in out[:CLIENT_ROWS]]
+
+
+def clients():
+    """Who reached the lab from the internet over the last day: which country
+    Cloudflare says they were in, what they were running, and what they asked
+    for. The Prometheus metrics carry no client detail at all, so this comes
+    from the JSON access log that promtail already ships to Loki."""
+    sel = f'{{job="traefik-access", host="{CLIENT_INGRESS}"}}'
+    w = CLIENT_WINDOW
+    k = CLIENT_ROWS
+
+    # a request with no Cf-Ipcountry did not come through Cloudflare, which in
+    # practice means someone dialled the address directly - a port scanner, or
+    # a health check from inside the DMZ.
+    countries = ranked(
+        logql(f'topk({k}, sum by (country) (count_over_time({sel}[{w}])))'),
+        "country", "direct")
+    agents = ranked(
+        logql(f'topk({k}, sum by (agent) (count_over_time({sel}'
+              f' | json ua=`["request_User-Agent"]`'
+              f' | label_format agent=`{AGENT_FAMILY}` [{w}])))'),
+        "agent", "other")
+    hosts = ranked(
+        logql(f'topk({k}, sum by (h) (count_over_time({sel}'
+              f' | json h="RequestHost" [{w}])))'),
+        "h", "direct")
+    for h in hosts:
+        if h["name"].endswith(CLIENT_DOMAIN):
+            h["name"] = h["name"][: -len(CLIENT_DOMAIN)]
+        elif h["name"][:1].isdigit():
+            # a bare address in the Host header is a scanner, not a visitor
+            h["name"] = "by address"
+
+    return {
+        "window": w,
+        "countries": countries,
+        "agents": agents,
+        "hosts": hosts,
+        "available": bool(countries or agents or hosts),
+    }
 
 
 def storage():
@@ -425,6 +542,7 @@ def main():
     disks = storage()
     load = totals()
     reqs = requests()
+    who = clients()
 
     now = datetime.now(timezone.utc).astimezone()
     payload = {
@@ -437,6 +555,7 @@ def main():
         "network": net,
         "totals": load,
         "requests": reqs,
+        "clients": who,
         "storage": disks,
         "torrents": tor,
     }
@@ -445,7 +564,8 @@ def main():
     write_atomic(os.path.join(out_dir, "stats.json"), json.dumps(payload, indent=2))
     print(f"{summary['up']}/{summary['total']} up, cpu {load['cpu_pct']}%, "
           f"mem {load['mem_used']}/{load['mem_total']}, {len(reqs)} busy routes, "
-          f"{tor['total']} torrents, rx {net['rx']} tx {net['tx']}")
+          f"{tor['total']} torrents, rx {net['rx']} tx {net['tx']}, "
+          f"{len(who['countries'])} countries calling")
     return 0
 
 
