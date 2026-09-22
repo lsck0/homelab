@@ -1,0 +1,69 @@
+{%- comment -%}
+Today's arXiv mathematics announcements. One polling URL:
+
+  https://terminal.lsck0.dev/<token>/arxiv.json
+
+src/scripts/arxiv-sync.py reads the daily announcement feed, keeps the papers
+announced as new, strips the TeX out of the titles and shortens the author
+lists, so this only has to lay them out.
+
+Kept flat, one tag per line. Do not run "Fix indentation" on it.
+{%- endcomment -%}
+
+<style>
+/* TRMNL's .layout centres and pads a single child, which renders a full-bleed
+   list as a narrow column in the middle of the screen. */
+.layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
+/* vh, not %: the renderer gives .layout no definite height, so a percentage
+   chain collapses to zero. */
+.ax { display: flex; flex-direction: column; height: calc(100vh - 58px); width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
+
+.ax-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 2px solid #000; padding-bottom: 3px; flex: 0 0 auto; }
+.ax-count { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.ax-subjects { font-size: 12px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ax-list { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.ax-p { border-bottom: 1px solid #d2d2d2; padding: 3px 0; min-width: 0; }
+.ax-p:last-child { border-bottom: 0; }
+.ax-t { font-size: 15px; line-height: 1.2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.ax-m { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; line-height: 1.25; }
+.ax-a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ax-s { font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; flex: 0 0 auto; }
+.ax-empty { font-size: 15px; padding-top: 10px; }
+</style>
+
+{% if view == 'arxiv' %}
+<div class="layout">
+<div class="ax">
+
+<div class="ax-head">
+<span class="ax-count">{{ total }} new</span>
+<span class="ax-subjects">{% for s in subjects %}{{ s.name }} {{ s.count }}{% unless forloop.last %} &middot; {% endunless %}{% endfor %}</span>
+</div>
+
+<div class="ax-list">
+{% for p in papers %}
+<div class="ax-p">
+<div class="ax-t">{{ p.title }}</div>
+<div class="ax-m"><span class="ax-a">{{ p.authors }}</span><span class="ax-s">{{ p.subject }}</span></div>
+</div>
+{% endfor %}
+{% if total == 0 %}<div class="ax-empty">Nothing announced. arXiv does not announce at weekends.</div>{% endif %}
+</div>
+
+</div>
+</div>
+<div class="title_bar">
+<span class="title">arXiv math</span>
+<span class="instance">{{ label }}{% unless is_today %} (last announcement){% endunless %}{% if more > 0 %} &middot; +{{ more }} more{% endif %}</span>
+</div>
+
+{% else %}
+<div class="layout">
+<div class="markdown">
+<span class="title">arXiv: no data</span>
+<div class="content">No `view` in the payload. Check the plugin's Polling URL points at arxiv.json on terminal.lsck0.dev.</div>
+</div>
+</div>
+<div class="title_bar"><span class="title">arXiv math</span><span class="instance">waiting for data</span></div>
+{% endif %}

@@ -18,6 +18,10 @@ let
     flakeIgnore = [ "E501" ];
   } (builtins.readFile ../scripts/stats-sync.py);
 
+  arxivSync = pkgs.writers.writePython3Bin "arxiv-sync" {
+    flakeIgnore = [ "E501" ];
+  } (builtins.readFile ../scripts/arxiv-sync.py);
+
   # only real VMs: down now, up sometime in the last 6h (the static /24 scrape
   # otherwise flags ~480 phantom IPs). On-demand VMs (instances.tf) sleep by
   # design and are excluded.
@@ -474,6 +478,35 @@ in {
     script = ''
       stats-sync ${terminalPublic}/$(cat ${terminalDir}/token)
     '';
+  };
+
+  # arXiv announces once a day, so hourly is already generous; it exists to
+  # catch the batch soon after it lands rather than to poll for changes.
+  systemd.services.arxiv-sync = {
+    description = "Fetch today's arXiv mathematics announcements";
+    after = [ "terminal-token.service" "network-online.target" ];
+    requires = [ "terminal-token.service" ];
+    wants = [ "network-online.target" ];
+    path = [ arxivSync pkgs.coreutils ];
+    serviceConfig = {
+      Type = "oneshot";
+      User = "nginx";
+      Group = "nginx";
+    };
+    script = ''
+      arxiv-sync ${terminalPublic}/$(cat ${terminalDir}/token)
+    '';
+  };
+
+  systemd.timers.arxiv-sync = {
+    description = "Refresh the arXiv feed for the terminal";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "5m";
+      OnUnitActiveSec = "1h";
+      Persistent = true;
+      Unit = "arxiv-sync.service";
+    };
   };
 
   systemd.timers.terminal-sync = {
