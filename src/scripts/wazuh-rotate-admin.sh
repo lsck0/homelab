@@ -50,7 +50,32 @@ H="$HASH" awk '
   /^  hash:/ && user == "admin:" { print "  hash: \"" ENVIRON["H"] "\""; next }
   { print }' config/wazuh_indexer/internal_users.yml > /tmp/iu.yml
 grep -q "$HASH" /tmp/iu.yml || { echo "ERROR: hash not written"; exit 1; }
-mv /tmp/iu.yml config/wazuh_indexer/internal_users.yml
+# `cat >`, not `mv`: internal_users.yml is bind-mounted into the indexer as a
+# single file, so replacing it gives the host a new inode that the container
+# never sees. The first attempt did exactly that - securityadmin reported
+# SUCC while pushing the file it still had open, the old hash, and the verify
+# then failed against a password nothing had actually changed.
+cat /tmp/iu.yml > config/wazuh_indexer/internal_users.yml
+rm -f /tmp/iu.yml
+
+# The indexer bind-mounts internal_users.yml as a single file, so it holds the
+# inode it was started with. Rewriting the file on the host - however it is
+# written - leaves the container reading the old contents, and securityadmin
+# then pushes the old hash while reporting success. Restarting rebinds the
+# mount to the file that is there now. This is the step whose absence made
+# three earlier runs report SUCC and change nothing.
+echo ">>> restarting the indexer so the bind mount picks up the new file"
+docker restart "$IDX" >/dev/null
+for _ in $(seq 1 60); do
+  docker exec "$IDX" curl -sk https://localhost:9200 -o /dev/null 2>/dev/null && break
+  sleep 3
+done
+container_hash=$(docker exec "$IDX" grep -A1 '^admin:' \
+  /usr/share/wazuh-indexer/config/opensearch-security/internal_users.yml | tail -1)
+case "$container_hash" in
+  *"$HASH"*) ;;
+  *) echo "ERROR: the indexer still reads the old file after a restart"; exit 1 ;;
+esac
 
 echo ">>> pushing internalusers to the running indexer"
 docker exec "$IDX" sh -c '
@@ -69,7 +94,7 @@ CODE=$(docker exec -e P="$A" "$IDX" sh -c \
 echo ">>> login with the Authelia password: $CODE"
 if [ "$CODE" != 200 ]; then
   echo "ABORT: the new password does not work. Restoring internal_users.yml."
-  cp -a config/wazuh_indexer/internal_users.yml.bak-"$STAMP" config/wazuh_indexer/internal_users.yml
+  cat config/wazuh_indexer/internal_users.yml.bak-"$STAMP" > config/wazuh_indexer/internal_users.yml
   exit 1
 fi
 
@@ -81,7 +106,8 @@ A="$A" awk '
     next
   }
   { print }' docker-compose.yml > /tmp/dc.yml
-mv /tmp/dc.yml docker-compose.yml
+cat /tmp/dc.yml > docker-compose.yml
+rm -f /tmp/dc.yml
 echo ">>> docker-compose.yml updated ($(grep -c 'INDEXER_PASSWORD=' docker-compose.yml) occurrences)"
 
 docker compose up -d 2>&1 | tail -4
