@@ -21,9 +21,11 @@ import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from itertools import zip_longest
 
 FEED = os.environ.get("ARXIV_FEED", "https://rss.arxiv.org/rss/math")
-ROWS = int(os.environ.get("ARXIV_ROWS", "14"))
+# 12 rows of 32px fill the 380px list; 14 clipped the last two.
+ROWS = int(os.environ.get("ARXIV_ROWS", "12"))
 # surnames shown before the list collapses to "+n"
 AUTHORS = int(os.environ.get("ARXIV_AUTHORS", "8"))
 # cross-lists and replacements are announced in the same feed; "new" alone is
@@ -73,9 +75,22 @@ SUBJECTS = {
 TEX_COMMANDS = re.compile(r"\\(?:mathcal|mathbb|mathbf|mathrm|mathfrak|mathscr|text|rm|bf|it)\s*")
 TEX_BRACES = re.compile(r"[{}$]")
 
+# Author lists carry their own noise: an optional affiliation in brackets, and
+# accents written as TeX, so "Pernecká" arrives as "Perneck\'a". Titles keep
+# the cautious whitelist above - dropping every backslash command there would
+# eat the maths - but a name has no maths in it, so strip the lot.
+AFFILIATION = re.compile(r"\s*\([^)]*\)")
+TEX_ACCENTS = re.compile(r"\\[a-zA-Z]+\s*|\\[`'^\"~=.]")
+
 
 def detex(s):
     s = TEX_COMMANDS.sub("", s)
+    s = TEX_BRACES.sub("", s)
+    return " ".join(s.split())
+
+
+def detex_name(s):
+    s = TEX_ACCENTS.sub("", s)
     s = TEX_BRACES.sub("", s)
     return " ".join(s.split())
 
@@ -91,7 +106,10 @@ def fetch():
 
 def authors(entry, limit=AUTHORS):
     raw = entry.findtext(DC + "creator") or ""
-    names = [n.strip() for n in raw.split(",") if n.strip()]
+    # before the split, because an affiliation can hold a comma of its own
+    raw = AFFILIATION.sub("", raw)
+    names = [detex_name(n) for n in raw.split(",")]
+    names = [n for n in names if n]
     if not names:
         return ""
     # surname only: full names eat the row on an 800px panel
@@ -162,13 +180,24 @@ def main():
     for e in todays:
         del e["day"]
 
+    # Feed order is submission order, and on a 718-paper day that put eight
+    # math.GM papers in the fourteen the panel shows: General Mathematics is
+    # the bin for anything that fits nowhere else, so it is both small and the
+    # least worth reading. Ordering by subject size alone swung the other way
+    # and filled the page with fourteen PDE papers, so take one from each
+    # subject in turn, largest first. Fourteen rows then means fourteen
+    # subjects, and a bin nobody reads sorts below the cut on its own.
+    groups = [sorted((e for e in todays if e["subject"] == s), key=lambda e: e["id"])
+              for s, _ in sorted(by_subject.items(), key=lambda kv: (-kv[1], kv[0]))]
+    shown = [e for tier in zip_longest(*groups) for e in tier if e is not None]
+
     payload = {
         "view": "arxiv",
         "generated_at": now.isoformat(),
         "label": label_day.strftime("%a %d %b"),
         "is_today": label_day == now.date(),
         "total": len(todays),
-        "papers": todays[:ROWS],
+        "papers": shown[:ROWS],
         "more": max(0, len(todays) - ROWS),
         "subjects": [{"name": n, "count": c} for n, c in top],
     }

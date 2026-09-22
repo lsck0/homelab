@@ -23,12 +23,13 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .ax-subjects { font-size: 12px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ax-list { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-/* 14 rows have to land on the panel edge: the list is the page, so any slack
-   here is a paper that could have been shown. */
+/* 12 rows have to land on the panel edge: the list is the page, so any slack
+   here is a paper that could have been shown. 378px for twelve leaves 31px a
+   row, which is why the two line-heights are as tight as they are. */
 .ax-p { border-bottom: 1px solid #d2d2d2; padding: 1px 0; min-width: 0; }
 .ax-p:last-child { border-bottom: 0; }
-.ax-t { font-size: 14px; line-height: 1.16; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
-.ax-m { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; line-height: 1.18; }
+.ax-t { font-size: 14px; line-height: 1.1; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.ax-m { display: flex; justify-content: space-between; gap: 10px; font-size: 11px; line-height: 1.1; }
 .ax-a { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .ax-s { font-weight: 700; letter-spacing: .04em; text-transform: uppercase; white-space: nowrap; flex: 0 0 auto; }
 .ax-empty { font-size: 15px; padding-top: 10px; }
