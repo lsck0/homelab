@@ -717,8 +717,12 @@ in {
     }) cfg.anubis.instances);
 
     # readable by the anubis group: the instances run as DynamicUser but share
-    # that static group.
-    sops.secrets.anubis-ed25519-key = {
+    # that static group. Declared only where Anubis runs, because the group only
+    # exists there: on a Traefik host without it, sops refused the whole
+    # manifest with "failed to lookup group 'anubis'", which left /run/secrets
+    # empty, Traefik unable to read its environment file, and every proxied host
+    # answering 526.
+    sops.secrets.anubis-ed25519-key = lib.mkIf cfg.anubis.enable {
       group = "anubis";
       mode = "0440";
     };
