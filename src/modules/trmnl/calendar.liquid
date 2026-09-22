@@ -32,11 +32,17 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 /* vh, not 100%: the renderer gives .layout no definite height, so a
    percentage chain collapses to zero and every absolutely positioned
    event disappears - which rendered the whole screen blank. */
-.cal { display: flex; flex-direction: column; height: calc(100vh - 58px); width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
+.cal { display: flex; flex-direction: column; height: calc(100vh - 58px); width: 100%; gap: 0; padding: 8px 10px 4px; box-sizing: border-box; }
 .cal-row { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
+/* the all-day band sits between the headers and the grid, so it needs the
+   same hairline separating it from both */
+.tg-row--allday { border-top: 1px solid #c8c8c8; }
 
-/* ---- shared event chip ---------------------------------------------- */
-.ev { border-left: 6px solid #000; padding: 1px 0 2px 6px; overflow: hidden; background: #fff; }
+/* ---- shared event chip ----------------------------------------------
+   One rule down the left edge rather than a box: a 2px frame around every
+   block turned a busy week into a grid of boxes inside boxes, and on e-ink
+   the frames read louder than the titles they hold. */
+.ev { border-left: 4px solid #000; padding: 0 0 1px 5px; overflow: hidden; background: #fff; }
 .ev-t { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .ev-s { font-size: 19px; line-height: 1.12; overflow-wrap: anywhere; }
 .ev-m { font-size: 14px; line-height: 1.15; overflow-wrap: anywhere; }
@@ -46,69 +52,81 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
    Three rows that share one column template, so the hour axis and the event
    area are the same box. Previously the axis spanned the full height while
    events were positioned inside a shorter body below the day header, so every
-   block was drawn at the wrong time. */
-.tg-row { display: flex; gap: 6px; width: 100%; }
-.tg-row--grid { flex: 1 1 auto; min-height: 0; }
-.tg-gutter { width: 54px; flex: 0 0 54px; }
-.tg-gutter--label { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; align-self: center; }
+   block was drawn at the wrong time.
+
+   The columns are separated by hairlines inside one outer frame instead of
+   each carrying its own border, so the week reads as a single grid. */
+.tg-row { display: flex; width: 100%; }
+.tg-row--grid { flex: 1 1 auto; min-height: 0; border-top: 2px solid #000; }
+.tg-gutter { width: 46px; flex: 0 0 46px; }
+.tg-gutter--label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; align-self: center; text-align: right; padding-right: 6px; }
 /* one line each, capped: "Flo Abwesend (Studium)" wrapped to five lines per
    day and pushed the time grid down to a third of the screen. */
-.tg-row--allday { flex: 0 0 auto; max-height: 56px; overflow: hidden; }
+.tg-row--allday { flex: 0 0 auto; max-height: 52px; overflow: hidden; }
 .tg-axis { position: relative; }
-.tg-h { position: absolute; right: 6px; font-size: 14px; font-weight: 700; transform: translateY(-50%); }
+.tg-h { position: absolute; right: 6px; font-size: 12px; font-weight: 700; letter-spacing: .02em; transform: translateY(-50%); color: #555; }
+/* the first label sits on the grid's top edge, where half of it would be
+   cut off by the frame; hang it below the line instead of centred on it */
+.tg-h--first { transform: none; }
 
-.tg-hd { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; justify-content: space-between; padding: 3px 7px; border: 2px solid #000; }
-.tg-hd--today { background: #000; }
-.tg-hd--today .tg-dow, .tg-hd--today .tg-dom { color: #fff; }
-.tg-dow { font-size: 17px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; }
-.tg-dom { font-size: 26px; font-weight: 700; line-height: .9; }
+.tg-hd { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: 5px; padding: 0 6px 3px; }
+.tg-dow { font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #555; }
+.tg-dom { font-size: 25px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
+/* today is the one thing worth picking out, so mark the number and nothing
+   else; a filled header cell drew the eye to the whole column instead. */
+.tg-hd--today .tg-dow { color: #000; }
+.tg-hd--today .tg-dom { background: #000; color: #fff; padding: 0 6px 2px; }
 
-.tg-adcell { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 1px 3px; border-left: 2px solid #000; border-right: 2px solid #000; overflow: hidden; }
-.tg-adcell .ev { padding: 0 0 0 5px; }
-.tg-adcell .ev-s { display: block; font-size: 15px; line-height: 1.18; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tg-adcell .ev-m { font-size: 13px; }
+.tg-adcell { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 1px; padding: 2px 4px; overflow: hidden; }
+.tg-adcell + .tg-adcell, .tg-col + .tg-col { border-left: 1px solid #c8c8c8; }
+.tg-adcell .ev { padding: 0 0 0 5px; border-left-width: 3px; }
+.tg-adcell .ev-s { display: block; font-size: 14px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-adcell .ev-m { font-size: 12px; }
 
-.tg-col { position: relative; flex: 1 1 0; min-width: 0; border: 2px solid #000; overflow: hidden; }
-.tg-col--weekend { background: #f2f2f2; }
-.tg-line { position: absolute; left: 0; right: 0; border-top: 1px solid #e4e4e4; }
-.tg-line--major { border-top-color: #b0b0b0; }
+.tg-col { position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; }
+.tg-col--weekend { background: #f4f4f4; }
+.tg-line { position: absolute; left: 0; right: 0; border-top: 1px solid #ededed; }
+.tg-line--major { border-top-color: #c4c4c4; }
 
-/* On a 24h axis a 30-minute event is ~13px tall, which fits the time and clips
-   everything else. Give every block room for its text even when that is taller
-   than its duration. */
-.tg-ev { position: absolute; box-sizing: border-box; border: 2px solid #000; border-left-width: 5px; padding: 0 2px; overflow: hidden; background: #fff; display: flex; flex-direction: column; justify-content: center; line-height: 1.04; }
-.tg-ev .ev-t { font-size: 12px; white-space: nowrap; flex: 0 0 auto; }
+/* Events are the only filled shapes on the grid, so they carry the weight:
+   a thick left rule and a hairline body, not a box. */
+.tg-ev { position: absolute; box-sizing: border-box; border: 1px solid #909090; border-left: 5px solid #000; padding: 0 3px; overflow: hidden; background: #fff; display: flex; flex-direction: column; justify-content: center; line-height: 1.06; }
+.tg-ev .ev-t { font-size: 12px; font-weight: 700; white-space: nowrap; flex: 0 0 auto; }
 /* do not let the title shrink away: the source line below it would win the
    space and the block would show a time and a category but no event. */
 /* one line: three lines of text only fit a 90-minute block if the title
    is one of them, and a wrapped title pushed the source out of the box. */
 .tg-ev .ev-s { font-size: 13px; flex: 0 0 auto; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 
-.tg-ev .ev-src { font-size: 10px; flex: 0 0 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-ev .ev-src { font-size: 10px; flex: 0 0 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #555; }
 /* calendar-sync already grew every block to a readable minimum and pushed
    the later ones down, so the height here is honest and no min-height is
    needed; thin edges keep the one line inside it. */
-.tg-ev--compact { justify-content: flex-start; border-top-width: 1px; border-bottom-width: 1px; }
-.tg-ev--compact .ev-s { display: block; font-size: 11px; line-height: 1.18; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-ev--compact { justify-content: flex-start; }
+.tg-ev--compact .ev-s { display: block; font-size: 11px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* the day view has one wide column, so put it all on a single readable row */
-.tg-ev--wide { flex-direction: row; align-items: center; gap: 10px; }
+.tg-ev--wide { flex-direction: row; align-items: center; gap: 10px; border-left-width: 7px; }
 .tg-ev--wide .ev-t { font-size: 19px; flex: 0 0 auto; }
 .tg-ev--wide .ev-s { font-size: 22px; -webkit-line-clamp: 1; flex: 1 1 auto; }
-.tg-ev--wide .ev-src { font-size: 14px; flex: 0 0 auto; margin-left: auto; }
+.tg-ev--wide .ev-src { font-size: 13px; flex: 0 0 auto; margin-left: auto; }
 
 /* ---- month ----------------------------------------------------------- */
-.mo { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; min-height: 0; gap: 3px; box-sizing: border-box; }
-.mo-dows { display: flex; gap: 4px; }
-.mo-dow { flex: 1 1 0; font-size: 15px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; text-align: center; }
-.mo-wk { display: flex; gap: 4px; flex: 1 1 0; min-height: 0; }
-.mo-cell { flex: 1 1 0; min-width: 0; border: 2px solid #000; padding: 2px 4px; display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
-.mo-cell--other { border-color: #b4b4b4; }
+.mo { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; min-height: 0; box-sizing: border-box; border-top: 2px solid #000; }
+.mo-dows { display: flex; padding-bottom: 3px; }
+.mo-dow { flex: 1 1 0; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; text-align: center; color: #555; }
+/* hairlines inside one frame, like the week grid: a 2px box per cell turned
+   the month into 42 boxes and buried the four that had anything in them. */
+.mo-wk { display: flex; flex: 1 1 0; min-height: 0; }
+.mo-wk + .mo-wk { border-top: 1px solid #c8c8c8; }
+.mo-cell { flex: 1 1 0; min-width: 0; padding: 2px 5px; display: flex; flex-direction: column; gap: 1px; overflow: hidden; }
+.mo-cell + .mo-cell { border-left: 1px solid #c8c8c8; }
 .mo-cell--other .mo-n { color: #b4b4b4; }
-.mo-cell--weekend { background: #f2f2f2; }
-.mo-n { font-size: 17px; font-weight: 700; line-height: 1; }
-.mo-cell--today .mo-n { background: #000; color: #fff; padding: 1px 5px; align-self: flex-start; }
-.mo-e { font-size: 13px; line-height: 1.18; border-left: 4px solid #000; padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.mo-more { font-size: 12px; font-weight: 700; }
+.mo-cell--other .mo-e { color: #909090; border-left-color: #b4b4b4; }
+.mo-cell--weekend { background: #f4f4f4; }
+.mo-n { font-size: 16px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.mo-cell--today .mo-n { background: #000; color: #fff; padding: 1px 6px 2px; align-self: flex-start; }
+.mo-e { font-size: 12px; line-height: 1.24; border-left: 3px solid #000; padding-left: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mo-more { font-size: 11px; font-weight: 700; color: #555; }
 </style>
 
 {% if view == 'month' %}
@@ -168,7 +186,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 <div class="tg-row tg-row--grid">
 <div class="tg-gutter tg-axis">
 {% for h in grid.hours %}
-{% if view == 'day' or h.major %}<div class="tg-h" style="top:{{ h.top_pct }}%">{{ h.label }}</div>{% endif %}
+{% if view == 'day' or h.major %}<div class="tg-h{% if forloop.first %} tg-h--first{% endif %}" style="top:{{ h.top_pct }}%">{{ h.label }}</div>{% endif %}
 {% endfor %}
 </div>
 {% for d in days %}
