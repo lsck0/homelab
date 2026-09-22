@@ -39,6 +39,22 @@ api() { # method url apikey [json]
 }
 later() { echo "$1"; pending=1; }
 
+# Existence is not the same as being right: a renumber leaves every row in
+# place pointing at the old address. fix_fields <label> <url> <key> <json>
+# <jq args...> writes back only when the filter changes something. Addresses
+# only, since the APIs return keys and passwords masked.
+fix_fields() {
+  local label=$1 url=$2 k=$3 cur=$4 want
+  shift 4
+  want=$(echo "$cur" | jq -c "$@")
+  [ "$(echo "$cur" | jq -cS .)" = "$(echo "$want" | jq -cS .)" ] && return 0
+  if api PUT "$url?forceSave=true" "$k" "$want" >/dev/null; then
+    echo "$label: corrected"
+  else
+    later "$label: correction failed"
+  fi
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # SERVARR APPS
 # ─────────────────────────────────────────────────────────────────────────────
@@ -51,7 +67,19 @@ wire_servarr() {
   a="$url/api/$v"
   api GET "$a/system/status" "$k" >/dev/null || { later "$name: unreachable"; return; }
 
-  if ! api GET "$a/downloadclient" "$k" | jq -e 'any(.[]; .implementation == "QBittorrent")' >/dev/null; then
+  local clients
+  clients=$(api GET "$a/downloadclient" "$k")
+  if echo "$clients" | jq -e 'any(.[]; .implementation == "QBittorrent")' >/dev/null; then
+    local cur id
+    cur=$(echo "$clients" | jq -c 'first(.[] | select(.implementation == "QBittorrent"))')
+    id=$(echo "$cur" | jq -r .id)
+    fix_fields "$name/qbittorrent" "$a/downloadclient/$id" "$k" "$cur" \
+      --arg qh "$QBIT_HOST" --arg qp "$QBIT_PORT" \
+      '.fields |= map(
+          if .name == "host" then .value = $qh
+          elif .name == "port" then .value = ($qp | tonumber)
+          else . end)'
+  else
     body=$(api GET "$a/downloadclient/schema" "$k" | jq -c --arg cf "$catfield" --arg cat "$cat" \
       --arg qh "$QBIT_HOST" --arg qp "$QBIT_PORT" --arg qpass "$qpass" '
       first(.[] | select(.implementation == "QBittorrent"))
@@ -104,8 +132,19 @@ wire_prowlarr() {
   for spec in "Radarr radarr http://$RADARR_HOST:$RADARR_PORT" "Sonarr sonarr http://$SONARR_HOST:$SONARR_PORT" \
               "Lidarr lidarr http://$LIDARR_HOST:$LIDARR_PORT" "Readarr bookshelf http://$BOOKSHELF_HOST:$BOOKSHELF_PORT"; do
     read -r impl name url <<< "$spec"
-    echo "$apps" | jq -e --arg i "$impl" 'any(.[]; .implementation == $i)' >/dev/null && continue
     k=$(key "$name-key") || { later "prowlarr: waiting for $name API key"; continue; }
+    if echo "$apps" | jq -e --arg i "$impl" 'any(.[]; .implementation == $i)' >/dev/null; then
+      local cur id
+      cur=$(echo "$apps" | jq -c --arg i "$impl" 'first(.[] | select(.implementation == $i))')
+      id=$(echo "$cur" | jq -r .id)
+      fix_fields "prowlarr/$name" "$P/applications/$id" "$pk" "$cur" \
+        --arg u "$url" --arg pu "http://$PROWLARR_HOST:$PROWLARR_PORT" \
+        '.fields |= map(
+            if .name == "baseUrl" then .value = $u
+            elif .name == "prowlarrUrl" then .value = $pu
+            else . end)'
+      continue
+    fi
     body=$(api GET "$P/applications/schema" "$pk" | jq -c --arg i "$impl" --arg n "$name" --arg u "$url" --arg k "$k" \
       --arg pu "http://$PROWLARR_HOST:$PROWLARR_PORT" '
       first(.[] | select(.implementation == $i))
@@ -132,7 +171,19 @@ wire_prowlarr() {
   fi
   if [ -n "$tag" ]; then
     proxies=$(api GET "$P/indexerproxy" "$pk")
-    if ! echo "$proxies" | jq -e 'any(.[]; .implementation == "Socks5")' >/dev/null; then
+    if echo "$proxies" | jq -e 'any(.[]; .implementation == "Socks5")' >/dev/null; then
+      # this is what actually carries indexer traffic; stale here means every
+      # search times out at 100s
+      local cur id
+      cur=$(echo "$proxies" | jq -c 'first(.[] | select(.implementation == "Socks5"))')
+      id=$(echo "$cur" | jq -r .id)
+      fix_fields "prowlarr/tor-proxy" "$P/indexerproxy/$id" "$pk" "$cur" \
+        --arg h "$TOR_HOST" --arg p "$TOR_PORT" \
+        '.fields |= map(
+            if .name == "host" then .value = $h
+            elif .name == "port" then .value = ($p | tonumber)
+            else . end)'
+    else
       body=$(api GET "$P/indexerproxy/schema" "$pk" | jq -c --argjson t "$tag" \
         --arg h "$TOR_HOST" --arg p "$TOR_PORT" '
         first(.[] | select(.implementation == "Socks5"))

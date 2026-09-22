@@ -94,18 +94,11 @@ in {
   // lib.genAttrs containerUnits (_: {
     startLimitIntervalSec = 0;
     serviceConfig.RestartSec = lib.mkDefault 10;
-    # Ordering alone is not enough. nas-tmpfiles runs `before` these units, but
-    # `before` says nothing about whether it ran at all: `systemctl restart
-    # podman-<app>` on its own starts the container with the share unmounted,
-    # podman bind-mounts the empty directory underneath the automount, and the
-    # app writes a fresh database onto the VM's own disk where it shadows the
-    # real one on the NAS. Prowlarr lost every indexer that way.
-    #
-    # The dependency is on the automount units, not RequiresMountsFor: that
-    # pulls in the .mount units instead, which defeats the point of an
-    # automount and makes every container fail to start when one NFS mount is
-    # briefly unhappy. Requiring the trigger guarantees the path resolves
-    # without forcing an eager mount.
+    # `before` alone does not stop a container starting with the share
+    # unmounted, which makes podman bind the empty directory under the
+    # automount and the app write a fresh database over it. The dependency is
+    # on the .automount, not RequiresMountsFor: that forces the .mount up and
+    # then one unhappy NFS share blocks every container.
     requires = nasAutomounts;
     after = nasAutomounts;
   });

@@ -400,6 +400,6 @@ in {
   # scrapes Prometheus straight from the LAN. That is read-only telemetry, so
   # it gets an exception; Grafana's :80 does not, because it trusts Remote-User
   # and anything that can reach it can forge an admin session.
-  homelab.ingressOnly.portSources."9090" = [ "192.168.178.0/24" ];
+  homelab.ingressOnly.portSources."9090" = [ "192.168.178.0/24" "10.100.0.104/32" ];
 
 }
