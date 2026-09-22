@@ -130,8 +130,11 @@ locals {
       name    = "119-internal-nextcloud",
       type    = "internal",
     }
-    "120" = { # synced calendar feeds (Outlook/StudIP/Proton -> TRMNL)
-      enabled = true,
+    "120" = { # retired: the calendar feeds moved to vm-104 with the other
+      # dashboards, and its NAS share is mounted there now. Kept as a slot
+      # rather than removed, because deleting an id renumbers everything after
+      # it and the last renumber is still being cleaned up after.
+      enabled = false,
       name    = "120-internal-calendar",
       type    = "internal",
     }

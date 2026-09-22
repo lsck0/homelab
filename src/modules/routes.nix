@@ -70,7 +70,10 @@
     nextcloud      = { host = "cloud";       vmid = 119; port = 80;    auth = "own"; };
     # the TRMNL cloud polls this and cannot log in. The feed URLs carry an
     # unguessable token instead, so this one token route stays public.
-    calendar       = { host = "cal";         vmid = 120; port = 80;    auth = "token"; publicRelay = true; proxied = false; };
+    # cal.lsck0.dev is kept as an alias for terminal.lsck0.dev: the feeds moved
+    # to vm-104 with the rest of the dashboards, and an old polling URL or a
+    # bookmarked upload endpoint should not break because of that.
+    calendar       = { host = "cal";         vmid = 104; port = 8081; auth = "token"; publicRelay = true; proxied = false; };
     # the e-ink terminal's data feeds. Same deal as the calendar: the TRMNL
     # cloud polls them and cannot log in, so the unguessable path is the only
     # thing in front. It lives on vm-104 because Prometheus is local there and
