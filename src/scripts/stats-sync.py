@@ -21,9 +21,17 @@ PROMETHEUS = os.environ.get("STATS_PROMETHEUS", "http://10.100.0.105:9090")
 QBITTORRENT = os.environ.get("STATS_QBITTORRENT", "http://10.100.0.112")
 INVENTORY = os.environ.get("STATS_INVENTORY", "/var/lib/homelab-stats/inventory.json")
 TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/homepage-tokens")
-# how many rows the screen can hold before the rest is summarised
-SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "48"))
-TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "7"))
+# how many rows the screen can hold before the rest is summarised. Three
+# columns of seventeen, which is every declared VM with two slots spare: the
+# router is the last entry by id, so a tighter budget cut the one host whose
+# state matters most.
+SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "51"))
+TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "3"))
+# The three side panels share 347px. Sending more rows than a panel can draw
+# does not show more, it clips the last one in half, so each list is cut to
+# what its panel holds: 17px a line for the two flat lists, 36px a torrent.
+REQUEST_ROWS = int(os.environ.get("STATS_REQUEST_ROWS", "5"))
+DISK_ROWS = int(os.environ.get("STATS_DISK_ROWS", "3"))
 # longest torrent name the panel can hold on one line
 NAME_CHARS = int(os.environ.get("STATS_NAME_CHARS", "42"))
 TIMEOUT = 8
@@ -77,6 +85,20 @@ def human_size(num):
     return f"{v:.0f}TB"
 
 
+def scrape_instance(vm):
+    """The address Prometheus scrapes this VM on.
+
+    For a VM that is its inventory address. The router's inventory address is
+    its WAN side, 192.168.178.x, which nothing scrapes: node-exporter is only
+    reached on the two LAN legs. Grafana's relabelling already special-cases
+    the same pair. Without this the dashboard called the router down whatever
+    it was doing.
+    """
+    if vm.get("type") == "router":
+        return "10.100.0.1:9100"
+    return f"{vm['ip']}:9100"
+
+
 def services():
     """One row per declared VM, whatever state it is in - the same rule the
     Homepage dashboard follows. A VM that is meant to be running and is not is
@@ -96,7 +118,7 @@ def services():
 
     rows = []
     for vmid, vm in sorted(inv.items(), key=lambda kv: int(kv[0])):
-        inst = f"{vm['ip']}:9100"
+        inst = scrape_instance(vm)
         enabled = vm.get("enabled", "true")
         # strip the "134-internal-" prefix the inventory carries
         name = vm["name"].split("-", 2)[-1]
@@ -220,7 +242,7 @@ def requests():
             "mixed": e["int"] > 0 and e["ext"] > 0,
         })
     out.sort(key=lambda x: float(x["rpm"]), reverse=True)
-    return out[:6]
+    return out[:REQUEST_ROWS]
 
 
 def storage():
@@ -230,7 +252,7 @@ def storage():
     real = ('fstype!~"tmpfs|ramfs|overlay|squashfs|nfs.*|fuse.*|autofs",'
             'mountpoint!~"/nix/store|/run.*|/var/lib/docker.*|/var/lib/containers.*"')
     rows = promql(
-        f'topk(5, 100 * (1 - node_filesystem_avail_bytes{{{real}}}'
+        f'topk({DISK_ROWS}, 100 * (1 - node_filesystem_avail_bytes{{{real}}}'
         f' / node_filesystem_size_bytes{{{real}}}))')
     free = by_instance(promql(f'node_filesystem_avail_bytes{{{real}}}'))
 
@@ -330,10 +352,13 @@ def torrents():
     for t in listing:
         counts[bucket(t.get("state", ""))] += 1
 
-    # active downloads first, fastest first: that is what someone glances at
+    # active downloads first, fastest first: that is what someone glances at.
+    # Progress breaks the tie, because the queue only lets one torrent run at
+    # a time, so everything behind it sits at 0B/s and the panel would
+    # otherwise lead with three untouched magnets.
     active = sorted(
         (t for t in listing if bucket(t.get("state", "")) == "downloading"),
-        key=lambda t: t.get("dlspeed", 0), reverse=True)
+        key=lambda t: (t.get("dlspeed", 0), t.get("progress", 0)), reverse=True)
     rest = sorted(listing, key=lambda t: t.get("added_on", 0), reverse=True)
     ordered = active + [t for t in rest if t not in active]
 

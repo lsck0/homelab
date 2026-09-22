@@ -41,9 +41,10 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 /* ---- services --------------------------------------------------------- */
 .hl-mid { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
 .hl-svc { flex: 1 1 0; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 10px; min-width: 0; border: 2px solid #000; padding: 3px 6px; overflow: hidden; }
-/* 16 rows of 48 services have to fit the panel exactly: taller and the last
-   row is cut off, shorter and a third of the panel is blank. */
-.hl-row { width: calc(33.33% - 7px); display: flex; align-items: center; gap: 4px; font-size: 14px; line-height: 1.46; min-width: 0; }
+/* 17 rows of 51 services have to fit the panel exactly: taller and the last
+   row is cut off, shorter and a third of the panel is blank. The panel is
+   347px, so a row may take 20px. */
+.hl-row { width: calc(33.33% - 7px); display: flex; align-items: center; gap: 4px; font-size: 14px; line-height: 1.42; min-width: 0; }
 .hl-dot { width: 8px; height: 8px; flex: 0 0 auto; border: 1px solid #000; background: #000; }
 .hl-dot--off { background: #fff; }
 .hl-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -56,7 +57,11 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 
 /* ---- side panels ------------------------------------------------------ */
 .hl-side { flex: 0 0 216px; min-width: 0; display: flex; flex-direction: column; gap: 5px; min-height: 0; }
-.hl-panel { border: 2px solid #000; padding: 3px 7px; min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
+/* 0 0 auto, not the flex default: a shrinkable panel silently gives up the
+   bottom half of its last row when the column is tight, which is how the
+   requests list came to show three and a half entries. The lists are cut to
+   size in stats-sync instead, and only the torrents panel takes up slack. */
+.hl-panel { flex: 0 0 auto; border: 2px solid #000; padding: 3px 7px; min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
 .hl-panel--grow { flex: 1 1 auto; }
 .hl-h { font-size: 12px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; border-bottom: 1px solid #000; margin-bottom: 2px; display: flex; justify-content: space-between; }
 .hl-line { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; line-height: 1.3; }

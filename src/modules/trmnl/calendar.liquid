@@ -113,6 +113,13 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .tg-ev--wide .ev-t { font-size: 19px; flex: 0 0 auto; }
 .tg-ev--wide .ev-s { font-size: 22px; -webkit-line-clamp: 1; flex: 1 1 auto; }
 .tg-ev--wide .ev-src { font-size: 13px; flex: 0 0 auto; margin-left: auto; }
+/* An all-afternoon block that shares its hours with something else is half a
+   column wide and a third of the screen tall. On one row that reads
+   "SDD..." beside an empty acre, so stack it and let the title use the
+   height it already has. */
+.tg-ev--tall { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 1px; padding-top: 3px; }
+.tg-ev--tall .ev-s { font-size: 19px; line-height: 1.12; -webkit-line-clamp: 4; }
+.tg-ev--tall .ev-src { margin-left: 0; }
 
 /* ---- month ----------------------------------------------------------- */
 .mo { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; min-height: 0; box-sizing: border-box; border-top: 2px solid #000; }
@@ -199,7 +206,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 <div class="tg-line{% if h.major %} tg-line--major{% endif %}" style="top:{{ h.top_pct }}%"></div>
 {% endfor %}
 {% for ev in d.timed_events %}
-<div class="tg-ev{{ wide }}{% unless is_day %}{% if ev.compact %} tg-ev--compact{% endif %}{% endunless %}" style="top:{{ ev.top_pct }}%;height:{{ ev.height_pct }}%;left:{{ ev.left_pct }}%;width:{{ ev.width_pct }}%">
+<div class="tg-ev{{ wide }}{% if is_day %}{% if ev.tall %} tg-ev--tall{% endif %}{% else %}{% if ev.compact %} tg-ev--compact{% endif %}{% endif %}" style="top:{{ ev.top_pct }}%;height:{{ ev.height_pct }}%;left:{{ ev.left_pct }}%;width:{{ ev.width_pct }}%">
 {% if is_day %}
 <div class="ev-t">{{ ev.time }}&ndash;{{ ev.end_time }}</div>
 <div class="ev-s">{{ ev.summary }}</div>
