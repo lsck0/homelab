@@ -23,7 +23,7 @@ INVENTORY = os.environ.get("STATS_INVENTORY", "/var/lib/homelab-stats/inventory.
 TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/homepage-tokens")
 # how many rows the screen can hold before the rest is summarised
 SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "48"))
-TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "4"))
+TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "7"))
 TIMEOUT = 8
 
 
