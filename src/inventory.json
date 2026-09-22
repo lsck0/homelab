@@ -163,7 +163,7 @@
   },
   "118": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.118",
     "name": "118-internal-vaultwarden",
@@ -172,7 +172,7 @@
   },
   "119": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.119",
     "name": "119-internal-nextcloud",
@@ -190,7 +190,7 @@
   },
   "121": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.121",
     "name": "121-internal-paperless",
@@ -208,7 +208,7 @@
   },
   "123": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.123",
     "name": "123-internal-wikijs",
@@ -217,7 +217,7 @@
   },
   "124": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.124",
     "name": "124-internal-firefly",
@@ -352,7 +352,7 @@
   },
   "201": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.201",
     "name": "201-external-headscale",
@@ -388,7 +388,7 @@
   },
   "205": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.205",
     "name": "205-external-shlink",
@@ -397,7 +397,7 @@
   },
   "206": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.206",
     "name": "206-external-privatebin",
@@ -406,7 +406,7 @@
   },
   "207": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.207",
     "name": "207-external-share",
@@ -424,7 +424,7 @@
   },
   "209": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.209",
     "name": "209-external-hello",

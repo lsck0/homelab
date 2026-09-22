@@ -146,9 +146,17 @@ def network():
 
 
 def totals():
-    """Lab-wide CPU and memory. Weighted by core and by byte rather than an
-    average of per-VM percentages, which would let an idle single-core VM
-    cancel out a loaded eight-core one."""
+    """CPU and memory of the machine that actually has them.
+
+    Summing the guests was nonsense: 44 VMs add up to 108 vCPUs and 107GB on a
+    box with 12 cores and 32GB, because virtual CPUs and guest RAM are
+    oversubscribed by design. The host's own node_exporter is the only place
+    the real figures exist.
+    """
+    host = os.environ.get("STATS_HOST_VM", "proxmox")
+    sel = f'{{vm="{host}"}}'
+    idle = f'{{vm="{host}",mode="idle"}}'
+
     def scalar(res, default=0.0):
         try:
             return float(res[0]["value"][1])
@@ -156,11 +164,11 @@ def totals():
             return default
 
     busy = scalar(promql(
-        '100 * (1 - (sum(rate(node_cpu_seconds_total{mode="idle"}[5m]))'
-        ' / sum(rate(node_cpu_seconds_total[5m]))))'))
-    cores = scalar(promql('count(count by (instance, cpu) (node_cpu_seconds_total))'))
-    mem_total = scalar(promql('sum(node_memory_MemTotal_bytes)'))
-    mem_free = scalar(promql('sum(node_memory_MemAvailable_bytes)'))
+        f'100 * (1 - (sum(rate(node_cpu_seconds_total{idle}[5m]))'
+        f' / sum(rate(node_cpu_seconds_total{sel}[5m]))))'))
+    cores = scalar(promql(f'count(count by (cpu) (node_cpu_seconds_total{sel}))'))
+    mem_total = scalar(promql(f'node_memory_MemTotal_bytes{sel}'))
+    mem_free = scalar(promql(f'node_memory_MemAvailable_bytes{sel}'))
     used = mem_total - mem_free
 
     return {
