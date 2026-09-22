@@ -121,12 +121,12 @@ locals {
     }
 
     "118" = { # password manager (Bitwarden-compatible)
-      enabled = true,
+      enabled = false,
       name    = "118-internal-vaultwarden",
       type    = "internal",
     }
     "119" = { # files / groupware cloud
-      enabled = true,
+      enabled = false,
       name    = "119-internal-nextcloud",
       type    = "internal",
     }
@@ -136,7 +136,7 @@ locals {
       type    = "internal",
     }
     "121" = { # document management (paperless-ngx)
-      enabled = true,
+      enabled = false,
       name    = "121-internal-paperless",
       type    = "internal",
       memory  = 2048,
@@ -148,12 +148,12 @@ locals {
       memory  = 2048,
     }
     "123" = { # wiki / knowledge base
-      enabled = true,
+      enabled = false,
       name    = "123-internal-wikijs",
       type    = "internal",
     }
     "124" = { # Firefly III personal finance
-      enabled = true,
+      enabled = false,
       name    = "124-internal-firefly",
       type    = "internal",
     }
@@ -238,7 +238,7 @@ locals {
       type    = "external",
     }
     "201" = { # Tailscale control server (VPN mesh)
-      enabled = true,
+      enabled = false,
       name    = "201-external-headscale",
       type    = "external",
     }
@@ -258,17 +258,17 @@ locals {
       type    = "external",
     }
     "205" = { # URL shortener
-      enabled = true,
+      enabled = false,
       name    = "205-external-shlink",
       type    = "external",
     }
     "206" = { # encrypted pastebin
-      enabled = true,
+      enabled = false,
       name    = "206-external-privatebin",
       type    = "external",
     }
     "207" = { # public file sharing
-      enabled = true,
+      enabled = false,
       name    = "207-external-share",
       type    = "external",
     }
@@ -281,7 +281,7 @@ locals {
       disk    = 16,
     }
     "209" = { # app host: Docker Swarm stacks deployed by CI (Forgejo + GitHub)
-      enabled = true,
+      enabled = false,
       name    = "209-external-hello",
       type    = "external",
       memory  = 2048,
