@@ -49,14 +49,14 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .hl-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hl-row--disabled .hl-name { text-decoration: line-through; }
 /* the two bars share one track so a busy VM reads at a glance without numbers */
-.hl-bars { flex: 0 0 26px; display: flex; flex-direction: column; gap: 2px; }
+.hl-bars { flex: 0 0 22px; display: flex; flex-direction: column; gap: 2px; }
 .hl-bar { height: 4px; background: #d2d2d2; }
 .hl-bar span { display: block; height: 100%; background: #000; }
-.hl-pct { flex: 0 0 44px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
+.hl-pct { flex: 0 0 38px; text-align: right; font-size: 12px; font-variant-numeric: tabular-nums; }
 
 /* ---- side panels ------------------------------------------------------ */
-.hl-side { flex: 0 0 216px; display: flex; flex-direction: column; gap: 5px; min-height: 0; }
-.hl-panel { border: 2px solid #000; padding: 3px 7px; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.hl-side { flex: 0 0 216px; min-width: 0; display: flex; flex-direction: column; gap: 5px; min-height: 0; }
+.hl-panel { border: 2px solid #000; padding: 3px 7px; min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
 .hl-panel--grow { flex: 1 1 auto; }
 .hl-h { font-size: 12px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; border-bottom: 1px solid #000; margin-bottom: 2px; display: flex; justify-content: space-between; }
 .hl-line { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; line-height: 1.3; }

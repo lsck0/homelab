@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Point the Wazuh indexer's `admin` account at the Authelia password.
 #
-# Run it ON vm-107:
+# Run it ON vm-108:
 #
-#   ssh root@10.100.0.107 'bash -s' < src/scripts/wazuh-rotate-admin.sh
+#   ssh root@10.100.0.108 'bash -s' < src/scripts/wazuh-rotate-admin.sh
 #
 # Why this is not part of 107-internal-wazuh.nix: that unit only rewrites the
 # credentials when the compose file still carries the upstream demo password

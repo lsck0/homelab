@@ -1,6 +1,6 @@
 """Build the TRMNL homelab dashboard payload.
 
-Runs on vm-104, where Prometheus is local. The qBittorrent credentials come
+Runs on vm-104. Prometheus is on vm-105. The qBittorrent credentials come
 from the shared homepage-tokens mount and 10.100.0.104 is on that app's API
 whitelist, so the dashboard needs nothing else opened up.
 
@@ -17,13 +17,15 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-PROMETHEUS = os.environ.get("STATS_PROMETHEUS", "http://10.100.0.104:9090")
-QBITTORRENT = os.environ.get("STATS_QBITTORRENT", "http://10.100.0.111")
+PROMETHEUS = os.environ.get("STATS_PROMETHEUS", "http://10.100.0.105:9090")
+QBITTORRENT = os.environ.get("STATS_QBITTORRENT", "http://10.100.0.112")
 INVENTORY = os.environ.get("STATS_INVENTORY", "/var/lib/homelab-stats/inventory.json")
 TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/homepage-tokens")
 # how many rows the screen can hold before the rest is summarised
 SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "48"))
 TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "7"))
+# longest torrent name the panel can hold on one line
+NAME_CHARS = int(os.environ.get("STATS_NAME_CHARS", "42"))
 TIMEOUT = 8
 
 
@@ -338,8 +340,15 @@ def torrents():
     items = []
     for t in ordered[:TORRENT_ROWS]:
         pct = round(float(t.get("progress", 0)) * 100)
+        name = t.get("name", "?")
+        # scene releases run past 80 characters and a magnet-only torrent is a
+        # 40-character hash. CSS ellipsis needs every ancestor to agree to
+        # shrink, which is one silent failure away from a name running off the
+        # panel, so cut it here as well.
+        if len(name) > NAME_CHARS:
+            name = name[:NAME_CHARS - 1].rstrip() + "\u2026"
         items.append({
-            "name": t.get("name", "?"),
+            "name": name,
             "pct": pct,
             "state": bucket(t.get("state", "")),
             "speed": human_rate(t.get("dlspeed", 0)),

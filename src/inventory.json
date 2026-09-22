@@ -40,7 +40,7 @@
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.104",
-    "name": "104-internal-grafana",
+    "name": "104-internal-terminal",
     "prefix": 24,
     "type": "internal"
   },
@@ -49,7 +49,7 @@
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.105",
-    "name": "105-internal-uptime-kuma",
+    "name": "105-internal-grafana",
     "prefix": 24,
     "type": "internal"
   },
@@ -58,7 +58,7 @@
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.106",
-    "name": "106-internal-kopia",
+    "name": "106-internal-uptime-kuma",
     "prefix": 24,
     "type": "internal"
   },
@@ -67,7 +67,7 @@
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.107",
-    "name": "107-internal-wazuh",
+    "name": "107-internal-kopia",
     "prefix": 24,
     "type": "internal"
   },
@@ -76,7 +76,7 @@
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.108",
-    "name": "108-internal-nas",
+    "name": "108-internal-wazuh",
     "prefix": 24,
     "type": "internal"
   },
@@ -85,7 +85,7 @@
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.109",
-    "name": "109-internal-attic",
+    "name": "109-internal-nas",
     "prefix": 24,
     "type": "internal"
   },
@@ -94,7 +94,7 @@
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.110",
-    "name": "110-internal-sccache",
+    "name": "110-internal-attic",
     "prefix": 24,
     "type": "internal"
   },
@@ -103,7 +103,7 @@
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.111",
-    "name": "111-internal-qbittorrent",
+    "name": "111-internal-sccache",
     "prefix": 24,
     "type": "internal"
   },
@@ -112,25 +112,25 @@
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.112",
-    "name": "112-internal-tor-router",
+    "name": "112-internal-qbittorrent",
     "prefix": 24,
     "type": "internal"
   },
   "113": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.113",
-    "name": "113-internal-hermes",
+    "name": "113-internal-tor-router",
     "prefix": 24,
     "type": "internal"
   },
   "114": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.114",
-    "name": "114-internal-forgejo",
+    "name": "114-internal-hermes",
     "prefix": 24,
     "type": "internal"
   },
@@ -139,34 +139,34 @@
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.115",
-    "name": "115-internal-forgejo-runner",
+    "name": "115-internal-forgejo",
     "prefix": 24,
     "type": "internal"
   },
   "116": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.116",
-    "name": "116-internal-github-runner",
+    "name": "116-internal-forgejo-runner",
     "prefix": 24,
     "type": "internal"
   },
   "117": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.117",
-    "name": "117-internal-registry",
+    "name": "117-internal-github-runner",
     "prefix": 24,
     "type": "internal"
   },
   "118": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.118",
-    "name": "118-internal-vaultwarden",
+    "name": "118-internal-registry",
     "prefix": 24,
     "type": "internal"
   },
@@ -175,16 +175,16 @@
     "enabled": "false",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.119",
-    "name": "119-internal-nextcloud",
+    "name": "119-internal-vaultwarden",
     "prefix": 24,
     "type": "internal"
   },
   "120": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.120",
-    "name": "120-internal-calendar",
+    "name": "120-internal-nextcloud",
     "prefix": 24,
     "type": "internal"
   },

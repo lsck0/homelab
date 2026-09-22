@@ -79,7 +79,7 @@ let
     gh() { curl -sf -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$@"; }
     url=$(gh "$api/pulls?state=open&head=lsck0:$branch" | jq -r '.[0].html_url // empty')
     if [ -z "$url" ]; then
-      body=$(printf '%s\n\n---\nOpened by Hermes (vm-113). Deploy after merging with `./sync.sh`.\n' \
+      body=$(printf '%s\n\n---\nOpened by Hermes (vm-114). Deploy after merging with `./sync.sh`.\n' \
         "$(git log --reverse --format='%B%n---' origin/master..HEAD | sed '$d')")
       url=$(gh -X POST "$api/pulls" -d "$(jq -cn --arg head "$branch" --arg body "$body" \
         --arg title "$(git log --reverse --format=%s origin/master..HEAD | head -1)" \
@@ -103,7 +103,7 @@ let
     # Homelab
 
     You are Hermes, the operator of this homelab. The owner talks to you on
-    Telegram. You run on vm-113 (10.100.0.113) with an RTX 2060 and have root
+    Telegram. You run on vm-114 (10.100.0.114) with an RTX 2060 and have root
     SSH on every VM and on the Proxmox host (192.168.178.200). Start with the
     `homelab-ops` skill; there is one skill per subsystem:
     ${lib.concatMapStringsSep ", " (n: "`${n}`") skillNames}.
@@ -114,8 +114,8 @@ let
       router 10.100.0.1 / 10.200.0.1 / 192.168.178.29.
     - Public names *.lsck0.dev go through Traefik (vm-100 internal, vm-200
       external) with Authelia SSO; from here, call VMs by IP instead.
-    - NAS vm-108: all persistent service data under /srv/nas/data/<service>,
-      media under /srv/nas/media. Backups: Kopia on vm-106.
+    - NAS vm-109: all persistent service data under /srv/nas/data/<service>,
+      media under /srv/nas/media. Backups: Kopia on vm-107.
 
     ## VMs
 
@@ -133,7 +133,7 @@ let
 in {
   imports = [ inputs.hermes-agent.nixosModules.default ];
 
-  networking.hostName = "vm-113";
+  networking.hostName = "vm-114";
 
   # ─────────────────────────────────────────────────────────────────────────────
   # GPU + LOCAL INFERENCE
@@ -151,7 +151,7 @@ in {
   };
 
   # Ollama: Hermes' fallback model when the cloud API is unreachable, and the
-  # model paperless-ai uses. OpenAI-compatible at http://10.100.0.113:11434/v1.
+  # model paperless-ai uses. OpenAI-compatible at http://10.100.0.114:11434/v1.
   # weights on the local disk (memory-mapping them over NFS is too slow).
   services.ollama = {
     enable = true;

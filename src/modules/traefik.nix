@@ -591,7 +591,7 @@ in {
         };
         api.dashboard = true;
         # Prometheus metrics on a dedicated entrypoint (:8082), scraped by
-        # vm-104. Per-entrypoint/router/service labels drive the HTTP analytics
+        # vm-105. Per-entrypoint/router/service labels drive the HTTP analytics
         # dashboard (request rate, status codes, latency percentiles) with a
         # service filter. Loopback+LAN only; not exposed publicly.
         metrics.prometheus = {
@@ -723,7 +723,7 @@ in {
       mode = "0440";
     };
 
-    # 8082 = Prometheus metrics, scraped by vm-104. Not port-forwarded, so it
+    # 8082 = Prometheus metrics, scraped by vm-105. Not port-forwarded, so it
     # stays on the LAN/DMZ; the internet never reaches it.
     networking.firewall.allowedTCPPorts = [ 80 443 8082 ];
   };

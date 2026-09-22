@@ -9,7 +9,7 @@
   };
 
   # Every request to an indexer leaves through Tor, on the isolated SOCKS port
-  # vm-112 keeps for exactly this (9055: a fresh circuit per destination, and a
+  # vm-113 keeps for exactly this (9055: a fresh circuit per destination, and a
   # different circuit from the torrent traffic on 9050). Radarr and Sonarr do
   # not talk to trackers themselves - their indexer entries point back at
   # Prowlarr - so proxying Prowlarr covers searching and grabbing both.
@@ -44,7 +44,7 @@
         | .allowedHosts = "prowlarr.lsck0.dev,10.100.0.129,127.0.0.1,localhost"
         | .proxyEnabled = true
         | .proxyType = "socks5"
-        | .proxyHostname = "10.100.0.112"
+        | .proxyHostname = "10.100.0.113"
         | .proxyPort = 9055
         | .proxyUsername = ""
         | .proxyPassword = ""
@@ -58,7 +58,7 @@
 
       curl -fsS -X PUT "$API/config/host/$(jq -r .id /tmp/host.json)" -H "X-Api-Key: $KEY" \
         -H "Content-Type: application/json" --data-binary @/tmp/host.new -o /dev/null
-      echo "Prowlarr now reaches indexers through Tor (10.100.0.112:9055)"
+      echo "Prowlarr now reaches indexers through Tor (10.100.0.113:9055)"
     '';
   };
 

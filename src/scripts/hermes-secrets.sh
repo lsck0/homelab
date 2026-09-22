@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fill the secrets Hermes (vm-113) needs, then run ./sync.sh.
+# Fill the secrets Hermes (vm-114) needs, then run ./sync.sh.
 #
 #   hermes-ssh-key       generated here, public key goes to src/modules/hermes.pub
 #                        (root on every VM and the Proxmox host)
@@ -41,7 +41,7 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 # SSH KEY (LAB)
 # ─────────────────────────────────────────────────────────────────────────────
 if [ -z "$(current hermes-ssh-key)" ] || [ "$FORCE" = --force ] || [ ! -f "$PUB" ]; then
-  ssh-keygen -q -t ed25519 -N "" -C "hermes@vm-113" -f "$tmp/lab"
+  ssh-keygen -q -t ed25519 -N "" -C "hermes@vm-114" -f "$tmp/lab"
   put hermes-ssh-key "$(cat "$tmp/lab")"
   cp "$tmp/lab.pub" "$PUB"
   git -C "$ROOT_DIR" add "$PUB"

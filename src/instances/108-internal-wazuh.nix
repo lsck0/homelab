@@ -36,7 +36,7 @@ let
 
   compose = "${pkgs.docker-compose}/bin/docker-compose -p single-node -f ${stack}/docker-compose.yml -f ${override}";
 in {
-  networking.hostName = "vm-107";
+  networking.hostName = "vm-108";
 
   # Wazuh single-node (manager + indexer + dashboard) from the official
   # wazuh-docker release. State lives in Docker volumes on the local disk.
@@ -151,7 +151,7 @@ in {
     iptables -F DOCKER-HOMELAB 2>/dev/null || iptables -N DOCKER-HOMELAB
     iptables -D DOCKER-USER -p tcp --dport 5601 -j DOCKER-HOMELAB 2>/dev/null || true
     iptables -I DOCKER-USER -p tcp --dport 5601 -j DOCKER-HOMELAB
-    for src in 10.100.0.100 10.100.0.103 10.100.0.105; do
+    for src in 10.100.0.100 10.100.0.103 10.100.0.106; do
       iptables -A DOCKER-HOMELAB -s $src -j RETURN
     done
     iptables -A DOCKER-HOMELAB -j DROP

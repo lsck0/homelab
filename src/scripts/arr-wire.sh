@@ -15,7 +15,7 @@
 # to the lab; tests override them (src/tests/media-stack.sh).
 
 T=${TOKEN_DIR:-/var/lib/homepage-tokens}
-QBIT_HOST=${QBIT_HOST:-10.100.0.111};       QBIT_PORT=${QBIT_PORT:-80}
+QBIT_HOST=${QBIT_HOST:-10.100.0.112};       QBIT_PORT=${QBIT_PORT:-80}
 PROWLARR_HOST=${PROWLARR_HOST:-10.100.0.129}; PROWLARR_PORT=${PROWLARR_PORT:-80}
 RADARR_HOST=${RADARR_HOST:-10.100.0.130};     RADARR_PORT=${RADARR_PORT:-80}
 SONARR_HOST=${SONARR_HOST:-10.100.0.131};     SONARR_PORT=${SONARR_PORT:-80}
@@ -24,9 +24,9 @@ BOOKSHELF_HOST=${BOOKSHELF_HOST:-10.100.0.135}; BOOKSHELF_PORT=${BOOKSHELF_PORT:
 LIDARR_HOST=${LIDARR_HOST:-10.100.0.136};     LIDARR_PORT=${LIDARR_PORT:-8686}
 JELLYSEERR_URL=${JELLYSEERR_URL:-http://10.100.0.128}
 BAZARR_URL=${BAZARR_URL:-http://10.100.0.132}
-# vm-112's isolated SOCKS port (the torrent client uses 9050 with shared
+# vm-113's isolated SOCKS port (the torrent client uses 9050 with shared
 # circuits; indexers get per-destination circuits on 9055).
-TOR_HOST=${TOR_HOST:-10.100.0.112};           TOR_PORT=${TOR_PORT:-9055}
+TOR_HOST=${TOR_HOST:-10.100.0.113};           TOR_PORT=${TOR_PORT:-9055}
 pending=0
 
 key() { cat "$T/$1.token" 2>/dev/null; }
@@ -147,7 +147,7 @@ wire_prowlarr() {
         # same reasoning as the indexers below: a proxy that is momentarily
         # unreachable must not keep the whole stack reported as "pending"
         # forever. Retried on the next run.
-        echo "prowlarr: Tor indexer proxy not added (is vm-112 up?), retried next run"
+        echo "prowlarr: Tor indexer proxy not added (is vm-113 up?), retried next run"
       fi
     fi
   else
@@ -171,7 +171,7 @@ wire_prowlarr() {
   done
 
   # after the indexers exist: put the tor tag on any that lack it, so indexers
-  # added here or by hand in the UI all egress through vm-112.
+  # added here or by hand in the UI all egress through vm-113.
   if [ -n "$tag" ]; then
     for id in $(api GET "$P/indexer" "$pk" | jq -r --argjson t "$tag" \
                   '.[] | select((.tags // []) | index($t) | not) | .id'); do

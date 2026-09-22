@@ -1,5 +1,5 @@
 { config, pkgs, ... }: {
-  networking.hostName = "vm-109";
+  networking.hostName = "vm-110";
 
   # attic client, for creating the cache + reading its public key on this host.
   environment.systemPackages = [ pkgs.attic-client ];

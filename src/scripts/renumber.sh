@@ -37,36 +37,34 @@ done
 
 # old new
 #
-# Current migration: 116 was freed for 116-internal-github-runner, which has to
-# sit directly after the Forgejo runner (115), so every internal VM from the old
-# registry (116) upwards moves one place up. Highest id first, and the script
-# routes every rename through a temporary 9xxx id anyway, so the shift cannot
-# collide with itself.
+# Current migration: 104 is freed for 104-internal-terminal, which holds every
+# feed the e-ink display polls and has to sit before Grafana, so each internal
+# VM from Grafana (104) up to Nextcloud (119) moves one place up. The 120 slot
+# the retired calendar VM left behind absorbs the shift exactly, so nothing
+# from 121 upwards moves at all.
 #
-# 116 itself is not listed: it is a brand-new VM with no disk to rename, and
+# Highest id first, and the script routes every rename through a temporary
+# 9xxx id anyway, so the shift cannot collide with itself.
+#
+# 104 itself is not listed: it is a brand-new VM with no disk to rename, and
 # sync.sh creates it afterwards.
 MAP="
-136 137
-135 136
-134 135
-133 134
-132 133
-131 132
-130 131
-129 130
-128 129
-127 128
-126 127
-125 126
-124 125
-123 124
-122 123
-121 122
-120 121
 119 120
 118 119
 117 118
 116 117
+115 116
+114 115
+113 114
+112 113
+111 112
+110 111
+109 110
+108 109
+107 108
+106 107
+105 106
+104 105
 "
 REMOVED=""
 NODE=luca-server

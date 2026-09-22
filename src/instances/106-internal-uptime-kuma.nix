@@ -16,7 +16,7 @@ let
   monitors = lib.sort (a: b: a.name < b.name) httpMonitors ++ [
     { name = "traefik-internal"; url = "http://10.100.0.100:80"; }
     { name = "traefik-external"; url = "http://10.200.0.200:80"; }
-    { name = "sccache"; url = "10.100.0.110"; type = "port"; port = 6379; }
+    { name = "sccache"; url = "10.100.0.111"; type = "port"; port = 6379; }
   ];
 
   setupJs = pkgs.writeText "uptime-setup.js" ''
@@ -154,7 +154,7 @@ let
     main().then(() => process.exit(0)).catch(e => { console.error(e); process.exit(1); });
   '';
 in {
-  networking.hostName = "vm-105";
+  networking.hostName = "vm-106";
 
   fileSystems = nasMount "/var/lib/uptime-kuma" "uptime-kuma";
 

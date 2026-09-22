@@ -1,7 +1,7 @@
 { config, lib, ... }:
 
 let
-  nasIP = "10.100.0.108";
+  nasIP = "10.100.0.109";
   # read-write mounts are `hard`: a `soft` rw mount returns an I/O error to the
   # application after timeo and can silently corrupt or lose a write when the NAS
   # blips: including the Postgres data directories that live here. `hard` blocks
@@ -10,7 +10,7 @@ let
   nfsOpts = [ "nfsvers=4" "rw" "hard" "timeo=50" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
   nfsOptsRo = [ "nfsvers=4" "ro" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
 
-  # the only /srv/nas/data shares the DMZ may mount, per VM. vm-108 exports
+  # the only /srv/nas/data shares the DMZ may mount, per VM. vm-109 exports
   # exactly these to exactly that address, nothing else under the tree: a
   # compromised public VM has root on its own share and no other.
   dmzShares = {

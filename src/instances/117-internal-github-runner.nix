@@ -27,7 +27,7 @@ let
     map (n: lib.nameValuePair "${slug repo}-${toString n}" {
       enable = true;
       url = "https://github.com/${repo}";
-      name = "vm-116-${slug repo}-${toString n}";
+      name = "vm-117-${slug repo}-${toString n}";
       inherit tokenFile;
 
       # one job per runner process, then it de-registers, wipes its state
@@ -72,7 +72,7 @@ let
     }) (lib.range 1 count)
   ) repos));
 in {
-  networking.hostName = "vm-116";
+  networking.hostName = "vm-117";
 
   # General-purpose GitHub Actions runners, one registration per repo replica.
   #
@@ -95,7 +95,7 @@ in {
     group = "github-runner";
     home = "/var/lib/github-runner";
     createHome = true;
-    # docker for container jobs and `docker build`/`push` to vm-117.
+    # docker for container jobs and `docker build`/`push` to vm-118.
     extraGroups = [ "docker" ];
   };
   users.groups.github-runner = { };
@@ -110,10 +110,10 @@ in {
     };
   };
 
-  # the internal registry (vm-117) serves plain HTTP: allow it explicitly rather
+  # the internal registry (vm-118) serves plain HTTP: allow it explicitly rather
   # than making every registry insecure.
   virtualisation.docker.daemon.settings.insecure-registries = [
-    "10.100.0.117:5000"
+    "10.100.0.118:5000"
     "registry.lsck0.dev"
   ];
 
@@ -131,9 +131,9 @@ in {
 
   # resolve the lab's own names without going out to Cloudflare.
   networking.hosts = {
-    "10.100.0.117" = [ "registry.lsck0.dev" ];
-    "10.100.0.114" = [ "git.lsck0.dev" ];
-    "10.100.0.110" = [ "sccache.lsck0.dev" ];
+    "10.100.0.118" = [ "registry.lsck0.dev" ];
+    "10.100.0.115" = [ "git.lsck0.dev" ];
+    "10.100.0.111" = [ "sccache.lsck0.dev" ];
   };
 
   # nothing listens here: the runners connect out to GitHub.

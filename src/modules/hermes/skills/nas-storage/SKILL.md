@@ -11,7 +11,7 @@ metadata:
     related_skills: [homelab-ops]
 ---
 
-# NAS (vm-108, 10.100.0.108, 750 GB disk)
+# NAS (vm-109, 10.100.0.109, 750 GB disk)
 
 Layout under `/srv/nas`:
 - `data/<service>` persistent data of every service (NFS-mounted by the VMs)
@@ -21,8 +21,8 @@ Layout under `/srv/nas`:
 
 ## Tasks
 
-- Space: `ssh 10.100.0.108 'df -h /srv/nas; du -sh /srv/nas/* /srv/nas/data/* 2>/dev/null | sort -h | tail -20'`
-- Find big files: `ssh 10.100.0.108 'find /srv/nas/media -size +10G -printf "%s %p\n" | sort -n | tail'`
+- Space: `ssh 10.100.0.109 'df -h /srv/nas; du -sh /srv/nas/* /srv/nas/data/* 2>/dev/null | sort -h | tail -20'`
+- Find big files: `ssh 10.100.0.109 'find /srv/nas/media -size +10G -printf "%s %p\n" | sort -n | tail'`
 - NFS: `exportfs -v`, clients `ss -tn sport = :2049`. A client VM hangs on I/O
   if the NAS is down (hard mounts) and recovers when it is back.
 - SMB shares (guest): public, media, documents, BACKUPS (read-only), homelab.

@@ -4,9 +4,9 @@ let
   # behind Authelia), the *arr VMs, the wiring VM and Hermes. Explicit /32s, so
   # an arbitrary LAN host cannot rewrite download paths across the NFS mounts.
   # 104 is the terminal dashboard collector (transfer rates and torrent list).
-  apiClients = map (id: "10.100.0.${toString id}/32") [ 100 104 113 130 131 133 135 136 ];
+  apiClients = map (id: "10.100.0.${toString id}/32") [ 100 104 114 130 131 133 135 136 ];
 
-  # route all traffic through the Tor SOCKS5 gateway on vm-112.
+  # route all traffic through the Tor SOCKS5 gateway on vm-113.
   #
   # Tor carries TCP only, so DHT, PEX and LSD are turned off here: they are UDP
   # or LAN broadcast and would otherwise bypass the proxy and expose the real
@@ -15,7 +15,7 @@ let
   # slow. A WireGuard VPN is the better tool if the goal is throughput.
   prefs = pkgs.writeText "qbittorrent-prefs.json" (builtins.toJSON {
     proxy_type = "SOCKS5";
-    proxy_ip = "10.100.0.112";
+    proxy_ip = "10.100.0.113";
     proxy_port = 9050;
     proxy_auth_enabled = false;
     proxy_hostname_lookup = true;
@@ -41,7 +41,7 @@ let
     dont_count_slow_torrents = true;
   });
 in {
-  networking.hostName = "vm-111";
+  networking.hostName = "vm-112";
 
   fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
     // nasPath "/data/torrents" "torrents"
@@ -118,7 +118,7 @@ in {
 
       prefs=$(jq -c --rawfile p $T/qbittorrent-pass.token '. + { web_ui_username: "admin", web_ui_password: $p }' ${prefs})
       curl -fsS -X POST "$API/app/setPreferences" --data-urlencode "json=$prefs"
-      echo "qBittorrent proxied via Tor (10.100.0.112:9050)"
+      echo "qBittorrent proxied via Tor (10.100.0.113:9050)"
     '';
   };
 

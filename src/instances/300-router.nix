@@ -168,16 +168,16 @@ in {
       iifname "wg0" accept
 
       # allow DMZ to reach internal Traefik, Git, and Registry (for CI/CD + image pulls)
-      iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.114 } tcp dport { 80, 443 } accept
-      iifname "ens20" ip daddr 10.100.0.117 tcp dport { 80, 443, 5000 } accept
+      iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.115 } tcp dport { 80, 443 } accept
+      iifname "ens20" ip daddr 10.100.0.118 tcp dport { 80, 443, 5000 } accept
 
-      # allow DMZ VMs to ship logs to Loki on vm-104 and syslog to Wazuh on vm-107
-      iifname "ens20" ip daddr 10.100.0.104 tcp dport 3100 accept
-      iifname "ens20" ip daddr 10.100.0.107 udp dport 514 accept
+      # allow DMZ VMs to ship logs to Loki on vm-105 and syslog to Wazuh on vm-108
+      iifname "ens20" ip daddr 10.100.0.105 tcp dport 3100 accept
+      iifname "ens20" ip daddr 10.100.0.108 udp dport 514 accept
 
       # allow DMZ to reach NAS (NFS for persistent data)
-      iifname "ens20" ip daddr 10.100.0.108 tcp dport { 111, 2049 } accept
-      iifname "ens20" ip daddr 10.100.0.108 udp dport { 111, 2049 } accept
+      iifname "ens20" ip daddr 10.100.0.109 tcp dport { 111, 2049 } accept
+      iifname "ens20" ip daddr 10.100.0.109 udp dport { 111, 2049 } accept
 
       # external DMZ -> internal LAN: BLOCK
       iifname "ens20" oifname "ens19" counter drop
@@ -295,8 +295,8 @@ in {
           # internal services -> internal Traefik
           ${lib.concatMapStringsSep "\n    " (h: "10.100.0.100 ${h}.lsck0.dev") (hostsOf "internal" ++ internalExtraHosts)}
           # direct: SMB/NFS on the NAS, sccache (Redis protocol)
-          10.100.0.108 smb.lsck0.dev
-          10.100.0.110 sccache.lsck0.dev
+          10.100.0.109 smb.lsck0.dev
+          10.100.0.111 sccache.lsck0.dev
           # external services -> external Traefik
           ${lib.concatMapStringsSep "\n    " (h: "10.200.0.200 ${h}.lsck0.dev") (hostsOf "external" ++ [ "mc" ])}
           fallthrough
