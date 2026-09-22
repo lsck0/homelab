@@ -93,5 +93,15 @@ in {
   // lib.genAttrs containerUnits (_: {
     startLimitIntervalSec = 0;
     serviceConfig.RestartSec = lib.mkDefault 10;
+    # Ordering alone is not enough. nas-tmpfiles runs `before` these units, but
+    # `before` says nothing about whether it ran at all: `systemctl restart
+    # podman-<app>` on its own starts the container with the share unmounted,
+    # podman bind-mounts the empty directory underneath the automount, and the
+    # app writes a fresh database onto the VM's own disk where it shadows the
+    # real one on the NAS. Prowlarr lost every indexer that way.
+    #
+    # RequiresMountsFor pulls in the mount units and waits for them, however
+    # the container is started.
+    unitConfig.RequiresMountsFor = nasMountpoints;
   });
 }
