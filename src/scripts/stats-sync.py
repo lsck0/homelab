@@ -22,11 +22,12 @@ LOKI = os.environ.get("STATS_LOKI", "http://10.100.0.105:3100")
 QBITTORRENT = os.environ.get("STATS_QBITTORRENT", "http://10.100.0.112")
 INVENTORY = os.environ.get("STATS_INVENTORY", "/var/lib/homelab-stats/inventory.json")
 TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/homepage-tokens")
-# how many rows the screen can hold before the rest is summarised. Four
-# columns of thirteen, which is every declared VM with three slots spare: the
-# router is the last entry by id, so a tighter budget cut the one host whose
-# state matters most.
-SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "52"))
+# how many service rows the grid holds: four columns of eight. Only VMs that
+# are meant to be running get one. The eighteen switched off on purpose were
+# taking a third of the panel to say 0/0 for ever, and they are named in one
+# line underneath instead. Enable more than 32 and the surplus falls into the
+# footer's "+n more", which is the same overflow the footer always reported.
+SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "32"))
 TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "3"))
 # The three side panels share 347px. Sending more rows than a panel can draw
 # does not show more, it clips the last one in half, so each list is cut to
@@ -41,7 +42,7 @@ NAME_CHARS = int(os.environ.get("STATS_NAME_CHARS", "42"))
 # private lab is mostly whatever the owner happened to open.
 CLIENT_INGRESS = os.environ.get("STATS_CLIENT_INGRESS", "vm-200")
 CLIENT_WINDOW = os.environ.get("STATS_CLIENT_WINDOW", "24h")
-CLIENT_ROWS = int(os.environ.get("STATS_CLIENT_ROWS", "4"))
+CLIENT_ROWS = int(os.environ.get("STATS_CLIENT_ROWS", "8"))
 # public suffix to drop from hostnames, which are all under one domain
 CLIENT_DOMAIN = os.environ.get("STATS_CLIENT_DOMAIN", ".lsck0.dev")
 TIMEOUT = 8
@@ -310,8 +311,25 @@ def human_count(n):
     return f"{n / 1000000:.1f}M"
 
 
+def bars(pairs, scale=None):
+    """(name, count) pairs -> rows the template can draw without arithmetic.
+
+    `pct` is the share of the largest row, not of the total: at a glance the
+    question is which of these is big relative to its neighbours, and a total
+    share makes every row after the first a sliver. Pass `scale` to measure
+    against something else, which the traffic column does so its status
+    classes read as a share of all requests.
+    """
+    top = scale if scale is not None else max((c for _, c in pairs), default=0)
+    return [{
+        "name": n,
+        "count": human_count(c),
+        "pct": round(100 * c / top) if top else 0,
+    } for n, c in pairs]
+
+
 def ranked(results, label, fallback="?"):
-    """Loki vector -> the label's value and a rounded count, largest first."""
+    """Loki vector -> the label's values, largest first, with share bars."""
     out = []
     for r in results:
         try:
@@ -319,7 +337,15 @@ def ranked(results, label, fallback="?"):
         except (KeyError, TypeError, ValueError):
             continue
     out.sort(key=lambda kv: -kv[1])
-    return [{"name": n, "count": human_count(c)} for n, c in out[:CLIENT_ROWS]]
+    return bars(out[:CLIENT_ROWS])
+
+
+def scalar_logql(query):
+    res = logql(query)
+    try:
+        return float(res[0]["value"][1])
+    except (IndexError, KeyError, TypeError, ValueError):
+        return 0.0
 
 
 def clients():
@@ -353,11 +379,38 @@ def clients():
             # a bare address in the Host header is a scanner, not a visitor
             h["name"] = "by address"
 
+    # How that traffic went. The status label is already on the stream, so the
+    # classes cost one query; 4xx running at half of everything is the shape of
+    # a public address being probed, and worth seeing next to who is probing.
+    by_status = {}
+    for r in logql(f'sum by (status) (count_over_time({sel}[{w}]))'):
+        code = str(r["metric"].get("status") or "")
+        try:
+            n = float(r["value"][1])
+        except (KeyError, TypeError, ValueError):
+            continue
+        by_status[code[:1] + "xx" if code[:1].isdigit() else "?"] = \
+            by_status.get(code[:1] + "xx" if code[:1].isdigit() else "?", 0.0) + n
+    total = sum(by_status.values())
+
+    # ClientHost is the real address: the Cloudflare ranges are trusted on the
+    # entrypoint, so it is the visitor and not the proxy.
+    visitors = scalar_logql(
+        f'count(count by (ip) (count_over_time({sel} | json ip="ClientHost" [{w}])))')
+
+    rows = [("requests", total), ("visitors", visitors)]
+    rows.extend((c, by_status.get(c, 0.0)) for c in ("2xx", "3xx", "4xx", "5xx"))
+    traffic = bars(rows, scale=total)
+    # the first two rows are not a share of the requests, so they get no bar
+    for row in traffic[:2]:
+        row["pct"] = 0
+
     return {
         "window": w,
         "countries": countries,
         "agents": agents,
         "hosts": hosts,
+        "traffic": traffic,
         "available": bool(countries or agents or hosts),
     }
 
@@ -537,6 +590,9 @@ def main():
     out_dir = sys.argv[1]
 
     rows, summary = services()
+    # the grid shows what is meant to be up; the rest is one line of names
+    running = [r for r in rows if not r["disabled"]]
+    switched_off = [r["name"] for r in rows if r["disabled"]]
     net = network()
     tor = torrents()
     disks = storage()
@@ -550,8 +606,9 @@ def main():
         "generated_at": now.isoformat(),
         "label": now.strftime("%a %d %b %H:%M"),
         "summary": summary,
-        "services": rows[:SERVICE_ROWS],
-        "services_more": max(0, len(rows) - SERVICE_ROWS),
+        "services": running[:SERVICE_ROWS],
+        "services_more": max(0, len(running) - SERVICE_ROWS),
+        "services_off": switched_off,
         "network": net,
         "totals": load,
         "requests": reqs,
