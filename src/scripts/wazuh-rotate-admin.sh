@@ -32,7 +32,12 @@ echo ">>> backups written: *.bak-$STAMP"
 # the password is passed through the environment the whole way. It is the
 # Authelia one and may contain "/" or a trailing "\", either of which a shell
 # or sed round-trip would mangle.
-HASH=$(docker exec -e P="$A" "$IDX" sh -c \
+# hash.sh locates the JVM with `which java`, and the container image ships
+# neither `which` nor a JAVA_HOME, so point it at the bundled JDK directly:
+#   hash.sh: line 26: which: command not found
+#   hash.sh: line 30: java: command not found
+JDK=/usr/share/wazuh-indexer/jdk
+HASH=$(docker exec -e P="$A" -e JAVA_HOME="$JDK" -e PATH="$JDK/bin:/usr/bin:/bin" "$IDX" sh -c \
   '/usr/share/wazuh-indexer/plugins/opensearch-security/tools/hash.sh -p "$P"' | tr -d '\r' | tail -1)
 case "$HASH" in
   \$2*) ;;
@@ -50,6 +55,7 @@ mv /tmp/iu.yml config/wazuh_indexer/internal_users.yml
 echo ">>> pushing internalusers to the running indexer"
 docker exec "$IDX" sh -c '
   export JAVA_HOME=/usr/share/wazuh-indexer/jdk
+  export PATH="$JAVA_HOME/bin:/usr/bin:/bin"
   /usr/share/wazuh-indexer/plugins/opensearch-security/tools/securityadmin.sh \
     -f /usr/share/wazuh-indexer/config/opensearch-security/internal_users.yml \
     -t internalusers -icl -nhnv \
