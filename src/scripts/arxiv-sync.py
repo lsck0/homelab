@@ -23,7 +23,9 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
 FEED = os.environ.get("ARXIV_FEED", "https://rss.arxiv.org/rss/math")
-ROWS = int(os.environ.get("ARXIV_ROWS", "9"))
+ROWS = int(os.environ.get("ARXIV_ROWS", "14"))
+# surnames shown before the list collapses to "+n"
+AUTHORS = int(os.environ.get("ARXIV_AUTHORS", "8"))
 # cross-lists and replacements are announced in the same feed; "new" alone is
 # what "today's publications" means.
 TYPES = set(os.environ.get("ARXIV_TYPES", "new").split(","))
@@ -87,7 +89,7 @@ def fetch():
         return ET.fromstring(r.read())
 
 
-def authors(entry, limit=3):
+def authors(entry, limit=AUTHORS):
     raw = entry.findtext(DC + "creator") or ""
     names = [n.strip() for n in raw.split(",") if n.strip()]
     if not names:
