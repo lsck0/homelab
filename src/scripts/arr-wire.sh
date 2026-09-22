@@ -237,7 +237,7 @@ wire_prowlarr() {
 # JELLYSEERR
 # ─────────────────────────────────────────────────────────────────────────────
 wire_jellyseerr() {
-  local S="$JELLYSEERR_URL/api/v1" jar rk sk rp sp pass ids
+  local S="$JELLYSEERR_URL/api/v1" jar rk sk rp sp ids
   [ "$(curl -sf "$S/settings/public" | jq -r '.initialized // empty')" = true ] && return
   [ -n "$(curl -sf "$S/settings/public")" ] || { later "jellyseerr: unreachable"; return; }
   if ! { rk=$(key radarr-key) && sk=$(key sonarr-key) && [ -s "$T/jellyfin-key.token" ]; }; then
