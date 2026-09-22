@@ -2,7 +2,6 @@
 let
   cfg = config.homelab.dbBackup;
   dir = "/var/backup/db";
-  host = config.networking.hostName;
 
   dbType = lib.types.submodule {
     options = {
@@ -41,7 +40,7 @@ let
   };
 
   script = name: db: ''
-    out=${dir}/${host}/${name}
+    out=${dir}/${name}
     mkdir -p "$out"
     stamp=$(date +%Y-%m-%dT%H%M)
     ${if db.sqlite != null then ''
