@@ -11,9 +11,9 @@ metadata:
     related_skills: [homelab-ops]
 ---
 
-# GPU and local models (this VM, vm-113)
+# GPU and local models (this VM, vm-114)
 
-- GPU: `ssh 10.100.0.113 nvidia-smi` (VRAM 6 GB).
+- GPU: `ssh 10.100.0.114 nvidia-smi` (VRAM 6 GB).
 - Ollama API `http://127.0.0.1:11434`: models `GET /api/tags`, loaded `GET /api/ps`,
   chat `POST /api/chat {"model":"qwen3:8b","messages":[...],"stream":false}`,
   OpenAI-compatible `/v1/chat/completions`.

@@ -11,10 +11,10 @@ metadata:
     related_skills: [homelab-ops, ci-cd]
 ---
 
-# Forgejo (vm-114, https://git.lsck0.dev, SSH port 2222)
+# Forgejo (vm-115, https://git.lsck0.dev, SSH port 2222)
 
-API from the LAN: `http://10.100.0.114/api/v1` (Swagger at /api/swagger).
-Admin CLI inside the container: `ssh 10.100.0.114 podman exec -u git forgejo forgejo admin <cmd>`.
+API from the LAN: `http://10.100.0.115/api/v1` (Swagger at /api/swagger).
+Admin CLI inside the container: `ssh 10.100.0.115 podman exec -u git forgejo forgejo admin <cmd>`.
 
 - Token for yourself: `podman exec -u git forgejo forgejo admin user generate-access-token --username luca --token-name hermes-<date> --scopes all`
   (store it in your memory only if the owner agrees; otherwise create per task and delete after).
@@ -24,10 +24,10 @@ Admin CLI inside the container: `ssh 10.100.0.114 podman exec -u git forgejo for
 - Users: `forgejo admin user list`, `forgejo admin user create --username <u> --email <e> --random-password`.
   Normal logins are SSO (Authelia); local accounts are break-glass.
 
-## Runner (vm-115)
+## Runner (vm-116)
 
-- `ssh 10.100.0.115 'podman ps; journalctl -u docker-forgejo-runner -n 50'`
+- `ssh 10.100.0.116 'podman ps; journalctl -u docker-forgejo-runner -n 50'`
   (runner runs under docker: `docker logs forgejo-runner`).
 - Labels: `docker` (node:20), `ubuntu-latest` (catthehacker act image), `rust`.
 - Re-register after a Forgejo reset: `systemctl restart forgejo-runner-register`.
-- Build cache: sccache on vm-110 (`redis://sccache.lsck0.dev`).
+- Build cache: sccache on vm-111 (`redis://sccache.lsck0.dev`).

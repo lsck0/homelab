@@ -1,7 +1,7 @@
 { pkgs, nasMount, retry, ... }:
 let
-  # local inference on the Hermes VM (vm-113). No external AI provider, no API key.
-  ollamaUrl = "http://10.100.0.113:11434";
+  # local inference on the Hermes VM (vm-114). No external AI provider, no API key.
+  ollamaUrl = "http://10.100.0.114:11434";
   ollamaModel = "qwen3:8b";
 in {
   networking.hostName = "vm-122";

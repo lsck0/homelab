@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Prints an installation token (valid 1 h) of a GitHub App for one repository,
-# scoped to that repository. Used by Hermes (lab-github-token on vm-113) and by
+# scoped to that repository. Used by Hermes (lab-github-token on vm-114) and by
 # hermes-secrets.sh to check the app is installed.
 #
 #   github-app-token.sh <app id> <private key file> [owner/repo]

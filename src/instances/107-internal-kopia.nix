@@ -90,7 +90,7 @@ EOF
     esac
   '';
 in {
-  networking.hostName = "vm-106";
+  networking.hostName = "vm-107";
 
   # whole NAS tree (the NAS exports /srv/nas to this VM only). The repository
   # lives on the same disk: survives deletion, bad deploys and bitrot, not a

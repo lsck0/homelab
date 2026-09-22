@@ -28,7 +28,7 @@ Everything else with `terminal` on the host: `ssh 192.168.178.200 <cmd>`.
   `qmrestore /var/lib/vz/dump/<file> <id> --force` (destroys current disk; NAS data is separate).
 - Console when SSH is dead: `qm guest exec <id> -- <cmd>` (QEMU guest agent) or `qm terminal <id>`.
 - Storage: `pvesm status`; disk health `smartctl -a /dev/sda`.
-- GPU passthrough (vm-113): mapping `gpu` = 10de:1f08 at 0000:2b:00.0, `lspci -nnk -s 2b:00.0` must show `vfio-pci`.
+- GPU passthrough (vm-114): mapping `gpu` = 10de:1f08 at 0000:2b:00.0, `lspci -nnk -s 2b:00.0` must show `vfio-pci`.
 
 ## Rules
 

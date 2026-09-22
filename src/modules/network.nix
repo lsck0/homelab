@@ -14,8 +14,8 @@ let
   #   loopback + container bridges  the app's own setup units and health checks
   #   10.100.0.100 / 10.200.0.200   internal / external Traefik (the ingress)
   #   10.100.0.103                  Homepage widgets (API keys, read-only)
-  #   10.100.0.105                  Uptime Kuma probes
-  #   10.100.0.113                  Hermes (has root on every VM anyway)
+  #   10.100.0.106                  Uptime Kuma probes
+  #   10.100.0.114                  Hermes (has root on every VM anyway)
   trustedSources = [
     "127.0.0.0/8"
     "10.88.0.0/16"     # podman default bridge
@@ -23,8 +23,8 @@ let
     "10.100.0.100/32"
     "10.200.0.200/32"
     "10.100.0.103/32"
-    "10.100.0.105/32"
-    "10.100.0.113/32"
+    "10.100.0.106/32"
+    "10.100.0.114/32"
   ] ++ cfg.extraSources;
 in {
   options.homelab.ingressOnly = {

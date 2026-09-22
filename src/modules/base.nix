@@ -40,7 +40,7 @@
     users.users.root.openssh.authorizedKeys.keys = [
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
     ]
-    # Hermes (vm-113) has root everywhere. Written by src/scripts/hermes-secrets.sh.
+    # Hermes (vm-114) has root everywhere. Written by src/scripts/hermes-secrets.sh.
     ++ lib.optional (builtins.pathExists ./hermes.pub) (lib.removeSuffix "\n" (builtins.readFile ./hermes.pub));
 
     services.openssh = {
@@ -67,9 +67,9 @@
     ];
     networking.firewall.allowedTCPPorts = [ 9100 ];
 
-    # ship every VM's journal to Loki on vm-104. The `host` label (from the
+    # ship every VM's journal to Loki on vm-105. The `host` label (from the
     # journal hostname) is what lets a Grafana dashboard filter to a single VM.
-    # runs everywhere except vm-104 itself, which would otherwise depend on its
+    # runs everywhere except vm-105 itself, which would otherwise depend on its
     # own Loki being up before it could log.
     # systemd creates /var/lib/promtail before start; without it promtail's
     # namespaced start fails with "/var/lib/promtail: No such file or directory".
@@ -81,7 +81,7 @@
       configuration = {
         server = { http_listen_port = 9080; grpc_listen_port = 0; };
         positions.filename = "/var/lib/promtail/positions.yaml";
-        clients = [{ url = "http://10.100.0.104:3100/loki/api/v1/push"; }];
+        clients = [{ url = "http://10.100.0.105:3100/loki/api/v1/push"; }];
         scrape_configs = [{
           job_name = "journal";
           journal = {
@@ -120,13 +120,13 @@
       };
     };
 
-    # journal -> Wazuh (vm-107) over syslog for intrusion detection. UDP so a
+    # journal -> Wazuh (vm-108) over syslog for intrusion detection. UDP so a
     # down Wazuh never blocks logging.
     services.rsyslogd = lib.mkIf (config.networking.hostName != "vm-107") {
       enable = true;
       defaultConfig = "";
       extraConfig = ''
-        *.info @10.100.0.107:514
+        *.info @10.100.0.108:514
       '';
     };
 
@@ -138,17 +138,17 @@
 
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
 
-    # attic binary cache (vm-109) as an extra substituter, so any local Nix
+    # attic binary cache (vm-110) as an extra substituter, so any local Nix
     # build on a VM or the CI runner reuses a closure built once instead of
     # rebuilding. Pull is authenticated with a read-only token via netrc.
     sops.secrets.attic-pull-token = {};
     sops.templates."nix-netrc".content = ''
-      machine 10.100.0.109
+      machine 10.100.0.110
         password ${config.sops.placeholder.attic-pull-token}
     '';
     nix.settings = {
       netrc-file = config.sops.templates."nix-netrc".path;
-      extra-substituters = [ "http://10.100.0.109:8080/homelab" ];
+      extra-substituters = [ "http://10.100.0.110:8080/homelab" ];
       extra-trusted-public-keys = [ "homelab:OtKSPQnvWs0hIa5D2RxbBwENbAo9qkX3yAr5PoWvtyc=" ];
     };
     system.stateVersion = "25.11";

@@ -13,19 +13,19 @@ metadata:
 
 # Downloads
 
-## qBittorrent (vm-111, http://10.100.0.111/api/v2, no login from this VM)
+## qBittorrent (vm-112, http://10.100.0.112/api/v2, no login from this VM)
 
-- Torrents: `curl -s http://10.100.0.111/api/v2/torrents/info | jq '.[] | {name, state, progress, dlspeed, category}'`
+- Torrents: `curl -s http://10.100.0.112/api/v2/torrents/info | jq '.[] | {name, state, progress, dlspeed, category}'`
 - Pause/resume: `POST /torrents/stop|start` form `hashes=<h>|all` (older: pause/resume).
 - Delete: `POST /torrents/delete` form `hashes=<h>&deleteFiles=true`: only for torrents
   the *arrs no longer track; otherwise remove via Sonarr/Radarr queue so they do not re-grab.
 - Speed limits: `POST /transfer/setDownloadLimit limit=<bytes/s>`.
 - Save path `/data/torrents`, category per *arr.
-- All peer traffic goes through Tor (SOCKS on vm-112). Slow swarms are expected.
+- All peer traffic goes through Tor (SOCKS on vm-113). Slow swarms are expected.
 
-## Tor router (vm-112)
+## Tor router (vm-113)
 
-- Health: `ssh 10.100.0.112 'systemctl status tor; curl -s --socks5-hostname 10.100.0.112:9050 https://check.torproject.org/api/ip'`.
+- Health: `ssh 10.100.0.113 'systemctl status tor; curl -s --socks5-hostname 10.100.0.113:9050 https://check.torproject.org/api/ip'`.
 
 ## Prowlarr (vm-129, http://10.100.0.129/api/v1, key `prowlarr-key`)
 

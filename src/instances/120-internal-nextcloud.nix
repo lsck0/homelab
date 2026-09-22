@@ -1,5 +1,5 @@
 { pkgs, config, nasMount, ... }: {
-  networking.hostName = "vm-119";
+  networking.hostName = "vm-120";
 
   fileSystems = nasMount "/var/lib/nextcloud" "nextcloud"
     // nasMount "/var/lib/postgresql" "nextcloud-db"

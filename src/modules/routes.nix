@@ -49,25 +49,25 @@
     # the directory itself: only the owner may edit accounts and groups.
     lldap          = { host = "lldap";       vmid = 102; port = 17170; group = "admins"; };
     homepage       = { host = "homepage";    vmid = 103; port = 80; };
-    grafana        = { host = "grafana";     vmid = 104; port = 80;    group = "admins"; };
-    uptime-kuma    = { host = "status";      vmid = 105; port = 80; };
-    kopia          = { host = "backup";      vmid = 106; port = 51515; group = "admins"; };
-    wazuh          = { host = "wazuh";       vmid = 107; port = 443;   group = "admins"; scheme = "https"; };
-    nas            = { host = "nas";         vmid = 108; port = 80;    group = "admins"; };
-    syncthing      = { host = "sync";        vmid = 108; port = 8384;  group = "admins"; };
+    grafana        = { host = "grafana";     vmid = 105; port = 80;    group = "admins"; };
+    uptime-kuma    = { host = "status";      vmid = 106; port = 80; };
+    kopia          = { host = "backup";      vmid = 107; port = 51515; group = "admins"; };
+    wazuh          = { host = "wazuh";       vmid = 108; port = 443;   group = "admins"; scheme = "https"; };
+    nas            = { host = "nas";         vmid = 109; port = 80;    group = "admins"; };
+    syncthing      = { host = "sync";        vmid = 109; port = 8384;  group = "admins"; };
     # nix clients authenticate to attic with their own token, so no browser
     # login is possible; not relayed from the internet.
-    attic          = { host = "attic";       vmid = 109; port = 8080;  auth = "token"; };
-    qbittorrent    = { host = "torrent";     vmid = 111; port = 80;    group = "media"; };
+    attic          = { host = "attic";       vmid = 110; port = 8080;  auth = "token"; };
+    qbittorrent    = { host = "torrent";     vmid = 112; port = 80;    group = "media"; };
     # Forgejo signs in through Authelia OIDC; git clients use tokens/SSH.
-    forgejo        = { host = "git";         vmid = 114; port = 80;    auth = "own";
+    forgejo        = { host = "git";         vmid = 115; port = 80;    auth = "own";
                        loginRedirect = { path = "/user/login"; to = "/user/oauth2/authelia"; }; };
     # headless API: docker clients cannot follow a browser login. Not relayed
     # publicly, and the external Traefik denies the host explicitly as well.
-    registry-api   = { host = "registry";    vmid = 117; port = 5000;  auth = "token"; };
-    registry-ui    = { host = "registry-ui"; vmid = 117; port = 80;    group = "admins"; };
-    vaultwarden    = { host = "vault";       vmid = 118; port = 8080;  auth = "own"; };
-    nextcloud      = { host = "cloud";       vmid = 119; port = 80;    auth = "own"; };
+    registry-api   = { host = "registry";    vmid = 118; port = 5000;  auth = "token"; };
+    registry-ui    = { host = "registry-ui"; vmid = 118; port = 80;    group = "admins"; };
+    vaultwarden    = { host = "vault";       vmid = 119; port = 8080;  auth = "own"; };
+    nextcloud      = { host = "cloud";       vmid = 120; port = 80;    auth = "own"; };
     # the TRMNL cloud polls this and cannot log in. The feed URLs carry an
     # unguessable token instead, so this one token route stays public.
     # cal.lsck0.dev is kept as an alias for terminal.lsck0.dev: the feeds moved

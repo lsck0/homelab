@@ -11,7 +11,7 @@ let
     printf 'AUTHENTICATE %s\r\nSIGNAL NEWNYM\r\nQUIT\r\n' "$cookie" | nc -w 5 127.0.0.1 9051
   '';
 in {
-  networking.hostName = "vm-112";
+  networking.hostName = "vm-113";
 
   # SOCKS5 gateway into the Tor network for internal VMs. Client only -
   # this node relays nothing. The public non-exit relay is vm-202.
@@ -23,7 +23,7 @@ in {
     client = {
       enable = true;
       socksListenAddress = {
-        addr = "10.100.0.112";
+        addr = "10.100.0.113";
         port = 9050;
         # per-destination circuit isolation is the usual client default, but a
         # torrent client opens connections to hundreds of peers at once and
@@ -42,7 +42,7 @@ in {
       # from the torrent traffic on 9050. The list merges with the one
       # services.tor.client.socksListenAddress generates.
       SOCKSPort = [{
-        addr = "10.100.0.112";
+        addr = "10.100.0.113";
         port = 9055;
         IsolateDestAddr = true;
         IsolateDestPort = true;
@@ -63,7 +63,7 @@ in {
       CookieAuthentication = true;
 
       # DNS resolver for callers that cannot resolve through SOCKS5 themselves.
-      DNSPort = [{ addr = "10.100.0.112"; port = 9053; }];
+      DNSPort = [{ addr = "10.100.0.113"; port = 9053; }];
       AutomapHostsOnResolve = true;
       ClientUseIPv6 = false;
     };

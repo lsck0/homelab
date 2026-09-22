@@ -25,66 +25,71 @@ locals {
       name    = "103-internal-homepage",
       type    = "internal",
     }
-    "104" = { # observability: Prometheus + Loki + Tempo + Grafana (Grafana owns alerting)
+    "104" = { # e-ink terminal feeds: calendar, homelab stats, arXiv
       enabled = true,
-      name    = "104-internal-grafana",
+      name    = "104-internal-terminal",
       type    = "internal",
     }
-    "105" = { # uptime/status monitoring
+    "105" = { # observability: Prometheus + Loki + Tempo + Grafana (Grafana owns alerting)
       enabled = true,
-      name    = "105-internal-uptime-kuma",
+      name    = "105-internal-grafana",
       type    = "internal",
     }
-    "106" = { # backups: Kopia server + web UI, snapshots the NAS
+    "106" = { # uptime/status monitoring
       enabled = true,
-      name    = "106-internal-kopia",
+      name    = "106-internal-uptime-kuma",
+      type    = "internal",
+    }
+    "107" = { # backups: Kopia server + web UI, snapshots the NAS
+      enabled = true,
+      name    = "107-internal-kopia",
       type    = "internal",
       memory  = 2048,
       disk    = 16,
     }
-    "107" = { # endpoint protection: Wazuh manager + indexer + dashboard
+    "108" = { # endpoint protection: Wazuh manager + indexer + dashboard
       enabled = true,
-      name    = "107-internal-wazuh",
+      name    = "108-internal-wazuh",
       type    = "internal",
       memory  = 8192,
       cores   = 4,
       disk    = 60,
     }
 
-    "108" = { # storage: NFS + SMB + Syncthing + FileBrowser
+    "109" = { # storage: NFS + SMB + Syncthing + FileBrowser
       enabled    = true,
-      name       = "108-internal-nas",
+      name       = "109-internal-nas",
       type       = "internal",
       boot_order = 2,
       memory     = 2048,
       disk       = 750,
     }
-    "109" = { # Nix binary cache (substituter)
+    "110" = { # Nix binary cache (substituter)
       enabled = true,
-      name    = "109-internal-attic",
+      name    = "110-internal-attic",
       type    = "internal",
       disk    = 40,
     }
-    "110" = { # shared Rust/C++ compile cache
+    "111" = { # shared Rust/C++ compile cache
       enabled = true,
-      name    = "110-internal-sccache",
+      name    = "111-internal-sccache",
       type    = "internal",
     }
 
-    "111" = { # torrent client (egress via tor-router)
+    "112" = { # torrent client (egress via tor-router)
       enabled = true,
-      name    = "111-internal-qbittorrent",
+      name    = "112-internal-qbittorrent",
       type    = "internal",
     }
-    "112" = { # Tor SOCKS gateway for qbittorrent egress
+    "113" = { # Tor SOCKS gateway for qbittorrent egress
       enabled = true,
-      name    = "112-internal-tor-router",
+      name    = "113-internal-tor-router",
       type    = "internal",
     }
 
-    "113" = { # GPU LLM agent: Hermes (Telegram) + Ollama on the passed-through RTX 2060
+    "114" = { # GPU LLM agent: Hermes (Telegram) + Ollama on the passed-through RTX 2060
       enabled = false,
-      name    = "113-internal-hermes",
+      name    = "114-internal-hermes",
       type    = "internal",
       memory  = 12288,
       cores   = 8,
@@ -93,49 +98,41 @@ locals {
       hostpci = ["gpu"],
     }
 
-    "114" = { # git forge (OIDC + SSH)
+    "115" = { # git forge (OIDC + SSH)
       enabled = true,
-      name    = "114-internal-forgejo",
+      name    = "115-internal-forgejo",
       type    = "internal",
     }
-    "115" = { # CI runner for Forgejo
+    "116" = { # CI runner for Forgejo
       enabled = true,
-      name    = "115-internal-forgejo-runner",
+      name    = "116-internal-forgejo-runner",
       type    = "internal",
     }
-    "116" = { # CI runners for GitHub repos (ephemeral, one systemd unit per replica)
+    "117" = { # CI runners for GitHub repos (ephemeral, one systemd unit per replica)
       # off until the github-runner-token secret is filled: without it every
       # runner unit dies on start and sync.sh exits 1 for the whole lab.
       #   sops set src/secrets.json '["github-runner-token"]' '"ghp_..."'
       enabled = false,
-      name    = "116-internal-github-runner",
+      name    = "117-internal-github-runner",
       type    = "internal",
       memory  = 4096,
       cores   = 4,
       disk    = 40,
     }
-    "117" = { # Docker image registry + UI (internal-only)
+    "118" = { # Docker image registry + UI (internal-only)
       enabled = true,
-      name    = "117-internal-registry",
+      name    = "118-internal-registry",
       type    = "internal",
     }
 
-    "118" = { # password manager (Bitwarden-compatible)
+    "119" = { # password manager (Bitwarden-compatible)
       enabled = false,
-      name    = "118-internal-vaultwarden",
+      name    = "119-internal-vaultwarden",
       type    = "internal",
     }
-    "119" = { # files / groupware cloud
+    "120" = { # files / groupware cloud
       enabled = false,
-      name    = "119-internal-nextcloud",
-      type    = "internal",
-    }
-    "120" = { # retired: the calendar feeds moved to vm-104 with the other
-      # dashboards, and its NAS share is mounted there now. Kept as a slot
-      # rather than removed, because deleting an id renumbers everything after
-      # it and the last renumber is still being cleaned up after.
-      enabled = false,
-      name    = "120-internal-calendar",
+      name    = "120-internal-nextcloud",
       type    = "internal",
     }
     "121" = { # document management (paperless-ngx)

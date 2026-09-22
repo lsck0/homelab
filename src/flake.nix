@@ -5,7 +5,7 @@
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
     sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
-    # Hermes agent (vm-113). Not following our nixpkgs: it is built and tested
+    # Hermes agent (vm-114). Not following our nixpkgs: it is built and tested
     # against nixos-unstable.
     hermes-agent.url = "github:NousResearch/hermes-agent";
   };

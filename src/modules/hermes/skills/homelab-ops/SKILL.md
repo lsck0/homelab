@@ -35,9 +35,9 @@ working directory first: it has the VM inventory, IPs, hostnames and rules.
 
 - Containers run under podman: `ssh <ip> podman ps`, `podman logs --tail 100 <name>`,
   `systemctl restart podman-<name>`.
-- Logs of every VM are in Loki: `curl -sG http://10.100.0.104:3100/loki/api/v1/query_range --data-urlencode 'query={host="vm-208"}' --data-urlencode limit=50`
+- Logs of every VM are in Loki: `curl -sG http://10.100.0.105:3100/loki/api/v1/query_range --data-urlencode 'query={host="vm-208"}' --data-urlencode limit=50`
   or `ssh <ip> journalctl -u <unit> -n 100`.
-- Alerts go to ntfy; metrics in Prometheus on 10.100.0.104:9090.
+- Alerts go to ntfy; metrics in Prometheus on 10.100.0.105:9090.
 
 ## Rules
 

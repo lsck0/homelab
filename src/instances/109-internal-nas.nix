@@ -1,7 +1,7 @@
 { lib, dmzShares, ... }: {
-  networking.hostName = "vm-108";
+  networking.hostName = "vm-109";
 
-  # backups: Kopia on vm-106 snapshots this tree (see 106-internal-kopia.nix).
+  # backups: Kopia on vm-107 snapshots this tree (see 106-internal-kopia.nix).
 
   # DMZ exports come from dmzShares (modules/nas.nix), one share per VM address.
   # subtree_check: all shares live on one filesystem, and without it a root
@@ -14,7 +14,7 @@
       /srv/nas/public     10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/torrents   10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/data       10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
-      /srv/nas            10.100.0.106(rw,sync,no_subtree_check,no_root_squash)
+      /srv/nas            10.100.0.107(rw,sync,no_subtree_check,no_root_squash)
     '' + lib.concatStrings (lib.mapAttrsToList (id: shares: lib.concatMapStrings (s: ''
       /srv/nas/data/${s} 10.200.0.${id}(rw,sync,subtree_check,no_root_squash)
     '') shares) dmzShares);
@@ -26,7 +26,7 @@
     settings = {
       global = {
         workgroup = "WORKGROUP";
-        "server string" = "vm-108-nas";
+        "server string" = "vm-109-nas";
         "map to guest" = "Bad User";
       };
       public = {

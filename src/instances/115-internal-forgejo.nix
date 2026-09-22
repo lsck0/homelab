@@ -1,5 +1,5 @@
 { config, pkgs, nasMount, retry, ... }: {
-  networking.hostName = "vm-114";
+  networking.hostName = "vm-115";
 
   fileSystems = nasMount "/var/lib/forgejo" "forgejo"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
