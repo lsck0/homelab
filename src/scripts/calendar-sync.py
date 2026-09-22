@@ -45,7 +45,7 @@ WEEK_OFFSETS = [int(o) for o in os.environ.get("CALENDAR_WEEK_OFFSETS", "-1,0,1"
 # how many events a month cell shows before collapsing the rest into "+n".
 # Six rows share 434px, so a cell holds its date plus two lines and the
 # "+n more"; a third line was drawn half outside the cell and clipped.
-MONTH_CELL_EVENTS = int(os.environ.get("CALENDAR_MONTH_CELL_EVENTS", "2"))
+MONTH_CELL_EVENTS = int(os.environ.get("CALENDAR_MONTH_CELL_EVENTS", "3"))
 # All-day events sit above the time grid and push it down, so a day with eight
 # of them would leave no room for the hours. Show a few, count the rest.
 ALLDAY_CELL_EVENTS = int(os.environ.get("CALENDAR_ALLDAY_CELL_EVENTS", "2"))
