@@ -1,4 +1,4 @@
-{ config, lib, ... }:
+{ config, lib, utils, ... }:
 
 let
   nasIP = "10.100.0.109";
@@ -32,6 +32,7 @@ let
   nasDevices = lib.mapAttrsToList (_: fs: fs.device) nasFileSystems;
   nasMountpoints = lib.attrNames nasFileSystems;
   containerUnits = map (n: "podman-${n}") (lib.attrNames config.virtualisation.oci-containers.containers);
+  nasAutomounts = map (m: "${utils.escapeSystemdPath m}.automount") nasMountpoints;
 in {
   _module.args = {
     inherit dmzShares;
@@ -100,8 +101,12 @@ in {
     # app writes a fresh database onto the VM's own disk where it shadows the
     # real one on the NAS. Prowlarr lost every indexer that way.
     #
-    # RequiresMountsFor pulls in the mount units and waits for them, however
-    # the container is started.
-    unitConfig.RequiresMountsFor = nasMountpoints;
+    # The dependency is on the automount units, not RequiresMountsFor: that
+    # pulls in the .mount units instead, which defeats the point of an
+    # automount and makes every container fail to start when one NFS mount is
+    # briefly unhappy. Requiring the trigger guarantees the path resolves
+    # without forcing an eager mount.
+    requires = nasAutomounts;
+    after = nasAutomounts;
   });
 }
