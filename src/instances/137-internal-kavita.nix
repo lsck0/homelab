@@ -104,32 +104,66 @@
     after = [ "kavita-setup.service" ];
     requires = [ "kavita-setup.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.python3 pkgs.systemd pkgs.coreutils ];
+    path = [ pkgs.python3 pkgs.curl pkgs.coreutils ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 60; };
+    # Through the API, not appsettings.json. Kavita 0.9 keeps these in its
+    # database and only seeds them from the file on a fresh install, so
+    # editing the file on a running instance changes nothing - the file said
+    # ProvisionAccounts true while /api/settings still reported false, and the
+    # login went on failing.
     script = ''
-      python3 - "${config.sops.secrets.kavita-oidc-secret.path}" <<'PY'
-      import json, sys, pathlib
-      cfg = pathlib.Path("/var/lib/kavita/appsettings.json")
-      d = json.loads(cfg.read_text())
-      o = d.setdefault("OpenIdConnectSettings", {})
+      python3 - "${config.sops.secrets.kavita-oidc-secret.path}" \
+               /var/lib/homepage-tokens/kavita-pass.token <<'PY'
+      import json, pathlib, sys, urllib.error, urllib.request
+
+      BASE = "http://127.0.0.1:80/api"
+      secret = pathlib.Path(sys.argv[1]).read_text().strip()
+      password = pathlib.Path(sys.argv[2]).read_text().strip()
+
+      def call(path, body=None, token=None, method=None):
+          data = json.dumps(body).encode() if body is not None else None
+          req = urllib.request.Request(BASE + path, data=data, method=method)
+          req.add_header("Content-Type", "application/json")
+          if token:
+              req.add_header("Authorization", "Bearer " + token)
+          with urllib.request.urlopen(req, timeout=30) as r:
+              raw = r.read()
+          return json.loads(raw) if raw else None
+
+      token = call("/Account/login", {"username": "admin", "password": password})["token"]
+      settings = call("/settings", token=token)
+      oidc = settings["oidcConfig"]
+
       want = {
-          "Authority": "https://auth.lsck0.dev",
-          "ClientId": "kavita",
-          "Secret": pathlib.Path(sys.argv[1]).read_text().strip(),
-          "Enabled": True,
+          "authority": "https://auth.lsck0.dev",
+          "clientId": "kavita",
+          "secret": secret,
+          "enabled": True,
+          # Without this the login ends on "no matching account found":
+          # Kavita will only sign in an OIDC identity that already has a
+          # local account, and nobody was going to create one by hand.
+          "provisionAccounts": True,
+          # Authelia does not send email_verified, so leaving this on rejects
+          # every provisioned account at the door.
+          "requireVerifiedEmail": False,
+          # An account with no libraries and no roles can log in and see
+          # nothing. Both libraries, and the rights to read, search and keep
+          # bookmarks - but not Admin, which stays something granted by hand.
+          "defaultLibraries": [1, 2],
+          "defaultRoles": ["Login", "Download", "Bookmark", "Change Password"],
+          # what the sign-in button says
+          "providerName": "Authelia",
       }
-      if all(o.get(k) == v for k, v in want.items()):
-          print("unchanged")
+      # The secret comes back masked as "*****", so comparing it would say
+      # "changed" on every run for ever. Everything else is readable.
+      if all(oidc.get(k) == v for k, v in want.items() if k != "secret"):
+          print("Kavita OpenID Connect already points at Authelia")
           raise SystemExit(0)
-      o.update(want)
-      cfg.write_text(json.dumps(d, indent=2))
-      print("changed")
+
+      oidc.update(want)
+      call("/settings", settings, token=token, method="POST")
+      print("Kavita OpenID Connect points at Authelia")
       PY
-      # only bounce the container when the file actually moved
-      if [ "$(python3 -c "import json;print(json.load(open('/var/lib/kavita/appsettings.json'))['OpenIdConnectSettings']['Enabled'])")" = True ]; then
-        systemctl try-restart podman-kavita.service
-        echo "Kavita OpenID Connect points at Authelia"
-      fi
     '';
   };
 
