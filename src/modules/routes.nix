@@ -101,10 +101,14 @@
     lidarr         = { host = "lidarr";      vmid = 136; port = 8686;  group = "admins"; };
     kavita         = { host = "read";        vmid = 137; port = 80;    auth = "own"; };
     suwayomi       = { host = "manga";       vmid = 137; port = 4567;  group = "media"; };
+    # A tailscale client cannot log in to Authelia, so no ForwardAuth here;
+    # Headscale authenticates registrations itself with pre-auth keys and its
+    # own browser flow. Relayed in from the internet like any internal host.
+    headscale      = { host = "hs";          vmid = 138; port = 80;    auth = "own"; };
+    headplane      = { host = "hs-ui";       vmid = 138; port = 3000;  group = "admins"; };
   };
 
   external = {
-    headscale  = { host = "hs";       vmid = 201; port = 80; };
     searxng    = { host = "search";   vmid = 204; port = 80; proxied = false; };
     shlink     = { host = "shlink";   vmid = 205; port = 80; proxied = false; };
     privatebin = { host = "paste";    vmid = 206; port = 80; proxied = false; };

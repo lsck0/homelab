@@ -230,16 +230,19 @@ locals {
       type    = "internal",
       memory  = 2048,
     }
+    "138" = { # Tailscale control server (VPN mesh) + Headplane UI
+      # Internal, not the DMZ: it decides which machines are on the mesh, so it
+      # is a trust anchor rather than something to expose alongside the public
+      # services. The external Traefik relays it in for client registration.
+      enabled = false,
+      name    = "138-internal-headscale",
+      type    = "internal",
+    }
 
     # external: 10.200.0.0/24 DMZ, public through external Traefik (CrowdSec/WAF)
     "200" = { # public reverse proxy: TLS + CrowdSec + Anubis + WAF + internal relay
       enabled = true,
       name    = "200-external-traefik",
-      type    = "external",
-    }
-    "201" = { # Tailscale control server (VPN mesh)
-      enabled = false,
-      name    = "201-external-headscale",
       type    = "external",
     }
     "202" = { # non-exit Tor relay
