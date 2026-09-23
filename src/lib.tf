@@ -10,9 +10,14 @@
 #   cooldown = idle time before an onDemand VM is shut down (systemd time, "30m")
 #   name     = "<id>-<type>-<service>", must match src/instances/<name>.nix
 #   type     = "internal" (10.100.0.0/24) | "external" (10.200.0.0/24 DMZ) | "router"
-#   memory   = MiB (default 1024)
+#   memory   = MiB ceiling (default 768). With ballooning on this is a cap, not
+#              a reservation, so it only has to cover the service's peak.
+#   balloon  = MiB floor the host may squeeze to (default: half of memory)
 #   cores    = vCPUs (default 2)
-#   disk     = GiB (default 8)
+#   disk     = GiB for the root disk on the NVMe pool (default 8)
+#   extra_disks = [{ size, datastore }] extra blank disks, scsi1 onward.
+#              Used for bulk storage on the spinning disk, which is a separate
+#              datastore and deliberately not part of the `pve` group.
 #   machine  = "q35" for PCIe passthrough (default bpg/i440fx)
 #   hostpci  = Proxmox hardware-mapping names to pass through, e.g. ["gpu"]
 #   boot_order = start order when the Proxmox host boots (default 3). Every VM
@@ -20,14 +25,34 @@
 
 locals {
   defaults = {
-    enabled    = true
-    cooldown   = "30m"
-    memory     = 1024
-    cores      = 2
-    disk       = 8
-    machine    = null
-    hostpci    = []
-    boot_order = 3
+    enabled  = true
+    cooldown = "30m"
+    # 768, not 1024. A plain VM - NixOS, one podman service - has a working set
+    # of 445 to 600 MiB: mosquitto 445, sccache 482, attic 483, vaultwarden 487,
+    # ntfy 507. Measured on the VMs that never reached their ceiling, so the
+    # figure is the service rather than page cache. A VM that was given 1024
+    # reads as 1024 whatever it does, because with the balloon off it never
+    # hands cache back, which is why the old default looked justified.
+    memory = 768
+    # Floor the host may balloon a VM down to, as a fraction of its memory.
+    # Without a floating size the provider sets balloon: 0, which switches the
+    # balloon device off: every VM then pins its full allocation for as long as
+    # it runs and never hands a page back. With everything enabled the lab asks
+    # for 48 GiB of ceilings on a 32 GiB host, so the guests have to be able to
+    # give memory up. They can: most sit far below their ceiling. Half is a
+    # floor generous enough that nothing is squeezed until the host is genuinely
+    # short, and it brings the guaranteed total to 24 GiB, which does fit.
+    balloon_ratio = 0.5
+    cores         = 2
+    disk          = 8
+    machine       = null
+    hostpci       = []
+    # Extra disks beyond the root one, as [{ size, datastore }]. The lab's
+    # bulk storage is a spinning 2 TB disk that is not in the `pve` volume
+    # group, so a VM that needs it takes a second disk from that datastore
+    # rather than growing its root disk on the NVMes.
+    extra_disks = []
+    boot_order  = 3
   }
 
   # pause after each VM that boots before the default group, so the router and
@@ -39,14 +64,16 @@ locals {
       name = i.name
       type = i.type
       # as a string, the for-expression would unify bool and string anyway
-      enabled    = tostring(try(i.enabled, local.defaults.enabled))
-      cooldown   = try(i.cooldown, local.defaults.cooldown)
-      memory     = try(i.memory, local.defaults.memory)
-      cores      = try(i.cores, local.defaults.cores)
-      disk       = try(i.disk, local.defaults.disk)
-      machine    = try(i.machine, local.defaults.machine)
-      hostpci    = try(i.hostpci, local.defaults.hostpci)
-      boot_order = try(i.boot_order, local.defaults.boot_order)
+      enabled     = tostring(try(i.enabled, local.defaults.enabled))
+      cooldown    = try(i.cooldown, local.defaults.cooldown)
+      memory      = try(i.memory, local.defaults.memory)
+      balloon     = try(i.balloon, floor(try(i.memory, local.defaults.memory) * try(i.balloon_ratio, local.defaults.balloon_ratio)))
+      cores       = try(i.cores, local.defaults.cores)
+      disk        = try(i.disk, local.defaults.disk)
+      machine     = try(i.machine, local.defaults.machine)
+      hostpci     = try(i.hostpci, local.defaults.hostpci)
+      extra_disks = try(i.extra_disks, local.defaults.extra_disks)
+      boot_order  = try(i.boot_order, local.defaults.boot_order)
 
       bridge        = i.type == "router" ? var.wan_bridge : i.type == "external" ? var.external_bridge : var.internal_bridge
       extra_bridges = i.type == "router" ? [var.internal_bridge, var.external_bridge] : []
@@ -154,6 +181,10 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
   memory {
     dedicated = each.value.memory
+    # floating turns the balloon device on. dedicated stays the ceiling; the
+    # host may reclaim down to this when it runs short. Proxmox only squeezes
+    # under real pressure, so a VM that needs its full size keeps it.
+    floating = each.value.balloon
   }
 
   disk {
@@ -164,6 +195,22 @@ resource "proxmox_virtual_environment_vm" "vm" {
     size         = each.value.disk
     ssd          = true
     discard      = "on"
+  }
+
+  # scsi1 onward. No file_id: these are blank disks, not clones of the NixOS
+  # image, and the VM formats them itself on first boot.
+  dynamic "disk" {
+    for_each = each.value.extra_disks
+    content {
+      datastore_id = disk.value.datastore
+      file_format  = "raw"
+      interface    = "scsi${disk.key + 1}"
+      size         = disk.value.size
+      # a 5400 rpm disk: ssd = false so the guest schedules for a rotating
+      # device, discard = on so deleting a file still returns the blocks.
+      ssd     = false
+      discard = "on"
+    }
   }
 
   network_device {

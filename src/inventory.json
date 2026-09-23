@@ -53,30 +53,12 @@
     "prefix": 24,
     "type": "internal"
   },
-  "106": {
-    "cooldown": "30m",
-    "enabled": "true",
-    "gateway": "10.100.0.1",
-    "ip": "10.100.0.106",
-    "name": "106-internal-uptime-kuma",
-    "prefix": 24,
-    "type": "internal"
-  },
   "107": {
     "cooldown": "30m",
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.107",
     "name": "107-internal-kopia",
-    "prefix": 24,
-    "type": "internal"
-  },
-  "108": {
-    "cooldown": "30m",
-    "enabled": "true",
-    "gateway": "10.100.0.1",
-    "ip": "10.100.0.108",
-    "name": "108-internal-wazuh",
     "prefix": 24,
     "type": "internal"
   },
@@ -113,15 +95,6 @@
     "gateway": "10.100.0.1",
     "ip": "10.100.0.112",
     "name": "112-internal-qbittorrent",
-    "prefix": 24,
-    "type": "internal"
-  },
-  "113": {
-    "cooldown": "30m",
-    "enabled": "true",
-    "gateway": "10.100.0.1",
-    "ip": "10.100.0.113",
-    "name": "113-internal-tor-router",
     "prefix": 24,
     "type": "internal"
   },
@@ -203,15 +176,6 @@
     "gateway": "10.100.0.1",
     "ip": "10.100.0.122",
     "name": "122-internal-paperless-ai",
-    "prefix": 24,
-    "type": "internal"
-  },
-  "123": {
-    "cooldown": "30m",
-    "enabled": "true",
-    "gateway": "10.100.0.1",
-    "ip": "10.100.0.123",
-    "name": "123-internal-wikijs",
     "prefix": 24,
     "type": "internal"
   },
@@ -314,30 +278,12 @@
     "prefix": 24,
     "type": "internal"
   },
-  "135": {
-    "cooldown": "30m",
-    "enabled": "true",
-    "gateway": "10.100.0.1",
-    "ip": "10.100.0.135",
-    "name": "135-internal-audiobookshelf",
-    "prefix": 24,
-    "type": "internal"
-  },
   "136": {
     "cooldown": "30m",
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.136",
     "name": "136-internal-navidrome",
-    "prefix": 24,
-    "type": "internal"
-  },
-  "137": {
-    "cooldown": "30m",
-    "enabled": "true",
-    "gateway": "10.100.0.1",
-    "ip": "10.100.0.137",
-    "name": "137-internal-kavita",
     "prefix": 24,
     "type": "internal"
   },

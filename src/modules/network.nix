@@ -14,7 +14,6 @@ let
   #   loopback + container bridges  the app's own setup units and health checks
   #   10.100.0.100 / 10.200.0.200   internal / external Traefik (the ingress)
   #   10.100.0.103                  Homepage widgets (API keys, read-only)
-  #   10.100.0.106                  Uptime Kuma probes
   #   10.100.0.114                  Hermes (has root on every VM anyway)
   trustedSources = [
     "127.0.0.0/8"
@@ -23,7 +22,6 @@ let
     "10.100.0.100/32"
     "10.200.0.200/32"
     "10.100.0.103/32"
-    "10.100.0.106/32"
     "10.100.0.114/32"
   ] ++ cfg.extraSources;
 in {
@@ -71,7 +69,7 @@ in {
       networking.nameservers = [ vm.gateway ];
 
       # a fresh VM boots as "nixos"; switching does not rename the running kernel,
-      # so logs shipped by hostname (rsyslog -> Wazuh) would say nixos until reboot.
+      # so logs shipped by hostname would say nixos until reboot.
       system.activationScripts.hostname = "echo ${config.networking.hostName} > /proc/sys/kernel/hostname";
 
       # network-setup adds the default route and gives up permanently if the

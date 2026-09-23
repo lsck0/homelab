@@ -6,7 +6,7 @@
   # written next to the media). Sonarr/Radarr connections are set by vm-133.
   # behind Authelia at subs.lsck0.dev.
   fileSystems = nasMount "/var/lib/bazarr" "bazarr"
-    // nasPath "/data/media" "media"
+    // nasPath "/data/media" "bulk/media"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   virtualisation.oci-containers.containers.bazarr = {

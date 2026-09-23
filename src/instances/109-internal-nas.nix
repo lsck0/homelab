@@ -1,4 +1,4 @@
-{ lib, dmzShares, ... }: {
+{ lib, pkgs, dmzShares, ... }: {
   networking.hostName = "vm-109";
 
   # backups: Kopia on vm-107 snapshots this tree (see 106-internal-kopia.nix).
@@ -6,13 +6,55 @@
   # DMZ exports come from dmzShares (modules/nas.nix), one share per VM address.
   # subtree_check: all shares live on one filesystem, and without it a root
   # client can forge file handles that reach outside its share.
+  # ── bulk storage ───────────────────────────────────────────────────────────
+  # scsi1, the 2 TB spinning disk (instances.tf: extra_disks). Media and
+  # torrents live here and nothing else does; the root disk on the NVMe pool
+  # keeps service state, backups and documents.
+  #
+  # Both directories share this one filesystem on purpose. The *arr stack
+  # imports a finished download by hardlinking it into the library, and a
+  # hardlink cannot cross a filesystem - separate them and every film is
+  # stored twice, which is exactly what was happening before.
+  fileSystems."/srv/nas/bulk" = {
+    device = "/dev/disk/by-label/bulk";
+    fsType = "ext4";
+    # nofail so a missing or unformatted bulk disk cannot stop the NAS booting.
+    # Everything else on this VM - the service-state exports every other VM
+    # mounts - matters more than media being available.
+    options = [ "defaults" "nofail" "x-systemd.device-timeout=30s" ];
+  };
+
+  # Formats the disk once, on first boot. Guarded on the label, so a rerun
+  # never touches a filesystem that already exists.
+  systemd.services.bulk-format = {
+    description = "Create the bulk filesystem on first boot";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "srv-nas-bulk.mount" ];
+    path = [ pkgs.util-linux pkgs.e2fsprogs ];
+    unitConfig.ConditionPathExists = "!/dev/disk/by-label/bulk";
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = ''
+      set -eu
+      disk=/dev/sdb
+      [ -b "$disk" ] || { echo "no $disk; nothing to format"; exit 0; }
+      if blkid "$disk" >/dev/null 2>&1; then
+        echo "$disk already carries a filesystem; refusing to format"
+        exit 0
+      fi
+      # no partition table: one filesystem filling the device. -m 0 because
+      # this holds media, not a root filesystem, so the 5% reserve is 90 GiB
+      # given to nobody.
+      mkfs.ext4 -m 0 -L bulk "$disk"
+    '';
+  };
+
   services.nfs.server = {
     enable = true;
     exports = ''
-      /srv/nas/media      10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
+      /srv/nas/bulk/media 10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/documents  10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/public     10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
-      /srv/nas/torrents   10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
+      /srv/nas/bulk/torrents 10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/data       10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas            10.100.0.107(rw,sync,no_subtree_check,no_root_squash)
     '' + lib.concatStrings (lib.mapAttrsToList (id: shares: lib.concatMapStrings (s: ''
@@ -112,18 +154,22 @@
     #   Folder '/data/media/movies/' is not writable by user 'abc'
     # The readers (Jellyfin, Audiobookshelf, Kavita, Navidrome) only need the
     # o+rx that 0775 already gives them.
-    "d /srv/nas/media 0775 1000 1000 -"
-    "d /srv/nas/media/tv 0775 1000 1000 -"
-    "d /srv/nas/media/movies 0775 1000 1000 -"
-    "d /srv/nas/media/audiobooks 0775 1000 1000 -"
-    "d /srv/nas/media/music 0775 1000 1000 -"
-    "d /srv/nas/media/manga 0775 1000 1000 -"
-    "d /srv/nas/media/anime 0775 1000 1000 -"
-    "d /srv/nas/media/books 0775 1000 1000 -"
-    "d /srv/nas/media/leaving-soon 0775 1000 1000 -"
+    # /srv/nas/bulk is the spinning disk's mountpoint (fileSystems above).
+    # These rules create the tree on whatever is mounted there, so the NAS
+    # works before the disk is handed over and keeps working after.
+    "d /srv/nas/bulk 0775 1000 1000 -"
+    "d /srv/nas/bulk/media 0775 1000 1000 -"
+    "d /srv/nas/bulk/media/tv 0775 1000 1000 -"
+    "d /srv/nas/bulk/media/movies 0775 1000 1000 -"
+    "d /srv/nas/bulk/media/audiobooks 0775 1000 1000 -"
+    "d /srv/nas/bulk/media/music 0775 1000 1000 -"
+    "d /srv/nas/bulk/media/manga 0775 1000 1000 -"
+    "d /srv/nas/bulk/media/anime 0775 1000 1000 -"
+    "d /srv/nas/bulk/media/books 0775 1000 1000 -"
+    "d /srv/nas/bulk/media/leaving-soon 0775 1000 1000 -"
     "d /srv/nas/BACKUPS 0700 root root -"
     "d /srv/nas/documents 0775 nobody nogroup -"
-    "d /srv/nas/torrents 0775 1000 1000 -"
+    "d /srv/nas/bulk/torrents 0775 1000 1000 -"
     # per-service persistent data
     "d /srv/nas/data 0777 nobody nogroup -"
     # nightly database dumps (modules/db-backup.nix), one subdir per VM. This is
@@ -147,7 +193,6 @@
     "d /srv/nas/data/vaultwarden 0777 nobody nogroup -"
     "d /srv/nas/data/nextcloud 0777 nobody nogroup -"
     "d /srv/nas/data/nextcloud-db 0777 nobody nogroup -"
-    "d /srv/nas/data/wikijs-db 0777 nobody nogroup -"
     "d /srv/nas/data/huginn 0777 nobody nogroup -"
     "d /srv/nas/data/huginn-db 0777 nobody nogroup -"
     "d /srv/nas/data/homeassistant 0777 nobody nogroup -"
@@ -155,7 +200,6 @@
     "d /srv/nas/data/prometheus 0777 nobody nogroup -"
     "d /srv/nas/data/navidrome 0777 nobody nogroup -"
     "d /srv/nas/data/kavita 0777 nobody nogroup -"
-    "d /srv/nas/data/uptime-kuma 0777 nobody nogroup -"
     "d /srv/nas/data/traefik-acme-internal 0777 nobody nogroup -"
     "d /srv/nas/data/paperless 0777 nobody nogroup -"
     "d /srv/nas/data/paperless-ai 0777 nobody nogroup -"

@@ -21,8 +21,8 @@ let
   ];
 
   # LAN, DMZ and the WireGuard mesh. Always allowed alongside Cloudflare so a
-  # lockout is impossible from inside, and so the Uptime Kuma and Homepage
-  # probes keep reaching the ingress.
+  # lockout is impossible from inside, and so the Homepage probes keep
+  # reaching the ingress.
   privateRanges = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "127.0.0.1/32" ];
 
   # response-header hardening on every websecure route (opt out via noSecureHeaders).

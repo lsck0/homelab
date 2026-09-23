@@ -116,3 +116,11 @@ provider "proxmox" {
     }
   }
 }
+
+# Proxmox storage holding bulk media, on the 2 TB spinning disk. Empty means
+# the disk has not been handed over yet and vm-109 gets no second disk; set it
+# to "bulk" once src/scripts/pve-install.sh has created the volume group.
+variable "bulk_datastore" {
+  type    = string
+  default = ""
+}

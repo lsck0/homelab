@@ -21,11 +21,11 @@ metadata:
   the *arrs no longer track; otherwise remove via Sonarr/Radarr queue so they do not re-grab.
 - Speed limits: `POST /transfer/setDownloadLimit limit=<bytes/s>`.
 - Save path `/data/torrents`, category per *arr.
-- All peer traffic goes through Tor (SOCKS on vm-113). Slow swarms are expected.
+- All peer traffic goes through Tor (SOCKS on the router). Slow swarms are expected.
 
-## Tor router (vm-113)
+## Tor router (the router)
 
-- Health: `ssh 10.100.0.113 'systemctl status tor; curl -s --socks5-hostname 10.100.0.113:9050 https://check.torproject.org/api/ip'`.
+- Health: `ssh 10.100.0.1 'systemctl status tor; curl -s --socks5-hostname 10.100.0.1:9050 https://check.torproject.org/api/ip'`.
 
 ## Prowlarr (vm-129, http://10.100.0.129/api/v1, key `prowlarr-key`)
 

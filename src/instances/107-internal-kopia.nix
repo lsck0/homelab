@@ -92,9 +92,15 @@ EOF
 in {
   networking.hostName = "vm-107";
 
-  # whole NAS tree (the NAS exports /srv/nas to this VM only). The repository
-  # lives on the same disk: survives deletion, bad deploys and bitrot, not a
-  # host/disk loss. Add a remote repository sync for real 3-2-1.
+  # whole NAS tree (the NAS exports /srv/nas to this VM only), except /bulk.
+  # The repository lives on the same disk: survives deletion, bad deploys and
+  # bitrot, not a host/disk loss. Add a remote repository sync for real 3-2-1.
+  #
+  # /bulk is the media and torrent disk and is deliberately not backed up. It
+  # is ~570 GiB of films and music that can be fetched again, against a backup
+  # repository of 10 GiB for everything that cannot - and snapshotting it would
+  # mean a second copy of the largest thing in the lab, on the disk that is
+  # already the tightest. Anything here that matters lives in /data.
   fileSystems = nasPath source "";
 
   # same secret the old restic setup used; only the name changed.
@@ -127,6 +133,7 @@ in {
         --compression=zstd \
         --keep-latest=3 --keep-hourly=0 --keep-daily=7 --keep-weekly=8 --keep-monthly=12 --keep-annual=2 \
         --add-ignore=/BACKUPS --add-ignore=lost+found --add-ignore='*.tmp' \
+        --add-ignore=/bulk \
         --one-file-system=false
     '';
   };
@@ -176,7 +183,7 @@ in {
   };
 
   # the Kopia server runs --without-password: internal Traefik (Authelia in
-  # front), Homepage and the Uptime Kuma probe are the only callers allowed.
+  # front) and Homepage are the only callers allowed.
   networking.firewall.allowedTCPPorts = [ 51515 ];
   homelab.ingressOnly.ports = [ 51515 ];
 }

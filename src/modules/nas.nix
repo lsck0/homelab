@@ -47,7 +47,7 @@ in {
 
     nasMedia = mountpoint: subpath: {
       "${mountpoint}" = {
-        device = "${nasIP}:/srv/nas/media/${subpath}";
+        device = "${nasIP}:/srv/nas/bulk/media/${subpath}";
         fsType = "nfs";
         options = nfsOptsRo;
       };

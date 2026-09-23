@@ -226,3 +226,180 @@ else
     pveum acl modify / --group "$LLDAP_ADMIN_GROUP-lldap" --role Administrator
     echo ">>> lldap realm ready: sign in as <user>@lldap"
 fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# BULK STORAGE (the spinning disk)
+# ─────────────────────────────────────────────────────────────────────────────
+# The lab has two NVMe SSDs and one 2 TB 5400 rpm disk (WD20EZRZ). The NVMes
+# carry the VMs and their service state; the spinning disk carries media, which
+# is large, sequentially read and does not care about latency.
+#
+# Keeping it out of the `pve` volume group is the point. Media grew until it
+# filled the pool the VMs live in, every guest's writes started failing, and
+# the whole lab went down at once - a film cannot do that to a database if they
+# are not on the same device.
+#
+# The provider has no resource for Proxmox storage, so this runs here rather
+# than in Terraform; instances.tf then asks for a disk on `bulk` by name.
+# Idempotent: it does nothing if the volume group is already there.
+BULK_DISK=${BULK_DISK:-/dev/disk/by-id/ata-WDC_WD20EZRZ-00Z5HB0_WD-WCC4N3KNZ2KS}
+if ! vgs bulk >/dev/null 2>&1; then
+    if [ ! -b "$BULK_DISK" ]; then
+        echo ">>> bulk disk $BULK_DISK not present; skipping bulk storage"
+    elif lsblk -no FSTYPE "$BULK_DISK" 2>/dev/null | grep -q .; then
+        # Refuse to wipe a disk that still holds a filesystem. This one shipped
+        # with an NTFS partition full of personal files; they were copied off
+        # deliberately before it was handed over, and a rerun of this script
+        # must never make that decision on its own.
+        echo ">>> $BULK_DISK still has a filesystem on it; refusing to wipe."
+        echo ">>> Clear it by hand once its contents are safe, then re-run."
+    else
+        echo ">>> Creating bulk storage on $BULK_DISK"
+        pvcreate -ff -y "$BULK_DISK"
+        vgcreate bulk "$BULK_DISK"
+        # Leave 1% for thin-pool metadata growth: a thin pool whose metadata
+        # fills is as wedged as one whose data fills, and far more annoying.
+        lvcreate --type thin-pool -l 99%FREE --thinpool data bulk
+    fi
+fi
+if vgs bulk >/dev/null 2>&1 && ! pvesm status --storage bulk >/dev/null 2>&1; then
+    pvesm add lvmthin bulk --vgname bulk --thinpool data --content images
+    echo ">>> Proxmox storage 'bulk' ready"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OSSEC (host intrusion detection)
+# ─────────────────────────────────────────────────────────────────────────────
+# The hypervisor is the one machine in the lab a HIDS genuinely earns its keep
+# on. Every VM is a NixOS system built from this repo: its filesystem is
+# immutable and content-addressed, so file integrity monitoring there restates
+# something Nix already guarantees. This host is the opposite - a mutable
+# Debian install, configured partly by hand, holding the Proxmox API token, the
+# LVM volumes of every VM and root on all of them. If anything is worth
+# watching for unexpected change, it is /etc/pve and /usr/sbin here.
+#
+# `local` mode: no manager, no agents, no network listener. It analyses this
+# host's own logs and filesystem and writes alerts locally. That is deliberate
+# - the lab ran a Wazuh manager for months with an agent on nothing at all,
+# which cost 4 GiB of RAM to duplicate what promtail already shipped to Loki.
+#
+# Built from source rather than installed from Atomicorp's repository, which
+# has no Debian 13 channel; the workaround is to point trixie at the bookworm
+# packages, and mismatched libc/OpenSSL builds on the hypervisor is a poor
+# trade for saving a compile.
+OSSEC_VERSION=${OSSEC_VERSION:-3.8.0}
+if [ ! -d /var/ossec ]; then
+    echo ">>> Building OSSEC $OSSEC_VERSION"
+    apt-get install -y --no-install-recommends \
+        build-essential libevent-dev libpcre2-dev libz-dev libssl-dev wget ca-certificates
+    tmp=$(mktemp -d)
+    wget -qO "$tmp/ossec.tar.gz" \
+        "https://github.com/ossec/ossec-hids/archive/refs/tags/$OSSEC_VERSION.tar.gz"
+    tar -xzf "$tmp/ossec.tar.gz" -C "$tmp"
+    # Unattended: install.sh is interactive, but every prompt has a USER_*
+    # override. Active response stays off - it reacts by running commands as
+    # root, and a false positive that firewalls the hypervisor off the network
+    # is a worse day than the intrusion it was guessing at.
+    (
+        cd "$tmp/ossec-hids-$OSSEC_VERSION"
+        USER_LANGUAGE=en USER_NO_STOP=y USER_INSTALL_TYPE=local USER_DIR=/var/ossec \
+        USER_ENABLE_ACTIVE_RESPONSE=n USER_ENABLE_SYSCHECK=y USER_ENABLE_ROOTCHECK=y \
+        USER_ENABLE_EMAIL=n USER_ENABLE_SYSLOG=y \
+        ./install.sh
+    )
+    rm -rf "$tmp"
+fi
+
+# What to watch. Written every run so the list stays in this repo rather than
+# in a file someone edited on the box two years ago.
+if [ -d /var/ossec ]; then
+    cat > /var/ossec/etc/local_internal_options.conf <<'OPTS'
+# report changes in real time where the kernel can tell us, rather than only
+# on the scan interval.
+syscheck.sleep=2
+OPTS
+    if ! grep -q "homelab-managed" /var/ossec/etc/ossec.conf 2>/dev/null; then
+        python3 - <<'PY'
+import re
+p = "/var/ossec/etc/ossec.conf"
+s = open(p).read()
+# 6h rather than the 12h default: a change to /etc/pve wants finding the same
+# day, and the tree is small enough that scanning it costs nothing.
+s = s.replace("<frequency>43200</frequency>", "<frequency>21600</frequency>")
+watch = """  <!-- homelab-managed: see src/scripts/pve-install.sh -->
+  <syscheck>
+    <directories check_all="yes" realtime="yes">/etc,/usr/bin,/usr/sbin,/bin,/sbin</directories>
+    <!-- the cluster filesystem: VM configs, the API tokens, the ACLs -->
+    <directories check_all="yes" realtime="yes">/etc/pve</directories>
+    <!-- noisy and rewritten constantly; watching it reports nothing useful -->
+    <ignore>/etc/pve/.version</ignore>
+    <ignore>/etc/pve/.members</ignore>
+    <ignore>/etc/pve/.rrd</ignore>
+    <ignore>/etc/pve/.vmlist</ignore>
+    <ignore>/etc/mtab</ignore>
+    <ignore>/etc/adjtime</ignore>
+  </syscheck>
+"""
+s = s.replace("</ossec_config>", watch + "</ossec_config>", 1)
+open(p, "w").write(s)
+PY
+    fi
+    systemctl enable --now ossec 2>/dev/null || /var/ossec/bin/ossec-control restart
+fi
+
+# OSSEC's alerts reach Grafana the same way the backup dead-man does: a gauge
+# in node_exporter's textfile directory, scraped from vm-105. Without this the
+# alerts sit in a file on a host nobody reads.
+if [ -d /var/ossec ]; then
+    install -d -m 0755 /var/lib/node-exporter-textfile
+    if ! grep -q "node-exporter-textfile" /etc/default/prometheus-node-exporter 2>/dev/null; then
+        echo 'ARGS="--collector.textfile.directory=/var/lib/node-exporter-textfile"' \
+            > /etc/default/prometheus-node-exporter
+        systemctl restart prometheus-node-exporter
+    fi
+    cat > /usr/local/bin/ossec-metrics <<'METRICS'
+#!/usr/bin/env bash
+# Count today's OSSEC alerts by severity for the node_exporter textfile
+# collector. Levels: 7+ is worth seeing, 10+ is worth waking up for.
+set -euo pipefail
+log=/var/ossec/logs/alerts/alerts.log
+d=/var/lib/node-exporter-textfile
+total=0; high=0
+if [ -r "$log" ]; then
+  total=$(grep -c "^\*\* Alert" "$log" 2>/dev/null || echo 0)
+  high=$(grep -cE "Level: (1[0-9]|[7-9])" "$log" 2>/dev/null || echo 0)
+fi
+{
+  echo "# HELP homelab_ossec_alerts_total OSSEC alerts on the hypervisor."
+  echo "# TYPE homelab_ossec_alerts_total gauge"
+  echo "homelab_ossec_alerts_total $total"
+  echo "# HELP homelab_ossec_alerts_high OSSEC alerts at level 7 or above."
+  echo "# TYPE homelab_ossec_alerts_high gauge"
+  echo "homelab_ossec_alerts_high $high"
+  echo "# HELP homelab_ossec_up Whether ossec-analysisd is running."
+  echo "# TYPE homelab_ossec_up gauge"
+  echo "homelab_ossec_up $(pgrep -x ossec-analysisd >/dev/null && echo 1 || echo 0)"
+} > "$d/ossec.prom.tmp"
+mv "$d/ossec.prom.tmp" "$d/ossec.prom"
+METRICS
+    chmod +x /usr/local/bin/ossec-metrics
+    cat > /etc/systemd/system/ossec-metrics.service <<'UNIT'
+[Unit]
+Description=Publish OSSEC alert counts for node_exporter
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/ossec-metrics
+UNIT
+    cat > /etc/systemd/system/ossec-metrics.timer <<'UNIT'
+[Unit]
+Description=Publish OSSEC alert counts every 5 minutes
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=5m
+[Install]
+WantedBy=timers.target
+UNIT
+    systemctl daemon-reload
+    systemctl enable --now ossec-metrics.timer
+    echo ">>> OSSEC ready (local mode); metrics via node_exporter textfile"
+fi

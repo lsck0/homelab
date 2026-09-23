@@ -38,7 +38,7 @@ in {
     # wins instead of merging two definitions of one mount.
     fileSystems = lib.mkMerge ([
       (lib.mapAttrs (_: lib.mkDefault) (
-        nasPath "/data/media" "media" // nasPath "/data/torrents" "torrents" // nasMount tokens "homepage-tokens"
+        nasPath "/data/media" "bulk/media" // nasPath "/data/torrents" "bulk/torrents" // nasMount tokens "homepage-tokens"
       ))
     ] ++ lib.mapAttrsToList (name: _: nasMount "/var/lib/${name}" name) cfg);
 

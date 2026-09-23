@@ -24,7 +24,7 @@
     common = {
       imports = [
         ./modules/base.nix
-        ./modules/vpn.nix
+        ./modules/egress-vpn.nix
         sops-nix.nixosModules.sops
       ];
     };
