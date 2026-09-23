@@ -134,7 +134,7 @@
     description = "Generate Forgejo API token for Homepage";
     after = [ "podman-forgejo.service" "forgejo-oauth2-setup.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq pkgs.podman ];
+    path = [ pkgs.curl pkgs.jq pkgs.podman pkgs.gawk pkgs.coreutils ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -164,11 +164,19 @@
         --must-change-password=false 2>/dev/null || true
 
       # generate token with required scopes (skip if already exists)
+      # The CLI prints "Access token was successfully created: <token>", so the
+      # value is the last field. It printed "... <token>" in some older
+      # release, and the pattern that matched that one silently captured
+      # nothing here for as long as this unit has existed - the token row was
+      # created every boot and the file it feeds was never written, which is
+      # why the Homepage widget had no Forgejo data. The name is stamped for
+      # the same reason the mirror token's is: a duplicate is refused, so a
+      # fixed name cannot be retried.
       TOKEN=$(podman exec -u git forgejo forgejo admin user generate-access-token \
         --username homepage-bot \
-        --token-name homepage \
+        --token-name "homepage-$(date +%s)" \
         --scopes read:activitypub,read:issue,read:misc,read:notification,read:organization,read:package,read:repository,read:user \
-        2>/dev/null | grep -oP 'Access token was successfully created\.\.\. \K.*' || true)
+        | tr -d '\r' | awk 'END {print $NF}' || true)
 
       if [ -n "$TOKEN" ]; then
         echo -n "$TOKEN" > "$TOKEN_FILE"
@@ -199,6 +207,72 @@
         echo "Runner token generated"
       fi
     '';
+  };
+
+  # ---- GitHub mirrors -------------------------------------------------------
+  # GitHub stays the place repositories are pushed to; Forgejo keeps a pull
+  # mirror of each one, so there is a second copy on hardware here that Kopia
+  # snapshots with the rest of the NAS. The mirrors are read-only, so a broken
+  # one can never leave GitHub stale.
+  #
+  # The token needs the `repo` scope, because the account has private
+  # repositories and a mirror of only the public half is not a backup.
+  sops.secrets.github-mirror-token = {};
+
+  systemd.services.forgejo-mirror = {
+    description = "Mirror every GitHub repository into Forgejo";
+    after = [ "podman-forgejo.service" "forgejo-init.service" ];
+    path = [ pkgs.curl pkgs.jq pkgs.podman pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.bash ];
+    serviceConfig = {
+      Type = "oneshot";
+      StateDirectory = "forgejo-mirror";
+    };
+    environment = {
+      FORGEJO_OWNER = "luca";
+      GITHUB_OWNER = "lsck0";
+      # how often Forgejo re-fetches each mirror on its own
+      MIRROR_INTERVAL = "8h";
+      FORGEJO_TOKEN_FILE = "/var/lib/forgejo-mirror/token";
+      GITHUB_TOKEN_FILE = config.sops.secrets.github-mirror-token.path;
+    };
+    script = ''
+      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
+
+      # A token of its own rather than the Homepage bot's: that one is
+      # deliberately read-only, and creating a mirror is a write.
+      #
+      # The name carries a timestamp because Forgejo refuses a duplicate with
+      # "access token name has been used already", and a run that creates the
+      # token but fails to capture it would otherwise never be able to retry.
+      # The value is the last field of "Access token was successfully
+      # created: <token>", and it is checked before it is stored rather than
+      # after: writing an empty file here is what makes every later run fail
+      # on a name that is already taken.
+      if [ ! -s /var/lib/forgejo-mirror/token ]; then
+        out=$(podman exec -u git forgejo forgejo admin user generate-access-token \
+          --username luca --token-name "mirror-$(date +%s)" \
+          --scopes write:repository,read:user)
+        tok=$(printf '%s' "$out" | tr -d '\r' | awk 'END {print $NF}')
+        case "$tok" in
+          ????????????????????????????????????????) ;;
+          *) echo "ERROR: unexpected output from generate-access-token: $out"; exit 1 ;;
+        esac
+        printf '%s' "$tok" > /var/lib/forgejo-mirror/token
+      fi
+
+      exec ${pkgs.bash}/bin/bash ${../scripts/forgejo-mirror.sh}
+    '';
+  };
+
+  # Daily: Forgejo does the fetching itself on MIRROR_INTERVAL, so all this has
+  # to catch is a repository that appeared on GitHub since the last run.
+  systemd.timers.forgejo-mirror = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "daily";
+      RandomizedDelaySec = "30m";
+      Persistent = true;
+    };
   };
 
   systemd.tmpfiles.rules = [
