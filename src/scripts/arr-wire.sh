@@ -476,9 +476,6 @@ wire_bazarr() {
     return
   fi
 
-  # Bazarr reads the languages profile once at start: a film synced before the
-  # profile changed keeps showing nothing missing until it is restarted, which
-  # is exactly how "no subtitles, nothing wanted" looked.
   # Bazarr reads the languages profile once at start, so a film synced before
   # the profile changed keeps reporting nothing missing until it restarts -
   # which is exactly how "no subtitles, and none wanted either" looked. Its own
@@ -490,6 +487,19 @@ wire_bazarr() {
   fi
   echo "bazarr: ${SUBTITLE_LANGUAGES// /+} subtitles from ${SUBTITLE_PROVIDERS// /, }"
 }
+
+# Prowlarr needs its own download client: "Grab" in its search UI hands the
+# release to Prowlarr, not to an *arr, so without one the button silently does
+# nothing. No root folders: Prowlarr does not manage files.
+wire_servarr prowlarr  "http://$PROWLARR_HOST:$PROWLARR_PORT"   v1 category     prowlarr
+wire_servarr radarr    "http://$RADARR_HOST:$RADARR_PORT"       v3 movieCategory radarr    /data/media/movies
+wire_jellyfin_notify radarr "http://$RADARR_HOST:$RADARR_PORT"
+wire_jellyfin_notify sonarr "http://$SONARR_HOST:$SONARR_PORT"
+wire_servarr sonarr    "http://$SONARR_HOST:$SONARR_PORT"       v3 tvCategory    sonarr    /data/media/tv /data/media/anime
+wire_servarr lidarr    "http://$LIDARR_HOST:$LIDARR_PORT"       v1 musicCategory lidarr    /data/media/music
+wire_servarr bookshelf "http://$BOOKSHELF_HOST:$BOOKSHELF_PORT" v1 bookCategory  bookshelf /data/media/books
+wire_prowlarr
+wire_jellyseerr
 wire_bazarr
 
 if [ "$pending" -eq 0 ]; then echo "media stack fully wired"; else echo "some steps pending, retrying on next run"; fi
