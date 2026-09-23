@@ -9,6 +9,14 @@ if [ -z "$PVE_TF_PASSWORD" ]; then
     echo "ERROR: Terraform Proxmox user password is required."
     exit 1
 fi
+# Optional second argument: the lldap bind password. Without it the LDAP realm
+# step is skipped rather than half-configured.
+LLDAP_BIND_PASSWORD="${2:-}"
+LLDAP_HOST="${LLDAP_HOST:-10.100.0.102}"
+LLDAP_PORT="${LLDAP_PORT:-3890}"
+LLDAP_BASE_DN="${LLDAP_BASE_DN:-dc=lsck0,dc=dev}"
+# the lldap group whose members get Administrator on the whole datacentre
+LLDAP_ADMIN_GROUP="${LLDAP_ADMIN_GROUP:-admins}"
 
 if ! command -v pveversion &>/dev/null; then
     echo "ERROR: This script expects Proxmox VE to be installed already."
@@ -174,3 +182,47 @@ HOMEPAGE_TOKEN="$(
 )"
 printf '%s\n' "$HOMEPAGE_TOKEN" > /root/homepage_token.txt
 chmod 600 /root/homepage_token.txt
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LDAP REALM (lldap)
+# ─────────────────────────────────────────────────────────────────────────────
+# So the one lldap account signs in here too, rather than Proxmox being the
+# odd one out with its own local password. Proxmox talks to lldap directly
+# rather than through Authelia: the web UI has no OIDC support in PVE 8, and
+# the API needs an auth source that a CLI can use.
+#
+# Proxmox names a synced group "<cn>-<realm>", so the lldap group "admins"
+# arrives as "admins-lldap". Users land as "<uid>@lldap".
+if [ -z "$LLDAP_BIND_PASSWORD" ]; then
+    echo ">>> No lldap bind password given, skipping the LDAP realm."
+else
+    echo ">>> Configuring the lldap LDAP realm..."
+    # The bind password lives in a file Proxmox owns; there is no CLI flag.
+    mkdir -p /etc/pve/priv/realm
+    printf '%s' "$LLDAP_BIND_PASSWORD" > /etc/pve/priv/realm/lldap.pw
+    chmod 600 /etc/pve/priv/realm/lldap.pw
+
+    # add or update: re-running init.sh must not fail on an existing realm.
+    REALM_VERB=add
+    pveum realm list --output-format json 2>/dev/null | grep -q '"lldap"' && REALM_VERB=modify
+    pveum realm "$REALM_VERB" lldap \
+        --type ldap \
+        --server1 "$LLDAP_HOST" \
+        --port "$LLDAP_PORT" \
+        --mode ldap \
+        --base_dn "ou=people,$LLDAP_BASE_DN" \
+        --user_attr uid \
+        --bind_dn "uid=admin,ou=people,$LLDAP_BASE_DN" \
+        --group_dn "ou=groups,$LLDAP_BASE_DN" \
+        --group_name_attr cn \
+        --group_classes groupOfUniqueNames \
+        --sync-defaults-options "enable-new=1,scope=both" \
+        --comment "lldap (single sign-on account store)"
+
+    pveum realm sync lldap
+    # Administrator on / for the lldap admins group. Idempotent: acl modify
+    # adds the entry and says nothing if it is already there.
+    pveum acl modify / --group "$LLDAP_ADMIN_GROUP-lldap" --role Administrator
+    echo ">>> lldap realm ready: sign in as <user>@lldap"
+fi

@@ -164,7 +164,11 @@ fi
 
 
 echo ">>> Configuring Proxmox (bridges + API token)..."
-"${SSH_CMD[@]}" root@"$TARGET_IP" "bash -s" < "$SCRIPT_DIR/pve-install.sh" "$PVE_TF_PASSWORD"
+# second argument wires the LDAP realm; without the secret the step is skipped
+LLDAP_BIND_PASSWORD=$(sops -d "$ROOT_DIR/src/secrets.json" 2>/dev/null \
+  | jq -r '."lldap-admin-password" // empty')
+"${SSH_CMD[@]}" root@"$TARGET_IP" "bash -s" < "$SCRIPT_DIR/pve-install.sh" \
+  "$PVE_TF_PASSWORD" "$LLDAP_BIND_PASSWORD"
 
 
 TOKEN_SECRET=$("${SSH_CMD[@]}" root@"$TARGET_IP" "cat /root/terraform_token.txt")
