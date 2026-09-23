@@ -14,7 +14,7 @@ pkgs.testers.runNixOSTest {
   };
 
   nodes.monitor = {
-    imports = [ ./stubs.nix ../instances/104-internal-grafana.nix ];
+    imports = [ ./stubs.nix ../instances/105-internal-grafana.nix ];
     _module.args.inventory = { };
     virtualisation.memorySize = 3072;
     environment.systemPackages = [ pkgs.curl pkgs.jq ];

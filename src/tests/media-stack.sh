@@ -85,48 +85,48 @@ run_app() {
 
 echo ">>> Starting containers (images from the NixOS configs)"
 DATA=(-v "$W/media:/data/media" -v "$W/torrents:/data/torrents")
-run_app qbittorrent "$(image 111-internal-qbittorrent qbittorrent)" 18080:8080 -e WEBUI_PORT=8080 \
+run_app qbittorrent "$(image 112-internal-qbittorrent qbittorrent)" 18080:8080 -e WEBUI_PORT=8080 \
   -v "$W/qbittorrent:/config" -v "$W/torrents:/data/torrents"
-run_app prowlarr  "$(image 128-internal-prowlarr prowlarr)"      19696:9696 -v "$W/prowlarr:/config" "${DATA[@]}"
-run_app radarr    "$(image 129-internal-radarr radarr)"          17878:7878 -v "$W/radarr:/config" "${DATA[@]}"
-run_app sonarr    "$(image 130-internal-sonarr sonarr)"          18989:8989 -v "$W/sonarr:/config" "${DATA[@]}"
-run_app lidarr    "$(image 135-internal-navidrome lidarr)"       18686:8686 -v "$W/lidarr:/config" "${DATA[@]}"
-run_app bookshelf "$(image 134-internal-audiobookshelf bookshelf)" 18787:8787 -v "$W/bookshelf:/config" "${DATA[@]}"
+run_app prowlarr  "$(image 129-internal-prowlarr prowlarr)"      19696:9696 -v "$W/prowlarr:/config" "${DATA[@]}"
+run_app radarr    "$(image 130-internal-radarr radarr)"          17878:7878 -v "$W/radarr:/config" "${DATA[@]}"
+run_app sonarr    "$(image 131-internal-sonarr sonarr)"          18989:8989 -v "$W/sonarr:/config" "${DATA[@]}"
+run_app lidarr    "$(image 136-internal-navidrome lidarr)"       18686:8686 -v "$W/lidarr:/config" "${DATA[@]}"
+run_app bookshelf "$(image 135-internal-audiobookshelf bookshelf)" 18787:8787 -v "$W/bookshelf:/config" "${DATA[@]}"
 mkdir -p "$W/jellyfin/config" "$W/jellyfin/cache"
-run_app jellyfin  "$(image 133-internal-jellyfin jellyfin)"      18096:8096 \
+run_app jellyfin  "$(image 134-internal-jellyfin jellyfin)"      18096:8096 \
   -v "$W/jellyfin/config:/config" -v "$W/jellyfin/cache:/cache" -v "$W/media:/data/media:ro"
-run_app jellyseerr "$(image 127-internal-jellyseerr jellyseerr)" 15055:5055 --init -e PORT=5055 -v "$W/jellyseerr:/app/config"
-run_app bazarr    "$(image 131-internal-bazarr bazarr)"          16767:6767 -v "$W/bazarr:/config" -v "$W/media:/data/media"
+run_app jellyseerr "$(image 128-internal-jellyseerr jellyseerr)" 15055:5055 --init -e PORT=5055 -v "$W/jellyseerr:/app/config"
+run_app bazarr    "$(image 132-internal-bazarr bazarr)"          16767:6767 -v "$W/bazarr:/config" -v "$W/media:/data/media"
 mkdir -p "$W/manga" "$W/books"
-run_app kavita    "$(image 136-internal-kavita kavita)"          15000:5000 -v "$W/kavita:/kavita/config" \
+run_app kavita    "$(image 137-internal-kavita kavita)"          15000:5000 -v "$W/kavita:/kavita/config" \
   -v "$W/media/manga:/manga:ro" -v "$W/media/books:/books:ro"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PER-VM SETUP UNITS
 # ─────────────────────────────────────────────────────────────────────────────
 Q="s#/var/lib/qbittorrent#$W/qbittorrent#g"
-run_unit 111-internal-qbittorrent qbittorrent-disable-auth "$Q" \
+run_unit 112-internal-qbittorrent qbittorrent-disable-auth "$Q" \
   "s#systemctl stop podman-qbittorrent.service#docker stop ${P}qbittorrent#" \
   "s#systemctl start podman-qbittorrent.service#docker start ${P}qbittorrent#"
 # the API whitelist lists the lab VMs; here the *arrs live on the test subnet.
 # Tor egress is left configured as in the lab (no real downloads happen).
-nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.111-internal-qbittorrent.config.systemd.units.\"qbittorrent-tor-proxy.service\".unit"
-QPREFS=$(nixeval 111-internal-qbittorrent systemd.services.qbittorrent-tor-proxy.script | grep -o '/nix/store/[^ ]*-qbittorrent-prefs.json')
+nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.112-internal-qbittorrent.config.systemd.units.\"qbittorrent-settings.service\".unit"
+QPREFS=$(nixeval 112-internal-qbittorrent systemd.services.qbittorrent-settings.script | grep -o '/nix/store/[^ ]*-qbittorrent-prefs.json')
 jq --arg s "$SUBNET" '.bypass_auth_subnet_whitelist = $s' "$QPREFS" > "$W/qbittorrent-prefs.json"
-run_unit 111-internal-qbittorrent qbittorrent-tor-proxy "$TOK" \
+run_unit 112-internal-qbittorrent qbittorrent-settings "$TOK" \
   "s#$QPREFS#$W/qbittorrent-prefs.json#" \
   "s#podman exec qbittorrent#podman exec ${P}qbittorrent#"
 
-for app in prowlarr:128-internal-prowlarr radarr:129-internal-radarr sonarr:130-internal-sonarr \
-           lidarr:135-internal-navidrome bookshelf:134-internal-audiobookshelf; do
+for app in prowlarr:129-internal-prowlarr radarr:130-internal-radarr sonarr:131-internal-sonarr \
+           lidarr:136-internal-navidrome bookshelf:135-internal-audiobookshelf; do
   name=${app%%:*}; host=${app#*:}
   run_unit "$host" "$name-setup" "$TOK" "s#/var/lib/$name#$W/$name#g" \
     "s#systemctl stop podman-$name.service#docker stop $P$name#" "s#systemctl start podman-$name.service#docker start $P$name#"
 done
 
-run_unit 133-internal-jellyfin jellyfin-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:18096#g"
-run_unit 127-internal-jellyseerr jellyseerr-token "$TOK" "s#/var/lib/jellyseerr#$W/jellyseerr#g"
-run_unit 131-internal-bazarr bazarr-token "$TOK" "s#/var/lib/bazarr#$W/bazarr#g"
+run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:18096#g"
+run_unit 128-internal-jellyseerr jellyseerr-token "$TOK" "s#/var/lib/jellyseerr#$W/jellyseerr#g"
+run_unit 132-internal-bazarr bazarr-token "$TOK" "s#/var/lib/bazarr#$W/bazarr#g"
 # an install from before generated passwords: admin with the old default, which
 # the unit must move to the generated one.
 for i in $(seq 1 60); do
@@ -136,15 +136,15 @@ for i in $(seq 1 60); do
     -d '{"username":"admin","password":"Admin123!"}' >/dev/null && break
   sleep 5
 done
-run_unit 136-internal-kavita kavita-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:15000#g"
+run_unit 137-internal-kavita kavita-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:15000#g"
 
 echo ">>> Exported tokens: $(cd "$W/tokens" && echo *)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ARR-WIRE (THE REAL SCRIPT BUILT FOR VM-132, RUN ON THE TEST NETWORK)
 # ─────────────────────────────────────────────────────────────────────────────
-nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.132-internal-recyclarr.config.systemd.services.arr-wire.serviceConfig.ExecStart"
-WIRE=$(nixeval 132-internal-recyclarr systemd.services.arr-wire.serviceConfig.ExecStart)
+nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.133-internal-recyclarr.config.systemd.services.arr-wire.serviceConfig.ExecStart"
+WIRE=$(nixeval 133-internal-recyclarr systemd.services.arr-wire.serviceConfig.ExecStart)
 arr_wire() {
   docker run --rm --network "$NET" -v /nix/store:/nix/store:ro -v "$W/tokens:/tokens" \
     -e TOKEN_DIR=/tokens \
@@ -244,7 +244,7 @@ if echo "$out" | grep -vE "unreachable, skipped" | grep -qE "added|connected|ini
 # ─────────────────────────────────────────────────────────────────────────────
 echo ">>> Janitorr with the config NixOS renders"
 mkdir -p "$W/janitorr/logs" "$W/janitorr/stats"; chmod -R 777 "$W/janitorr"
-run_unit 133-internal-jellyfin janitorr-config "$TOK" "s#/var/lib/janitorr#$W/janitorr#g" "s#chown 1000:1000#true#"
+run_unit 134-internal-jellyfin janitorr-config "$TOK" "s#/var/lib/janitorr#$W/janitorr#g" "s#chown 1000:1000#true#"
 for f in application.yml stats.yml; do
   sed -i -e 's#http://10.100.0.131#http://sonarr:8989#; s#http://10.100.0.130#http://radarr:7878#' \
          -e 's#http://10.100.0.134#http://jellyfin:8096#; s#http://10.100.0.128#http://jellyseerr:5055#' \
@@ -254,10 +254,10 @@ chmod 644 "$W/janitorr/"*.yml
 docker rm -f "${P}janitorr-stats" "${P}janitorr" >/dev/null 2>&1 || true
 docker run -d --name "${P}janitorr-stats" --network "$NET" --network-alias janitorr-stats \
   -v "$W/janitorr/stats.yml:/work/config/application.yml:ro" -v "$W/janitorr/stats:/data" \
-  "$(image 133-internal-jellyfin janitorr-stats)" >/dev/null
+  "$(image 134-internal-jellyfin janitorr-stats)" >/dev/null
 docker run -d --name "${P}janitorr" --network "$NET" --user 1000:1000 -e SERVER_PORT=8082 --memory=512m \
   -v "$W/janitorr/application.yml:/config/application.yml:ro" -v "$W/janitorr/logs:/logs" "${DATA[@]}" \
-  "$(image 133-internal-jellyfin janitorr)" >/dev/null
+  "$(image 134-internal-jellyfin janitorr)" >/dev/null
 sleep 90
 check "janitorr-stats running" sh -c "[ \"\$(docker inspect -f '{{.State.Running}}' ${P}janitorr-stats)\" = true ]"
 check "janitorr running" sh -c "[ \"\$(docker inspect -f '{{.State.Running}}' ${P}janitorr)\" = true ]"

@@ -6,37 +6,43 @@ let
   # 104 is the terminal dashboard collector (transfer rates and torrent list).
   apiClients = map (id: "10.100.0.${toString id}/32") [ 100 104 114 130 131 133 135 136 ];
 
-  # route all traffic through the Tor SOCKS5 gateway on vm-113.
+  # Peer traffic goes out directly. It used to go through the Tor SOCKS5
+  # gateway on vm-113, and that is simply not a thing BitTorrent can do:
+  # SOCKS5 over Tor carries TCP only, so every udp:// tracker announce came
+  # back "Permission denied", DHT and uTP were impossible, and exit nodes drop
+  # the peer protocol. The symptom was a torrent that knew about nine seeds and
+  # held zero connections to any of them, with connection_status "firewalled".
   #
-  # Tor carries TCP only, so DHT, PEX and LSD are turned off here: they are UDP
-  # or LAN broadcast and would otherwise bypass the proxy and expose the real
-  # WAN address. That also means peers are only discovered through trackers,
-  # and inbound connections cannot arrive at all, so swarms will be small and
-  # slow. A WireGuard VPN is the better tool if the goal is throughput.
+  # The indexer side is unaffected: Prowlarr still searches through the same
+  # Tor gateway (a Socks5 indexer proxy, configured by arr-wire.sh), which is
+  # plain HTTP and works fine. Searches stay private; the swarm sees this
+  # WAN address.
   prefs = pkgs.writeText "qbittorrent-prefs.json" (builtins.toJSON {
-    proxy_type = "SOCKS5";
-    proxy_ip = "10.100.0.113";
-    proxy_port = 9050;
-    proxy_auth_enabled = false;
-    proxy_hostname_lookup = true;
-    proxy_bittorrent = true;
-    proxy_peer_connections = true;
-    proxy_misc = true;
-    proxy_rss = true;
-    anonymous_mode = true;
+    proxy_type = "None";
+    proxy_bittorrent = false;
+    proxy_peer_connections = false;
+    proxy_misc = false;
+    proxy_rss = false;
+    # anonymous_mode suppresses the client fingerprint and the IP in tracker
+    # announces. Without a proxy it buys little and some private trackers
+    # refuse it, but it costs nothing on public ones.
+    anonymous_mode = false;
     save_path = "/data/torrents";
     bypass_auth_subnet_whitelist_enabled = true;
     bypass_auth_subnet_whitelist = lib.concatStringsSep ", " apiClients;
-    dht = false;
-    pex = false;
-    lsd = false;
-    # one download at a time. Everything goes through a single Tor circuit, so
-    # parallel torrents split one slow pipe and all of them crawl; serialising
-    # them means the first finishes at whatever speed the circuit allows.
-    # Seeding is not capped, only active downloads.
+    # back on: these are how a swarm is actually found. They were off only
+    # because UDP cannot cross a SOCKS5 proxy.
+    dht = true;
+    pex = true;
+    lsd = true;
+    # 6881 is forwarded on the router, so peers can open connections inward
+    # rather than only being dialled out to.
+    listen_port = 6881;
+    random_port = false;
+    upnp = false;
     queueing_enabled = true;
-    max_active_downloads = 1;
-    max_active_torrents = 6;
+    max_active_downloads = 5;
+    max_active_torrents = 10;
     max_active_uploads = 5;
     dont_count_slow_torrents = true;
   });
@@ -92,8 +98,8 @@ in {
     '';
   };
 
-  systemd.services.qbittorrent-tor-proxy = {
-    description = "Configure qBittorrent: Tor SOCKS5 proxy, save path, API whitelist, WebUI password";
+  systemd.services.qbittorrent-settings = {
+    description = "Configure qBittorrent: peer settings, save path, API whitelist, WebUI password";
     after = [ "podman-qbittorrent.service" "qbittorrent-disable-auth.service" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.podman pkgs.jq pkgs.openssl ];
@@ -118,7 +124,7 @@ in {
 
       prefs=$(jq -c --rawfile p $T/qbittorrent-pass.token '. + { web_ui_username: "admin", web_ui_password: $p }' ${prefs})
       curl -fsS -X POST "$API/app/setPreferences" --data-urlencode "json=$prefs"
-      echo "qBittorrent proxied via Tor (10.100.0.113:9050)"
+      echo "qBittorrent configured: direct peer traffic, DHT/PEX/LSD on, 5 active downloads"
     '';
   };
 
