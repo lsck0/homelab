@@ -201,6 +201,11 @@ in {
       [ -n "$KEY" ] && echo -n "$KEY" > ${T}/jellyfin-key.token
 
       # libraries on the shared media layout.
+      #
+      # EnableRealtimeMonitor is left on but does nothing here: it is inotify,
+      # and the library is an NFS mount, which does not deliver inotify events.
+      # What actually keeps the library current is the Jellyfin notification
+      # Radarr and Sonarr carry (arr-wire.sh), which asks for a scan on import.
       have=$(api $J/Library/VirtualFolders | jq -r '.[].Name')
       lib() { # name collectionType path
         echo "$have" | grep -qx "$1" && return 0
@@ -210,6 +215,35 @@ in {
       lib Movies movies /data/media/movies
       lib Shows tvshows /data/media/tv
       lib Anime tvshows /data/media/anime
+
+      # Metadata. A library created by the call above has internet providers
+      # off and no fetchers at all, which is a shelf of filenames: the one
+      # film that did match only did so because Radarr had named its folder
+      # "The Odyssey (2026)". Corrected on every run rather than only at
+      # creation, because the libraries already existed when this was noticed.
+      fetchers() { # jq array of type names -> TypeOptions for those types
+        jq -cn --argjson types "$1" '[$types[] | {
+          Type: .,
+          MetadataFetchers: ["TheMovieDb"], MetadataFetcherOrder: ["TheMovieDb"],
+          ImageFetchers: ["TheMovieDb"],    ImageFetcherOrder: ["TheMovieDb"],
+          ImageOptions: []
+        }]'
+      }
+      api $J/Library/VirtualFolders | jq -c '.[]' | while read -r folder; do
+        name=$(echo "$folder" | jq -r .Name)
+        [ "$(echo "$folder" | jq -r '.LibraryOptions.EnableInternetProviders')" = true ] && continue
+        case "$(echo "$folder" | jq -r .CollectionType)" in
+          movies)  types='["Movie"]' ;;
+          tvshows) types='["Series","Season","Episode"]' ;;
+          *) continue ;;
+        esac
+        body=$(echo "$folder" | jq -c --argjson t "$(fetchers "$types")" \
+          '{Id: .ItemId, LibraryOptions: (.LibraryOptions
+             | .EnableInternetProviders = true
+             | .TypeOptions = $t)}')
+        api -X POST "$J/Library/VirtualFolders/LibraryOptions" -d "$body" \
+          && echo "library $name: metadata fetching enabled"
+      done
 
       # Janitorr needs a real user with deletion rights, not only an API key.
       [ -s ${T}/janitorr-pass.token ] || openssl rand -hex 16 | tr -d '\n' > ${T}/janitorr-pass.token

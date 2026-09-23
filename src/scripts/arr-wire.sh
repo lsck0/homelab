@@ -411,46 +411,85 @@ wire_jellyseerr() {
 # ─────────────────────────────────────────────────────────────────────────────
 # BAZARR
 # ─────────────────────────────────────────────────────────────────────────────
+# Subtitle languages, in the order Bazarr should prefer them. One profile
+# holds both, and it is the default for films and for series.
+SUBTITLE_LANGUAGES=${SUBTITLE_LANGUAGES:-de en}
+# Providers that need no account. opensubtitles.com is the best source for
+# German but wants credentials, so it is left out rather than configured
+# half-way and failing on every search.
+# subf2m is left out: it throttles itself for twelve hours on every search
+# with "'User-agent config missing'" unless a user agent is configured.
+SUBTITLE_PROVIDERS=${SUBTITLE_PROVIDERS:-podnapisi gestdown tvsubtitles yifysubtitles}
+
 wire_bazarr() {
-  local B="$BAZARR_URL/api" bk rk sk
+  local B="$BAZARR_URL/api" bk rk sk cur want args=()
   if ! { bk=$(key bazarr-key) && rk=$(key radarr-key) && sk=$(key sonarr-key); }; then
     later "bazarr: waiting for API keys"; return
   fi
-  [ "$(curl -sf -H "X-API-KEY: $bk" "$B/system/settings" | jq -r '.general.use_radarr // empty')" = true ] && return
-  if curl -sf -X POST -H "X-API-KEY: $bk" "$B/system/settings" \
-    --data-urlencode "settings-general-use_radarr=true" \
-    --data-urlencode "settings-general-use_sonarr=true" \
-    --data-urlencode "settings-radarr-ip=$RADARR_HOST" \
-    --data-urlencode "settings-radarr-port=$RADARR_PORT" \
-    --data-urlencode "settings-radarr-apikey=$rk" \
-    --data-urlencode "settings-sonarr-ip=$SONARR_HOST" \
-    --data-urlencode "settings-sonarr-port=$SONARR_PORT" \
-    --data-urlencode "settings-sonarr-apikey=$sk" \
-    --data-urlencode "settings-general-enabled_providers=podnapisi" \
-    --data-urlencode "languages-enabled=en" \
-    --data-urlencode 'languages-profiles=[{"profileId":1,"name":"English","cutoff":null,"items":[{"id":1,"language":"en","audio_exclude":"False","hi":"False","forced":"False"}],"mustContain":[],"mustNotContain":[],"originalFormat":false}]' \
-    --data-urlencode "settings-general-serie_default_enabled=true" \
-    --data-urlencode "settings-general-serie_default_profile=1" \
-    --data-urlencode "settings-general-movie_default_enabled=true" \
-    --data-urlencode "settings-general-movie_default_profile=1" >/dev/null; then
-    echo "bazarr: connected Radarr + Sonarr"
-  else
-    later "bazarr: settings update failed"
-  fi
-}
+  cur=$(curl -sf -H "X-API-KEY: $bk" "$B/system/settings") || { later "bazarr: unreachable"; return; }
 
-# Prowlarr needs its own download client: "Grab" in its search UI hands the
-# release to Prowlarr, not to an *arr, so without one the button silently does
-# nothing. No root folders: Prowlarr does not manage files.
-wire_servarr prowlarr  "http://$PROWLARR_HOST:$PROWLARR_PORT"   v1 category     prowlarr
-wire_servarr radarr    "http://$RADARR_HOST:$RADARR_PORT"       v3 movieCategory radarr    /data/media/movies
-wire_jellyfin_notify radarr "http://$RADARR_HOST:$RADARR_PORT"
-wire_jellyfin_notify sonarr "http://$SONARR_HOST:$SONARR_PORT"
-wire_servarr sonarr    "http://$SONARR_HOST:$SONARR_PORT"       v3 tvCategory    sonarr    /data/media/tv /data/media/anime
-wire_servarr lidarr    "http://$LIDARR_HOST:$LIDARR_PORT"       v1 musicCategory lidarr    /data/media/music
-wire_servarr bookshelf "http://$BOOKSHELF_HOST:$BOOKSHELF_PORT" v1 bookCategory  bookshelf /data/media/books
-wire_prowlarr
-wire_jellyseerr
+  # Everything below is sent on every run, not only when Bazarr is unconfigured.
+  # It used to return early once use_radarr was true, which is why Bazarr spent
+  # the time since the renumber pointed at 10.100.0.129 - Prowlarr - and every
+  # sync died on Prowlarr's answer to a Radarr URL:
+  #   JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+  #     ... in radarr/rootfolder.py, get_radarr_rootfolder
+  local profile items i=0 lang
+  items=""
+  for lang in $SUBTITLE_LANGUAGES; do
+    i=$((i + 1))
+    # audio_only_include is not optional: without it every indexer run dies
+    # with KeyError: 'audio_only_include' in list_missing_subtitles_movies,
+    # and the settings POST that triggers one answers 500.
+    items="$items${items:+,}$(jq -cn --arg l "$lang" --argjson id "$i" \
+      '{id: $id, language: $l, audio_exclude: "False", audio_only_include: "False",
+        hi: "False", forced: "False"}')"
+  done
+  profile=$(jq -cn --argjson items "[$items]" --arg n "$(echo "$SUBTITLE_LANGUAGES" | tr ' ' '+')" \
+    '[{profileId: 1, name: $n, cutoff: null, items: $items,
+       mustContain: [], mustNotContain: [], originalFormat: false, tag: null}]')
+
+  args=(
+    --data-urlencode "settings-general-use_radarr=true"
+    --data-urlencode "settings-general-use_sonarr=true"
+    --data-urlencode "settings-radarr-ip=$RADARR_HOST"
+    --data-urlencode "settings-radarr-port=$RADARR_PORT"
+    --data-urlencode "settings-radarr-apikey=$rk"
+    --data-urlencode "settings-sonarr-ip=$SONARR_HOST"
+    --data-urlencode "settings-sonarr-port=$SONARR_PORT"
+    --data-urlencode "settings-sonarr-apikey=$sk"
+    --data-urlencode "languages-profiles=$profile"
+    --data-urlencode "settings-general-serie_default_enabled=true"
+    --data-urlencode "settings-general-serie_default_profile=1"
+    --data-urlencode "settings-general-movie_default_enabled=true"
+    --data-urlencode "settings-general-movie_default_profile=1"
+  )
+  for p in $SUBTITLE_PROVIDERS; do
+    args+=(--data-urlencode "settings-general-enabled_providers=$p")
+  done
+  for lang in $SUBTITLE_LANGUAGES; do
+    args+=(--data-urlencode "languages-enabled=$lang")
+  done
+
+  if ! curl -sf -X POST -H "X-API-KEY: $bk" "$B/system/settings" "${args[@]}" >/dev/null; then
+    later "bazarr: settings update failed"
+    return
+  fi
+
+  # Bazarr reads the languages profile once at start: a film synced before the
+  # profile changed keeps showing nothing missing until it is restarted, which
+  # is exactly how "no subtitles, nothing wanted" looked.
+  # Bazarr reads the languages profile once at start, so a film synced before
+  # the profile changed keeps reporting nothing missing until it restarts -
+  # which is exactly how "no subtitles, and none wanted either" looked. Its own
+  # endpoint, because this script runs on another VM and cannot touch the
+  # container.
+  if [ "$(echo "$cur" | jq -r '[.radarr.ip, .sonarr.ip] | join(",")')" != "$RADARR_HOST,$SONARR_HOST" ]; then
+    echo "bazarr: corrected the Radarr/Sonarr addresses, restarting it to reload the profile"
+    curl -sf -X POST -H "X-API-KEY: $bk" "$B/system?action=restart" >/dev/null || true
+  fi
+  echo "bazarr: ${SUBTITLE_LANGUAGES// /+} subtitles from ${SUBTITLE_PROVIDERS// /, }"
+}
 wire_bazarr
 
 if [ "$pending" -eq 0 ]; then echo "media stack fully wired"; else echo "some steps pending, retrying on next run"; fi
