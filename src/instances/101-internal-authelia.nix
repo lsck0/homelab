@@ -81,6 +81,13 @@ let
       secretName = "kavita-oidc-secret";
       # ASP.NET Core's OpenIdConnectHandler sends the secret in the body.
       tokenAuthMethod = "client_secret_post";
+      # Kavita asks for a refresh token, and Authelia refuses a scope a client
+      # is not registered for rather than ignoring it:
+      #   invalid_scope ... The OAuth 2.0 Client is not allowed to request
+      #   scope 'offline_access'
+      # Only this client gets it; a refresh token that outlives the session is
+      # not something to hand out by default.
+      scopes = [ "openid" "profile" "email" "groups" "offline_access" ];
       redirectUris = [ "https://read.lsck0.dev/signin-oidc" ];
     }
   ];
@@ -107,10 +114,7 @@ let
     "        redirect_uris:"
   ] ++ map (u: "          - ${u}") c.redirectUris ++ [
     "        scopes:"
-    "          - openid"
-    "          - profile"
-    "          - email"
-    "          - groups"
+  ] ++ map (sc: "          - ${sc}") (c.scopes or [ "openid" "profile" "email" "groups" ]) ++ [
   ]) + "\n";
 in {
   networking.hostName = "vm-101";
