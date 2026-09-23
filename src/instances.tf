@@ -109,10 +109,11 @@ locals {
       type    = "internal",
     }
     "117" = { # CI runners for GitHub repos (ephemeral, one systemd unit per replica)
-      # off until the github-runner-token secret is filled: without it every
-      # runner unit dies on start and sync.sh exits 1 for the whole lab.
-      #   sops set src/secrets.json '["github-runner-token"]' '"ghp_..."'
-      enabled = false,
+      # github-runner-token is filled. It is currently the gh CLI's own token,
+      # which registers runners (the API answers 201), but `gh auth login`
+      # rotates it - swap in a fine-grained PAT with Administration: read and
+      # write when that becomes annoying.
+      enabled = true,
       name    = "117-internal-github-runner",
       type    = "internal",
       memory  = 4096,
@@ -126,50 +127,50 @@ locals {
     }
 
     "119" = { # password manager (Bitwarden-compatible)
-      enabled = false,
+      enabled = true,
       name    = "119-internal-vaultwarden",
       type    = "internal",
     }
     "120" = { # files / groupware cloud
-      enabled = false,
+      enabled = true,
       name    = "120-internal-nextcloud",
       type    = "internal",
     }
     "121" = { # document management (paperless-ngx)
-      enabled = false,
+      enabled = true,
       name    = "121-internal-paperless",
       type    = "internal",
       memory  = 2048,
     }
     "122" = { # AI auto-tagging for paperless
-      enabled = false,
+      enabled = true,
       name    = "122-internal-paperless-ai",
       type    = "internal",
       memory  = 2048,
     }
     "123" = { # wiki / knowledge base
-      enabled = false,
+      enabled = true,
       name    = "123-internal-wikijs",
       type    = "internal",
     }
     "124" = { # Firefly III personal finance
-      enabled = false,
+      enabled = true,
       name    = "124-internal-firefly",
       type    = "internal",
     }
 
     "125" = { # home automation hub
-      enabled = false,
+      enabled = true,
       name    = "125-internal-homeassistant",
       type    = "internal",
     }
     "126" = { # automation agents / scraping
-      enabled = false,
+      enabled = true,
       name    = "126-internal-huginn",
       type    = "internal",
     }
     "127" = { # MQTT broker (Home Assistant / IoT)
-      enabled = false,
+      enabled = true,
       name    = "127-internal-mosquitto",
       type    = "internal",
     }
@@ -234,7 +235,7 @@ locals {
       # Internal, not the DMZ: it decides which machines are on the mesh, so it
       # is a trust anchor rather than something to expose alongside the public
       # services. The external Traefik relays it in for client registration.
-      enabled = false,
+      enabled = true,
       name    = "138-internal-headscale",
       type    = "internal",
     }
@@ -246,7 +247,7 @@ locals {
       type    = "external",
     }
     "202" = { # non-exit Tor relay
-      enabled = false,
+      enabled = true,
       name    = "202-external-tor-relay",
       type    = "external",
     }
@@ -261,17 +262,17 @@ locals {
       type    = "external",
     }
     "205" = { # URL shortener
-      enabled = false,
+      enabled = true,
       name    = "205-external-shlink",
       type    = "external",
     }
     "206" = { # encrypted pastebin
-      enabled = false,
+      enabled = true,
       name    = "206-external-privatebin",
       type    = "external",
     }
     "207" = { # public file sharing
-      enabled = false,
+      enabled = true,
       name    = "207-external-share",
       type    = "external",
     }
@@ -284,7 +285,7 @@ locals {
       disk    = 16,
     }
     "209" = { # app host: Docker Swarm stacks deployed by CI (Forgejo + GitHub)
-      enabled = false,
+      enabled = true,
       name    = "209-external-hello",
       type    = "external",
       memory  = 2048,
