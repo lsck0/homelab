@@ -11,7 +11,10 @@ let
   stack = "${dir}/single-node";
 
   # compose override: keep the indexer and manager API on loopback (Docker
-  # publishes ports past the NixOS firewall), and add the syslog receiver.
+  # publishes ports past the NixOS firewall), add the syslog receiver, and
+  # mount the two security files that teach the indexer about lldap. They are
+  # written at runtime by wazuh-ldap.service rather than coming from the nix
+  # store, because one of them carries the LDAP bind password.
   override = pkgs.writeText "wazuh-override.yml" ''
     services:
       wazuh.manager:
@@ -21,6 +24,9 @@ let
       wazuh.indexer:
         ports: !override
           - "127.0.0.1:9200:9200"
+        volumes:
+          - ${stack}/config/wazuh_indexer/config.yml:/usr/share/wazuh-indexer/config/opensearch-security/config.yml
+          - ${stack}/config/wazuh_indexer/roles_mapping.yml:/usr/share/wazuh-indexer/config/opensearch-security/roles_mapping.yml
   '';
 
   # every VM forwards its journal here over syslog (modules/base.nix).
@@ -46,6 +52,7 @@ in {
   # kibanaserver is the dashboard's own service account, never typed by a human,
   # so it keeps a generated password.
   sops.secrets.authelia-admin-pass = {};
+  sops.secrets.lldap-admin-password = {};
   virtualisation.docker.enable = true;
   boot.kernel.sysctl."vm.max_map_count" = 262144;
 
@@ -127,6 +134,40 @@ in {
         echo "WARNING: rotate it with src/scripts/wazuh-rotate-admin.sh (needs the admin cert)." >&2
       fi
     '';
+  };
+
+  # Sign in with the lldap account rather than the indexer's own user
+  # database. Runs after the stack is up because it pushes the configuration
+  # into the running cluster, not just onto disk.
+  # The files must exist before the stack starts: Docker creates a directory
+  # where a bind-mount source is missing, and the indexer then refuses to
+  # start at all with "Are you trying to mount a directory onto a file".
+  systemd.services.wazuh-ldap-files = {
+    description = "Write the Wazuh indexer's lldap security files";
+    before = [ "wazuh.service" ];
+    requiredBy = [ "wazuh.service" ];
+    path = [ pkgs.coreutils ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    environment.LDAP_BIND_PASSWORD_FILE = config.sops.secrets.lldap-admin-password.path;
+    script = "exec ${pkgs.bash}/bin/bash ${../scripts/wazuh-ldap.sh} write";
+  };
+
+  systemd.services.wazuh-ldap = {
+    description = "Point the Wazuh indexer at lldap";
+    after = [ "wazuh.service" ];
+    requires = [ "wazuh.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.docker pkgs.coreutils pkgs.gnugrep ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      WorkingDirectory = stack;
+      TimeoutStartSec = "10min";
+      Restart = "on-failure";
+      RestartSec = 60;
+    };
+    environment.LDAP_BIND_PASSWORD_FILE = config.sops.secrets.lldap-admin-password.path;
+    script = "exec ${pkgs.bash}/bin/bash ${../scripts/wazuh-ldap.sh}";
   };
 
   systemd.services.wazuh = {
