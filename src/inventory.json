@@ -154,7 +154,7 @@
   },
   "117": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.117",
     "name": "117-internal-github-runner",
@@ -172,7 +172,7 @@
   },
   "119": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.119",
     "name": "119-internal-vaultwarden",
@@ -181,7 +181,7 @@
   },
   "120": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.120",
     "name": "120-internal-nextcloud",
@@ -190,7 +190,7 @@
   },
   "121": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.121",
     "name": "121-internal-paperless",
@@ -199,7 +199,7 @@
   },
   "122": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.122",
     "name": "122-internal-paperless-ai",
@@ -208,7 +208,7 @@
   },
   "123": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.123",
     "name": "123-internal-wikijs",
@@ -217,7 +217,7 @@
   },
   "124": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.124",
     "name": "124-internal-firefly",
@@ -226,7 +226,7 @@
   },
   "125": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.125",
     "name": "125-internal-homeassistant",
@@ -235,7 +235,7 @@
   },
   "126": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.126",
     "name": "126-internal-huginn",
@@ -244,7 +244,7 @@
   },
   "127": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.127",
     "name": "127-internal-mosquitto",
@@ -343,7 +343,7 @@
   },
   "138": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.138",
     "name": "138-internal-headscale",
@@ -361,7 +361,7 @@
   },
   "202": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.202",
     "name": "202-external-tor-relay",
@@ -388,7 +388,7 @@
   },
   "205": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.205",
     "name": "205-external-shlink",
@@ -397,7 +397,7 @@
   },
   "206": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.206",
     "name": "206-external-privatebin",
@@ -406,7 +406,7 @@
   },
   "207": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.207",
     "name": "207-external-share",
@@ -424,7 +424,7 @@
   },
   "209": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.209",
     "name": "209-external-hello",
