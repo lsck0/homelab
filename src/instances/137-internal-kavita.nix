@@ -1,4 +1,4 @@
-{ config, pkgs, nasMount, nasMedia, nasPath, ... }: {
+{ config, pkgs, nasMount, nasMedia, nasPath, retry, ... }: {
   networking.hostName = "vm-137";
 
   fileSystems = nasMount "/var/lib/kavita" "kavita"
@@ -36,6 +36,30 @@
       # community extension store (sources). Install sources in the UI.
       EXTENSION_STORES = ''["https://raw.githubusercontent.com/keiyoushi/extensions/repo/index.min.json"]'';
     };
+  };
+
+  # Suwayomi starts with no sources but "Local source", so a fresh instance
+  # can search nothing at all. Installing them by hand in the UI is state that
+  # does not survive a rebuild, so it is declared here instead.
+  systemd.services.suwayomi-sources = {
+    description = "Install Suwayomi's manga sources";
+    after = [ "podman-suwayomi.service" ];
+    requires = [ "podman-suwayomi.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.curl pkgs.jq pkgs.coreutils ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      # the extension store is a third party; a bad morning there should not
+      # leave this permanently unconfigured
+      Restart = "on-failure";
+      RestartSec = 300;
+      TimeoutStartSec = "20min";
+    };
+    script = ''
+      ${retry} 60 5 curl -sf http://127.0.0.1:4567/api/v1/settings/about
+      exec ${pkgs.bash}/bin/bash ${../scripts/suwayomi-sources.sh}
+    '';
   };
 
   systemd.tmpfiles.rules = [
