@@ -127,8 +127,19 @@ resource "proxmox_virtual_environment_vm" "vm" {
   lifecycle {
     # file_id is only the image a disk was created from; imported VMs (see
     # src/scripts/renumber.sh) have none, and a diff there must never replace a VM.
+    #
+    # Only user_account of initialization, not the whole block. Ignoring all of
+    # it also ignored ip_config, so an address could be written once and never
+    # corrected: renumber.sh imported these VMs with addresses derived from
+    # their position in the list rather than their vmid, and 44 of 45 kept an
+    # address belonging to a different VM while `terraform plan` reported no
+    # changes. It stayed hidden because network.nix sets the address statically
+    # from the inventory, so cloud-init only decides where a VM sits on its
+    # first boot - and there a fresh VM came up on an address a running VM
+    # already held. user_account still has to be ignored: the provider cannot
+    # read back a password it never stored, so it diffs on every plan.
     ignore_changes = [
-      initialization,
+      initialization[0].user_account,
       mac_addresses,
       disk[0].file_id,
     ]
