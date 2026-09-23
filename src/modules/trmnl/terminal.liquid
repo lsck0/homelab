@@ -9,8 +9,8 @@ widths all arrive ready to render.
 
 Monochrome e-ink, 800x480. No colour to spend, so state is carried by shape:
 a filled square is up and a hollow one is down. VMs switched off on purpose
-are named in one grey line at the foot of the grid rather than given a row
-each - eighteen rows reading 0/0 for ever is where the free space went.
+get no row at all - eighteen rows reading 0/0 for ever is where the free
+space went - and the Services tile carries their count.
 
 Kept flat, one tag per line. Do not run "Fix indentation" on it.
 {%- endcomment -%}
@@ -23,10 +23,16 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
    markup editor previews in a container far taller than it is tall: the rows
    stretched past the visible area and only three of the month's six weeks
    fitted. 100% tracks whatever TRMNL hands us, and min-height keeps the
-   layout from collapsing if that parent turns out to have no definite
-   height, which is what made an earlier version render blank. max-height
-   keeps the content clear of the title bar, which is drawn over the page. */
-.hl { display: flex; flex-direction: column; height: 100%; min-height: 422px; max-height: calc(100vh - 58px); width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
+   A fixed 452px, not a percentage. TRMNL's container has no definite
+   height of its own, so height:100% collapsed and every child laid out at
+   its natural size and ran off the bottom of the panel - which is how the
+   footer ended up below the screen. This markup only ever goes to
+   markup_full, which is the whole 800x480 screen, and content starts 18px
+   down, so 452 is the panel less that offset and a 10px margin.
+   Measure changes against a device screenshot and not a local render:
+   TRMNL's font is not the one chromium picks here, and the same markup came
+   out 18px shorter in the band and 10px taller in the grid. */
+.hl { display: flex; flex-direction: column; height: 452px; max-height: 452px; width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
 
 /* ---- headline numbers ------------------------------------------------- */
 .hl-top { display: flex; gap: 6px; flex: 0 0 auto; }
@@ -59,8 +65,6 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .hl-bars { flex: 0 0 34px; display: flex; flex-direction: column; gap: 2px; }
 .hl-bar { height: 4px; background: #d2d2d2; }
 .hl-bar span { display: block; height: 100%; background: #000; }
-.hl-off { width: 100%; font-size: 11px; line-height: 1.25; color: #555; border-top: 1px solid #d2d2d2; margin-top: 2px; padding-top: 2px; }
-.hl-off b { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #000; }
 
 /* ---- who is calling ---------------------------------------------------- */
 /* The Prometheus metrics know nothing about clients, so this band comes from
@@ -88,6 +92,17 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .hl-who-l em { font-style: normal; font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #555; }
 .hl-who-l span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; padding-left: 2px; }
 .hl-who-l b { flex: 0 0 auto; font-variant-numeric: tabular-nums; padding-right: 2px; }
+
+/* ---- footer ------------------------------------------------------------ */
+/* TRMNL's own title_bar is not used. It reserves 52px at the foot of an
+   800x480 panel to draw a plugin name and a timestamp, most of which is
+   white; this says the same in 16px and gives the rest back to the clients
+   band. Measured on a device screenshot: dropping title_bar moved the
+   content's bottom edge from 426 to 464. */
+.hl-foot { flex: 0 0 auto; display: flex; justify-content: space-between; gap: 10px; font-size: 11px; line-height: 1.3; }
+.hl-foot b { font-weight: 700; letter-spacing: .10em; text-transform: uppercase; }
+.hl-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hl-foot em { font-style: normal; font-weight: 700; }
 
 /* ---- side panels ------------------------------------------------------ */
 .hl-side { flex: 0 0 216px; min-width: 0; display: flex; flex-direction: column; gap: 5px; min-height: 0; }
@@ -154,9 +169,6 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 <span class="hl-bars"><span class="hl-bar"><span style="width:{{ s.cpu_pct }}%"></span></span><span class="hl-bar"><span style="width:{{ s.mem_pct }}%"></span></span></span>
 </div>
 {% endfor %}
-{% if services_off.size > 0 %}
-<div class="hl-off"><b>Off &middot; {{ services_off.size }}</b> &nbsp;{{ services_off | join: " &middot; " }}</div>
-{% endif %}
 </div>
 
 <div class="hl-who">
@@ -230,10 +242,13 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 </div>
 
 </div>
+
+<div class="hl-foot">
+<span><b>Homelab</b> &middot; {{ label }}</span>
+<span>{% if summary.down.size > 0 %}<em>down: {{ summary.down | join: ", " }}</em>{% endif %}{% if services_more > 0 %} &middot; +{{ services_more }} more{% endif %}</span>
 </div>
-<div class="title_bar">
-<span class="title">Homelab</span>
-<span class="instance">{{ label }}{% if summary.down.size > 0 %} &middot; down: {{ summary.down | join: ", " }}{% endif %}{% if services_more > 0 %} &middot; +{{ services_more }} more{% endif %}</span>
+
+</div>
 </div>
 
 {% else %}
