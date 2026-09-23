@@ -6,7 +6,17 @@ let
   # nyaasi covers anime, knaben is a meta-index. eztv answers 451 (blocked for
   # legal reasons) from Germany. Add private trackers in the Prowlarr UI; they
   # sync to every *arr automatically.
-  indexers = [ "nyaasi" "yts" "thepiratebay" "limetorrents" "Knaben" ];
+  # Public indexers, by Prowlarr definition name. The first five carry films,
+  # series and anime; the last three are the book-shaped ones, because the
+  # general trackers list a Books category but barely fill it.
+  #
+  # Libgen and Anna's Archive are not here and cannot be: they are direct
+  # download sites rather than trackers, Prowlarr dropped its Libgen
+  # definition, and nothing in this stack can fetch an http .epub anyway.
+  indexers = [
+    "nyaasi" "yts" "thepiratebay" "limetorrents" "Knaben"
+    "ebookbay" "internetarchive" "postman"
+  ];
 
   arrWire = pkgs.writeShellScript "arr-wire" ''
     set -uo pipefail
