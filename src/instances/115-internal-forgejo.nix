@@ -97,6 +97,13 @@
           --id "$AUTH_ID" --name authelia || true
       fi
 
+      # The scopes are explicit because Forgejo asks for "openid" alone
+      # otherwise, and an id_token with no profile and no email carries no
+      # username and no address to create an account from. Auto-registration
+      # then cannot run and the login lands on /user/link_account, which says
+      # "Registration is disabled" because it is.
+      # Errors are not sent to /dev/null: this step failing quietly is how the
+      # source kept its one-scope configuration through several deploys.
       if [ -n "$AUTH_ID" ]; then
         echo "OAuth2 source exists (id=$AUTH_ID), updating..."
         podman exec -u git forgejo forgejo admin auth update-oauth \
@@ -104,7 +111,8 @@
           --name authelia \
           --secret "$OIDC_SECRET" \
           --auto-discover-url "$DISCOVER_URL" \
-          2>/dev/null || true
+          --scopes openid --scopes profile --scopes email \
+          || echo "WARNING: could not update the authelia OAuth2 source"
         exit 0
       fi
 
@@ -115,6 +123,7 @@
         --key forgejo \
         --secret "$OIDC_SECRET" \
         --auto-discover-url "$DISCOVER_URL" \
+        --scopes openid --scopes profile --scopes email \
         --skip-local-2fa \
         2>/dev/null || echo "Auth source may already exist"
     '';
