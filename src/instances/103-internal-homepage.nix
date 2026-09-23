@@ -11,9 +11,7 @@ let
       { route = "authelia"; name = "Authelia"; icon = "authelia"; desc = "SSO"; }
       { route = "lldap"; name = "LLDAP"; icon = "mdi-account-group"; desc = "Directory"; }
       { route = "grafana"; name = "Grafana"; icon = "grafana"; desc = "Monitoring"; }
-      { route = "uptime-kuma"; name = "Status"; icon = "uptime-kuma"; desc = "Uptime"; }
       { route = "kopia"; name = "Kopia"; icon = "kopia"; desc = "Backups"; }
-      { route = "wazuh"; name = "Wazuh"; icon = "wazuh"; desc = "Security"; }
       { route = "nas"; name = "NAS"; icon = "mdi-nas"; desc = "Files"; }
       { route = "syncthing"; name = "Syncthing"; icon = "syncthing"; desc = "Device sync"; }
       { route = "attic"; name = "Attic"; icon = "nixos"; desc = "Nix cache"; }
@@ -31,7 +29,6 @@ let
       { route = "paperless"; name = "Paperless"; icon = "paperless-ngx"; desc = "Documents"; }
       { route = "paperless-ai"; name = "Paperless AI"; icon = "paperless-ngx"; desc = "Auto-tagging"; }
       { route = "firefly"; name = "Firefly III"; icon = "firefly-iii"; desc = "Finance"; }
-      { route = "wikijs"; name = "Wiki.js"; icon = "wikijs"; desc = "Wiki"; }
       { route = "homeassistant"; name = "Home Assistant"; icon = "home-assistant"; desc = "Home"; }
       { route = "huginn"; name = "Huginn"; icon = "huginn"; desc = "Agents"; }
     ]; }
@@ -39,13 +36,9 @@ let
       { route = "jellyseerr"; name = "Jellyseerr"; icon = "jellyseerr"; desc = "Requests"; }
       { route = "jellyfin"; name = "Jellyfin"; icon = "jellyfin"; desc = "Movies & shows"; }
       { route = "navidrome"; name = "Navidrome"; icon = "navidrome"; desc = "Music"; }
-      { route = "audiobookshelf"; name = "Audiobookshelf"; icon = "audiobookshelf"; desc = "Audiobooks"; }
-      { route = "kavita"; name = "Kavita"; icon = "kavita"; desc = "Books & manga"; }
-      { route = "suwayomi"; name = "Suwayomi"; icon = "suwayomi"; desc = "Manga downloads"; }
       { route = "radarr"; name = "Radarr"; icon = "radarr"; desc = "Movies"; }
       { route = "sonarr"; name = "Sonarr"; icon = "sonarr"; desc = "Series & anime"; }
       { route = "lidarr"; name = "Lidarr"; icon = "lidarr"; desc = "Music"; }
-      { route = "bookshelf"; name = "Bookshelf"; icon = "readarr"; desc = "Ebooks"; }
       { route = "prowlarr"; name = "Prowlarr"; icon = "prowlarr"; desc = "Indexers"; }
       { route = "bazarr"; name = "Bazarr"; icon = "bazarr"; desc = "Subtitles"; }
     ]; }

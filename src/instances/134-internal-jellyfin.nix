@@ -103,8 +103,8 @@ in {
   # read-only inside the Jellyfin container.
   fileSystems = nasMount "/var/lib/jellyfin" "jellyfin"
     // nasMount "/var/lib/janitorr" "janitorr"
-    // nasPath "/data/media" "media"
-    // nasPath "/data/torrents" "torrents"
+    // nasPath "/data/media" "bulk/media"
+    // nasPath "/data/torrents" "bulk/torrents"
     // nasMount T "homepage-tokens";
 
   virtualisation.oci-containers.containers = {

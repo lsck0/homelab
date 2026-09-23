@@ -8,6 +8,7 @@ locals {
       enabled = true,
       name    = "100-internal-traefik",
       type    = "internal",
+      memory  = 1024,
     }
     "101" = { # SSO: OIDC provider + ForwardAuth (backed by lldap)
       enabled = true,
@@ -34,26 +35,13 @@ locals {
       enabled = true,
       name    = "105-internal-grafana",
       type    = "internal",
-    }
-    "106" = { # uptime/status monitoring
-      enabled = true,
-      name    = "106-internal-uptime-kuma",
-      type    = "internal",
+      memory  = 1024,
     }
     "107" = { # backups: Kopia server + web UI, snapshots the NAS
       enabled = true,
       name    = "107-internal-kopia",
       type    = "internal",
-      memory  = 2048,
       disk    = 16,
-    }
-    "108" = { # endpoint protection: Wazuh manager + indexer + dashboard
-      enabled = true,
-      name    = "108-internal-wazuh",
-      type    = "internal",
-      memory  = 8192,
-      cores   = 4,
-      disk    = 60,
     }
 
     "109" = { # storage: NFS + SMB + Syncthing + FileBrowser
@@ -62,7 +50,19 @@ locals {
       type       = "internal",
       boot_order = 2,
       memory     = 2048,
-      disk       = 750,
+      # root disk on the NVMe pool: service state, backups and documents - the
+      # things that are small and want to be fast. Media does not live here.
+      disk = 750,
+      # Bulk storage on the 2 TB spinning disk. One filesystem for media *and*
+      # torrents, deliberately: the *arr stack imports a finished download by
+      # hardlinking it into the library, and a hardlink cannot cross a
+      # filesystem. Split them and every film is stored twice - which is what
+      # was happening here, at a cost of 129 GiB.
+      # Empty until the spinning disk has been handed over: var.bulk_datastore
+      # is "" by default, so a lab whose bulk storage does not exist yet still
+      # applies cleanly instead of failing on a datastore Proxmox has never
+      # heard of. Set it in terraform.tfvars once pve-install.sh has built it.
+      extra_disks = var.bulk_datastore == "" ? [] : [{ size = 1800, datastore = var.bulk_datastore }],
     }
     "110" = { # Nix binary cache (substituter)
       enabled = true,
@@ -80,11 +80,7 @@ locals {
       enabled = true,
       name    = "112-internal-qbittorrent",
       type    = "internal",
-    }
-    "113" = { # Tor SOCKS gateway for qbittorrent egress
-      enabled = true,
-      name    = "113-internal-tor-router",
-      type    = "internal",
+      memory  = 1024,
     }
 
     "114" = { # GPU LLM agent: Hermes (Telegram) + Ollama on the passed-through RTX 2060
@@ -102,11 +98,13 @@ locals {
       enabled = true,
       name    = "115-internal-forgejo",
       type    = "internal",
+      memory  = 1024,
     }
     "116" = { # CI runner for Forgejo
       enabled = true,
       name    = "116-internal-forgejo-runner",
       type    = "internal",
+      memory  = 1024,
     }
     "117" = { # CI runners for GitHub repos (ephemeral, one systemd unit per replica)
       # github-runner-token is filled. It is currently the gh CLI's own token,
@@ -116,7 +114,7 @@ locals {
       enabled = true,
       name    = "117-internal-github-runner",
       type    = "internal",
-      memory  = 4096,
+      memory  = 1024,
       cores   = 4,
       disk    = 40,
     }
@@ -135,39 +133,37 @@ locals {
       enabled = true,
       name    = "120-internal-nextcloud",
       type    = "internal",
+      memory  = 1024,
     }
     "121" = { # document management (paperless-ngx)
       enabled = true,
       name    = "121-internal-paperless",
       type    = "internal",
-      memory  = 2048,
+      memory  = 1536,
     }
     "122" = { # AI auto-tagging for paperless
       enabled = true,
       name    = "122-internal-paperless-ai",
-      type    = "internal",
-      memory  = 2048,
-    }
-    "123" = { # wiki / knowledge base
-      enabled = true,
-      name    = "123-internal-wikijs",
       type    = "internal",
     }
     "124" = { # Firefly III personal finance
       enabled = true,
       name    = "124-internal-firefly",
       type    = "internal",
+      memory  = 1024,
     }
 
     "125" = { # home automation hub
       enabled = true,
       name    = "125-internal-homeassistant",
       type    = "internal",
+      memory  = 1024,
     }
     "126" = { # automation agents / scraping
       enabled = true,
       name    = "126-internal-huginn",
       type    = "internal",
+      memory  = 1024,
     }
     "127" = { # MQTT broker (Home Assistant / IoT)
       enabled = true,
@@ -179,26 +175,31 @@ locals {
       enabled = true,
       name    = "128-internal-jellyseerr",
       type    = "internal",
+      memory  = 1024,
     }
     "129" = { # indexer manager, syncs indexers into every *arr
       enabled = true,
       name    = "129-internal-prowlarr",
       type    = "internal",
+      memory  = 1024,
     }
     "130" = { # movie library manager
       enabled = true,
       name    = "130-internal-radarr",
       type    = "internal",
+      memory  = 1024,
     }
     "131" = { # series + anime library manager
       enabled = true,
       name    = "131-internal-sonarr",
       type    = "internal",
+      memory  = 1024,
     }
     "132" = { # subtitle downloader for *arr
       enabled = true,
       name    = "132-internal-bazarr",
       type    = "internal",
+      memory  = 1024,
     }
     "133" = { # TRaSH-guide sync + *arr/qBittorrent/Prowlarr wiring
       enabled = true,
@@ -209,27 +210,15 @@ locals {
       enabled = true,
       name    = "134-internal-jellyfin",
       type    = "internal",
-      memory  = 4096,
+      memory  = 2048,
       cores   = 4,
       disk    = 16,
-    }
-    "135" = { # audiobooks/podcasts + Bookshelf (ebook manager)
-      enabled = true,
-      name    = "135-internal-audiobookshelf",
-      type    = "internal",
-      memory  = 2048,
     }
     "136" = { # music streaming (Subsonic API) + Lidarr (music manager)
       enabled = true,
       name    = "136-internal-navidrome",
       type    = "internal",
-      memory  = 2048,
-    }
-    "137" = { # manga/ebook reader + Suwayomi (manga downloader)
-      enabled = true,
-      name    = "137-internal-kavita",
-      type    = "internal",
-      memory  = 2048,
+      memory  = 1024,
     }
     "138" = { # Tailscale control server (VPN mesh) + Headplane UI
       # Internal, not the DMZ: it decides which machines are on the mesh, so it
@@ -245,6 +234,7 @@ locals {
       enabled = true,
       name    = "200-external-traefik",
       type    = "external",
+      memory  = 1024,
     }
     "202" = { # non-exit Tor relay
       enabled = true,
@@ -275,6 +265,7 @@ locals {
       enabled = true,
       name    = "207-external-share",
       type    = "external",
+      memory  = 1024,
     }
     "208" = { # Minecraft server, boots when a player connects
       enabled = false,
@@ -288,7 +279,6 @@ locals {
       enabled = true,
       name    = "209-external-hello",
       type    = "external",
-      memory  = 2048,
     }
 
     # router
@@ -296,6 +286,7 @@ locals {
       enabled    = true,
       name       = "luca-router",
       type       = "router",
+      memory     = 1024,
       boot_order = 1,
     }
   }

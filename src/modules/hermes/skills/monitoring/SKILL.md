@@ -29,7 +29,6 @@ metadata:
   Silence: `POST /api/alertmanager/grafana/api/v2/silences` with matchers, startsAt, endsAt, createdBy, comment.
 - Grafana https://grafana.lsck0.dev (dashboard "Homelab"); API from the VM on port 80 needs the auth proxy header:
   `ssh 10.100.0.105 curl -s -H 'Remote-User: hermes' localhost/api/search`.
-- Uptime Kuma https://status.lsck0.dev: HTTP monitors for every always-on service.
 - Tempo (traces) OTLP at 10.100.0.105:4317/4318.
 
 When the owner asks "is everything ok": query `up == 0`, active alerts, disk

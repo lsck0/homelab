@@ -1,6 +1,31 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, inventory, ... }:
 let
   routes = import ../modules/routes.nix;
+
+  # ── egress classes (modules/egress.nix) ────────────────────────────────────
+  # Policy routing, keyed on source address. A member VM is untouched: it keeps
+  # its ordinary default route here, and this decides what happens next.
+  egress = import ../modules/egress.nix;
+  # The VPN exit is a routing decision, so it needs a mark and a table. Tor
+  # is not: Tor runs on this router, so a member is redirected into it.
+  torPorts = { trans = 9040; dns = 9053; socks = 9050; socksIsolated = 9055; };
+  # fwmark -> routing table. Marks are set in the mangle hook below and matched
+  # by `ip rule`; the tables hold nothing but a default route each.
+  egressMarks = { vpn = { mark = 1; table = 100; }; };
+  membersOf = via: lib.sort (a: b: a < b)
+    (lib.mapAttrsToList (_: e: inventory.${toString e.vmid}.ip)
+      (lib.filterAttrs (_: e: e.via == via && inventory ? ${toString e.vmid}) egress));
+  vpnMembers = membersOf "vpn";
+  torMembers = membersOf "tor";
+  torSet = lib.concatStringsSep ", " torMembers;
+  # nftables rejects an empty set literal, so each rule is emitted only when it
+  # has members.
+  markRule = via: members:
+    lib.optionalString (members != [ ])
+      "ip saddr { ${lib.concatStringsSep ", " members} } meta mark set ${toString egressMarks.${via}.mark}";
+  vpnCfg = config.homelab.egress.vpn;
+  # the one member that takes unsolicited inbound connections through the exit.
+  peerHost = inventory."112".ip;
   hostsOf = side: lib.unique (map (r: r.host) (lib.attrValues routes.${side}));
   # hosts served by internal Traefik that are not a VM route.
   internalExtraHosts = [ "traefik" "proxmox" ];
@@ -101,6 +126,215 @@ in {
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
+  # EGRESS CLASSES
+  # ─────────────────────────────────────────────────────────────────────────────
+  # A VM listed in modules/egress.nix leaves through something other than the
+  # WAN NAT. Its packets are marked by source address, and the mark selects a
+  # routing table holding one default route.
+  #
+  # The killswitch is the same idea modules/vpn.nix used: each table ends in a
+  # blackhole, so when the exit is down there is nowhere for a member's packets
+  # to go. They are never allowed to fall back to the main table, which is what
+  # "leaving through the house" would mean.
+  assertions = [{
+    assertion = vpnMembers == [ ] || vpnCfg.enable;
+    message = "modules/egress.nix routes ${lib.concatStringsSep ", " vpnMembers} through the VPN, but homelab.egress.vpn is not enabled on the router.";
+  }];
+
+  networking.nftables.tables.egress = lib.mkIf (vpnMembers != [ ] || torMembers != [ ]) {
+    family = "ip";
+    content = ''
+      chain premark {
+        type filter hook prerouting priority mangle; policy accept;
+        ${markRule "vpn" vpnMembers}
+      }
+      ${lib.optionalString (torMembers != [ ]) ''
+        chain tor-redirect {
+          type nat hook prerouting priority dstnat - 3; policy accept;
+          # DNS first: a name has to become one of Tor's virtual addresses
+          # before redirecting a TCP connection to it means anything.
+          ip saddr { ${torSet} } udp dport 53 redirect to :${toString torPorts.dns}
+          ip saddr { ${torSet} } tcp dport 53 redirect to :${toString torPorts.dns}
+          ip saddr { ${torSet} } tcp flags & (fin|syn|rst|ack) == syn redirect to :${toString torPorts.trans}
+        }
+        chain tor-drop {
+          type filter hook forward priority filter - 5; policy accept;
+          # Whatever is still being forwarded from a tor member is UDP that is
+          # not DNS - QUIC, NTP, trackers - because every TCP connection and
+          # every lookup was redirected above and is handled locally. Tor
+          # cannot carry it, and letting it take the WAN NAT would publish the
+          # house address for exactly the traffic nobody thinks to check.
+          ip saddr { ${torSet} } ct state established,related accept
+          ip saddr { ${torSet} } counter drop
+        }
+      ''}
+    '';
+  };
+
+  # The VPN exit needs policy routing; Tor does not, because it runs here.
+  # Idempotent, so a redeploy does not stack duplicate rules, and a oneshot so
+  # it can be re-run by hand.
+  systemd.services.egress-policy = lib.mkIf (vpnMembers != [ ]) {
+    description = "Policy routing for the VPN egress class";
+    after = [ "network-setup.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.iproute2 ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = ''
+      set -eu
+      ip rule del fwmark ${toString egressMarks.vpn.mark} table ${toString egressMarks.vpn.table} 2>/dev/null || true
+      ip rule add fwmark ${toString egressMarks.vpn.mark} table ${toString egressMarks.vpn.table} priority 101
+      # the floor of the table: when the tunnel is down there is nowhere for a
+      # member's packets to go, rather than a quiet fall back to the house.
+      ip route replace blackhole default metric 1000 table ${toString egressMarks.vpn.table}
+    '';
+  };
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # TOR EXIT
+  # ─────────────────────────────────────────────────────────────────────────────
+  # The other half of the proxy. Was vm-113, a VM whose whole job was to hold a
+  # Tor client and forward for others; with the exits collected here there is
+  # nothing left for it to do, and running Tor on the router is what makes the
+  # transparent path simple: a redirect has to happen where Tor runs, because
+  # TransPort recovers the address the client meant to reach with
+  # SO_ORIGINAL_DST, and that is only recorded where the translation happened.
+  # On a separate VM that forced the router to route to it as a next hop and to
+  # punch a hole in the DMZ isolation. Here it is one redirect.
+  #
+  # Client only. This relays nothing for anyone - the public non-exit relay is
+  # vm-202, which is a different thing entirely.
+  services.tor = {
+    enable = true;
+    enableGeoIP = false;
+    relay.enable = false;
+    client = {
+      enable = true;
+      socksListenAddress = {
+        addr = "10.100.0.1";
+        port = torPorts.socks;
+        # A torrent client opens connections to hundreds of peers at once and
+        # would build a circuit for each. Shared circuits on this port.
+        IsolateDestAddr = false;
+      };
+    };
+    settings = {
+      # the lab, both sides. The DMZ can use it now as well: the proxy is the
+      # router, so a DMZ VM reaches it without crossing into the internal LAN.
+      SocksPolicy = [ "accept 10.100.0.0/24" "accept 10.200.0.0/24" "reject *" ];
+
+      # Second SOCKS port for the indexers (Prowlarr). Indexer traffic is a
+      # handful of requests to a handful of sites, so it gets real stream
+      # isolation: a separate circuit per destination, and a separate circuit
+      # from anything on the shared port.
+      SOCKSPort = [{
+        addr = "10.100.0.1";
+        port = torPorts.socksIsolated;
+        IsolateDestAddr = true;
+        IsolateDestPort = true;
+      }];
+
+      # The transparent pair, for whole VMs listed via = "tor" in
+      # modules/egress.nix. Those VMs have no Tor configuration at all.
+      TransPort = [{ addr = "10.100.0.1"; port = torPorts.trans; }];
+      DNSPort = [{ addr = "10.100.0.1"; port = torPorts.dns; }];
+      AutomapHostsOnResolve = true;
+      # keeps DNSPort's mapped answers resolvable by TransPort, which is what
+      # makes name-based connections work at all.
+      VirtualAddrNetworkIPv4 = "10.192.0.0/10";
+      ClientUseIPv6 = false;
+
+      # Path rotation. Tor picks a new guard rarely by design - rotating guards
+      # is what deanonymises you - but the middle and exit relays turn over:
+      #   MaxCircuitDirtiness  a circuit stops taking new streams after 10 min
+      #   NewCircuitPeriod     consider building a fresh circuit every 2 min
+      MaxCircuitDirtiness = 600;
+      NewCircuitPeriod = 120;
+      CircuitBuildTimeout = 30;
+
+      ControlPort = [{ addr = "127.0.0.1"; port = 9051; }];
+      CookieAuthentication = true;
+    };
+  };
+
+  # MaxCircuitDirtiness only stops *new* streams reusing an old circuit. NEWNYM
+  # retires the ones already in use, so a long session does not sit on the same
+  # three relays for days.
+  systemd.services.tor-new-circuits = {
+    description = "Ask Tor for a fresh set of circuits";
+    after = [ "tor.service" ];
+    requires = [ "tor.service" ];
+    path = [ pkgs.coreutils pkgs.netcat-gnu pkgs.xxd ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      set -euo pipefail
+      cookie=$(xxd -p -c 256 /var/lib/tor/control_auth_cookie)
+      printf 'AUTHENTICATE %s\r\nSIGNAL NEWNYM\r\nQUIT\r\n' "$cookie" | nc -w 5 127.0.0.1 9051
+    '';
+  };
+  systemd.timers.tor-new-circuits = {
+    wantedBy = [ "timers.target" ];
+    # randomised so the rotation is not itself a clock-like fingerprint.
+    timerConfig = { OnBootSec = "10m"; OnUnitActiveSec = "30m"; RandomizedDelaySec = "10m"; };
+  };
+
+  # The VPN exit itself is modules/egress-vpn.nix: it owns the tunnel and the
+  # default route in table 100. On the router rather than a VM of its own,
+  # because it needs nothing from the host it runs on and a dedicated gateway
+  # would cost memory the lab does not have. Tor is the other way round, for
+  # the SO_ORIGINAL_DST reason above, so the two exits are deliberately
+  # asymmetric.
+  homelab.egress.vpn = {
+    enable = true;
+    table = egressMarks.vpn.table;
+    # The key vm-112 used to hold. Moved here rather than duplicated: two
+    # WireGuard clients cannot share a key and an address, so the VM having
+    # given it up is what makes this work. The VM now has no tunnel at all.
+    privateKeyFile = config.sops.secrets.protonvpn-private-key.path;
+    address = "10.2.0.2/32";
+    publicKey = "36G8+pInNcPK9F1TpHglWs9Pk5uJOY9o8SCNrCBgvHE=";
+    # CH#684. An address and not a name, because DNS is inside the tunnel.
+    endpoint = "89.222.96.158:51820";
+  };
+  sops.secrets.protonvpn-private-key = { };
+
+  # ── Proton's forwarded port ────────────────────────────────────────────────
+  # One tunnel gets one port, so the router leases it and forwards it to the
+  # one member that needs unsolicited inbound connections. Everything else
+  # behind the exit is ordinary outbound NAT and needs nothing here.
+  #
+  # The port changes whenever the 60-second lease lapses, so the DNAT cannot be
+  # written once. It matches a named set instead, and the renewal unit replaces
+  # the set's single element.
+  networking.nftables.tables.proton-port = {
+    family = "ip";
+    content = ''
+      set proton_port {
+        type inet_service;
+      }
+      chain prerouting {
+        type nat hook prerouting priority dstnat - 2; policy accept;
+        iifname "wg-egress" tcp dport @proton_port dnat to ${peerHost}
+        iifname "wg-egress" udp dport @proton_port dnat to ${peerHost}
+      }
+    '';
+  };
+
+  systemd.services.protonvpn-port = {
+    description = "Renew the Proton forwarded port and publish it";
+    after = [ "wireguard-wg-egress.service" ];
+    path = [ pkgs.libnatpmp pkgs.nftables pkgs.curl pkgs.coreutils pkgs.gnused ];
+    serviceConfig = { Type = "oneshot"; StateDirectory = "protonvpn"; };
+    environment.PEER_HOST = peerHost;
+    script = "exec ${pkgs.bash}/bin/bash ${../scripts/protonvpn-port.sh}";
+  };
+  systemd.timers.protonvpn-port = {
+    wantedBy = [ "timers.target" ];
+    # the lease is 60s; a renewal that lands late is the same as none.
+    timerConfig = { OnBootSec = "90s"; OnUnitActiveSec = "45s"; AccuracySec = "5s"; };
+  };
+
+  # ─────────────────────────────────────────────────────────────────────────────
   # NAT + PORT FORWARDING
   # ─────────────────────────────────────────────────────────────────────────────
   networking.nat = {
@@ -153,6 +387,14 @@ in {
       iifname "ens18" ct state new \
         meter wan-conns size 65535 { ip saddr ct count over 200 } \
         counter drop
+
+      # Tor, for the lab only and never from the WAN. 9050 and 9055 are the
+      # SOCKS ports an app points itself at (Prowlarr uses 9055 for
+      # per-destination circuit isolation); 9040 and 9053 are where the egress
+      # redirect lands a tor-class VM, which arrives here as ordinary input
+      # because the translation happened on this host.
+      ip saddr { 10.100.0.0/24, 10.200.0.0/24 } tcp dport { ${toString torPorts.socks}, ${toString torPorts.socksIsolated}, ${toString torPorts.trans}, ${toString torPorts.dns} } accept
+      ip saddr { 10.100.0.0/24, 10.200.0.0/24 } udp dport ${toString torPorts.dns} accept
     '';
 
     extraForwardRules = ''
@@ -171,9 +413,8 @@ in {
       iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.115 } tcp dport { 80, 443 } accept
       iifname "ens20" ip daddr 10.100.0.118 tcp dport { 80, 443, 5000 } accept
 
-      # allow DMZ VMs to ship logs to Loki on vm-105 and syslog to Wazuh on vm-108
+      # allow DMZ VMs to ship logs to Loki on vm-105
       iifname "ens20" ip daddr 10.100.0.105 tcp dport 3100 accept
-      iifname "ens20" ip daddr 10.100.0.108 udp dport 514 accept
 
       # allow DMZ to reach NAS (NFS for persistent data)
       iifname "ens20" ip daddr 10.100.0.109 tcp dport { 111, 2049 } accept

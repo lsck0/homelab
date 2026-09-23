@@ -120,15 +120,12 @@
       };
     };
 
-    # journal -> Wazuh (vm-108) over syslog for intrusion detection. UDP so a
-    # down Wazuh never blocks logging.
-    services.rsyslogd = lib.mkIf (config.networking.hostName != "vm-107") {
-      enable = true;
-      defaultConfig = "";
-      extraConfig = ''
-        *.info @10.100.0.108:514
-      '';
-    };
+    # No syslog forwarding. This shipped every journal to Wazuh on vm-108, which
+    # is gone: with no agent on any VM, Wazuh only ever matched rules against
+    # these lines, which is log collection Loki (vm-105) already does - and did
+    # it over unauthenticated UDP, so anything on the subnet could forge events
+    # into it. The agent is where Wazuh's real work happens (file integrity,
+    # rootcheck, configuration assessment) and none of it was running.
 
     # prefer IPv4: internal VMs have no IPv6 routing
     networking.enableIPv6 = false;

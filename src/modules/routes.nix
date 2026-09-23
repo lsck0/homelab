@@ -50,9 +50,7 @@
     lldap          = { host = "lldap";       vmid = 102; port = 17170; group = "admins"; };
     homepage       = { host = "homepage";    vmid = 103; port = 80; };
     grafana        = { host = "grafana";     vmid = 105; port = 80;    group = "admins"; };
-    uptime-kuma    = { host = "status";      vmid = 106; port = 80; };
     kopia          = { host = "backup";      vmid = 107; port = 51515; group = "admins"; };
-    wazuh          = { host = "wazuh";       vmid = 108; port = 443;   group = "admins"; scheme = "https"; };
     nas            = { host = "nas";         vmid = 109; port = 80;    group = "admins"; };
     syncthing      = { host = "sync";        vmid = 109; port = 8384;  group = "admins"; };
     # nix clients authenticate to attic with their own token, so no browser
@@ -81,7 +79,6 @@
     terminal       = { host = "terminal";    vmid = 104; port = 8081; auth = "token"; publicRelay = true; proxied = false; };
     paperless      = { host = "paperless";   vmid = 121; port = 8080; };
     paperless-ai   = { host = "paperless-ai"; vmid = 122; port = 80;   group = "admins"; };
-    wikijs         = { host = "wiki";        vmid = 123; port = 80; };
     firefly        = { host = "firefly";     vmid = 124; port = 8080;  group = "admins"; };
     homeassistant  = { host = "hass";        vmid = 125; port = 80; };
     huginn         = { host = "huginn";      vmid = 126; port = 80;    group = "admins"; };
@@ -95,12 +92,8 @@
     # own apps can still log in, which ForwardAuth would break.
     jellyfin       = { host = "jellyfin";    vmid = 134; port = 80;    auth = "own";
                        loginRedirect = { path = "/"; to = "/sso/OID/start/authelia"; }; };
-    audiobookshelf = { host = "abs";         vmid = 135; port = 80;    auth = "own"; };
-    bookshelf      = { host = "books";       vmid = 135; port = 8787;  group = "admins"; };
     navidrome      = { host = "music";       vmid = 136; port = 80;    group = "media"; };
     lidarr         = { host = "lidarr";      vmid = 136; port = 8686;  group = "admins"; };
-    kavita         = { host = "read";        vmid = 137; port = 80;    auth = "own"; };
-    suwayomi       = { host = "manga";       vmid = 137; port = 4567;  group = "media"; };
     # A tailscale client cannot log in to Authelia, so no ForwardAuth here;
     # Headscale authenticates registrations itself with pre-auth keys and its
     # own browser flow. Relayed in from the internet like any internal host.
@@ -121,6 +114,6 @@
     # pushed ghcr.io/lsck0/hello and the swarm task stays "Rejected: No such
     # image". Kept as the wiring for a GitHub-built app, but not monitored -
     # an uptime check on it is a permanent false alarm.
-    hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; monitor = false; proxied = false; };
+    hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; proxied = false; };
   };
 }

@@ -33,6 +33,34 @@ let
     ++ lib.optionals (router != null) [ (vmLabel "10.100.0.1" "router") (vmLabel "10.200.0.1" "router") ]
     ++ [ (vmLabel "192.168.178.200" "proxmox") ];
 
+  # ── blackbox probes ────────────────────────────────────────────────────────
+  # Replaces Uptime Kuma (was vm-108's neighbour on vm-106). node-exporter's
+  # `up` only says a VM answers on :9100, which stays true while the service on
+  # it is dead; these probe the service's own port.
+  #
+  # Aimed at the backend, not at https://<host>.lsck0.dev. The public name goes
+  # through Authelia, which answers 302 to the login portal for every gated
+  # route, so a probe of it would pass while the app behind it was down. Kuma
+  # aimed at backends for the same reason.
+  routes = import ../modules/routes.nix;
+  probes =
+    let
+      # on-demand VMs sleep by design and disabled ones are off; a probe of
+      # either is a permanent false alarm. It would not even wake them, since
+      # it bypasses the Traefik on-demand proxy and goes straight to the VM.
+      alwaysOn = r: (inventory.${toString r.vmid}.enabled or "false") == "true";
+      ofSide = side: lib.mapAttrsToList (name: r: {
+        inherit name;
+        url = "${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}";
+      }) (lib.filterAttrs (_: alwaysOn) side);
+    in
+    lib.concatLists (lib.mapAttrsToList (_: ofSide) routes)
+    # the two ingresses themselves, which own no route of their own
+    ++ [
+      { name = "traefik-internal"; url = "http://10.100.0.100:80"; }
+      { name = "traefik-external"; url = "http://10.200.0.200:80"; }
+    ];
+
   # alerts also go to the Hermes Telegram bot (same bot, same chat as Hermes).
   # needs telegram-bot-token + telegram-chat-id in sops (src/scripts/hermes-secrets.sh).
   enableTelegram = true;
@@ -178,10 +206,77 @@ in {
     "z /var/lib/grafana/data/grafana.db 0640 grafana grafana -"
   ];
 
+  # localhost only: it is an unauthenticated prober, and anything that can
+  # reach it can make this VM issue requests on its behalf.
+  services.prometheus.exporters.blackbox = {
+    enable = true;
+    listenAddress = "127.0.0.1";
+    port = 9115;
+    configFile = pkgs.writeText "blackbox.yml" (builtins.toJSON {
+      modules = {
+        # Liveness, not authorization. 401 and 403 mean the app is up and
+        # refusing an anonymous caller, which is exactly right for the routes
+        # that carry their own token auth (attic, the registry API). 3xx means
+        # an app redirecting to its own login (Forgejo, Vaultwarden,
+        # Nextcloud). Treating any of those as "down" would alert constantly.
+        http_up = {
+          prober = "http";
+          timeout = "10s";
+          http = {
+            valid_status_codes = [ 200 201 204 301 302 303 307 308 401 403 ];
+            follow_redirects = false;
+            preferred_ip_protocol = "ip4";
+            # routes.nix marks a backend scheme = "https" only when it serves
+            # its own self-signed certificate, so there is nothing to verify.
+            tls_config.insecure_skip_verify = true;
+          };
+        };
+        tcp_up = {
+          prober = "tcp";
+          timeout = "5s";
+          tcp.preferred_ip_protocol = "ip4";
+        };
+      };
+    });
+  };
+
   services.prometheus = {
     enable = true;
     retentionTime = "30d";
     scrapeConfigs = [
+      {
+        # the standard blackbox relabel dance: the target travels as a URL
+        # parameter and the scrape itself goes to the exporter.
+        job_name = "blackbox-http";
+        metrics_path = "/probe";
+        params.module = [ "http_up" ];
+        scrape_interval = "60s";
+        static_configs = map (p: {
+          targets = [ p.url ];
+          labels.service = p.name;
+        }) probes;
+        relabel_configs = [
+          { source_labels = [ "__address__" ]; target_label = "__param_target"; }
+          { source_labels = [ "__param_target" ]; target_label = "instance"; }
+          { target_label = "__address__"; replacement = "127.0.0.1:9115"; }
+        ];
+      }
+      {
+        # sccache speaks Redis, not HTTP, so it only gets a connect check.
+        job_name = "blackbox-tcp";
+        metrics_path = "/probe";
+        params.module = [ "tcp_up" ];
+        scrape_interval = "60s";
+        static_configs = [{
+          targets = [ "10.100.0.111:6379" ];
+          labels.service = "sccache";
+        }];
+        relabel_configs = [
+          { source_labels = [ "__address__" ]; target_label = "__param_target"; }
+          { source_labels = [ "__param_target" ]; target_label = "instance"; }
+          { target_label = "__address__"; replacement = "127.0.0.1:9115"; }
+        ];
+      }
       {
         job_name = "homelab-node-exporter";
         relabel_configs = vmRelabels;
@@ -374,6 +469,89 @@ in {
               labels.severity = "critical";
               annotations.summary = "NAS daily backup has not succeeded in over 26h";
               annotations.description = "Kopia on vm-107 has not completed a snapshot of /srv/nas. Check `systemctl status kopia-server` and https://backup.lsck0.dev.";
+            }
+            {
+              uid = "service_down";
+              title = "Service not answering";
+              condition = "C";
+              # A blackbox probe of a service's own port failing for 5m. This is
+              # the gap node-exporter leaves: "Instance down" only fires when
+              # the whole VM stops answering on :9100, which stays up while the
+              # container on it is crash-looping.
+              data = [
+                {
+                  refId = "A";
+                  relativeTimeRange = { from = 600; to = 0; };
+                  datasourceUid = "prometheus";
+                  model = {
+                    refId = "A";
+                    expr = "probe_success";
+                    instant = true;
+                  };
+                }
+                {
+                  refId = "C";
+                  datasourceUid = "__expr__";
+                  model = {
+                    refId = "C";
+                    type = "threshold";
+                    expression = "A";
+                    conditions = [{
+                      evaluator = { type = "lt"; params = [ 1 ]; };
+                    }];
+                  };
+                }
+              ];
+              for = "5m";
+              # a probe that has never reported is a scrape problem, not an
+              # outage; Instance down covers a VM that has genuinely gone.
+              noDataState = "OK";
+              execErrState = "Error";
+              labels.severity = "warning";
+              annotations.summary = "{{ $labels.service }} is not answering on {{ $labels.instance }}";
+              annotations.description = "The blackbox probe of this service's own port has failed for 5 minutes while its VM is still up. Check the unit and `podman ps` on that VM.";
+            }
+            {
+              uid = "ossec_alert";
+              title = "OSSEC alert on the hypervisor";
+              condition = "C";
+              # OSSEC runs in local mode on the Proxmox host (see
+              # src/scripts/pve-install.sh) and is the only intrusion detection
+              # in the lab that watches a mutable filesystem. Level 7+ is its
+              # "worth a human" threshold; the count only ever grows, so this
+              # fires on the increase rather than the value.
+              data = [
+                {
+                  refId = "A";
+                  relativeTimeRange = { from = 3600; to = 0; };
+                  datasourceUid = "prometheus";
+                  model = {
+                    refId = "A";
+                    expr = "increase(homelab_ossec_alerts_high[1h])";
+                    instant = true;
+                  };
+                }
+                {
+                  refId = "C";
+                  datasourceUid = "__expr__";
+                  model = {
+                    refId = "C";
+                    type = "threshold";
+                    expression = "A";
+                    conditions = [{
+                      evaluator = { type = "gt"; params = [ 0 ]; };
+                    }];
+                  };
+                }
+              ];
+              for = "0m";
+              # the metric is absent until OSSEC has been installed; that is a
+              # missing hypervisor agent, not an intrusion.
+              noDataState = "OK";
+              execErrState = "Error";
+              labels.severity = "critical";
+              annotations.summary = "OSSEC raised {{ $value }} level 7+ alerts on the hypervisor";
+              annotations.description = "File integrity or rootcheck findings on 192.168.178.200. Read them with `tail -50 /var/ossec/logs/alerts/alerts.log`.";
             }];
           }];
         };
