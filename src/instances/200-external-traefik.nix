@@ -79,9 +79,13 @@ in {
     crowdsecBouncer.enable = true;
     crowdsecBouncer.appsec = true;
     crowdsecBouncer.noAppsecRouters = [ "headscale-tls" "ntfy-tls" ];
-    # never self-ban the LAN or the home network (real IPv6 prefix may rotate).
+    # The bouncer's own whitelist, which only stops it acting on a decision.
+    # The house is kept out of CrowdSec entirely by crowdsec-home-whitelist,
+    # which resolves the current public address rather than pinning one - a
+    # hardcoded 2003:f7:8f3a::/48 here is precisely what stopped matching when
+    # Telekom moved the delegation to 2003:f7:8f43::/48.
     crowdsecBouncer.whitelistCidrs = [
-      "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "2003:f7:8f3a::/48"
+      "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16"
     ];
 
     anubis = {
