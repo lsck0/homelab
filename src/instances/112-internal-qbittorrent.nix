@@ -1,4 +1,4 @@
-{ pkgs, lib, nasMount, nasPath, retry, ... }:
+{ config, pkgs, lib, nasMount, nasPath, retry, ... }:
 let
   # hosts that may use the WebUI API without a login: internal Traefik (itself
   # behind Authelia), the *arr VMs, the wiring VM and Hermes. Explicit /32s, so
@@ -35,8 +35,9 @@ let
     dht = true;
     pex = true;
     lsd = true;
-    # 6881 is forwarded on the router, so peers can open connections inward
-    # rather than only being dialled out to.
+    # The listen port is whatever Proton's NAT-PMP lease currently says;
+    # protonvpn-port.service overwrites it. 6881 is only the value the client
+    # starts on before the first lease arrives.
     listen_port = 6881;
     random_port = false;
     upnp = false;
@@ -53,6 +54,47 @@ let
   });
 in {
   networking.hostName = "vm-112";
+
+  # ── egress ──────────────────────────────────────────────────────────────
+  # Everything this VM sends leaves through Proton, and there is no default
+  # route when the tunnel is down, so a drop means no traffic rather than
+  # traffic from the house address. The LAN stays off the tunnel: the NFS
+  # mounts, the *arr reaching the WebUI, and ssh all live on 10.100.0.0/24,
+  # which the kernel routes on-link.
+  sops.secrets.protonvpn-private-key = {};
+  homelab.vpn = {
+    enable = true;
+    privateKeyFile = config.sops.secrets.protonvpn-private-key.path;
+    address = "10.2.0.2/32";
+    publicKey = "36G8+pInNcPK9F1TpHglWs9Pk5uJOY9o8SCNrCBgvHE=";
+    # CH#684. An address and not a name, because DNS is inside the tunnel.
+    endpoint = "89.222.96.158:51820";
+    dns = "10.2.0.1";
+    lanGateway = "10.100.0.1";
+  };
+
+  # Proton's forwarded port is leased for 60 seconds at a time and changes
+  # when the lease lapses, so it has to be renewed and handed to the client
+  # rather than configured once.
+  systemd.services.protonvpn-port = {
+    description = "Renew the Proton forwarded port and give it to qBittorrent";
+    after = [ "wireguard-wg0.service" "podman-qbittorrent.service" ];
+    path = [ pkgs.libnatpmp pkgs.curl pkgs.coreutils pkgs.gnused ];
+    serviceConfig = {
+      Type = "oneshot";
+      StateDirectory = "protonvpn";
+    };
+    script = "exec ${pkgs.bash}/bin/bash ${../scripts/protonvpn-port.sh}";
+  };
+
+  systemd.timers.protonvpn-port = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "90s";
+      OnUnitActiveSec = "45s";
+      AccuracySec = "5s";
+    };
+  };
 
   fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
     // nasPath "/data/torrents" "torrents"
