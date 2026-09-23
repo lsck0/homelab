@@ -146,7 +146,7 @@ in {
     description = "Write the Wazuh indexer's lldap security files";
     before = [ "wazuh.service" ];
     requiredBy = [ "wazuh.service" ];
-    path = [ pkgs.coreutils ];
+    path = [ pkgs.coreutils pkgs.docker pkgs.gawk (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     environment.LDAP_BIND_PASSWORD_FILE = config.sops.secrets.lldap-admin-password.path;
     script = "exec ${pkgs.bash}/bin/bash ${../scripts/wazuh-ldap.sh} write";
@@ -157,7 +157,7 @@ in {
     after = [ "wazuh.service" ];
     requires = [ "wazuh.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.docker pkgs.coreutils pkgs.gnugrep ];
+    path = [ pkgs.docker pkgs.coreutils pkgs.gnugrep pkgs.gawk (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;

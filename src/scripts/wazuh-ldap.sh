@@ -122,52 +122,46 @@ config:
             resolve_nested_roles: true
 EOF
 
-# all_access keeps "admin" so the local account still works, and gains the
-# lldap group. kibana_user is what lets the dashboard load at all.
-cat > "$CFG/roles_mapping.yml" <<EOF
----
-_meta:
-  type: "rolesmapping"
-  config_version: 2
+# roles_mapping is the image's own file with two lines added, not a file of
+# our own. Writing it from scratch is what broke the dashboard: the version
+# here listed all_access, own_index and kibana_user, and silently dropped
+# kibana_server - the mapping that grants the dashboard's own service account
+# its permissions. The dashboard then could not read the cluster state:
+#   [security_exception] no permissions for [cluster:monitor/state] and
+#   User [name=kibanaserver, backend_roles=[]]
+# So the shipped file is taken from the image on every run and patched.
+# From the compose file, not from `docker inspect`: the files have to be on
+# disk before the stack starts, so at this point there is no container to ask.
+IMAGE=${IMAGE:-$(awk '/wazuh\.indexer:/,/image:/ { if ($1 == "image:") { print $2; exit } }' \
+  "$STACK/docker-compose.yml")}
+[ -n "$IMAGE" ] || { echo "ERROR: no indexer image in docker-compose.yml"; exit 1; }
+docker run --rm --entrypoint cat "$IMAGE" \
+  /usr/share/wazuh-indexer/config/opensearch-security/roles_mapping.yml > "$CFG/roles_mapping.yml.orig"
+[ -s "$CFG/roles_mapping.yml.orig" ] || { echo "ERROR: could not read the shipped roles_mapping"; exit 1; }
 
-all_access:
-  reserved: true
-  hidden: false
-  backend_roles:
-  - "admin"
-  - "$LDAP_ADMIN_GROUP"
-  hosts: []
-  users: []
-  and_backend_roles: []
-  description: "Maps admin and the lldap $LDAP_ADMIN_GROUP group to all_access"
+LDAP_ADMIN_GROUP="$LDAP_ADMIN_GROUP" python3 - \
+  "$CFG/roles_mapping.yml.orig" "$CFG/roles_mapping.yml" <<'PYEOF'
+import os, sys, yaml
 
-own_index:
-  reserved: false
-  hidden: false
-  backend_roles: []
-  hosts: []
-  users:
-  - "*"
-  and_backend_roles: []
-  description: "Allow full access to an index named like the username"
+group = os.environ["LDAP_ADMIN_GROUP"]
+doc = yaml.safe_load(open(sys.argv[1]))
 
-kibana_user:
-  reserved: false
-  hidden: false
-  backend_roles:
-  - "kibanauser"
-  - "$LDAP_ADMIN_GROUP"
-  hosts: []
-  users: []
-  and_backend_roles: []
-  description: "Maps the lldap $LDAP_ADMIN_GROUP group to kibana_user"
-EOF
-# uid 1000 is wazuh-indexer inside the image, and the container runs as that
-# user: root-owned 640 files are simply invisible to it. 640 and not 644
-# because config.yml carries the LDAP bind password in plaintext - the
-# plugin has no way to read it from anywhere else - so the directory above
-# is what keeps it off the rest of the host.
-chown 1000:1000 "$CFG/config.yml" "$CFG/roles_mapping.yml"
+# all_access so the group administers the cluster, kibana_user so the
+# dashboard will load for them at all. Everything else the image ships -
+# kibana_server above all - is left exactly as it was.
+for role in ("all_access", "kibana_user"):
+    entry = doc.setdefault(role, {"reserved": False, "hidden": False,
+                                  "hosts": [], "users": [], "and_backend_roles": []})
+    roles = entry.setdefault("backend_roles", [])
+    if group not in roles:
+        roles.append(group)
+
+with open(sys.argv[2], "w") as f:
+    yaml.safe_dump(doc, f, default_flow_style=False, sort_keys=False)
+PYEOF
+rm -f "$CFG/roles_mapping.yml.orig"
+echo ">>> roles_mapping patched: $LDAP_ADMIN_GROUP added to all_access and kibana_user"
+
 chmod 640 "$CFG/config.yml" "$CFG/roles_mapping.yml"
 chmod 750 "$CFG"
 echo ">>> security files written"
