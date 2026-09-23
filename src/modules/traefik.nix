@@ -486,6 +486,43 @@ in {
       };
     };
 
+    # CrowdSec banned the house once: a burst of requests across a dozen hosts
+    # read as http-crawl-non_statics and every service answered 403 from the
+    # outside. There was a whitelist, and it was the problem - a hardcoded
+    # IPv6 prefix that Telekom had since rotated away from, so it matched
+    # nothing. The address is asked for on a timer instead of pinned.
+    systemd.services.crowdsec-home-whitelist = lib.mkIf cfg.crowdsecBouncer.enable {
+      description = "Keep CrowdSec's whitelist pointed at the house";
+      after = [ "podman-crowdsec.service" ];
+      requires = [ "podman-crowdsec.service" ];
+      wantedBy = [ "multi-user.target" ];
+      path = [ pkgs.podman pkgs.curl pkgs.coreutils pkgs.gawk ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        # No aggressive retry: an earlier version restarted CrowdSec on every
+        # run and, failing, retried every two minutes - which is how the
+        # container ended up wedged and the lab spent several minutes
+        # answering 403 to everyone.
+        Restart = "on-failure";
+        RestartSec = 600;
+      };
+      script = "exec ${pkgs.bash}/bin/bash ${../scripts/crowdsec-home-whitelist.sh}";
+    };
+
+    # Often enough to catch a rotation before anyone notices, rarely enough
+    # that the address lookup is not itself traffic worth counting.
+    systemd.timers.crowdsec-home-whitelist = lib.mkIf cfg.crowdsecBouncer.enable {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        # Every five minutes: the reload is rare, but clearing a decision
+        # against the house is the part that has to be prompt.
+        OnBootSec = "3min";
+        OnUnitActiveSec = "5min";
+        AccuracySec = "30s";
+      };
+    };
+
     # register the bouncer with CrowdSec's local API using the shared key, so the
     # plugin authenticates. Idempotent: skip if the bouncer already exists.
     systemd.services.crowdsec-register-bouncer = lib.mkIf cfg.crowdsecBouncer.enable {
