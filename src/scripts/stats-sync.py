@@ -23,19 +23,23 @@ QBITTORRENT = os.environ.get("STATS_QBITTORRENT", "http://10.100.0.112")
 INVENTORY = os.environ.get("STATS_INVENTORY", "/var/lib/homelab-stats/inventory.json")
 TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/homepage-tokens")
 # how many service rows the grid holds: four columns of eight. Only VMs that
-# are meant to be running get one. The eighteen switched off on purpose were
-# taking a third of the panel to say 0/0 for ever, and they are named in one
-# line underneath instead. Enable more than 32 and the surplus falls into the
-# footer's "+n more", which is the same overflow the footer always reported.
+# are meant to be running get one; the eighteen switched off on purpose were
+# taking a third of the panel to say 0/0 for ever, and their count is on the
+# Services tile. Enable more than 32 and the surplus falls into the footer's
+# "+n more", which is the same overflow the footer always reported.
 SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "32"))
 TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "6"))
 # Sending more rows than a panel can draw does not show more, it clips the
 # last one in half, so every list is cut to what its own panel holds. Requests
-# sits in the clients band with the other eight-row lists; disks and torrents
-# share the 343px side column at 17px a line and 36px a torrent.
-REQUEST_ROWS = int(os.environ.get("STATS_REQUEST_ROWS", "8"))
+# sits in the clients band with the other lists; disks and torrents share the
+# side column at 17px a line and 36px a torrent.
+#
+# Count these against a TRMNL screenshot, not a local render: TRMNL's font is
+# not the one chromium picks here and the same markup came out 18px shorter in
+# the band, which silently cost it a row.
+REQUEST_ROWS = int(os.environ.get("STATS_REQUEST_ROWS", "11"))
 REQUEST_WINDOW = os.environ.get("STATS_REQUEST_WINDOW", "3h")
-DISK_ROWS = int(os.environ.get("STATS_DISK_ROWS", "3"))
+DISK_ROWS = int(os.environ.get("STATS_DISK_ROWS", "4"))
 # longest torrent name the panel can hold on one line
 NAME_CHARS = int(os.environ.get("STATS_NAME_CHARS", "42"))
 # The "who is calling" strip. Only the external ingress is counted: vm-200
@@ -44,7 +48,7 @@ NAME_CHARS = int(os.environ.get("STATS_NAME_CHARS", "42"))
 # private lab is mostly whatever the owner happened to open.
 CLIENT_INGRESS = os.environ.get("STATS_CLIENT_INGRESS", "vm-200")
 CLIENT_WINDOW = os.environ.get("STATS_CLIENT_WINDOW", "24h")
-CLIENT_ROWS = int(os.environ.get("STATS_CLIENT_ROWS", "8"))
+CLIENT_ROWS = int(os.environ.get("STATS_CLIENT_ROWS", "11"))
 # public suffix to drop from hostnames, which are all under one domain
 CLIENT_DOMAIN = os.environ.get("STATS_CLIENT_DOMAIN", ".lsck0.dev")
 TIMEOUT = 8
@@ -406,15 +410,19 @@ def clients():
     # How that traffic went. The status label is already on the stream, so the
     # classes cost one query; 4xx running at half of everything is the shape of
     # a public address being probed, and worth seeing next to who is probing.
-    by_status = {}
+    # The exact codes come off the same result, and 404/403/401 are the three
+    # that say which kind of probing it is: guessing paths, or guessing a way
+    # past the door.
+    by_status, exact = {}, {}
     for r in logql(f'sum by (status) (count_over_time({sel}[{w}]))'):
         code = str(r["metric"].get("status") or "")
         try:
             n = float(r["value"][1])
         except (KeyError, TypeError, ValueError):
             continue
-        by_status[code[:1] + "xx" if code[:1].isdigit() else "?"] = \
-            by_status.get(code[:1] + "xx" if code[:1].isdigit() else "?", 0.0) + n
+        klass = code[:1] + "xx" if code[:1].isdigit() else "?"
+        by_status[klass] = by_status.get(klass, 0.0) + n
+        exact[code] = exact.get(code, 0.0) + n
     total = sum(by_status.values())
 
     # ClientHost is the real address: the Cloudflare ranges are trusted on the
@@ -422,8 +430,7 @@ def clients():
     visitors = scalar_logql(
         f'count(count by (ip) (count_over_time({sel} | json ip="ClientHost" [{w}])))')
 
-    # the method label is on the stream too, so the two that matter cost
-    # nothing and fill the column to the eight rows the band draws
+    # the method label is on the stream too, so this costs nothing
     by_method = {}
     for r in logql(f'sum by (method) (count_over_time({sel}[{w}]))'):
         try:
@@ -433,6 +440,7 @@ def clients():
 
     rows = [("requests", total), ("visitors", visitors)]
     rows.extend((c, by_status.get(c, 0.0)) for c in ("2xx", "3xx", "4xx", "5xx"))
+    rows.extend((c, exact.get(c, 0.0)) for c in ("404", "403", "401"))
     rows.extend((m, by_method.get(m, 0.0)) for m in ("GET", "POST"))
     traffic = bars(rows, scale=total)
     # the first two rows are not a share of the requests, so they get no bar
