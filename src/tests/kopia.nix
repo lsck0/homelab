@@ -5,7 +5,7 @@ pkgs.testers.runNixOSTest {
   name = "kopia";
 
   nodes.machine = {
-    imports = [ ./stubs.nix ../instances/106-internal-kopia.nix ];
+    imports = [ ./stubs.nix ../instances/107-internal-kopia.nix ];
     virtualisation.memorySize = 2048;
     environment.systemPackages = [ pkgs.curl ];
     # A tiny NAS tree: two services' data and the backup dir.

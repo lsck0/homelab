@@ -39,12 +39,12 @@ trap cleanup EXIT
 ok()   { echo "  PASS  $*"; }
 fail() { echo "  FAIL  $*"; FAILED=1; }
 
-H=nixosConfigurations.113-internal-hermes.config.services.hermes-agent
+H=nixosConfigurations.114-internal-hermes.config.services.hermes-agent
 echo ">>> Building Hermes (vm-113 package) and test tools"
 ENV=$(nix build --no-warn-dirty --no-link --print-out-paths --impure --expr "
   let f = builtins.getFlake \"$SRC\"; pkgs = f.inputs.nixpkgs.legacyPackages.x86_64-linux;
   in pkgs.buildEnv { name = \"hermes-test-env\"; paths = [
-    f.nixosConfigurations.\"113-internal-hermes\".config.services.hermes-agent.package pkgs.bashInteractive pkgs.coreutils pkgs.curl pkgs.jq pkgs.gnugrep pkgs.gnused
+    f.nixosConfigurations.\"114-internal-hermes\".config.services.hermes-agent.package pkgs.bashInteractive pkgs.coreutils pkgs.curl pkgs.jq pkgs.gnugrep pkgs.gnused
     pkgs.gawk pkgs.findutils pkgs.poppler-utils pkgs.python3 pkgs.procps pkgs.which pkgs.git pkgs.cacert ]; }")
 
 mkdir -p "$W"/{home,workspace,shims,log,tokens,mock}; : > "$W/home/.env"
@@ -90,7 +90,7 @@ cat > "$W/shims/vm" <<'EOF'
 #!/bin/sh
 /work/shims/_log vm "$@"
 case "$1" in
-  list|"") printf '106\trunning\t106-internal-kopia\n120\trunning\t120-internal-paperless\n123\tstopped\t123-internal-firefly\n208\tstopped\t208-external-minecraft\n' ;;
+  list|"") printf '107\trunning\t107-internal-kopia\n121\trunning\t121-internal-paperless\n124\tstopped\t124-internal-firefly\n208\tstopped\t208-external-minecraft\n' ;;
   status) echo running ;;
   start) echo "vm-$2 up" ;;
   stop) echo "vm-$2 shutting down" ;;
@@ -160,7 +160,7 @@ echo -n fake-firefly-token > "$W/tokens/firefly-token.token"
 # with a fake pull request URL. Git identity as configured on vm-113.
 git clone -q --bare --no-local "$SRC/.." "$W/remote.git"   # a copy: chmod below must not touch this repo
 MASTER=$(git -C "$W/remote.git" rev-parse master)
-nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.113-internal-hermes.config.programs.git.config" \
+nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.114-internal-hermes.config.programs.git.config" \
   | jq -r 'map(.user // empty) | add | "[user]\n\tname = \(.name)\n\temail = \(.email)"' > "$W/home/.gitconfig"
 printf '[url "/work/remote.git"]\n\tinsteadOf = https://github.com/lsck0/homelab.git\n[safe]\n\tdirectory = *\n' >> "$W/home/.gitconfig"
 cat > "$W/shims/lab-pr" <<'EOF'
@@ -226,7 +226,7 @@ if [[ " $SCENARIOS " == *" media "* ]]; then
   mkdir -p "$W/sonarr" "$W/media/tv" "$W/media/anime"; chmod -R 777 "$W/sonarr" "$W/media"
   docker run -d --name ht-sonarr --network "$NET" --network-alias sonarr -p 127.0.0.1:28989:8989 \
     -e PUID=1000 -e PGID=1000 -v "$W/sonarr:/config" -v "$W/media:/data/media" \
-    "$(nix eval --no-warn-dirty --raw "$SRC#nixosConfigurations.130-internal-sonarr.config.virtualisation.oci-containers.containers.sonarr.image")" >/dev/null
+    "$(nix eval --no-warn-dirty --raw "$SRC#nixosConfigurations.131-internal-sonarr.config.virtualisation.oci-containers.containers.sonarr.image")" >/dev/null
   for _ in $(seq 90); do [ -f "$W/sonarr/config.xml" ] && grep -q ApiKey "$W/sonarr/config.xml" && break; sleep 2; done
   SK=$(grep -oP '<ApiKey>\K[^<]+' "$W/sonarr/config.xml"); echo -n "$SK" > "$W/tokens/sonarr-key.token"
   for _ in $(seq 60); do curl -sf -H "X-Api-Key: $SK" http://127.0.0.1:28989/api/v3/system/status >/dev/null && break; sleep 2; done

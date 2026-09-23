@@ -209,6 +209,12 @@ in {
         ip daddr 192.168.178.29 tcp dport 25565 dnat to 10.200.0.200:25565
         # Tor relay ORPort: must also be forwarded on the FritzBox.
         ip daddr 192.168.178.29 tcp dport 9001 dnat to 10.200.0.202:9001
+        # qBittorrent peer port. Without it the client is "firewalled": it can
+        # only dial peers out and never be dialled, which halves the reachable
+        # swarm and is what a tracker counts against you. UDP as well as TCP,
+        # because uTP and DHT are UDP. Also needs forwarding on the FritzBox.
+        ip daddr 192.168.178.29 tcp dport 6881 dnat to 10.100.0.112:6881
+        ip daddr 192.168.178.29 udp dport 6881 dnat to 10.100.0.112:6881
       }
     '';
   };
