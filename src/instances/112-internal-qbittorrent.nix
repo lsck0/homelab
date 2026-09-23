@@ -42,8 +42,13 @@ let
     upnp = false;
     queueing_enabled = true;
     max_active_downloads = 5;
-    max_active_torrents = 10;
-    max_active_uploads = 5;
+    # One torrent seeds at a time. Upstream is the scarce direction on a
+    # domestic line, and a seed saturating it makes everything else in the
+    # flat feel broken - a video call before a download.
+    max_active_uploads = 1;
+    # downloads plus the one upload slot, so a full download queue never
+    # starves seeding of its slot.
+    max_active_torrents = 6;
     dont_count_slow_torrents = true;
   });
 in {

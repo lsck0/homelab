@@ -27,6 +27,20 @@ BAZARR_URL=${BAZARR_URL:-http://10.100.0.132}
 # vm-113's isolated SOCKS port (the torrent client uses 9050 with shared
 # circuits; indexers get per-destination circuits on 9055).
 TOR_HOST=${TOR_HOST:-10.100.0.113};           TOR_PORT=${TOR_PORT:-9055}
+# When Radarr is allowed to start looking. "released" is Radarr's own default
+# and means nothing is searched until a digital release exists, which is why a
+# film still in cinemas sat monitored with an empty history while a manual
+# search found forty releases. "announced" searches from the moment the film
+# has a date.
+MIN_AVAILABILITY=${MIN_AVAILABILITY:-announced}
+# The Jellyfin account that owns this lab. Jellyseerr gives a new user
+# permission 32 (REQUEST) and nothing else, so every request it makes sits
+# PENDING until an admin approves it - and in a one-person lab the person
+# waiting for approval is the person who would give it. 160 is REQUEST plus
+# AUTO_APPROVE (128), which is the smallest grant that makes a request reach
+# Radarr on its own; ADMIN (2) would work too and is far more than is needed.
+OWNER_USER=${OWNER_USER:-luca}
+OWNER_PERMISSIONS=${OWNER_PERMISSIONS:-160}
 pending=0
 
 key() { cat "$T/$1.token" 2>/dev/null; }
@@ -237,8 +251,8 @@ wire_prowlarr() {
 # JELLYSEERR
 # ─────────────────────────────────────────────────────────────────────────────
 wire_jellyseerr() {
-  local S="$JELLYSEERR_URL/api/v1" jar rk sk rp sp ids
-  [ "$(curl -sf "$S/settings/public" | jq -r '.initialized // empty')" = true ] && return
+  local S="$JELLYSEERR_URL/api/v1" jar rk sk rp sp ids initialised
+  initialised=$(curl -sf "$S/settings/public" | jq -r '.initialized // empty')
   [ -n "$(curl -sf "$S/settings/public")" ] || { later "jellyseerr: unreachable"; return; }
   if ! { rk=$(key radarr-key) && sk=$(key sonarr-key) && [ -s "$T/jellyfin-key.token" ]; }; then
     later "jellyseerr: waiting for radarr/sonarr/jellyfin"; return
@@ -247,11 +261,75 @@ wire_jellyseerr() {
   jar=$(mktemp); trap 'rm -f "$jar"' RETURN
   js() { curl -sf -c "$jar" -b "$jar" -H "Content-Type: application/json" "$@"; }
 
-  js -X POST "$S/auth/jellyfin" -d "$(jq -cn --arg p "$(key jellyfin-admin-pass)" \
-    --arg h "$JELLYFIN_HOST" --argjson port "$JELLYFIN_PORT" \
-    '{username: "admin", password: $p, hostname: $h, port: $port, useSsl: false,
-      urlBase: "", email: "admin@lsck0.dev", serverType: 2}')" >/dev/null || true
+  # Two shapes of the same endpoint: before initialisation it also carries the
+  # Jellyfin server to point at, and an initialised Jellyseerr rejects that
+  # body and accepts only the credentials.
+  if [ "$initialised" = true ]; then
+    js -X POST "$S/auth/jellyfin" -d "$(jq -cn --arg p "$(key jellyfin-admin-pass)" \
+      '{username: "admin", password: $p}')" >/dev/null || true
+  else
+    js -X POST "$S/auth/jellyfin" -d "$(jq -cn --arg p "$(key jellyfin-admin-pass)" \
+      --arg h "$JELLYFIN_HOST" --argjson port "$JELLYFIN_PORT" \
+      '{username: "admin", password: $p, hostname: $h, port: $port, useSsl: false,
+        urlBase: "", email: "admin@lsck0.dev", serverType: 2}')" >/dev/null || true
+  fi
   js "$S/auth/me" >/dev/null || { later "jellyseerr: Jellyfin login failed"; return; }
+
+  # An already-initialised Jellyseerr used to be skipped outright, so every
+  # value below was whatever it happened to be set to on the day it was first
+  # wired - the same create-but-never-correct hole that left the *arr pointing
+  # at addresses from before the renumber. Correct what has drifted instead.
+  if [ "$initialised" = true ]; then
+    local cur want
+    cur=$(js "$S/settings/radarr" | jq -c '.[0] // empty')
+    if [ -z "$cur" ]; then
+      later "jellyseerr: initialised but has no Radarr server"
+    else
+      # id is read-only on the way back in:
+      #   request/body/id is read-only (readOnly.openapi.validation)
+      want=$(echo "$cur" | jq -c --arg k "$rk" --arg h "$RADARR_HOST" \
+        --argjson port "$RADARR_PORT" --arg min "$MIN_AVAILABILITY" \
+        '.apiKey = $k | .hostname = $h | .port = $port | .minimumAvailability = $min')
+      if [ "$(echo "$cur" | jq -cS .)" != "$(echo "$want" | jq -cS .)" ]; then
+        js -X PUT "$S/settings/radarr/$(echo "$cur" | jq -r .id)" \
+          -d "$(echo "$want" | jq -c 'del(.id)')" >/dev/null \
+          && echo "jellyseerr: Radarr server corrected" \
+          || later "jellyseerr: correcting the Radarr server failed"
+      fi
+    fi
+    # A request that is never approved never reaches Radarr, which looks
+    # exactly like Jellyseerr being unable to talk to it.
+    local uid
+    uid=$(js "$S/user?take=100" | jq -r --arg u "$OWNER_USER" \
+      'first(.results[] | select(.displayName == $u or .jellyfinUsername == $u)) | .id // empty')
+    if [ -n "$uid" ]; then
+      if [ "$(js "$S/user/$uid" | jq -r .permissions)" != "$OWNER_PERMISSIONS" ]; then
+        js -X PUT "$S/user/$uid" -d "$(jq -cn --argjson p "$OWNER_PERMISSIONS" '{permissions: $p}')" >/dev/null \
+          && echo "jellyseerr: $OWNER_USER may now approve its own requests" \
+          || later "jellyseerr: could not set permissions for $OWNER_USER"
+      fi
+    else
+      later "jellyseerr: no user called $OWNER_USER"
+    fi
+    if [ "$(js "$S/settings/main" | jq -r .defaultPermissions)" != "$OWNER_PERMISSIONS" ]; then
+      js -X POST "$S/settings/main" -d "$(jq -cn --argjson p "$OWNER_PERMISSIONS" '{defaultPermissions: $p}')" >/dev/null \
+        && echo "jellyseerr: default permissions corrected" \
+        || later "jellyseerr: could not set default permissions"
+    fi
+
+    cur=$(js "$S/settings/sonarr" | jq -c '.[0] // empty')
+    if [ -n "$cur" ]; then
+      want=$(echo "$cur" | jq -c --arg k "$sk" --arg h "$SONARR_HOST" \
+        --argjson port "$SONARR_PORT" '.apiKey = $k | .hostname = $h | .port = $port')
+      if [ "$(echo "$cur" | jq -cS .)" != "$(echo "$want" | jq -cS .)" ]; then
+        js -X PUT "$S/settings/sonarr/$(echo "$cur" | jq -r .id)" \
+          -d "$(echo "$want" | jq -c 'del(.id)')" >/dev/null \
+          && echo "jellyseerr: Sonarr server corrected" \
+          || later "jellyseerr: correcting the Sonarr server failed"
+      fi
+    fi
+    return
+  fi
 
   js "$S/settings/jellyfin/library?sync=true" >/dev/null
   ids=$(js "$S/settings/jellyfin/library" | jq -r 'map(.id) | join(",")')
@@ -260,10 +338,10 @@ wire_jellyseerr() {
   rp=$(api GET "http://$RADARR_HOST:$RADARR_PORT/api/v3/qualityprofile" "$rk" | jq -c '.[0]')
   sp=$(api GET "http://$SONARR_HOST:$SONARR_PORT/api/v3/qualityprofile" "$sk" | jq -c '.[0]')
   js -X POST "$S/settings/radarr" -d "$(jq -cn --arg k "$rk" --argjson p "$rp" \
-    --arg h "$RADARR_HOST" --argjson port "$RADARR_PORT" '{
+    --arg h "$RADARR_HOST" --argjson port "$RADARR_PORT" --arg min "$MIN_AVAILABILITY" '{
     name: "Radarr", hostname: $h, port: $port, apiKey: $k, useSsl: false, baseUrl: "",
     activeProfileId: $p.id, activeProfileName: $p.name, activeDirectory: "/data/media/movies",
-    minimumAvailability: "released", tags: [], is4k: false, isDefault: true,
+    minimumAvailability: $min, tags: [], is4k: false, isDefault: true,
     externalUrl: "https://radarr.lsck0.dev", syncEnabled: true, preventSearch: false}')" >/dev/null \
     || { later "jellyseerr: adding Radarr failed"; return; }
   js -X POST "$S/settings/sonarr" -d "$(jq -cn --arg k "$sk" --argjson p "$sp" \
