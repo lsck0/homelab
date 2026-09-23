@@ -29,18 +29,22 @@ for proto in udp tcp; do
   port=$got
 done
 
+# Compare against what the client actually has, not against a note this script
+# left itself. The cached value said "unchanged" while qBittorrent had been
+# put back on 6881 by its own settings unit, so the lease was renewed every 45
+# seconds and never applied. This runs ~1900 times a day and setPreferences
+# makes the client rebind, so it still only fires when the two disagree.
+have=$(podman exec "$CONTAINER" curl -sf "http://127.0.0.1:80/api/v2/app/preferences" \
+  | sed -n 's/.*"listen_port":\([0-9]*\).*/\1/p')
 mkdir -p "$(dirname "$STATE")"
-# Only talk to qBittorrent when the port actually moved. This runs 1900 times
-# a day and setPreferences makes the client rebind its listener.
-if [ -f "$STATE" ] && [ "$(cat "$STATE")" = "$port" ]; then
+if [ "$have" = "$port" ]; then
   exit 0
 fi
 
-# The request has to come from inside the container. qBittorrent skips the
-# login for loopback, and only there is it really loopback - a published port
-# arrives from the podman bridge, which is not on the API whitelist either, so
-# from the host this is a 403.
-if podman exec "$CONTAINER" curl -sf -X POST "http://127.0.0.1:8080/api/v2/app/setPreferences" \
+# The request has to come from inside the container, where qBittorrent counts
+# it as loopback and skips the login. The VM's own address is not on the API
+# whitelist, so from the host this is a 403.
+if podman exec "$CONTAINER" curl -sf -X POST "http://127.0.0.1:80/api/v2/app/setPreferences" \
     --data-urlencode "json={\"listen_port\":$port,\"random_port\":false,\"upnp\":false}" >/dev/null; then
   printf '%s' "$port" > "$STATE"
   echo "forwarded port is now $port"

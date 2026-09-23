@@ -35,6 +35,11 @@ let
     dht = true;
     pex = true;
     lsd = true;
+    # The WebUI has to answer on 80, because that is where the *arr, Traefik,
+    # Homepage and the dashboard collector all look, and with host networking
+    # there is no publish to remap it. Binding it as the container's
+    # unprivileged user needs the sysctl below.
+    web_ui_port = 80;
     # The listen port is whatever Proton's NAT-PMP lease currently says;
     # protonvpn-port.service overwrites it. 6881 is only the value the client
     # starts on before the first lease arrives.
@@ -110,9 +115,15 @@ in {
     // nasPath "/data/torrents" "torrents"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
+  # Host networking, not a published port. Proton's NAT-PMP always maps the
+  # public port to the same private port and will not grant a chosen one, so
+  # the client has to bind whatever it is leased - which a fixed "6881:6881"
+  # publish cannot follow. The symptom was a client that downloaded fine and
+  # was reachable by nobody: Proton forwarded 49649 to the VM and the only
+  # listener was conmon on 6881.
   virtualisation.oci-containers.containers.qbittorrent = {
     image = "lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls476";
-    ports = [ "80:8080" "6881:6881" "6881:6881/udp" ];
+    extraOptions = [ "--network=host" ];
     volumes = [
       "/var/lib/qbittorrent:/config"
       "/data/torrents:/data/torrents"
@@ -121,7 +132,7 @@ in {
       PUID = "1000";
       PGID = "1000";
       TZ = "Europe/Berlin";
-      WEBUI_PORT = "8080";
+      WEBUI_PORT = "80";
     };
   };
 
@@ -167,9 +178,11 @@ in {
       RestartSec = 30;
     };
     script = ''
-      API="http://127.0.0.1:8080/api/v2"
+      API="http://127.0.0.1:80/api/v2"
       # run curl inside the container: only there is the request really from
-      # loopback (WebUI\LocalHostAuth=false), a published port is not.
+      # loopback (WebUI\LocalHostAuth=false). With host networking that is
+      # the same loopback as the VM's, but podman exec keeps this working
+      # whichever way the container is attached.
       curl() { podman exec qbittorrent curl "$@"; }
       ${retry} 60 2 podman exec qbittorrent curl -fsS "$API/app/version"
 
@@ -189,8 +202,16 @@ in {
     "d /var/lib/qbittorrent 0750 1000 1000 -"
   ];
 
-  networking.firewall.allowedTCPPorts = [ 80 6881 ];
-  networking.firewall.allowedUDPPorts = [ 6881 ];
+  # The peer port changes with every Proton lease, so it cannot be listed.
+  # Trusting wg0 is the honest way to say it: the only thing that reaches this
+  # VM over that interface is Proton, and Proton only forwards the one port it
+  # leased. 6881 is gone from the LAN side with the router's forward.
+  networking.firewall.trustedInterfaces = [ "wg0" ];
+  networking.firewall.allowedTCPPorts = [ 80 ];
+
+  # qBittorrent runs as uid 1000 inside the container and, sharing the host's
+  # network namespace, has to bind 80 itself.
+  boot.kernel.sysctl."net.ipv4.ip_unprivileged_port_start" = 80;
 
   # the WebUI skips its login for the whitelisted API clients, so the port
   # itself must not be reachable from anywhere else. 6881 (peer traffic) stays
