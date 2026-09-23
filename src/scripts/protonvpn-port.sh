@@ -12,7 +12,7 @@
 set -euo pipefail
 
 GATEWAY=${GATEWAY:-10.2.0.1}
-QBIT=${QBIT:-http://127.0.0.1:80}
+CONTAINER=${CONTAINER:-qbittorrent}
 STATE=${STATE:-/var/lib/protonvpn/port}
 
 # -a <private> <public> <proto> <lifetime>. 0 as the public port means "any",
@@ -36,9 +36,11 @@ if [ -f "$STATE" ] && [ "$(cat "$STATE")" = "$port" ]; then
   exit 0
 fi
 
-# 127.0.0.1 is on qBittorrent's API whitelist via the container's published
-# port, so no login is needed.
-if curl -sf -X POST "$QBIT/api/v2/app/setPreferences" \
+# The request has to come from inside the container. qBittorrent skips the
+# login for loopback, and only there is it really loopback - a published port
+# arrives from the podman bridge, which is not on the API whitelist either, so
+# from the host this is a 403.
+if podman exec "$CONTAINER" curl -sf -X POST "http://127.0.0.1:8080/api/v2/app/setPreferences" \
     --data-urlencode "json={\"listen_port\":$port,\"random_port\":false,\"upnp\":false}" >/dev/null; then
   printf '%s' "$port" > "$STATE"
   echo "forwarded port is now $port"

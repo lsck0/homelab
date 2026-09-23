@@ -136,6 +136,58 @@ wire_servarr() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
+# JELLYFIN NOTIFICATION
+# ─────────────────────────────────────────────────────────────────────────────
+# Tell Jellyfin to look when a file lands, instead of waiting for it to notice.
+#
+# It never notices: the library sits on an NFS mount and Jellyfin's realtime
+# monitor is inotify, which NFS does not deliver. A film imported by Radarr is
+# on disk and absent from the library until something asks for a scan, which
+# is exactly what happened to The Odyssey.
+#
+# wire_jellyfin_notify <name> <base url> <api key name>
+wire_jellyfin_notify() {
+  local name=$1 url=$2 k jk cur id body
+  k=$(key "$name-key") || { later "$name: API key not exported yet"; return; }
+  jk=$(key jellyfin-key) || { later "$name: waiting for the Jellyfin API key"; return; }
+  local a="$url/api/v3"
+
+  cur=$(api GET "$a/notification" "$k") || { later "$name: unreachable"; return; }
+  if echo "$cur" | jq -e 'any(.[]; .implementation == "MediaBrowser")' >/dev/null; then
+    local one
+    one=$(echo "$cur" | jq -c 'first(.[] | select(.implementation == "MediaBrowser"))')
+    id=$(echo "$one" | jq -r .id)
+    fix_fields "$name/jellyfin" "$a/notification/$id" "$k" "$one" \
+      --arg h "$JELLYFIN_HOST" --arg p "$JELLYFIN_PORT" \
+      '.onDownload = true | .onUpgrade = true | .onRename = true
+       | .fields |= map(
+           if .name == "host" then .value = $h
+           elif .name == "port" then .value = ($p | tonumber)
+           elif .name == "updateLibrary" then .value = true
+           else . end)'
+    return
+  fi
+
+  body=$(api GET "$a/notification/schema" "$k" | jq -c \
+    --arg h "$JELLYFIN_HOST" --arg p "$JELLYFIN_PORT" --arg jk "$jk" '
+    first(.[] | select(.implementation == "MediaBrowser"))
+    | .name = "Jellyfin"
+    # on import and on rename: the two moments the library changed on disk
+    | .onDownload = true | .onUpgrade = true | .onRename = true
+    | .fields |= map(
+        if .name == "host" then .value = $h
+        elif .name == "port" then .value = ($p | tonumber)
+        elif .name == "apiKey" then .value = $jk
+        elif .name == "updateLibrary" then .value = true
+        else . end)')
+  if api POST "$a/notification?forceSave=true" "$k" "$body" >/dev/null; then
+    echo "$name: added the Jellyfin library-update notification"
+  else
+    later "$name: adding the Jellyfin notification failed"
+  fi
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
 # PROWLARR
 # ─────────────────────────────────────────────────────────────────────────────
 wire_prowlarr() {
@@ -392,6 +444,8 @@ wire_bazarr() {
 # nothing. No root folders: Prowlarr does not manage files.
 wire_servarr prowlarr  "http://$PROWLARR_HOST:$PROWLARR_PORT"   v1 category     prowlarr
 wire_servarr radarr    "http://$RADARR_HOST:$RADARR_PORT"       v3 movieCategory radarr    /data/media/movies
+wire_jellyfin_notify radarr "http://$RADARR_HOST:$RADARR_PORT"
+wire_jellyfin_notify sonarr "http://$SONARR_HOST:$SONARR_PORT"
 wire_servarr sonarr    "http://$SONARR_HOST:$SONARR_PORT"       v3 tvCategory    sonarr    /data/media/tv /data/media/anime
 wire_servarr lidarr    "http://$LIDARR_HOST:$LIDARR_PORT"       v1 musicCategory lidarr    /data/media/music
 wire_servarr bookshelf "http://$BOOKSHELF_HOST:$BOOKSHELF_PORT" v1 bookCategory  bookshelf /data/media/books

@@ -71,6 +71,16 @@ in {
     endpoint = "89.222.96.158:51820";
     dns = "10.2.0.1";
     lanGateway = "10.100.0.1";
+    # Everything that must not be answered through the tunnel. The VM's own
+    # /24 is on-link and needs no entry; these are reached through the router
+    # and every one of them is a way in. Leaving 192.168.178.0/24 out of this
+    # list took the VM off the network: ssh from a workstation on the house
+    # LAN still arrived, and the replies went into Proton.
+    lanRoutes = [
+      "192.168.178.0/24"  # the house LAN, and the Proxmox host
+      "10.200.0.0/24"     # the DMZ
+      "10.0.0.0/24"       # the router's WireGuard clients
+    ];
   };
 
   # Proton's forwarded port is leased for 60 seconds at a time and changes
@@ -79,7 +89,7 @@ in {
   systemd.services.protonvpn-port = {
     description = "Renew the Proton forwarded port and give it to qBittorrent";
     after = [ "wireguard-wg0.service" "podman-qbittorrent.service" ];
-    path = [ pkgs.libnatpmp pkgs.curl pkgs.coreutils pkgs.gnused ];
+    path = [ pkgs.libnatpmp pkgs.podman pkgs.coreutils pkgs.gnused ];
     serviceConfig = {
       Type = "oneshot";
       StateDirectory = "protonvpn";
