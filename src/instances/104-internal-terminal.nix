@@ -96,6 +96,8 @@ in {
     calendar-upload-token = {};
     kraken-api-key = {};
     kraken-api-secret = {};
+    # write token for the TRMNL plugins: it can replace what the panels show.
+    trmnl-api-key = {};
   };
 
   services.nginx = {
@@ -194,6 +196,53 @@ in {
     script = ''
       arxiv-sync ${terminalPublic}/$(cat ${terminalDir}/token)
     '';
+  };
+
+  # The .liquid files in this repo are the dashboards, and nothing used to
+  # carry them anywhere - every change was uploaded by hand. That made the
+  # panels the one part of the lab whose visible behaviour lived outside git:
+  # rebuild from scratch and they would keep whatever had last been pasted in.
+  #
+  # Plugin ids come from the TRMNL account and are not derivable from
+  # anything here, so they are written down. A plugin created later needs a
+  # line adding; nothing else does.
+  systemd.services.trmnl-sync = {
+    description = "Push the dashboard templates to TRMNL";
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    path = [ pkgs.python3 ];
+    serviceConfig = {
+      Type = "oneshot";
+      # TRMNL is someone else's service; a bad afternoon there should not
+      # leave the templates permanently unsent.
+      Restart = "on-failure";
+      RestartSec = 600;
+      TimeoutStartSec = "10min";
+    };
+    environment.TRMNL_API_KEY_FILE = config.sops.secrets.trmnl-api-key.path;
+    script = ''
+      exec python3 ${../scripts/trmnl-sync.py} \
+        484687=${../modules/trmnl/terminal.liquid} \
+        484717=${../modules/trmnl/arxiv.liquid} \
+        484254=${../modules/trmnl/calendar.liquid} \
+        484274=${../modules/trmnl/calendar.liquid} \
+        484257=${../modules/trmnl/calendar.liquid} \
+        484255=${../modules/trmnl/calendar.liquid}
+    '';
+  };
+
+  # On boot and daily. The templates change when someone edits them and a
+  # deploy restarts this unit, so the timer is only a backstop for a push
+  # that failed while TRMNL was unreachable.
+  systemd.timers.trmnl-sync = {
+    description = "Keep the TRMNL plugins on this repo's templates";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "10m";
+      OnUnitActiveSec = "24h";
+      Persistent = true;
+      Unit = "trmnl-sync.service";
+    };
   };
 
   systemd.timers.arxiv-sync = {
