@@ -90,16 +90,16 @@ def main():
         print("the GitHub token is empty", file=sys.stderr)
         return 1
 
-    repos = safe(f"user/repos?per_page=100&affiliation=owner&sort=pushed",
+    repos = safe("user/repos?per_page=100&affiliation=owner&sort=pushed",
                  token, [])
     notes = safe("notifications?per_page=100", token, [])
 
-    issues = safe(
-        "search/issues?q=" + urllib.parse.quote(f"is:open is:issue involves:{USER}")
-        + "&per_page=" + str(WORK_ROWS), token, {})
-    prs = safe(
-        "search/issues?q=" + urllib.parse.quote(f"is:open is:pr involves:{USER}")
-        + "&per_page=" + str(WORK_ROWS), token, {})
+    def search(kind):
+        q = urllib.parse.quote(f"is:open is:{kind} involves:{USER}")
+        return safe(f"search/issues?q={q}&per_page={WORK_ROWS}", token, {})
+
+    issues = search("issue")
+    prs = search("pr")
 
     # CI failures are the bulk of the notifications, and the only part of them
     # that is actionable. Everything else is counted, not listed.
