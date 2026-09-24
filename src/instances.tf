@@ -180,7 +180,10 @@ locals {
       enabled = true,
       name    = "126-internal-huginn",
       type    = "internal",
-      memory  = 1024,
+      # Rails plus its own Postgres; measured at 1003 MiB, i.e. at the old
+      # ceiling. Migrations thrash hard enough to take sshd down.
+      memory  = 2048,
+      balloon = 1536,
       # the huginn image plus its Postgres left 396 MiB free on an 8 GiB disk.
       disk = 16,
     }
