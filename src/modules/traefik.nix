@@ -273,7 +273,14 @@ let
       chain = map frameSwap (
         (if cfg.crowdsecBouncer.enable
             && cfg.crowdsecBouncer.appsec
-            && builtins.elem name cfg.crowdsecBouncer.noAppsecRouters
+            && (builtins.elem name cfg.crowdsecBouncer.noAppsecRouters
+                # The honeypot always skips AppSec. Its whole purpose is to let
+                # a scanner reach the labyrinth and waste its time there; with
+                # the WAF in front, /.env and /wp-login.php were answered with a
+                # cheap 403 and the caller moved on in milliseconds. The IP
+                # bouncer stays, so an address CrowdSec already decided about is
+                # still dropped before any of this.
+                || name == "honeypot-tls")
          then map (m: if m == "crowdsec" then "crowdsec-noappsec" else m) defaultMiddlewares
          else defaultMiddlewares)
         ++ lib.optional (cfg.bodyLimit > 0 && builtins.elem name cfg.bodyLimitRouters) "body-limit"
