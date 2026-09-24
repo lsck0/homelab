@@ -253,7 +253,13 @@ if ! vgs bulk >/dev/null 2>&1; then
         vgcreate bulk "$BULK_DISK"
         # Leave 1% for thin-pool metadata growth: a thin pool whose metadata
         # fills is as wedged as one whose data fills, and far more annoying.
-        lvcreate --type thin-pool -l 99%FREE --thinpool data bulk
+        #
+        # -Zn: no zeroing of new chunks. Zeroing writes every chunk twice and
+        # halved throughput on this disk - 55 MB/s against 106 MB/s once it was
+        # off. It only protects against reading a previously-freed chunk, which
+        # matters for untrusted tenants sharing a pool; here the one consumer is
+        # the NAS's own filesystem, which never reads a block it has not written.
+        lvcreate --type thin-pool -l 99%FREE -Zn --thinpool data bulk
     fi
 fi
 if vgs bulk >/dev/null 2>&1 && ! pvesm status --storage bulk >/dev/null 2>&1; then

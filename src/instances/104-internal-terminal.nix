@@ -20,6 +20,10 @@ let
     flakeIgnore = [ "E501" ];
   } (builtins.readFile ../scripts/stats-sync.py);
 
+  githubSync = pkgs.writers.writePython3Bin "github-sync" {
+    flakeIgnore = [ "E501" ];
+  } (builtins.readFile ../scripts/github-sync.py);
+
   arxivSync = pkgs.writers.writePython3Bin "arxiv-sync" {
     flakeIgnore = [ "E501" ];
   } (builtins.readFile ../scripts/arxiv-sync.py);
@@ -98,6 +102,10 @@ in {
     kraken-api-secret = {};
     # write token for the TRMNL plugins: it can replace what the panels show.
     trmnl-api-key = {};
+    # read-only use here: the GitHub panel lists repos, CI state and open work.
+    # Shared with the mirror job rather than minted separately, because it is
+    # the same account and the same scopes.
+    github-mirror-token = { owner = "nginx"; };
   };
 
   services.nginx = {
@@ -242,6 +250,37 @@ in {
       OnUnitActiveSec = "24h";
       Persistent = true;
       Unit = "trmnl-sync.service";
+    };
+  };
+
+  # GitHub: commits, repos, CI state and open work. Hourly - the panel is a
+  # glance at the day, not a notifier, and six API calls an hour is nothing
+  # against the 5000 limit.
+  systemd.services.github-sync = {
+    description = "Collect GitHub activity for the TRMNL terminal";
+    after = [ "terminal-token.service" "network-online.target" ];
+    requires = [ "terminal-token.service" ];
+    wants = [ "network-online.target" ];
+    path = [ githubSync pkgs.coreutils ];
+    environment.GITHUB_TOKEN_FILE = config.sops.secrets.github-mirror-token.path;
+    serviceConfig = {
+      Type = "oneshot";
+      User = "nginx";
+      Group = "nginx";
+    };
+    script = ''
+      github-sync ${terminalPublic}/$(cat ${terminalDir}/token)
+    '';
+  };
+
+  systemd.timers.github-sync = {
+    description = "Refresh the GitHub feed for the terminal";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "7m";
+      OnUnitActiveSec = "1h";
+      Persistent = true;
+      Unit = "github-sync.service";
     };
   };
 
