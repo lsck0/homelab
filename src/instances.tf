@@ -153,6 +153,8 @@ locals {
       enabled = true,
       name    = "122-internal-paperless-ai",
       type    = "internal",
+      # paperless-ai pulls a large model image; 8 GiB was 80% full at rest.
+      disk = 16,
     }
     "124" = { # Firefly III personal finance
       enabled = true,
@@ -166,12 +168,17 @@ locals {
       name    = "125-internal-homeassistant",
       type    = "internal",
       memory  = 1024,
+      # Home Assistant's image alone does not fit in 8 GiB: the pull failed
+      # with "no space left on device" and the container never started.
+      disk = 16,
     }
     "126" = { # automation agents / scraping
       enabled = true,
       name    = "126-internal-huginn",
       type    = "internal",
       memory  = 1024,
+      # the huginn image plus its Postgres left 396 MiB free on an 8 GiB disk.
+      disk = 16,
     }
     "127" = { # MQTT broker (Home Assistant / IoT)
       enabled = true,

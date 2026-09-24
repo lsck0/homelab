@@ -42,10 +42,6 @@ in
     image = "ghcr.io/tale/headplane:0.6.0";
     ports = [ "3000:3000" ];
     volumes = [
-      # read-only: Headplane reads Headscale's config to learn the DNS and
-      # prefix settings it displays. It has no integration configured, so it
-      # never writes here and never has to restart the server.
-      "/var/lib/headscale/config.yaml:/etc/headscale/config.yaml:ro"
       "/var/lib/headplane:/var/lib/headplane"
     ];
     environment = {
@@ -54,7 +50,12 @@ in
       HEADPLANE_SERVER__COOKIE_SECURE = "true";
       HEADPLANE_HEADSCALE__URL = headscaleLocal;
       HEADPLANE_HEADSCALE__PUBLIC_URL = "https://hs.lsck0.dev";
-      HEADPLANE_HEADSCALE__CONFIG_PATH = "/etc/headscale/config.yaml";
+      # No config file is mounted. The NixOS headscale module renders its
+      # config into the store, not into /var/lib/headscale, so the bind mount
+      # this used to carry pointed at nothing and podman refused to start the
+      # container at all: "statfs /var/lib/headscale/config.yaml: no such file
+      # or directory". Headplane only reads it to display DNS and prefix
+      # settings, and works from the API alone with strict mode off.
       HEADPLANE_HEADSCALE__CONFIG_STRICT = "false";
     };
     environmentFiles = [ "/var/lib/headplane/cookie.env" ];
