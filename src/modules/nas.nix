@@ -62,14 +62,9 @@ in {
     };
   };
 
-  # Anything stateful on an NFS mount is slow to shut down, and systemd's
-  # default 45s stop timeout is not enough for it. When it expires the service
-  # is SIGKILLed, lands in `failed`, and - because most upstream units do not
-  # restart on failure - simply stays down. A deploy would take Postgres,
-  # Prometheus or Grafana out on one VM after another and report success,
-  # because the deploy itself worked; only the probes noticed, hours later.
-  #
-  # So: time to stop cleanly, and a restart if it still does not.
+  # Stateful services on NFS are slow to stop, and systemd's 45s default kills
+  # them: they land in `failed` and, with no Restart, stay down. A deploy took
+  # Postgres out on VM after VM and still reported success.
   # a DMZ mount missing from dmzShares would hang at boot on a denied export.
   assertions = lib.optionals external (map (d: {
     assertion = lib.elem d allowed;

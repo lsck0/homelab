@@ -128,14 +128,10 @@ in {
   # ─────────────────────────────────────────────────────────────────────────────
   # EGRESS CLASSES
   # ─────────────────────────────────────────────────────────────────────────────
-  # A VM listed in modules/egress.nix leaves through something other than the
-  # WAN NAT. Its packets are marked by source address, and the mark selects a
-  # routing table holding one default route.
-  #
-  # The killswitch is the same idea modules/vpn.nix used: each table ends in a
-  # blackhole, so when the exit is down there is nowhere for a member's packets
-  # to go. They are never allowed to fall back to the main table, which is what
-  # "leaving through the house" would mean.
+  # A VM in modules/egress.nix leaves through something other than the WAN NAT:
+  # its packets are marked by source and the mark selects a routing table. Each
+  # table ends in a blackhole, so a dead exit means no traffic rather than
+  # traffic from the house address.
   assertions = [{
     assertion = vpnMembers == [ ] || vpnCfg.enable;
     message = "modules/egress.nix routes ${lib.concatStringsSep ", " vpnMembers} through the VPN, but homelab.egress.vpn is not enabled on the router.";
@@ -146,14 +142,11 @@ in {
     content = ''
       chain premark {
         type filter hook prerouting priority mangle; policy accept;
-        # The lab and the house are never diverted. Without this a member's
-        # reply to an ssh session from the house is marked like anything else,
-        # looked up in a table whose only entries are the tunnel and a
-        # blackhole, and dropped - the VM answers on no address at all.
-        #
-        # modules/vpn.nix needed the same exception and called it lanRoutes,
-        # kept by hand per VM. Getting that list wrong took vm-112 off the
-        # network once already; here it is one rule for every member.
+        # The lab and the house are never diverted: otherwise a member's reply
+        # to an ssh session is marked, looked up in a table holding only the
+        # tunnel and a blackhole, and dropped. modules/vpn.nix called this
+        # lanRoutes and kept it by hand per VM; getting it wrong took vm-112
+        # off the network. One rule for every member instead.
         ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } return
         ${markRule "vpn" vpnMembers}
       }
@@ -201,15 +194,10 @@ in {
       # member's packets to go, rather than a quiet fall back to the house.
       ip route replace blackhole default metric 1000 table ${toString egressMarks.vpn.table}
 
-      # The lab's own subnets, so reverse-path filtering passes. rpfilter
-      # validates a packet's source against the table its mark selects, and a
-      # table holding only the tunnel makes 10.100.0.112 look as though it
-      # arrived from wg-egress rather than from ens19 - so every marked packet
-      # was dropped in `rpfilter-allow` before it ever reached the tunnel.
-      #
-      # This does not weaken the killswitch: the default route here is still
-      # the tunnel and then a blackhole. These entries only describe where the
-      # lab's own addresses legitimately live.
+      # The lab's own subnets, so rpfilter passes: it validates a source
+      # against the table the mark selects, and a table holding only the tunnel
+      # made 10.100.0.112 look as though it came from wg-egress. Does not
+      # weaken the killswitch - the default is still tunnel, then blackhole.
       ip route replace 10.100.0.0/24 dev ens19 table ${toString egressMarks.vpn.table}
       ip route replace 10.200.0.0/24 dev ens20 table ${toString egressMarks.vpn.table}
       ip route replace 192.168.178.0/24 dev ens18 table ${toString egressMarks.vpn.table}
@@ -219,17 +207,13 @@ in {
   # ─────────────────────────────────────────────────────────────────────────────
   # TOR EXIT
   # ─────────────────────────────────────────────────────────────────────────────
-  # The other half of the proxy. Was vm-113, a VM whose whole job was to hold a
-  # Tor client and forward for others; with the exits collected here there is
-  # nothing left for it to do, and running Tor on the router is what makes the
-  # transparent path simple: a redirect has to happen where Tor runs, because
-  # TransPort recovers the address the client meant to reach with
-  # SO_ORIGINAL_DST, and that is only recorded where the translation happened.
-  # On a separate VM that forced the router to route to it as a next hop and to
-  # punch a hole in the DMZ isolation. Here it is one redirect.
+  # The other half of the proxy; was vm-113 until the exits were collected here.
+  # Tor runs on the router because a transparent redirect must happen where Tor
+  # runs - TransPort recovers the original destination via SO_ORIGINAL_DST,
+  # which is only recorded where the translation happened. On a separate VM
+  # that needed next-hop routing plus a hole in the DMZ isolation.
   #
-  # Client only. This relays nothing for anyone - the public non-exit relay is
-  # vm-202, which is a different thing entirely.
+  # Client only; the public non-exit relay is vm-202, a different thing.
   services.tor = {
     enable = true;
     enableGeoIP = false;
@@ -379,12 +363,9 @@ in {
   networking.nftables.enable = true;
   networking.firewall = {
     # Loose, to match the rp_filter sysctl above rather than contradict it.
-    # The default strict check is `fib saddr . mark . iif check exists`, which
-    # requires a reply to arrive on the interface the main table would use to
-    # reach its source. Traffic that left through the VPN exit comes back on
-    # wg-egress while 1.1.1.1 still routes via ens18, so every reply for an
-    # egress member was dropped - the request reached the internet and the
-    # answer was discarded one hop from home.
+    # Strict is `fib saddr . mark . iif check exists`, which wants the reply on
+    # the interface the main table would use for its source. VPN replies arrive
+    # on wg-egress while 1.1.1.1 routes via ens18, so every one was dropped.
     checkReversePath = "loose";
     enable = true;
     filterForward = true;

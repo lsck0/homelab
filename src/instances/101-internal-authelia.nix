@@ -57,16 +57,6 @@ let
       ];
     }
     {
-      id = "audiobookshelf";
-      name = "Audiobookshelf";
-      secretName = "audiobookshelf-oidc-secret";
-      redirectUris = [
-        "https://abs.lsck0.dev/auth/openid/callback"
-        # the mobile app completes the flow on a private-use URI scheme.
-        "audiobookshelf://oauth"
-      ];
-    }
-    {
       id = "jellyfin";
       name = "Jellyfin";
       secretName = "jellyfin-oidc-secret";
@@ -74,21 +64,6 @@ let
       # integration note says.
       tokenAuthMethod = "client_secret_post";
       redirectUris = [ "https://jellyfin.lsck0.dev/sso/OID/redirect/authelia" ];
-    }
-    {
-      id = "kavita";
-      name = "Kavita";
-      secretName = "kavita-oidc-secret";
-      # ASP.NET Core's OpenIdConnectHandler sends the secret in the body.
-      tokenAuthMethod = "client_secret_post";
-      # Kavita asks for a refresh token, and Authelia refuses a scope a client
-      # is not registered for rather than ignoring it:
-      #   invalid_scope ... The OAuth 2.0 Client is not allowed to request
-      #   scope 'offline_access'
-      # Only this client gets it; a refresh token that outlives the session is
-      # not something to hand out by default.
-      scopes = [ "openid" "profile" "email" "groups" "offline_access" ];
-      redirectUris = [ "https://read.lsck0.dev/signin-oidc" ];
     }
   ];
 

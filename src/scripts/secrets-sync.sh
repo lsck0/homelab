@@ -25,7 +25,6 @@ GENERATED=(
   lldap-admin-password lldap-jwt-secret authelia-admin-pass
   forgejo-admin-pass forgejo-oidc-secret
   vaultwarden-oidc-secret nextcloud-oidc-secret nextcloud-admin-pass
-  audiobookshelf-oidc-secret kavita-oidc-secret
   restic-password minecraft-rcon-password
   firefly-db-password
   crowdsec-bouncer-key

@@ -28,7 +28,7 @@ P=mt-   # container name prefix on the host; aliases are the plain names
 FAILED=0
 KEEP=${KEEP:-0}
 
-APPS="qbittorrent prowlarr radarr sonarr lidarr bookshelf jellyfin jellyseerr bazarr kavita janitorr-stats janitorr"
+APPS="qbittorrent prowlarr radarr sonarr lidarr jellyfin jellyseerr bazarr janitorr-stats janitorr"
 cleanup() {
   if [ "$KEEP" = 1 ]; then echo ">>> KEEP=1: containers left running, workdir $W"; return; fi
   for a in $APPS; do docker rm -f "$P$a" >/dev/null 2>&1 || true; done
@@ -91,14 +91,12 @@ run_app prowlarr  "$(image 129-internal-prowlarr prowlarr)"      19696:9696 -v "
 run_app radarr    "$(image 130-internal-radarr radarr)"          17878:7878 -v "$W/radarr:/config" "${DATA[@]}"
 run_app sonarr    "$(image 131-internal-sonarr sonarr)"          18989:8989 -v "$W/sonarr:/config" "${DATA[@]}"
 run_app lidarr    "$(image 136-internal-navidrome lidarr)"       18686:8686 -v "$W/lidarr:/config" "${DATA[@]}"
-run_app bookshelf "$(image 135-internal-audiobookshelf bookshelf)" 18787:8787 -v "$W/bookshelf:/config" "${DATA[@]}"
 mkdir -p "$W/jellyfin/config" "$W/jellyfin/cache"
 run_app jellyfin  "$(image 134-internal-jellyfin jellyfin)"      18096:8096 \
   -v "$W/jellyfin/config:/config" -v "$W/jellyfin/cache:/cache" -v "$W/media:/data/media:ro"
 run_app jellyseerr "$(image 128-internal-jellyseerr jellyseerr)" 15055:5055 --init -e PORT=5055 -v "$W/jellyseerr:/app/config"
 run_app bazarr    "$(image 132-internal-bazarr bazarr)"          16767:6767 -v "$W/bazarr:/config" -v "$W/media:/data/media"
 mkdir -p "$W/manga" "$W/books"
-run_app kavita    "$(image 137-internal-kavita kavita)"          15000:5000 -v "$W/kavita:/kavita/config" \
   -v "$W/media/manga:/manga:ro" -v "$W/media/books:/books:ro"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -118,7 +116,7 @@ run_unit 112-internal-qbittorrent qbittorrent-settings "$TOK" \
   "s#podman exec qbittorrent#podman exec ${P}qbittorrent#"
 
 for app in prowlarr:129-internal-prowlarr radarr:130-internal-radarr sonarr:131-internal-sonarr \
-           lidarr:136-internal-navidrome bookshelf:135-internal-audiobookshelf; do
+           lidarr:136-internal-navidrome; do
   name=${app%%:*}; host=${app#*:}
   run_unit "$host" "$name-setup" "$TOK" "s#/var/lib/$name#$W/$name#g" \
     "s#systemctl stop podman-$name.service#docker stop $P$name#" "s#systemctl start podman-$name.service#docker start $P$name#"
@@ -136,7 +134,6 @@ for i in $(seq 1 60); do
     -d '{"username":"admin","password":"Admin123!"}' >/dev/null && break
   sleep 5
 done
-run_unit 137-internal-kavita kavita-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:15000#g"
 
 echo ">>> Exported tokens: $(cd "$W/tokens" && echo *)"
 
@@ -153,7 +150,6 @@ arr_wire() {
     -e RADARR_HOST=radarr -e RADARR_PORT=7878 \
     -e SONARR_HOST=sonarr -e SONARR_PORT=8989 \
     -e LIDARR_HOST=lidarr -e LIDARR_PORT=8686 \
-    -e BOOKSHELF_HOST=bookshelf -e BOOKSHELF_PORT=8787 \
     -e JELLYFIN_HOST=jellyfin -e JELLYFIN_PORT=8096 \
     -e JELLYSEERR_URL=http://jellyseerr:5055 -e BAZARR_URL=http://bazarr:6767 \
     alpine "$WIRE"
@@ -178,7 +174,7 @@ test_client() { # base apiver key  -> run the app's own connection test on its q
   curl -sf -X POST -H "X-Api-Key: $3" -H "Content-Type: application/json" --data "$body" "$1/api/$2/downloadclient/test"
 }
 for spec in radarr:17878:v3:/data/media/movies sonarr:18989:v3:/data/media/anime \
-            lidarr:18686:v1:/data/media/music bookshelf:18787:v1:/data/media/books; do
+            lidarr:18686:v1:/data/media/music; do
   IFS=: read -r name port v folder <<< "$spec"
   base=http://127.0.0.1:$port; k=$(key "$name-key")
   check "$name: qBittorrent download client connects" test_client "$base" "$v" "$k"
@@ -231,9 +227,6 @@ jfk=$(key jellyfin-key)
 check "jellyfin: Movies/Shows/Anime libraries" sh -c "curl -sf -H 'Authorization: MediaBrowser Token=\"$jfk\"' http://127.0.0.1:18096/Library/VirtualFolders | jq -e '[.[].Name] | contains([\"Movies\",\"Shows\",\"Anime\"])'"
 check "jellyfin: janitorr user can delete" sh -c "curl -sf -H 'Authorization: MediaBrowser Token=\"$jfk\"' http://127.0.0.1:18096/Users | jq -e 'any(.[]; .Name==\"janitorr\" and .Policy.EnableContentDeletion)'"
 
-check "kavita: old default password refused" sh -c "! curl -sf -X POST http://127.0.0.1:15000/api/Account/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"Admin123!\"}'"
-check "kavita: Manga + Books libraries" sh -c "jwt=\$(curl -sf -X POST http://127.0.0.1:15000/api/Account/login -H 'Content-Type: application/json' -d '{\"username\":\"admin\",\"password\":\"$(key kavita-pass)\"}' | jq -r .token); \
-  curl -sf -H \"Authorization: Bearer \$jwt\" http://127.0.0.1:15000/api/Library/libraries | jq -e '[.[].name] | contains([\"Manga\",\"Books\"])'"
 
 echo ">>> Idempotence: second arr-wire run must change nothing"
 out=$(arr_wire 2>&1); echo "$out"

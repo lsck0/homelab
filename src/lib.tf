@@ -27,29 +27,22 @@ locals {
   defaults = {
     enabled  = true
     cooldown = "30m"
-    # 768, not 1024. A plain VM - NixOS, one podman service - has a working set
-    # of 445 to 600 MiB: mosquitto 445, sccache 482, attic 483, vaultwarden 487,
-    # ntfy 507. Measured on the VMs that never reached their ceiling, so the
-    # figure is the service rather than page cache. A VM that was given 1024
-    # reads as 1024 whatever it does, because with the balloon off it never
-    # hands cache back, which is why the old default looked justified.
+    # A plain VM - NixOS plus one podman service - measures 445 to 600 MiB.
+    # Read off the VMs that never hit their ceiling; one that did reads as its
+    # ceiling whatever it needs, because with the balloon off it never hands
+    # page cache back.
     memory = 768
-    # Floor the host may balloon a VM down to, as a fraction of its memory.
-    # Without a floating size the provider sets balloon: 0, which switches the
-    # balloon device off: every VM then pins its full allocation for as long as
-    # it runs and never hands a page back. With everything enabled the lab asks
-    # for 48 GiB of ceilings on a 32 GiB host, so the guests have to be able to
-    # give memory up. They can: most sit far below their ceiling. Half is a
-    # floor generous enough that nothing is squeezed until the host is genuinely
-    # short, and it brings the guaranteed total to 24 GiB, which does fit.
+    # Floor the host may balloon a VM down to, as a fraction of memory. Without
+    # a floating size the provider sets balloon: 0 and the device is off, so
+    # every VM pins its full allocation for ever. The lab asks 41 GiB of
+    # ceilings on a 32 GiB host; half brings the guaranteed total to ~21 GiB.
     balloon_ratio = 0.5
     cores         = 2
     disk          = 8
     machine       = null
     hostpci       = []
-    # Extra disks beyond the root one, as [{ size, datastore }]. The lab's
-    # bulk storage is a spinning 2 TB disk that is not in the `pve` volume
-    # group, so a VM that needs it takes a second disk from that datastore
+    # Extra disks as [{ size, datastore }]. Bulk storage is a 2 TB spinning
+    # disk outside the `pve` group, so a VM takes a second disk from there
     # rather than growing its root disk on the NVMes.
     extra_disks = []
     boot_order  = 3
@@ -155,16 +148,12 @@ resource "proxmox_virtual_environment_vm" "vm" {
     # file_id is only the image a disk was created from; imported VMs (see
     # src/scripts/renumber.sh) have none, and a diff there must never replace a VM.
     #
-    # Only user_account of initialization, not the whole block. Ignoring all of
-    # it also ignored ip_config, so an address could be written once and never
-    # corrected: renumber.sh imported these VMs with addresses derived from
-    # their position in the list rather than their vmid, and 44 of 45 kept an
-    # address belonging to a different VM while `terraform plan` reported no
-    # changes. It stayed hidden because network.nix sets the address statically
-    # from the inventory, so cloud-init only decides where a VM sits on its
-    # first boot - and there a fresh VM came up on an address a running VM
-    # already held. user_account still has to be ignored: the provider cannot
-    # read back a password it never stored, so it diffs on every plan.
+    # user_account only, not all of initialization: ignoring the whole block
+    # also ignored ip_config, and 44 of 45 VMs kept an address belonging to a
+    # different VM while `terraform plan` reported no changes. Hidden because
+    # network.nix sets the address statically, so cloud-init only decides where
+    # a *new* VM lands. user_account stays ignored - the provider cannot read
+    # back a password, so it diffs on every plan.
     ignore_changes = [
       initialization[0].user_account,
       mac_addresses,

@@ -167,7 +167,11 @@ locals {
       enabled = true,
       name    = "125-internal-homeassistant",
       type    = "internal",
-      memory  = 1024,
+      # Home Assistant is a large Python process with dozens of integrations;
+      # squeezed toward the 512 balloon floor it thrashed hard enough that sshd
+      # stopped answering during startup.
+      memory  = 2048,
+      balloon = 1536,
       # Home Assistant's image alone does not fit in 8 GiB: the pull failed
       # with "no space left on device" and the container never started.
       disk = 16,

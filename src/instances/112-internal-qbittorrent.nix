@@ -63,18 +63,11 @@ in {
   networking.hostName = "vm-112";
 
   # ── egress ──────────────────────────────────────────────────────────────
-  # No tunnel here any more. The exit moved to the router (modules/egress.nix
-  # lists this VM as via = "vpn"), which holds the key this VM used to hold
-  # and marks its packets by source address. Nothing on this VM knows about
-  # Proton: it has an ordinary default route to 10.100.0.1, and the router
-  # decides what happens next.
-  #
-  # The killswitch moved with it and is the same idea: the routing table the
-  # mark selects ends in a blackhole, so when the tunnel is down this VM's
-  # packets have nowhere to go rather than falling back to the house address.
-  # Better than the old arrangement, where this VM had to have its own default
-  # route removed and a list of LAN exceptions kept by hand - and where
-  # getting that list wrong took the VM off the network entirely.
+  # No tunnel here. The exit is on the router (modules/egress.nix: via = "vpn"),
+  # which holds the key and marks this VM's packets by source. Nothing here
+  # knows about Proton - an ordinary default route to 10.100.0.1, and the
+  # router decides. The killswitch went with it: the marked table ends in a
+  # blackhole, so a dead tunnel means no traffic, not house traffic.
 
   fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
     // nasPath "/data/torrents" "bulk/torrents"
@@ -169,15 +162,10 @@ in {
 
   networking.firewall.allowedTCPPorts = [ 80 ];
 
-  # The peer port changes with every Proton lease, so it still cannot be
-  # listed. It used to be covered by trusting wg0, the tunnel's own interface;
-  # with the tunnel on the router, peer traffic arrives on eth0 instead, having
-  # been forwarded, and still carries the peer's own public address.
-  #
-  # So the source is what is matched rather than the port. A public address can
-  # only have reached this VM through that one forward: nothing else on the
-  # network routes a public source here, and the router DNATs exactly the port
-  # it has leased.
+  # The peer port changes every Proton lease, so match the source instead.
+  # Peer traffic now arrives on eth0 via the router's DNAT, still carrying the
+  # peer's public address; nothing else routes a public source here, and the
+  # router forwards exactly the one port it leased.
   networking.firewall.extraInputRules = ''
     ip saddr != { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 } tcp dport 1024-65535 accept
     ip saddr != { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 } udp dport 1024-65535 accept
