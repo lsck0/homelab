@@ -114,6 +114,6 @@
     # pushed ghcr.io/lsck0/hello and the swarm task stays "Rejected: No such
     # image". Kept as the wiring for a GitHub-built app, but not monitored -
     # an uptime check on it is a permanent false alarm.
-    hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; proxied = false; };
+    hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; proxied = false; monitor = false; };
   };
 }

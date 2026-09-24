@@ -48,7 +48,11 @@ let
       # on-demand VMs sleep by design and disabled ones are off; a probe of
       # either is a permanent false alarm. It would not even wake them, since
       # it bypasses the Traefik on-demand proxy and goes straight to the VM.
-      alwaysOn = r: (inventory.${toString r.vmid}.enabled or "false") == "true";
+      # monitor = false opts a route out, for a service that is wiring rather
+      # than something expected to answer: hello-gh has never had an image
+      # pushed to it, so probing it is a permanent false alarm.
+      alwaysOn = r: (inventory.${toString r.vmid}.enabled or "false") == "true"
+        && (r.monitor or true);
       ofSide = side: lib.mapAttrsToList (name: r: {
         inherit name;
         url = "${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}";
