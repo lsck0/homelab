@@ -96,11 +96,7 @@ in {
   # The repository lives on the same disk: survives deletion, bad deploys and
   # bitrot, not a host/disk loss. Add a remote repository sync for real 3-2-1.
   #
-  # /bulk is the media and torrent disk and is deliberately not backed up. It
-  # is ~570 GiB of films and music that can be fetched again, against a backup
-  # repository of 10 GiB for everything that cannot - and snapshotting it would
-  # mean a second copy of the largest thing in the lab, on the disk that is
-  # already the tightest. Anything here that matters lives in /data.
+  # /bulk is media that can be fetched again; anything that matters is in /data.
   fileSystems = nasPath source "";
 
   # same secret the old restic setup used; only the name changed.

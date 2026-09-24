@@ -3,11 +3,8 @@
 Runs on vm-104 beside the other terminal feeds and writes <out-dir>/github.json,
 which nginx serves under the same token.
 
-Shaped around what the account actually contains rather than what a GitHub
-dashboard usually shows. Measured on 2026-09-24: 0 open issues, 0 open PRs, and
-50 notifications of which 49 were failed CI runs - but those 49 collapse to 2
-repos once grouped. So the repo list gets the wide column and everything else
-is a counter or a short list.
+Shaped around real content: 0 open issues, 0 open PRs, 49 CI failures across
+2 repos. The repo list gets the wide column; the rest are counters.
 
 One call per section, six in total, well inside the 5000/hour limit.
 """
@@ -101,16 +98,14 @@ def main():
     issues = search("issue")
     prs = search("pr")
 
-    # CI failures are the bulk of the notifications, and the only part of them
-    # that is actionable. Everything else is counted, not listed.
+    # CI failures are the only actionable notifications; the rest are counted
     ci = [n for n in notes if n.get("reason") == "ci_activity"]
     alerts = [n for n in notes if n.get("reason") != "ci_activity"]
 
     def repo_of(n):
         return (n.get("repository") or {}).get("name", "?")
 
-    # one row per repo, not per run: eight failures of the same workflow say
-    # the same thing eight times and crowd out the other repos.
+    # one row per repo, not per run
     by_repo = {}
     for n in ci:
         r = repo_of(n)
@@ -143,10 +138,7 @@ def main():
             })
     work = work[:WORK_ROWS]
 
-    # Languages, counted off the repo list rather than fetched: /languages is
-    # one call per repo and this says the same thing for free. It exists to
-    # give the side column something true to show, because with no open issues
-    # or PRs it was 280px of white.
+    # counted off the repo list: /languages would be one call per repo
     langs = {}
     for r in repos:
         lang = r.get("language")
@@ -154,8 +146,7 @@ def main():
             langs[lang] = langs.get(lang, 0) + 1
     ranked = sorted(langs.items(), key=lambda kv: (-kv[1], kv[0]))[:LANG_ROWS]
     top = ranked[0][1] if ranked else 1
-    # share of the leader, not of the total: a share of the total makes
-    # everything under the top language a sliver on a 46px bar.
+    # share of the leader: share of total makes everything else a sliver
     top_langs = [{"name": k, "n": v, "pct": round(100 * v / top)}
                  for k, v in ranked]
 
@@ -178,8 +169,7 @@ def main():
         "active_a": active[:half],
         "active_b": active[half:],
         "work": work,
-        # an empty work list is the normal state here, and the panel says so
-        # rather than leaving a blank box that reads as a broken feed.
+        # empty is normal here; the panel says so rather than look broken
         "langs": top_langs,
         "work_empty": not work,
     }

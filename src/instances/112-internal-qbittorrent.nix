@@ -63,11 +63,7 @@ in {
   networking.hostName = "vm-112";
 
   # ── egress ──────────────────────────────────────────────────────────────
-  # No tunnel here. The exit is on the router (modules/egress.nix: via = "vpn"),
-  # which holds the key and marks this VM's packets by source. Nothing here
-  # knows about Proton - an ordinary default route to 10.100.0.1, and the
-  # router decides. The killswitch went with it: the marked table ends in a
-  # blackhole, so a dead tunnel means no traffic, not house traffic.
+  # No tunnel here: the router holds the key and the killswitch (modules/egress.nix).
 
   fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
     // nasPath "/data/torrents" "bulk/torrents"
@@ -162,10 +158,7 @@ in {
 
   networking.firewall.allowedTCPPorts = [ 80 ];
 
-  # The peer port changes every Proton lease, so match the source instead.
-  # Peer traffic now arrives on eth0 via the router's DNAT, still carrying the
-  # peer's public address; nothing else routes a public source here, and the
-  # router forwards exactly the one port it leased.
+  # The port changes every lease, so match the source: only the router's DNAT brings a public source here.
   networking.firewall.extraInputRules = ''
     ip saddr != { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 } tcp dport 1024-65535 accept
     ip saddr != { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 } udp dport 1024-65535 accept

@@ -34,18 +34,11 @@ let
     ++ [ (vmLabel "192.168.178.200" "proxmox") ];
 
   # ── blackbox probes ────────────────────────────────────────────────────────
-  # Replaces Uptime Kuma. node-exporter's `up` only says the VM answers on
-  # :9100, which stays true while the service on it is dead.
-  #
-  # Aimed at backends, not https://<host>.lsck0.dev: the public name goes
-  # through Authelia, which answers 302 for every gated route, so a probe of it
-  # would pass while the app behind it was down.
+  # Replaces Uptime Kuma. Aimed at backends: the public name answers 302 from Authelia whatever the app is doing.
   routes = import ../modules/routes.nix;
   probes =
     let
-      # on-demand VMs sleep by design and disabled ones are off; a probe of
-      # either is a permanent false alarm. It would not even wake them, since
-      # it bypasses the Traefik on-demand proxy and goes straight to the VM.
+      # on-demand and disabled VMs would be a permanent false alarm
       # monitor = false opts a route out, for a service that is wiring rather
       # than something expected to answer: hello-gh has never had an image
       # pushed to it, so probing it is a permanent false alarm.
@@ -216,18 +209,7 @@ in {
     port = 9115;
     configFile = pkgs.writeText "blackbox.yml" (builtins.toJSON {
       modules = {
-        # Liveness, not authorization, and not content. 401 and 403 mean the
-        # app is up and refusing an anonymous caller, which is exactly right
-        # for the routes that carry their own token auth (attic, the registry
-        # API). 3xx means an app redirecting to its own login (Forgejo,
-        # Vaultwarden, Nextcloud). 404 means it answered and has no page at /,
-        # which is simply true of Headscale and Shlink - both were reported
-        # down for days of uptime. Treating any of those as "down" alerts
-        # constantly and teaches you to ignore the alert.
-        #
-        # 5xx is deliberately absent: that is the app failing, and Nextcloud
-        # returning 500 with a dead Postgres behind it is exactly what this
-        # should catch.
+        # Liveness, not authorization: 401/403 is up-and-refusing, 3xx is its own login, 404 is no page at /. 5xx is absent on purpose.
         http_up = {
           prober = "http";
           timeout = "10s";
@@ -254,8 +236,7 @@ in {
     retentionTime = "30d";
     scrapeConfigs = [
       {
-        # the standard blackbox relabel dance: the target travels as a URL
-        # parameter and the scrape itself goes to the exporter.
+        # standard blackbox relabel: target as a param, scrape to the exporter
         job_name = "blackbox-http";
         metrics_path = "/probe";
         params.module = [ "http_up" ];
@@ -271,7 +252,7 @@ in {
         ];
       }
       {
-        # sccache speaks Redis, not HTTP, so it only gets a connect check.
+        # sccache speaks Redis, not HTTP
         job_name = "blackbox-tcp";
         metrics_path = "/probe";
         params.module = [ "tcp_up" ];
@@ -312,9 +293,7 @@ in {
     # InstanceDown rule notified the same ntfy topic and Telegram chat twice.
   };
 
-  # Both keep state on NFS and are slow to stop - Prometheus flushes its TSDB
-  # head, Grafana its SQLite. The 45s default killed them on every deploy and
-  # they stayed `failed`, so the lab ran an evening with no alerting at all.
+  # both keep state on NFS and are slow to stop; the 45s default killed them
   systemd.services.prometheus.serviceConfig = {
     TimeoutStopSec = "5min";
     # the upstream module already sets Restart; override rather than add.
@@ -498,10 +477,7 @@ in {
               uid = "service_down";
               title = "Service not answering";
               condition = "C";
-              # A blackbox probe of a service's own port failing for 5m. This is
-              # the gap node-exporter leaves: "Instance down" only fires when
-              # the whole VM stops answering on :9100, which stays up while the
-              # container on it is crash-looping.
+              # the gap node-exporter leaves: the VM answers while the container crash-loops
               data = [
                 {
                   refId = "A";
@@ -527,8 +503,7 @@ in {
                 }
               ];
               for = "5m";
-              # a probe that has never reported is a scrape problem, not an
-              # outage; Instance down covers a VM that has genuinely gone.
+              # never-reported is a scrape problem, not an outage
               noDataState = "OK";
               execErrState = "Error";
               labels.severity = "warning";
@@ -539,11 +514,7 @@ in {
               uid = "ossec_alert";
               title = "OSSEC alert on the hypervisor";
               condition = "C";
-              # OSSEC runs in local mode on the Proxmox host (see
-              # src/scripts/pve-install.sh) and is the only intrusion detection
-              # in the lab that watches a mutable filesystem. Level 7+ is its
-              # "worth a human" threshold; the count only ever grows, so this
-              # fires on the increase rather than the value.
+              # level 7+ is OSSEC's "worth a human"; the count only grows, so alert on the increase
               data = [
                 {
                   refId = "A";
@@ -569,8 +540,7 @@ in {
                 }
               ];
               for = "0m";
-              # the metric is absent until OSSEC has been installed; that is a
-              # missing hypervisor agent, not an intrusion.
+              # absent until OSSEC is installed, which is not an intrusion
               noDataState = "OK";
               execErrState = "Error";
               labels.severity = "critical";
