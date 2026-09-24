@@ -62,6 +62,14 @@ in {
     };
   };
 
+  # Anything stateful on an NFS mount is slow to shut down, and systemd's
+  # default 45s stop timeout is not enough for it. When it expires the service
+  # is SIGKILLed, lands in `failed`, and - because most upstream units do not
+  # restart on failure - simply stays down. A deploy would take Postgres,
+  # Prometheus or Grafana out on one VM after another and report success,
+  # because the deploy itself worked; only the probes noticed, hours later.
+  #
+  # So: time to stop cleanly, and a restart if it still does not.
   # a DMZ mount missing from dmzShares would hang at boot on a denied export.
   assertions = lib.optionals external (map (d: {
     assertion = lib.elem d allowed;
@@ -69,6 +77,12 @@ in {
   }) nasDevices);
 
   systemd.services = {
+    postgresql.serviceConfig = lib.mkIf (config.services.postgresql.enable or false) {
+      TimeoutStopSec = "3min";
+      Restart = lib.mkForce "on-failure";
+      RestartSec = 10;
+    };
+
     # systemd-tmpfiles skips paths below an automount that is not mounted yet,
     # so the boot-time run never creates directories inside the NAS shares.
     # Mount them, then apply the rules for those paths; retried until the NAS

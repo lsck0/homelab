@@ -218,16 +218,23 @@ in {
     port = 9115;
     configFile = pkgs.writeText "blackbox.yml" (builtins.toJSON {
       modules = {
-        # Liveness, not authorization. 401 and 403 mean the app is up and
-        # refusing an anonymous caller, which is exactly right for the routes
-        # that carry their own token auth (attic, the registry API). 3xx means
-        # an app redirecting to its own login (Forgejo, Vaultwarden,
-        # Nextcloud). Treating any of those as "down" would alert constantly.
+        # Liveness, not authorization, and not content. 401 and 403 mean the
+        # app is up and refusing an anonymous caller, which is exactly right
+        # for the routes that carry their own token auth (attic, the registry
+        # API). 3xx means an app redirecting to its own login (Forgejo,
+        # Vaultwarden, Nextcloud). 404 means it answered and has no page at /,
+        # which is simply true of Headscale and Shlink - both were reported
+        # down for days of uptime. Treating any of those as "down" alerts
+        # constantly and teaches you to ignore the alert.
+        #
+        # 5xx is deliberately absent: that is the app failing, and Nextcloud
+        # returning 500 with a dead Postgres behind it is exactly what this
+        # should catch.
         http_up = {
           prober = "http";
           timeout = "10s";
           http = {
-            valid_status_codes = [ 200 201 204 301 302 303 307 308 401 403 ];
+            valid_status_codes = [ 200 201 204 301 302 303 307 308 401 403 404 ];
             follow_redirects = false;
             preferred_ip_protocol = "ip4";
             # routes.nix marks a backend scheme = "https" only when it serves
