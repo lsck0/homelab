@@ -9,7 +9,7 @@ let
   apiClients = map (id: "10.100.0.${toString id}/32") [ 1 100 104 114 130 131 133 135 136 ];
 
   # Peer traffic goes out directly. It used to go through the Tor SOCKS5
-  # gateway, and that is simply not a thing BitTorrent can do:
+  # gateway on vm-113, and that is simply not a thing BitTorrent can do:
   # SOCKS5 over Tor carries TCP only, so every udp:// tracker announce came
   # back "Permission denied", DHT and uTP were impossible, and exit nodes drop
   # the peer protocol. The symptom was a torrent that knew about nine seeds and
@@ -76,6 +76,97 @@ in {
   # route removed and a list of LAN exceptions kept by hand - and where
   # getting that list wrong took the VM off the network entirely.
 
+  fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
+    // nasPath "/data/torrents" "bulk/torrents"
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+
+  # Host networking, not a published port. Proton's NAT-PMP always maps the
+  # public port to the same private port and will not grant a chosen one, so
+  # the client has to bind whatever it is leased - which a fixed "6881:6881"
+  # publish cannot follow. The symptom was a client that downloaded fine and
+  # was reachable by nobody: Proton forwarded 49649 to the VM and the only
+  # listener was conmon on 6881.
+  virtualisation.oci-containers.containers.qbittorrent = {
+    image = "lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls476";
+    extraOptions = [ "--network=host" ];
+    volumes = [
+      "/var/lib/qbittorrent:/config"
+      "/data/torrents:/data/torrents"
+    ];
+    environment = {
+      PUID = "1000";
+      PGID = "1000";
+      TZ = "Europe/Berlin";
+      WEBUI_PORT = "80";
+    };
+  };
+
+  # disable built-in auth: authelia ForwardAuth handles access control
+  systemd.services.qbittorrent-disable-auth = {
+    description = "Disable qBittorrent built-in auth";
+    after = [ "podman-qbittorrent.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.gnused pkgs.gnugrep pkgs.systemd pkgs.coreutils ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      conf="/var/lib/qbittorrent/qBittorrent/qBittorrent.conf"
+      ${retry} 60 2 test -f "$conf"
+
+      # bootstrap only: loopback without login, so the Tor-proxy unit below can
+      # push the real settings (incl. the API client whitelist) over the API.
+      # qBittorrent writes its config back on shutdown, so edit it while stopped.
+      if ! grep -qF 'WebUI\LocalHostAuth=false' "$conf"; then
+        systemctl stop podman-qbittorrent.service
+        sed -i '/^WebUI\\LocalHostAuth=/d' "$conf"
+        if grep -q '^\[Preferences\]' "$conf"; then
+          sed -i 's/^\[Preferences\]$/[Preferences]\nWebUI\\LocalHostAuth=false/' "$conf"
+        else
+          printf '\n[Preferences]\nWebUI\\LocalHostAuth=false\n' >> "$conf"
+        fi
+        systemctl start podman-qbittorrent.service
+      fi
+    '';
+  };
+
+  systemd.services.qbittorrent-settings = {
+    description = "Configure qBittorrent: peer settings, save path, API whitelist, WebUI password";
+    after = [ "podman-qbittorrent.service" "qbittorrent-disable-auth.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.podman pkgs.jq pkgs.openssl ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      Restart = "on-failure";
+      RestartSec = 30;
+    };
+    script = ''
+      API="http://127.0.0.1:80/api/v2"
+      # run curl inside the container: only there is the request really from
+      # loopback (WebUI\LocalHostAuth=false). With host networking that is
+      # the same loopback as the VM's, but podman exec keeps this working
+      # whichever way the container is attached.
+      curl() { podman exec qbittorrent curl "$@"; }
+      ${retry} 60 2 podman exec qbittorrent curl -fsS "$API/app/version"
+
+      # WebUI login for everything off the whitelist. Homepage and the *arr
+      # download clients read it from the token files.
+      T=/var/lib/homepage-tokens
+      [ -s $T/qbittorrent-pass.token ] || openssl rand -hex 16 | tr -d '\n' > $T/qbittorrent-pass.token
+      echo -n admin > $T/qbittorrent-user.token
+
+      prefs=$(jq -c --rawfile p $T/qbittorrent-pass.token '. + { web_ui_username: "admin", web_ui_password: $p }' ${prefs})
+      curl -fsS -X POST "$API/app/setPreferences" --data-urlencode "json=$prefs"
+      echo "qBittorrent configured: direct peer traffic, DHT/PEX/LSD on, 5 active downloads"
+    '';
+  };
+
+  systemd.tmpfiles.rules = [
+    "d /var/lib/qbittorrent 0750 1000 1000 -"
+  ];
+
   networking.firewall.allowedTCPPorts = [ 80 ];
 
   # The peer port changes with every Proton lease, so it still cannot be
@@ -86,8 +177,7 @@ in {
   # So the source is what is matched rather than the port. A public address can
   # only have reached this VM through that one forward: nothing else on the
   # network routes a public source here, and the router DNATs exactly the port
-  # it has leased. Matching the private ranges out keeps this from widening
-  # anything on the LAN side, where the WebUI is still the only open port.
+  # it has leased.
   networking.firewall.extraInputRules = ''
     ip saddr != { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 } tcp dport 1024-65535 accept
     ip saddr != { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 } udp dport 1024-65535 accept
