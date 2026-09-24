@@ -14,6 +14,7 @@ let
   #   loopback + container bridges  the app's own setup units and health checks
   #   10.100.0.100 / 10.200.0.200   internal / external Traefik (the ingress)
   #   10.100.0.103                  Homepage widgets (API keys, read-only)
+  #   10.100.0.105                  blackbox probes from Prometheus
   #   10.100.0.114                  Hermes (has root on every VM anyway)
   trustedSources = [
     "127.0.0.0/8"
@@ -22,6 +23,11 @@ let
     "10.100.0.100/32"
     "10.200.0.200/32"
     "10.100.0.103/32"
+    # The prober. This was 10.100.0.106 when Uptime Kuma owned the checks; the
+    # address changed when blackbox_exporter replaced it on the Grafana VM and
+    # the entry did not, so every ingressOnly service reported down while
+    # answering perfectly well to everything else.
+    "10.100.0.105/32"
     "10.100.0.114/32"
   ] ++ cfg.extraSources;
 in {
