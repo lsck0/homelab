@@ -80,7 +80,13 @@
           --instance https://git.lsck0.dev \
           --token "$REG_TOKEN" \
           --name vm-116-runner \
-          --labels "docker:docker://node:20-bookworm,ubuntu-latest:docker://catthehacker/ubuntu:act-22.04,rust:docker://rust:1.80-bookworm" \
+          # `docker` must resolve to an image that HAS the docker CLI. It was
+          # node:20-bookworm, which does not, so every workflow using
+          # `runs-on: docker` to build an image died on "docker: command not
+          # found" five seconds in - the hello pipeline had never once worked.
+          # catthehacker/ubuntu carries both docker and node, and node is
+          # needed too because actions/checkout is a JS action.
+          --labels "docker:docker://catthehacker/ubuntu:act-22.04,ubuntu-latest:docker://catthehacker/ubuntu:act-22.04,rust:docker://rust:1.80-bookworm" \
           --no-interactive
 
       echo "Runner registered successfully"
