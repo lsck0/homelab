@@ -35,7 +35,15 @@ locals {
       enabled = true,
       name    = "105-internal-grafana",
       type    = "internal",
-      memory  = 1024,
+      # Four services, not one: Prometheus (30d retention), Loki, Tempo,
+      # Grafana, plus the blackbox prober. 1024 was read off a measurement of
+      # 984 MiB, but that VM was sitting *at* its ceiling, which says the
+      # ceiling was the limit rather than the need. Squeezed to the 512 floor
+      # by the balloon it thrashed until sshd stopped answering.
+      memory = 3072,
+      # An explicit floor rather than half: the TSDB head and Loki's chunks are
+      # working memory, and reclaiming them is what made it unresponsive.
+      balloon = 2048,
     }
     "107" = { # backups: Kopia server + web UI, snapshots the NAS
       enabled = true,
