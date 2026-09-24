@@ -248,6 +248,11 @@ locals {
       enabled = true,
       name    = "202-external-tor-relay",
       type    = "external",
+      # A public relay, not a client: it carries other people's circuits, and
+      # its working set was measured at 1028 MiB - above the ceiling it had.
+      # Left on the 768 default it OOM-killed tor every few seconds.
+      memory  = 1536,
+      balloon = 1024,
     }
     "203" = { # push notifications (alert delivery)
       enabled = true,
