@@ -418,10 +418,10 @@ if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git -C "$ROOT_DIR" add -A
   if ! git -C "$ROOT_DIR" diff --cached --quiet; then
     # highest generation so far, not the last commit: hand-written commits sit in between
-    last=$(git -C "$ROOT_DIR" log --format=%s | sed -n 's/^Generation: \([0-9]\+\)$/\1/p' | sort -n | tail -1)
+    last=$(git -C "$ROOT_DIR" log --format=%s | sed -n 's/^chore(deploy): generation \([0-9]\+\)$/\1/p' | sort -n | tail -1)
     next=$(( ${last:-0} + 1 ))
-    echo ">>> Git: committing Generation: $next"
-    git -C "$ROOT_DIR" commit -m "Generation: $next"
+    echo ">>> Git: committing generation $next"
+    git -C "$ROOT_DIR" commit -m "chore(deploy): generation $next"
     git -C "$ROOT_DIR" push || echo "WARNING: git push failed."
   fi
 fi
