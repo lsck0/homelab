@@ -57,10 +57,13 @@ locals {
       name = i.name
       type = i.type
       # as a string, the for-expression would unify bool and string anyway
-      enabled     = tostring(try(i.enabled, local.defaults.enabled))
-      cooldown    = try(i.cooldown, local.defaults.cooldown)
-      memory      = try(i.memory, local.defaults.memory)
-      balloon     = try(i.balloon, floor(try(i.memory, local.defaults.memory) * try(i.balloon_ratio, local.defaults.balloon_ratio)))
+      enabled  = tostring(try(i.enabled, local.defaults.enabled))
+      cooldown = try(i.cooldown, local.defaults.cooldown)
+      memory   = try(i.memory, local.defaults.memory)
+      # never below 512 MiB: half of a 768 ceiling is 384, which is not enough
+      # for NixOS plus a service to stay responsive, and the VMs squeezed that
+      # far stopped answering ssh entirely.
+      balloon     = max(512, floor(try(i.memory, local.defaults.memory) * try(i.balloon_ratio, local.defaults.balloon_ratio)))
       cores       = try(i.cores, local.defaults.cores)
       disk        = try(i.disk, local.defaults.disk)
       machine     = try(i.machine, local.defaults.machine)

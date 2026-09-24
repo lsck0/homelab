@@ -49,7 +49,9 @@ locals {
       enabled = true,
       name    = "107-internal-kopia",
       type    = "internal",
-      disk    = 16,
+      # snapshots the whole NAS tree; measured 624 MiB and does real IO.
+      memory = 1024,
+      disk   = 16,
     }
 
     "109" = { # storage: NFS + SMB + Syncthing + FileBrowser
@@ -147,7 +149,10 @@ locals {
       enabled = true,
       name    = "121-internal-paperless",
       type    = "internal",
-      memory  = 1536,
+      # OCR plus its own Postgres. Squeezed toward a 768 floor it thrashed;
+      # give it a ceiling with room and a floor it can actually work in.
+      memory  = 2048,
+      balloon = 1536,
     }
     "122" = { # AI auto-tagging for paperless
       enabled = true,
