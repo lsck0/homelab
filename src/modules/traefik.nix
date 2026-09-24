@@ -94,13 +94,23 @@ let
 
   # user agents that get the labyrinth instead of the site. Scrapers that
   # honour robots.txt never reach this; the list is for the ones that do not.
+  # Matched case-insensitively as a substring, so "GPTBot" also catches
+  # "GPTBot/1.2". Plain "Applebot" is deliberately absent: it serves Siri and
+  # Spotlight, and Applebot-Extended is the one that means training.
   labyrinthUserAgents = [
+    # model trainers and their retrieval agents
     "GPTBot" "ChatGPT-User" "OAI-SearchBot" "ClaudeBot" "Claude-Web"
-    "anthropic-ai" "CCBot" "Bytespider" "Amazonbot" "Applebot-Extended"
-    "Google-Extended" "PerplexityBot" "Perplexity-User" "Diffbot" "FacebookBot"
-    "meta-externalagent" "ImagesiftBot" "Omgilibot" "Timpibot" "YouBot"
-    "cohere-ai" "Kangaroo Bot" "PanguBot" "Webzio-Extended" "Scrapy"
-    "SemrushBot" "AhrefsBot" "DotBot" "MJ12bot" "DataForSeoBot"
+    "Claude-SearchBot" "Claude-User" "anthropic-ai" "CCBot" "Bytespider"
+    "Amazonbot" "Applebot-Extended" "Google-Extended" "PerplexityBot"
+    "Perplexity-User" "Diffbot" "FacebookBot" "meta-externalagent"
+    "meta-externalfetcher" "ImagesiftBot" "Omgilibot" "Timpibot" "YouBot"
+    "cohere-ai" "cohere-training-data-crawler" "Kangaroo Bot" "PanguBot"
+    "Webzio-Extended" "AI2Bot" "Ai2Bot-Dolma" "MistralAI-User" "DeepSeek"
+    "FirecrawlAgent" "Firecrawl" "img2dataset" "VelenPublicWebCrawler"
+    "Brightbot" "iaskspider" "ProRataInc" "TikTokSpider" "Sidetrade"
+    # generic scrapers and SEO crawlers, which cost bandwidth for nothing here
+    "Scrapy" "SemrushBot" "AhrefsBot" "DotBot" "MJ12bot" "DataForSeoBot"
+    "PetalBot" "Barkrowler" "SeekportBot" "Awario" "peer39_crawler"
   ];
 
   # CrowdSec bouncer plugin. LAPI key from a file (not the Nix store); "live"
@@ -144,7 +154,13 @@ let
 
     User-agent: *
     Disallow: /
-  '');
+  '' + lib.optionalString (cfg.botDefense.honeypotPaths != [ ]) ''
+
+    # Disclosed so that ignoring it is a decision rather than an accident.
+    # Anything that fetches these is served the labyrinth.
+  '' + lib.concatMapStrings (p: ''
+    Disallow: ${p}
+  '') cfg.botDefense.honeypotPaths);
 
   llmsTxt = pkgs.writeText "llms.txt" ''
     # llms.txt
@@ -192,6 +208,9 @@ let
 
   labyrinthRule = "HeaderRegexp(`User-Agent`, `(?i).*(${lib.concatStringsSep "|" labyrinthUserAgents}).*`)";
 
+  honeypotRule = lib.concatMapStringsSep " || " (p: "Path(`${p}`)")
+    cfg.botDefense.honeypotPaths;
+
   botDefenseRouters = lib.optionalAttrs cfg.botDefense.enable {
     # served on every host, ahead of everything else and with no auth in front:
     # a crawler has to be able to read the file that tells it to go away.
@@ -206,6 +225,18 @@ let
       service = "labyrinth";
       entryPoints = [ "websecure" ];
       priority = 9000;
+    };
+  } // lib.optionalAttrs (cfg.botDefense.enable && cfg.botDefense.honeypotPaths != [ ]) {
+    # Above the labyrinth and every real route, below only /robots.txt: the
+    # trap has to win against whatever host the path was requested on. It
+    # deliberately sits in front of Anubis - a scanner hitting /.env is not
+    # worth a proof-of-work challenge, and answering the challenge would tell
+    # it the path exists.
+    honeypot-tls = {
+      rule = honeypotRule;
+      service = "labyrinth";
+      entryPoints = [ "websecure" ];
+      priority = 9500;
     };
   };
 
@@ -356,6 +387,34 @@ in {
         type = lib.types.port;
         default = 42069;
         description = "Loopback port iocaine binds.";
+      };
+
+      honeypotPaths = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [
+          # Disclosed only in robots.txt, so nothing reaches it by following a
+          # link. A request here is a crawler that read the file and ignored it.
+          "/internal/export"
+          # Never disclosed anywhere. These are what opportunistic scanners try
+          # unprompted; the lab runs no PHP and no WordPress, so a hit is not a
+          # visitor who mistyped.
+          "/wp-login.php"
+          "/wp-admin/setup-config.php"
+          "/.env"
+          "/.git/config"
+          "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php"
+        ];
+        description = ''
+          Paths that exist only to be hit by something that should not be
+          hitting them. They answer from the labyrinth, so the caller spends
+          its time on generated prose instead of finding the real site.
+
+          The labyrinth alone matches on User-Agent, which a crawler controls
+          and can simply lie about. These match on behaviour, which it cannot.
+
+          Exact paths, never prefixes: a prefix under /.git/ would risk
+          catching a Forgejo repository that happens to be named for it.
+        '';
       };
 
       wellKnownPort = lib.mkOption {
