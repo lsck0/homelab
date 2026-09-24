@@ -227,11 +227,8 @@ let
       priority = 9000;
     };
   } // lib.optionalAttrs (cfg.botDefense.enable && cfg.botDefense.honeypotPaths != [ ]) {
-    # Above the labyrinth and every real route, below only /robots.txt: the
-    # trap has to win against whatever host the path was requested on. It
-    # deliberately sits in front of Anubis - a scanner hitting /.env is not
-    # worth a proof-of-work challenge, and answering the challenge would tell
-    # it the path exists.
+    # above every real route, below /robots.txt. In front of Anubis too: a
+    # scanner hitting /.env is not worth a proof-of-work challenge.
     honeypot-tls = {
       rule = honeypotRule;
       service = "labyrinth";
@@ -274,12 +271,8 @@ let
         (if cfg.crowdsecBouncer.enable
             && cfg.crowdsecBouncer.appsec
             && (builtins.elem name cfg.crowdsecBouncer.noAppsecRouters
-                # The honeypot always skips AppSec. Its whole purpose is to let
-                # a scanner reach the labyrinth and waste its time there; with
-                # the WAF in front, /.env and /wp-login.php were answered with a
-                # cheap 403 and the caller moved on in milliseconds. The IP
-                # bouncer stays, so an address CrowdSec already decided about is
-                # still dropped before any of this.
+                # the honeypot skips AppSec so a scanner reaches the labyrinth
+                # instead of a cheap 403; the IP bouncer still applies
                 || name == "honeypot-tls")
          then map (m: if m == "crowdsec" then "crowdsec-noappsec" else m) defaultMiddlewares
          else defaultMiddlewares)
@@ -412,15 +405,12 @@ in {
           "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php"
         ];
         description = ''
-          Paths that exist only to be hit by something that should not be
-          hitting them. They answer from the labyrinth, so the caller spends
-          its time on generated prose instead of finding the real site.
+          Paths nothing legitimate requests. They answer from the labyrinth.
+          The labyrinth matches User-Agent, which a crawler can lie about;
+          these match behaviour, which it cannot.
 
-          The labyrinth alone matches on User-Agent, which a crawler controls
-          and can simply lie about. These match on behaviour, which it cannot.
-
-          Exact paths, never prefixes: a prefix under /.git/ would risk
-          catching a Forgejo repository that happens to be named for it.
+          Exact paths, never prefixes: /.git/ as a prefix could catch a
+          Forgejo repository named for it.
         '';
       };
 

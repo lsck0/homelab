@@ -27,23 +27,17 @@ locals {
   defaults = {
     enabled  = true
     cooldown = "30m"
-    # A plain VM - NixOS plus one podman service - measures 445 to 600 MiB.
-    # Read off the VMs that never hit their ceiling; one that did reads as its
-    # ceiling whatever it needs, because with the balloon off it never hands
-    # page cache back.
+    # measured working set of a plain VM: 445-600 MiB
     memory = 768
-    # Floor the host may balloon a VM down to, as a fraction of memory. Without
-    # a floating size the provider sets balloon: 0 and the device is off, so
-    # every VM pins its full allocation for ever. The lab asks 41 GiB of
-    # ceilings on a 32 GiB host; half brings the guaranteed total to ~21 GiB.
+    # Balloon floor as a fraction of memory. Without it the provider sets
+    # balloon: 0 and a VM never gives memory back; the lab is overcommitted.
     balloon_ratio = 0.5
     cores         = 2
     disk          = 8
     machine       = null
     hostpci       = []
-    # Extra disks as [{ size, datastore }]. Bulk storage is a 2 TB spinning
-    # disk outside the `pve` group, so a VM takes a second disk from there
-    # rather than growing its root disk on the NVMes.
+    # [{ size, datastore }]. Bulk media lives on the spinning disk, which is
+    # a separate datastore from the NVMe pool.
     extra_disks = []
     boot_order  = 3
   }
@@ -60,9 +54,7 @@ locals {
       enabled  = tostring(try(i.enabled, local.defaults.enabled))
       cooldown = try(i.cooldown, local.defaults.cooldown)
       memory   = try(i.memory, local.defaults.memory)
-      # never below 512 MiB: half of a 768 ceiling is 384, which is not enough
-      # for NixOS plus a service to stay responsive, and the VMs squeezed that
-      # far stopped answering ssh entirely.
+      # never below 512: squeezed to 384 a VM stops answering ssh
       balloon     = max(512, floor(try(i.memory, local.defaults.memory) * try(i.balloon_ratio, local.defaults.balloon_ratio)))
       cores       = try(i.cores, local.defaults.cores)
       disk        = try(i.disk, local.defaults.disk)
@@ -152,11 +144,9 @@ resource "proxmox_virtual_environment_vm" "vm" {
     # src/scripts/renumber.sh) have none, and a diff there must never replace a VM.
     #
     # user_account only, not all of initialization: ignoring the whole block
-    # also ignored ip_config, and 44 of 45 VMs kept an address belonging to a
-    # different VM while `terraform plan` reported no changes. Hidden because
-    # network.nix sets the address statically, so cloud-init only decides where
-    # a *new* VM lands. user_account stays ignored - the provider cannot read
-    # back a password, so it diffs on every plan.
+    # also ignored ip_config, and 44 of 45 VMs silently kept another VM's
+    # address. user_account must stay ignored - the provider cannot read back
+    # a password, so it diffs every plan.
     ignore_changes = [
       initialization[0].user_account,
       mac_addresses,

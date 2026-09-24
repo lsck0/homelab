@@ -128,10 +128,7 @@ in {
   # ─────────────────────────────────────────────────────────────────────────────
   # EGRESS CLASSES
   # ─────────────────────────────────────────────────────────────────────────────
-  # A VM in modules/egress.nix leaves through something other than the WAN NAT:
-  # its packets are marked by source and the mark selects a routing table. Each
-  # table ends in a blackhole, so a dead exit means no traffic rather than
-  # traffic from the house address.
+  # marked by source; the mark selects a table ending in a blackhole
   assertions = [{
     assertion = vpnMembers == [ ] || vpnCfg.enable;
     message = "modules/egress.nix routes ${lib.concatStringsSep ", " vpnMembers} through the VPN, but homelab.egress.vpn is not enabled on the router.";
@@ -142,34 +139,23 @@ in {
     content = ''
       chain premark {
         type filter hook prerouting priority mangle; policy accept;
-        # The lab and the house are never diverted: otherwise a member's reply
-        # to an ssh session is marked, looked up in a table holding only the
-        # tunnel and a blackhole, and dropped. modules/vpn.nix called this
-        # lanRoutes and kept it by hand per VM; getting it wrong took vm-112
-        # off the network. One rule for every member instead.
+        # never divert lab or house traffic, or ssh replies blackhole
         ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } return
         ${markRule "vpn" vpnMembers}
       }
       ${lib.optionalString (torMembers != [ ]) ''
         chain tor-redirect {
           type nat hook prerouting priority dstnat - 3; policy accept;
-          # same exception as the mark chain: Tor is for leaving the house, not
-          # for reaching the NAS. A redirect of lab-local traffic would send it
-          # to an exit node that cannot route 10.0.0.0/8 anywhere.
+          # same exception: an exit node cannot route 10.0.0.0/8
           ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } return
-          # DNS first: a name has to become one of Tor's virtual addresses
-          # before redirecting a TCP connection to it means anything.
+          # DNS first: a name must become a Tor virtual address
           ip saddr { ${torSet} } udp dport 53 redirect to :${toString torPorts.dns}
           ip saddr { ${torSet} } tcp dport 53 redirect to :${toString torPorts.dns}
           ip saddr { ${torSet} } tcp flags & (fin|syn|rst|ack) == syn redirect to :${toString torPorts.trans}
         }
         chain tor-drop {
           type filter hook forward priority filter - 5; policy accept;
-          # Whatever is still being forwarded from a tor member is UDP that is
-          # not DNS - QUIC, NTP, trackers - because every TCP connection and
-          # every lookup was redirected above and is handled locally. Tor
-          # cannot carry it, and letting it take the WAN NAT would publish the
-          # house address for exactly the traffic nobody thinks to check.
+          # what reaches here is non-DNS UDP, which Tor cannot carry
           ip saddr { ${torSet} } ct state established,related accept
           ip saddr { ${torSet} } counter drop
         }
@@ -194,10 +180,7 @@ in {
       # member's packets to go, rather than a quiet fall back to the house.
       ip route replace blackhole default metric 1000 table ${toString egressMarks.vpn.table}
 
-      # The lab's own subnets, so rpfilter passes: it validates a source
-      # against the table the mark selects, and a table holding only the tunnel
-      # made 10.100.0.112 look as though it came from wg-egress. Does not
-      # weaken the killswitch - the default is still tunnel, then blackhole.
+      # rpfilter checks the source against the marked table, so it needs these
       ip route replace 10.100.0.0/24 dev ens19 table ${toString egressMarks.vpn.table}
       ip route replace 10.200.0.0/24 dev ens20 table ${toString egressMarks.vpn.table}
       ip route replace 192.168.178.0/24 dev ens18 table ${toString egressMarks.vpn.table}
@@ -207,13 +190,7 @@ in {
   # ─────────────────────────────────────────────────────────────────────────────
   # TOR EXIT
   # ─────────────────────────────────────────────────────────────────────────────
-  # The other half of the proxy; was vm-113 until the exits were collected here.
-  # Tor runs on the router because a transparent redirect must happen where Tor
-  # runs - TransPort recovers the original destination via SO_ORIGINAL_DST,
-  # which is only recorded where the translation happened. On a separate VM
-  # that needed next-hop routing plus a hole in the DMZ isolation.
-  #
-  # Client only; the public non-exit relay is vm-202, a different thing.
+  # Tor runs here because TransPort needs SO_ORIGINAL_DST from the local redirect. Client only; the relay is vm-202.
   services.tor = {
     enable = true;
     enableGeoIP = false;
@@ -297,9 +274,7 @@ in {
   homelab.egress.vpn = {
     enable = true;
     table = egressMarks.vpn.table;
-    # The key vm-112 used to hold. Moved here rather than duplicated: two
-    # WireGuard clients cannot share a key and an address, so the VM having
-    # given it up is what makes this work. The VM now has no tunnel at all.
+    # the key vm-112 used to hold; two clients cannot share one
     privateKeyFile = config.sops.secrets.protonvpn-private-key.path;
     address = "10.2.0.2/32";
     publicKey = "36G8+pInNcPK9F1TpHglWs9Pk5uJOY9o8SCNrCBgvHE=";
@@ -309,13 +284,7 @@ in {
   sops.secrets.protonvpn-private-key = { };
 
   # ── Proton's forwarded port ────────────────────────────────────────────────
-  # One tunnel gets one port, so the router leases it and forwards it to the
-  # one member that needs unsolicited inbound connections. Everything else
-  # behind the exit is ordinary outbound NAT and needs nothing here.
-  #
-  # The port changes whenever the 60-second lease lapses, so the DNAT cannot be
-  # written once. It matches a named set instead, and the renewal unit replaces
-  # the set's single element.
+  # One tunnel, one port, one member. The port changes every lease, so the DNAT matches a set the renewal unit rewrites.
   networking.nftables.tables.proton-port = {
     family = "ip";
     content = ''
@@ -362,10 +331,7 @@ in {
   # ─────────────────────────────────────────────────────────────────────────────
   networking.nftables.enable = true;
   networking.firewall = {
-    # Loose, to match the rp_filter sysctl above rather than contradict it.
-    # Strict is `fib saddr . mark . iif check exists`, which wants the reply on
-    # the interface the main table would use for its source. VPN replies arrive
-    # on wg-egress while 1.1.1.1 routes via ens18, so every one was dropped.
+    # loose, matching the sysctl above: strict drops every VPN reply
     checkReversePath = "loose";
     enable = true;
     filterForward = true;
@@ -403,11 +369,7 @@ in {
         meter wan-conns size 65535 { ip saddr ct count over 200 } \
         counter drop
 
-      # Tor, for the lab only and never from the WAN. 9050 and 9055 are the
-      # SOCKS ports an app points itself at (Prowlarr uses 9055 for
-      # per-destination circuit isolation); 9040 and 9053 are where the egress
-      # redirect lands a tor-class VM, which arrives here as ordinary input
-      # because the translation happened on this host.
+      # Tor for the lab only: 9050/9055 SOCKS, 9040/9053 the egress redirect
       ip saddr { 10.100.0.0/24, 10.200.0.0/24 } tcp dport { ${toString torPorts.socks}, ${toString torPorts.socksIsolated}, ${toString torPorts.trans}, ${toString torPorts.dns} } accept
       ip saddr { 10.100.0.0/24, 10.200.0.0/24 } udp dport ${toString torPorts.dns} accept
     '';

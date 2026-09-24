@@ -254,11 +254,9 @@ if ! vgs bulk >/dev/null 2>&1; then
         # Leave 1% for thin-pool metadata growth: a thin pool whose metadata
         # fills is as wedged as one whose data fills, and far more annoying.
         #
-        # -Zn: no zeroing of new chunks. Zeroing writes every chunk twice and
-        # halved throughput on this disk - 55 MB/s against 106 MB/s once it was
-        # off. It only protects against reading a previously-freed chunk, which
-        # matters for untrusted tenants sharing a pool; here the one consumer is
-        # the NAS's own filesystem, which never reads a block it has not written.
+        # -Zn: zeroing writes every chunk twice and halved throughput here
+        # (55 vs 106 MB/s). It guards against reading a freed chunk, which
+        # matters for untrusted tenants; the only consumer is the NAS.
         lvcreate --type thin-pool -l 99%FREE -Zn --thinpool data bulk
     fi
 fi
@@ -270,15 +268,10 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 # OSSEC (host intrusion detection)
 # ─────────────────────────────────────────────────────────────────────────────
-# The hypervisor is the one machine a HIDS earns its keep on. Every VM is an
-# immutable NixOS system, so FIM there restates what Nix already guarantees;
-# this host is mutable Debian holding the API token and root on every VM.
-#
-# `local` mode: no manager, no agents, no listener. The lab ran a Wazuh manager
-# for months with an agent on nothing, costing 4 GiB to duplicate promtail.
-#
-# Built from source: Atomicorp has no Debian 13 channel, and pointing trixie at
-# bookworm packages is a poor trade on the hypervisor.
+# The hypervisor is the one machine a HIDS earns its keep on: every VM is an
+# immutable NixOS system, this host is mutable Debian holding root on all of
+# them. `local` mode - no manager, no agents, no listener. Built from source
+# because Atomicorp has no Debian 13 channel.
 OSSEC_VERSION=${OSSEC_VERSION:-3.8.0}
 if [ ! -d /var/ossec ]; then
     echo ">>> Building OSSEC $OSSEC_VERSION"

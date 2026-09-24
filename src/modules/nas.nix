@@ -62,9 +62,7 @@ in {
     };
   };
 
-  # Stateful services on NFS are slow to stop, and systemd's 45s default kills
-  # them: they land in `failed` and, with no Restart, stay down. A deploy took
-  # Postgres out on VM after VM and still reported success.
+  # Postgres on NFS is slow to stop; the 45s default kills it and it stays failed
   # a DMZ mount missing from dmzShares would hang at boot on a denied export.
   assertions = lib.optionals external (map (d: {
     assertion = lib.elem d allowed;
