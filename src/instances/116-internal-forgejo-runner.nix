@@ -73,6 +73,12 @@
 
       REG_TOKEN=$(cat "$TOKEN_FILE")
 
+      # `docker` must map to an image that HAS the docker CLI. It was
+      # node:20-bookworm, which does not, so every workflow using
+      # `runs-on: docker` to build an image died on "docker: command not found"
+      # five seconds in - the hello pipeline had never once worked. The
+      # catthehacker image carries docker and node both, and node is needed
+      # because actions/checkout is a JS action.
       docker run --rm -v /var/lib/forgejo-runner:/data \
         --add-host=git.lsck0.dev:10.100.0.100 \
         code.forgejo.org/forgejo/runner:6.2.1 \
@@ -80,12 +86,6 @@
           --instance https://git.lsck0.dev \
           --token "$REG_TOKEN" \
           --name vm-116-runner \
-          # `docker` must resolve to an image that HAS the docker CLI. It was
-          # node:20-bookworm, which does not, so every workflow using
-          # `runs-on: docker` to build an image died on "docker: command not
-          # found" five seconds in - the hello pipeline had never once worked.
-          # catthehacker/ubuntu carries both docker and node, and node is
-          # needed too because actions/checkout is a JS action.
           --labels "docker:docker://catthehacker/ubuntu:act-22.04,ubuntu-latest:docker://catthehacker/ubuntu:act-22.04,rust:docker://rust:1.80-bookworm" \
           --no-interactive
 
