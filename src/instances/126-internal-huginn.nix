@@ -17,7 +17,10 @@
       local all all trust
       host all all 127.0.0.1/32 trust
       host all all ::1/128 trust
-      host huginn huginn 10.88.0.0/16 trust
+      # all databases, not just huginn: the entrypoint runs `db:create`, which
+      # connects to the `postgres` maintenance database first and was refused
+      # with "no pg_hba.conf entry for ... database \"postgres\"".
+      host all huginn 10.88.0.0/16 trust
     '';
   };
 
