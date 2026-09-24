@@ -674,6 +674,10 @@ in {
         publicKey = "AW4t+4glZqmUl8ZAtrq60K/GTDmzZJisz1+6EqYnmzI=";
         allowedIPs = [ "10.0.0.4/32" ];
       }
+      { # pc (luca-pc). Config and QR: secrets repo, wg0.pc.conf
+        publicKey = "rvtqHdSDK3JGZhZkzVYIcb9gKHiZUTsenfpJtm4adT0=";
+        allowedIPs = [ "10.0.0.5/32" ];
+      }
     ];
   };
 

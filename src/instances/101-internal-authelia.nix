@@ -122,8 +122,6 @@ in {
   sops.secrets.nextcloud-oidc-secret = {};
   sops.secrets.vaultwarden-oidc-secret = {};
   sops.secrets.forgejo-oidc-secret = {};
-  sops.secrets.audiobookshelf-oidc-secret = {};
-  sops.secrets.kavita-oidc-secret = {};
   sops.secrets.jellyfin-oidc-secret = {};
 
   # Authelia's own cryptographic material is generated here rather than kept in
