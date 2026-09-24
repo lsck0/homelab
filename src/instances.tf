@@ -143,7 +143,9 @@ locals {
       enabled = true,
       name    = "120-internal-nextcloud",
       type    = "internal",
-      memory  = 1024,
+      # Nextcloud + php-fpm + its own Postgres
+      memory  = 2048,
+      balloon = 1536,
     }
     "121" = { # document management (paperless-ngx)
       enabled = true,
@@ -261,7 +263,9 @@ locals {
       enabled = true,
       name    = "200-external-traefik",
       type    = "external",
-      memory  = 1024,
+      # Traefik + CrowdSec + AppSec + Anubis + iocaine; OOM-killed crowdsec at 1024
+      memory  = 2048,
+      balloon = 1536,
     }
     "202" = { # non-exit Tor relay
       enabled = true,
