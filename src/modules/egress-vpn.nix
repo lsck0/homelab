@@ -48,6 +48,19 @@ in
       '';
     };
 
+    gateway = lib.mkOption {
+      type = lib.types.str;
+      default = "10.2.0.1";
+      description = ''
+        The provider's gateway inside the tunnel. Needs a route of its own in
+        the main table: allowedIPsAsRoutes is off, so nothing here points at
+        wg-egress except the egress table, and the router's own NAT-PMP lease
+        request (scripts/protonvpn-port.sh) is locally generated and unmarked.
+        Without it natpmpc sends to 10.2.0.1 through the WAN and gets
+        "readnatpmpresponseorretry returned -7 (FAILED)".
+      '';
+    };
+
     table = lib.mkOption {
       type = lib.types.int;
       default = 100;
@@ -73,9 +86,12 @@ in
       }];
       postSetup = ''
         ${pkgs.iproute2}/bin/ip route replace default dev wg-egress metric 1 table ${toString cfg.table}
+        # the provider's gateway, in the main table: see the option's comment.
+        ${pkgs.iproute2}/bin/ip route replace ${cfg.gateway}/32 dev wg-egress
       '';
       postShutdown = ''
         ${pkgs.iproute2}/bin/ip route del default dev wg-egress metric 1 table ${toString cfg.table} || true
+        ${pkgs.iproute2}/bin/ip route del ${cfg.gateway}/32 dev wg-egress || true
       '';
     };
 
