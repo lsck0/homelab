@@ -15,7 +15,7 @@
   # imports a finished download by hardlinking it into the library, and a
   # hardlink cannot cross a filesystem - separate them and every film is
   # stored twice, which is exactly what was happening before.
-  fileSystems."/srv/nas/bulk" = {
+  fileSystems."/mnt/bulk-new" = {
     device = "/dev/disk/by-label/bulk";
     fsType = "ext4";
     # nofail so a missing or unformatted bulk disk cannot stop the NAS booting.
@@ -29,7 +29,7 @@
   systemd.services.bulk-format = {
     description = "Create the bulk filesystem on first boot";
     wantedBy = [ "multi-user.target" ];
-    before = [ "srv-nas-bulk.mount" ];
+    before = [ "mnt-bulk\\x2dnew.mount" ];
     path = [ pkgs.util-linux pkgs.e2fsprogs ];
     unitConfig.ConditionPathExists = "!/dev/disk/by-label/bulk";
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
