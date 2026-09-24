@@ -138,4 +138,14 @@ in {
 
   # nothing listens here: the runners connect out to GitHub.
   networking.firewall.allowedTCPPorts = [ ];
+
+  # The module emits InaccessiblePaths=.../.current-token with no "-" prefix, but
+  # its own unconfigure.sh pre-start deletes that file, so namespace setup fails
+  # 226/NAMESPACE before configure.sh can recreate it. Re-add both paths optional.
+  systemd.services = lib.mapAttrs' (n: _: lib.nameValuePair "github-runner-${n}" {
+    serviceConfig.InaccessiblePaths = lib.mkForce [
+      "-/run/secrets/github-runner-token"
+      "-/var/lib/github-runner/${n}/.current-token"
+    ];
+  }) runners;
 }
