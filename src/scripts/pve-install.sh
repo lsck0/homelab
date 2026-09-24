@@ -230,18 +230,12 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 # BULK STORAGE (the spinning disk)
 # ─────────────────────────────────────────────────────────────────────────────
-# The lab has two NVMe SSDs and one 2 TB 5400 rpm disk (WD20EZRZ). The NVMes
-# carry the VMs and their service state; the spinning disk carries media, which
-# is large, sequentially read and does not care about latency.
+# NVMes carry the VMs and their state; the 2 TB spinning disk carries media.
+# Keeping media out of the `pve` group is the point: it once filled the pool
+# the VMs live in and took the whole lab down at once.
 #
-# Keeping it out of the `pve` volume group is the point. Media grew until it
-# filled the pool the VMs live in, every guest's writes started failing, and
-# the whole lab went down at once - a film cannot do that to a database if they
-# are not on the same device.
-#
-# The provider has no resource for Proxmox storage, so this runs here rather
-# than in Terraform; instances.tf then asks for a disk on `bulk` by name.
-# Idempotent: it does nothing if the volume group is already there.
+# The provider has no storage resource, so this runs here and instances.tf asks
+# for a disk on `bulk` by name. Idempotent.
 BULK_DISK=${BULK_DISK:-/dev/disk/by-id/ata-WDC_WD20EZRZ-00Z5HB0_WD-WCC4N3KNZ2KS}
 if ! vgs bulk >/dev/null 2>&1; then
     if [ ! -b "$BULK_DISK" ]; then
@@ -270,23 +264,15 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 # OSSEC (host intrusion detection)
 # ─────────────────────────────────────────────────────────────────────────────
-# The hypervisor is the one machine in the lab a HIDS genuinely earns its keep
-# on. Every VM is a NixOS system built from this repo: its filesystem is
-# immutable and content-addressed, so file integrity monitoring there restates
-# something Nix already guarantees. This host is the opposite - a mutable
-# Debian install, configured partly by hand, holding the Proxmox API token, the
-# LVM volumes of every VM and root on all of them. If anything is worth
-# watching for unexpected change, it is /etc/pve and /usr/sbin here.
+# The hypervisor is the one machine a HIDS earns its keep on. Every VM is an
+# immutable NixOS system, so FIM there restates what Nix already guarantees;
+# this host is mutable Debian holding the API token and root on every VM.
 #
-# `local` mode: no manager, no agents, no network listener. It analyses this
-# host's own logs and filesystem and writes alerts locally. That is deliberate
-# - the lab ran a Wazuh manager for months with an agent on nothing at all,
-# which cost 4 GiB of RAM to duplicate what promtail already shipped to Loki.
+# `local` mode: no manager, no agents, no listener. The lab ran a Wazuh manager
+# for months with an agent on nothing, costing 4 GiB to duplicate promtail.
 #
-# Built from source rather than installed from Atomicorp's repository, which
-# has no Debian 13 channel; the workaround is to point trixie at the bookworm
-# packages, and mismatched libc/OpenSSL builds on the hypervisor is a poor
-# trade for saving a compile.
+# Built from source: Atomicorp has no Debian 13 channel, and pointing trixie at
+# bookworm packages is a poor trade on the hypervisor.
 OSSEC_VERSION=${OSSEC_VERSION:-3.8.0}
 if [ ! -d /var/ossec ]; then
     echo ">>> Building OSSEC $OSSEC_VERSION"

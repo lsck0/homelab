@@ -2,7 +2,7 @@
 # Hermes agent end-to-end test: free Nous model (nous/welcome), or the
 # production Anthropic config when ANTHROPIC_API_KEY is set.
 #
-# Runs the exact Hermes package, settings, skills and AGENTS.md from the vm-113
+# Runs the exact Hermes package, settings, skills and AGENTS.md from the vm-114
 # config, switched to the Nous free tier, inside a container (it executes shell
 # commands without approval). The lab is simulated at its edges:
 #   vm, ssh, nc, lab-token   shims that log every call and answer like the lab
@@ -40,7 +40,7 @@ ok()   { echo "  PASS  $*"; }
 fail() { echo "  FAIL  $*"; FAILED=1; }
 
 H=nixosConfigurations.114-internal-hermes.config.services.hermes-agent
-echo ">>> Building Hermes (vm-113 package) and test tools"
+echo ">>> Building Hermes (vm-114 package) and test tools"
 ENV=$(nix build --no-warn-dirty --no-link --print-out-paths --impure --expr "
   let f = builtins.getFlake \"$SRC\"; pkgs = f.inputs.nixpkgs.legacyPackages.x86_64-linux;
   in pkgs.buildEnv { name = \"hermes-test-env\"; paths = [
@@ -53,7 +53,7 @@ chmod -R 777 "$W"
 # ─────────────────────────────────────────────────────────────────────────────
 # HERMES CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
-# vm-113 settings, model switched to the Nous free tier
+# vm-114 settings, model switched to the Nous free tier
 # With ANTHROPIC_API_KEY set, test the production model config unchanged;
 # otherwise the free Nous tier. The local Ollama fallback is not available here.
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
@@ -157,7 +157,7 @@ echo -n fake-paperless-token > "$W/tokens/paperless-key.token"
 echo -n fake-firefly-token > "$W/tokens/firefly-token.token"
 
 # the repo: a bare copy stands in for GitHub; lab-pr pushes there and answers
-# with a fake pull request URL. Git identity as configured on vm-113.
+# with a fake pull request URL. Git identity as configured on vm-114.
 git clone -q --bare --no-local "$SRC/.." "$W/remote.git"   # a copy: chmod below must not touch this repo
 MASTER=$(git -C "$W/remote.git" rev-parse master)
 nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.114-internal-hermes.config.programs.git.config" \

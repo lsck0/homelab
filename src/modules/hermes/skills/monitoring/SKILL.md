@@ -11,7 +11,7 @@ metadata:
     related_skills: [homelab-ops]
 ---
 
-# Monitoring (vm-105 10.100.0.105, vm-106 10.100.0.106)
+# Monitoring (vm-105 10.100.0.105)
 
 - Prometheus `http://10.100.0.105:9090`: node-exporter on every VM (:9100), Traefik (:8082).
   Query: `curl -sG http://10.100.0.105:9090/api/v1/query --data-urlencode 'query=up == 0'`.
