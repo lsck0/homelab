@@ -200,6 +200,19 @@ in {
       # the floor of the table: when the tunnel is down there is nowhere for a
       # member's packets to go, rather than a quiet fall back to the house.
       ip route replace blackhole default metric 1000 table ${toString egressMarks.vpn.table}
+
+      # The lab's own subnets, so reverse-path filtering passes. rpfilter
+      # validates a packet's source against the table its mark selects, and a
+      # table holding only the tunnel makes 10.100.0.112 look as though it
+      # arrived from wg-egress rather than from ens19 - so every marked packet
+      # was dropped in `rpfilter-allow` before it ever reached the tunnel.
+      #
+      # This does not weaken the killswitch: the default route here is still
+      # the tunnel and then a blackhole. These entries only describe where the
+      # lab's own addresses legitimately live.
+      ip route replace 10.100.0.0/24 dev ens19 table ${toString egressMarks.vpn.table}
+      ip route replace 10.200.0.0/24 dev ens20 table ${toString egressMarks.vpn.table}
+      ip route replace 192.168.178.0/24 dev ens18 table ${toString egressMarks.vpn.table}
     '';
   };
 
