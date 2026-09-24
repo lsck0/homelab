@@ -10,6 +10,7 @@
 	"proxmox_ssh_password": "",
 	"proxmox_insecure": "ENC[AES256_GCM,data:r74asg==,iv:H27MTj4/W76E481J0QQustgrXk9axOkSB1ImcxyMne4=,tag:ZLpWZT52O5ZA6+HXxdzYcQ==,type:bool]",
 	"ssh_public_key": "ENC[AES256_GCM,data:J2kLUj/h886DKCtcMPVov9Q6lAVU271IrOnz5k09ZaMHR4jHfhRK5jAcuWNeU3j7V8XE9kpTzyKlQYwwLLcQ3ydifc2Zs9XklMEouFeYTgTrwo1iVcXdJnfQ3D6SGCUU,iv:tPkUv+p3g/c/MBNOGVYVSzM3PdiN+73FvdOngiQp9EY=,tag:cfQ29ueP3jAjUJLG1eQCCA==,type:str]",
+	"bulk_datastore": "ENC[AES256_GCM,data:leoWLA==,iv:Xy32QKPzPDXyaSoG8w3871fch6u8aZpHB5n2iycAPoM=,tag:xMjutoNhLV+3d97LUN3HKw==,type:str]",
 	"sops": {
 		"age": [
 			{
@@ -17,8 +18,8 @@
 				"recipient": "age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609"
 			}
 		],
-		"lastmodified": "2026-09-21T11:46:57Z",
-		"mac": "ENC[AES256_GCM,data:qWzJAObYyDQTGNZnGt091lVz31G1JfL1Zln39QA0Iy4VxDlkT7pjeTYe7iR1U4qpbxKxvocCpypONiSVX8fvEtVUizqOowkMjoyApJCTT5ubWJeRxPkVwJUK75SKJDEacXVTW0hHVf5Swf7FQKp3YpcCwB85vEkPkNM83SZN2cg=,iv:CKGS900mG8g9lRn+pwf7mqtOpTAJlVxQ19I89wQegOE=,tag:rUD1InV7moMdyWMSVO7K2g==,type:str]",
+		"lastmodified": "2026-09-24T16:25:06Z",
+		"mac": "ENC[AES256_GCM,data:GKZTo8mSLPt8Zpgz1VR/TpLL3CMmTyMo3Gc/y3poYdaTzDOmxQphJ4MgV2D5kkyByHj+FJBX2RVBjpsKuObbFPqRH01udmDUf39OUnfunsPxcUIkelIWOT+85v1Qu5tfPECElj6spARZZPDVeSpC8BEF/4Gp/lbt+hrOhLD7dyo=,iv:MqOHiwTSyhPBonGMXCFbLDlPTFKt3fpxbNFpsfqTNbI=,tag:uub+mxf30lyduBuKGfS1bg==,type:str]",
 		"unencrypted_suffix": "_unencrypted",
 		"version": "3.12.2"
 	}
