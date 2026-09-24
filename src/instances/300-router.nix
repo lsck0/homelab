@@ -146,11 +146,24 @@ in {
     content = ''
       chain premark {
         type filter hook prerouting priority mangle; policy accept;
+        # The lab and the house are never diverted. Without this a member's
+        # reply to an ssh session from the house is marked like anything else,
+        # looked up in a table whose only entries are the tunnel and a
+        # blackhole, and dropped - the VM answers on no address at all.
+        #
+        # modules/vpn.nix needed the same exception and called it lanRoutes,
+        # kept by hand per VM. Getting that list wrong took vm-112 off the
+        # network once already; here it is one rule for every member.
+        ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } return
         ${markRule "vpn" vpnMembers}
       }
       ${lib.optionalString (torMembers != [ ]) ''
         chain tor-redirect {
           type nat hook prerouting priority dstnat - 3; policy accept;
+          # same exception as the mark chain: Tor is for leaving the house, not
+          # for reaching the NAS. A redirect of lab-local traffic would send it
+          # to an exit node that cannot route 10.0.0.0/8 anywhere.
+          ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } return
           # DNS first: a name has to become one of Tor's virtual addresses
           # before redirecting a TCP connection to it means anything.
           ip saddr { ${torSet} } udp dport 53 redirect to :${toString torPorts.dns}
