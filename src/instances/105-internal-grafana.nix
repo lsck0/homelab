@@ -307,6 +307,26 @@ in {
     # InstanceDown rule notified the same ntfy topic and Telegram chat twice.
   };
 
+  # Prometheus and Grafana both keep their state on NFS (fileSystems above), and
+  # both are slow to shut down because of it: Prometheus flushes its TSDB head
+  # and Grafana its SQLite. systemd's default 45s stop timeout expired on every
+  # deploy, so each one was SIGKILLed, landed in `failed`, and stayed down -
+  # which is how the lab spent an evening with no monitoring and no alerting
+  # while every service it watches was working.
+  #
+  # Two changes: time to stop cleanly, and a restart if it still does not.
+  systemd.services.prometheus.serviceConfig = {
+    TimeoutStopSec = "5min";
+    # the upstream module already sets Restart; override rather than add.
+    Restart = lib.mkForce "on-failure";
+    RestartSec = 10;
+  };
+  systemd.services.grafana.serviceConfig = {
+    TimeoutStopSec = "2min";
+    Restart = lib.mkForce "on-failure";
+    RestartSec = 10;
+  };
+
   services.grafana = {
     enable = true;
     settings = {
