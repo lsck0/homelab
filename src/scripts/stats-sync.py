@@ -381,6 +381,11 @@ def clients():
     Cloudflare says they were in, what they were running, and what they asked
     for. The Prometheus metrics carry no client detail at all, so this comes
     from the JSON access log that promtail already ships to Loki."""
+    # | __error__="" on every json stage: the access log contains lines that
+    # are not valid JSON - truncated writes from the day the storage filled -
+    # and one of them fails the whole query with JSONParserErr, not just its
+    # own line. Over a 24h window that is the difference between a populated
+    # panel and an empty one.
     sel = f'{{job="traefik-access", host="{CLIENT_INGRESS}"}}'
     w = CLIENT_WINDOW
     k = CLIENT_ROWS
@@ -393,12 +398,12 @@ def clients():
         "country", "direct")
     agents = ranked(
         logql(f'topk({k}, sum by (agent) (count_over_time({sel}'
-              f' | json ua=`["request_User-Agent"]`'
+              f' | json ua=`["request_User-Agent"]` | __error__=""'
               f' | label_format agent=`{AGENT_FAMILY}` [{w}])))'),
         "agent", "other")
     hosts = ranked(
         logql(f'topk({k}, sum by (h) (count_over_time({sel}'
-              f' | json h="RequestHost" [{w}])))'),
+              f' | json h="RequestHost" | __error__="" [{w}])))'),
         "h", "direct")
     for h in hosts:
         if h["name"].endswith(CLIENT_DOMAIN):
@@ -428,7 +433,8 @@ def clients():
     # ClientHost is the real address: the Cloudflare ranges are trusted on the
     # entrypoint, so it is the visitor and not the proxy.
     visitors = scalar_logql(
-        f'count(count by (ip) (count_over_time({sel} | json ip="ClientHost" [{w}])))')
+        f'count(count by (ip) (count_over_time({sel} | json ip="ClientHost"'
+        f' | __error__="" [{w}])))')
 
     # the method label is on the stream too, so this costs nothing
     by_method = {}
