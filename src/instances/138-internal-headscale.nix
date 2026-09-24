@@ -43,6 +43,11 @@ in
     ports = [ "3000:3000" ];
     volumes = [
       "/var/lib/headplane:/var/lib/headplane"
+      # Headplane 0.6.0 will not start without this file, whatever the
+      # environment says: it calls access("/etc/headplane/config.yaml") before
+      # reading anything else and exits 1 with ENOENT. Generated next to the
+      # cookie secret, because it carries that secret.
+      "/var/lib/headplane/config.yaml:/etc/headplane/config.yaml:ro"
     ];
     environment = {
       HEADPLANE_SERVER__HOST = "0.0.0.0";
@@ -77,6 +82,27 @@ in
           "$(openssl rand -hex 16)" > /var/lib/headplane/cookie.env
         chmod 600 /var/lib/headplane/cookie.env
       fi
+      secret=$(cut -d= -f2 /var/lib/headplane/cookie.env)
+
+      # Written every run so the settings stay in this repo, but the secret is
+      # only generated once above.
+      cat > /var/lib/headplane/config.yaml <<EOF
+      server:
+        host: "0.0.0.0"
+        port: 3000
+        cookie_secret: "$secret"
+        cookie_secure: true
+      headscale:
+        url: "${headscaleLocal}"
+        public_url: "https://hs.lsck0.dev"
+        config_strict: false
+      integration:
+        agent:
+          enabled: false
+      EOF
+      # the heredoc above is indented for readability; strip it back out.
+      sed -i 's/^      //' /var/lib/headplane/config.yaml
+      chmod 600 /var/lib/headplane/config.yaml
     '';
   };
 
