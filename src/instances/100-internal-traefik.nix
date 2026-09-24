@@ -35,6 +35,16 @@ in {
     sameOriginFrameRouters = [ "jellyfin-tls" ];
 
     middlewares = {
+      # auth = "token" routes have no gate of their own. The registry accepts
+      # anonymous push, so without this any DMZ VM can replace an image the
+      # swarm pulls every minute.
+      registry-clients.ipAllowList.sourceRange = [
+        "10.100.0.116/32"   # forgejo runner, pushes
+        "10.100.0.117/32"   # github runner, pushes
+        "10.200.0.209/32"   # swarm host, pulls
+        "192.168.178.0/24"  # the workstation, for manual inspection
+      ];
+
       authelia.forwardAuth = {
         address = "http://10.100.0.101:9091/api/authz/forward-auth";
         trustForwardHeader = true;
@@ -63,7 +73,8 @@ in {
       service = name;
       entryPoints = [ "websecure" ];
     } // lib.optionalAttrs ((r.auth or "sso") == "sso") { middlewares = [ sso ]; }
-      // lib.optionalAttrs (r ? loginRedirect) { middlewares = [ "${name}-login" ]; })) routes // {
+      // lib.optionalAttrs (r ? loginRedirect) { middlewares = [ "${name}-login" ]; }
+      // lib.optionalAttrs (name == "registry-api") { middlewares = [ "registry-clients" ]; })) routes // {
       traefik-dash-tls = { rule = "Host(`traefik.lsck0.dev`)";  service = "api@internal"; entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       proxmox-tls      = { rule = "Host(`proxmox.lsck0.dev`)";  service = "proxmox";      entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
     };

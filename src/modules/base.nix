@@ -57,8 +57,7 @@
     services.prometheus.exporters.node = {
       enable = true;
       openFirewall = true;
-      # textfile collector lets services publish their own metrics (e.g. the
-      # backup writes a last-success timestamp here for the dead-man alert).
+      # textfile collector: services publish their own metrics here
       enabledCollectors = [ "textfile" ];
       extraFlags = [ "--collector.textfile.directory=/var/lib/node-exporter-textfile" ];
     };
@@ -67,12 +66,7 @@
     ];
     networking.firewall.allowedTCPPorts = [ 9100 ];
 
-    # ship every VM's journal to Loki on vm-105. The `host` label (from the
-    # journal hostname) is what lets a Grafana dashboard filter to a single VM.
-    # runs everywhere except vm-105 itself, which would otherwise depend on its
-    # own Loki being up before it could log.
-    # systemd creates /var/lib/promtail before start; without it promtail's
-    # namespaced start fails with "/var/lib/promtail: No such file or directory".
+    # journals to Loki; StateDirectory because promtail's namespaced start needs it
     systemd.services.promtail.serviceConfig = lib.mkIf (config.networking.hostName != "vm-104") {
       StateDirectory = "promtail";
     };
@@ -94,8 +88,7 @@
             { source_labels = [ "__journal_priority_keyword" ]; target_label = "level"; }
           ];
         }]
-        # on the Traefik VMs, also ship the JSON access log with the client's
-        # country (Cloudflare's Cf-Ipcountry) so Grafana can draw the world map.
+        # Traefik VMs also ship the access log, for the country on the world map
         ++ lib.optional (config.homelab.traefik.enable or false) {
           job_name = "traefik-access";
           static_configs = [{
@@ -120,12 +113,7 @@
       };
     };
 
-    # No syslog forwarding. This shipped every journal to Wazuh on vm-108, which
-    # is gone: with no agent on any VM, Wazuh only ever matched rules against
-    # these lines, which is log collection Loki (vm-105) already does - and did
-    # it over unauthenticated UDP, so anything on the subnet could forge events
-    # into it. The agent is where Wazuh's real work happens (file integrity,
-    # rootcheck, configuration assessment) and none of it was running.
+    # No syslog forwarding: Wazuh is gone and promtail already ships journals.
 
     # prefer IPv4: internal VMs have no IPv6 routing
     networking.enableIPv6 = false;
@@ -133,11 +121,13 @@
     # reduce idle CPU power; has no effect on throughput
     powerManagement.cpuFreqGovernor = "powersave";
 
+    # every deploy adds a system generation and nothing else ever collects them
+    nix.gc = { automatic = true; dates = "weekly"; options = "--delete-older-than 14d"; };
+    nix.optimise.automatic = true;
+
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
 
-    # attic binary cache (vm-110) as an extra substituter, so any local Nix
-    # build on a VM or the CI runner reuses a closure built once instead of
-    # rebuilding. Pull is authenticated with a read-only token via netrc.
+    # attic (vm-110) as an extra substituter, read-only token via netrc
     sops.secrets.attic-pull-token = {};
     sops.templates."nix-netrc".content = ''
       machine 10.100.0.110
