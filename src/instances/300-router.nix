@@ -378,6 +378,14 @@ in {
   # ─────────────────────────────────────────────────────────────────────────────
   networking.nftables.enable = true;
   networking.firewall = {
+    # Loose, to match the rp_filter sysctl above rather than contradict it.
+    # The default strict check is `fib saddr . mark . iif check exists`, which
+    # requires a reply to arrive on the interface the main table would use to
+    # reach its source. Traffic that left through the VPN exit comes back on
+    # wg-egress while 1.1.1.1 still routes via ens18, so every reply for an
+    # egress member was dropped - the request reached the internet and the
+    # answer was discarded one hop from home.
+    checkReversePath = "loose";
     enable = true;
     filterForward = true;
 
