@@ -55,7 +55,7 @@ locals {
       cooldown = try(i.cooldown, local.defaults.cooldown)
       memory   = try(i.memory, local.defaults.memory)
       # never below 512: squeezed to 384 a VM stops answering ssh
-      balloon     = max(512, floor(try(i.memory, local.defaults.memory) * try(i.balloon_ratio, local.defaults.balloon_ratio)))
+      balloon     = try(i.balloon, max(512, floor(try(i.memory, local.defaults.memory) * try(i.balloon_ratio, local.defaults.balloon_ratio))))
       cores       = try(i.cores, local.defaults.cores)
       disk        = try(i.disk, local.defaults.disk)
       machine     = try(i.machine, local.defaults.machine)
