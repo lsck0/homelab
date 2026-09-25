@@ -1,5 +1,8 @@
-{ config, lib, pkgs, inputs, inventory, nasMount, ... }:
+{ config, lib, pkgs, inputs, inventory, nasMount, nasPath, ... }:
 let
+  # the RTX 2060 passthrough; see the GPU section below.
+  gpu = true;
+
   T = "/var/lib/homepage-tokens";
   routes = import ../modules/routes.nix;
   sshKey = config.sops.secrets.hermes-ssh-key.path;
@@ -42,6 +45,27 @@ let
     if [ -z "''${1:-}" ]; then cd ${T} && ls *.token external/*.token | sed 's|^external/||; s/\.token$//'; exit 0; fi
     [ -f "${T}/$1.token" ] && exec cat "${T}/$1.token"
     exec cat "${T}/external/$1.token"
+  '';
+
+  # mc <command...>   e.g. mc list, mc "whitelist add Steve"
+  # vm-208 already owns the rcon password; reach its helper over SSH rather
+  # than copying the credential onto this VM.
+  mc = pkgs.writeShellScriptBin "mc" ''
+    exec ${pkgs.openssh}/bin/ssh 10.200.0.208 mc-rcon "$@"
+  '';
+
+  # lab-deploy [vm ...]   apply the workspace clone to the lab, or to named VMs.
+  # This is sync.sh, so it also commits and pushes a deploy generation.
+  labDeploy = pkgs.writeShellScriptBin "lab-deploy" ''
+    set -euo pipefail
+    repo=/var/lib/hermes/workspace/homelab
+    [ -d "$repo/.git" ] || { echo "lab-deploy: no clone at $repo" >&2; exit 1; }
+    cd "$repo"
+    # sync.sh wants the key at secrets/age.txt, which is gitignored. It is not
+    # kept in sops: it is the key that decrypts sops. sync.sh already places a
+    # copy on every VM, and the tmpfiles rule below makes this one readable.
+    install -m 600 /var/lib/hermes/age.txt secrets/age.txt
+    exec ./sync.sh "$@"
   '';
 
   # GitHub App (src/scripts/hermes-secrets.sh): may push branches and open pull
@@ -139,11 +163,12 @@ in {
   # GPU + LOCAL INFERENCE
   # ─────────────────────────────────────────────────────────────────────────────
   # NVIDIA RTX 2060 (Turing) passed through from the host (instances.tf hostpci).
+  # `gpu` here and `hostpci` there move together.
   nixpkgs.config.allowUnfree = true;
-  services.xserver.videoDrivers = [ "nvidia" ];
-  boot.blacklistedKernelModules = [ "nouveau" ];
-  hardware.graphics.enable = true;
-  hardware.nvidia = {
+  services.xserver.videoDrivers = lib.mkIf gpu [ "nvidia" ];
+  boot.blacklistedKernelModules = lib.mkIf gpu [ "nouveau" ];
+  hardware.graphics.enable = gpu;
+  hardware.nvidia = lib.mkIf gpu {
     modesetting.enable = true;
     nvidiaSettings = false;
     open = false;
@@ -153,8 +178,9 @@ in {
   # Ollama: Hermes' fallback model when the cloud API is unreachable, and the
   # model paperless-ai uses. OpenAI-compatible at http://10.100.0.114:11434/v1.
   # weights on the local disk (memory-mapping them over NFS is too slow).
+  # qwen3:8b needs the card; on CPU in a 4 GB VM it will not load at all.
   services.ollama = {
-    enable = true;
+    enable = gpu;
     host = "0.0.0.0";
     port = 11434;
     openFirewall = true;
@@ -198,7 +224,10 @@ in {
     '';
   };
 
-  fileSystems = nasMount T "homepage-tokens";
+  fileSystems = nasMount T "homepage-tokens"
+    # where downloads go: /srv/sync is the same tree as the owner's ~/Sync.
+    // nasPath "/srv/sync" "syncthing/sync"
+    // nasPath "/srv/media" "bulk/media";
 
   # root on every VM and the Proxmox host with the Hermes key.
   programs.ssh.extraConfig = ''
@@ -275,9 +304,13 @@ in {
     };
 
     extraPackages = with pkgs; [
-      pve vm labToken labPr labGithubToken config.nix.package
+      pve vm mc labDeploy labToken labPr labGithubToken config.nix.package
       openssh curl jq yq-go git gnugrep gnused coreutils findutils netcat-gnu
       poppler-utils python3
+      # fetching things the owner asks for, into /srv/sync or /srv/media
+      wget aria2 yt-dlp rsync unzip
+      # lab-deploy runs sync.sh, which needs these
+      terraform sops age openssl
     ];
 
     workingDirectory = "/var/lib/hermes/workspace";
@@ -289,5 +322,12 @@ in {
 
   # the module's hardening makes the filesystem read-only; the token dir is
   # where Hermes reads API keys (and paperless/firefly tokens appear).
-  systemd.services.hermes-agent.serviceConfig.ReadWritePaths = [ T ];
+  systemd.services.hermes-agent.serviceConfig.ReadWritePaths = [ T "/srv/sync" "/srv/media" ];
+
+  # lab-deploy runs sync.sh, which needs the age key. sync.sh already drops it
+  # on every VM; this exposes that copy to the agent. It decrypts every secret
+  # in the lab, which is the access the owner asked Hermes to have.
+  systemd.tmpfiles.rules = [
+    "C+ /var/lib/hermes/age.txt 0400 hermes hermes - /var/lib/sops-nix/key.txt"
+  ];
 }

@@ -93,12 +93,18 @@ locals {
       memory  = 1024,
     }
 
-    "114" = { # GPU LLM agent: Hermes (Telegram) + Ollama on the passed-through RTX 2060
-      enabled = false,
+    "114" = { # Hermes: the Telegram agent with root on the lab
+      enabled = true,
       name    = "114-internal-hermes",
       type    = "internal",
-      memory  = 12288,
-      cores   = 8,
+      # VFIO pins the guest's whole RAM up front, so this VM costs its full
+      # `memory` the moment it boots and balloon has to be off. At the old
+      # 12288 it would not start on a host with ~6 GB free; qwen3:8b lives in
+      # the card's 6 GB of VRAM, so the guest only needs room for the OS and
+      # the ollama server.
+      memory  = 5120,
+      balloon = 0,
+      cores   = 4,
       disk    = 60,
       machine = "q35",
       hostpci = ["gpu"],
