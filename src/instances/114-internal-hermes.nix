@@ -134,6 +134,20 @@ let
     `homelab-ops` skill; there is one skill per subsystem:
     ${lib.concatMapStringsSep ", " (n: "`${n}`") skillNames}.
 
+    The owner's own skills are under `skills/luca`:
+    ${lib.concatMapStringsSep ", " (n: "`${n}`") lucaSkillNames}.
+
+    ## Which model to use
+
+    You run on `claude-sonnet-5`, which is the right choice for almost
+    everything: answering questions, reading state, routine edits, a single
+    service that misbehaves. Switch up with `/model claude-opus-5` before work
+    that is actually hard - a change spanning several VMs, a failure whose
+    cause is not obvious after one look, anything touching the router, egress
+    or secrets, or a deploy you cannot trivially roll back. Switch back with
+    `/model claude-sonnet-5` once it is done. Escalating costs the owner money,
+    so do it on difficulty, not on importance.
+
     ## Network
 
     - 10.100.0.0/24 internal (VM id = last octet), 10.200.0.0/24 external DMZ,
@@ -156,6 +170,12 @@ let
 
   skillsDir = ../modules/hermes/skills;
   skillNames = lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir skillsDir));
+
+  # the owner's own skills, straight from the dotfiles repo (flake.nix input)
+  lucaSkillsDir = "${inputs.dotfiles}/skills";
+  lucaSkillNames = lib.attrNames (lib.filterAttrs
+    (n: t: t == "directory" && builtins.pathExists "${lucaSkillsDir}/${n}/SKILL.md")
+    (builtins.readDir lucaSkillsDir));
 in {
   imports = [ inputs.hermes-agent.nixosModules.default ];
 
@@ -266,14 +286,9 @@ in {
     environmentFiles = [ config.sops.templates."hermes.env".path ];
 
     settings = {
-      # paid Anthropic first, free tiers next, the local card last.
-      #
-      # A Claude Pro/Max *subscription* is not usable as an inference route in
-      # this hermes-agent revision: its provider list has `anthropic`
-      # (ANTHROPIC_API_KEY) but no Anthropic OAuth route. The subscription-style
-      # OAuth providers it does have are `nous` (Nous Portal, free tier) and
-      # `openai-codex` (ChatGPT/Codex). So the primary is the Anthropic API key
-      # in sops, and `nous` sits directly behind it as the free OAuth route.
+      # Anthropic first, free tiers next, the local card last. Authenticated by
+      # `hermes auth add --type oauth anthropic`, so the subscription is the
+      # route and ANTHROPIC_API_KEY can stay empty.
       model = {
         provider = "anthropic";
         default = "claude-sonnet-5";
@@ -328,7 +343,9 @@ in {
     documents."AGENTS.md" = agentsMd;
     # every directory in src/modules/hermes/skills becomes a skill.
     hermesHomeFiles = lib.genAttrs' skillNames
-      (name: lib.nameValuePair "skills/homelab/${name}/SKILL.md" (skillsDir + "/${name}/SKILL.md"));
+      (name: lib.nameValuePair "skills/homelab/${name}/SKILL.md" (skillsDir + "/${name}/SKILL.md"))
+      // lib.genAttrs' lucaSkillNames
+      (name: lib.nameValuePair "skills/luca/${name}/SKILL.md" "${lucaSkillsDir}/${name}/SKILL.md");
   };
 
   # the module's hardening makes the filesystem read-only; the token dir is
