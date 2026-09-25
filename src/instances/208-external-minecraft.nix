@@ -4,10 +4,9 @@ let
   # runtime server type/modpack.
   modpackEnv = "${data}/modpack.env";
   defaultModpack = ''
-    TYPE=MODRINTH
-    MODRINTH_MODPACK=https://modrinth.com/modpack/cobbleverse
+    TYPE=VANILLA
     VERSION=LATEST
-    LEVEL=world
+    LEVEL=vanilla
   '';
 
   # mc-modpack <modrinth url|slug|curseforge url|vanilla> [version] Writes the env file
@@ -64,7 +63,8 @@ in {
   };
 
   virtualisation.oci-containers.containers.minecraft = {
-    image = "itzg/minecraft-server:2026.9.1-java21";
+    # java25: vanilla 26.3 is compiled for it and the java21 image refused it
+    image = "itzg/minecraft-server:2026.9.1-java25";
     ports = [ "25565:25565" "25575:25575" ];
     extraOptions = [ "--dns=1.1.1.1" "--dns=8.8.8.8" ];
     volumes = [
@@ -74,7 +74,8 @@ in {
     environmentFiles = [ "${data}/rcon.env" modpackEnv ];
     environment = {
       EULA = "TRUE";
-      MEMORY = "18G";
+      # vanilla needs a fraction of the modded pack; must fit the balloon floor
+      MEMORY = "2G";
       DIFFICULTY = "hard";
       ICON = "https://d.furaffinity.net/art/skullfugg/1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png";
       OVERRIDE_ICON = "TRUE";
@@ -87,9 +88,7 @@ in {
       ENFORCE_WHITELIST = "true";
       OPS = "apokryphos";
       WHITELIST = builtins.concatStringsSep "," [
-        "LocalBlanky"
         "apokryphos"
-        "sanabwun"
         "zidoio"
       ];
       # drop mods of the previous pack when switching packs.
