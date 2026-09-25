@@ -117,14 +117,16 @@ locals {
       memory  = 1024,
     }
     "117" = { # CI runners for GitHub repos (ephemeral, one systemd unit per replica)
-      # github-runner-token is filled. It is currently the gh CLI's own token,
-      # which registers runners (the API answers 201), but `gh auth login`
-      # rotates it - swap in a fine-grained PAT with Administration: read and
-      # write when that becomes annoying.
+      # github-runner-token is the gh CLI's own gho_ token; the runner module
+      # only detects ghp_/github_pat_ as a PAT, so vm-117 mints a registration
+      # token from it per start. `gh auth login` rotates it.
       enabled = true,
       name    = "117-internal-github-runner",
       type    = "internal",
-      memory  = 1024,
+      # four .NET listeners plus docker. At the 1024/512 default the VM ran at
+      # 452 MB and registration timed out mid-authentication while thrashing.
+      memory  = 4096,
+      balloon = 2048,
       cores   = 4,
       disk    = 40,
     }
@@ -134,11 +136,6 @@ locals {
       type    = "internal",
     }
 
-    "119" = { # password manager (Bitwarden-compatible)
-      enabled = true,
-      name    = "119-internal-vaultwarden",
-      type    = "internal",
-    }
     "120" = { # files / groupware cloud
       enabled = true,
       name    = "120-internal-nextcloud",
