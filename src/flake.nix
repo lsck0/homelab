@@ -3,6 +3,9 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
+    # GitHub deprecates old Actions runners server-side, faster than the stable
+    # channel moves. vm-117 takes github-runner from here and nothing else does.
+    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
     # Hermes agent (vm-114). Not following our nixpkgs: it is built and tested
