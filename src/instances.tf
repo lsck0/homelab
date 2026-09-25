@@ -79,7 +79,7 @@ locals {
     }
 
     "114" = { # Hermes: the Telegram agent with root on the lab
-      enabled = true,
+      enabled = false,
       name    = "114-internal-hermes",
       type    = "internal",
       # VFIO pins the guest's whole RAM up front, so this VM costs its full `memory` the moment
@@ -130,7 +130,7 @@ locals {
     }
     "122" = { # AI auto-tagging for paperless
       # off: paperless holds 0 documents and the RAM is wanted for vm-208.
-      enabled = false,
+      enabled = true,
       name    = "122-internal-paperless-ai",
       type    = "internal",
       # paperless-ai pulls a large model image; 8 GiB was 80% full at rest.
@@ -145,7 +145,7 @@ locals {
 
     "125" = { # home automation hub
       # off: the host ran out of RAM once vm-208 and the GPU VM were pinned.
-      enabled = false,
+      enabled = true,
       name    = "125-internal-homeassistant",
       type    = "internal",
       # Home Assistant is a large Python process with dozens of integrations; squeezed toward
@@ -156,7 +156,7 @@ locals {
     }
     "126" = { # automation agents / scraping
       # off: the host ran out of RAM once vm-208 and the GPU VM were pinned.
-      enabled = false,
+      enabled = true,
       name    = "126-internal-huginn",
       type    = "internal",
       # Rails plus its own Postgres; measured at 1003 MiB, i.e. at the old ceiling.
@@ -237,7 +237,7 @@ locals {
       balloon = 1536,
     }
     "202" = { # non-exit Tor relay
-      enabled = true,
+      enabled = false,
       name    = "202-external-tor-relay",
       type    = "external",
       # A public relay, not a client: it carries other people's circuits
@@ -271,7 +271,7 @@ locals {
       memory  = 1024,
     }
     "208" = { # Minecraft server, boots when a player connects
-      enabled = true,
+      enabled = false,
       name    = "208-external-minecraft",
       type    = "external",
       # vanilla, not the Cobbleverse pack: 20480 was sized for the modpack and

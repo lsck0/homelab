@@ -100,7 +100,7 @@
   },
   "114": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.114",
     "name": "114-internal-hermes",
@@ -154,7 +154,7 @@
   },
   "122": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.122",
     "name": "122-internal-paperless-ai",
@@ -172,7 +172,7 @@
   },
   "125": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.125",
     "name": "125-internal-homeassistant",
@@ -181,7 +181,7 @@
   },
   "126": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.126",
     "name": "126-internal-huginn",
@@ -289,7 +289,7 @@
   },
   "202": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.202",
     "name": "202-external-tor-relay",
@@ -343,7 +343,7 @@
   },
   "208": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.208",
     "name": "208-external-minecraft",
