@@ -129,7 +129,8 @@ locals {
       balloon = 1536,
     }
     "122" = { # AI auto-tagging for paperless
-      enabled = true,
+      # off: paperless holds 0 documents and the RAM is wanted for vm-208.
+      enabled = false,
       name    = "122-internal-paperless-ai",
       type    = "internal",
       # paperless-ai pulls a large model image; 8 GiB was 80% full at rest.
@@ -143,7 +144,8 @@ locals {
     }
 
     "125" = { # home automation hub
-      enabled = true,
+      # off: the host ran out of RAM once vm-208 and the GPU VM were pinned.
+      enabled = false,
       name    = "125-internal-homeassistant",
       type    = "internal",
       # Home Assistant is a large Python process with dozens of integrations; squeezed toward
@@ -153,7 +155,8 @@ locals {
       disk = 16,
     }
     "126" = { # automation agents / scraping
-      enabled = true,
+      # off: the host ran out of RAM once vm-208 and the GPU VM were pinned.
+      enabled = false,
       name    = "126-internal-huginn",
       type    = "internal",
       # Rails plus its own Postgres; measured at 1003 MiB, i.e. at the old ceiling.
@@ -268,11 +271,15 @@ locals {
       memory  = 1024,
     }
     "208" = { # Minecraft server, boots when a player connects
-      enabled = false,
+      enabled = true,
       name    = "208-external-minecraft",
       type    = "external",
-      memory  = 20480,
-      cores   = 8,
+      # vanilla, not the Cobbleverse pack: 20480 was sized for the modpack and
+      # does not fit this host. The floor is high because the JVM commits its
+      # whole heap at startup: at 2048 it died with "Not enough space".
+      memory  = 4096,
+      balloon = 3072,
+      cores   = 4,
       disk    = 16,
     }
     "209" = { # app host: Docker Swarm stacks deployed by CI (Forgejo + GitHub)

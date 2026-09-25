@@ -181,6 +181,52 @@
     '';
   };
 
+  # Hermes drives Forgejo too, and homepage-bot is read-only and not an admin.
+  systemd.services.forgejo-hermes-token = {
+    description = "Generate a Forgejo admin token for Hermes";
+    after = [ "podman-forgejo.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.podman pkgs.curl pkgs.coreutils ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = ''
+      TOKEN_FILE="/var/lib/homepage-tokens/forgejo-hermes.token"
+
+      if [ -s "$TOKEN_FILE" ]; then
+        HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: token $(cat $TOKEN_FILE)" \
+          http://127.0.0.1:80/api/v1/user || echo 000)
+        case "$HTTP" in
+          200) echo "Hermes token valid"; exit 0 ;;
+          401) echo "Hermes token stale, regenerating..."; rm -f "$TOKEN_FILE" ;;
+          *)   echo "Hermes token check inconclusive (HTTP $HTTP), keeping it"; exit 0 ;;
+        esac
+      fi
+
+      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
+
+      podman exec -u git forgejo forgejo admin user create \
+        --username hermes-bot \
+        --password "hermes-bot-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
+        --email hermes@lsck0.dev \
+        --admin \
+        --must-change-password=false 2>/dev/null || true
+
+      # "all" rather than a scope list: Hermes is meant to operate the forge.
+      TOKEN=$(podman exec -u git forgejo forgejo admin user generate-access-token \
+        --username hermes-bot \
+        --token-name "hermes-$(date +%s)" \
+        --scopes all \
+        | tr -d '\r' | awk 'END {print $NF}' || true)
+
+      if [ -n "$TOKEN" ]; then
+        echo -n "$TOKEN" > "$TOKEN_FILE"
+        echo "Forgejo Hermes admin token created"
+      else
+        echo "Hermes token creation failed"
+      fi
+    '';
+  };
+
   # generate runner registration token and save to NAS for runner VM
   systemd.services.forgejo-runner-token = {
     description = "Generate Forgejo runner registration token";
