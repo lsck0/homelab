@@ -5,7 +5,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SECRETS="$ROOT_DIR/src/secrets.json"
 APPLY=0
-[ "${1:-}" = "--apply" ] && APPLY=1
+PRUNE=0
+for a in "$@"; do
+  case "$a" in
+    --apply) APPLY=1 ;;
+    --prune) PRUNE=1 ;;
+  esac
+done
 
 # the age key lives in the dotfiles repo; secrets/age.txt here is a symlink to it.
 export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$ROOT_DIR/secrets/age.txt}"
@@ -46,7 +52,27 @@ chmod 600 "$PLAIN" "$OUT"
 
 sops --decrypt "$SECRETS" > "$PLAIN"
 
-wanted=$(printf '%s\n' "${GENERATED[@]}" "${MANUAL[@]}" | sort)
+# Every name the Nix configs actually reference. The two lists above only say
+# how a missing key is filled; they are not the source of truth for what is in
+# use. They were, and five live secrets (anubis-ed25519-key, trmnl-api-key,
+# github-mirror-token, jellyfin-oidc-secret, protonvpn-private-key) were
+# reported as "no config reads it" because nobody had added them to a list.
+# sops.templates.* are rendered files, not stored keys, so they are excluded.
+# sops.templates.* are rendered files, not stored keys, so they are excluded.
+# A name cited only in an option's `example` (ghcr-token) shows up as an extra
+# empty key, which is harmless; a wrong *removal* is not, hence --prune.
+referenced=$(grep -rhoE 'sops\.(secrets|placeholder)\.[a-zA-Z0-9_-]+' \
+    "$ROOT_DIR/src" --include='*.nix' 2>/dev/null \
+  | sed -E 's/.*\.//' | sort -u)
+
+# `sops.secrets.<alias>.key = "<real>"` stores <real>, not <alias>.
+aliases=$(grep -rhoE 'sops\.secrets\.[a-zA-Z0-9_-]+\.key' "$ROOT_DIR/src" --include='*.nix' 2>/dev/null \
+  | sed -E 's/^sops\.secrets\.//; s/\.key$//' | sort -u)
+if [ -n "$aliases" ]; then
+  referenced=$(comm -23 <(printf '%s\n' $referenced | sort -u) <(printf '%s\n' $aliases | sort -u))
+fi
+
+wanted=$(printf '%s\n' "${GENERATED[@]}" "${MANUAL[@]}" $referenced | sort -u)
 have=$(jq -r 'keys[] | select(. != "sops")' "$PLAIN" | sort)
 
 added=(); removed=()
@@ -54,10 +80,17 @@ while read -r k; do [ -n "$k" ] && added+=("$k"); done < <(comm -23 <(echo "$wan
 while read -r k; do [ -n "$k" ] && removed+=("$k"); done < <(comm -13 <(echo "$wanted") <(echo "$have"))
 
 cp "$PLAIN" "$OUT"
-for k in "${removed[@]}"; do
-  jq --arg k "$k" 'del(.[$k])' "$OUT" > "$OUT.t" && mv "$OUT.t" "$OUT"
-  echo "remove  $k (no config reads it)"
-done
+if [ "$PRUNE" -eq 1 ]; then
+  for k in "${removed[@]}"; do
+    jq --arg k "$k" 'del(.[$k])' "$OUT" > "$OUT.t" && mv "$OUT.t" "$OUT"
+    echo "remove  $k (no config references it)"
+  done
+else
+  for k in "${removed[@]}"; do
+    echo "unused  $k (nothing references it; --prune to delete)"
+  done
+  removed=()
+fi
 for k in "${added[@]}"; do
   if printf '%s\n' "${GENERATED[@]}" | grep -qx "$k"; then
     v=$(openssl rand -hex 24); echo "add     $k (generated)"
@@ -74,7 +107,7 @@ fi
 
 if [ "$APPLY" -eq 0 ]; then
   echo
-  echo "dry run. Re-run with --apply to write and re-encrypt."
+  echo "dry run. Re-run with --apply to write and re-encrypt (add --prune to delete unused keys)."
   exit 0
 fi
 
