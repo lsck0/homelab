@@ -136,14 +136,6 @@ locals {
       type    = "internal",
     }
 
-    "120" = { # files / groupware cloud
-      enabled = true,
-      name    = "120-internal-nextcloud",
-      type    = "internal",
-      # Nextcloud + php-fpm + its own Postgres
-      memory  = 2048,
-      balloon = 1536,
-    }
     "121" = { # document management (paperless-ngx)
       enabled = true,
       name    = "121-internal-paperless",

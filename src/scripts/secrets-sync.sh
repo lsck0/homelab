@@ -24,7 +24,6 @@ export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$ROOT_DIR/secrets/age.txt}"
 GENERATED=(
   lldap-admin-password lldap-jwt-secret authelia-admin-pass
   forgejo-admin-pass forgejo-oidc-secret
-  nextcloud-oidc-secret nextcloud-admin-pass
   restic-password minecraft-rcon-password
   firefly-db-password
   crowdsec-bouncer-key

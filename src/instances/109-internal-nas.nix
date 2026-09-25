@@ -188,8 +188,6 @@
     "d /srv/nas/data/forgejo 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo-runner 0777 nobody nogroup -"
     "d /srv/nas/data/registry 0777 nobody nogroup -"
-    "d /srv/nas/data/nextcloud 0777 nobody nogroup -"
-    "d /srv/nas/data/nextcloud-db 0777 nobody nogroup -"
     "d /srv/nas/data/huginn 0777 nobody nogroup -"
     "d /srv/nas/data/huginn-db 0777 nobody nogroup -"
     "d /srv/nas/data/homeassistant 0777 nobody nogroup -"

@@ -117,7 +117,7 @@ in {
 
     # cap request bodies on the routes that only ever take small posts. Left
     # out on purpose: share and privatebin exist to receive files, and
-    # internal-relay carries Nextcloud and Paperless uploads. Traefik has to
+    # internal-relay carries Paperless uploads. Traefik has to
     # buffer a body to measure it, so a limit there would stall those.
     bodyLimit = 32 * 1024 * 1024;
     bodyLimitRouters = [ "searxng-tls" "shlink-tls" "hello-tls" "hello-gh-tls" ];

@@ -12,7 +12,7 @@ in {
 
   # lightweight LDAP directory: the single account store for the lab. Authelia
   # authenticates every SSO route against it, Jellyfin binds to it directly,
-  # and Forgejo/Nextcloud reach it through
+  # and Forgejo reaches it through
   # Authelia's OIDC provider. Group membership here is what grants or revokes
   # a service for a person.
   #
