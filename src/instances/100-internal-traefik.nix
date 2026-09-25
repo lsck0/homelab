@@ -4,7 +4,7 @@ let
   address = config.homelab.onDemand.address;
 
   # SSO gateway guarding the protected routes. Authelia (vm-101) serves both
-  # ForwardAuth (this middleware) and OIDC (Forgejo/Nextcloud/Vaultwarden).
+  # ForwardAuth (this middleware) and OIDC (Forgejo/Nextcloud).
   sso = "authelia";
 in {
   networking.hostName = "vm-100";

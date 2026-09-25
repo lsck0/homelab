@@ -64,7 +64,6 @@
     # publicly, and the external Traefik denies the host explicitly as well.
     registry-api   = { host = "registry";    vmid = 118; port = 5000;  auth = "token"; };
     registry-ui    = { host = "registry-ui"; vmid = 118; port = 80;    group = "admins"; };
-    vaultwarden    = { host = "vault";       vmid = 119; port = 8080;  auth = "own"; };
     nextcloud      = { host = "cloud";       vmid = 120; port = 80;    auth = "own"; };
     # the TRMNL cloud polls this and cannot log in. The feed URLs carry an
     # unguessable token instead, so this one token route stays public.
