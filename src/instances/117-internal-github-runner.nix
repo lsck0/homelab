@@ -79,7 +79,12 @@ let
         IOWeight = 50;
         MemoryHigh = "2G";
         MemoryMax = "3G";
+        # bounds a hung job, but it also stops a listener that has merely been
+        # idle for 3h, and ephemeral's Restart=on-success does not cover a
+        # timeout, so the unit stayed failed. Restart on any exit instead.
         RuntimeMaxSec = "3h";
+        Restart = lib.mkForce "always";
+        RestartSec = 10;
         SupplementaryGroups = [ "docker" ];
       };
     }) (lib.range 1 count)
