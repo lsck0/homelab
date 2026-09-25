@@ -232,6 +232,7 @@ in {
       exec python3 ${../scripts/trmnl-sync.py} \
         484687=${../modules/trmnl/terminal.liquid} \
         484717=${../modules/trmnl/arxiv.liquid} \
+        487323=${../modules/trmnl/github.liquid} \
         484254=${../modules/trmnl/calendar.liquid} \
         484274=${../modules/trmnl/calendar.liquid} \
         484257=${../modules/trmnl/calendar.liquid} \
