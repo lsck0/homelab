@@ -1,5 +1,21 @@
 {
   "nodes": {
+    "dotfiles": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1790284031,
+        "narHash": "sha256-BOh0CT11gfhttqg7x7rbEQBdG+gwAXPjI/OSncftDnM=",
+        "owner": "lsck0",
+        "repo": "arch-dotfiles",
+        "rev": "e742748120772f7b75033a04a03c94f440bf5e50",
+        "type": "github"
+      },
+      "original": {
+        "owner": "lsck0",
+        "repo": "arch-dotfiles",
+        "type": "github"
+      }
+    },
     "flake-parts": {
       "inputs": {
         "nixpkgs-lib": [
@@ -187,6 +203,7 @@
     },
     "root": {
       "inputs": {
+        "dotfiles": "dotfiles",
         "hermes-agent": "hermes-agent",
         "nixpkgs": "nixpkgs_2",
         "nixpkgs-unstable": "nixpkgs-unstable",

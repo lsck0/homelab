@@ -11,6 +11,9 @@
     # Hermes agent (vm-114). Not following our nixpkgs: it is built and tested
     # against nixos-unstable.
     hermes-agent.url = "github:NousResearch/hermes-agent";
+    # the owner's personal skills, handed to Hermes as-is
+    dotfiles.url = "github:lsck0/arch-dotfiles";
+    dotfiles.flake = false;
   };
 
   outputs = { nixpkgs, sops-nix, ... }@inputs:
