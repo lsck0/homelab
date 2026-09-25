@@ -1,5 +1,8 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, inputs, ... }:
 let
+  # see the nixpkgs-unstable comment in flake.nix
+  runnerPackage = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-runner;
+
   # ───────────────────────────────────────────────────────────────────────────
   # ADD OR REMOVE A REPO HERE. Nothing else changes.
   # ───────────────────────────────────────────────────────────────────────────
@@ -15,20 +18,46 @@ let
     "lsck0/webapp-template" = 1;
   };
 
-  # a fine-grained PAT with Administration: read and write on those repos
-  # (sops: github-runner-token). The runner service exchanges it for a
-  # registration token itself, and does so again after every job, which is what
-  # makes `ephemeral` sustainable: a registration token would expire.
-  tokenFile = config.sops.secrets.github-runner-token.path;
+  # a token with Administration: read and write on those repos (sops:
+  # github-runner-token), used only to mint registration tokens below.
+  apiTokenFile = config.sops.secrets.github-runner-token.path;
 
   slug = repo: lib.replaceStrings [ "/" ] [ "-" ] (lib.toLower repo);
+
+  # The module treats the token file as a PAT only when it starts with "ghp_" or
+  # "github_pat_"; ours is a "gho_" OAuth token, so it was passed as a
+  # registration token and the runner got 404 from /actions/runner-registration.
+  # Mint a real registration token per start instead: ephemeral runners restart
+  # after every job, so the 1 h expiry never bites.
+  regTokenDir = "/run/github-runner-regtoken";
+  regTokenFile = name: "${regTokenDir}/${name}";
+
+  mintToken = name: repo: pkgs.writeShellScript "github-runner-${name}-mint-token" ''
+    set -euo pipefail
+    umask 077
+    ${pkgs.curl}/bin/curl -sSf -X POST \
+      -H "Authorization: Bearer $(${pkgs.coreutils}/bin/cat ${apiTokenFile})" \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "https://api.github.com/repos/${repo}/actions/runners/registration-token" \
+      | ${pkgs.jq}/bin/jq -re .token \
+      | ${pkgs.coreutils}/bin/tr -d '\n' > ${regTokenFile name}
+  '';
+
+  # name -> owner/repo, for the minting script above
+  runnerRepos = lib.listToAttrs (lib.concatLists (lib.mapAttrsToList (repo: count:
+    map (n: lib.nameValuePair "${slug repo}-${toString n}" repo) (lib.range 1 count)
+  ) repos));
 
   runners = lib.listToAttrs (lib.concatLists (lib.mapAttrsToList (repo: count:
     map (n: lib.nameValuePair "${slug repo}-${toString n}" {
       enable = true;
+      package = runnerPackage;
+      # 2.337.0 dropped node20; the module's default would fail its assertion.
+      nodeRuntimes = [ "node24" ];
       url = "https://github.com/${repo}";
       name = "vm-117-${slug repo}-${toString n}";
-      inherit tokenFile;
+      tokenFile = regTokenFile "${slug repo}-${toString n}";
 
       # one job per runner process, then it de-registers, wipes its state
       # directory and registers again. A job therefore never sees another job's
@@ -42,7 +71,8 @@ let
       extraLabels = [ "nixos" "homelab" ];
       user = "github-runner";
       group = "github-runner";
-      workDir = "/var/lib/github-runner/${slug repo}-${toString n}";
+      # No workDir: it defaults to the runtime dir, and setting it to the state
+      # dir made the module symlink every credential file onto itself.
 
       # what a workflow can reasonably expect on the PATH without installing it.
       extraPackages = with pkgs; [
@@ -127,6 +157,7 @@ in {
 
   systemd.tmpfiles.rules = [
     "d /var/lib/github-runner 0750 github-runner github-runner -"
+    "d ${regTokenDir} 0700 root root -"
   ];
 
   # resolve the lab's own names without going out to Cloudflare.
@@ -139,13 +170,19 @@ in {
   # nothing listens here: the runners connect out to GitHub.
   networking.firewall.allowedTCPPorts = [ ];
 
-  # The module emits InaccessiblePaths=.../.current-token with no "-" prefix, but
-  # its own unconfigure.sh pre-start deletes that file, so namespace setup fails
-  # 226/NAMESPACE before configure.sh can recreate it. Re-add both paths optional.
-  systemd.services = lib.mapAttrs' (n: _: lib.nameValuePair "github-runner-${n}" {
-    serviceConfig.InaccessiblePaths = lib.mkForce [
-      "-/run/secrets/github-runner-token"
-      "-/var/lib/github-runner/${n}/.current-token"
-    ];
-  }) runners;
+  systemd.services = lib.mapAttrs' (n: repo: lib.nameValuePair "github-runner-${n}" {
+    serviceConfig = {
+      # "+": as root and outside the sandbox, so it can read the sops secret, and
+      # first in the list so the module's pre-start sees a fresh token.
+      ExecStartPre = lib.mkBefore [ "+${mintToken n repo}" ];
+
+      # The module emits these with no "-" prefix, but its own unconfigure.sh
+      # pre-start deletes them, so namespace setup fails 226/NAMESPACE before
+      # configure.sh can recreate them. Re-add both as optional.
+      InaccessiblePaths = lib.mkForce [
+        "-${regTokenFile n}"
+        "-/var/lib/github-runner/${n}/.current-token"
+      ];
+    };
+  }) runnerRepos;
 }
