@@ -17,7 +17,11 @@ let
     # The prober.
     "10.100.0.105/32"
     "10.100.0.114/32"
-  ] ++ cfg.extraSources;
+  ]
+  # its own address: a container that calls a sibling by the VM's IP is not
+  # coming from the bridge subnet.
+  ++ lib.optional (vm != null) "${vm.ip}/32"
+  ++ cfg.extraSources;
 in {
   options.homelab.ingressOnly = {
     ports = lib.mkOption {
@@ -103,12 +107,35 @@ in {
         iptables -A homelab-ingress -j RETURN
         iptables -D nixos-fw -j homelab-ingress 2>/dev/null || true
         iptables -I nixos-fw 1 -j homelab-ingress
+
+        # Same guard again in mangle PREROUTING, which is the only place that
+        # sees a published container port. nixos-fw is INPUT, but podman
+        # publishes with a netavark DNAT, so the packet is forwarded to the
+        # container and never traverses INPUT: FileBrowser (FB_NOAUTH) and the
+        # registry (anonymous push) were reachable from the whole house.
+        # PREROUTING runs before that DNAT, so it catches both paths.
+        iptables -t mangle -N homelab-ingress-pre 2>/dev/null || iptables -t mangle -F homelab-ingress-pre
+        ${lib.concatMapStrings (s: ''
+          iptables -t mangle -A homelab-ingress-pre -s ${s} -j RETURN
+        '') trustedSources}
+        ${lib.concatMapStrings (p: ''
+          ${lib.concatMapStrings (s: ''
+            iptables -t mangle -A homelab-ingress-pre -p tcp --dport ${toString p} -s ${s} -j RETURN
+          '') (cfg.portSources.${toString p} or [])}
+          iptables -t mangle -A homelab-ingress-pre -p tcp --dport ${toString p} -j DROP
+        '') cfg.ports}
+        iptables -t mangle -A homelab-ingress-pre -j RETURN
+        iptables -t mangle -D PREROUTING -j homelab-ingress-pre 2>/dev/null || true
+        iptables -t mangle -I PREROUTING 1 -j homelab-ingress-pre
       '';
 
       networking.firewall.extraStopCommands = ''
         iptables -D nixos-fw -j homelab-ingress 2>/dev/null || true
         iptables -F homelab-ingress 2>/dev/null || true
         iptables -X homelab-ingress 2>/dev/null || true
+        iptables -t mangle -D PREROUTING -j homelab-ingress-pre 2>/dev/null || true
+        iptables -t mangle -F homelab-ingress-pre 2>/dev/null || true
+        iptables -t mangle -X homelab-ingress-pre 2>/dev/null || true
       '';
     })
   ];
