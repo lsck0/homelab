@@ -38,7 +38,7 @@
     # use simple eth0 naming so cloud-init network config matches
     networking.usePredictableInterfaceNames = false;
     users.users.root.openssh.authorizedKeys.keys = [
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOyFzEnngz8rYRpJAxLCQ/237CgFW2QDpangshbBksjU homelab@luca-pc"
+      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID3CzR77c6L49KNFZWmMc+SEQCda0+MdGBWTrEkZRly+ homelab@luca-pc"
     ]
     # Hermes (vm-114) has root everywhere. Written by src/scripts/hermes-secrets.sh.
     ++ lib.optional (builtins.pathExists ./hermes.pub) (lib.removeSuffix "\n" (builtins.readFile ./hermes.pub));
