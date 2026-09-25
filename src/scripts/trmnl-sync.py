@@ -23,8 +23,7 @@ import urllib.error
 import urllib.request
 
 BASE = "https://trmnl.com/api/plugin_settings"
-# TRMNL rate-limits writes; six back-to-back pushes answered 429 when these
-# were uploaded by hand. Only paid on a template that actually changed.
+# TRMNL rate-limits writes; six back-to-back pushes answered 429 when these were uploaded
 PUSH_INTERVAL = float(os.environ.get("TRMNL_PUSH_INTERVAL", "12"))
 TIMEOUT = 40
 
@@ -34,8 +33,7 @@ def call(path, token, body=None, method=None):
     req = urllib.request.Request(BASE + path, data=data, method=method)
     req.add_header("Authorization", "Bearer " + token)
     req.add_header("Content-Type", "application/json")
-    # TRMNL is behind Cloudflare, which refuses urllib's default agent with a
-    # bare 403 - the same request through curl is fine. Identify properly.
+    # TRMNL is behind Cloudflare, which refuses urllib's default agent with a bare 403
     req.add_header("User-Agent", "homelab-trmnl-sync/1.0 (+https://lsck0.dev)")
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         raw = r.read()
@@ -49,8 +47,7 @@ def current(plugin_id, token):
     except (urllib.error.URLError, ValueError) as e:
         print(f"{plugin_id}: could not read the current markup: {e}", file=sys.stderr)
         return None
-    # A freshly created plugin answers 200 with no markup at all; that is empty,
-    # not unreadable, or a new plugin could never receive its first push.
+    # A freshly created plugin answers 200 with no markup at all; that is empty
     return (body or {}).get("data", {}).get("markup") or ""
 
 

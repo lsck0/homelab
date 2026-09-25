@@ -2,11 +2,7 @@
 let
   stateDir = "/var/lib/authelia-main";
 
-  # the access rules are generated from modules/routes.nix, so adding a service
-  # there is all it takes to gate it. Every auth = "sso" route emits two rules
-  # in order: allow its lldap group, then deny everyone else. Without the deny,
-  # a user outside the group would fall through to the catch-all at the end and
-  # be let in anyway.
+  # the access rules are generated from modules/routes.nix
   routes = (import ../modules/routes.nix).internal;
   ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
   routeRules = lib.concatLists (lib.mapAttrsToList (_: r: [
@@ -21,9 +17,7 @@ let
     }
   ]) ssoRoutes);
 
-  # runtime-generated config fragments. OIDC client secrets have to be stored
-  # hashed, and a hash of a sops secret cannot be computed at build time
-  # without leaking the secret into the world-readable Nix store.
+  # runtime-generated config fragments.
   oidcClientsFile = "${stateDir}/oidc-clients.yml";
   ldapFile = "${stateDir}/ldap.yml";
   secretsDir = "${stateDir}/secrets";
@@ -33,12 +27,9 @@ let
       id = "forgejo";
       name = "Forgejo";
       secretName = "forgejo-oidc-secret";
-      # Forgejo's go-oauth2 client posts the secret, verified against
-      # 7.0.16+gitea-1.21.11.
+      # Forgejo's go-oauth2 client posts the secret, verified against 7.0.16+gitea-1.21.11.
       tokenAuthMethod = "client_secret_post";
-      # Forgejo derives the callback path from the auth source name. The source
-      # is called "authelia" now; the old "authentik" path stays registered so
-      # accounts linked to the previous source still sign in.
+      # Forgejo derives the callback path from the auth source name.
       redirectUris = [
         "https://git.lsck0.dev/user/oauth2/authelia/callback"
         "https://git.lsck0.dev/user/oauth2/authentik/callback"
@@ -48,30 +39,23 @@ let
       id = "jellyfin";
       name = "Jellyfin";
       secretName = "jellyfin-oidc-secret";
-      # jellyfin-plugin-sso posts the secret, as Authelia's own Jellyfin
-      # integration note says.
+      # jellyfin-plugin-sso posts the secret, as Authelia's own Jellyfin integration note says.
       tokenAuthMethod = "client_secret_post";
       redirectUris = [ "https://jellyfin.lsck0.dev/sso/OID/redirect/authelia" ];
     }
   ];
 
-  # built line by line rather than as an indented block: Nix strips the common
-  # indentation from '' strings, which silently flattens nested YAML.
+  # built line by line rather than as an indented block: Nix strips the common indentation
   mkClientYaml = c: lib.concatStringsSep "\n" ([
     "      - client_id: ${c.id}"
     "        client_name: ${c.name}"
     "        client_secret: '$CLIENT_HASH_${c.id}'"
     "        public: false"
-    # same bar as the ForwardAuth routes: an OIDC login must not be a cheaper
-    # way into Forgejo than the SSO portal.
+    # same bar as the ForwardAuth routes: an OIDC login must not be a cheaper way into Forgejo
     "        authorization_policy: two_factor"
     "        require_pkce: false"
     "        consent_mode: implicit"
-    # client_secret_basic is the OAuth 2.0 default and what Forgejo sends. Authelia rejects the request
-    # outright when the registration names a different method:
-    #   invalid_client ... the OAuth 2.0 client registration does not allow
-    #   this method
-    # Overridable per client because .NET (Kavita) posts the secret instead.
+    # client_secret_basic is the OAuth 2.0 default and what Forgejo sends.
     "        token_endpoint_auth_method: ${c.tokenAuthMethod or "client_secret_basic"}"
     "        redirect_uris:"
   ] ++ map (u: "          - ${u}") c.redirectUris ++ [
@@ -81,8 +65,7 @@ let
 in {
   networking.hostName = "vm-101";
 
-  # session store for Authelia, see session.redis below. Unix socket only: no
-  # TCP listener, so nothing on the network can reach it.
+  # session store for Authelia, see session.redis below.
   services.redis.servers.authelia = {
     enable = true;
     port = 0;
@@ -92,16 +75,12 @@ in {
   users.users.authelia-main.extraGroups = [ "redis-authelia" ];
   systemd.services.authelia-main.after = [ "redis-authelia.service" ];
 
-  # state on LOCAL disk, not NFS: a NAS stall must not wedge the auth gateway.
-  # it's small (TOTP enrolments, sessions, keys) and a rebuild regenerates it.
+  # state on LOCAL disk, not NFS: a NAS stall must not wedge the auth gateway. it's small
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0700 authelia-main authelia-main -"
   ];
 
-  # ...but "a rebuild regenerates it" only covers the keys. The TOTP and WebAuthn
-  # enrolments live in this SQLite file and nothing else has a copy, so losing
-  # vm-101's disk would mean re-enrolling every second factor. Kopia only
-  # snapshots the NAS, so the database is dumped onto it nightly.
+  # ...but "a rebuild regenerates it" only covers the keys.
   homelab.dbBackup.databases.authelia.sqlite = "${stateDir}/db.sqlite3";
 
   # bind password for the lldap backend (same secret lldap itself uses).
@@ -109,9 +88,7 @@ in {
   sops.secrets.forgejo-oidc-secret = {};
   sops.secrets.jellyfin-oidc-secret = {};
 
-  # Authelia's own cryptographic material is generated here rather than kept in
-  # sops: none of it has to match anything outside this VM, and it persists on
-  # local disk so a rebuild regenerates it (sessions and TOTP re-enrol).
+  # Authelia's own cryptographic material is generated here rather than kept in sops: none
   systemd.services.authelia-bootstrap = {
     description = "Generate Authelia secrets, users and OIDC clients";
     before = [ "authelia-main.service" ];
@@ -187,10 +164,7 @@ in {
       log.level = "info";
       log.format = "text";
 
-      # lldap (vm-102) is the single identity store. The "lldap" implementation
-      # preset fills in the correct filters/attributes; only the bind password
-      # comes from the runtime fragment (ldapFile). Users and groups are managed
-      # in lldap's admin dashboard.
+      # lldap (vm-102) is the single identity store.
       authentication_backend = {
         password_reset.disable = false;
         refresh_interval = "1m";
@@ -202,9 +176,7 @@ in {
         };
       };
 
-      # WebAuthn (FIDO2) is the strong second factor: a hardware key IS the
-      # identity. Users enrol their key in the Authelia portal; internal services
-      # then require it (two_factor).
+      # WebAuthn (FIDO2) is the strong second factor: a hardware key IS the identity.
       webauthn = {
         disable = false;
         display_name = "lsck0.dev";
@@ -213,15 +185,6 @@ in {
       };
 
       # everything internal demands two_factor (lldap password + TOTP/FIDO2).
-      # Per-service authorisation comes from lldap group membership: routeRules
-      # above turns each route's `group` into an allow rule plus a deny rule, so
-      # revoking a service for a person is a group edit in the lldap dashboard
-      # and takes effect within refresh_interval.
-      #
-      # lldap is seeded with the groups the routes reference (admins, users,
-      # media) and the owner is in all of them, so a group that fails to resolve
-      # cannot lock the portal out the way an unseeded group:admins once did.
-      # auth.lsck0.dev is bypassed so logging in is always possible.
       access_control = {
         default_policy = "deny";
         rules = [
@@ -230,8 +193,7 @@ in {
             policy = "bypass";
           }
         ] ++ routeRules ++ [
-          # anything with a route but no entry in routes.nix (the Traefik
-          # dashboard, proxmox.lsck0.dev) still needs an authenticated admin.
+          # anything with a route but no entry in routes.nix
           {
             domain = [ "*.lsck0.dev" "lsck0.dev" ];
             policy = "two_factor";
@@ -251,11 +213,7 @@ in {
           default_redirection_url = "https://homepage.lsck0.dev";
         }];
 
-        # Without this Authelia keeps sessions in memory, so every restart of
-        # the service signs everyone out of every host at once and the next
-        # page visited asks for the password again. A deploy that touches
-        # vm-101 is enough to do it. Redis on a local socket outlives the
-        # restart; nothing else uses it and it never leaves the VM.
+        # Without this Authelia keeps sessions in memory
         redis = {
           host = "/run/redis-authelia/redis.sock";
           port = 0;
@@ -264,8 +222,7 @@ in {
 
       storage.local.path = "${stateDir}/db.sqlite3";
 
-      # no SMTP in the lab, so password resets and 2FA enrolment links are
-      # written to a file on the VM instead of being mailed.
+      # no SMTP in the lab, so password resets and 2FA enrolment links are written to a file
       notifier = {
         disable_startup_check = true;
         filesystem.filename = "${stateDir}/notification.txt";

@@ -1,9 +1,4 @@
-# On-demand VMs: wake on first connection, power off after the cooldown, and
-# the reaper for VMs that were started without a connection.
-#
-# "backend" plays both the on-demand VM (nginx) and the Proxmox API: a tiny
-# HTTPS server whose start/shutdown endpoints start/stop nginx, so the power
-# state the proxy sees is real.
+# On-demand VMs: wake on first connection, power off after the cooldown
 { pkgs, lib, ... }:
 let
   inventory = {

@@ -1,12 +1,4 @@
 # Test stand-ins for things the VMs get from the lab: sops secrets and templates
-# (dummy values rendered into /run/secrets at activation) and NAS mounts (plain
-# local directories).
-#
-# The homelab.* options an instance file may set are pulled in from their real
-# modules rather than re-declared here, so a test cannot drift from the option
-# it is standing in for. Both are inert in a test node: network.nix only
-# configures interfaces for a `vm-<id>` hostname, and db-backup.nix only creates
-# units when a database is declared.
 { lib, config, ... }:
 let
   # numeric where the consumer parses a number (the Telegram chat id).
@@ -61,8 +53,7 @@ in
       nasMount = _: _: { };
       nasPath = _: _: { };
       nasMedia = _: _: { };
-      # network.nix (imported above for the homelab.ingressOnly option) reads the
-      # inventory. mkDefault so a test that wants real entries can still set it.
+      # network.nix (imported above for the homelab.ingressOnly option) reads the inventory.
       inventory = lib.mkDefault { };
     };
   };

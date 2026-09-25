@@ -21,7 +21,7 @@ Nothing internal is reachable without one of them:
   lldap group may enter, so **granting or revoking a service for a person is a
   group edit in the lldap dashboard** and takes effect within a minute.
 - `auth = "own"` routes run their own login backed by the same directory:
-  Forgejo, Nextcloud, Vaultwarden and Audiobookshelf through Authelia OIDC,
+  Forgejo through Authelia OIDC,
   Jellyfin by binding to lldap directly (its apps cannot follow a portal
   redirect).
 - `auth = "token"` routes are headless (a Nix client, the Docker registry) and

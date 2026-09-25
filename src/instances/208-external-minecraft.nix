@@ -1,9 +1,7 @@
 { config, pkgs, nasMount, ... }:
 let
   data = "/var/lib/minecraft";
-  # runtime server type/modpack. Lives on the NAS, not in Nix, so `mc-modpack`
-  # (you or Hermes) can switch packs without a redeploy, and a deploy never
-  # reverts the choice. Seeded with the default below on first boot.
+  # runtime server type/modpack.
   modpackEnv = "${data}/modpack.env";
   defaultModpack = ''
     TYPE=MODRINTH
@@ -12,9 +10,7 @@ let
     LEVEL=world
   '';
 
-  # mc-modpack <modrinth url|slug|curseforge url|vanilla> [version]
-  # Writes the env file and restarts the server. Each pack gets its own world
-  # (LEVEL = slug), so switching back restores that world.
+  # mc-modpack <modrinth url|slug|curseforge url|vanilla> [version] Writes the env file
   mcModpack = pkgs.writeShellScriptBin "mc-modpack" ''
     set -euo pipefail
     arg="''${1:-}"; version="''${2:-LATEST}"

@@ -2,10 +2,7 @@
 let
   T = "/var/lib/homepage-tokens";
 
-  # Janitorr: media not watched (janitorr-stats play history) or, if never
-  # watched, not grabbed for this long is deleted via Radarr/Sonarr/Jellyfin.
-  # shorter when the disk fills up. It shows in a "Leaving Soon" collection
-  # 14 days before. Tag media `janitorr_keep` in Radarr/Sonarr to keep it.
+  # Janitorr: media not watched (janitorr-stats play history) or, if never watched
   unwatchedFor = "120d";
 
   janitorrConfig = pkgs.writeText "janitorr.yml.tmpl" ''
@@ -99,8 +96,7 @@ let
 in {
   networking.hostName = "vm-134";
 
-  # /data/media rw on the VM (Janitorr writes the leaving-soon links),
-  # read-only inside the Jellyfin container.
+  # /data/media rw on the VM (Janitorr writes the leaving-soon links)
   fileSystems = nasMount "/var/lib/jellyfin" "jellyfin"
     // nasMount "/var/lib/janitorr" "janitorr"
     // nasPath "/data/media" "bulk/media"
@@ -151,8 +147,7 @@ in {
     "d /var/lib/janitorr/stats 0750 1000 1000 -"
   ];
 
-  # first run: admin user, libraries, API key for Homepage/Janitorr/Hermes,
-  # and a deletion-capable `janitorr` user. Idempotent.
+  # first run: admin user, libraries, API key for Homepage/Janitorr/Hermes
   systemd.services.jellyfin-setup = {
     description = "Initialise Jellyfin (admin, libraries, API key, janitorr user)";
     after = [ "podman-jellyfin.service" ];
@@ -257,15 +252,7 @@ in {
     '';
   };
 
-  # Jellyfin authenticates against lldap, so the lab account is the Jellyfin
-  # account and no separate password exists. ForwardAuth is not an option here:
-  # the TV and phone apps cannot follow the Authelia portal redirect, and
-  # Jellyfin has no forward-auth support of its own. The LDAP-Auth plugin is
-  # therefore the way Jellyfin joins the single identity store.
-  #
-  # Installing a plugin needs a server restart before its configuration
-  # endpoint exists, which is why this runs as its own unit after the setup one.
-  # Failures are logged, not fatal: the generated admin account stays usable.
+  # Jellyfin authenticates against lldap, so the lab account is the Jellyfin account
   sops.secrets.lldap-admin-password = {};
   systemd.services.jellyfin-ldap = {
     description = "Point Jellyfin authentication at lldap (LDAP-Auth plugin)";
@@ -344,18 +331,7 @@ in {
     '';
   };
 
-  # Second identity path, for browsers only: jellyfin-plugin-sso turns an
-  # existing Authelia session into a Jellyfin session with no password prompt.
-  # The internal Traefik sends the bare host straight at /sso/OID/start/authelia
-  # (loginRedirect in modules/routes.nix), so a signed-in browser never sees a
-  # Jellyfin login screen at all.
-  #
-  # LDAP-Auth above stays: TV and phone apps cannot run a browser OIDC flow, so
-  # they keep signing in with the same lldap credential.
-  #
-  # The plugin is NOT in the official Jellyfin catalogue, so its own manifest is
-  # added as a second repository. That is third-party code in the login path;
-  # it is pinned to the upstream release manifest and nothing else uses it.
+  # Second identity path, for browsers only: jellyfin-plugin-sso turns an existing Authelia
   sops.secrets.jellyfin-oidc-secret = {};
   systemd.services.jellyfin-sso = {
     description = "Install and configure jellyfin-plugin-sso against Authelia";
@@ -433,8 +409,7 @@ in {
     '';
   };
 
-  # render Janitorr configs from the API keys the other VMs export. Waits until
-  # all of them exist (the *arrs and Jellyseerr may come up later).
+  # render Janitorr configs from the API keys the other VMs export.
   systemd.services.janitorr-config = {
     description = "Render Janitorr configuration from exported API keys";
     after = [ "jellyfin-setup.service" ];

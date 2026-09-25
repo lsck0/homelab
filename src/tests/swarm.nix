@@ -1,7 +1,4 @@
-# CI/CD target (vm-209): the real stack definitions pull from a registry,
-# a new push rolls out with no failed requests, and an image that fails its
-# healthcheck is rolled back. A local registry answers for both
-# registry.lsck0.dev (Forgejo) and ghcr.io (GitHub).
+# CI/CD target (vm-209): the real stack definitions pull from a registry
 { pkgs, lib, ... }:
 let
   # tiny web app like example/: serves its version, has curl for the healthcheck.

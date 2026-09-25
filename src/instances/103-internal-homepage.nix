@@ -2,10 +2,7 @@
 let
   routes = let r = import ../modules/routes.nix; in r.internal // r.external;
 
-  # dashboard entries, in display order. `route` links the card to its host
-  # in modules/routes.nix; the VM's state in instances.tf decides whether it
-  # is shown (disabled: hidden), pinged (always on) or marked on-demand (no
-  # ping, which would only ever show it as down).
+  # dashboard entries, in display order.
   groups = [
     { name = "Core"; entries = [
       { route = "authelia"; name = "Authelia"; icon = "authelia"; desc = "SSO"; }
@@ -52,11 +49,7 @@ let
 
   stateOf = e: inventory.${toString routes.${e.route}.vmid}.enabled or "false";
 
-  # Every declared service is listed, in declaration order, whatever state its
-  # VM is in. A card that vanishes when its VM is switched off hides exactly
-  # the thing worth seeing, and leaves the remaining cards looking shuffled.
-  # The dot carries the state instead: every entry is pinged, so a disabled or
-  # sleeping VM shows up red rather than disappearing.
+  # Every declared service is listed, in declaration order, whatever state its VM
   stateSuffix = state:
     if state == "onDemand" then " (on-demand)"
     else if state == "false" then " (disabled)"
@@ -207,9 +200,7 @@ in {
     '';
   };
 
-  # restart the container when any config file changes, so a deploy that only
-  # edits services/settings/widgets actually reloads (config is copied in by
-  # homepage-config, which is requiredBy this unit).
+  # restart the container when any config file changes
   systemd.services.podman-homepage.restartTriggers = [
     servicesYaml settingsYaml widgetsYaml bookmarksYaml
   ];
@@ -234,7 +225,6 @@ in {
 
   networking.firewall.allowedTCPPorts = [ 80 ];
 
-  # Homepage has no login of its own and carries every service's API key in its
-  # widgets, so only the ingress (which puts Authelia in front) may reach it.
+  # Homepage has no login of its own and carries every service's API key in its widgets
   homelab.ingressOnly.ports = [ 80 ];
 }

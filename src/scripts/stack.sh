@@ -1,21 +1,5 @@
 #!/usr/bin/env bash
 # Turn a group of VMs on or off in src/instances.tf, then deploy with ./sync.sh.
-#
-# The lab does not have the RAM to run every group at once, so groups are
-# brought up one at a time: verify one, switch it off, switch the next on.
-#
-#   src/scripts/stack.sh status
-#   src/scripts/stack.sh media off
-#   src/scripts/stack.sh apps on
-#   src/scripts/stack.sh apps on --apply     # write the file
-#
-# Dry run by default: prints the changes it would make.
-#
-# Groups (ids as of the 116-internal-github-runner renumbering):
-#   media   qbittorrent, tor-router and the whole *arr/Jellyfin/Kavita chain
-#   apps    the personal apps that are off while the media stack is under test
-#   gpu     Hermes; needs the host to bind the RTX 2060 to vfio-pci first, so it
-#           is never switched on by `apps`
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -80,8 +64,7 @@ for id in $(group_ids "$GROUP"); do
   printf '  %-4s %-34s %s -> %s\n' "$id" "$(name_of "$id")" "$cur" "$want_bare"
   CHANGED=1
   if [ "$APPLY" = 1 ]; then
-    # replace `enabled = <x>,` only inside this id's block: the first such line
-    # after the `"<id>" = {` header.
+    # replace `enabled = <x>,` only inside this id's block: the first such line after
     python3 - "$TF" "$id" "$VALUE" <<'PY'
 import re, sys
 path, vm_id, value = sys.argv[1], sys.argv[2], sys.argv[3]

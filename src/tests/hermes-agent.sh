@@ -1,20 +1,5 @@
 #!/usr/bin/env bash
-# Hermes agent end-to-end test: free Nous model (nous/welcome), or the
-# production Anthropic config when ANTHROPIC_API_KEY is set.
-#
-# Runs the exact Hermes package, settings, skills and AGENTS.md from the vm-114
-# config, switched to the Nous free tier, inside a container (it executes shell
-# commands without approval). The lab is simulated at its edges:
-#   vm, ssh, nc, lab-token   shims that log every call and answer like the lab
-#   curl                     rewrites lab IPs: Sonarr -> a real Sonarr container,
-#                            Paperless/Firefly -> a recording mock API
-#   telegram                 live: the real bot answers the owner (needs env,
-#                            see the scenario)
-# Each scenario is one chat turn, like a Telegram message, followed by checks on
-# what the agent actually did.
-#
-#   GitHub                   lab-pr pushes to a local bare copy of this repo
-# Usage: src/tests/hermes-agent.sh [scenario...]   (minecraft backup media bill repo | telegram)
+# Hermes agent end-to-end test: free Nous model (nous/welcome)
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -51,11 +36,7 @@ mkdir -p "$W"/{home,workspace,shims,log,tokens,mock}; : > "$W/home/.env"
 chmod -R 777 "$W"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HERMES CONFIG
-# ─────────────────────────────────────────────────────────────────────────────
-# vm-114 settings, model switched to the Nous free tier
-# With ANTHROPIC_API_KEY set, test the production model config unchanged;
-# otherwise the free Nous tier. The local Ollama fallback is not available here.
+# HERMES CONFIG vm-114 settings, model switched to the Nous free tier With ANTHROPIC_API_KEY
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   MODEL_FILTER='.'
   printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" > "$W/home/.env"; chmod 600 "$W/home/.env"
@@ -72,8 +53,7 @@ mkdir -p "$W/home/skills/homelab"
 cp -r "$SRC/modules/hermes/skills/." "$W/home/skills/homelab/"
 echo ">>> config.yaml:"; sed 's/^/    /' "$W/home/config.yaml"
 
-# the free tier mints a guest identity per fresh HERMES_HOME and rate-limits
-# minting; reuse one across runs.
+# the free tier mints a guest identity per fresh HERMES_HOME and rate-limits minting; reuse one
 CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/homelab-hermes-test
 mkdir -p "$CACHE"; chmod 700 "$CACHE"
 [ -f "$CACHE/auth.json" ] && cp "$CACHE/auth.json" "$W/home/auth.json"
@@ -81,7 +61,6 @@ save_identity() { [ -s "$W/home/auth.json" ] && cp "$W/home/auth.json" "$CACHE/a
 
 # ─────────────────────────────────────────────────────────────────────────────
 # LAB SHIMS
-# ─────────────────────────────────────────────────────────────────────────────
 cat > "$W/shims/_log" <<'EOF'
 #!/bin/sh
 printf '%s\t%s\n' "$(date +%s)" "$*" >> /work/log/calls.log
@@ -156,8 +135,7 @@ chmod +x "$W"/shims/*
 echo -n fake-paperless-token > "$W/tokens/paperless-key.token"
 echo -n fake-firefly-token > "$W/tokens/firefly-token.token"
 
-# the repo: a bare copy stands in for GitHub; lab-pr pushes there and answers
-# with a fake pull request URL. Git identity as configured on vm-114.
+# the repo: a bare copy stands in for GitHub; lab-pr pushes there and answers with a fake pull
 git clone -q --bare --no-local "$SRC/.." "$W/remote.git"   # a copy: chmod below must not touch this repo
 MASTER=$(git -C "$W/remote.git" rev-parse master)
 nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.114-internal-hermes.config.programs.git.config" \
@@ -172,7 +150,6 @@ chmod -R 777 "$W/remote.git"; chmod +x "$W/shims/lab-pr"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RECORDING MOCK FOR PAPERLESS + FIREFLY
-# ─────────────────────────────────────────────────────────────────────────────
 cat > "$W/mock/mock.py" <<'EOF'
 import json, http.server, uuid
 LOG = "/work/log/mock.jsonl"
@@ -220,7 +197,6 @@ docker run -d --name ht-mock --network "$NET" --network-alias mock -v /nix/store
 
 # ─────────────────────────────────────────────────────────────────────────────
 # REAL SONARR FOR THE MEDIA SCENARIO
-# ─────────────────────────────────────────────────────────────────────────────
 if [[ " $SCENARIOS " == *" media "* ]]; then
   echo ">>> Starting Sonarr"
   mkdir -p "$W/sonarr" "$W/media/tv" "$W/media/anime"; chmod -R 777 "$W/sonarr" "$W/media"
@@ -237,7 +213,6 @@ fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # AGENT RUNNER
-# ─────────────────────────────────────────────────────────────────────────────
 ask() { # ask <scenario> <prompt> [extra hermes args]
   local name=$1 prompt=$2; shift 2
   echo ">>> [$name] owner: $prompt"
@@ -330,9 +305,7 @@ for s in $SCENARIOS; do
     fi
     ;;
   telegram)
-    # live: the real bot, polling Telegram, answering only TELEGRAM_ALLOWED_USERS.
-    # needs TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_USERS in the environment, e.g.
-    #   TELEGRAM_BOT_TOKEN=$(sops -d --extract '["telegram-bot-token"]' src/secrets.json)
+    # live: the real bot, polling Telegram, answering only TELEGRAM_ALLOWED_USERS. needs
     : "${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN}" "${TELEGRAM_ALLOWED_USERS:?set TELEGRAM_ALLOWED_USERS}"
     WINDOW=${TELEGRAM_WINDOW:-300}
     : > "$W/log/calls.log"

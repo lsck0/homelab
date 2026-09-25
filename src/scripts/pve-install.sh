@@ -1,7 +1,5 @@
 #!/bin/bash
 # Configure an existing Proxmox VE host for Terraform management.
-# Creates internal/external bridges and a Terraform API token.
-# Usage: ssh root@proxmox "bash -s" < pve-install.sh <terraform_user_password>
 set -e
 
 PVE_TF_PASSWORD="${1:-}"
@@ -9,8 +7,7 @@ if [ -z "$PVE_TF_PASSWORD" ]; then
     echo "ERROR: Terraform Proxmox user password is required."
     exit 1
 fi
-# Optional second argument: the lldap bind password. Without it the LDAP realm
-# step is skipped rather than half-configured.
+# Optional second argument: the lldap bind password.
 LLDAP_BIND_PASSWORD="${2:-}"
 LLDAP_HOST="${LLDAP_HOST:-10.100.0.102}"
 LLDAP_PORT="${LLDAP_PORT:-3890}"
@@ -48,8 +45,7 @@ cat > /etc/apt/sources.list.d/pve-no-subscription.list <<EOF
 deb http://download.proxmox.com/debian/pve ${CODENAME} pve-no-subscription
 EOF
 
-# vmbr0 is created by the Proxmox installer. vmbr100/vmbr200 are
-# purely virtual networks between the router VM and other VMs (no host IPs).
+# vmbr0 is created by the Proxmox installer. vmbr100/vmbr200 are purely virtual networks
 
 if ! grep -q "auto vmbr100" /etc/network/interfaces; then
     cat <<EOF >> /etc/network/interfaces
@@ -75,10 +71,7 @@ fi
 
 ifreload -a || true
 
-# quiet + low-power tuning (server lives in a bedroom)
-# powersave governor caps clocks at idle; disabling boost stops the short,
-# loud, hot frequency spikes that spin fans up. Small throughput cost, large
-# noise/heat/power win. Applied now and made persistent across reboots.
+# quiet + low-power tuning (server lives in a bedroom) powersave governor caps clocks at idle
 for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
     echo powersave > "$g" 2>/dev/null || true
 done
@@ -104,12 +97,7 @@ EOF
 systemctl daemon-reload
 systemctl enable --now lab-lowpower.service >/dev/null 2>&1 || true
 
-# GPU passthrough (NVIDIA RTX 2060 / TU106)
-# Bind the GPU and its HDMI-audio function to vfio-pci so a VM can claim them.
-# whole IOMMU group must be bound to vfio-pci for the group to be assignable,
-# even though only the VGA function is assigned to the VM:
-#   10de:1f08 VGA, 10de:10f9 audio, 10de:1ada USB, 10de:1adb UCSI.
-# idempotent; needs a reboot.
+# GPU passthrough (NVIDIA RTX 2060 / TU106) Bind the GPU and its HDMI-audio function
 GPU_IDS="10de:1f08,10de:10f9,10de:1ada,10de:1adb"
 
 # AMD host: enable the IOMMU in passthrough mode on the GRUB kernel cmdline.
@@ -185,15 +173,7 @@ chmod 600 /root/homepage_token.txt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LDAP REALM (lldap)
-# ─────────────────────────────────────────────────────────────────────────────
-# So the one lldap account signs in here too, rather than Proxmox being the
-# odd one out with its own local password. Proxmox talks to lldap directly
-# rather than through Authelia: the web UI has no OIDC support in PVE 8, and
-# the API needs an auth source that a CLI can use.
-#
-# Proxmox names a synced group "<cn>-<realm>", so the lldap group "admins"
-# arrives as "admins-lldap". Users land as "<uid>@lldap".
+# LDAP REALM (lldap) So the one lldap account signs in here too
 if [ -z "$LLDAP_BIND_PASSWORD" ]; then
     echo ">>> No lldap bind password given, skipping the LDAP realm."
 else
@@ -221,42 +201,26 @@ else
         --comment "lldap (single sign-on account store)"
 
     pveum realm sync lldap
-    # Administrator on / for the lldap admins group. Idempotent: acl modify
-    # adds the entry and says nothing if it is already there.
+    # Administrator on / for the lldap admins group.
     pveum acl modify / --group "$LLDAP_ADMIN_GROUP-lldap" --role Administrator
     echo ">>> lldap realm ready: sign in as <user>@lldap"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# BULK STORAGE (the spinning disk)
-# ─────────────────────────────────────────────────────────────────────────────
-# NVMes carry the VMs and their state; the 2 TB spinning disk carries media.
-# Keeping media out of the `pve` group is the point: it once filled the pool
-# the VMs live in and took the whole lab down at once.
-#
-# The provider has no storage resource, so this runs here and instances.tf asks
-# for a disk on `bulk` by name. Idempotent.
+# BULK STORAGE (the spinning disk) NVMes carry the VMs and their state; the 2 TB spinning disk
 BULK_DISK=${BULK_DISK:-/dev/disk/by-id/ata-WDC_WD20EZRZ-00Z5HB0_WD-WCC4N3KNZ2KS}
 if ! vgs bulk >/dev/null 2>&1; then
     if [ ! -b "$BULK_DISK" ]; then
         echo ">>> bulk disk $BULK_DISK not present; skipping bulk storage"
     elif lsblk -no FSTYPE "$BULK_DISK" 2>/dev/null | grep -q .; then
-        # Refuse to wipe a disk that still holds a filesystem. This one shipped
-        # with an NTFS partition full of personal files; they were copied off
-        # deliberately before it was handed over, and a rerun of this script
-        # must never make that decision on its own.
+        # Refuse to wipe a disk that still holds a filesystem.
         echo ">>> $BULK_DISK still has a filesystem on it; refusing to wipe."
         echo ">>> Clear it by hand once its contents are safe, then re-run."
     else
         echo ">>> Creating bulk storage on $BULK_DISK"
         pvcreate -ff -y "$BULK_DISK"
         vgcreate bulk "$BULK_DISK"
-        # Leave 1% for thin-pool metadata growth: a thin pool whose metadata
-        # fills is as wedged as one whose data fills, and far more annoying.
-        #
-        # -Zn: zeroing writes every chunk twice and halved throughput here
-        # (55 vs 106 MB/s). It guards against reading a freed chunk, which
-        # matters for untrusted tenants; the only consumer is the NAS.
+        # Leave 1% for thin-pool metadata growth: a thin pool whose metadata fills is as wedged
         lvcreate --type thin-pool -l 99%FREE -Zn --thinpool data bulk
     fi
 fi
@@ -266,12 +230,7 @@ if vgs bulk >/dev/null 2>&1 && ! pvesm status --storage bulk >/dev/null 2>&1; th
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# OSSEC (host intrusion detection)
-# ─────────────────────────────────────────────────────────────────────────────
-# The hypervisor is the one machine a HIDS earns its keep on: every VM is an
-# immutable NixOS system, this host is mutable Debian holding root on all of
-# them. `local` mode - no manager, no agents, no listener. Built from source
-# because Atomicorp has no Debian 13 channel.
+# OSSEC (host intrusion detection) The hypervisor is the one machine a HIDS earns its keep
 OSSEC_VERSION=${OSSEC_VERSION:-3.8.0}
 if [ ! -d /var/ossec ]; then
     echo ">>> Building OSSEC $OSSEC_VERSION"
@@ -281,10 +240,7 @@ if [ ! -d /var/ossec ]; then
     wget -qO "$tmp/ossec.tar.gz" \
         "https://github.com/ossec/ossec-hids/archive/refs/tags/$OSSEC_VERSION.tar.gz"
     tar -xzf "$tmp/ossec.tar.gz" -C "$tmp"
-    # Unattended: install.sh is interactive, but every prompt has a USER_*
-    # override. Active response stays off - it reacts by running commands as
-    # root, and a false positive that firewalls the hypervisor off the network
-    # is a worse day than the intrusion it was guessing at.
+    # Unattended: install.sh is interactive, but every prompt has a USER_* override.
     (
         cd "$tmp/ossec-hids-$OSSEC_VERSION"
         USER_LANGUAGE=en USER_NO_STOP=y USER_INSTALL_TYPE=local USER_DIR=/var/ossec \
@@ -295,8 +251,7 @@ if [ ! -d /var/ossec ]; then
     rm -rf "$tmp"
 fi
 
-# What to watch. Written every run so the list stays in this repo rather than
-# in a file someone edited on the box two years ago.
+# What to watch.
 if [ -d /var/ossec ]; then
     cat > /var/ossec/etc/local_internal_options.conf <<'OPTS'
 # report changes in real time where the kernel can tell us, rather than only
@@ -333,8 +288,6 @@ PY
 fi
 
 # OSSEC's alerts reach Grafana the same way the backup dead-man does: a gauge
-# in node_exporter's textfile directory, scraped from vm-105. Without this the
-# alerts sit in a file on a host nobody reads.
 if [ -d /var/ossec ]; then
     install -d -m 0755 /var/lib/node-exporter-textfile
     if ! grep -q "node-exporter-textfile" /etc/default/prometheus-node-exporter 2>/dev/null; then

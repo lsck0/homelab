@@ -2,8 +2,7 @@
 let
   cfg = config.homelab.traefik;
 
-  # Cloudflare edge ranges: trusted so Traefik reads the real client IP from
-  # XFF (else Anubis re-challenges every request and CrowdSec bans the edge).
+  # Cloudflare edge ranges: trusted so Traefik reads the real client IP from XFF
   cloudflareRanges = [
     "173.245.48.0/20" "103.21.244.0/22" "103.22.200.0/22" "103.31.4.0/22"
     "141.101.64.0/18" "108.162.192.0/18" "190.93.240.0/20" "188.114.96.0/20"
@@ -12,17 +11,12 @@ let
   ];
 
   # the v6 half of the same published list (api.cloudflare.com/client/v4/ips).
-  # Unused while the zone has no AAAA records - Cloudflare can only reach an
-  # IPv4 origin - but listed so adding one later does not silently lock the edge
-  # out. Refresh both lists from that endpoint if Cloudflare ever changes them.
   cloudflareRangesV6 = [
     "2400:cb00::/32" "2606:4700::/32" "2803:f800::/32" "2405:b500::/32"
     "2405:8100::/32" "2a06:98c0::/29" "2c0f:f248::/32"
   ];
 
-  # LAN, DMZ and the WireGuard mesh. Always allowed alongside Cloudflare so a
-  # lockout is impossible from inside, and so the Homepage probes keep
-  # reaching the ingress.
+  # LAN, DMZ and the WireGuard mesh.
   privateRanges = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "127.0.0.1/32" ];
 
   # response-header hardening on every websecure route (opt out via noSecureHeaders).
@@ -37,17 +31,12 @@ let
 
   secureHeadersMiddleware = {
     secure-headers.headers = baseSecureHeaders // { frameDeny = true; };
-    # X-Frame-Options: SAMEORIGIN instead of DENY, for apps that frame
-    # themselves. jellyfin-plugin-sso finishes its login by loading
-    # /web/index.html in a hidden same-origin iframe to seed the client's
-    # credentials; under DENY that frame never loads and the page sits on
-    # "Logging in..." for ever.
+    # X-Frame-Options: SAMEORIGIN instead of DENY, for apps that frame themselves.
     secure-headers-sameorigin.headers =
       baseSecureHeaders // { customFrameOptionsValue = "SAMEORIGIN"; };
   };
 
-  # per-source-IP DoS limits on every websecure route (depth=1 reads the real
-  # client from XFF, not the Cloudflare edge).
+  # per-source-IP DoS limits on every websecure route
   rateLimitAverage = 50;   # requests/second sustained per source IP
   rateLimitBurst = 100;    # short spikes allowed above the average
   inFlightAmount = 100;    # concurrent in-flight requests per source IP
@@ -63,27 +52,17 @@ let
       amount = inFlightAmount;
       sourceCriterion.ipStrategy.depth = 1;
     };
-    # retry a request that never reached the backend. It fires on connection
-    # errors only (never on a 5xx the app itself returned), which is exactly the
-    # on-demand case: a wake that raced a shutdown leaves the proxy connecting to
-    # a port that just closed, and the client saw a 502 for something that works
-    # a second later.
+    # retry a request that never reached the backend.
     retry-upstream.retry = {
       attempts = 4;
       initialInterval = "500ms";
     };
   } // lib.optionalAttrs cfg.cloudflareOnly.enable {
     # Proxying a hostname only protects it if the origin refuses everyone else.
-    # The zone publishes a DNS-only wildcard, so the WAN address is public and
-    # anyone could otherwise skip the edge entirely by connecting here with the
-    # right SNI. This makes Cloudflare an actual chokepoint for the hosts that
-    # are supposed to be behind it.
     cloudflare-only.ipAllowList.sourceRange =
       cloudflareRanges ++ cloudflareRangesV6 ++ privateRanges;
   } // lib.optionalAttrs (cfg.bodyLimit > 0) {
-    # cap on the request body. Traefik can only enforce this by buffering, so
-    # it is deliberately NOT in the default chain: it would break streaming
-    # uploads. Routes opt in through cfg.bodyLimitRouters.
+    # cap on the request body.
     body-limit.buffering = {
       maxRequestBodyBytes = cfg.bodyLimit;
       # spill to disk past 1 MiB instead of holding every upload in RAM.
@@ -92,11 +71,7 @@ let
     };
   };
 
-  # user agents that get the labyrinth instead of the site. Scrapers that
-  # honour robots.txt never reach this; the list is for the ones that do not.
-  # Matched case-insensitively as a substring, so "GPTBot" also catches
-  # "GPTBot/1.2". Plain "Applebot" is deliberately absent: it serves Siri and
-  # Spotlight, and Applebot-Extended is the one that means training.
+  # user agents that get the labyrinth instead of the site.
   labyrinthUserAgents = [
     # model trainers and their retrieval agents
     "GPTBot" "ChatGPT-User" "OAI-SearchBot" "ClaudeBot" "Claude-Web"
@@ -113,8 +88,7 @@ let
     "PetalBot" "Barkrowler" "SeekportBot" "Awario" "peer39_crawler"
   ];
 
-  # CrowdSec bouncer plugin. LAPI key from a file (not the Nix store); "live"
-  # mode fails open so a crowdsec hiccup can't take the ingress down.
+  # CrowdSec bouncer plugin.
   mkBouncer = appsec: {
     plugin.crowdsec-bouncer = {
       enabled = true;
@@ -125,13 +99,11 @@ let
       crowdsecAppsecEnabled = appsec;
       crowdsecAppsecHost = "127.0.0.1:7422";
       # trust the router/Cloudflare hop so the plugin bans the real client IP
-      # from X-Forwarded-For, not the proxy in front of it.
       forwardedHeadersTrustedIPs = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
     };
   };
 
-  # default bouncer (IP rep + optional WAF) plus a "-noappsec" variant (IP rep
-  # only) for routes the WAF would break (headscale, ntfy).
+  # default bouncer (IP rep + optional WAF) plus a "-noappsec" variant (IP rep only) for routes
   bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable ({
     crowdsec = mkBouncer cfg.crowdsecBouncer.appsec;
   } // lib.optionalAttrs cfg.crowdsecBouncer.appsec {
@@ -139,11 +111,7 @@ let
   });
 
   # ── bot defence: robots.txt / llms.txt and the labyrinth ────────────────────
-  # A crawler that reads robots.txt is asked to leave. One that ignores it is
-  # matched on its user agent and handed iocaine instead of the site: an endless
-  # tree of plausible-looking Markov prose with links to more of itself, so the
-  # scrape costs it time and poisons what it collects. Nothing real is served
-  # down that path, and a human never matches these agents.
+  # A crawler that reads robots.txt is asked to leave.
   robotsTxt = pkgs.writeText "robots.txt" (''
     # Crawlers that collect training data are not welcome here. The ones that
     # ignore this file are served https://iocaine.madhouse-project.org/ instead.
@@ -185,14 +153,12 @@ let
     cp ${llmsTxt} $out/.well-known/llms.txt
   '';
 
-  # public-domain prose for the Markov generator. Pinned by hash, so the build
-  # is reproducible and does not depend on Gutenberg staying up.
+  # public-domain prose for the Markov generator.
   corpus = pkgs.fetchurl {
     url = "https://www.gutenberg.org/cache/epub/2701/pg2701.txt";
     hash = "sha256-kHQg22xLaMcOKYjNKtnIz3kThmegG2M3bRjdF/7xoYs=";
   };
-  # iocaine wants a one-word-per-line list as well; derive it from the corpus
-  # instead of fetching a second file.
+  # iocaine wants a one-word-per-line list as well; derive it from the corpus instead
   wordList = pkgs.runCommand "iocaine-words" { } ''
     tr -cs '[:alpha:]' '\n' < ${corpus} | tr '[:upper:]' '[:lower:]' \
       | ${pkgs.gnugrep}/bin/grep -E '^[a-z]{3,}$' | sort -u > $out
@@ -212,8 +178,7 @@ let
     cfg.botDefense.honeypotPaths;
 
   botDefenseRouters = lib.optionalAttrs cfg.botDefense.enable {
-    # served on every host, ahead of everything else and with no auth in front:
-    # a crawler has to be able to read the file that tells it to go away.
+    # served on every host, ahead of everything else and with no auth in front: a crawler has
     wellknown-tls = {
       rule = "Path(`/robots.txt`) || Path(`/llms.txt`) || Path(`/.well-known/llms.txt`)";
       service = "wellknown";
@@ -227,8 +192,7 @@ let
       priority = 9000;
     };
   } // lib.optionalAttrs (cfg.botDefense.enable && cfg.botDefense.honeypotPaths != [ ]) {
-    # above every real route, below /robots.txt. In front of Anubis too: a
-    # scanner hitting /.env is not worth a proof-of-work challenge.
+    # above every real route, below /robots.txt.
     honeypot-tls = {
       rule = honeypotRule;
       service = "labyrinth";
@@ -242,15 +206,12 @@ let
     labyrinth.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString cfg.botDefense.listenPort}"; }];
   };
 
-  # default middleware chain prepended to every websecure router, in order:
-  # bouncer first (drop known-bad IPs before any work), then per-IP limits, then
-  # response-header hardening. Route-specific middlewares (auth, etc.) follow.
+  # default middleware chain prepended to every websecure router
   defaultMiddlewares =
     lib.optional cfg.crowdsecBouncer.enable "crowdsec"
     ++ [ "rate-limit" "inflight-limit" "retry-upstream" "secure-headers" ];
 
-  # ensure every websecure route has tls.certResolver = "cloudflare" unless
-  # overridden, and prepend the default middleware chain unless opted out.
+  # ensure every websecure route has tls.certResolver = "cloudflare" unless overridden
   routersWithTls = lib.mapAttrs (name: router:
     let
       eps = router.entryPoints or [];
@@ -262,8 +223,7 @@ let
         else
           router;
       wantsDefaults = needsTls && !(builtins.elem name cfg.noSecureHeaders);
-      # routes opted out of AppSec use the WAF-free bouncer variant but keep
-      # every other default middleware (IP bouncer, rate limits, headers).
+      # routes opted out of AppSec use the WAF-free bouncer variant but keep every other
       sameOriginFrames = builtins.elem name cfg.sameOriginFrameRouters;
       frameSwap = m:
         if sameOriginFrames && m == "secure-headers" then "secure-headers-sameorigin" else m;
@@ -271,8 +231,7 @@ let
         (if cfg.crowdsecBouncer.enable
             && cfg.crowdsecBouncer.appsec
             && (builtins.elem name cfg.crowdsecBouncer.noAppsecRouters
-                # the honeypot skips AppSec so a scanner reaches the labyrinth
-                # instead of a cheap 403; the IP bouncer still applies
+                # the honeypot skips AppSec so a scanner reaches the labyrinth instead
                 || name == "honeypot-tls")
          then map (m: if m == "crowdsec" then "crowdsec-noappsec" else m) defaultMiddlewares
          else defaultMiddlewares)
@@ -392,12 +351,9 @@ in {
       honeypotPaths = lib.mkOption {
         type = lib.types.listOf lib.types.str;
         default = [
-          # Disclosed only in robots.txt, so nothing reaches it by following a
-          # link. A request here is a crawler that read the file and ignored it.
+          # Disclosed only in robots.txt, so nothing reaches it by following a link.
           "/internal/export"
-          # Never disclosed anywhere. These are what opportunistic scanners try
-          # unprompted; the lab runs no PHP and no WordPress, so a hit is not a
-          # visitor who mistyped.
+          # Never disclosed anywhere.
           "/wp-login.php"
           "/wp-admin/setup-config.php"
           "/.env"
@@ -513,8 +469,7 @@ in {
 
   config = lib.mkIf cfg.enable {
     sops.secrets.cloudflare-token = {};
-    # readable by the traefik user because the bouncer plugin (running inside
-    # traefik) reads the LAPI key from this file.
+    # readable by the traefik user because the bouncer plugin (running inside traefik) reads
     sops.secrets.crowdsec-bouncer-key = lib.mkIf cfg.crowdsecBouncer.enable {
       owner = "traefik";
     };
@@ -529,8 +484,7 @@ in {
         "/var/lib/crowdsec/data:/var/lib/crowdsec/data"
         "/var/log/traefik:/var/log/traefik:ro"
       ]
-      # AppSec acquisition config tells crowdsec to listen for inline request
-      # inspection on :7422, which the bouncer plugin forwards requests to.
+      # AppSec acquisition config tells crowdsec to listen for inline request inspection
       ++ lib.optional cfg.crowdsecBouncer.appsec
         "/var/lib/crowdsec/acquis-appsec.yaml:/etc/crowdsec/acquis.d/appsec.yaml:ro";
       ports = [ "127.0.0.1:8180:8080" ]
@@ -542,11 +496,7 @@ in {
       };
     };
 
-    # CrowdSec banned the house once: a burst of requests across a dozen hosts
-    # read as http-crawl-non_statics and every service answered 403 from the
-    # outside. There was a whitelist, and it was the problem - a hardcoded
-    # IPv6 prefix that Telekom had since rotated away from, so it matched
-    # nothing. The address is asked for on a timer instead of pinned.
+    # CrowdSec banned the house once: a burst of requests across a dozen hosts read
     systemd.services.crowdsec-home-whitelist = lib.mkIf cfg.crowdsecBouncer.enable {
       description = "Keep CrowdSec's whitelist pointed at the house";
       after = [ "podman-crowdsec.service" ];
@@ -556,31 +506,25 @@ in {
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
-        # No aggressive retry: an earlier version restarted CrowdSec on every
-        # run and, failing, retried every two minutes - which is how the
-        # container ended up wedged and the lab spent several minutes
-        # answering 403 to everyone.
+        # No aggressive retry: an earlier version restarted CrowdSec on every run
         Restart = "on-failure";
         RestartSec = 600;
       };
       script = "exec ${pkgs.bash}/bin/bash ${../scripts/crowdsec-home-whitelist.sh}";
     };
 
-    # Often enough to catch a rotation before anyone notices, rarely enough
-    # that the address lookup is not itself traffic worth counting.
+    # Often enough to catch a rotation before anyone notices
     systemd.timers.crowdsec-home-whitelist = lib.mkIf cfg.crowdsecBouncer.enable {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        # Every five minutes: the reload is rare, but clearing a decision
-        # against the house is the part that has to be prompt.
+        # Every five minutes: the reload is rare, but clearing a decision against the house
         OnBootSec = "3min";
         OnUnitActiveSec = "5min";
         AccuracySec = "30s";
       };
     };
 
-    # register the bouncer with CrowdSec's local API using the shared key, so the
-    # plugin authenticates. Idempotent: skip if the bouncer already exists.
+    # register the bouncer with CrowdSec's local API using the shared key
     systemd.services.crowdsec-register-bouncer = lib.mkIf cfg.crowdsecBouncer.enable {
       description = "Register the Traefik bouncer with CrowdSec";
       after = [ "podman-crowdsec.service" ];
@@ -618,14 +562,11 @@ in {
     systemd.tmpfiles.rules = [
       "d /var/lib/traefik 0700 traefik traefik -"
       "d /var/lib/traefik/acme 0700 traefik traefik -"
-      # traefik (not root) writes access.log here; the crowdsec container reads
-      # it. root-owned 0750 blocked the write, so the access log never appeared
-      # and crowdsec had nothing to parse.
+      # traefik (not root) writes access.log here; the crowdsec container reads it. root-owned
       "d /var/log/traefik 0755 traefik traefik -"
     ];
 
-    # /var/lib/crowdsec is an NFS automount; create its subdirs here (tmpfiles
-    # runs before the mount triggers, so the container would fail on statfs).
+    # /var/lib/crowdsec is an NFS automount; create its subdirs here
     systemd.services.crowdsec-prepare-dirs = {
       description = "Create CrowdSec config/data dirs on the NFS share";
       before = [ "podman-crowdsec.service" ];
@@ -654,8 +595,7 @@ in {
       '';
     };
 
-    # acme.json lives on the 0777 NFS share; lego drops the cloudflare resolver
-    # if it's more permissive than 0600, so tighten it on every start.
+    # acme.json lives on the 0777 NFS share; lego drops the cloudflare resolver if it's more
     systemd.services.traefik.preStart = ''
       f=/var/lib/traefik/acme/acme.json
       if [ -e "$f" ]; then
@@ -668,11 +608,7 @@ in {
       environmentFiles = [ config.sops.templates."traefik.env".path ];
       staticConfigOptions = {
         log.level = cfg.logLevel;
-        # JSON access log to a file: CrowdSec parses it, and promtail ships it to
-        # Loki. Cf-Ipcountry (Cloudflare sets it on every proxied request) drives
-        # the world map; User-Agent and Referer drive the "who is calling this"
-        # panels. ClientHost is in the log by default and carries the real client
-        # IP because the Cloudflare ranges are trusted on the entrypoint.
+        # JSON access log to a file: CrowdSec parses it, and promtail ships it to Loki.
         accessLog = {
           filePath = "/var/log/traefik/access.log";
           format = "json";
@@ -683,10 +619,7 @@ in {
           };
         };
         api.dashboard = true;
-        # Prometheus metrics on a dedicated entrypoint (:8082), scraped by
-        # vm-105. Per-entrypoint/router/service labels drive the HTTP analytics
-        # dashboard (request rate, status codes, latency percentiles) with a
-        # service filter. Loopback+LAN only; not exposed publicly.
+        # Prometheus metrics on a dedicated entrypoint (:8082), scraped by vm-105.
         metrics.prometheus = {
           entryPoint = "metrics";
           addEntryPointsLabels = true;
@@ -697,10 +630,7 @@ in {
           web = {
             address = ":80";
             http.redirections.entryPoint = { to = "websecure"; scheme = "https"; permanent = true; };
-            # bound how long a client may take to send a request: a client that
-            # dribbles headers forever (Slowloris) is dropped instead of holding
-            # a connection. writeTimeout is 0 (unbounded) so large media
-            # downloads/streams are not cut off.
+            # bound how long a client may take to send a request: a client that dribbles
             transport.respondingTimeouts = { readTimeout = "120s"; writeTimeout = "0s"; idleTimeout = "180s"; };
           };
           websecure = {
@@ -721,9 +651,7 @@ in {
           };
         };
       }
-      # only present when the bouncer is enabled: an empty `experimental` block
-      # makes Traefik fail to start ("experimental cannot be a standalone
-      # element"). Traefik downloads and caches the plugin at startup.
+      # only present when the bouncer is enabled: an empty `experimental` block makes Traefik
       // lib.optionalAttrs cfg.crowdsecBouncer.enable {
         experimental.plugins.crowdsec-bouncer = {
           moduleName = "github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin";
@@ -770,9 +698,7 @@ in {
       };
     };
 
-    # Anubis instances: one per browser-facing upstream, each bound to loopback.
-    # the default baked-in bot policy (challenge Mozilla UAs, allow well-known /
-    # robots / API-JSON) is sufficient; only the bind, target and difficulty vary.
+    # Anubis instances: one per browser-facing upstream
     services.anubis.instances = lib.mkIf cfg.anubis.enable (lib.mapAttrs (_name: a: {
       settings = {
         BIND = "127.0.0.1:${toString a.listenPort}";
@@ -782,46 +708,28 @@ in {
         # unique loopback metrics port per instance; Prometheus can scrape later.
         METRICS_BIND = "127.0.0.1:${toString (a.listenPort + 1000)}";
         METRICS_BIND_NETWORK = "tcp";
-        # robots.txt is served centrally for every host (botDefense), and that
-        # router outranks the Anubis routes, so Anubis must not answer it too.
+        # robots.txt is served centrally for every host (botDefense)
         SERVE_ROBOTS_TXT = false;
 
-        # Anubis reaches this instance over loopback, so its socket peer is
-        # always 127.0.0.1. Reading the client from the forwarded headers is
-        # what makes the proof-of-work cookie stick to one visitor instead of
-        # re-challenging on every request. Traefik sets X-Real-Ip to the address
-        # it considers the client, and because the Cloudflare ranges are trusted
-        # on the websecure entrypoint (trustCloudflare) that is the real visitor
-        # and not the rotating edge address.
+        # Anubis reaches this instance over loopback, so its socket peer is always 127.0.0.1.
         USE_REMOTE_ADDRESS = false;
 
         COOKIE_SECURE = true;
 
-        # Every instance signs the clearance cookie with the SAME key. Anubis
-        # generates a random one per process when this is unset, and with one
-        # cookie shared across the whole domain (above) each instance then
-        # rejected the cookie the previous one issued and re-challenged,
-        # clobbering it in turn: hello.lsck0.dev and share.lsck0.dev sat in an
-        # endless redirect loop. A restart had the same effect on a single host.
+        # Every instance signs the clearance cookie with the SAME key.
         ED25519_PRIVATE_KEY_HEX_FILE = config.sops.secrets.anubis-ed25519-key.path;
       } // lib.optionalAttrs (cfg.anubis.cookieDomain != "") {
         COOKIE_DOMAIN = cfg.anubis.cookieDomain;
       };
     }) cfg.anubis.instances);
 
-    # readable by the anubis group: the instances run as DynamicUser but share
-    # that static group. Declared only where Anubis runs, because the group only
-    # exists there: on a Traefik host without it, sops refused the whole
-    # manifest with "failed to lookup group 'anubis'", which left /run/secrets
-    # empty, Traefik unable to read its environment file, and every proxied host
-    # answering 526.
+    # readable by the anubis group: the instances run as DynamicUser but share that static
     sops.secrets.anubis-ed25519-key = lib.mkIf cfg.anubis.enable {
       group = "anubis";
       mode = "0440";
     };
 
-    # 8082 = Prometheus metrics, scraped by vm-105. Not port-forwarded, so it
-    # stays on the LAN/DMZ; the internet never reaches it.
+    # 8082 = Prometheus metrics, scraped by vm-105.
     networking.firewall.allowedTCPPorts = [ 80 443 8082 ];
   };
 }

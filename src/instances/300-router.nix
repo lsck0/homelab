@@ -3,14 +3,11 @@ let
   routes = import ../modules/routes.nix;
 
   # ── egress classes (modules/egress.nix) ────────────────────────────────────
-  # Policy routing, keyed on source address. A member VM is untouched: it keeps
-  # its ordinary default route here, and this decides what happens next.
+  # Policy routing, keyed on source address.
   egress = import ../modules/egress.nix;
-  # The VPN exit is a routing decision, so it needs a mark and a table. Tor
-  # is not: Tor runs on this router, so a member is redirected into it.
+  # The VPN exit is a routing decision, so it needs a mark and a table.
   torPorts = { trans = 9040; dns = 9053; socks = 9050; socksIsolated = 9055; };
-  # fwmark -> routing table. Marks are set in the mangle hook below and matched
-  # by `ip rule`; the tables hold nothing but a default route each.
+  # fwmark -> routing table.
   egressMarks = { vpn = { mark = 1; table = 100; }; };
   membersOf = via: lib.sort (a: b: a < b)
     (lib.mapAttrsToList (_: e: inventory.${toString e.vmid}.ip)
@@ -18,8 +15,7 @@ let
   vpnMembers = membersOf "vpn";
   torMembers = membersOf "tor";
   torSet = lib.concatStringsSep ", " torMembers;
-  # nftables rejects an empty set literal, so each rule is emitted only when it
-  # has members.
+  # nftables rejects an empty set literal, so each rule is emitted only when it has members.
   markRule = via: members:
     lib.optionalString (members != [ ])
       "ip saddr { ${lib.concatStringsSep ", " members} } meta mark set ${toString egressMarks.${via}.mark}";
@@ -30,19 +26,7 @@ let
   # hosts served by internal Traefik that are not a VM route.
   internalExtraHosts = [ "traefik" "proxmox" ];
 
-  # Whether a host is Cloudflare-PROXIED comes from `proxied` in routes.nix, so
-  # the ingress policy lives next to the route rather than in a list here.
-  #
-  #   proxied   Authelia stands in front, so the edge's DDoS absorption is worth
-  #             having and the rotating edge address costs nothing: Traefik only
-  #             needs the Host header to route, and Authelia only needs a cookie.
-  #   DNS-only  public by design and defended by Anubis. Behind the edge Anubis
-  #             sees a different Cloudflare address on every request and issues a
-  #             fresh challenge each time, so the proof-of-work never sticks.
-  #             Going direct is what makes it work at all.
-  #
-  # Concealing the origin is not a consideration either way: the DNS-only
-  # wildcard below already answers every unlisted name with the WAN address.
+  # Whether a host is Cloudflare-PROXIED comes from `proxied` in routes.nix
   routeHosts = side: lib.mapAttrsToList (_: r: {
     inherit (r) host;
     proxied = r.proxied or true;
@@ -51,9 +35,7 @@ let
     ++ map (h: { host = h; proxied = true; }) internalExtraHosts;
 
   proxiedHosts = lib.unique (map (r: r.host) (lib.filter (r: r.proxied) allRouteHosts));
-  # unproxied (raw WAN IP): the Anubis-fronted routes, the L4 services Cloudflare
-  # cannot proxy, plus a DNS-only wildcard kept fresh so no unlisted name goes
-  # stale.
+  # unproxied (raw WAN IP): the Anubis-fronted routes
   rawHosts = lib.unique (
     map (r: r.host) (lib.filter (r: !r.proxied) allRouteHosts)
     ++ [ "wg" "mc" "tor" "*" ]
@@ -66,8 +48,7 @@ let
 in {
   networking.hostName = "luca-router";
 
-  # mDNS on ens18 only, so the FritzBox shows "luca-router" (ens18 is static, so
-  # it never sends a DHCP hostname and otherwise shows the install-time "nixos").
+  # mDNS on ens18 only, so the FritzBox shows "luca-router"
   services.avahi = {
     enable = true;
     allowInterfaces = [ "ens18" ];
@@ -82,12 +63,7 @@ in {
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # NETWORK INTERFACES
-  # ─────────────────────────────────────────────────────────────────────────────
-  # ens18 = WAN    -> static lease from FritzBox
-  # ens19 = Internal LAN  (10.100.0.0/24)
-  # ens20 = External DMZ  (10.200.0.0/24)
-  # wg0   = WireGuard VPN (10.0.0.0/24)
+  # NETWORK INTERFACES ens18 = WAN -> static lease from FritzBox ens19 = Internal LAN
 
   networking.usePredictableInterfaceNames = lib.mkForce true;
   networking.useDHCP = false;
@@ -100,16 +76,11 @@ in {
     "net.ipv4.ip_forward" = 1;
 
     # ── volumetric / spoofing hardening on the edge ──────────────────────────
-    # SYN cookies answer a SYN flood without keeping half-open state, so the
-    # backlog cannot be exhausted; the larger backlog and fewer SYN-ACK retries
-    # shorten how long a half-open entry occupies it.
+    # SYN cookies answer a SYN flood without keeping half-open state
     "net.ipv4.tcp_syncookies" = 1;
     "net.ipv4.tcp_max_syn_backlog" = 4096;
     "net.ipv4.tcp_synack_retries" = 2;
-    # loose reverse-path filter: drop packets whose source address has no route
-    # at all. Loose (2) rather than strict (1) on purpose - strict mode drops
-    # legitimate traffic as soon as routing is asymmetric, which is easy to hit
-    # with WireGuard.
+    # loose reverse-path filter: drop packets whose source address has no route at all.
     "net.ipv4.conf.all.rp_filter" = 2;
     "net.ipv4.conf.default.rp_filter" = 2;
     # no source routing, no redirects: both let a remote host steer traffic.
@@ -120,15 +91,12 @@ in {
     # do not be an amplifier.
     "net.ipv4.icmp_echo_ignore_broadcasts" = 1;
     "net.ipv4.icmp_ignore_bogus_error_responses" = 1;
-    # headroom so a flood fills the conntrack table more slowly than it fills
-    # the per-source meters below.
+    # headroom so a flood fills the conntrack table more slowly than it fills the per-source
     "net.netfilter.nf_conntrack_max" = 262144;
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # EGRESS CLASSES
-  # ─────────────────────────────────────────────────────────────────────────────
-  # marked by source; the mark selects a table ending in a blackhole
+  # EGRESS CLASSES marked by source; the mark selects a table ending in a blackhole
   assertions = [{
     assertion = vpnMembers == [ ] || vpnCfg.enable;
     message = "modules/egress.nix routes ${lib.concatStringsSep ", " vpnMembers} through the VPN, but homelab.egress.vpn is not enabled on the router.";
@@ -164,8 +132,6 @@ in {
   };
 
   # The VPN exit needs policy routing; Tor does not, because it runs here.
-  # Idempotent, so a redeploy does not stack duplicate rules, and a oneshot so
-  # it can be re-run by hand.
   systemd.services.egress-policy = lib.mkIf (vpnMembers != [ ]) {
     description = "Policy routing for the VPN egress class";
     after = [ "network-setup.service" ];
@@ -188,9 +154,7 @@ in {
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # TOR EXIT
-  # ─────────────────────────────────────────────────────────────────────────────
-  # Tor runs here because TransPort needs SO_ORIGINAL_DST from the local redirect. Client only; the relay is vm-202.
+  # TOR EXIT Tor runs here because TransPort needs SO_ORIGINAL_DST from the local redirect.
   services.tor = {
     enable = true;
     enableGeoIP = false;
@@ -200,20 +164,15 @@ in {
       socksListenAddress = {
         addr = "10.100.0.1";
         port = torPorts.socks;
-        # A torrent client opens connections to hundreds of peers at once and
-        # would build a circuit for each. Shared circuits on this port.
+        # A torrent client opens connections to hundreds of peers at once and would build
         IsolateDestAddr = false;
       };
     };
     settings = {
-      # the lab, both sides. The DMZ can use it now as well: the proxy is the
-      # router, so a DMZ VM reaches it without crossing into the internal LAN.
+      # the lab, both sides.
       SocksPolicy = [ "accept 10.100.0.0/24" "accept 10.200.0.0/24" "reject *" ];
 
-      # Second SOCKS port for the indexers (Prowlarr). Indexer traffic is a
-      # handful of requests to a handful of sites, so it gets real stream
-      # isolation: a separate circuit per destination, and a separate circuit
-      # from anything on the shared port.
+      # Second SOCKS port for the indexers (Prowlarr).
       SOCKSPort = [{
         addr = "10.100.0.1";
         port = torPorts.socksIsolated;
@@ -221,20 +180,15 @@ in {
         IsolateDestPort = true;
       }];
 
-      # The transparent pair, for whole VMs listed via = "tor" in
-      # modules/egress.nix. Those VMs have no Tor configuration at all.
+      # The transparent pair, for whole VMs listed via = "tor" in modules/egress.nix.
       TransPort = [{ addr = "10.100.0.1"; port = torPorts.trans; }];
       DNSPort = [{ addr = "10.100.0.1"; port = torPorts.dns; }];
       AutomapHostsOnResolve = true;
-      # keeps DNSPort's mapped answers resolvable by TransPort, which is what
-      # makes name-based connections work at all.
+      # keeps DNSPort's mapped answers resolvable by TransPort
       VirtualAddrNetworkIPv4 = "10.192.0.0/10";
       ClientUseIPv6 = false;
 
-      # Path rotation. Tor picks a new guard rarely by design - rotating guards
-      # is what deanonymises you - but the middle and exit relays turn over:
-      #   MaxCircuitDirtiness  a circuit stops taking new streams after 10 min
-      #   NewCircuitPeriod     consider building a fresh circuit every 2 min
+      # Path rotation.
       MaxCircuitDirtiness = 600;
       NewCircuitPeriod = 120;
       CircuitBuildTimeout = 30;
@@ -244,9 +198,7 @@ in {
     };
   };
 
-  # MaxCircuitDirtiness only stops *new* streams reusing an old circuit. NEWNYM
-  # retires the ones already in use, so a long session does not sit on the same
-  # three relays for days.
+  # MaxCircuitDirtiness only stops *new* streams reusing an old circuit.
   systemd.services.tor-new-circuits = {
     description = "Ask Tor for a fresh set of circuits";
     after = [ "tor.service" ];
@@ -265,12 +217,7 @@ in {
     timerConfig = { OnBootSec = "10m"; OnUnitActiveSec = "30m"; RandomizedDelaySec = "10m"; };
   };
 
-  # The VPN exit itself is modules/egress-vpn.nix: it owns the tunnel and the
-  # default route in table 100. On the router rather than a VM of its own,
-  # because it needs nothing from the host it runs on and a dedicated gateway
-  # would cost memory the lab does not have. Tor is the other way round, for
-  # the SO_ORIGINAL_DST reason above, so the two exits are deliberately
-  # asymmetric.
+  # The VPN exit itself is modules/egress-vpn.nix: it owns the tunnel and the default route
   homelab.egress.vpn = {
     enable = true;
     table = egressMarks.vpn.table;
@@ -315,20 +262,16 @@ in {
 
   # ─────────────────────────────────────────────────────────────────────────────
   # NAT + PORT FORWARDING
-  # ─────────────────────────────────────────────────────────────────────────────
   networking.nat = {
     enable = true;
     externalInterface = "ens18";
     internalInterfaces = [ "ens19" "ens20" "wg0" ];
-    # forwardPorts left empty, NixOS forwardPorts matches ALL inbound traffic on ens18,
-    # hijacking LAN->10.100.0.x:443 to external traefik. Custom nftables below restrict
-    # DNAT to traffic destined for the router's own WAN IP only.
+    # forwardPorts left empty, NixOS forwardPorts matches ALL inbound traffic on ens18
     forwardPorts = [];
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
   # FIREWALL
-  # ─────────────────────────────────────────────────────────────────────────────
   networking.nftables.enable = true;
   networking.firewall = {
     # loose, matching the sysctl above: strict drops every VPN reply
@@ -353,14 +296,7 @@ in {
       allowedUDPPorts = [ 53 ];
     };
 
-    # per-source limits on traffic from the internet, applied before anything
-    # reaches a service. Only drops: no accept rule here, so the normal
-    # allowedTCPPorts logic still decides what is permitted.
-    #
-    # `meter` keys the limit on the source address, so one noisy host cannot
-    # consume the budget of everybody else. Traefik has its own per-IP rate and
-    # in-flight limits (modules/traefik.nix) for layer 7; these two cover the
-    # layers below it, where Traefik never sees the packet.
+    # per-source limits on traffic from the internet, applied before anything reaches a service.
     extraInputRules = ''
       iifname "ens18" tcp flags & (fin|syn|rst|ack) == syn \
         meter wan-syn size 65535 { ip saddr limit rate over 50/second burst 100 packets } \
@@ -415,7 +351,6 @@ in {
 
   # ─────────────────────────────────────────────────────────────────────────────
   # PORT FORWARDS (DNAT ONLY FOR ROUTER'S OWN WAN IP)
-  # ─────────────────────────────────────────────────────────────────────────────
   networking.nftables.tables.port-forwards = {
     family = "ip";
     content = ''
@@ -437,7 +372,6 @@ in {
 
   # ─────────────────────────────────────────────────────────────────────────────
   # DHCP SERVER (KEA)
-  # ─────────────────────────────────────────────────────────────────────────────
   services.kea.dhcp4 = {
     enable = true;
     settings = {
@@ -476,10 +410,7 @@ in {
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # DNS BLOCKLIST + DOT UPSTREAM (BLOCKY)
-  # ─────────────────────────────────────────────────────────────────────────────
-  # loopback-only; CoreDNS forwards `.` here. Blocks ads/trackers/malware and
-  # encrypts upstream queries over DNS-over-TLS to Cloudflare/Quad9.
+  # DNS BLOCKLIST + DOT UPSTREAM (BLOCKY) loopback-only; CoreDNS forwards `.` here.
   services.blocky = {
     enable = true;
     settings = {
@@ -505,9 +436,7 @@ in {
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # DNS SERVER (COREDNS)
-  # ─────────────────────────────────────────────────────────────────────────────
-  # all services use *.lsck0.dev: internal DNS resolves to local traefik IPs
+  # DNS SERVER (COREDNS) all services use *.lsck0.dev: internal DNS resolves to local traefik
   services.resolved.enable = false;
   services.coredns = {
     enable = true;
@@ -541,14 +470,12 @@ in {
     '';
   };
 
-  # after first boot, get server pubkey: wg show wg0 public-key
-  # Generate client config: endpoint = <public-ip>:51820, DNS = 10.0.0.1
+  # after first boot, get server pubkey: wg show wg0 public-key Generate client config
   sops.secrets.wireguard-private-key = {};
   sops.secrets.cloudflare-token = {};
 
   # ─────────────────────────────────────────────────────────────────────────────
   # DDNS (CLOUDFLARE)
-  # ─────────────────────────────────────────────────────────────────────────────
   systemd.services.ddns-cloudflare = {
     description = "Update vpn.lsck0.dev A record with current public IP";
     after = [ "network-online.target" ];
@@ -614,11 +541,7 @@ in {
     };
   };
   # ─────────────────────────────────────────────────────────────────────────────
-  # WIREGUARD VPN
-  # ─────────────────────────────────────────────────────────────────────────────
-  # client config MUST include: DNS = 10.0.0.1
-  # This enables split-horizon DNS so *.lsck0.dev resolves to internal IPs over VPN.
-  # port 53 is already open on wg0 (see firewall above).
+  # WIREGUARD VPN client config MUST include: DNS = 10.0.0.1 This enables split-horizon DNS
   networking.wireguard.interfaces.wg0 = {
     ips = [ "10.0.0.1/24" ];
     listenPort = 51820;
@@ -645,8 +568,7 @@ in {
 
   virtualisation.docker.enable = lib.mkForce false;
 
-  # wake-on-LAN: wake luca-pc from VPN
-  # Usage: ssh root@10.0.0.1 wol-pc
+  # wake-on-LAN: wake luca-pc from VPN Usage: ssh root@10.0.0.1 wol-pc
   environment.etc."profile.d/wol.sh".text = ''
     alias wol-pc='wakeonlan -i 192.168.178.255 10:ff:e0:e4:04:4a'
   '';

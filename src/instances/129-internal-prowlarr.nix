@@ -1,22 +1,13 @@
 { pkgs, ... }: {
   networking.hostName = "vm-129";
 
-  # indexer manager. Indexers and the app connections to Radarr/Sonarr/Lidarr/
-  # Bookshelf are created by the *arr wiring on vm-133.
+  # indexer manager.
   homelab.servarr.prowlarr = {
     image = "lscr.io/linuxserver/prowlarr:2.6.5.5623-ls161";
     port = 9696;
   };
 
-  # Every request to an indexer leaves through Tor, on the isolated SOCKS port
-  # the router keeps for exactly this (9055: a fresh circuit per destination, and a
-  # different circuit from the torrent traffic on 9050). Radarr and Sonarr do
-  # not talk to trackers themselves - their indexer entries point back at
-  # Prowlarr - so proxying Prowlarr covers searching and grabbing both.
-  #
-  # Set over the API because Prowlarr keeps its configuration in its own
-  # database, not a file. Idempotent: it reads the current config and only
-  # writes when something differs.
+  # Every request to an indexer leaves through Tor
   systemd.services.prowlarr-tor-proxy = {
     description = "Send Prowlarr's indexer traffic through Tor";
     after = [ "podman-prowlarr.service" ];
@@ -62,17 +53,7 @@
     '';
   };
 
-  # Half the useful public trackers sit behind Cloudflare's bot check and
-  # answer Prowlarr with "blocked by CloudFlare Protection": 1337x, EZTV,
-  # kickasstorrents, ExtraTorrent and Uindex all failed to add for that reason.
-  # FlareSolverr drives a headless browser through the challenge and hands the
-  # cookie back, which is the only way those indexers work at all.
-  #
-  # Bound to the podman bridge, not the host address: Prowlarr runs in its own
-  # bridged container, so 127.0.0.1 there is not this host. 10.88.0.1 is the
-  # bridge gateway, reachable from sibling containers and from nowhere off the
-  # VM, which matters because FlareSolverr is an unauthenticated
-  # browser-as-a-service.
+  # Half the useful public trackers sit behind Cloudflare's bot check and answer Prowlarr
   virtualisation.oci-containers.containers.flaresolverr = {
     image = "ghcr.io/flaresolverr/flaresolverr:v3.4.2";
     ports = [ "10.88.0.1:8191:8191" ];

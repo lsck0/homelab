@@ -62,9 +62,7 @@
   # Postgres only for the container (podman bridge), not the subnet
   networking.firewall.interfaces.podman0.allowedTCPPorts = [ 5432 ];
 
-  # /var/lib/postgresql is a live data directory on the NAS: Kopia's file copy of
-  # one is not a backup (it can catch a checkpoint mid-flight). pg_dumpall runs
-  # through Postgres itself and produces something restorable.
+  # /var/lib/postgresql is a live data directory on the NAS: Kopia's file copy of one
   homelab.dbBackup.databases.huginn = {
     command = "${config.services.postgresql.package}/bin/pg_dumpall -U postgres --clean --if-exists";
     path = [ config.services.postgresql.package ];

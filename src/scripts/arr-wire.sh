@@ -24,21 +24,11 @@ BOOKSHELF_HOST=${BOOKSHELF_HOST:-10.100.0.135}; BOOKSHELF_PORT=${BOOKSHELF_PORT:
 LIDARR_HOST=${LIDARR_HOST:-10.100.0.136};     LIDARR_PORT=${LIDARR_PORT:-8686}
 JELLYSEERR_URL=${JELLYSEERR_URL:-http://10.100.0.128}
 BAZARR_URL=${BAZARR_URL:-http://10.100.0.132}
-# the router's isolated SOCKS port (the torrent client uses 9050 with shared
-# circuits; indexers get per-destination circuits on 9055).
+# the router's isolated SOCKS port
 TOR_HOST=${TOR_HOST:-10.100.0.1};           TOR_PORT=${TOR_PORT:-9055}
-# When Radarr is allowed to start looking. "released" is Radarr's own default
-# and means nothing is searched until a digital release exists, which is why a
-# film still in cinemas sat monitored with an empty history while a manual
-# search found forty releases. "announced" searches from the moment the film
-# has a date.
+# When Radarr is allowed to start looking.
 MIN_AVAILABILITY=${MIN_AVAILABILITY:-announced}
-# The Jellyfin account that owns this lab. Jellyseerr gives a new user
-# permission 32 (REQUEST) and nothing else, so every request it makes sits
-# PENDING until an admin approves it - and in a one-person lab the person
-# waiting for approval is the person who would give it. 160 is REQUEST plus
-# AUTO_APPROVE (128), which is the smallest grant that makes a request reach
-# Radarr on its own; ADMIN (2) would work too and is far more than is needed.
+# The Jellyfin account that owns this lab.
 OWNER_USER=${OWNER_USER:-luca}
 OWNER_PERMISSIONS=${OWNER_PERMISSIONS:-160}
 pending=0
@@ -53,10 +43,7 @@ api() { # method url apikey [json]
 }
 later() { echo "$1"; pending=1; }
 
-# Existence is not the same as being right: a renumber leaves every row in
-# place pointing at the old address. fix_fields <label> <url> <key> <json>
-# <jq args...> writes back only when the filter changes something. Addresses
-# only, since the APIs return keys and passwords masked.
+# Existence is not the same as being right: a renumber leaves every row in place pointing
 fix_fields() {
   local label=$1 url=$2 k=$3 cur=$4 want
   shift 4
@@ -70,9 +57,7 @@ fix_fields() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SERVARR APPS
-# ─────────────────────────────────────────────────────────────────────────────
-# wire_servarr <name> <base url> <api version> <category field> <category> <root folder>...
+# SERVARR APPS wire_servarr <name> <base url> <api version> <category field> <category> <root
 wire_servarr() {
   local name=$1 url=$2 v=$3 catfield=$4 cat=$5; shift 5
   local k a body qpass
@@ -136,16 +121,7 @@ wire_servarr() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# JELLYFIN NOTIFICATION
-# ─────────────────────────────────────────────────────────────────────────────
-# Tell Jellyfin to look when a file lands, instead of waiting for it to notice.
-#
-# It never notices: the library sits on an NFS mount and Jellyfin's realtime
-# monitor is inotify, which NFS does not deliver. A film imported by Radarr is
-# on disk and absent from the library until something asks for a scan, which
-# is exactly what happened to The Odyssey.
-#
-# wire_jellyfin_notify <name> <base url> <api key name>
+# JELLYFIN NOTIFICATION Tell Jellyfin to look when a file lands
 wire_jellyfin_notify() {
   local name=$1 url=$2 k jk cur id body
   k=$(key "$name-key") || { later "$name: API key not exported yet"; return; }
@@ -189,7 +165,6 @@ wire_jellyfin_notify() {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PROWLARR
-# ─────────────────────────────────────────────────────────────────────────────
 wire_prowlarr() {
   local P="http://$PROWLARR_HOST:$PROWLARR_PORT/api/v1" pk apps spec impl name url k body have schema="" def
   pk=$(key prowlarr-key) || { later "prowlarr: API key not exported yet"; return; }
@@ -227,9 +202,7 @@ wire_prowlarr() {
     fi
   done
 
-  # Tor SOCKS5 in front of the indexers. A Prowlarr proxy only applies to the
-  # indexers that carry the same tag, so the tag is created first and then put
-  # on every indexer, including ones added by hand in the UI later.
+  # Tor SOCKS5 in front of the indexers.
   local tag proxies ind id
   tag=$(api GET "$P/tag" "$pk" | jq -r '.[] | select(.label == "tor") | .id')
   if [ -z "$tag" ]; then
@@ -238,8 +211,7 @@ wire_prowlarr() {
   if [ -n "$tag" ]; then
     proxies=$(api GET "$P/indexerproxy" "$pk")
     if echo "$proxies" | jq -e 'any(.[]; .implementation == "Socks5")' >/dev/null; then
-      # this is what actually carries indexer traffic; stale here means every
-      # search times out at 100s
+      # this is what actually carries indexer traffic; stale here means every search times
       local cur id
       cur=$(echo "$proxies" | jq -c 'first(.[] | select(.implementation == "Socks5"))')
       id=$(echo "$cur" | jq -r .id)
@@ -261,9 +233,7 @@ wire_prowlarr() {
       if api POST "$P/indexerproxy?forceSave=true" "$pk" "$body" >/dev/null; then
         echo "prowlarr: added Tor SOCKS5 indexer proxy ($TOR_HOST:$TOR_PORT)"
       else
-        # same reasoning as the indexers below: a proxy that is momentarily
-        # unreachable must not keep the whole stack reported as "pending"
-        # forever. Retried on the next run.
+        # same reasoning as the indexers below: a proxy that is momentarily unreachable must
         echo "prowlarr: Tor indexer proxy not added (is the router up?), retried next run"
       fi
     fi
@@ -278,8 +248,7 @@ wire_prowlarr() {
     body=$(echo "$schema" | jq -c --arg d "$def" \
       'first(.[] | select(.definitionName == $d)) | .enable = true | .appProfileId = 1 | .priority = 25')
     [ -n "$body" ] || { echo "prowlarr: unknown indexer definition '$def'"; continue; }
-    # Prowlarr tests the site even with forceSave; a blocked or down site must
-    # not keep the rest of the stack "pending".
+    # Prowlarr tests the site even with forceSave; a blocked or down site must not keep
     if api POST "$P/indexer?forceSave=true" "$pk" "$body" >/dev/null; then
       echo "prowlarr: added indexer $def"
     else
@@ -287,8 +256,7 @@ wire_prowlarr() {
     fi
   done
 
-  # after the indexers exist: put the tor tag on any that lack it, so indexers
-  # added here or by hand in the UI all egress through the router.
+  # after the indexers exist: put the tor tag on any that lack
   if [ -n "$tag" ]; then
     for id in $(api GET "$P/indexer" "$pk" | jq -r --argjson t "$tag" \
                   '.[] | select((.tags // []) | index($t) | not) | .id'); do
@@ -301,7 +269,6 @@ wire_prowlarr() {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # JELLYSEERR
-# ─────────────────────────────────────────────────────────────────────────────
 wire_jellyseerr() {
   local S="$JELLYSEERR_URL/api/v1" jar rk sk rp sp ids initialised
   initialised=$(curl -sf "$S/settings/public" | jq -r '.initialized // empty')
@@ -313,9 +280,7 @@ wire_jellyseerr() {
   jar=$(mktemp); trap 'rm -f "$jar"' RETURN
   js() { curl -sf -c "$jar" -b "$jar" -H "Content-Type: application/json" "$@"; }
 
-  # Two shapes of the same endpoint: before initialisation it also carries the
-  # Jellyfin server to point at, and an initialised Jellyseerr rejects that
-  # body and accepts only the credentials.
+  # Two shapes of the same endpoint: before initialisation it also carries the Jellyfin server
   if [ "$initialised" = true ]; then
     js -X POST "$S/auth/jellyfin" -d "$(jq -cn --arg p "$(key jellyfin-admin-pass)" \
       '{username: "admin", password: $p}')" >/dev/null || true
@@ -327,18 +292,14 @@ wire_jellyseerr() {
   fi
   js "$S/auth/me" >/dev/null || { later "jellyseerr: Jellyfin login failed"; return; }
 
-  # An already-initialised Jellyseerr used to be skipped outright, so every
-  # value below was whatever it happened to be set to on the day it was first
-  # wired - the same create-but-never-correct hole that left the *arr pointing
-  # at addresses from before the renumber. Correct what has drifted instead.
+  # An already-initialised Jellyseerr used to be skipped outright
   if [ "$initialised" = true ]; then
     local cur want
     cur=$(js "$S/settings/radarr" | jq -c '.[0] // empty')
     if [ -z "$cur" ]; then
       later "jellyseerr: initialised but has no Radarr server"
     else
-      # id is read-only on the way back in:
-      #   request/body/id is read-only (readOnly.openapi.validation)
+      # id is read-only on the way back in: request/body/id is read-only
       want=$(echo "$cur" | jq -c --arg k "$rk" --arg h "$RADARR_HOST" \
         --argjson port "$RADARR_PORT" --arg min "$MIN_AVAILABILITY" \
         '.apiKey = $k | .hostname = $h | .port = $port | .minimumAvailability = $min')
@@ -349,8 +310,7 @@ wire_jellyseerr() {
           || later "jellyseerr: correcting the Radarr server failed"
       fi
     fi
-    # A request that is never approved never reaches Radarr, which looks
-    # exactly like Jellyseerr being unable to talk to it.
+    # A request that is never approved never reaches Radarr
     local uid
     uid=$(js "$S/user?take=100" | jq -r --arg u "$OWNER_USER" \
       'first(.results[] | select(.displayName == $u or .jellyfinUsername == $u)) | .id // empty')
@@ -409,16 +369,9 @@ wire_jellyseerr() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# BAZARR
-# ─────────────────────────────────────────────────────────────────────────────
-# Subtitle languages, in the order Bazarr should prefer them. One profile
-# holds both, and it is the default for films and for series.
+# BAZARR Subtitle languages, in the order Bazarr should prefer them.
 SUBTITLE_LANGUAGES=${SUBTITLE_LANGUAGES:-de en}
-# Providers that need no account. opensubtitles.com is the best source for
-# German but wants credentials, so it is left out rather than configured
-# half-way and failing on every search.
-# subf2m is left out: it throttles itself for twelve hours on every search
-# with "'User-agent config missing'" unless a user agent is configured.
+# Providers that need no account. opensubtitles.com is the best source for German but wants
 SUBTITLE_PROVIDERS=${SUBTITLE_PROVIDERS:-podnapisi gestdown tvsubtitles yifysubtitles}
 
 wire_bazarr() {
@@ -429,18 +382,11 @@ wire_bazarr() {
   cur=$(curl -sf -H "X-API-KEY: $bk" "$B/system/settings") || { later "bazarr: unreachable"; return; }
 
   # Everything below is sent on every run, not only when Bazarr is unconfigured.
-  # It used to return early once use_radarr was true, which is why Bazarr spent
-  # the time since the renumber pointed at 10.100.0.129 - Prowlarr - and every
-  # sync died on Prowlarr's answer to a Radarr URL:
-  #   JSONDecodeError: Expecting value: line 1 column 1 (char 0)
-  #     ... in radarr/rootfolder.py, get_radarr_rootfolder
   local profile items i=0 lang
   items=""
   for lang in $SUBTITLE_LANGUAGES; do
     i=$((i + 1))
-    # audio_only_include is not optional: without it every indexer run dies
-    # with KeyError: 'audio_only_include' in list_missing_subtitles_movies,
-    # and the settings POST that triggers one answers 500.
+    # audio_only_include is not optional: without it every indexer run dies with KeyError
     items="$items${items:+,}$(jq -cn --arg l "$lang" --argjson id "$i" \
       '{id: $id, language: $l, audio_exclude: "False", audio_only_include: "False",
         hi: "False", forced: "False"}')"
@@ -476,11 +422,7 @@ wire_bazarr() {
     return
   fi
 
-  # Bazarr reads the languages profile once at start, so a film synced before
-  # the profile changed keeps reporting nothing missing until it restarts -
-  # which is exactly how "no subtitles, and none wanted either" looked. Its own
-  # endpoint, because this script runs on another VM and cannot touch the
-  # container.
+  # Bazarr reads the languages profile once at start
   if [ "$(echo "$cur" | jq -r '[.radarr.ip, .sonarr.ip] | join(",")')" != "$RADARR_HOST,$SONARR_HOST" ]; then
     echo "bazarr: corrected the Radarr/Sonarr addresses, restarting it to reload the profile"
     curl -sf -X POST -H "X-API-KEY: $bk" "$B/system?action=restart" >/dev/null || true
@@ -488,9 +430,7 @@ wire_bazarr() {
   echo "bazarr: ${SUBTITLE_LANGUAGES// /+} subtitles from ${SUBTITLE_PROVIDERS// /, }"
 }
 
-# Prowlarr needs its own download client: "Grab" in its search UI hands the
-# release to Prowlarr, not to an *arr, so without one the button silently does
-# nothing. No root folders: Prowlarr does not manage files.
+# Prowlarr needs its own download client: "Grab" in its search UI hands the release
 wire_servarr prowlarr  "http://$PROWLARR_HOST:$PROWLARR_PORT"   v1 category     prowlarr
 wire_servarr radarr    "http://$RADARR_HOST:$RADARR_PORT"       v3 movieCategory radarr    /data/media/movies
 wire_jellyfin_notify radarr "http://$RADARR_HOST:$RADARR_PORT"

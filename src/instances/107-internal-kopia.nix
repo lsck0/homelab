@@ -93,10 +93,6 @@ in {
   networking.hostName = "vm-107";
 
   # whole NAS tree (the NAS exports /srv/nas to this VM only), except /bulk.
-  # The repository lives on the same disk: survives deletion, bad deploys and
-  # bitrot, not a host/disk loss. Add a remote repository sync for real 3-2-1.
-  #
-  # /bulk is media that can be fetched again; anything that matters is in /data.
   fileSystems = nasPath source "";
 
   # same secret the old restic setup used; only the name changed.
@@ -134,8 +130,7 @@ in {
     '';
   };
 
-  # server + web UI. Scheduled snapshots and maintenance run inside the server.
-  # no own auth: port 51515 only accepts internal Traefik, which puts Authelia in front.
+  # server + web UI.
   systemd.services.kopia-server = {
     description = "Kopia server and web UI";
     after = [ "kopia-init.service" ];
@@ -149,8 +144,7 @@ in {
     '';
   };
 
-  # dead-man metric for the Grafana "backup stale" alert: age of the newest
-  # snapshot of the NAS, written for the node-exporter textfile collector.
+  # dead-man metric for the Grafana "backup stale" alert: age of the newest snapshot
   systemd.services.kopia-metrics = {
     description = "Publish Kopia snapshot freshness";
     after = [ "kopia-init.service" ];
@@ -178,21 +172,15 @@ in {
     timerConfig = { OnBootSec = "10m"; OnUnitActiveSec = "15m"; };
   };
 
-  # the Kopia server runs --without-password: internal Traefik (Authelia in
-  # front) and Homepage are the only callers allowed.
+  # the Kopia server runs --without-password: internal Traefik (Authelia in front) and Homepage
   networking.firewall.allowedTCPPorts = [ 51515 ];
   homelab.ingressOnly.ports = [ 51515 ];
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # OFF-SITE: PROTON DRIVE
-  # ─────────────────────────────────────────────────────────────────────────────
-  # The Kopia repository above lives on the same disk as the data it protects,
-  # so it survives a bad deploy but not a dead disk. This carries the two trees
-  # that cannot be re-downloaded off the box.
+  # OFF-SITE: PROTON DRIVE The Kopia repository above lives on the same disk as the data
   sops.secrets.proton-username = {};
   sops.secrets.proton-password = {};
-  # the TOTP *seed* from Proton's 2FA setup, not a 6-digit code: rclone derives
-  # the code itself, so the sync needs nobody present.
+  # the TOTP *seed* from Proton's 2FA setup, not a 6-digit code: rclone derives the code
   sops.secrets.proton-totp-secret = {};
 
   systemd.services.proton-sync = {

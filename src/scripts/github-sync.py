@@ -21,8 +21,7 @@ USER = os.environ.get("GITHUB_USER", "lsck0")
 TOKEN_FILE = os.environ.get("GITHUB_TOKEN_FILE")
 TIMEOUT = 30
 
-# Rows each list can show before it is cut. The CI list gets the most because
-# it is the only one with real volume; see the module docstring.
+# Rows each list can show before it is cut.
 CI_ROWS = int(os.environ.get("GITHUB_CI_ROWS", "9"))
 # two columns of 16 fill the wide box exactly; every repo gets a row.
 REPO_ROWS = int(os.environ.get("GITHUB_REPO_ROWS", "32"))

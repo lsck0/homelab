@@ -18,10 +18,6 @@
       FORGEJO__security__INSTALL_LOCK = "true";
       FORGEJO__actions__ENABLED = "true";
       # SSO-only: no self-service signup, and nothing is visible without logging
-      # in (kills anonymous browsing). Accounts are created only by the Authelia
-      # OAuth source (auto-register); the local login form stays only as a
-      # break-glass admin. Basic-auth git-over-HTTP is disabled: use SSH or a
-      # personal access token.
       FORGEJO__service__DISABLE_REGISTRATION = "true";
       FORGEJO__service__ALLOW_ONLY_EXTERNAL_REGISTRATION = "true";
       FORGEJO__service__REQUIRE_SIGNIN_VIEW = "true";
@@ -33,9 +29,7 @@
     };
   };
 
-  # create the initial admin user if Forgejo has no users yet.
-  # idempotent: exits immediately if any user already exists.
-  # password retrieved from SOPS; login via Authelia SSO is the normal path.
+  # create the initial admin user if Forgejo has no users yet. idempotent: exits immediately
   systemd.services.forgejo-init = {
     description = "Initialise Forgejo admin user";
     after = [ "podman-forgejo.service" ];
@@ -210,13 +204,7 @@
   };
 
   # ---- GitHub mirrors -------------------------------------------------------
-  # GitHub stays the place repositories are pushed to; Forgejo keeps a pull
-  # mirror of each one, so there is a second copy on hardware here that Kopia
-  # snapshots with the rest of the NAS. The mirrors are read-only, so a broken
-  # one can never leave GitHub stale.
-  #
-  # The token needs the `repo` scope, because the account has private
-  # repositories and a mirror of only the public half is not a backup.
+  # GitHub stays the place repositories are pushed to; Forgejo keeps a pull mirror of each one
   sops.secrets.github-mirror-token = {};
 
   systemd.services.forgejo-mirror = {
@@ -244,7 +232,7 @@
       # The name carries a timestamp because Forgejo refuses a duplicate with
       # "access token name has been used already", and a run that creates the
       # token but fails to capture it would otherwise never be able to retry.
-      # The value is the last field of "Access token was successfully
+      # The value is the last field of
       # created: <token>", and it is checked before it is stored rather than
       # after: writing an empty file here is what makes every later run fail
       # on a name that is already taken.
@@ -264,8 +252,7 @@
     '';
   };
 
-  # Daily: Forgejo does the fetching itself on MIRROR_INTERVAL, so all this has
-  # to catch is a repository that appeared on GitHub since the last run.
+  # Daily: Forgejo does the fetching itself on MIRROR_INTERVAL
   systemd.timers.forgejo-mirror = {
     wantedBy = [ "timers.target" ];
     timerConfig = {

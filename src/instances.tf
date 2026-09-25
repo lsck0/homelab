@@ -1,5 +1,4 @@
-# VM inventory. One entry per VM; field reference and defaults in lib.tf.
-# Nix config for each VM lives in src/instances/<name>.nix.
+# VM inventory.
 
 locals {
   instances = {
@@ -35,14 +34,9 @@ locals {
       enabled = true,
       name    = "105-internal-grafana",
       type    = "internal",
-      # Four services, not one: Prometheus (30d retention), Loki, Tempo,
-      # Grafana, plus the blackbox prober. 1024 was read off a measurement of
-      # 984 MiB, but that VM was sitting *at* its ceiling, which says the
-      # ceiling was the limit rather than the need. Squeezed to the 512 floor
-      # by the balloon it thrashed until sshd stopped answering.
+      # Four services, not one: Prometheus (30d retention), Loki, Tempo, Grafana
       memory = 3072,
-      # An explicit floor rather than half: the TSDB head and Loki's chunks are
-      # working memory, and reclaiming them is what made it unresponsive.
+      # An explicit floor rather than half: the TSDB head and Loki's chunks are working memory
       balloon = 2048,
     }
     "107" = { # backups: Kopia server + web UI, snapshots the NAS
@@ -60,18 +54,9 @@ locals {
       type       = "internal",
       boot_order = 2,
       memory     = 2048,
-      # root disk on the NVMe pool: service state, backups and documents - the
-      # things that are small and want to be fast. Media does not live here.
+      # root disk on the NVMe pool: service state, backups and documents - the things
       disk = 750,
-      # Bulk storage on the 2 TB spinning disk. One filesystem for media *and*
-      # torrents, deliberately: the *arr stack imports a finished download by
-      # hardlinking it into the library, and a hardlink cannot cross a
-      # filesystem. Split them and every film is stored twice - which is what
-      # was happening here, at a cost of 129 GiB.
-      # Empty until the spinning disk has been handed over: var.bulk_datastore
-      # is "" by default, so a lab whose bulk storage does not exist yet still
-      # applies cleanly instead of failing on a datastore Proxmox has never
-      # heard of. Set it in terraform.tfvars once pve-install.sh has built it.
+      # Bulk storage on the 2 TB spinning disk.
       extra_disks = var.bulk_datastore == "" ? [] : [{ size = 1800, datastore = var.bulk_datastore }],
     }
     "110" = { # Nix binary cache (substituter)
@@ -97,11 +82,7 @@ locals {
       enabled = true,
       name    = "114-internal-hermes",
       type    = "internal",
-      # VFIO pins the guest's whole RAM up front, so this VM costs its full
-      # `memory` the moment it boots and balloon has to be off. At the old
-      # 12288 it would not start on a host with ~6 GB free; qwen3:8b lives in
-      # the card's 6 GB of VRAM, so the guest only needs room for the OS and
-      # the ollama server.
+      # VFIO pins the guest's whole RAM up front, so this VM costs its full `memory` the moment
       memory  = 5120,
       balloon = 0,
       cores   = 4,
@@ -123,14 +104,11 @@ locals {
       memory  = 1024,
     }
     "117" = { # CI runners for GitHub repos (ephemeral, one systemd unit per replica)
-      # github-runner-token is the gh CLI's own gho_ token; the runner module
-      # only detects ghp_/github_pat_ as a PAT, so vm-117 mints a registration
-      # token from it per start. `gh auth login` rotates it.
+      # github-runner-token is the gh CLI's own gho_ token; the runner module only detects
       enabled = true,
       name    = "117-internal-github-runner",
       type    = "internal",
-      # four .NET listeners plus docker. At the 1024/512 default the VM ran at
-      # 452 MB and registration timed out mid-authentication while thrashing.
+      # four .NET listeners plus docker.
       memory  = 4096,
       balloon = 2048,
       cores   = 4,
@@ -146,8 +124,7 @@ locals {
       enabled = true,
       name    = "121-internal-paperless",
       type    = "internal",
-      # OCR plus its own Postgres. Squeezed toward a 768 floor it thrashed;
-      # give it a ceiling with room and a floor it can actually work in.
+      # OCR plus its own Postgres.
       memory  = 2048,
       balloon = 1536,
     }
@@ -169,21 +146,17 @@ locals {
       enabled = true,
       name    = "125-internal-homeassistant",
       type    = "internal",
-      # Home Assistant is a large Python process with dozens of integrations;
-      # squeezed toward the 512 balloon floor it thrashed hard enough that sshd
-      # stopped answering during startup.
+      # Home Assistant is a large Python process with dozens of integrations; squeezed toward
       memory  = 2048,
       balloon = 1536,
-      # Home Assistant's image alone does not fit in 8 GiB: the pull failed
-      # with "no space left on device" and the container never started.
+      # Home Assistant's image alone does not fit in 8 GiB: the pull failed with
       disk = 16,
     }
     "126" = { # automation agents / scraping
       enabled = true,
       name    = "126-internal-huginn",
       type    = "internal",
-      # Rails plus its own Postgres; measured at 1003 MiB, i.e. at the old
-      # ceiling. Migrations thrash hard enough to take sshd down.
+      # Rails plus its own Postgres; measured at 1003 MiB, i.e. at the old ceiling.
       memory  = 2048,
       balloon = 1536,
       # the huginn image plus its Postgres left 396 MiB free on an 8 GiB disk.
@@ -245,9 +218,7 @@ locals {
       memory  = 1024,
     }
     "138" = { # Tailscale control server (VPN mesh) + Headplane UI
-      # Internal, not the DMZ: it decides which machines are on the mesh, so it
-      # is a trust anchor rather than something to expose alongside the public
-      # services. The external Traefik relays it in for client registration.
+      # Internal, not the DMZ: it decides which machines are on the mesh
       enabled = true,
       name    = "138-internal-headscale",
       type    = "internal",
@@ -266,9 +237,7 @@ locals {
       enabled = true,
       name    = "202-external-tor-relay",
       type    = "external",
-      # A public relay, not a client: it carries other people's circuits, and
-      # its working set was measured at 1028 MiB - above the ceiling it had.
-      # Left on the 768 default it OOM-killed tor every few seconds.
+      # A public relay, not a client: it carries other people's circuits
       memory  = 1536,
       balloon = 1024,
     }

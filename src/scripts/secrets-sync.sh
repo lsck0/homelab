@@ -1,15 +1,5 @@
 #!/usr/bin/env bash
-# Reconcile src/secrets.json with the keys the NixOS configs actually read.
-#
-#   generated   created here with a random value when missing, never touched again
-#   manual      created empty when missing; fill with `sops src/secrets.json`
-#   anything else in the file is unused and is removed
-#
-# Idempotent: existing values are preserved. Run after adding or dropping a
-# `sops.secrets.<name>` in src/instances/ or src/modules/.
-#
-#   src/scripts/secrets-sync.sh            show what would change
-#   src/scripts/secrets-sync.sh --apply    write and re-encrypt
+# Reconcile src/secrets.json with the keys the NixOS configs actually read. generated created
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -42,8 +32,7 @@ MANUAL=(
   hermes-gemini-api-key hermes-glm-api-key
   github-runner-token
   wireguard-private-key firefly-app-key
-  # off-site backup (vm-107). proton-totp-secret is the TOTP seed from Proton's
-  # 2FA setup, not a 6-digit code.
+  # off-site backup (vm-107). proton-totp-secret is the TOTP seed from Proton's 2FA setup
   proton-username proton-password proton-totp-secret
 )
 

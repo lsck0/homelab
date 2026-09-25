@@ -1,21 +1,12 @@
 { config, lib, inventory, ... }:
 let
-  # "vm-136" -> the inventory entry for 135 (address from src/lib.tf); null for
-  # hosts outside the inventory naming, like the router, which configures itself.
+  # "vm-136" -> the inventory entry for 135 (address from src/lib.tf); null for hosts outside
   match = builtins.match "vm-([0-9]+)" config.networking.hostName;
   vm = if match == null then null else inventory.${builtins.head match} or null;
 
   cfg = config.homelab.ingressOnly;
 
-  # who may talk to a guarded port. Everything else is refused even from the
-  # LAN: a service whose own login is switched off must only ever be reached
-  # through a Traefik route, and every such route carries Authelia.
-  #
-  #   loopback + container bridges  the app's own setup units and health checks
-  #   10.100.0.100 / 10.200.0.200   internal / external Traefik (the ingress)
-  #   10.100.0.103                  Homepage widgets (API keys, read-only)
-  #   10.100.0.105                  blackbox probes from Prometheus
-  #   10.100.0.114                  Hermes (has root on every VM anyway)
+  # who may talk to a guarded port.
   trustedSources = [
     "127.0.0.0/8"
     "10.88.0.0/16"     # podman default bridge
@@ -23,10 +14,7 @@ let
     "10.100.0.100/32"
     "10.200.0.200/32"
     "10.100.0.103/32"
-    # The prober. This was 10.100.0.106 when Uptime Kuma owned the checks; the
-    # address changed when blackbox_exporter replaced it on the Grafana VM and
-    # the entry did not, so every ingressOnly service reported down while
-    # answering perfectly well to everything else.
+    # The prober.
     "10.100.0.105/32"
     "10.100.0.114/32"
   ] ++ cfg.extraSources;
@@ -74,14 +62,10 @@ in {
       networking.defaultGateway = { address = vm.gateway; interface = "eth0"; };
       networking.nameservers = [ vm.gateway ];
 
-      # a fresh VM boots as "nixos"; switching does not rename the running kernel,
-      # so logs shipped by hostname would say nixos until reboot.
+      # a fresh VM boots as "nixos"; switching does not rename the running kernel
       system.activationScripts.hostname = "echo ${config.networking.hostName} > /proc/sys/kernel/hostname";
 
-      # network-setup adds the default route and gives up permanently if the
-      # interface is not up yet ("Error: Device for nexthop is not up"), which
-      # leaves the VM with no address and unreachable until someone notices.
-      # vm-121 sat like that through two syncs. Retry instead of one-shot.
+      # network-setup adds the default route and gives up permanently if the interface
       systemd.services.network-setup = {
         startLimitIntervalSec = 0;
         serviceConfig = {
@@ -98,18 +82,13 @@ in {
           message = "homelab.ingressOnly.ports must not contain 22 or 9100: SSH and node-exporter are the recovery path.";
         }
         {
-          # the rules below are iptables. With the nftables backend the firewall
-          # module ignores extraCommands, so the ports would silently stay open
-          # to the whole LAN instead of failing loudly.
+          # the rules below are iptables.
           assertion = !config.networking.nftables.enable;
           message = "homelab.ingressOnly uses networking.firewall.extraCommands (iptables); port this module to extraInputRules before enabling networking.nftables on ${config.networking.hostName}.";
         }
       ];
 
-      # own chain jumped into at the top of nixos-fw, so it is evaluated before
-      # the accept rules the allowedTCPPorts option generates. A trusted source
-      # RETURNs immediately and is then handled normally; anything else is
-      # refused for the guarded ports only.
+      # own chain jumped into at the top of nixos-fw
       networking.firewall.extraCommands = ''
         iptables -N homelab-ingress 2>/dev/null || iptables -F homelab-ingress
         ${lib.concatMapStrings (s: ''

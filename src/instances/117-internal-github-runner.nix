@@ -4,31 +4,19 @@ let
   runnerPackage = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-runner;
 
   # ───────────────────────────────────────────────────────────────────────────
-  # ADD OR REMOVE A REPO HERE. Nothing else changes.
-  # ───────────────────────────────────────────────────────────────────────────
-  # <owner>/<repo> = how many jobs that repo may run at the same time. Each
-  # replica is its own systemd unit and its own registered runner, so two
-  # workflows in one repo (or two repos) run in parallel instead of queueing.
-  #
-  # Target them from a workflow with:
-  #   runs-on: [self-hosted, nixos]
+  # ADD OR REMOVE A REPO HERE.
   repos = {
     "lsck0/homelab" = 2;
     "lsck0/arch-dotfiles" = 1;
     "lsck0/webapp-template" = 1;
   };
 
-  # a token with Administration: read and write on those repos (sops:
-  # github-runner-token), used only to mint registration tokens below.
+  # a token with Administration: read and write on those repos (sops: github-runner-token)
   apiTokenFile = config.sops.secrets.github-runner-token.path;
 
   slug = repo: lib.replaceStrings [ "/" ] [ "-" ] (lib.toLower repo);
 
-  # The module treats the token file as a PAT only when it starts with "ghp_" or
-  # "github_pat_"; ours is a "gho_" OAuth token, so it was passed as a
-  # registration token and the runner got 404 from /actions/runner-registration.
-  # Mint a real registration token per start instead: ephemeral runners restart
-  # after every job, so the 1 h expiry never bites.
+  # The module treats the token file as a PAT only when it starts with "ghp_" or "github_pat_"
   regTokenDir = "/run/github-runner-regtoken";
   regTokenFile = name: "${regTokenDir}/${name}";
 
@@ -59,20 +47,16 @@ let
       name = "vm-117-${slug repo}-${toString n}";
       tokenFile = regTokenFile "${slug repo}-${toString n}";
 
-      # one job per runner process, then it de-registers, wipes its state
-      # directory and registers again. A job therefore never sees another job's
-      # checkout, credentials or leftover containers.
+      # one job per runner process, then it de-registers
       ephemeral = true;
 
-      # take over a stale registration with the same name instead of refusing to
-      # start (happens after this VM is rebuilt or rolled back).
+      # take over a stale registration with the same name instead of refusing to start
       replace = true;
 
       extraLabels = [ "nixos" "homelab" ];
       user = "github-runner";
       group = "github-runner";
-      # No workDir: it defaults to the runtime dir, and setting it to the state
-      # dir made the module symlink every credential file onto itself.
+      # No workDir: it defaults to the runtime dir, and setting it to the state dir made
 
       # what a workflow can reasonably expect on the PATH without installing it.
       extraPackages = with pkgs; [
@@ -90,8 +74,7 @@ let
       };
 
       serviceOverrides = {
-        # CI is bursty and this VM is shared: keep one job from starving the rest
-        # of the box, and stop a hung job from holding a runner forever.
+        # CI is bursty and this VM is shared: keep one job from starving the rest of the box
         CPUWeight = 50;
         IOWeight = 50;
         MemoryHigh = "2G";
@@ -105,20 +88,6 @@ in {
   networking.hostName = "vm-117";
 
   # General-purpose GitHub Actions runners, one registration per repo replica.
-  #
-  # Why not Kubernetes with actions-runner-controller: ARC's value is elastic
-  # capacity across a pool of nodes, and it buys that with a control plane to
-  # run and upgrade. There is one node here. Ephemeral runners already give the
-  # two properties that matter - a clean machine per job and N jobs in parallel -
-  # for the price of N idle listener processes (tens of MB each), with no new
-  # moving parts and no second scheduler to keep alive.
-  #
-  # Why this VM is always on: an on-demand VM is woken by the Traefik socket
-  # proxy on an inbound request, and a queued GitHub job never touches our
-  # ingress - the runner reaches out to GitHub. Waking it on demand would mean
-  # a public webhook receiver in the DMZ that starts the VM on
-  # `workflow_job.queued` and something to stop it again; until that exists,
-  # this is a 4 GB VM whose idle cost is the listener processes above.
 
   users.users.github-runner = {
     isSystemUser = true;
@@ -140,8 +109,7 @@ in {
     };
   };
 
-  # the internal registry (vm-118) serves plain HTTP: allow it explicitly rather
-  # than making every registry insecure.
+  # the internal registry (vm-118) serves plain HTTP: allow it explicitly rather than making
   virtualisation.docker.daemon.settings.insecure-registries = [
     "10.100.0.118:5000"
     "registry.lsck0.dev"
@@ -172,13 +140,10 @@ in {
 
   systemd.services = lib.mapAttrs' (n: repo: lib.nameValuePair "github-runner-${n}" {
     serviceConfig = {
-      # "+": as root and outside the sandbox, so it can read the sops secret, and
-      # first in the list so the module's pre-start sees a fresh token.
+      # "+": as root and outside the sandbox, so it can read the sops secret
       ExecStartPre = lib.mkBefore [ "+${mintToken n repo}" ];
 
-      # The module emits these with no "-" prefix, but its own unconfigure.sh
-      # pre-start deletes them, so namespace setup fails 226/NAMESPACE before
-      # configure.sh can recreate them. Re-add both as optional.
+      # The module emits these with no "-" prefix, but its own unconfigure.sh pre-start deletes
       InaccessiblePaths = lib.mkForce [
         "-${regTokenFile n}"
         "-/var/lib/github-runner/${n}/.current-token"

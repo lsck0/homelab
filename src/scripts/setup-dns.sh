@@ -1,10 +1,5 @@
 #!/usr/bin/env bash
-# Split DNS setup for homelab
-# Routes *.lsck0.dev queries to the homelab router (CoreDNS)
-# Everything else uses default DNS
-#
-# Requires: NetworkManager + dnsmasq
-# Usage: sudo ./setup-dns.sh
+# Split DNS setup for homelab Routes *.lsck0.dev queries to the homelab router (CoreDNS)
 
 set -euo pipefail
 

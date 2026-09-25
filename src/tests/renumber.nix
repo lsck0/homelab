@@ -1,8 +1,4 @@
-# The on-host part of src/scripts/renumber.sh: renaming VMs in place on
-# Proxmox storage. Real LVM thin volumes (data + a snapshot) and a directory
-# storage; `qm` and `pvesm` are stubs that read /etc/pve like Proxmox does.
-# Ids collide (105 -> 108 while 108 -> 115 exists), which is why the script goes
-# through temporary 9xxx ids.
+# The on-host part of src/scripts/renumber.sh: renaming VMs in place on Proxmox storage.
 { pkgs, ... }:
 let
   stubs = pkgs.runCommand "pve-stubs" { } ''

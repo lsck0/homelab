@@ -4,14 +4,7 @@
   # attic client, for creating the cache + reading its public key on this host.
   environment.systemPackages = [ pkgs.attic-client ];
 
-  # attic: a Nix binary cache shared across every VM and the Forgejo runner, so
-  # a closure built once (during a deploy) is fetched, not rebuilt, everywhere
-  # else. sccache only covers Rust; this covers all Nix builds.
-  #
-  # storage is on the VM's local 40 GB disk. atticd runs under a DynamicUser
-  # StateDirectory, and mounting NFS inside that dir fails with "Device or
-  # resource busy" (the id-mapped mount clashes); a NAS stall would also wedge
-  # the cache. Local disk sidesteps both.
+  # attic: a Nix binary cache shared across every VM and the Forgejo runner
   sops.secrets.attic-server-token = {};
   sops.templates."atticd.env".content = ''
     ATTIC_SERVER_TOKEN_HS256_SECRET_BASE64=${config.sops.placeholder.attic-server-token}

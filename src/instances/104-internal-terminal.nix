@@ -1,19 +1,11 @@
 { config, pkgs, lib, inventory, nasMount, ... }:
 let
-  # Everything the e-ink terminal displays: the calendar, the homelab stats and
-  # the arXiv feed. They started out scattered - the calendar had a VM of its
-  # own and the other two were bolted onto the monitoring host - which meant
-  # two hosts, two tokens and two sets of nginx rules for one screen.
-  #
-  # Every feed is plain JSON under one unguessable path, served on its own port
-  # and relayed out by the external Traefik, because the TRMNL cloud polls them
-  # and cannot log in.
+  # Everything the e-ink terminal displays: the calendar, the homelab stats and the arXiv feed.
   terminalDir = "/var/lib/terminal";
   terminalPublic = "${terminalDir}/public";
   terminalPort = 8081;
 
-  # the collector needs to know which VMs are meant to exist; Prometheus alone
-  # cannot tell a retired target from a VM that is down right now.
+  # the collector needs to know which VMs are meant to exist; Prometheus alone cannot tell
   terminalInventory = pkgs.writeText "inventory.json" (builtins.toJSON inventory);
 
   statsSync = pkgs.writers.writePython3Bin "stats-sync" {
@@ -28,10 +20,8 @@ let
     flakeIgnore = [ "E501" ];
   } (builtins.readFile ../scripts/arxiv-sync.py);
 
-  # ---- calendar, moved here from vm-120 -------------------------------------
-  # The calendar is one dashboard among several now, so it lives with the rest
-  # of them rather than on a host of its own. Its working state stays on the
-  # same NAS share, so nothing had to be migrated; only the feed URLs moved.
+  # ---- calendar -------------------------------------------------------------
+  # The calendar is one dashboard among several now
   calendarState = "/var/lib/calendar";
   incomingDir = "${calendarState}/incoming";
   uploadDir = "${calendarState}/uploads";
@@ -39,9 +29,7 @@ let
   # kraken pair codes, not the display symbols: XXBTZEUR is BTC/EUR.
   krakenPairs = "XXBTZEUR,XETHZEUR";
 
-  # Calendars that cannot be subscribed to, only exported by hand. The work
-  # Outlook tenant blocks calendar publishing, so there is no URL to poll: the
-  # .ics is pushed here instead and read back as a file:// source.
+  # Calendars that cannot be subscribed to, only exported by hand.
   uploadNames = [ "work" ];
 
   promote = pkgs.writers.writePython3Bin "calendar-promote" {
@@ -86,25 +74,20 @@ let
 in {
   networking.hostName = "vm-104";
 
-  # every feed's working state lives on the NAS, so this VM holds nothing that
-  # matters: the calendar share came with the service when it moved off vm-120.
+  # every feed's working state lives on the NAS, so this VM holds nothing that matters
   fileSystems = nasMount calendarState "calendar"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   sops.secrets = {
-    # one URL per line as "NAME|URL". Work Outlook and Proton both hand out a
-    # published ICS link; StudIP exports one per calendar.
+    # one URL per line as "NAME|URL".
     calendar-sources = {};
-    # separate from the read token: a leaked feed URL must not also grant the
-    # ability to overwrite a calendar.
+    # separate from the read token: a leaked feed URL must not also grant the ability
     calendar-upload-token = {};
     kraken-api-key = {};
     kraken-api-secret = {};
     # write token for the TRMNL plugins: it can replace what the panels show.
     trmnl-api-key = {};
     # read-only use here: the GitHub panel lists repos, CI state and open work.
-    # Shared with the mirror job rather than minted separately, because it is
-    # the same account and the same scopes.
     github-mirror-token = { owner = "nginx"; };
   };
 
@@ -123,15 +106,10 @@ in {
         add_header Cache-Control "no-cache";
       '';
 
-      # push endpoint for calendars that cannot be subscribed to:
-      #   curl -T work.ics https://terminal.lsck0.dev/upload/<upload-token>/work.ics
-      # Only the names in uploadNames are accepted, only PUT, and only into the
-      # token directory, which calendar-upload-dir creates. nginx refuses a PUT
-      # whose parent directory is missing, so a wrong token cannot write.
+      # push endpoint for calendars that cannot be subscribed to: curl -T work.ics
       locations."~ ^/upload/[^/]+/(${lib.concatStringsSep "|" uploadNames})\\.ics$" = {
         root = incomingDir;
-        # must be emitted before any other regex location: nginx takes the
-        # first match, and a static handler answers a PUT with 405.
+        # must be emitted before any other regex location: nginx takes the first match
         priority = 100;
         extraConfig = ''
           limit_except PUT { deny all; }
@@ -188,8 +166,7 @@ in {
     '';
   };
 
-  # arXiv announces once a day, so hourly is already generous; it exists to
-  # catch the batch soon after it lands rather than to poll for changes.
+  # arXiv announces once a day, so hourly is already generous; it exists to catch the batch
   systemd.services.arxiv-sync = {
     description = "Fetch today's arXiv mathematics announcements";
     after = [ "terminal-token.service" "network-online.target" ];
@@ -206,14 +183,7 @@ in {
     '';
   };
 
-  # The .liquid files in this repo are the dashboards, and nothing used to
-  # carry them anywhere - every change was uploaded by hand. That made the
-  # panels the one part of the lab whose visible behaviour lived outside git:
-  # rebuild from scratch and they would keep whatever had last been pasted in.
-  #
-  # Plugin ids come from the TRMNL account and are not derivable from
-  # anything here, so they are written down. A plugin created later needs a
-  # line adding; nothing else does.
+  # The .liquid files in this repo are the dashboards
   systemd.services.trmnl-sync = {
     description = "Push the dashboard templates to TRMNL";
     after = [ "network-online.target" ];
@@ -221,8 +191,7 @@ in {
     path = [ pkgs.python3 ];
     serviceConfig = {
       Type = "oneshot";
-      # TRMNL is someone else's service; a bad afternoon there should not
-      # leave the templates permanently unsent.
+      # TRMNL is someone else's service; a bad afternoon there should not leave the templates
       Restart = "on-failure";
       RestartSec = 600;
       TimeoutStartSec = "10min";
@@ -240,9 +209,7 @@ in {
     '';
   };
 
-  # On boot and daily. The templates change when someone edits them and a
-  # deploy restarts this unit, so the timer is only a backstop for a push
-  # that failed while TRMNL was unreachable.
+  # On boot and daily.
   systemd.timers.trmnl-sync = {
     description = "Keep the TRMNL plugins on this repo's templates";
     wantedBy = [ "timers.target" ];
@@ -254,9 +221,7 @@ in {
     };
   };
 
-  # GitHub: commits, repos, CI state and open work. Hourly - the panel is a
-  # glance at the day, not a notifier, and six API calls an hour is nothing
-  # against the 5000 limit.
+  # GitHub: commits, repos, CI state and open work.
   systemd.services.github-sync = {
     description = "Collect GitHub activity for the TRMNL terminal";
     after = [ "terminal-token.service" "network-online.target" ];
@@ -305,9 +270,7 @@ in {
     serviceConfig.Type = "oneshot";
     environment = {
       CALENDAR_SOURCES = config.sops.secrets.calendar-sources.path;
-      # a personal calendar is sparse: a short window renders an empty screen
-      # whenever the next appointment is more than a fortnight out. Look far
-      # ahead and cap the count instead, so the screen shows what is next.
+      # a personal calendar is sparse: a short window renders an empty screen whenever the next
       CALENDAR_HORIZON_DAYS = "90";
       CALENDAR_MAX_EVENTS = "12";
       KRAKEN_PAIRS = krakenPairs;
@@ -332,10 +295,7 @@ in {
     };
   };
 
-  # nginx accepts PUT only into a directory named after the upload token, and
-  # never creates one (no create_full_put_path), so a wrong token is a 409
-  # rather than a write. Same trick as the read side: the token stays out of the
-  # Nix store, which is world readable.
+  # nginx accepts PUT only into a directory named after the upload token
   systemd.services.calendar-upload-dir = {
     description = "Create the token-named upload directory";
     wantedBy = [ "multi-user.target" ];
@@ -362,18 +322,10 @@ in {
     '';
   };
 
-  # the NixOS nginx unit runs with ProtectSystem=strict, so the whole filesystem
-  # is read-only to it apart from an allowlist. Without this the DAV PUT fails
-  # with "open() ... failed (30: Read-only file system)" and returns 500.
+  # the NixOS nginx unit runs with ProtectSystem=strict
   systemd.services.nginx.serviceConfig.ReadWritePaths = [ incomingDir terminalDir ];
 
-  # promote a pushed file to uploads/ as soon as it parses, then re-render so
-  # the screen reflects the push within seconds instead of at the next timer.
-  # A timer, not a systemd.path: the PUT lands in incoming/<token>/, and
-  # DirectoryNotEmpty on incoming/ is satisfied permanently by that token
-  # directory, so it never fires again after the first boot. Watching the token
-  # directory itself is not possible either, since its name is a secret and unit
-  # files are built into the world-readable Nix store.
+  # promote a pushed file to uploads/ as soon as it parses
   systemd.timers.calendar-upload = {
     wantedBy = [ "timers.target" ];
     timerConfig = {
@@ -411,7 +363,6 @@ in {
 
   networking.firewall.allowedTCPPorts = [ terminalPort ];
 
-  # the feeds carry no secret beyond the token in their path, but there is no
-  # reason for anything except the ingress to read them.
+  # the feeds carry no secret beyond the token in their path
   homelab.ingressOnly.ports = [ terminalPort ];
 }

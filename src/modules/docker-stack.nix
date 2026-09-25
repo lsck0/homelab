@@ -4,10 +4,7 @@ let
 
   stackFile = name: pkgs.writeText "stack-${name}.yaml" cfg.stacks.${name};
 
-  # log in to every registry that has credentials, then deploy all stacks.
-  # --resolve-image always pins each service to the tag's current digest, so a
-  # re-deploy only changes (and rolling-updates) services whose image was
-  # pushed since the last run. Unchanged services are left alone.
+  # log in to every registry that has credentials, then deploy all stacks. --resolve-image
   deployScript = pkgs.writeShellScript "swarm-deploy" ''
     set -uo pipefail
     export PATH="${lib.makeBinPath [ pkgs.docker pkgs.coreutils pkgs.gnugrep pkgs.gawk ]}"

@@ -2,17 +2,7 @@
 let
   T = "/var/lib/homepage-tokens";
 
-  # public indexers added to Prowlarr on first run (Prowlarr definition names).
-  # nyaasi covers anime, knaben is a meta-index. eztv answers 451 (blocked for
-  # legal reasons) from Germany. Add private trackers in the Prowlarr UI; they
-  # sync to every *arr automatically.
-  # Public indexers, by Prowlarr definition name. The first five carry films,
-  # series and anime; the last three are the book-shaped ones, because the
-  # general trackers list a Books category but barely fill it.
-  #
-  # Libgen and Anna's Archive are not here and cannot be: they are direct
-  # download sites rather than trackers, Prowlarr dropped its Libgen
-  # definition, and nothing in this stack can fetch an http .epub anyway.
+  # public indexers added to Prowlarr on first run (Prowlarr definition names). nyaasi covers
   indexers = [
     "nyaasi" "yts" "thepiratebay" "limetorrents" "Knaben"
     "ebookbay" "internetarchive" "postman"
@@ -42,10 +32,7 @@ let
 in {
   networking.hostName = "vm-133";
 
-  # media automation host, no web UI:
-  #   arr-wire   connects qBittorrent/Prowlarr/Jellyseerr/Bazarr to the *arrs
-  #   recyclarr  syncs TRaSH-guide quality definitions into Radarr/Sonarr
-  # Both read the API keys the other VMs export to the NAS token dir.
+  # media automation host, no web UI: arr-wire connects qBittorrent/Prowlarr/Jellyseerr/Bazarr
   fileSystems = nasMount T "homepage-tokens";
 
   systemd.services.arr-wire = {

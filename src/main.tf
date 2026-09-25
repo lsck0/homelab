@@ -9,7 +9,6 @@ terraform {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PROXMOX CONNECTION
-# ─────────────────────────────────────────────────────────────────────────────
 variable "proxmox_api_url" { type = string }
 variable "proxmox_api_token_id" { type = string }
 variable "proxmox_api_token_secret" {
@@ -45,7 +44,6 @@ variable "proxmox_ssh_password" {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # VM DEFAULTS
-# ─────────────────────────────────────────────────────────────────────────────
 variable "ssh_public_key" { type = string }
 variable "nixos_image_id" {
   type    = string
@@ -54,7 +52,6 @@ variable "nixos_image_id" {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # NETWORK BRIDGES
-# ─────────────────────────────────────────────────────────────────────────────
 variable "wan_bridge" {
   type    = string
   default = "vmbr0"
@@ -70,7 +67,6 @@ variable "external_bridge" {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SUBNETS
-# ─────────────────────────────────────────────────────────────────────────────
 variable "internal_subnet" {
   type    = string
   default = "10.100.0.0/24"
@@ -82,7 +78,6 @@ variable "external_subnet" {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ROUTER VM (VM-300)
-# ─────────────────────────────────────────────────────────────────────────────
 variable "router_internal_ip" {
   type    = string
   default = "10.100.0.1"
@@ -98,14 +93,7 @@ provider "proxmox" {
   insecure  = var.proxmox_insecure
 
   ssh {
-    # The provider imports every new VM's disk over SSH. Password auth is the
-    # fallback, not the default: sync.sh rotates the host's root password, so a
-    # password in tfvars goes stale on the run that rotates it and disk imports
-    # start failing. With no password it uses the ssh-agent, which sync.sh
-    # populates with the deploy key.
-    #
-    # "" has to become null rather than being passed through: the provider
-    # validates the field as "not an empty string" and fails to configure at all.
+    # The provider imports every new VM's disk over SSH.
     agent    = var.proxmox_ssh_password == null || var.proxmox_ssh_password == ""
     username = var.proxmox_ssh_user
     password = var.proxmox_ssh_password == "" ? null : var.proxmox_ssh_password
@@ -117,9 +105,7 @@ provider "proxmox" {
   }
 }
 
-# Proxmox storage holding bulk media, on the 2 TB spinning disk. Empty means
-# the disk has not been handed over yet and vm-109 gets no second disk; set it
-# to "bulk" once src/scripts/pve-install.sh has created the volume group.
+# Proxmox storage holding bulk media, on the 2 TB spinning disk.
 variable "bulk_datastore" {
   type    = string
   default = ""

@@ -6,9 +6,7 @@ export SHELL=/bin/bash
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TFVARS_PATH="$ROOT_DIR/src/terraform.tfvars"
 TFVARS_ENC_PATH="$ROOT_DIR/src/terraform.tfvars.sops.json"
-# the age key is owned by the dotfiles repo; secrets/age.txt here is normally a
-# symlink to it. Fall back to the dotfiles path so a fresh clone works without
-# copying key material around.
+# the age key is owned by the dotfiles repo; secrets/age.txt here is normally a symlink
 AGE_KEY="$ROOT_DIR/secrets/age.txt"
 AGE_KEY_SOURCE="${AGE_KEY_SOURCE:-$HOME/projects/arch-dotfiles/configs/secrets/age.txt}"
 if [ ! -r "$AGE_KEY" ] && [ -r "$AGE_KEY_SOURCE" ]; then
@@ -34,7 +32,6 @@ fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # HELPERS
-# ─────────────────────────────────────────────────────────────────────────────
 read_tfvar() {
   jq -r --arg k "$1" 'if has($k) and .[$k] != null then .[$k] else empty end' "$ACTIVE_TFVARS_PATH"
 }
@@ -61,8 +58,7 @@ wait_for_ssh() {
   echo "ERROR: SSH not reachable at $ip"; return 1
 }
 
-# vmid: start the VM unless it is running. Returns 1 when it had to issue a
-# start, so the caller knows whether anything needs time to boot.
+# vmid: start the VM unless it is running.
 vm_wake() {
   local st
   st=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu/$1/status/current" -H "$PVE_AUTH" | jq -r '.data.status // "unknown"' 2>/dev/null)
@@ -94,14 +90,11 @@ deploy_nixos() {
       "cat > /var/lib/sops-nix/key.txt && chmod 600 /var/lib/sops-nix/key.txt" || return 1
   fi
 
-  # --no-check-sigs: the closures are built locally and pushed to our own VMs,
-  # so they are unsigned; without this the remote daemon rejects them with
-  # "cannot add path ... because it lacks a signature by a trusted key".
+  # --no-check-sigs: the closures are built locally and pushed to our own VMs
   nix copy --extra-experimental-features "nix-command flakes" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
     || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
 
   # use 'switch', activates config in-place, restarts changed services, no reboot needed.
-  # reboot manually only when kernel changes (rare).
   ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
     "nix-env -p /nix/var/nix/profiles/system --set '${toplevel}' \
      && '${toplevel}/bin/switch-to-configuration' switch"
@@ -110,7 +103,6 @@ deploy_nixos() {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MAIN
-# ─────────────────────────────────────────────────────────────────────────────
 load_tfvars
 
 # Git pull (skip if local changes)
@@ -131,11 +123,7 @@ else
   SSH_CMD=(ssh -p "$PROXMOX_SSH_PORT" -o StrictHostKeyChecking=accept-new)
 fi
 
-# The bpg provider imports every new VM's disk over SSH to the hypervisor, and
-# main.tf only falls back to the ssh-agent when proxmox_ssh_password is empty.
-# Rotating the host's root password below would therefore break disk imports on
-# the very run that rotates it, so make sure the deployer's key is in an agent
-# and let the provider use that instead of a password.
+# The bpg provider imports every new VM's disk over SSH to the hypervisor
 if [ -f "$HOME/.ssh/id_ed25519" ]; then
   if ! ssh-add -l >/dev/null 2>&1; then
     eval "$(ssh-agent -s)" >/dev/null
@@ -154,11 +142,7 @@ ssh-keyscan -p "$PROXMOX_SSH_PORT" -H "$PROXMOX_SSH_HOST" >> "$HOME/.ssh/known_h
 
 SSH_CONFIG="$(mktemp --suffix=.ssh_config)"; CLEANUP_FILES+=("$SSH_CONFIG")
 
-# the router is a bastion for the 10.x subnets, but when the deployer already
-# has a route to them (e.g. the LAN gateway routes 10.100.0.0/24 to the router),
-# jumping through the router's single SSH -W forward just serializes every
-# closure copy through one powersave CPU. Probe a directly-routed hop first and
-# only fall back to the ProxyCommand when the subnet is not reachable directly.
+# the router is a bastion for the 10.x subnets, but when the deployer already has a route
 if timeout 4 bash -c "echo > /dev/tcp/10.100.0.100/22" 2>/dev/null; then
   echo ">>> Internal subnet directly routable: deploying without the router bastion."
   cat > "$SSH_CONFIG" <<EOF
@@ -188,10 +172,7 @@ PVE_API="https://$PROXMOX_SSH_HOST:8006/api2/json"
 PVE_AUTH="Authorization: PVEAPIToken=$PROXMOX_API_TOKEN_ID=$PROXMOX_API_TOKEN_SECRET"
 
 if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
-  # whole-VM vzdump jobs used to dump vm-108 (750 GB NAS disk) and vm-208 to
-  # `local`, the host's root disk, daily/weekly/monthly: enough to fill it.
-  # NAS data is backed up by Kopia (vm-106) and VM configs are declarative, so
-  # remove the jobs. Existing dump files are NOT deleted here.
+  # whole-VM vzdump jobs used to dump vm-108 (750 GB NAS disk) and vm-208 to `local`
   for jid in homelab-daily homelab-weekly homelab-monthly; do
     if curl -sk "$PVE_API/cluster/backup/$jid" -H "$PVE_AUTH" | jq -e '.data.id' >/dev/null 2>&1; then
       curl -sk -X DELETE "$PVE_API/cluster/backup/$jid" -H "$PVE_AUTH" >/dev/null \
@@ -200,9 +181,7 @@ if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
   done
 fi
 
-# Hermes (vm-113) and this deployer get root on the Proxmox host too. The
-# deployer's key has to go in before the root password is rotated below,
-# otherwise the password in tfvars goes stale and the next sync cannot log in.
+# Hermes (vm-114) and this deployer get root on the Proxmox host too.
 for pub in "$ROOT_DIR/src/modules/hermes.pub" "$HOME/.ssh/id_ed25519.pub"; do
   [ -f "$pub" ] || continue
   "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
@@ -211,8 +190,7 @@ for pub in "$ROOT_DIR/src/modules/hermes.pub" "$HOME/.ssh/id_ed25519.pub"; do
     2>/dev/null || echo "WARNING: Could not install $(basename "$pub") on Proxmox."
 done
 
-# Proxmox root (PAM) login = the Authelia password, so the PVE web UI is not a
-# separate credential. Piped over stdin so it never appears in the host's ps.
+# Proxmox root (PAM) login = the Authelia password
 if PVE_ROOT_PASS=$(SOPS_AGE_KEY_FILE="$AGE_KEY" sops --decrypt \
      --extract '["authelia-admin-pass"]' "$ROOT_DIR/src/secrets.json" 2>/dev/null) \
    && [ -n "$PVE_ROOT_PASS" ]; then
@@ -242,8 +220,7 @@ fi
 
 # Terraform
 [ -d "$ROOT_DIR/src/.terraform" ] || terraform -chdir="$ROOT_DIR/src" init
-# VM ids were renumbered to follow instances.tf; applying against the old state
-# would recreate every VM. The migration renames them in place first.
+# VM ids were renumbered to follow instances.tf; applying against the old state would recreate
 if terraform -chdir="$ROOT_DIR/src" state list 2>/dev/null | grep -q '^module\.instances\.'; then
   echo "ERROR: Terraform state still has the old VM ids. Run src/scripts/renumber.sh first."
   exit 1
@@ -262,8 +239,7 @@ else
   echo ">>> Terraform: no changes."
 fi
 
-# inventory for the Nix side (src/inventory.json): evaluated from the Terraform
-# config itself, so it is current even when apply was skipped.
+# inventory for the Nix side (src/inventory.json): evaluated from the Terraform config itself
 INVENTORY="$ROOT_DIR/src/inventory.json"
 INVENTORY_NEW=$(echo 'jsonencode(local.inventory)' \
   | terraform -chdir="$ROOT_DIR/src" console -var-file="$ACTIVE_TFVARS_PATH" \
@@ -277,26 +253,16 @@ VM_IPS=$(jq -r 'to_entries[] | "\(.key)=\(.value.ip)"' "$INVENTORY")
 DISABLED_VMS=$(jq -r 'to_entries[] | select(.value.enabled == "false") | .key' "$INVENTORY")
 [ -n "$DISABLED_VMS" ] && echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')" || true
 
-# Every VM that is not disabled has to be running to receive a deploy.
-#
-# on-demand VMs are stopped by design (woken by the socket proxy on request,
-# reaped when idle). An enabled = true VM should already be up, but nothing
-# guarantees it: terraform applies with -refresh=false and never reads real
-# power state, so a VM stopped out of band stays stopped and fails every sync
-# from then on. vm-204 sat off for a day that way, shut down by the reaper
-# before it was switched from onDemand to always-on.
+# Every VM that is not disabled has to be running to receive a deploy. on-demand VMs
 WAKE_VMS=$(jq -r 'to_entries[] | select(.value.enabled != "false") | .key' "$INVENTORY")
 if [ -n "$WAKE_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
   WOKE=0
   for vmid in $WAKE_VMS; do vm_wake "$vmid" || WOKE=1; done
-  # give cold VMs time to boot, but only when one was actually started. The
-  # per-VM wait_for_ssh in the deploy loop does the real readiness gate with
-  # retries, so a slow boot still deploys.
+  # give cold VMs time to boot, but only when one was actually started.
   [ "$WOKE" = 1 ] && sleep 45 || true
 fi
 
-# push the SSH key to every running VM via the guest agent. After apply, so VMs
-# created in this run get it too: their cloud-init key is not this machine's.
+# push the SSH key to every running VM via the guest agent.
 if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
   echo ">>> Pushing SSH key to all running VMs..."
   payload=$(jq -cn --arg k "$PUBKEY" \
@@ -313,8 +279,7 @@ if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
   done
 fi
 
-# Nix flakes only see files git knows about: stage new/renamed configs (and
-# the inventory) before building. Everything is committed at the end anyway.
+# Nix flakes only see files git knows about: stage new/renamed configs (and the inventory)
 git -C "$ROOT_DIR" add -A src
 
 # build all enabled closures in parallel

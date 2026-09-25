@@ -1,6 +1,5 @@
 #!/bin/bash
 # Initialize homelab against an existing Proxmox VE server.
-# Usage: ./src/scripts/init.sh <PROXMOX_IP>
 set -e
 
 TARGET_IP=$1
@@ -62,8 +61,7 @@ fi
 echo ">>> Connected to $("${SSH_CMD[@]}" root@"$TARGET_IP" "pveversion")"
 
 if [ -z "${HOMELAB_PVE_TF_PASSWORD:-}" ]; then
-    # use the root password for the terraform user to avoid prompting twice.
-    # if using SSH keys (blank root password), generate a random one since we use API token.
+    # use the root password for the terraform user to avoid prompting twice. if using SSH keys
     if [ -n "$ROOT_PASS" ]; then
         PVE_TF_PASSWORD="$ROOT_PASS"
     else
@@ -84,9 +82,7 @@ else
 fi
 
 
-# the age key belongs to the dotfiles repo, which is the source of truth for all
-# key material. Link it rather than keeping a second copy here; only generate a
-# fresh one when the dotfiles repo has none (a brand-new lab).
+# the age key belongs to the dotfiles repo, which is the source of truth for all key material.
 AGE_KEY="$ROOT_DIR/secrets/age.txt"
 AGE_KEY_SOURCE="${AGE_KEY_SOURCE:-$HOME/projects/arch-dotfiles/configs/secrets/age.txt}"
 mkdir -p "$ROOT_DIR/secrets"
@@ -114,8 +110,7 @@ if [ ! -f "$SECRETS_FILE" ]; then
     echo ">>> Generating secrets..."
     WG_PRIVKEY=$(wg genkey 2>/dev/null || openssl rand -base64 32)
 
-    # generated locally where possible; external credentials are placeholders
-    # to fill with `sops src/secrets.json` (Hermes: src/scripts/hermes-secrets.sh).
+    # generated locally where possible; external credentials are placeholders to fill
     jq -n \
       --arg wg "$WG_PRIVKEY" \
       --arg s1 "$(generate_secret)" --arg s2 "$(generate_secret)" --arg s3 "$(generate_secret)" \
@@ -144,7 +139,6 @@ if [ ! -f "$SECRETS_FILE" ]; then
 fi
 
 # add whatever the configs have grown since (and drop what they no longer read).
-# The list above is only the bootstrap set; secrets-sync.sh is the source of truth.
 "$ROOT_DIR/src/scripts/secrets-sync.sh" --apply
 
 
