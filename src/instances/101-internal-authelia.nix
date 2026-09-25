@@ -36,12 +36,6 @@ let
       redirectUris = [ "https://cloud.lsck0.dev/apps/user_oidc/code" ];
     }
     {
-      id = "vaultwarden";
-      name = "Vaultwarden";
-      secretName = "vaultwarden-oidc-secret";
-      redirectUris = [ "https://vault.lsck0.dev/identity/connect/oidc-signin" ];
-    }
-    {
       id = "forgejo";
       name = "Forgejo";
       secretName = "forgejo-oidc-secret";
@@ -75,12 +69,12 @@ let
     "        client_secret: '$CLIENT_HASH_${c.id}'"
     "        public: false"
     # same bar as the ForwardAuth routes: an OIDC login must not be a cheaper
-    # way into Forgejo or Vaultwarden than the SSO portal.
+    # way into Forgejo or Nextcloud than the SSO portal.
     "        authorization_policy: two_factor"
     "        require_pkce: false"
     "        consent_mode: implicit"
-    # client_secret_basic is the OAuth 2.0 default and what Vaultwarden,
-    # Nextcloud's user_oidc and Forgejo all send. Authelia rejects the request
+    # client_secret_basic is the OAuth 2.0 default and what Nextcloud's
+    # user_oidc and Forgejo both send. Authelia rejects the request
     # outright when the registration names a different method:
     #   invalid_client ... the OAuth 2.0 client registration does not allow
     #   this method
@@ -120,7 +114,6 @@ in {
   # bind password for the lldap backend (same secret lldap itself uses).
   sops.secrets.lldap-admin-password = {};
   sops.secrets.nextcloud-oidc-secret = {};
-  sops.secrets.vaultwarden-oidc-secret = {};
   sops.secrets.forgejo-oidc-secret = {};
   sops.secrets.jellyfin-oidc-secret = {};
 

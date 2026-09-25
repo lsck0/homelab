@@ -24,7 +24,6 @@ let
       { route = "hello-gh"; name = "Hello GH"; icon = "github"; desc = "CI/CD demo (GitHub)"; }
     ]; }
     { name = "Apps"; entries = [
-      { route = "vaultwarden"; name = "Vaultwarden"; icon = "vaultwarden"; desc = "Passwords"; }
       { route = "nextcloud"; name = "Nextcloud"; icon = "nextcloud"; desc = "Cloud"; }
       { route = "paperless"; name = "Paperless"; icon = "paperless-ngx"; desc = "Documents"; }
       { route = "paperless-ai"; name = "Paperless AI"; icon = "paperless-ngx"; desc = "Auto-tagging"; }

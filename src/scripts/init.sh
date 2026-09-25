@@ -119,7 +119,7 @@ if [ ! -f "$SECRETS_FILE" ]; then
     jq -n \
       --arg wg "$WG_PRIVKEY" \
       --arg s1 "$(generate_secret)" --arg s2 "$(generate_secret)" --arg s3 "$(generate_secret)" \
-      --arg s4 "$(generate_secret)" --arg s5 "$(generate_secret)" --arg s6 "$(generate_secret)" \
+      --arg s4 "$(generate_secret)" --arg s5 "$(generate_secret)" \
       --arg s7 "$(generate_secret)" --arg s8 "$(generate_secret)" --arg s9 "$(generate_secret)" \
       --arg s10 "$(generate_secret)" --arg s11 "$(generate_secret)" --arg s12 "base64:$(openssl rand -base64 32)" \
       '{
@@ -128,7 +128,7 @@ if [ ! -f "$SECRETS_FILE" ]; then
         "proxmox-user": "", "proxmox-pass": "",
         "lldap-admin-password": $s1, "lldap-jwt-secret": $s2, "authelia-admin-pass": $s3,
         "forgejo-admin-pass": $s4, "forgejo-oidc-secret": $s5,
-        "vaultwarden-oidc-secret": $s6, "nextcloud-oidc-secret": $s7, "nextcloud-admin-pass": $s8,
+        "nextcloud-oidc-secret": $s7, "nextcloud-admin-pass": $s8,
         "restic-password": $s9, "minecraft-rcon-password": $s10,
         "firefly-db-password": $s11, "firefly-app-key": $s12,
         "crowdsec-bouncer-key": "", "attic-server-token": "", "attic-pull-token": "",
