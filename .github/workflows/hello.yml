@@ -1,0 +1,38 @@
+name: hello
+
+# Builds example/ and pushes it to GHCR. vm-209 polls ghcr.io/lsck0/hello:latest
+# every minute and rolls the new digest out start-first. The copy under
+# example/.github/ is the template for an app's own repo; Actions only reads
+# workflows from .github/workflows at the root, so that one never ran and the
+# hello-gh stack sat at 0/1 with "No such image".
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'example/**'
+      - '.github/workflows/hello.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: [self-hosted, nixos]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: example
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/hello:latest
+            ghcr.io/${{ github.repository_owner }}/hello:${{ github.sha }}
