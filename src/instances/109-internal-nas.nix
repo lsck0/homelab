@@ -70,7 +70,8 @@
         "force group" = "nogroup";
       };
       media = {
-        path = "/srv/nas/media";
+        # the bulk disk, where the migration moved the media tree
+        path = "/srv/nas/bulk/media";
         browseable = "yes";
         "read only" = "no";
         "guest ok" = "yes";
@@ -94,6 +95,16 @@
         browseable = "yes";
         "read only" = "yes";
         "guest ok" = "yes";
+        "force user" = "nobody";
+        "force group" = "nogroup";
+      };
+      syncthing = {
+        path = "/srv/nas/syncthing";
+        browseable = "yes";
+        "read only" = "no";
+        "guest ok" = "yes";
+        "create mask" = "0664";
+        "directory mask" = "0775";
         "force user" = "nobody";
         "force group" = "nogroup";
       };
@@ -171,12 +182,12 @@
     "d /srv/nas/data/firefly/db 0750 999 999 -"
     "d /srv/nas/data/firefly/upload 0750 1000 1000 -"
     "d /srv/nas/syncthing 0775 nobody nogroup -"
+    "d /srv/nas/syncthing/sync 0775 nobody nogroup -"
     "d /var/lib/syncthing 0700 nobody nogroup -"
     "d /srv/nas/data/calendar 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo 0777 nobody nogroup -"
     "d /srv/nas/data/forgejo-runner 0777 nobody nogroup -"
     "d /srv/nas/data/registry 0777 nobody nogroup -"
-    "d /srv/nas/data/vaultwarden 0777 nobody nogroup -"
     "d /srv/nas/data/nextcloud 0777 nobody nogroup -"
     "d /srv/nas/data/nextcloud-db 0777 nobody nogroup -"
     "d /srv/nas/data/huginn 0777 nobody nogroup -"
@@ -240,7 +251,22 @@
       # does not double-prompt, and keep the GUI off the public port.
       insecureSkipHostcheck = true;
     };
+
+    settings.devices.luca-pc.id =
+      "CJDJNIO-XF2HJN5-IOUMFGP-JLEPI4Q-IHEWABK-M4AFSV2-25VSZHA-NSBK3A3";
+
+    # /srv/nas/syncthing is also the "syncthing" SMB share, so whatever lands
+    # here shows up in the file browser.
+    settings.folders.sync = {
+      id = "sync";
+      path = "/srv/nas/syncthing/sync";
+      devices = [ "luca-pc" ];
+      type = "sendreceive";
+      ignorePerms = true;
+    };
   };
+
+
 
   networking.firewall.allowedTCPPorts = [ 80 2049 111 8384 22000 ];
   networking.firewall.allowedUDPPorts = [ 2049 111 22000 21027 ];
