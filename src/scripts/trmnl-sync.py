@@ -49,7 +49,9 @@ def current(plugin_id, token):
     except (urllib.error.URLError, ValueError) as e:
         print(f"{plugin_id}: could not read the current markup: {e}", file=sys.stderr)
         return None
-    return (body or {}).get("data", {}).get("markup")
+    # A freshly created plugin answers 200 with no markup at all; that is empty,
+    # not unreadable, or a new plugin could never receive its first push.
+    return (body or {}).get("data", {}).get("markup") or ""
 
 
 def main():
