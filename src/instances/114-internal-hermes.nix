@@ -5,7 +5,9 @@ let
 
   T = "/var/lib/homepage-tokens";
   routes = import ../modules/routes.nix;
-  sshKey = config.sops.secrets.hermes-ssh-key.path;
+  # via a template, not the raw secret: the stored value has no trailing
+  # newline and OpenSSH rejects it with "error in libcrypto".
+  sshKey = config.sops.templates."hermes-ssh-key".path;
 
   # ─────────────────────────────────────────────────────────────────────────────
   # CLI HELPERS ON THE AGENT'S PATH
@@ -208,6 +210,15 @@ in {
     telegram-chat-id = {};
     proxmox-api-token = { owner = "hermes"; mode = "0400"; };
   };
+  # see the sshKey comment at the top: this only re-adds the trailing newline.
+  sops.templates."hermes-ssh-key" = {
+    owner = "hermes";
+    mode = "0400";
+    content = ''
+      ${config.sops.placeholder.hermes-ssh-key}
+    '';
+  };
+
   sops.templates."hermes.env" = {
     owner = "hermes";
     content = ''
