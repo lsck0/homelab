@@ -182,4 +182,73 @@ in {
   # front) and Homepage are the only callers allowed.
   networking.firewall.allowedTCPPorts = [ 51515 ];
   homelab.ingressOnly.ports = [ 51515 ];
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # OFF-SITE: PROTON DRIVE
+  # ─────────────────────────────────────────────────────────────────────────────
+  # The Kopia repository above lives on the same disk as the data it protects,
+  # so it survives a bad deploy but not a dead disk. This carries the two trees
+  # that cannot be re-downloaded off the box.
+  sops.secrets.proton-username = {};
+  sops.secrets.proton-password = {};
+  # the TOTP *seed* from Proton's 2FA setup, not a 6-digit code: rclone derives
+  # the code itself, so the sync needs nobody present.
+  sops.secrets.proton-totp-secret = {};
+
+  systemd.services.proton-sync = {
+    description = "Mirror the NAS backups and documents to Proton Drive";
+    after = [ "network-online.target" "remote-fs.target" ];
+    wants = [ "network-online.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      # Proton throttles and the first run uploads everything.
+      TimeoutStartSec = "12h";
+    };
+    path = [ pkgs.rclone pkgs.coreutils ];
+    script = ''
+      set -euo pipefail
+      conf=/var/lib/rclone/rclone.conf
+      mkdir -p /var/lib/rclone && chmod 700 /var/lib/rclone
+
+      user=$(cat ${config.sops.secrets.proton-username.path})
+      [ -n "$user" ] || { echo "proton-username is empty; fill it with scripts/secrets-sync.sh"; exit 0; }
+
+      # Written every run, because rclone rewrites this file to cache its
+      # session tokens and we want a credential change to take effect.
+      if [ ! -s "$conf" ]; then
+        rclone --config "$conf" config create proton protondrive \
+          username="$user" \
+          password="$(rclone obscure "$(cat ${config.sops.secrets.proton-password.path})")" \
+          otp_secret_key="$(cat ${config.sops.secrets.proton-totp-secret.path})" \
+          --non-interactive >/dev/null
+      fi
+
+      # sync, not copy: the remote should mirror the source. --backup-dir keeps
+      # anything deleted or overwritten for 30 days instead of dropping it, so a
+      # local mistake cannot erase the off-site copy.
+      stamp=$(date +%Y-%m-%d)
+      for tree in BACKUPS documents; do
+        echo ">>> $tree -> proton:homelab/$tree"
+        rclone --config "$conf" sync "${source}/$tree" "proton:homelab/$tree" \
+          --backup-dir "proton:homelab/.trash/$stamp/$tree" \
+          --transfers 4 --checkers 8 --retries 3 --low-level-retries 10 \
+          --stats 5m --stats-one-line
+      done
+      rclone --config "$conf" delete "proton:homelab/.trash" --min-age 30d --rmdirs || true
+
+      d=/var/lib/node-exporter-textfile; mkdir -p $d
+      {
+        echo "# HELP homelab_offsite_last_success_timestamp_seconds Unix time of the last Proton Drive sync."
+        echo "# TYPE homelab_offsite_last_success_timestamp_seconds gauge"
+        echo "homelab_offsite_last_success_timestamp_seconds $(date +%s)"
+      } > $d/proton_sync.prom.tmp
+      mv $d/proton_sync.prom.tmp $d/proton_sync.prom
+    '';
+  };
+
+  # after the 02:00 Kopia snapshot, so the repository it uploads is the fresh one
+  systemd.timers.proton-sync = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnCalendar = "04:00"; Persistent = true; RandomizedDelaySec = "30m"; };
+  };
 }

@@ -42,6 +42,9 @@ MANUAL=(
   hermes-gemini-api-key hermes-glm-api-key
   github-runner-token
   wireguard-private-key firefly-app-key
+  # off-site backup (vm-107). proton-totp-secret is the TOTP seed from Proton's
+  # 2FA setup, not a 6-digit code.
+  proton-username proton-password proton-totp-secret
 )
 
 command -v sops >/dev/null || { echo "ERROR: sops not installed."; exit 1; }
