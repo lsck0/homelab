@@ -186,7 +186,7 @@
     description = "Generate a Forgejo admin token for Hermes";
     after = [ "podman-forgejo.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.podman pkgs.curl pkgs.coreutils ];
+    path = [ pkgs.podman pkgs.curl pkgs.coreutils pkgs.gawk ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/forgejo-hermes.token"
