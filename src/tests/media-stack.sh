@@ -1,14 +1,5 @@
 #!/usr/bin/env bash
 # End-to-end test of the media stack wiring, against the real app containers.
-#
-# Starts qBittorrent, Prowlarr, Radarr, Sonarr, Lidarr, Bookshelf, Jellyfin,
-# Jellyseerr, Bazarr, Kavita, Janitorr and janitorr-stats in Docker (same
-# images as the VMs), then runs the setup scripts exactly as NixOS generates
-# them (only lab addresses and paths are swapped for the test ones) plus
-# arr-wire, and checks the result through each app's own API, including the
-# apps' connection tests (download client, Prowlarr apps, Jellyseerr -> *arr).
-#
-# Usage: src/tests/media-stack.sh        (KEEP=1 leaves containers running)
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -45,8 +36,7 @@ check() { local desc=$1; shift; if "$@" >/dev/null 2>&1; then ok "$desc"; else f
 nixeval() { nix eval --no-warn-dirty --raw "$SRC#nixosConfigurations.$1.config.$2"; }
 image() { nixeval "$1" "virtualisation.oci-containers.containers.$2.image"; }
 
-# script body of a NixOS unit, with lab-specific strings replaced.
-# unit_script <host> <unit> [sed expressions...]
+# script body of a NixOS unit, with lab-specific strings replaced. unit_script <host> <unit>
 unit_script() {
   local host=$1 unit=$2 out="$W/scripts/$2.sh"; shift 2
   mkdir -p "$W/scripts"
@@ -101,13 +91,11 @@ mkdir -p "$W/manga" "$W/books"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PER-VM SETUP UNITS
-# ─────────────────────────────────────────────────────────────────────────────
 Q="s#/var/lib/qbittorrent#$W/qbittorrent#g"
 run_unit 112-internal-qbittorrent qbittorrent-disable-auth "$Q" \
   "s#systemctl stop podman-qbittorrent.service#docker stop ${P}qbittorrent#" \
   "s#systemctl start podman-qbittorrent.service#docker start ${P}qbittorrent#"
 # the API whitelist lists the lab VMs; here the *arrs live on the test subnet.
-# Tor egress is left configured as in the lab (no real downloads happen).
 nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.112-internal-qbittorrent.config.systemd.units.\"qbittorrent-settings.service\".unit"
 QPREFS=$(nixeval 112-internal-qbittorrent systemd.services.qbittorrent-settings.script | grep -o '/nix/store/[^ ]*-qbittorrent-prefs.json')
 jq --arg s "$SUBNET" '.bypass_auth_subnet_whitelist = $s' "$QPREFS" > "$W/qbittorrent-prefs.json"
@@ -125,8 +113,7 @@ done
 run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:18096#g"
 run_unit 128-internal-jellyseerr jellyseerr-token "$TOK" "s#/var/lib/jellyseerr#$W/jellyseerr#g"
 run_unit 132-internal-bazarr bazarr-token "$TOK" "s#/var/lib/bazarr#$W/bazarr#g"
-# an install from before generated passwords: admin with the old default, which
-# the unit must move to the generated one.
+# an install from before generated passwords: admin with the old default
 for i in $(seq 1 60); do
   curl -s -X POST http://127.0.0.1:15000/api/Account/register -H "Content-Type: application/json" \
     -d '{"username":"admin","password":"Admin123!","email":"admin@internal"}' >/dev/null || true
@@ -139,7 +126,6 @@ echo ">>> Exported tokens: $(cd "$W/tokens" && echo *)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ARR-WIRE (THE REAL SCRIPT BUILT FOR VM-132, RUN ON THE TEST NETWORK)
-# ─────────────────────────────────────────────────────────────────────────────
 nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.133-internal-recyclarr.config.systemd.services.arr-wire.serviceConfig.ExecStart"
 WIRE=$(nixeval 133-internal-recyclarr systemd.services.arr-wire.serviceConfig.ExecStart)
 arr_wire() {
@@ -212,8 +198,7 @@ check "jellyseerr: sonarr anime folder set" sh -c "curl -sf -H 'X-Api-Key: $jk' 
 bk=$(key bazarr-key)
 check "bazarr: radarr + sonarr enabled" sh -c "curl -sf -H 'X-API-KEY: $bk' http://127.0.0.1:16767/api/system/settings | jq -e '.general.use_radarr and .general.use_sonarr'"
 
-# every test client is on the API whitelist, where any login succeeds: check
-# the stored PBKDF2 hash (qBittorrent: SHA-512, 100000 rounds) instead.
+# every test client is on the API whitelist, where any login succeeds: check the stored PBKDF2
 qbit_password_is() {
   python3 - "$W/qbittorrent/qBittorrent/qBittorrent.conf" "$1" <<'PY'
 import base64, hashlib, re, sys
@@ -234,7 +219,6 @@ if echo "$out" | grep -vE "unreachable, skipped" | grep -qE "added|connected|ini
 
 # ─────────────────────────────────────────────────────────────────────────────
 # JANITORR
-# ─────────────────────────────────────────────────────────────────────────────
 echo ">>> Janitorr with the config NixOS renders"
 mkdir -p "$W/janitorr/logs" "$W/janitorr/stats"; chmod -R 777 "$W/janitorr"
 run_unit 134-internal-jellyfin janitorr-config "$TOK" "s#/var/lib/janitorr#$W/janitorr#g" "s#chown 1000:1000#true#"

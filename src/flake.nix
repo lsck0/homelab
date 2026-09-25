@@ -3,13 +3,11 @@
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
-    # GitHub deprecates old Actions runners server-side, faster than the stable
-    # channel moves. vm-117 takes github-runner from here and nothing else does.
+    # GitHub deprecates old Actions runners server-side, faster than the stable channel moves.
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
-    # Hermes agent (vm-114). Not following our nixpkgs: it is built and tested
-    # against nixos-unstable.
+    # Hermes agent (vm-114).
     hermes-agent.url = "github:NousResearch/hermes-agent";
     # the owner's personal skills, handed to Hermes as-is
     dotfiles.url = "github:lsck0/arch-dotfiles";
@@ -22,8 +20,7 @@
     pkgs = nixpkgs.legacyPackages.${system};
     lib = nixpkgs.lib;
 
-    # VM inventory (id -> name/type/ip/enabled/cooldown), exported from
-    # instances.tf by sync.sh. Modules take it as the `inventory` argument.
+    # VM inventory (id -> name/type/ip/enabled/cooldown), exported from instances.tf by sync.sh.
     inventory = builtins.fromJSON (builtins.readFile ./inventory.json);
     specialArgs = { inherit inputs inventory; };
 

@@ -9,9 +9,7 @@ in {
   fileSystems = nasMount "/var/lib/paperless-ai" "paperless-ai"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
-  # paperless-ai reads its settings from /app/data/.env, which the setup wizard
-  # normally writes. Seed it from the Paperless API token vm-121 already exports,
-  # so the stack comes up configured without a manual wizard pass.
+  # paperless-ai reads its settings from /app/data/.env, which the setup wizard normally writes.
   systemd.services.paperless-ai-config = {
     description = "Seed paperless-ai configuration";
     before = [ "podman-paperless-ai.service" ];

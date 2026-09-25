@@ -18,15 +18,7 @@ let
     };
   };
 in {
-  # Radarr/Sonarr/Lidarr/Prowlarr/Bookshelf all share one shape: a linuxserver-
-  # style container, config on the NAS, auth delegated to Authelia, and an API
-  # key exported to the NAS token dir. That key is what Homepage widgets,
-  # the *arr wiring on vm-133, Janitorr, Jellyseerr and Hermes use.
-  #
-  # media layout (same path in every container, so imports can be moved and
-  # Janitorr/Jellyfin see the files where the *arrs put them):
-  #   /data/media/{movies,tv,anime,music,books,manga,audiobooks,leaving-soon}
-  #   /data/torrents   qBittorrent download dir
+  # Radarr/Sonarr/Lidarr/Prowlarr/Bookshelf all share one shape: a linuxserver- style
   options.homelab.servarr = lib.mkOption {
     type = lib.types.attrsOf appType;
     default = {};
@@ -34,8 +26,7 @@ in {
   };
 
   config = lib.mkIf (cfg != {}) {
-    # mkDefault: a host that mounts the same path itself (e.g. the token dir)
-    # wins instead of merging two definitions of one mount.
+    # mkDefault: a host that mounts the same path itself (e.g. the token dir) wins instead
     fileSystems = lib.mkMerge ([
       (lib.mapAttrs (_: lib.mkDefault) (
         nasPath "/data/media" "bulk/media" // nasPath "/data/torrents" "bulk/torrents" // nasMount tokens "homepage-tokens"
@@ -88,11 +79,7 @@ in {
 
     networking.firewall.allowedTCPPorts = lib.mapAttrsToList (_: app: app.hostPort) cfg;
 
-    # these apps have AuthenticationRequired=DisabledForLocalAddresses, so a
-    # direct call to the VM's port skips Authelia entirely. Only the ingress,
-    # the monitoring hosts and the other media VMs (which drive each other's
-    # APIs: arr-wire on vm-133, Prowlarr app sync, Janitorr, Jellyseerr) may
-    # reach them.
+    # these apps have AuthenticationRequired=DisabledForLocalAddresses
     homelab.ingressOnly = {
       ports = lib.mapAttrsToList (_: app: app.hostPort) cfg;
       extraSources = map (id: "10.100.0.${toString id}/32")

@@ -3,14 +3,12 @@ let
   routes = (import ../modules/routes.nix).internal;
   address = config.homelab.onDemand.address;
 
-  # SSO gateway guarding the protected routes. Authelia (vm-101) serves both
-  # ForwardAuth (this middleware) and OIDC (Forgejo).
+  # SSO gateway guarding the protected routes.
   sso = "authelia";
 in {
   networking.hostName = "vm-100";
 
-  # every backend goes through homelab.onDemand: VMs with enabled = "onDemand"
-  # in instances.tf get a wake proxy on this host, the rest are reached directly.
+  # every backend goes through homelab.onDemand: VMs with enabled = "onDemand" in instances.tf
   sops.secrets.proxmox-api-token = {};
   homelab.onDemand = {
     enable = true;
@@ -30,14 +28,11 @@ in {
   homelab.traefik = {
     enable = true;
 
-    # jellyfin-plugin-sso completes the login inside a hidden same-origin
-    # iframe, which X-Frame-Options: DENY blocks.
+    # jellyfin-plugin-sso completes the login inside a hidden same-origin iframe
     sameOriginFrameRouters = [ "jellyfin-tls" ];
 
     middlewares = {
-      # auth = "token" routes have no gate of their own. The registry accepts
-      # anonymous push, so without this any DMZ VM can replace an image the
-      # swarm pulls every minute.
+      # auth = "token" routes have no gate of their own.
       registry-clients.ipAllowList.sourceRange = [
         "10.100.0.116/32"   # forgejo runner, pushes
         "10.100.0.117/32"   # github runner, pushes
@@ -56,9 +51,7 @@ in {
         ];
       };
     }
-    # one per route that declares loginRedirect: send the app's own login page
-    # at its Authelia OIDC entry point instead, so a browser that already holds
-    # an Authelia session becomes an app session with nothing to click.
+    # one per route that declares loginRedirect: send the app's own login page at its Authelia
     // lib.mapAttrs' (name: r: lib.nameValuePair "${name}-login" {
       redirectRegex = {
         regex = "^https://${r.host}\\.lsck0\\.dev${lib.escapeRegex r.loginRedirect.path}$";
@@ -66,8 +59,7 @@ in {
       };
     }) (lib.filterAttrs (_: r: r ? loginRedirect) routes);
 
-    # auth = "sso" gets Authelia ForwardAuth; "own", "token" and "portal" carry
-    # their own authentication (see the header of modules/routes.nix).
+    # auth = "sso" gets Authelia ForwardAuth; "own"
     routers = lib.mapAttrs' (name: r: lib.nameValuePair "${name}-tls" ({
       rule = "Host(`${r.host}.lsck0.dev`)";
       service = name;

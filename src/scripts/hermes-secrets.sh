@@ -1,24 +1,5 @@
 #!/bin/bash
-# Fill the secrets Hermes (vm-114) needs, then run ./sync.sh.
-#
-#   hermes-ssh-key       generated here, public key goes to src/modules/hermes.pub
-#                        (root on every VM and the Proxmox host)
-#   hermes-github-app-key  private key of the GitHub App Hermes uses to push
-#                        hermes/* branches and open pull requests; created here
-#                        in your browser (app id in src/modules/hermes/github-app.json)
-#   hermes-llm-api-key   Anthropic API key (prompted)
-#   telegram-bot-token   from @BotFather (prompted if empty)
-#   telegram-chat-id     your numeric Telegram user id (prompted if empty;
-#                        message @userinfobot to get it)
-#
-# The GitHub side needs `gh` logged in as the repo owner and a browser. The app
-# may write contents and pull requests but not workflows. A deploy key would not
-# do: on a personal repo it bypasses every ruleset, so Hermes could push master.
-# The protect-master ruleset lets only repo admins update master, which the
-# app is not.
-#
-# Existing non-empty values are kept. Pass --force to re-enter them. Without a
-# terminal the prompted secrets are skipped.
+# Fill the secrets Hermes (vm-114) needs, then run ./sync.sh. hermes-ssh-key generated here
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,7 +20,6 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SSH KEY (LAB)
-# ─────────────────────────────────────────────────────────────────────────────
 if [ -z "$(current hermes-ssh-key)" ] || [ "$FORCE" = --force ] || [ ! -f "$PUB" ]; then
   ssh-keygen -q -t ed25519 -N "" -C "hermes@vm-114" -f "$tmp/lab"
   put hermes-ssh-key "$(cat "$tmp/lab")"
@@ -52,11 +32,9 @@ fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GITHUB APP (PULL REQUESTS)
-# ─────────────────────────────────────────────────────────────────────────────
 APP_JSON="$ROOT_DIR/src/modules/hermes/github-app.json"
 if [ -z "$(current hermes-github-app-key)" ] || [ ! -f "$APP_JSON" ] || [ "$FORCE" = --force ]; then
-  # manifest flow: a local page posts the manifest to GitHub, you confirm, and
-  # GitHub redirects back here with a code that converts into the app's key.
+  # manifest flow: a local page posts the manifest to GitHub, you confirm
   python3 - "$REPO" "$tmp/app.json" <<'PY'
 import html, http.server, json, secrets, subprocess, sys, urllib.parse, urllib.request
 repo, out = sys.argv[1], sys.argv[2]
@@ -136,7 +114,6 @@ echo ">>> ruleset protect-master active"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PROMPTED
-# ─────────────────────────────────────────────────────────────────────────────
 ask() { # name prompt
   if [ -n "$(current "$1")" ] && [ "$FORCE" != --force ]; then
     echo ">>> $1 already set"; return

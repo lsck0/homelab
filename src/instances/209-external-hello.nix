@@ -1,7 +1,6 @@
 { ... }:
 let
-  # zero-downtime rollout: the new task must pass its healthcheck before the
-  # old one is stopped; the swarm ingress balances across both meanwhile.
+  # zero-downtime rollout: the new task must pass its healthcheck before the old one
   webService = image: publishedPort: ''
     image: ${image}
     ports:
@@ -27,11 +26,7 @@ let
 in {
   networking.hostName = "vm-209";
 
-  # CI/CD target. Push an image, the stack rolls it out within updateInterval:
-  #   Forgejo  -> registry.lsck0.dev (internal, example/.forgejo/workflows/hello.yml)
-  #   GitHub   -> ghcr.io            (example/.github/workflows/hello.yml)
-  # Any other registry works the same; add credentials under `registries` if
-  # the image is private.
+  # CI/CD target.
   homelab.swarm = {
     enable = true;
     updateInterval = "1m";
@@ -49,8 +44,7 @@ in {
       '';
     };
 
-    # private image example (token in sops):
-    # registries."ghcr.io" = { username = "lsck0"; passwordFile = config.sops.secrets.ghcr-token.path; };
+    # private image example (token in sops): registries."ghcr.io" =
   };
 
   networking.firewall.allowedTCPPorts = [ 80 8080 ];

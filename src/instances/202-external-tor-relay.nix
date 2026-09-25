@@ -5,12 +5,10 @@ let
 in {
   networking.hostName = "vm-202";
 
-  # identity keys live on the VM disk, which a VM recreate throws away. Back them
-  # up to the NAS so a rebuilt relay keeps its fingerprint and its earned flags.
+  # identity keys live on the VM disk, which a VM recreate throws away.
   fileSystems = nasMount keyBackup "tor-relay-keys";
 
-  # non-exit middle relay. role = "relay" forces ExitPolicy to reject *:*,
-  # so this node never carries traffic out to the open internet.
+  # non-exit middle relay. role = "relay" forces ExitPolicy to reject *:*
   services.tor = {
     enable = true;
     openFirewall = true;
@@ -24,9 +22,7 @@ in {
     settings = {
       Nickname = "lsck0relay";
       ORPort = [{ addr = "0.0.0.0"; port = orPort; }];
-      # the relay sits behind NAT and sees only its DMZ address, so it cannot
-      # guess its public IP. Point it at the DDNS record the router keeps
-      # current (unproxied A record, Cloudflare must not hide the real IP).
+      # the relay sits behind NAT and sees only its DMZ address
       Address = "tor.lsck0.dev";
       # published in the public consensus and scraped by spammers.
       ContactInfo = config.homelab.acmeEmail;

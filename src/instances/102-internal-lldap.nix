@@ -1,8 +1,6 @@
 { config, lib, pkgs, retry, ... }:
 let
-  # every group referenced by a route in modules/routes.nix, plus the two base
-  # groups. Authelia turns route.group into an allow rule, so a group that does
-  # not exist here would deny the service to everyone.
+  # every group referenced by a route in modules/routes.nix, plus the two base groups.
   routes = (import ../modules/routes.nix).internal;
   routeGroups = lib.unique (lib.mapAttrsToList (_: r: r.group or "users")
     (lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes));
@@ -10,14 +8,7 @@ let
 in {
   networking.hostName = "vm-102";
 
-  # lightweight LDAP directory: the single account store for the lab. Authelia
-  # authenticates every SSO route against it, Jellyfin binds to it directly,
-  # and Forgejo reaches it through
-  # Authelia's OIDC provider. Group membership here is what grants or revokes
-  # a service for a person.
-  #
-  # state (sqlite) is on local disk, not NFS: the auth directory must not wedge
-  # on a NAS stall (same reasoning as Authelia).
+  # lightweight LDAP directory: the single account store for the lab.
   sops.secrets.lldap-jwt-secret = { owner = "lldap"; group = "lldap"; };
   sops.secrets.lldap-admin-password = { owner = "lldap"; group = "lldap"; };
 
@@ -43,13 +34,10 @@ in {
     };
   };
 
-  # luca's own password (reused from the Authelia admin secret) so the seeded
-  # user can log in through Authelia's LDAP backend.
+  # luca's own password (reused from the Authelia admin secret) so the seeded user can log
   sops.secrets.authelia-admin-pass = { owner = "lldap"; group = "lldap"; };
 
-  # seed the directory: groups (admins, users) + the admin user luca. Idempotent
-  #, re-running ignores "already exists". Runs after lldap is up, via its HTTP
-  # API (admin token) plus lldap_set_password for the OPAQUE password flow.
+  # seed the directory: groups (admins, users) + the admin user luca.
   systemd.services.lldap-bootstrap = {
     description = "Seed lldap groups and users";
     after = [ "lldap.service" ];
@@ -106,10 +94,7 @@ in {
     '';
   };
 
-  # every account, password hash and group membership in the lab is in this one
-  # SQLite file on vm-102's local disk. Kopia snapshots the NAS only, so without
-  # this dump the directory is the single unbacked-up thing in the lab and losing
-  # the VM would mean rebuilding every account by hand.
+  # every account, password hash and group membership in the lab is in this one SQLite file
   homelab.dbBackup.databases.lldap.sqlite = "/var/lib/lldap/users.db";
 
   # 3890 LDAP (LAN only), 17170 web UI (behind Traefik + Authelia).

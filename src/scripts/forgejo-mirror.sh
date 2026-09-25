@@ -1,20 +1,5 @@
 #!/usr/bin/env bash
 # Keep a pull mirror in Forgejo of every GitHub repository this account owns.
-#
-# GitHub stays the place you push to. Forgejo fetches on a timer and its copy
-# is read-only, so nothing about the working setup changes and a broken mirror
-# can never leave GitHub stale. The point is a second copy on hardware in the
-# flat, snapshotted by Kopia with the rest of the NAS.
-#
-# Reconciles rather than creates. The *arr stack taught this the hard way: a
-# script that only fills in what is missing leaves every wrong value in place
-# for ever, and the wrong value is what actually breaks. So an existing mirror
-# has its interval corrected, and a repository that is not a mirror at all is
-# reported rather than quietly overwritten.
-#
-# Issues, labels and releases are copied once by the migration. GitHub does not
-# expose them to an incremental fetch, so they are a snapshot from the day the
-# mirror was made; only git objects stay in sync.
 set -euo pipefail
 
 FORGEJO_URL=${FORGEJO_URL:-http://127.0.0.1:80}
@@ -32,9 +17,7 @@ GITHUB_TOKEN=$(cat "${GITHUB_TOKEN_FILE:?}")
 problems=0
 later() { echo "$*"; problems=$((problems + 1)); }
 
-# Forgejo normalises a mirror interval on the way in: "8h" is reported back as
-# "8h0m0s". Comparing the strings said every mirror was wrong on every run and
-# rewrote all of them, so compare the durations instead.
+# Forgejo normalises a mirror interval on the way in: "8h" is reported back as "8h0m0s".
 dur_seconds() {
   echo "$1" | awk '{
     s = 0; t = $0
@@ -63,9 +46,7 @@ gh_api() {
     -H "X-GitHub-Api-Version: 2022-11-28"
 }
 
-# Every repository the token's account owns, private ones included. Paginated
-# because the account is past the first page's worth and a silent truncation
-# would look exactly like "that repo is not mirrored yet".
+# Every repository the token's account owns, private ones included.
 repos=$(
   page=1
   while :; do
@@ -113,8 +94,7 @@ while read -r repo; do
       continue
     fi
   else
-    # Only a private repository gets the token. A public mirror then needs no
-    # credential at all, so rotating the PAT cannot break two thirds of them.
+    # Only a private repository gets the token.
     body=$(jq -cn \
       --arg addr "$clone" --arg name "$name" --arg owner "$FORGEJO_OWNER" \
       --arg interval "$MIRROR_INTERVAL" --arg tok "$GITHUB_TOKEN" \
@@ -135,8 +115,7 @@ while read -r repo; do
     continue
   fi
 
-  # An existing mirror is only as good as its last fetch, and the timer that
-  # runs this is the natural moment to ask for one.
+  # An existing mirror is only as good as its last fetch
   fj POST "/repos/$FORGEJO_OWNER/$name/mirror-sync" >/dev/null \
     || later "$name: sync request failed"
 done <<< "$repos"

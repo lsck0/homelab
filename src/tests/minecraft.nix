@@ -1,7 +1,4 @@
-# Minecraft modpack switching (vm-208): `mc-modpack` writes the runtime env
-# file the container reads and restarts the server; the NAS copy survives
-# redeploys. The real itzg container is replaced by a stub that records the
-# environment it would start with.
+# Minecraft modpack switching (vm-208): `mc-modpack` writes the runtime env file the container
 { pkgs, lib, ... }:
 pkgs.testers.runNixOSTest {
   name = "minecraft";

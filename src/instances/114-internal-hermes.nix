@@ -5,13 +5,11 @@ let
 
   T = "/var/lib/homepage-tokens";
   routes = import ../modules/routes.nix;
-  # via a template, not the raw secret: the stored value has no trailing
-  # newline and OpenSSH rejects it with "error in libcrypto".
+  # via a template, not the raw secret: the stored value has no trailing newline and OpenSSH
   sshKey = config.sops.templates."hermes-ssh-key".path;
 
   # ─────────────────────────────────────────────────────────────────────────────
   # CLI HELPERS ON THE AGENT'S PATH
-  # ─────────────────────────────────────────────────────────────────────────────
   pve = pkgs.writeShellScriptBin "pve" ''
     # pve <METHOD> <api path> [curl args]   e.g. pve GET /nodes/luca-server/qemu
     m="''${1:?method}"; p="''${2:?path}"; shift 2
@@ -49,15 +47,12 @@ let
     exec cat "${T}/external/$1.token"
   '';
 
-  # mc <command...>   e.g. mc list, mc "whitelist add Steve"
-  # vm-208 already owns the rcon password; reach its helper over SSH rather
-  # than copying the credential onto this VM.
+  # mc <command...> e.g. mc list, mc "whitelist add Steve" vm-208 already owns the rcon
   mc = pkgs.writeShellScriptBin "mc" ''
     exec ${pkgs.openssh}/bin/ssh 10.200.0.208 mc-rcon "$@"
   '';
 
-  # lab-deploy [vm ...]   apply the workspace clone to the lab, or to named VMs.
-  # This is sync.sh, so it also commits and pushes a deploy generation.
+  # lab-deploy [vm ...] apply the workspace clone to the lab, or to named VMs.
   labDeploy = pkgs.writeShellScriptBin "lab-deploy" ''
     set -euo pipefail
     repo=/var/lib/hermes/workspace/homelab
@@ -70,8 +65,7 @@ let
     exec ./sync.sh "$@"
   '';
 
-  # GitHub App (src/scripts/hermes-secrets.sh): may push branches and open pull
-  # requests on lsck0/homelab, not workflows; master is protected by a ruleset.
+  # GitHub App (src/scripts/hermes-secrets.sh): may push branches and open pull requests
   githubApp = lib.importJSON ../modules/hermes/github-app.json;
   githubAppToken = pkgs.writeShellApplication {
     name = "github-app-token";
@@ -87,8 +81,7 @@ let
     printf 'username=x-access-token\npassword=%s\n' "$(${labGithubToken}/bin/lab-github-token)"
   '';
 
-  # push the current hermes/<topic> branch of the homelab clone and open (or
-  # find) its pull request, titled and described from the commit messages.
+  # push the current hermes/<topic> branch of the homelab clone and open (or find) its pull
   labPr = pkgs.writeShellScriptBin "lab-pr" ''
     set -euo pipefail
     export PATH="${lib.makeBinPath [ pkgs.git pkgs.curl pkgs.jq pkgs.coreutils labGithubToken ]}:$PATH"
@@ -115,9 +108,7 @@ let
   '';
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # WORKSPACE CONTEXT
-  # ─────────────────────────────────────────────────────────────────────────────
-  # the inventory as the agent sees it
+  # WORKSPACE CONTEXT the inventory as the agent sees
   urlOf = id: lib.concatStringsSep ", " (lib.concatLists (lib.mapAttrsToList (_: side:
     lib.mapAttrsToList (_: r: "https://${r.host}.lsck0.dev") (lib.filterAttrs (_: r: toString r.vmid == id) side)
   ) routes));
@@ -182,10 +173,7 @@ in {
   networking.hostName = "vm-114";
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # GPU + LOCAL INFERENCE
-  # ─────────────────────────────────────────────────────────────────────────────
-  # NVIDIA RTX 2060 (Turing) passed through from the host (instances.tf hostpci).
-  # `gpu` here and `hostpci` there move together.
+  # GPU + LOCAL INFERENCE NVIDIA RTX 2060 (Turing) passed through from the host
   nixpkgs.config.allowUnfree = true;
   services.xserver.videoDrivers = lib.mkIf gpu [ "nvidia" ];
   boot.blacklistedKernelModules = lib.mkIf gpu [ "nouveau" ];
@@ -197,10 +185,7 @@ in {
     package = config.boot.kernelPackages.nvidiaPackages.stable;
   };
 
-  # Ollama: Hermes' fallback model when the cloud API is unreachable, and the
-  # model paperless-ai uses. OpenAI-compatible at http://10.100.0.114:11434/v1.
-  # weights on the local disk (memory-mapping them over NFS is too slow).
-  # qwen3:8b needs the card; on CPU in a 4 GB VM it will not load at all.
+  # Ollama: Hermes' fallback model when the cloud API is unreachable
   services.ollama = {
     enable = gpu;
     host = "0.0.0.0";
@@ -219,7 +204,6 @@ in {
 
   # ─────────────────────────────────────────────────────────────────────────────
   # SECRETS (FILL WITH SRC/SCRIPTS/HERMES-SECRETS.SH)
-  # ─────────────────────────────────────────────────────────────────────────────
   sops.secrets = {
     hermes-ssh-key = { owner = "hermes"; mode = "0400"; };
     hermes-github-app-key = { owner = "hermes"; mode = "0400"; };
@@ -279,28 +263,21 @@ in {
 
   # ─────────────────────────────────────────────────────────────────────────────
   # AGENT
-  # ─────────────────────────────────────────────────────────────────────────────
   services.hermes-agent = {
     enable = true;
     addToSystemPackages = true;
     environmentFiles = [ config.sops.templates."hermes.env".path ];
 
     settings = {
-      # Anthropic first, free tiers next, the local card last. Authenticated by
-      # `hermes auth add --type oauth anthropic`, so the subscription is the
-      # route and ANTHROPIC_API_KEY can stay empty.
+      # Anthropic first, free tiers next, the local card last.
       model = {
         provider = "anthropic";
         default = "claude-sonnet-5";
       };
 
-      # tried in order when the primary is rate-limited, out of credit or
-      # unauthenticated. An entry whose credential is missing is skipped, so the
-      # chain degrades to whatever is actually configured and always ends on the
-      # GPU in this VM, which needs no credential and no internet at all.
+      # tried in order when the primary is rate-limited, out of credit or unauthenticated.
       fallback_providers = [
-        # Nous Portal free tier. Needs a one-off `hermes auth add nous` as the
-        # hermes user on this VM; until then this entry is skipped.
+        # Nous Portal free tier.
         { provider = "nous"; model = "nous/welcome"; }
         # Google AI Studio free tier (GEMINI_API_KEY).
         { provider = "gemini"; model = "gemini-2.5-flash"; }
@@ -319,8 +296,6 @@ in {
       # full access: the owner granted root on the lab; no per-command prompts.
       approvals.mode = "off";
       # only the owner: TELEGRAM_ALLOWED_USERS holds the owner's numeric user id
-      # (usernames can change hands). Everyone else is dropped silently, no
-      # pairing codes, no allow-all.
       unauthorized_dm_behavior = "ignore";
       gateway.allow_all_users = false;
       terminal = {
@@ -348,13 +323,10 @@ in {
       (name: lib.nameValuePair "skills/luca/${name}/SKILL.md" "${lucaSkillsDir}/${name}/SKILL.md");
   };
 
-  # the module's hardening makes the filesystem read-only; the token dir is
-  # where Hermes reads API keys (and paperless/firefly tokens appear).
+  # the module's hardening makes the filesystem read-only; the token dir is where Hermes reads
   systemd.services.hermes-agent.serviceConfig.ReadWritePaths = [ T "/srv/sync" "/srv/media" ];
 
-  # lab-deploy runs sync.sh, which needs the age key. sync.sh already drops it
-  # on every VM; this exposes that copy to the agent. It decrypts every secret
-  # in the lab, which is the access the owner asked Hermes to have.
+  # lab-deploy runs sync.sh, which needs the age key. sync.sh already drops it on every VM
   systemd.tmpfiles.rules = [
     "C+ /var/lib/hermes/age.txt 0400 hermes hermes - /var/lib/sops-nix/key.txt"
   ];

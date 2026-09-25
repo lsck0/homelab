@@ -4,8 +4,7 @@ let
   endpointHost = lib.head (lib.splitString ":" cfg.endpoint);
 in
 {
-  # One WireGuard tunnel on the router carrying forwarded traffic for every
-  # via = "vpn" member; the router's own default route is untouched.
+  # One WireGuard tunnel on the router carrying forwarded traffic for every via = "vpn" member
   options.homelab.egress.vpn = {
     enable = lib.mkEnableOption "a shared WireGuard exit for egress.nix members";
 

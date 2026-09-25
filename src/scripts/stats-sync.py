@@ -22,30 +22,16 @@ LOKI = os.environ.get("STATS_LOKI", "http://10.100.0.105:3100")
 QBITTORRENT = os.environ.get("STATS_QBITTORRENT", "http://10.100.0.112")
 INVENTORY = os.environ.get("STATS_INVENTORY", "/var/lib/homelab-stats/inventory.json")
 TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/homepage-tokens")
-# how many service rows the grid holds: four columns of eight. Only VMs that
-# are meant to be running get one; the eighteen switched off on purpose were
-# taking a third of the panel to say 0/0 for ever, and their count is on the
-# Services tile. Enable more than 32 and the surplus falls into the footer's
-# "+n more", which is the same overflow the footer always reported.
+# how many service rows the grid holds: four columns of eight.
 SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "32"))
 TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "6"))
-# Sending more rows than a panel can draw does not show more, it clips the
-# last one in half, so every list is cut to what its own panel holds. Requests
-# sits in the clients band with the other lists; disks and torrents share the
-# side column at 17px a line and 36px a torrent.
-#
-# Count these against a TRMNL screenshot, not a local render: TRMNL's font is
-# not the one chromium picks here and the same markup came out 18px shorter in
-# the band, which silently cost it a row.
+# Sending more rows than a panel can draw does not show more, it clips the last one in half
 REQUEST_ROWS = int(os.environ.get("STATS_REQUEST_ROWS", "11"))
 REQUEST_WINDOW = os.environ.get("STATS_REQUEST_WINDOW", "3h")
 DISK_ROWS = int(os.environ.get("STATS_DISK_ROWS", "4"))
 # longest torrent name the panel can hold on one line
 NAME_CHARS = int(os.environ.get("STATS_NAME_CHARS", "42"))
-# The "who is calling" strip. Only the external ingress is counted: vm-200
-# relays into vm-100, so a request off the internet is logged by both and
-# summing the two double-counts it. A day's window, because an hour of a
-# private lab is mostly whatever the owner happened to open.
+# The "who is calling" strip.
 CLIENT_INGRESS = os.environ.get("STATS_CLIENT_INGRESS", "vm-200")
 CLIENT_WINDOW = os.environ.get("STATS_CLIENT_WINDOW", "24h")
 CLIENT_ROWS = int(os.environ.get("STATS_CLIENT_ROWS", "11"))
@@ -133,11 +119,7 @@ def services():
     mem = by_instance(promql(
         '(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100'))
 
-    # strip the "134-internal-" prefix the inventory carries, and where that
-    # leaves two VMs called the same thing - the two Traefiks - put the id
-    # back, or the grid shows one name twice and says nothing about which is
-    # which. Grafana's relabelling solves the same collision with the zone,
-    # but a quarter column has no room for "traefik-external".
+    # strip the "134-internal-" prefix the inventory carries
     short = {k: v["name"].split("-", 2)[-1] for k, v in inv.items()}
     taken = {}
     for n in short.values():
@@ -159,16 +141,13 @@ def services():
             "on_demand": enabled == "onDemand",
             "cpu": round(cpu.get(inst, 0.0), 1) if online else 0.0,
             "mem": round(mem.get(inst, 0.0), 1) if online else 0.0,
-            # the template draws a bar from these, so clamp here rather than
-            # emitting a width over 100%
+            # the template draws a bar from these, so clamp here rather than emitting a width
             "cpu_pct": min(100, max(0, round(cpu.get(inst, 0.0)))) if online else 0,
             "mem_pct": min(100, max(0, round(mem.get(inst, 0.0)))) if online else 0,
         })
 
     expected = [r for r in rows if not r["disabled"]]
-    # Each headline tile carries a second line, and the CPU tile's is the VM
-    # doing the work: the host percentage alone says the lab is busy without
-    # saying who is making it busy.
+    # Each headline tile carries a second line, and the CPU tile's is the VM doing the work
     busiest = max(expected, key=lambda r: r["cpu_pct"], default=None)
     return rows, {
         "up": sum(1 for r in expected if r["online"]),
@@ -287,20 +266,14 @@ def requests():
         })
     out.sort(key=lambda x: -x["rate"])
     out = out[:REQUEST_ROWS]
-    # this list lives in the clients band now, whose rows all carry a bar of
-    # their share of the busiest row in the column
+    # this list lives in the clients band now, whose rows all carry a bar of their share
     top = out[0]["rate"] if out else 0
     for e in out:
         e["pct"] = round(100 * e.pop("rate") / top) if top else 0
     return out
 
 
-# Traefik logs the User-Agent verbatim, which is thousands of distinct strings
-# and useless as a series label, so Loki folds it into a family before the
-# count. Order matters: Edge and Chrome both claim Safari, and Edge claims
-# Chrome, so the most specific test comes first. `contains` rather than a
-# regex because this Loki has no regexMatch:
-#   invalid template for label 'agent': function "regexMatch" not defined
+# Traefik logs the User-Agent verbatim, which is thousands of distinct strings and useless
 AGENT_FAMILY = (
     '{{ if or (contains "bot" .ua) (contains "Bot" .ua) (contains "crawl" .ua)'
     ' (contains "spider" .ua) }}bot'
@@ -381,18 +354,12 @@ def clients():
     Cloudflare says they were in, what they were running, and what they asked
     for. The Prometheus metrics carry no client detail at all, so this comes
     from the JSON access log that promtail already ships to Loki."""
-    # | __error__="" on every json stage: the access log contains lines that
-    # are not valid JSON - truncated writes from the day the storage filled -
-    # and one of them fails the whole query with JSONParserErr, not just its
-    # own line. Over a 24h window that is the difference between a populated
-    # panel and an empty one.
+    # | __error__="" on every json stage: the access log contains lines that are not valid JSON
     sel = f'{{job="traefik-access", host="{CLIENT_INGRESS}"}}'
     w = CLIENT_WINDOW
     k = CLIENT_ROWS
 
-    # a request with no Cf-Ipcountry did not come through Cloudflare, which in
-    # practice means someone dialled the address directly - a port scanner, or
-    # a health check from inside the DMZ.
+    # a request with no Cf-Ipcountry did not come through Cloudflare
     countries = ranked(
         logql(f'topk({k}, sum by (country) (count_over_time({sel}[{w}])))'),
         "country", "direct")
@@ -412,12 +379,7 @@ def clients():
             # a bare address in the Host header is a scanner, not a visitor
             h["name"] = "by address"
 
-    # How that traffic went. The status label is already on the stream, so the
-    # classes cost one query; 4xx running at half of everything is the shape of
-    # a public address being probed, and worth seeing next to who is probing.
-    # The exact codes come off the same result, and 404/403/401 are the three
-    # that say which kind of probing it is: guessing paths, or guessing a way
-    # past the door.
+    # How that traffic went.
     by_status, exact = {}, {}
     for r in logql(f'sum by (status) (count_over_time({sel}[{w}]))'):
         code = str(r["metric"].get("status") or "")
@@ -430,8 +392,7 @@ def clients():
         exact[code] = exact.get(code, 0.0) + n
     total = sum(by_status.values())
 
-    # ClientHost is the real address: the Cloudflare ranges are trusted on the
-    # entrypoint, so it is the visitor and not the proxy.
+    # ClientHost is the real address: the Cloudflare ranges are trusted on the entrypoint
     visitors = scalar_logql(
         f'count(count by (ip) (count_over_time({sel} | json ip="ClientHost"'
         f' | __error__="" [{w}])))')
@@ -502,9 +463,7 @@ def qb_session():
         print(f"no qBittorrent credentials: {e}", file=sys.stderr)
         return None
 
-    # 10.100.0.104 is on qBittorrent's bypass_auth_subnet_whitelist, so the API
-    # usually answers with no session at all. Only fall back to a login when it
-    # does not, which keeps this working if the whitelist is ever trimmed.
+    # 10.100.0.104 is on qBittorrent's bypass_auth_subnet_whitelist
     try:
         req = urllib.request.Request(QBITTORRENT + "/api/v2/app/version")
         with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
@@ -570,10 +529,7 @@ def torrents():
     for t in listing:
         counts[bucket(t.get("state", ""))] += 1
 
-    # active downloads first, fastest first: that is what someone glances at.
-    # Progress breaks the tie, because the queue only lets one torrent run at
-    # a time, so everything behind it sits at 0B/s and the panel would
-    # otherwise lead with three untouched magnets.
+    # active downloads first, fastest first: that is what someone glances
     active = sorted(
         (t for t in listing if bucket(t.get("state", "")) == "downloading"),
         key=lambda t: (t.get("dlspeed", 0), t.get("progress", 0)), reverse=True)
@@ -584,10 +540,7 @@ def torrents():
     for t in ordered[:TORRENT_ROWS]:
         pct = round(float(t.get("progress", 0)) * 100)
         name = t.get("name", "?")
-        # scene releases run past 80 characters and a magnet-only torrent is a
-        # 40-character hash. CSS ellipsis needs every ancestor to agree to
-        # shrink, which is one silent failure away from a name running off the
-        # panel, so cut it here as well.
+        # scene releases run past 80 characters and a magnet-only torrent is a 40-character
         if len(name) > NAME_CHARS:
             name = name[:NAME_CHARS - 1].rstrip() + "\u2026"
         items.append({

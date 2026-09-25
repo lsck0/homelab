@@ -1,5 +1,4 @@
 # Kopia on vm-107: repository init, snapshot, restore of a broken service dir
-# with `nas-restore` (the path Hermes uses), freshness metric, web UI.
 { pkgs, ... }:
 pkgs.testers.runNixOSTest {
   name = "kopia";

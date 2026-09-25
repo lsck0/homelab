@@ -21,10 +21,7 @@
     };
   };
 
-  # the owner's account (the lldap user Authelia passes in Remote-User, see
-  # 102-internal-lldap.nix) as superuser, and the API token Homepage, Hermes
-  # and paperless-ai use. Remote-user logins create plain users, so the
-  # account is created here first. Idempotent.
+  # the owner's account
   systemd.services.paperless-setup = {
     description = "Create the Paperless owner account and API token";
     after = [ "paperless-web.service" ];
@@ -48,16 +45,12 @@
     '';
   };
 
-  # the documents themselves are plain files the snapshot handles, but the index
-  # that maps them to correspondents, tags and dates is SQLite: dump it rather
-  # than trusting a byte copy taken while the consumer is writing.
+  # the documents themselves are plain files the snapshot handles
   homelab.dbBackup.databases.paperless.sqlite = "/var/lib/paperless/db.sqlite3";
 
   networking.firewall.allowedTCPPorts = [ 8080 ];
 
-  # PAPERLESS_ENABLE_HTTP_REMOTE_USER makes Paperless trust the Remote-User
-  # header, so a direct caller could forge it and become the owner. Only the
-  # ingress, the ops hosts and paperless-ai (vm-122, API token) may reach it.
+  # PAPERLESS_ENABLE_HTTP_REMOTE_USER makes Paperless trust the Remote-User header
   homelab.ingressOnly = {
     ports = [ 8080 ];
     extraSources = [ "10.100.0.122/32" ];

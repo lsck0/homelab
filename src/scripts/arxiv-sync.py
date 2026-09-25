@@ -28,15 +28,13 @@ FEED = os.environ.get("ARXIV_FEED", "https://rss.arxiv.org/rss/math")
 ROWS = int(os.environ.get("ARXIV_ROWS", "12"))
 # surnames shown before the list collapses to "+n"
 AUTHORS = int(os.environ.get("ARXIV_AUTHORS", "8"))
-# cross-lists and replacements are announced in the same feed; "new" alone is
-# what "today's publications" means.
+# cross-lists and replacements are announced in the same feed; "new" alone is what "today's
 TYPES = set(os.environ.get("ARXIV_TYPES", "new").split(","))
 TIMEOUT = 30
 DC = "{http://purl.org/dc/elements/1.1/}"
 ARXIV = "{http://arxiv.org/schemas/atom}"
 
 # the primary category is what the paper is filed under; spell the common ones
-# out, because "math.AG" means nothing at a glance across the room.
 SUBJECTS = {
     "math.AC": "Commutative Algebra", "math.AG": "Algebraic Geometry",
     "math.AP": "Analysis of PDEs", "math.AT": "Algebraic Topology",
@@ -68,17 +66,11 @@ SUBJECTS = {
     "eess.SY": "Systems and Control",
 }
 
-# Titles are TeX. A panel read from across the room cannot render it, and the
-# markup is noisier than what it encodes, so unwrap the inline maths and drop
-# the commands that only pick a font. Anything left is shown verbatim: a real
-# TeX renderer is not worth carrying for a nine-line list.
+# Titles are TeX.
 TEX_COMMANDS = re.compile(r"\\(?:mathcal|mathbb|mathbf|mathrm|mathfrak|mathscr|text|rm|bf|it)\s*")
 TEX_BRACES = re.compile(r"[{}$]")
 
-# Author lists carry their own noise: an optional affiliation in brackets, and
-# accents written as TeX, so "Pernecká" arrives as "Perneck\'a". Titles keep
-# the cautious whitelist above - dropping every backslash command there would
-# eat the maths - but a name has no maths in it, so strip the lot.
+# Author lists carry their own noise: an optional affiliation in brackets
 AFFILIATION = re.compile(r"\s*\([^)]*\)")
 TEX_ACCENTS = re.compile(r"\\[a-zA-Z]+\s*|\\[`'^\"~=.]")
 
@@ -166,9 +158,7 @@ def main():
             "day": when.date(),
         })
 
-    # The feed is one announcement batch, so every item shares a date; taking
-    # the newest present keeps this honest on the days arXiv does not announce
-    # (weekends and US holidays) instead of reporting an empty today.
+    # The feed is one announcement batch, so every item shares a date; taking the newest
     label_day = max((e["day"] for e in entries), default=now.date())
     todays = [e for e in entries if e["day"] == label_day]
 
@@ -180,13 +170,7 @@ def main():
     for e in todays:
         del e["day"]
 
-    # Feed order is submission order, and on a 718-paper day that put eight
-    # math.GM papers in the fourteen the panel shows: General Mathematics is
-    # the bin for anything that fits nowhere else, so it is both small and the
-    # least worth reading. Ordering by subject size alone swung the other way
-    # and filled the page with fourteen PDE papers, so take one from each
-    # subject in turn, largest first. Fourteen rows then means fourteen
-    # subjects, and a bin nobody reads sorts below the cut on its own.
+    # Feed order is submission order, and on a 718-paper day that put eight math.GM papers
     groups = [sorted((e for e in todays if e["subject"] == s), key=lambda e: e["id"])
               for s, _ in sorted(by_subject.items(), key=lambda kv: (-kv[1], kv[0]))]
     shown = [e for tier in zip_longest(*groups) for e in tier if e is not None]

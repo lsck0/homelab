@@ -2,9 +2,7 @@
 let
 
 
-  # only real VMs: down now, up sometime in the last 6h (the static /24 scrape
-  # otherwise flags ~480 phantom IPs). On-demand VMs (instances.tf) sleep by
-  # design and are excluded.
+  # only real VMs: down now, up sometime in the last 6h
   onDemandIps = lib.mapAttrsToList (_: v: v.ip) (lib.filterAttrs (_: v: v.enabled == "onDemand") inventory);
   instanceDownExpr = "up{job=\"homelab-node-exporter\""
     + lib.optionalString (onDemandIps != []) ",instance!~\"(${lib.concatMapStringsSep "|" (ip: lib.replaceStrings [ "." ] [ "\\\\." ] ip) onDemandIps}):9100\""
@@ -12,9 +10,7 @@ let
   subnetTargets = subnet:
     builtins.map (host: "${subnet}.${toString host}:9100") (lib.range 1 254);
 
-  # A readable `vm` label on every node-exporter series ("homepage", not
-  # "10.100.0.103:9100"). Names come from the inventory without the id/zone
-  # prefix; the two Traefiks keep their zone. Unknown addresses keep the IP.
+  # A readable `vm` label on every node-exporter series ("homepage", not "10.100.0.103:9100").
   shortName = v:
     let m = builtins.match "[0-9]+-(internal|external)-(.*)" v.name;
     in if m == null then v.name else builtins.elemAt m 1;
@@ -34,14 +30,11 @@ let
     ++ [ (vmLabel "192.168.178.200" "proxmox") ];
 
   # ── blackbox probes ────────────────────────────────────────────────────────
-  # Replaces Uptime Kuma. Aimed at backends: the public name answers 302 from Authelia whatever the app is doing.
+  # Aimed at backends: the public name answers 302 from Authelia whatever the app is doing.
   routes = import ../modules/routes.nix;
   probes =
     let
-      # on-demand and disabled VMs would be a permanent false alarm
-      # monitor = false opts a route out, for a service that is wiring rather
-      # than something expected to answer: hello-gh has never had an image
-      # pushed to it, so probing it is a permanent false alarm.
+      # on-demand and disabled VMs would be a permanent false alarm monitor = false opts
       alwaysOn = r: (inventory.${toString r.vmid}.enabled or "false") == "true"
         && (r.monitor or true);
       ofSide = side: lib.mapAttrsToList (name: r: {
@@ -56,17 +49,13 @@ let
       { name = "traefik-external"; url = "http://10.200.0.200:80"; }
     ];
 
-  # alerts also go to the Hermes Telegram bot (same bot, same chat as Hermes).
-  # needs telegram-bot-token + telegram-chat-id in sops (src/scripts/hermes-secrets.sh).
+  # alerts also go to the Hermes Telegram bot
   enableTelegram = true;
 
-  # ntfy topic for alerts. ntfy (vm-203) requires a login now, so Grafana
-  # publishes as the `grafana` user; subscribe the phone with the `luca`
-  # account. Change the topic name to rotate it.
+  # ntfy topic for alerts. ntfy (vm-203) requires a login now
   ntfyAlertTopic = "homelab-alerts";
 
-  # ntfy renders these Go templates against Grafana's webhook JSON body
-  # (?template=yes), so the phone shows a readable line instead of raw JSON.
+  # ntfy renders these Go templates against Grafana's webhook JSON body (?template=yes)
   ntfyQuery = lib.concatStringsSep "&" [
     "template=yes"
     "title=${lib.escapeURL "{{if eq .status \"firing\"}}FIRING{{else}}RESOLVED{{end}}: {{.commonLabels.alertname}}"}"
@@ -74,8 +63,7 @@ let
     "tags=${lib.escapeURL "rotating_light"}"
   ];
 
-  # Telegram message: one compact HTML block per alert instead of Grafana's
-  # default wall of text. Firing and resolved are visually distinct.
+  # Telegram message: one compact HTML block per alert instead of Grafana's default wall
   telegramMessage = ''
     {{ if eq .Status "firing" }}🔴 <b>FIRING</b>{{ else }}✅ <b>RESOLVED</b>{{ end }} · <b>{{ .CommonLabels.alertname }}</b>
     {{ range .Alerts }}
@@ -85,9 +73,7 @@ let
     {{ end }}
     <a href="https://grafana.lsck0.dev/alerting/list">open Grafana</a>'';
 
-  # single delivery path: Grafana unified alerting only. Prometheus' own
-  # Alertmanager used to evaluate the same InstanceDown rule and notify the
-  # same ntfy topic and Telegram chat, so every alert arrived twice.
+  # single delivery path: Grafana unified alerting
   contactPoints = {
     apiVersion = 1;
     contactPoints = [{
@@ -121,8 +107,7 @@ let
 in {
   networking.hostName = "vm-105";
 
-  # bot token, chat id and the ntfy publisher password come from sops: rendered
-  # into Grafana's contact point file at activation, never into the Nix store.
+  # bot token, chat id and the ntfy publisher password come from sops: rendered into Grafana's
   sops.secrets = {
     ntfy-grafana-password = {};
   } // lib.optionalAttrs enableTelegram {
@@ -144,8 +129,7 @@ in {
     configuration = {
       auth_enabled = false;
       server.http_listen_port = 3100;
-      # tempo also runs on this VM and defaults its gRPC to 9095; move Loki's
-      # off it to avoid "bind: address already in use".
+      # tempo also runs on this VM and defaults its gRPC to 9095; move Loki's off it to avoid
       server.grpc_listen_port = 9096;
       common = {
         instance_addr = "127.0.0.1";
@@ -195,14 +179,11 @@ in {
   systemd.tmpfiles.rules = [
     "d /var/lib/loki 0750 loki loki -"
     "d /var/lib/tempo 0750 tempo tempo -"
-    # /var/lib/grafana is a 0777 NFS share, so the database inherits 0644 and
-    # Grafana logs "SQLite database file has broader permissions than it should"
-    # on every start. Tighten the file itself (z = only if it exists).
+    # /var/lib/grafana is a 0777 NFS share, so the database inherits 0644 and Grafana logs
     "z /var/lib/grafana/data/grafana.db 0640 grafana grafana -"
   ];
 
-  # localhost only: it is an unauthenticated prober, and anything that can
-  # reach it can make this VM issue requests on its behalf.
+  # localhost only: it is an unauthenticated prober
   services.prometheus.exporters.blackbox = {
     enable = true;
     listenAddress = "127.0.0.1";
@@ -217,8 +198,7 @@ in {
             valid_status_codes = [ 200 201 204 301 302 303 307 308 401 403 404 ];
             follow_redirects = false;
             preferred_ip_protocol = "ip4";
-            # routes.nix marks a backend scheme = "https" only when it serves
-            # its own self-signed certificate, so there is nothing to verify.
+            # routes.nix marks a backend scheme = "https" only when it serves its own
             tls_config.insecure_skip_verify = true;
           };
         };
@@ -280,17 +260,14 @@ in {
         }];
       }
       {
-        # Traefik's own Prometheus endpoint (:8082) on both ingresses. Feeds the
-        # HTTP analytics dashboard: request rate, status codes, latency.
+        # Traefik's own Prometheus endpoint (:8082) on both ingresses.
         job_name = "traefik";
         static_configs = [{
           targets = [ "10.100.0.100:8082" "10.200.0.200:8082" ];
         }];
       }
     ];
-    # no Prometheus-native alerting path: Grafana unified alerting below owns
-    # every rule and every notification. Running both meant the same
-    # InstanceDown rule notified the same ntfy topic and Telegram chat twice.
+    # no Prometheus-native alerting path: Grafana unified alerting below owns every rule
   };
 
   # both keep state on NFS and are slow to stop; the 45s default killed them
@@ -314,10 +291,7 @@ in {
         http_port = 80;
         root_url = "https://grafana.lsck0.dev";
       };
-      # access is gated by Authelia ForwardAuth on the Traefik route, which
-      # injects the Remote-User header. Grafana trusts that header (auth.proxy)
-      # instead of granting every anonymous visitor admin: so hitting
-      # 10.100.0.105:80 directly, without the header, gets nothing.
+      # access is gated by Authelia ForwardAuth on the Traefik route
       auth = {
         disable_login_form = true;
       };
@@ -371,14 +345,9 @@ in {
           }
         ];
       };
-      # alerting is always on and delivers to ntfy (vm-203, public, so it still
-      # works when the LAN is down): subscribe the phone app to
-      # https://ntfy.lsck0.dev/${ntfyAlertTopic} with the `luca` ntfy account.
-      # Telegram is the second channel (enableTelegram).
+      # alerting is always on and delivers to ntfy
       alerting = {
-        # rendered by sops at activation with the secrets filled in. Not via
-        # $__env{}: Grafana re-parses substituted values, turning the numeric
-        # Telegram chat id into a number, and then refuses to start.
+        # rendered by sops at activation with the secrets filled
         contactPoints.path = config.sops.templates."grafana-contact-points.yaml".path;
         policies.settings = {
           apiVersion = 1;
@@ -421,8 +390,7 @@ in {
                     refId = "C";
                     type = "threshold";
                     expression = "A";
-                    # `up == 0 and …` keeps the value of `up`, so A is 0 for each
-                    # real down target (and empty when everything is up).
+                    # `up == 0 and …` keeps the value of `up`
                     conditions = [{
                       evaluator = { type = "lt"; params = [ 1 ]; };
                     }];
@@ -441,8 +409,7 @@ in {
               uid = "backup_stale";
               title = "NAS backup stale (dead-man)";
               condition = "C";
-              # no successful daily backup for > 26h. no_data also fires, so a
-              # backup box that stopped publishing the metric is caught too.
+              # no successful daily backup for > 26h. no_data also fires
               data = [
                 {
                   refId = "A";
@@ -562,16 +529,9 @@ in {
   # 3100 Loki push, 3200 Tempo, 4317/4318 OTLP trace ingest.
   networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 ];
 
-  # Grafana trusts the Remote-User header (auth.proxy), so anyone who can reach
-  # :80 directly can forge it and land as Admin. Prometheus (:9090) and Tempo
-  # (:3200) have no authentication at all. Only the ingress and the ops hosts
-  # may reach those three; 3100/4317/4318 stay open because every VM pushes
-  # logs and traces into them.
+  # Grafana trusts the Remote-User header (auth.proxy)
   homelab.ingressOnly.ports = [ 80 9090 3200 ];
-  # the desktop status widget (arch-dotfiles quickshell homelab-status.py)
-  # scrapes Prometheus straight from the LAN. That is read-only telemetry, so
-  # it gets an exception; Grafana's :80 does not, because it trusts Remote-User
-  # and anything that can reach it can forge an admin session.
+  # the desktop status widget (arch-dotfiles quickshell homelab-status.py) scrapes Prometheus
   homelab.ingressOnly.portSources."9090" = [ "192.168.178.0/24" "10.100.0.104/32" ];
 
 }

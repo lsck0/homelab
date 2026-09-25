@@ -30,9 +30,7 @@
 
   networking.firewall.allowedTCPPorts = [ 80 5000 ];
 
-  # the registry has no authentication and the UI has no login: only the
-  # ingress, the CI runners and the swarm host that pulls the images may reach
-  # it. The external Traefik additionally denies registry.lsck0.dev publicly.
+  # the registry has no authentication and the UI has no login: only the ingress
   homelab.ingressOnly = {
     ports = [ 80 5000 ];
     extraSources = [

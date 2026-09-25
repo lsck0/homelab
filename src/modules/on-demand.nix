@@ -6,15 +6,13 @@ let
   isOnDemand = svc: (vmOf svc).enabled == "onDemand";
   active = lib.filterAttrs (_: isOnDemand) cfg.services;
 
-  # several routes can share one VM (e.g. NAS web UI + Syncthing). The VM may
-  # only go down when none of its proxies is serving.
+  # several routes can share one VM
   siblingsBusy = svc: lib.concatStrings (lib.mapAttrsToList (n: s:
     lib.optionalString (s.vmid == svc.vmid) ''
       systemctl is-active --quiet ondemand-${n}.service && exit 0
     '') active);
 
-  # "15m" -> 900. Cooldowns live in instances.tf; keep the format simple so the
-  # proxy idle timeout and the reaper agree on the same number.
+  # "15m" -> 900.
   toSeconds = s:
     let m = builtins.match "([0-9]+)(s|m|h|d)" s;
         unit = { s = 1; m = 60; h = 3600; d = 86400; };
@@ -86,9 +84,7 @@ let
     pve -X POST "$API/status/shutdown" >/dev/null
   '';
 
-  # the proxy only powers a VM off after it served a connection. A VM that was
-  # started some other way (sync.sh deploy, Hermes, the Proxmox UI) and never
-  # got a request would run forever; the reaper stops it after the cooldown.
+  # the proxy only powers a VM off after it served a connection.
   reaperScript = pkgs.writeShellScript "ondemand-reaper" ''
     set -uo pipefail
     export PATH="${lib.makeBinPath [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ]}"
@@ -225,8 +221,7 @@ in {
         wants = [ "network-online.target" ];
         after = [ "ondemand-${name}.socket" "network-online.target" ];
         serviceConfig = {
-          # start-pre holds the client while the VM boots; systemd's default 90s
-          # start timeout would kill the wake before a cold VM answers.
+          # start-pre holds the client while the VM boots; systemd's default 90s start timeout
           TimeoutStartSec = svc.bootTimeout + 60;
           ExecStartPre = wakeScript name svc;
           ExecStart = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd"

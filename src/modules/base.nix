@@ -116,7 +116,7 @@
       };
     };
 
-    # No syslog forwarding: Wazuh is gone and promtail already ships journals.
+    # No syslog forwarding: promtail already ships journals.
 
     # prefer IPv4: internal VMs have no IPv6 routing
     networking.enableIPv6 = false;

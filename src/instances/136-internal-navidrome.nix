@@ -5,8 +5,7 @@
     // nasMedia "/srv/music" "music"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
-  # Lidarr: music manager. Downloads into /data/media/music, which Navidrome
-  # serves. Wired to qBittorrent/Prowlarr by vm-133.
+  # Lidarr: music manager.
   homelab.servarr.lidarr = {
     image = "lscr.io/linuxserver/lidarr:3.1.0.4875-ls41";
     port = 8686;

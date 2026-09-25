@@ -1,24 +1,5 @@
 #!/bin/bash
 # One-time migration: renumber the VMs so ids follow the order in instances.tf.
-#
-# A VM id is also its IP (10.x.0.<id>) and hostname (vm-<id>), so every
-# renumbered VM needs its new NixOS config *before* it boots under the new id,
-# and Terraform must not see a changed vm_id (it would destroy and recreate the
-# disk). This script, for each VM in MAP:
-#
-#   1. builds the new configs and installs them on the VM at its OLD address as
-#      the next boot generation (`switch-to-configuration boot`, no switch now)
-#   2. shuts the VM down
-#   3. destroys the VMs removed from instances.tf (REMOVED, empty in this
-#      migration), so their ids can be reused
-#   4. renames the VM on Proxmox in place: disk volumes (LVM/LVM-thin, ZFS, dir)
-#      and config, through temporary ids 9xxx so no two VMs collide
-#   5. rewrites Terraform state: drops the old addresses and imports every VM
-#      at its new id, then refuses to continue if the plan replaces any VM
-#   6. starts the VMs again; they boot the installed config with the new IP
-#
-# Afterwards run ./sync.sh as usual. Dry run by default: prints what it would
-# do. Run with --execute to apply. The whole lab is down during steps 2–6.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -35,19 +16,7 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# old new
-#
-# Current migration: 104 is freed for 104-internal-terminal, which holds every
-# feed the e-ink display polls and has to sit before Grafana, so each internal
-# VM from Grafana (104) up to Nextcloud (119) moves one place up. The 120 slot
-# the retired calendar VM left behind absorbs the shift exactly, so nothing
-# from 121 upwards moves at all.
-#
-# Highest id first, and the script routes every rename through a temporary
-# 9xxx id anyway, so the shift cannot collide with itself.
-#
-# 104 itself is not listed: it is a brand-new VM with no disk to rename, and
-# sync.sh creates it afterwards.
+# old new Current migration: 104 is freed for 104-internal-terminal
 MAP="
 119 120
 118 119
@@ -78,7 +47,6 @@ run() {
 
 # ─────────────────────────────────────────────────────────────────────────────
 # ACCESS
-# ─────────────────────────────────────────────────────────────────────────────
 TFVARS=$(mktemp --suffix=.tfvars.json); trap 'rm -f "$TFVARS"' EXIT
 if [ "$EXECUTE" = 1 ]; then
   SOPS_AGE_KEY_FILE="$ROOT_DIR/secrets/age.txt" sops --decrypt "$SRC/terraform.tfvars.sops.json" > "$TFVARS"
@@ -116,8 +84,7 @@ if [ "$EXECUTE" = 1 ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. NEW CONFIGS AS NEXT BOOT GENERATION
-# ─────────────────────────────────────────────────────────────────────────────
+# 1.
 if [ "$FROM_STEP" -le 1 ]; then
 echo ">>> 1. Installing new configs (next boot) at the old addresses"
 while read -r old new <&3; do
@@ -155,8 +122,7 @@ done 3<<< "$MAP"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2. STOP
-# ─────────────────────────────────────────────────────────────────────────────
+# 2.
 if [ "$FROM_STEP" -le 2 ]; then
 echo ">>> 2. Shutting down renumbered VMs"
 while read -r old _ <&3; do
@@ -166,8 +132,7 @@ done 3<<< "$MAP"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. REMOVED VMS
-# ─────────────────────────────────────────────────────────────────────────────
+# 3.
 if [ "$FROM_STEP" -le 3 ]; then
 echo ">>> 3. Destroying removed VMs"
 for id in $REMOVED; do
@@ -176,10 +141,7 @@ done
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. RENAME ON PROXMOX
-# ─────────────────────────────────────────────────────────────────────────────
-# runs on the host. Renames every volume named vm-<old>-* (and LVM snapshot
-# volumes snap_vm-<old>-*) on the VM's storages, then the config file.
+# 4.
 RENAME_FN='
 renum() {
   old=$1 new=$2
@@ -223,10 +185,7 @@ while read -r old new <&3; do [ -n "$old" ] && pve "$RENAME_FN renum 9$new $new"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5. TERRAFORM STATE
-# ─────────────────────────────────────────────────────────────────────────────
-# every renumbered VM must now exist under its new id and nothing under its old
-# one; importing before that would attach the wrong VMs to the new keys
+# 5.
 if [ "$EXECUTE" = 1 ]; then
   bad=""
   new_ids=" $(awk 'NF {printf "%s ", $2}' <<< "$MAP")"
@@ -242,10 +201,7 @@ fi
 
 echo ">>> 5. Rewriting Terraform state"
 TF=(terraform -chdir="$SRC")
-# one rollback copy per migration, stamped. `--from-step` re-runs of the SAME
-# migration must not overwrite it (the state is already partly rewritten by
-# then), but a later migration must not silently inherit the previous one's copy
-# either - that copy describes ids that no longer exist.
+# one rollback copy per migration, stamped.
 BACKUP="$SRC/terraform.tfstate.pre-renumber-$(date +%Y%m%d)"
 if [ -e "$BACKUP" ]; then
   echo "    keeping the existing rollback copy $(basename "$BACKUP")"
@@ -279,8 +235,7 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6. START
-# ─────────────────────────────────────────────────────────────────────────────
+# 6.
 echo ">>> 6. Starting VMs with their new ids"
 start_failed=""
 while read -r _ new <&3; do

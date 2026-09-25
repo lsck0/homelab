@@ -3,9 +3,7 @@
 
   # backups: Kopia on vm-107 snapshots this tree (see 106-internal-kopia.nix).
 
-  # DMZ exports come from dmzShares (modules/nas.nix), one share per VM address.
-  # subtree_check: all shares live on one filesystem, and without it a root
-  # client can forge file handles that reach outside its share.
+  # DMZ exports come from dmzShares (modules/nas.nix)
   # ── bulk storage ───────────────────────────────────────────────────────────
   # scsi1, the spinning disk. media and torrents share one filesystem so the *arr stack can hardlink between them.
   fileSystems."/srv/nas/bulk" = {
@@ -140,21 +138,10 @@
   };
 
   systemd.tmpfiles.rules = [
-    # root, not nobody: systemd-tmpfiles refuses to descend when ownership
-    # changes from one non-root user to another ("Detected unsafe path
-    # transition"), so a nobody-owned /srv/nas silently blocked every rule
-    # for the 1000-owned media tree below it. A root-owned parent is exempt.
-    # Nothing writes into /srv/nas itself; every share is a subdirectory.
+    # root, not nobody: systemd-tmpfiles refuses to descend when ownership changes from one
     "d /srv/nas 0755 root root -"
     "d /srv/nas/public 0775 nobody nogroup -"
-    # 1000, not nobody: every container that writes here (the *arr stack and
-    # qbittorrent, via homelab.servarr and 111) runs as PUID 1000, which
-    # LinuxServer images call "abc". Against a 0775 tree owned by 65534 they
-    # could read but not write, and Radarr refused its own root folder with
-    #   Folder '/data/media/movies/' is not writable by user 'abc'
-    # The readers (Jellyfin, Audiobookshelf, Kavita, Navidrome) only need the
-    # o+rx that 0775 already gives them.
-    # creates the tree on whatever is mounted at /srv/nas/bulk
+    # 1000, not nobody: every container that writes here
     "d /srv/nas/bulk 0775 1000 1000 -"
     "d /srv/nas/bulk/media 0775 1000 1000 -"
     "d /srv/nas/bulk/media/tv 0775 1000 1000 -"
@@ -170,9 +157,7 @@
     "d /srv/nas/bulk/torrents 0775 1000 1000 -"
     # per-service persistent data
     "d /srv/nas/data 0777 nobody nogroup -"
-    # nightly database dumps (modules/db-backup.nix), one subdir per VM. This is
-    # what makes the Kopia snapshot contain a restorable copy of the databases
-    # rather than a byte copy of live data directories.
+    # nightly database dumps (modules/db-backup.nix), one subdir per VM.
     "d /srv/nas/data/db-dumps 0777 nobody nogroup -"
     "d /srv/nas/data/authelia 0777 nobody nogroup -"
     "d /srv/nas/data/loki 0777 nobody nogroup -"
@@ -230,11 +215,7 @@
     };
   };
 
-  # Syncthing: continuous device sync, complements SMB/NFS
-  # GUI at sync.lsck0.dev behind Authelia; sync protocol on 22000 (LAN only,
-  # not port-forwarded). Data lives under the NAS tree so it is backed up.
-  # syncthing panics with "$HOME is not defined" under the home-less `nobody`
-  # user, so give the service an explicit HOME (its config dir).
+  # Syncthing: continuous device sync, complements SMB/NFS GUI at sync.lsck0.dev behind
   systemd.services.syncthing.environment.HOME = "/var/lib/syncthing";
   services.syncthing = {
     enable = true;
@@ -246,16 +227,14 @@
     overrideDevices = false;
     overrideFolders = false;
     settings.gui = {
-      # Authelia ForwardAuth gates the route; disable Syncthing's own auth so it
-      # does not double-prompt, and keep the GUI off the public port.
+      # Authelia ForwardAuth gates the route; disable Syncthing's own auth so it does
       insecureSkipHostcheck = true;
     };
 
     settings.devices.luca-pc.id =
       "CJDJNIO-XF2HJN5-IOUMFGP-JLEPI4Q-IHEWABK-M4AFSV2-25VSZHA-NSBK3A3";
 
-    # /srv/nas/syncthing is also the "syncthing" SMB share, so whatever lands
-    # here shows up in the file browser.
+    # /srv/nas/syncthing is also the "syncthing" SMB share
     settings.folders.sync = {
       id = "sync";
       path = "/srv/nas/syncthing/sync";
@@ -270,9 +249,6 @@
   networking.firewall.allowedTCPPorts = [ 80 2049 111 8384 22000 ];
   networking.firewall.allowedUDPPorts = [ 2049 111 22000 21027 ];
 
-  # FileBrowser runs with FB_NOAUTH and the Syncthing GUI has its own auth
-  # disabled, both because Authelia gates their routes. NFS (2049/111), SMB and
-  # the Syncthing sync protocol (22000) are untouched: they are the actual file
-  # services and carry their own access control.
+  # FileBrowser runs with FB_NOAUTH and the Syncthing GUI has its own auth disabled
   homelab.ingressOnly.ports = [ 80 8384 ];
 }

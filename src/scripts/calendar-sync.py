@@ -28,46 +28,25 @@ import recurring_ical_events
 from icalendar import Calendar
 
 TIMEOUT = 30
-# How far ahead to look, and how many events to keep. A fixed short window is
-# wrong for a sparse personal calendar: with a 14 day horizon the payload was
-# empty whenever the next appointment happened to be a month out. Look far
-# ahead instead and cap the count, so the screen always shows "what is next"
-# regardless of how busy the calendar is.
+# How far ahead to look, and how many events to keep.
 HORIZON_DAYS = int(os.environ.get("CALENDAR_HORIZON_DAYS", "90"))
 MAX_EVENTS = int(os.environ.get("CALENDAR_MAX_EVENTS", "12"))
-# The week view is rendered in local time: a day column has to start at local
-# midnight, not UTC midnight, or late-evening events land on the wrong day.
+# The week view is rendered in local time: a day column has to start at local midnight
 LOCAL_TZ = ZoneInfo(os.environ.get("CALENDAR_TZ", "Europe/Berlin"))
-# Which weeks to publish, as offsets from the current one. The device cannot
-# tell a plugin "show me last week", so each offset is served as its own static
-# file and gets its own plugin instance in the playlist.
+# Which weeks to publish, as offsets from the current one.
 WEEK_OFFSETS = [int(o) for o in os.environ.get("CALENDAR_WEEK_OFFSETS", "-1,0,1").split(",")]
 # how many events a month cell shows before collapsing the rest into "+n".
-# Six rows share 434px, so a cell holds its date plus two lines and the
-# "+n more"; a third line was drawn half outside the cell and clipped.
 MONTH_CELL_EVENTS = int(os.environ.get("CALENDAR_MONTH_CELL_EVENTS", "3"))
-# All-day events sit above the time grid and push it down, so a day with eight
-# of them would leave no room for the hours. Show a few, count the rest.
+# All-day events sit above the time grid and push it down
 ALLDAY_CELL_EVENTS = int(os.environ.get("CALENDAR_ALLDAY_CELL_EVENTS", "2"))
-# The time axis spans this window, every hour drawn, so a given hour is always
-# at the same height and the screen reads at a glance. 07:00-22:00, not the
-# full day: on a 480px panel 24 rows left ~13px per hour, so the hour labels
-# overlapped each other and every event was shorter than its own text. The
-# night is empty on every calendar here, and an event outside the window still
-# widens it (below) rather than being hidden. 08:00-24:00 by request.
+# The time axis spans this window, every hour drawn
 GRID_START_MIN = int(os.environ.get("CALENDAR_GRID_START_MIN", "480"))
 GRID_END_MIN = int(os.environ.get("CALENDAR_GRID_END_MIN", "1260"))
-# Smallest block, as a percentage of the grid height. Percent positions are
-# exact but text is not: a 30-minute block is ~15px tall and one line of text
-# needs about that, so two back-to-back meetings drew on top of each other and
-# the first one vanished. Blocks grow to this and push the ones below them
-# down. The day view has one wide column and can afford more.
+# Smallest block, as a percentage of the grid height.
 WEEK_MIN_BLOCK_PCT = float(os.environ.get("CALENDAR_WEEK_MIN_BLOCK_PCT", "4.7"))
 DAY_MIN_BLOCK_PCT = float(os.environ.get("CALENDAR_DAY_MIN_BLOCK_PCT", "9.5"))
 
-# Display names for the sources. The key is the source name (the part before
-# "|" in calendar-sources, or an uploaded file's stem); the value is what the
-# screen shows. A source with no mapping falls back to its own name.
+# Display names for the sources.
 SOURCE_LABELS = dict(
     pair.split("=", 1)
     for pair in os.environ.get(
@@ -76,9 +55,7 @@ SOURCE_LABELS = dict(
     if "=" in pair
 )
 
-# Monochrome e-ink has no colour to spend on categories, so each source gets a
-# border style instead. Assigned in the order sources are first seen, so adding
-# or renaming one keeps working without touching the template.
+# Monochrome e-ink has no colour to spend on categories
 BORDER_STYLES = ["solid", "dashed", "dotted", "double"]
 _border_assigned = {}
 
@@ -176,8 +153,7 @@ def merge(calendars):
                 seen_timezones.add(tzid)
                 merged.add_component(component)
             elif kind in ("VEVENT", "VTODO"):
-                # Distinct sources can reuse a UID; without a prefix a client
-                # would treat those as the same event and drop one.
+                # Distinct sources can reuse a UID; without a prefix a client would treat
                 uid = str(component.get("uid", ""))
                 component["UID"] = f"{name}-{uid}"
                 component["CATEGORIES"] = name
@@ -233,8 +209,7 @@ def event_row(name, event, day=None):
         "source": name,
         "source_label": SOURCE_LABELS.get(name, name.title()),
         "border_style": border_style(name),
-        # some invites in the work feed carry no SUMMARY at all; without a
-        # placeholder the block renders as an empty box on the screen.
+        # some invites in the work feed carry no SUMMARY at all; without a placeholder
         "summary": str(event.get("SUMMARY", "")).strip() or "(no title)",
         "location": str(event.get("LOCATION", "")),
         "start": to_iso(start_value) if start_value is not None else None,
@@ -245,9 +220,7 @@ def event_row(name, event, day=None):
                 else start_value.astimezone(LOCAL_TZ).strftime("%H:%M"),
     }
 
-    # Minute offsets let the template lay the week out as a real time grid, so
-    # two things at once sit side by side instead of stacking into a list that
-    # hides the clash. Liquid cannot do date arithmetic, hence doing it here.
+    # Minute offsets let the template lay the week out as a real time grid
     if day is not None and not all_day:
         begin = minutes_into(day, start_value)
         finish = minutes_into(day, stop_value) if stop_value is not None else None
@@ -369,28 +342,14 @@ def week(calendars, offset):
             "all_day_events": [e for e in rows if e["all_day"]][:ALLDAY_CELL_EVENTS],
             "all_day_more": max(0, len([e for e in rows if e["all_day"]]) - ALLDAY_CELL_EVENTS),
             "timed_events": timed,
-            # how many columns this day needs: the template does not have to
-            # work it out, and an empty day still reports 1.
+            # how many columns this day needs: the template does not have to work
             "max_lanes": max([e.get("lanes", 1) for e in timed], default=1),
         })
 
-    # The axis spans the whole configured day, every hour drawn, rather than
-    # cropping to the hours that happen to be busy. A cropped axis silently
-    # rescales: the same meeting sits at a different height each day, so the
-    # screen cannot be read at a glance. A fixed day means 09:00 is always in
-    # the same place, and an empty morning reads as an empty morning.
-    #
-    # GRID_START/GRID_END default to the full 24 hours; narrow them if the night
-    # is wasted space on your panel.
+    # The axis spans the whole configured day, every hour drawn
     grid_start, grid_end = GRID_START_MIN, GRID_END_MIN
 
-    # The window is exactly what was asked for. An earlier version widened it
-    # to swallow any outlier, which meant one 21:00 meeting rescaled the whole
-    # week and 08:00-16:00 silently became 08:00-21:00.
-    #
-    # Nothing is dropped silently instead: an event that starts after the
-    # window is counted per day and in the footer, and one that merely runs
-    # past the end is clipped to it.
+    # The window is exactly what was asked
     grid_start, grid_end = max(0, grid_start), min(1440, grid_end)
     if grid_end - grid_start < 240:
         grid_end = min(1440, grid_start + 240)
@@ -416,13 +375,7 @@ def week(calendars, offset):
             e["left_pct"] = round(e.get("lane", 0) / lanes * 100, 3)
             e["width_pct"] = round(100 / lanes, 3)
             e["overlapping"] = lanes > 1
-            # How much text the block can hold. Three lines (time, title,
-            # source) need ~35px; in the week a minute is ~0.47px, so anything
-            # under 90 minutes printed three lines into a box too short for
-            # them and the title was the line that got clipped away. Short
-            # blocks get one line instead, "10:00 Standup", and keep their
-            # source in the left border style. The day view has one wide
-            # column and always shows all three.
+            # How much text the block can hold.
             dur = e["end_min"] - e["start_min"]
             e["compact"] = dur < 90
             e["tall"] = dur >= 150
@@ -433,8 +386,7 @@ def week(calendars, offset):
         hours.append({
             "label": f"{m // 60:02d}:00",
             "hour": m // 60,
-            # the week packs 24 rows into one screen; labelling every other one
-            # keeps the axis readable. The day view has room for all of them.
+            # the week packs 24 rows into one screen; labelling every other one keeps the axis
             "major": (m // 60) % 2 == 0,
             "top_pct": round((m - grid_start) / span * 100, 3),
         })
@@ -491,8 +443,7 @@ def day_view(calendars, offset=0):
         "later": match.get("later", 0),
         "grid": grid["grid"],
         "day": match,
-        # the week template iterates `days`; expose the single day the same way
-        # so one markup renders both views without special-casing the shape.
+        # the week template iterates `days`; expose the single day the same way so one markup
         "days": [match],
     }
 
@@ -641,8 +592,7 @@ def main():
 
     calendars = load_calendars(sources)
     if sources and not calendars:
-        # Every source failed. Leaving the previous output in place beats
-        # replacing a working calendar with an empty one.
+        # Every source failed.
         log("every source failed, keeping previous output")
         return 1
 
@@ -663,16 +613,13 @@ def main():
     }
     write_atomic(os.path.join(out_dir, "trmnl.json"), json.dumps(payload, indent=2))
 
-    # one file per week offset: the TRMNL device has no way to tell a plugin
-    # which week to show, so each week is its own polling URL and its own
-    # plugin instance. Stepping through the playlist is what moves weeks.
+    # one file per week offset: the TRMNL device has no way to tell a plugin which week
     weeks = []
     for offset in WEEK_OFFSETS:
         grid = week(calendars, offset)
         grid["generated_at"] = payload["generated_at"]
         grid["sources"] = payload["sources"]
-        # no "+" in the filename: it is legal in a path segment but enough
-        # clients and proxies decode it as a space that it is not worth the risk.
+        # no "+" in the filename: it is legal in a path segment but enough clients and proxies
         if offset == 0:
             name = "week.json"
         elif offset == -1:

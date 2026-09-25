@@ -1,15 +1,12 @@
 { pkgs, nasMount, retry, ... }: {
   networking.hostName = "vm-128";
 
-  # Seerr (formerly Jellyseerr), request movies, series and anime; approved requests go to
-  # Radarr/Sonarr (anime -> Sonarr anime folder). Connected to Jellyfin and the
-  # *arrs by vm-133. Behind Authelia at requests.lsck0.dev.
+  # Seerr (formerly Jellyseerr), request movies, series and anime; approved requests go
   fileSystems = nasMount "/var/lib/jellyseerr" "jellyseerr"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   virtualisation.oci-containers.containers.jellyseerr = {
-    # the old fallenbagel/jellyseerr image is frozen at 2.7 and cannot log in
-    # to Jellyfin 12; the project continues as Seerr.
+    # the old fallenbagel/jellyseerr image is frozen at 2.7 and cannot log in to Jellyfin 12
     image = "ghcr.io/seerr-team/seerr:v3.4.1";
     extraOptions = [ "--init" ];
     ports = [ "80:5055" ];
@@ -22,9 +19,7 @@
 
   systemd.tmpfiles.rules = [
     "d /var/lib/jellyseerr 0750 1000 1000 -"
-    # the Seerr image runs as node:node (uid 1000); the old fallenbagel image
-    # ran as root and left root-owned db/ and logs/ behind, which made every
-    # start crash with EACCES on the log file. Z = recursive chown.
+    # the Seerr image runs as node:node (uid 1000); the old fallenbagel image ran as root
     "Z /var/lib/jellyseerr - 1000 1000 -"
   ];
 

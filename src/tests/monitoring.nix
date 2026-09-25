@@ -1,10 +1,4 @@
-# vm-104 alerting: the provisioned Grafana "Instance down" rule is Normal while
-# everything is up (not "No data") and fires when a node-exporter goes down.
-#
-# Grafana unified alerting is the only delivery path. Prometheus' Alertmanager
-# used to evaluate the same rule and notify the same ntfy topic and Telegram
-# chat, which delivered every alert twice; the test asserts it is gone, so
-# re-adding a second path fails here instead of in the owner's notifications.
+# vm-104 alerting: the provisioned Grafana "Instance down" rule is Normal while everything
 { pkgs, lib, ... }:
 pkgs.testers.runNixOSTest {
   name = "monitoring";
