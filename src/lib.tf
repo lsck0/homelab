@@ -104,6 +104,10 @@ resource "proxmox_virtual_environment_hardware_mapping_pci" "gpu" {
     node = var.target_node
     id   = "10de:1f08"
     path = "0000:2b:00.0"
+    # without these two the start fails with "PCI device mapping invalid
+    # (hardware probably changed): missing expected property '<name>'".
+    iommu_group  = 3
+    subsystem_id = "10de:12fd"
   }]
 }
 
