@@ -5,17 +5,15 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TF="$ROOT_DIR/src/instances.tf"
 
-MEDIA="111 112 128 129 130 131 132 133 134 135 136 137"
-APPS="118 119 120 122 123 125 126 127"
-GPU="113"
+MEDIA="112 128 129 130 131 132 133 134 136"
+APPS="121 122 124 125 126 127"
 
-usage() { echo "usage: $0 status | {media|apps|gpu} {on|off|onDemand} [--apply]"; exit 1; }
+usage() { echo "usage: $0 status | {media|apps} {on|off|onDemand} [--apply]"; exit 1; }
 
 group_ids() {
   case "$1" in
     media) echo "$MEDIA" ;;
     apps)  echo "$APPS" ;;
-    gpu)   echo "$GPU" ;;
     *) usage ;;
   esac
 }
@@ -38,7 +36,7 @@ name_of() {
 [ $# -ge 1 ] || usage
 
 if [ "$1" = status ]; then
-  for g in media apps gpu; do
+  for g in media apps; do
     printf '%s:\n' "$g"
     for id in $(group_ids "$g"); do
       printf '  %-4s %-34s %s\n' "$id" "$(name_of "$id")" "$(state_of "$id")"

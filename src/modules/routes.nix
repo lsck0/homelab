@@ -39,18 +39,17 @@
     lidarr         = { host = "lidarr";      vmid = 136; port = 8686;  group = "admins"; };
     # A tailscale client cannot log in to Authelia, so no ForwardAuth here; Headscale
     headscale      = { host = "hs";          vmid = 138; port = 80;    auth = "own"; };
-    headplane      = { host = "hs-ui";       vmid = 138; port = 3000;  group = "admins"; };
+    headplane      = { host = "hs-ui";       vmid = 138; port = 3000;  group = "admins";
+                       loginRedirect = { path = "/"; to = "/admin/"; }; };
   };
 
   external = {
     searxng    = { host = "search";   vmid = 204; port = 80; proxied = false; };
-    shlink     = { host = "shlink";   vmid = 205; port = 80; proxied = false; };
     privatebin = { host = "paste";    vmid = 206; port = 80; proxied = false; };
     share      = { host = "share";    vmid = 207; port = 80; proxied = false; };
     ntfy       = { host = "ntfy";     vmid = 203; port = 80; };
     # CI/CD targets on the swarm host: hello <- Forgejo, hello-gh <- GitHub.
     hello      = { host = "hello";    vmid = 209; port = 80; proxied = false; };
-    # no image exists yet: example/.github/workflows/hello.yml is a template to copy
-    hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; proxied = false; monitor = false; };
+    hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; proxied = false; };
   };
 }

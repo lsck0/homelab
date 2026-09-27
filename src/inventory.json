@@ -100,7 +100,7 @@
   },
   "114": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.114",
     "name": "114-internal-hermes",
@@ -287,15 +287,6 @@
     "prefix": 24,
     "type": "external"
   },
-  "202": {
-    "cooldown": "30m",
-    "enabled": "false",
-    "gateway": "10.200.0.1",
-    "ip": "10.200.0.202",
-    "name": "202-external-tor-relay",
-    "prefix": 24,
-    "type": "external"
-  },
   "203": {
     "cooldown": "30m",
     "enabled": "true",
@@ -311,15 +302,6 @@
     "gateway": "10.200.0.1",
     "ip": "10.200.0.204",
     "name": "204-external-searxng",
-    "prefix": 24,
-    "type": "external"
-  },
-  "205": {
-    "cooldown": "30m",
-    "enabled": "true",
-    "gateway": "10.200.0.1",
-    "ip": "10.200.0.205",
-    "name": "205-external-shlink",
     "prefix": 24,
     "type": "external"
   },

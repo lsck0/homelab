@@ -54,6 +54,7 @@ locals {
       type       = "internal",
       boot_order = 2,
       memory     = 2048,
+      balloon    = 2048,
       # root disk on the NVMe pool: service state, backups and documents - the things
       disk = 750,
       # Bulk storage on the 2 TB spinning disk.
@@ -78,17 +79,13 @@ locals {
       memory  = 1024,
     }
 
-    "114" = { # Hermes: the Telegram agent with root on the lab
-      enabled = false,
+    "114" = { # Hermes: Telegram agent, cloud models only, root on the lab
+      enabled = true,
       name    = "114-internal-hermes",
       type    = "internal",
-      # VFIO pins the guest's whole RAM up front, so this VM costs its full `memory` the moment
-      memory  = 5120,
-      balloon = 0,
-      cores   = 4,
+      memory  = 1536,
       disk    = 60,
       machine = "q35",
-      hostpci = ["gpu"],
     }
 
     "115" = { # git forge (OIDC + SSH)
@@ -210,7 +207,9 @@ locals {
       enabled = true,
       name    = "134-internal-jellyfin",
       type    = "internal",
-      memory  = 2048,
+      # no balloon: squeezed to 1 GiB it was OOM-killed mid-stream
+      memory  = 3072,
+      balloon = 3072,
       cores   = 4,
       disk    = 16,
     }
@@ -236,14 +235,6 @@ locals {
       memory  = 2048,
       balloon = 1536,
     }
-    "202" = { # non-exit Tor relay
-      enabled = false,
-      name    = "202-external-tor-relay",
-      type    = "external",
-      # A public relay, not a client: it carries other people's circuits
-      memory  = 1536,
-      balloon = 1024,
-    }
     "203" = { # push notifications (alert delivery)
       enabled = true,
       name    = "203-external-ntfy",
@@ -252,11 +243,6 @@ locals {
     "204" = { # privacy metasearch
       enabled = true,
       name    = "204-external-searxng",
-      type    = "external",
-    }
-    "205" = { # URL shortener
-      enabled = true,
-      name    = "205-external-shlink",
       type    = "external",
     }
     "206" = { # encrypted pastebin
@@ -294,6 +280,7 @@ locals {
       name       = "luca-router",
       type       = "router",
       memory     = 1024,
+      balloon    = 1024,
       boot_order = 1,
     }
   }
