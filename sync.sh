@@ -95,9 +95,22 @@ deploy_nixos() {
     || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
 
   # switch in place, no reboot
+  local out rc=0 failed
+  out=$(mktemp)
   ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
     "nix-env -p /nix/var/nix/profiles/system --set '${toplevel}' \
-     && '${toplevel}/bin/switch-to-configuration' switch"
+     && '${toplevel}/bin/switch-to-configuration' switch" 2>&1 | tee "$out" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    # podman healthchecks fire mid-restart; those alone are not a failed deploy
+    failed=$(sed -n 's/^warning: the following units failed: //p' "$out" | tr ',' '\n' | tr -d ' ' \
+      | grep -v -E '^[0-9a-f]{64}-[0-9a-f]{16}\.service$' || true)
+    if grep -q '^warning: the following units failed: ' "$out" && [ -z "$failed" ]; then
+      echo ">>> $name: only podman healthchecks failed during the switch, ignoring."
+    else
+      rm -f "$out"; return 1
+    fi
+  fi
+  rm -f "$out"
   echo ">>> $name deployed."
 }
 
