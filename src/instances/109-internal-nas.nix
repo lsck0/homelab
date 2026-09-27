@@ -58,6 +58,9 @@
         workgroup = "WORKGROUP";
         "server string" = "vm-109-nas";
         "map to guest" = "Bad User";
+        # guest shares: owner pc, wireguard and tailnet only
+        "hosts allow" = "192.168.178.138 10.0.0.0/24 100.64.0.0/10 127.0.0.1";
+        "hosts deny" = "0.0.0.0/0";
       };
       public = {
         path = "/srv/nas/public";
