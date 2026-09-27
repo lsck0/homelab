@@ -17,6 +17,10 @@
     DB_PASSWORD=${config.sops.placeholder.firefly-db-password}
     APP_URL=https://firefly.lsck0.dev
     TRUSTED_PROXIES=*
+    # login is Authelia's Remote-Email header
+    AUTHENTICATION_GUARD=remote_user_guard
+    AUTHENTICATION_GUARD_HEADER=HTTP_REMOTE_EMAIL
+    AUTHENTICATION_GUARD_EMAIL=HTTP_REMOTE_EMAIL
   '';
   sops.templates."firefly-db.env".content = ''
     POSTGRES_DB=firefly
@@ -55,9 +59,11 @@
     serviceConfig.Type = "oneshot";
     script = ''
       out=/var/lib/homepage-tokens/firefly-token.token
-      [ -s "$out" ] && exit 0
       tinker() { podman exec firefly php artisan tinker --execute="$1" 2>/dev/null | tail -1; }
       [ "$(tinker 'echo \FireflyIII\User::count();')" -gt 0 ] 2>/dev/null || { echo "no Firefly user yet"; exit 0; }
+      # the header login matches by email: keep the owner on the lldap address
+      tinker '$u = \FireflyIII\User::orderBy("id")->first(); $u->email = "${config.homelab.acmeEmail}"; $u->save();' >/dev/null
+      [ -s "$out" ] && exit 0
       podman exec firefly php artisan passport:client --personal --no-interaction --name=homelab >/dev/null 2>&1 || true
       token=$(tinker 'echo \FireflyIII\User::orderBy("id")->first()->createToken("hermes")->accessToken;')
       echo "$token" | grep -q '^ey' || { echo "token creation failed: $token"; exit 1; }
@@ -77,4 +83,5 @@
   ];
 
   networking.firewall.allowedTCPPorts = [ 8080 ];
+  homelab.ingressOnly.ports = [ 8080 ];
 }

@@ -1,4 +1,24 @@
-{ config, pkgs, nasMount, ... }: {
+{ config, pkgs, nasMount, ... }:
+let
+  # sign in as Authelia's Remote-User; the first admin takes over the seeded akadmin
+  remoteUser = pkgs.writeText "zz_remote_user.rb" ''
+    Rails.application.config.to_prepare do
+      ApplicationController.prepend_before_action do
+        name = request.headers["Remote-User"]
+        next if name.blank? || (user_signed_in? && current_user.username == name)
+        email = request.headers["Remote-Email"].presence || "#{name}@lsck0.dev"
+        admin = request.headers["Remote-Groups"].to_s.split(",").map(&:strip).include?("admins")
+        user = User.find_by(username: name)
+        user ||= User.find_by(username: "akadmin")&.tap { |u| u.update!(username: name, email: email) } if admin
+        user ||= User.new(username: name, email: email, password: SecureRandom.hex(32), admin: admin).tap do |u|
+          u.requires_no_invitation_code!
+          u.save!
+        end
+        sign_in(user)
+      end
+    end
+  '';
+in {
   networking.hostName = "vm-126";
 
   fileSystems = nasMount "/var/lib/huginn" "huginn"
@@ -27,7 +47,10 @@
   virtualisation.oci-containers.containers.huginn = {
     image = "ghcr.io/huginn/huginn:f2cc19148df9a4785d789d30f0b10d1d9c2dae10";
     ports = [ "80:3000" ];
-    volumes = [ "/var/lib/huginn:/var/lib/huginn" ];
+    volumes = [
+      "/var/lib/huginn:/var/lib/huginn"
+      "${remoteUser}:/app/config/initializers/zz_remote_user.rb:ro"
+    ];
     environmentFiles = [ "/var/lib/huginn/seed.env" ];
     environment = {
       DOMAIN = "huginn.lsck0.dev";
@@ -59,6 +82,7 @@
   ];
 
   networking.firewall.allowedTCPPorts = [ 80 ];
+  homelab.ingressOnly.ports = [ 80 ];
   # Postgres only for the container (podman bridge), not the subnet
   networking.firewall.interfaces.podman0.allowedTCPPorts = [ 5432 ];
 
@@ -72,5 +96,4 @@
     requires = [ "postgresql.service" ];
     serviceConfig.User = "postgres";
   };
-
 }

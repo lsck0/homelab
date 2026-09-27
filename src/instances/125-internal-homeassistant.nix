@@ -7,13 +7,15 @@ let
     automation: !include automations.yaml
     script: !include scripts.yaml
     scene: !include scenes.yaml
-    http:
-      server_host: 0.0.0.0
-      use_x_forwarded_for: true
-      trusted_proxies:
-        - 10.100.0.0/24
-        - 10.0.0.0/8
   '';
+
+  # 2026.9 ignores the YAML http: block; hass-http writes it to .storage/http
+  httpStable = builtins.toJSON {
+    server_port = 8123;
+    server_host = [ "0.0.0.0" ];
+    use_x_forwarded_for = true;
+    trusted_proxies = [ "10.100.0.100/32" ];
+  };
 in {
   networking.hostName = "vm-125";
 
@@ -27,6 +29,23 @@ in {
       "/var/lib/homeassistant:/config"
       "${hassConfig}:/config/configuration.yaml:ro"
     ];
+  };
+
+  systemd.services.hass-http = {
+    before = [ "podman-homeassistant.service" ];
+    requiredBy = [ "podman-homeassistant.service" ];
+    unitConfig.RequiresMountsFor = [ "/var/lib/homeassistant" ];
+    path = [ pkgs.jq pkgs.coreutils ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      f=/var/lib/homeassistant/.storage/http
+      mkdir -p "$(dirname $f)"
+      [ -s $f ] || echo '{"version":2,"minor_version":2,"key":"http","data":{"stable":{}}}' > $f
+      jq --argjson h '${httpStable}' \
+        '.data.stable += $h | .data.stable.error = null | .data.pending = null | .data.yaml_migration_done = true' \
+        $f > $f.new && mv $f.new $f
+      chown 1000:1000 $f
+    '';
   };
 
   systemd.tmpfiles.rules = [
@@ -112,4 +131,5 @@ in {
   };
 
   networking.firewall.allowedTCPPorts = [ 80 ];
+  homelab.ingressOnly.ports = [ 80 ];
 }
