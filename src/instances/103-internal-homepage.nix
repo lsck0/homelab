@@ -2,45 +2,56 @@
 let
   routes = let r = import ../modules/routes.nix; in r.internal // r.external;
 
+  ipOf = route: let r = routes.${route}; in "http://${inventory.${toString r.vmid}.ip}:${toString r.port}";
+  key = name: "{{HOMEPAGE_VAR_${name}}}";
+  arr = type: route: tok: { inherit type; url = ipOf route; key = key tok; };
+
   # dashboard entries, in display order.
   groups = [
-    { name = "Core"; entries = [
-      { route = "authelia"; name = "Authelia"; icon = "authelia"; desc = "SSO"; }
-      { route = "lldap"; name = "LLDAP"; icon = "mdi-account-group"; desc = "Directory"; }
-      { route = "grafana"; name = "Grafana"; icon = "grafana"; desc = "Monitoring"; }
-      { route = "kopia"; name = "Kopia"; icon = "kopia"; desc = "Backups"; }
-      { route = "nas"; name = "NAS"; icon = "mdi-nas"; desc = "Files"; }
-      { route = "syncthing"; name = "Syncthing"; icon = "syncthing"; desc = "Device sync"; }
-      { route = "attic"; name = "Attic"; icon = "nixos"; desc = "Nix cache"; }
-      { route = "qbittorrent"; name = "qBittorrent"; icon = "qbittorrent"; desc = "Downloads (Tor)"; }
+    { name = "Media"; icon = "mdi-play-box-multiple"; columns = 4; entries = [
+      { route = "jellyfin"; name = "Jellyfin"; icon = "jellyfin"; desc = "Movies & shows";
+        widget = arr "jellyfin" "jellyfin" "JELLYFIN_KEY" // { enableBlocks = true; enableNowPlaying = true; }; }
+      { route = "jellyseerr"; name = "Jellyseerr"; icon = "jellyseerr"; desc = "Requests";
+        widget = arr "jellyseerr" "jellyseerr" "JELLYSEERR_KEY"; }
+      { route = "navidrome"; name = "Navidrome"; icon = "navidrome"; desc = "Music"; }
+      { route = "qbittorrent"; name = "qBittorrent"; icon = "qbittorrent"; desc = "Downloads (VPN)";
+        widget = { type = "qbittorrent"; url = ipOf "qbittorrent"; username = key "QBITTORRENT_USER"; password = key "QBITTORRENT_PASS"; }; }
+      { route = "radarr"; name = "Radarr"; icon = "radarr"; desc = "Movies"; widget = arr "radarr" "radarr" "RADARR_KEY"; }
+      { route = "sonarr"; name = "Sonarr"; icon = "sonarr"; desc = "Series & anime"; widget = arr "sonarr" "sonarr" "SONARR_KEY"; }
+      { route = "lidarr"; name = "Lidarr"; icon = "lidarr"; desc = "Music"; widget = arr "lidarr" "lidarr" "LIDARR_KEY"; }
+      { route = "prowlarr"; name = "Prowlarr"; icon = "prowlarr"; desc = "Indexers (Tor)"; widget = arr "prowlarr" "prowlarr" "PROWLARR_KEY"; }
+      { route = "bazarr"; name = "Bazarr"; icon = "bazarr"; desc = "Subtitles"; widget = arr "bazarr" "bazarr" "BAZARR_KEY"; }
     ]; }
-    { name = "Dev"; entries = [
-      { route = "forgejo"; name = "Forgejo"; icon = "forgejo"; desc = "Git (SSO)"; }
-      { route = "registry-ui"; name = "Registry"; icon = "docker-moby"; desc = "Docker registry"; }
-      { route = "hello"; name = "Hello"; icon = "mdi-hand-wave"; desc = "CI/CD demo (Forgejo)"; }
-      { route = "hello-gh"; name = "Hello GH"; icon = "github"; desc = "CI/CD demo (GitHub)"; }
-    ]; }
-    { name = "Apps"; entries = [
-      { route = "paperless"; name = "Paperless"; icon = "paperless-ngx"; desc = "Documents"; }
+    { name = "Apps"; icon = "mdi-apps"; columns = 4; entries = [
+      { route = "homeassistant"; name = "Home Assistant"; icon = "home-assistant"; desc = "Home";
+        widget = arr "homeassistant" "homeassistant" "HASS_KEY"; }
+      { route = "paperless"; name = "Paperless"; icon = "paperless-ngx"; desc = "Documents";
+        widget = arr "paperlessngx" "paperless" "PAPERLESS_KEY"; }
       { route = "paperless-ai"; name = "Paperless AI"; icon = "paperless-ngx"; desc = "Auto-tagging"; }
       { route = "firefly"; name = "Firefly III"; icon = "firefly-iii"; desc = "Finance"; }
-      { route = "homeassistant"; name = "Home Assistant"; icon = "home-assistant"; desc = "Home"; }
       { route = "huginn"; name = "Huginn"; icon = "huginn"; desc = "Agents"; }
     ]; }
-    { name = "Media"; entries = [
-      { route = "jellyseerr"; name = "Jellyseerr"; icon = "jellyseerr"; desc = "Requests"; }
-      { route = "jellyfin"; name = "Jellyfin"; icon = "jellyfin"; desc = "Movies & shows"; }
-      { route = "navidrome"; name = "Navidrome"; icon = "navidrome"; desc = "Music"; }
-      { route = "radarr"; name = "Radarr"; icon = "radarr"; desc = "Movies"; }
-      { route = "sonarr"; name = "Sonarr"; icon = "sonarr"; desc = "Series & anime"; }
-      { route = "lidarr"; name = "Lidarr"; icon = "lidarr"; desc = "Music"; }
-      { route = "prowlarr"; name = "Prowlarr"; icon = "prowlarr"; desc = "Indexers"; }
-      { route = "bazarr"; name = "Bazarr"; icon = "bazarr"; desc = "Subtitles"; }
+    { name = "Dev"; icon = "mdi-source-branch"; columns = 4; entries = [
+      { route = "forgejo"; name = "Forgejo"; icon = "forgejo"; desc = "Git";
+        widget = arr "gitea" "forgejo" "FORGEJO_KEY"; }
+      { route = "registry-ui"; name = "Registry"; icon = "docker-moby"; desc = "Images"; }
+      { route = "attic"; name = "Attic"; icon = "nixos"; desc = "Nix cache"; }
+      { route = "hello"; name = "Hello"; icon = "mdi-hand-wave"; desc = "Swarm demo (Forgejo)"; }
+      { route = "hello-gh"; name = "Hello GH"; icon = "github"; desc = "Swarm demo (GitHub)"; }
     ]; }
-    { name = "Public"; entries = [
-      { route = "headscale"; name = "Headscale"; icon = "headscale"; desc = "VPN mesh"; }
+    { name = "Core"; icon = "mdi-server-network"; columns = 4; entries = [
+      { route = "grafana"; name = "Grafana"; icon = "grafana"; desc = "Metrics & alerts";
+        widget = { type = "prometheus"; url = "http://10.100.0.105:9090"; }; }
+      { route = "authelia"; name = "Authelia"; icon = "authelia"; desc = "SSO"; }
+      { route = "lldap"; name = "LLDAP"; icon = "mdi-account-group"; desc = "Users & groups"; }
+      { route = "headplane"; name = "Headplane"; icon = "headscale"; desc = "VPN mesh admin"; }
+      { route = "nas"; name = "NAS"; icon = "mdi-nas"; desc = "Files"; }
+      { route = "syncthing"; name = "Syncthing"; icon = "syncthing"; desc = "Device sync"; }
+      { route = "kopia"; name = "Kopia"; icon = "kopia"; desc = "Backups"; }
+    ]; }
+    { name = "Public"; icon = "mdi-earth"; columns = 5; entries = [
+      { route = "headscale"; name = "Headscale"; icon = "headscale"; desc = "VPN control"; }
       { route = "ntfy"; name = "ntfy"; icon = "ntfy"; desc = "Notifications"; }
-      { route = "shlink"; name = "Shlink"; icon = "shlink"; desc = "Short links"; }
       { route = "searxng"; name = "SearXNG"; icon = "searxng"; desc = "Search"; }
       { route = "privatebin"; name = "PrivateBin"; icon = "privatebin"; desc = "Paste"; }
       { route = "share"; name = "Share"; icon = "pingvin-share"; desc = "File sharing"; }
@@ -59,8 +70,8 @@ let
     "        icon: ${e.icon}"
     "        href: https://${r.host}.lsck0.dev"
     "        description: ${e.desc}${stateSuffix state}"
-    "        ping: ${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}"
-  ];
+    "        siteMonitor: ${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}"
+  ] + lib.optionalString (e ? widget) "        widget: ${builtins.toJSON e.widget}\n";
   groupYaml = g: "- ${g.name}:\n" + lib.concatMapStrings entryYaml g.entries;
 
   servicesYaml = pkgs.writeText "services.yaml" (''
@@ -100,47 +111,44 @@ let
             description: E-ink dashboard (TRMNL)
   '' + lib.concatMapStrings groupYaml groups);
 
-  settingsYaml = pkgs.writeText "settings.yaml" ''
-    title: Homelab
-    favicon: https://cdn.jsdelivr.net/gh/walkxcode/dashboard-icons/png/heimdall.png
+  settingsYaml = pkgs.writeText "settings.yaml" (''
+    title: lsck0 lab
+    favicon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/homepage.svg
     background:
-      image: https://images.unsplash.com/photo-1451187580459-43490279c0fa?w=2560
-      blur: sm
-      opacity: 15
-      saturate: 70
+      image: https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=2560
+      blur: md
+      brightness: 50
+      saturate: 60
     theme: dark
-    color: stone
-    cardBlur: md
-    headerStyle: clean
+    color: slate
+    cardBlur: xl
+    headerStyle: boxedWidgets
     statusStyle: dot
+    iconStyle: theme
+    useEqualHeights: true
     hideVersion: true
-    disableCollapse: true
-    fiveColumns: true
+    target: _blank
+    quicklaunch:
+      searchDescriptions: true
+      hideVisitURL: true
     layout:
       Infra:
+        icon: mdi-server
         style: row
         columns: 5
-      Core:
-        style: row
-        columns: 5
-      Dev:
-        style: row
-        columns: 4
-      Apps:
-        style: row
-        columns: 4
-      Media:
-        style: row
-        columns: 6
-      Public:
-        style: row
-        columns: 6
-  '';
+  '' + lib.concatMapStrings (g: lib.concatMapStrings (l: "  " + l + "\n") [
+    "${g.name}:"
+    "  icon: ${g.icon}"
+    "  style: row"
+    "  columns: ${toString g.columns}"
+  ]) groups);
 
   widgetsYaml = pkgs.writeText "widgets.yaml" ''
-    - greeting:
-        text_size: xl
-        text: Homelab
+    - resources:
+        label: vm-103
+        cpu: true
+        memory: true
+        uptime: true
     - datetime:
         text_size: l
         format:

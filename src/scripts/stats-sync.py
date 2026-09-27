@@ -22,11 +22,11 @@ LOKI = os.environ.get("STATS_LOKI", "http://10.100.0.105:3100")
 QBITTORRENT = os.environ.get("STATS_QBITTORRENT", "http://10.100.0.112")
 INVENTORY = os.environ.get("STATS_INVENTORY", "/var/lib/homelab-stats/inventory.json")
 TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/homepage-tokens")
-# how many service rows the grid holds: four columns of eight.
-SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "32"))
-TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "6"))
+# six columns of seven
+SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "42"))
+TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "4"))
 # Sending more rows than a panel can draw does not show more, it clips the last one in half
-REQUEST_ROWS = int(os.environ.get("STATS_REQUEST_ROWS", "11"))
+REQUEST_ROWS = int(os.environ.get("STATS_REQUEST_ROWS", "13"))
 REQUEST_WINDOW = os.environ.get("STATS_REQUEST_WINDOW", "3h")
 DISK_ROWS = int(os.environ.get("STATS_DISK_ROWS", "4"))
 # longest torrent name the panel can hold on one line
@@ -34,7 +34,7 @@ NAME_CHARS = int(os.environ.get("STATS_NAME_CHARS", "42"))
 # The "who is calling" strip.
 CLIENT_INGRESS = os.environ.get("STATS_CLIENT_INGRESS", "vm-200")
 CLIENT_WINDOW = os.environ.get("STATS_CLIENT_WINDOW", "24h")
-CLIENT_ROWS = int(os.environ.get("STATS_CLIENT_ROWS", "11"))
+CLIENT_ROWS = int(os.environ.get("STATS_CLIENT_ROWS", "13"))
 # public suffix to drop from hostnames, which are all under one domain
 CLIENT_DOMAIN = os.environ.get("STATS_CLIENT_DOMAIN", ".lsck0.dev")
 TIMEOUT = 8
@@ -533,7 +533,9 @@ def torrents():
     active = sorted(
         (t for t in listing if bucket(t.get("state", "")) == "downloading"),
         key=lambda t: (t.get("dlspeed", 0), t.get("progress", 0)), reverse=True)
-    rest = sorted(listing, key=lambda t: t.get("added_on", 0), reverse=True)
+    # unfinished only: a finished torrent is noise here
+    rest = sorted((t for t in listing if float(t.get("progress", 0)) < 1),
+                  key=lambda t: t.get("added_on", 0), reverse=True)
     ordered = active + [t for t in rest if t not in active]
 
     items = []
