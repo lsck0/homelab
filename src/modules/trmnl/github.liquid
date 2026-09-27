@@ -1,27 +1,8 @@
-{%- comment -%}
-GitHub for the TRMNL terminal. One polling URL:
-
-  https://terminal.lsck0.dev/<token>/github.json
-
-Everything is precomputed by src/scripts/github-sync.py. Liquid cannot do
-arithmetic worth relying on, so ages and counts arrive ready to render.
-
-Monochrome e-ink, 800x480. State is carried by shape, not colour: a filled
-square is healthy, a hollow one is not.
-
-Weighted by what the account actually holds. Measured 2026-09-24: 0 open
-issues, 0 open PRs, and 49 failed CI runs that group into 2 repos. So the repo
-list gets the wide column in two sub-columns, and the rest are short lists that
-say so when empty.
-
-Kept flat, one tag per line. Do not run "Fix indentation" on it.
-{%- endcomment -%}
+{%- comment -%} github panel, data from github-sync.py; keep flat {%- endcomment -%}
 
 <style>
 .layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
-/* 452px for the same reason as terminal.liquid: TRMNL's container has no
-   definite height, so height:100% collapses and children run off the bottom.
-   800x480 less the 18px content offset and a 10px margin. */
+/* 480 - 18px offset - 10px margin; 100% collapses */
 .gh { display: flex; flex-direction: column; height: 452px; max-height: 452px; width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
 
 /* ---- headline numbers ------------------------------------------------- */
@@ -36,20 +17,16 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 /* ---- body: repos wide, CI and work narrow ------------------------------ */
 .gh-mid { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
 .gh-box { border: 2px solid #000; padding: 3px 7px; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-/* The repo list is the only one with real volume - 32 of them against a
-   handful of failing workflows - so it takes the wide column. Sizing CI wide
-   because it had 49 notifications was wrong: they collapse to 2 repos, and
-   the box rendered two rows above 300px of nothing. */
+/* repos have the volume, so they get width */
 .gh-repos { flex: 1.25 1 0; }
 .gh-side { flex: 1 1 0; display: flex; flex-direction: column; gap: 5px; min-width: 0; min-height: 0; }
 .gh-ci { flex: 0 0 auto; max-height: 176px; }
 .gh-work { flex: 0 0 auto; max-height: 116px; }
-/* Languages fill what open issues and PRs do not. Counted off the repo list,
-   so it costs no extra API call. */
+/* languages fill space issues and prs leave */
 .gh-lang { flex: 1 1 0; }
 .gh-bar { flex: 0 0 46px; height: 5px; background: #d2d2d2; }
 .gh-bar span { display: block; height: 100%; background: #000; }
-/* two columns inside the wide box: 16 repos read better than 9 and a gap */
+/* two columns: 16 repos instead of 9 */
 .gh-cols { display: flex; gap: 12px; min-height: 0; overflow: hidden; }
 .gh-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
 
@@ -63,8 +40,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .gh-meta { flex: 0 0 auto; color: #555; font-size: 11px; font-variant-numeric: tabular-nums; }
 .gh-n { flex: 0 0 auto; font-weight: 700; font-variant-numeric: tabular-nums; }
 
-/* An empty list is the normal state for issues and PRs here. Saying so beats
-   a blank box, which reads as a feed that has broken. */
+/* say empty, else it reads as broken */
 .gh-none { font-size: 12px; color: #555; padding: 3px 0; }
 
 .gh-foot { flex: 0 0 16px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #555; white-space: nowrap; }

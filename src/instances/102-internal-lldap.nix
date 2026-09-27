@@ -1,18 +1,18 @@
 { config, lib, pkgs, retry, ... }:
 let
-  # bundle groups from routes.nix, plus one app-<route> group per login page.
+  # bundle groups plus one app-<route> group per page
   routes = (import ../modules/routes.nix).internal;
   ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
   routeGroups = lib.unique (lib.mapAttrsToList (_: r: r.group or "users") ssoRoutes);
   appGroups = map (n: "app-${n}") (lib.attrNames ssoRoutes ++ [ "forgejo" "jellyfin" ]);
   groups = lib.unique ([ "admins" "users" ] ++ routeGroups ++ appGroups);
 
-  # example account: sees exactly three pages.
+  # example account, three pages
   guestGroups = [ "app-homepage" "app-jellyfin" "app-jellyseerr" ];
 in {
   networking.hostName = "vm-102";
 
-  # lightweight LDAP directory: the single account store for the lab.
+  # lldap: the lab's single account store
   sops.secrets.lldap-jwt-secret = { owner = "lldap"; group = "lldap"; };
   sops.secrets.lldap-admin-password = { owner = "lldap"; group = "lldap"; };
 
@@ -38,11 +38,11 @@ in {
     };
   };
 
-  # luca's own password (reused from the Authelia admin secret) so the seeded user can log
+  # luca's password, reused from authelia admin
   sops.secrets.authelia-admin-pass = { owner = "lldap"; group = "lldap"; };
   sops.secrets.lldap-guest-password = { owner = "lldap"; group = "lldap"; };
 
-  # seed the directory: groups (admins, users) + the admin user luca.
+  # seed groups and the admin user
   systemd.services.lldap-bootstrap = {
     description = "Seed lldap groups and users";
     after = [ "lldap.service" ];
@@ -75,18 +75,18 @@ in {
           -d "$1"
       }
 
-      # every group the routes reference (ignore "already exists").
+      # every referenced group, ignore "already exists"
       ${lib.concatMapStrings (g: ''
         gql '{"query":"mutation{createGroup(name:\"${g}\"){id}}"}' || true
       '') groups}
 
-      # admin user luca.
+      # admin user luca
       gql '{"query":"mutation($u:CreateUserInput!){createUser(user:$u){id}}","variables":{"u":{"id":"luca","email":"'${config.homelab.acmeEmail}'","displayName":"Luca"}}}' || true
 
-      # password via the OPAQUE flow.
+      # password via opaque
       lldap_set_password --base-url "$URL" --token "$TOKEN" --username luca --password "$LUCA_PASS"
 
-      # example user guest.
+      # example user guest
       gql '{"query":"mutation($u:CreateUserInput!){createUser(user:$u){id}}","variables":{"u":{"id":"guest","email":"guest@lsck0.dev","displayName":"Guest"}}}' || true
       lldap_set_password --base-url "$URL" --token "$TOKEN" --username guest --password "$GUEST_PASS"
 
@@ -99,7 +99,7 @@ in {
           gql "{\"query\":\"mutation{addUserToGroup(userId:\\\"$u\\\",groupId:$gid){ok}}\"}" || true
         done
       }
-      # owner gets every group so no page locks them out.
+      # owner gets every group
       join luca ${lib.escapeShellArgs groups}
       join guest ${lib.escapeShellArgs guestGroups}
 
@@ -107,9 +107,9 @@ in {
     '';
   };
 
-  # every account, password hash and group membership in the lab is in this one SQLite file
+  # every account lives in this sqlite file
   homelab.dbBackup.databases.lldap.sqlite = "/var/lib/lldap/users.db";
 
-  # 3890 LDAP (LAN only), 17170 web UI (behind Traefik + Authelia).
+  # 3890 ldap (lan), 17170 web ui (traefik + authelia)
   networking.firewall.allowedTCPPorts = [ 3890 17170 ];
 }

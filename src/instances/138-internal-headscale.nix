@@ -1,10 +1,10 @@
 { config, pkgs, nasMount, retry, ... }:
 let
-  # Headplane talks to Headscale over the loopback address rather than hs.lsck0.dev: the public
+  # loopback, not the public hs.lsck0.dev
   headscaleLocal = "http://127.0.0.1:80";
 in
 {
-  # Internal, not the DMZ.
+  # internal, not the dmz
   networking.hostName = "vm-138";
 
   fileSystems = nasMount "/var/lib/headscale" "headscale"
@@ -28,13 +28,13 @@ in
   };
 
   # ── Headplane ──────────────────────────────────────────────────────────────
-  # The web UI Headscale does not ship.
+  # the web ui headscale does not ship
   virtualisation.oci-containers.containers.headplane = {
     image = "ghcr.io/tale/headplane:0.6.0";
     ports = [ "3000:3000" ];
     volumes = [
       "/var/lib/headplane:/var/lib/headplane"
-      # Headplane 0.6.0 will not start without this file
+      # headplane 0.6.0 needs this file to start
       "/var/lib/headplane/config.yaml:/etc/headplane/config.yaml:ro"
     ];
     environment = {
@@ -43,19 +43,19 @@ in
       HEADPLANE_SERVER__COOKIE_SECURE = "true";
       HEADPLANE_HEADSCALE__URL = headscaleLocal;
       HEADPLANE_HEADSCALE__PUBLIC_URL = "https://hs.lsck0.dev";
-      # No config file is mounted.
+      # no headscale config file is mounted
       HEADPLANE_HEADSCALE__CONFIG_STRICT = "false";
     };
     environmentFiles = [ "/var/lib/headplane/cookie.env" ];
   };
 
-  # Headplane refuses to start without a 32-character cookie secret, and it signs sessions
+  # headplane needs a 32-char cookie secret
   sops.secrets.headplane-oidc-secret = {};
   systemd.services.headplane-secret = {
     description = "Generate the Headplane cookie secret";
     before = [ "podman-headplane.service" ];
     requiredBy = [ "podman-headplane.service" ];
-    # OIDC sessions act through this key
+    # oidc sessions act through this key
     after = [ "headplane-apikey.service" ];
     requires = [ "headplane-apikey.service" ];
     path = [ pkgs.openssl pkgs.coreutils ];
@@ -71,8 +71,7 @@ in
       install -m 600 ${config.sops.secrets.headplane-oidc-secret.path} /var/lib/headplane/oidc-secret
       apikey=$(cat /var/lib/homepage-tokens/headplane-key.token)
 
-      # Written every run so the settings stay in this repo, but the secret is
-      # only generated once above.
+      # settings rewritten every run, secret generated once
       cat > /var/lib/headplane/config.yaml <<EOF
       server:
         host: "0.0.0.0"
@@ -95,13 +94,13 @@ in
         disable_api_key_login: true
         headscale_api_key: "$apikey"
       EOF
-      # the heredoc above is indented for readability; strip it back out.
+      # strip the heredoc indentation
       sed -i 's/^      //' /var/lib/headplane/config.yaml
       chmod 600 /var/lib/headplane/config.yaml
     '';
   };
 
-  # Signing in to Headplane means pasting a Headscale API key.
+  # headplane sign-in takes a headscale api key
   systemd.services.headplane-apikey = {
     description = "Generate a Headscale API key for Headplane";
     after = [ "headscale.service" ];
@@ -117,15 +116,14 @@ in
         echo "Headplane API key already present"
         exit 0
       fi
-      # 90d is headscale's own default and the longest it offers; the unit
-      # will mint a new one once this expires and the file is removed.
+      # 90d is headscale's max; reminted after expiry
       headscale apikeys create --expiration 90d | tail -1 | tr -d '\n' > "$T"
       chmod 600 "$T"
       echo "Headplane API key written to $T"
     '';
   };
 
-  # 80 Headscale (relayed in for client registration)
+  # 80 headscale (relayed for client registration)
   networking.firewall.allowedTCPPorts = [ 80 3000 ];
   homelab.ingressOnly.ports = [ 3000 ];
 }

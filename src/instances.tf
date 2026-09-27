@@ -1,9 +1,9 @@
-# VM inventory.
+# vm inventory
 
 locals {
   instances = {
-    # internal: 10.100.0.0/24, reached through internal Traefik (Authelia-gated)
-    "100" = { # internal reverse proxy: TLS/ACME + Authelia ForwardAuth + on-demand proxy
+    # internal: 10.100.0.0/24 behind internal traefik (authelia)
+    "100" = { # internal reverse proxy: tls, forwardauth, on-demand wake
       enabled = true,
       name    = "100-internal-traefik",
       type    = "internal",
@@ -30,20 +30,20 @@ locals {
       name    = "104-internal-terminal",
       type    = "internal",
     }
-    "105" = { # observability: Prometheus + Loki + Tempo + Grafana (Grafana owns alerting)
+    "105" = { # observability: prometheus, loki, tempo, grafana
       enabled = true,
       name    = "105-internal-grafana",
       type    = "internal",
-      # Four services, not one: Prometheus (30d retention), Loki, Tempo, Grafana
+      # four services, prometheus keeps 30d
       memory = 3072,
-      # An explicit floor rather than half: the TSDB head and Loki's chunks are working memory
+      # explicit floor: tsdb head and loki chunks are working memory
       balloon = 2048,
     }
     "107" = { # backups: Kopia server + web UI, snapshots the NAS
       enabled = true,
       name    = "107-internal-kopia",
       type    = "internal",
-      # snapshots the whole NAS tree; measured 624 MiB and does real IO.
+      # snapshots the whole nas, measured 624 MiB
       memory = 1024,
       disk   = 16,
     }
@@ -55,9 +55,9 @@ locals {
       boot_order = 2,
       memory     = 2048,
       balloon    = 2048,
-      # root disk on the NVMe pool: service state, backups and documents - the things
+      # nvme root: state, backups, documents
       disk = 750,
-      # Bulk storage on the 2 TB spinning disk.
+      # bulk storage on the 2 tb hdd
       extra_disks = var.bulk_datastore == "" ? [] : [{ size = 1800, datastore = var.bulk_datastore }],
     }
     "110" = { # Nix binary cache (substituter)
@@ -100,12 +100,12 @@ locals {
       type    = "internal",
       memory  = 1024,
     }
-    "117" = { # CI runners for GitHub repos (ephemeral, one systemd unit per replica)
-      # github-runner-token is the gh CLI's own gho_ token; the runner module only detects
+    "117" = { # ci runners for github repos (ephemeral)
+      # token is the gh cli's gho_ token
       enabled = true,
       name    = "117-internal-github-runner",
       type    = "internal",
-      # four .NET listeners plus docker.
+      # four .net listeners plus docker
       memory  = 4096,
       balloon = 2048,
       cores   = 4,
@@ -121,16 +121,15 @@ locals {
       enabled = true,
       name    = "121-internal-paperless",
       type    = "internal",
-      # OCR plus its own Postgres.
+      # ocr plus its own postgres
       memory  = 2048,
       balloon = 1536,
     }
     "122" = { # AI auto-tagging for paperless
-      # off: paperless holds 0 documents and the RAM is wanted for vm-208.
       enabled = true,
       name    = "122-internal-paperless-ai",
       type    = "internal",
-      # paperless-ai pulls a large model image; 8 GiB was 80% full at rest.
+      # large model image, 8 GiB was 80% full at rest
       disk = 16,
     }
     "124" = { # Firefly III personal finance
@@ -141,25 +140,23 @@ locals {
     }
 
     "125" = { # home automation hub
-      # off: the host ran out of RAM once vm-208 and the GPU VM were pinned.
       enabled = true,
       name    = "125-internal-homeassistant",
       type    = "internal",
-      # Home Assistant is a large Python process with dozens of integrations; squeezed toward
+      # large python process, squeezed it stalls
       memory  = 2048,
       balloon = 1536,
-      # Home Assistant's image alone does not fit in 8 GiB: the pull failed with
+      # image alone does not fit in 8 GiB
       disk = 16,
     }
     "126" = { # automation agents / scraping
-      # off: the host ran out of RAM once vm-208 and the GPU VM were pinned.
       enabled = true,
       name    = "126-internal-huginn",
       type    = "internal",
-      # Rails plus its own Postgres; measured at 1003 MiB, i.e. at the old ceiling.
+      # rails plus postgres, measured 1003 MiB
       memory  = 2048,
       balloon = 1536,
-      # the huginn image plus its Postgres left 396 MiB free on an 8 GiB disk.
+      # image plus postgres left 396 MiB free on 8 GiB
       disk = 16,
     }
     "127" = { # MQTT broker (Home Assistant / IoT)
@@ -220,18 +217,18 @@ locals {
       memory  = 1024,
     }
     "138" = { # Tailscale control server (VPN mesh) + Headplane UI
-      # Internal, not the DMZ: it decides which machines are on the mesh
+      # internal, not dmz: it controls mesh membership
       enabled = true,
       name    = "138-internal-headscale",
       type    = "internal",
     }
 
-    # external: 10.200.0.0/24 DMZ, public through external Traefik (CrowdSec/WAF)
-    "200" = { # public reverse proxy: TLS + CrowdSec + Anubis + WAF + internal relay
+    # external: 10.200.0.0/24 dmz behind external traefik (crowdsec/waf)
+    "200" = { # public reverse proxy: tls, crowdsec, anubis, waf
       enabled = true,
       name    = "200-external-traefik",
       type    = "external",
-      # Traefik + CrowdSec + AppSec + Anubis + iocaine; OOM-killed crowdsec at 1024
+      # crowdsec oom-killed at 1024
       memory  = 2048,
       balloon = 1536,
     }
@@ -260,9 +257,7 @@ locals {
       enabled = false,
       name    = "208-external-minecraft",
       type    = "external",
-      # vanilla, not the Cobbleverse pack: 20480 was sized for the modpack and
-      # does not fit this host. The floor is high because the JVM commits its
-      # whole heap at startup: at 2048 it died with "Not enough space".
+      # vanilla; jvm commits its heap at start, 2048 died
       memory  = 4096,
       balloon = 3072,
       cores   = 4,
@@ -275,7 +270,7 @@ locals {
     }
 
     # router
-    "300" = { # gateway: NAT + nftables firewall + Kea DHCP + CoreDNS/blocky + WireGuard + DDNS
+    "300" = { # gateway: nat, firewall, dhcp, dns, wireguard, ddns
       enabled    = true,
       name       = "luca-router",
       type       = "router",

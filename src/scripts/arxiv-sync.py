@@ -1,16 +1,4 @@
-"""Build the TRMNL arXiv payload: today's mathematics submissions.
-
-Runs on vm-104 beside the other terminal feeds and writes
-<out-dir>/arxiv.json, which nginx serves under the same token.
-
-Source is the daily announcement feed, https://rss.arxiv.org/rss/math, not the
-search API. The API's index lags several days - queried on 22 Sep it had
-nothing newer than the 18th - while the RSS feed is the announcement itself and
-carries announce_type, so genuinely new papers can be told from cross-lists and
-replacements. http:// answers 301; both only work over https.
-
-One request an hour, well inside arXiv's one-every-three-seconds request.
-"""
+"""Build the TRMNL arXiv payload from the math RSS feed (the API lags days)."""
 import json
 import os
 import re
@@ -24,17 +12,17 @@ from email.utils import parsedate_to_datetime
 from itertools import zip_longest
 
 FEED = os.environ.get("ARXIV_FEED", "https://rss.arxiv.org/rss/math")
-# 12 rows of 32px fill the 380px list; 14 clipped the last two.
+# 12 rows of 32px fill 380px; 14 clipped
 ROWS = int(os.environ.get("ARXIV_ROWS", "12"))
 # surnames shown before the list collapses to "+n"
 AUTHORS = int(os.environ.get("ARXIV_AUTHORS", "8"))
-# cross-lists and replacements are announced in the same feed; "new" alone is what "today's
+# "new" only; skip cross-lists and replacements
 TYPES = set(os.environ.get("ARXIV_TYPES", "new").split(","))
 TIMEOUT = 30
 DC = "{http://purl.org/dc/elements/1.1/}"
 ARXIV = "{http://arxiv.org/schemas/atom}"
 
-# the primary category is what the paper is filed under; spell the common ones
+# names for common primary categories
 SUBJECTS = {
     "math.AC": "Commutative Algebra", "math.AG": "Algebraic Geometry",
     "math.AP": "Analysis of PDEs", "math.AT": "Algebraic Topology",
@@ -52,7 +40,7 @@ SUBJECTS = {
     "math.QA": "Quantum Algebra", "math.RA": "Rings and Algebras",
     "math.RT": "Representation Theory", "math.SG": "Symplectic Geometry",
     "math.SP": "Spectral Theory", "math.ST": "Statistics Theory",
-    # cross-lists are announced in the maths feed too and are not math.* codes
+    # cross-lists in the math feed use non-math codes
     "math-ph": "Mathematical Physics", "cs.IT": "Information Theory",
     "cs.LG": "Machine Learning", "cs.DM": "Discrete Mathematics",
     "cs.NA": "Numerical Analysis", "cs.DS": "Data Structures",
@@ -66,11 +54,11 @@ SUBJECTS = {
     "eess.SY": "Systems and Control",
 }
 
-# Titles are TeX.
+# titles are tex
 TEX_COMMANDS = re.compile(r"\\(?:mathcal|mathbb|mathbf|mathrm|mathfrak|mathscr|text|rm|bf|it)\s*")
 TEX_BRACES = re.compile(r"[{}$]")
 
-# Author lists carry their own noise: an optional affiliation in brackets
+# strip bracketed affiliations and tex accents
 AFFILIATION = re.compile(r"\s*\([^)]*\)")
 TEX_ACCENTS = re.compile(r"\\[a-zA-Z]+\s*|\\[`'^\"~=.]")
 
@@ -89,7 +77,7 @@ def detex_name(s):
 
 def fetch():
     req = urllib.request.Request(FEED, headers={
-        # arXiv asks callers to identify themselves
+        # arxiv asks callers to identify themselves
         "User-Agent": "homelab-trmnl/1.0 (+https://lsck0.dev)",
     })
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
@@ -98,13 +86,13 @@ def fetch():
 
 def authors(entry, limit=AUTHORS):
     raw = entry.findtext(DC + "creator") or ""
-    # before the split, because an affiliation can hold a comma of its own
+    # before the split: affiliations may contain commas
     raw = AFFILIATION.sub("", raw)
     names = [detex_name(n) for n in raw.split(",")]
     names = [n for n in names if n]
     if not names:
         return ""
-    # surname only: full names eat the row on an 800px panel
+    # surname only: full names overflow 800px
     short = [n.rsplit(" ", 1)[-1] for n in names]
     if len(short) <= limit:
         return ", ".join(short)
@@ -112,8 +100,7 @@ def authors(entry, limit=AUTHORS):
 
 
 def parse_date(raw):
-    """RFC 822, as RSS uses. email.utils rather than strptime: the offset can be
-    numeric or a name, and the day-of-week is optional."""
+    """RFC 822 date; email.utils handles named offsets and optional weekday."""
     try:
         return parsedate_to_datetime(raw).astimezone()
     except (TypeError, ValueError):
@@ -158,7 +145,7 @@ def main():
             "day": when.date(),
         })
 
-    # The feed is one announcement batch, so every item shares a date; taking the newest
+    # one batch per feed; newest date labels it
     label_day = max((e["day"] for e in entries), default=now.date())
     todays = [e for e in entries if e["day"] == label_day]
 
@@ -170,7 +157,7 @@ def main():
     for e in todays:
         del e["day"]
 
-    # Feed order is submission order, and on a 718-paper day that put eight math.GM papers
+    # group by subject; submission order interleaved them
     groups = [sorted((e for e in todays if e["subject"] == s), key=lambda e: e["id"])
               for s, _ in sorted(by_subject.items(), key=lambda kv: (-kv[1], kv[0]))]
     shown = [e for tier in zip_longest(*groups) for e in tier if e is not None]

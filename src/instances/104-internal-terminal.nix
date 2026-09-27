@@ -1,11 +1,11 @@
 { config, pkgs, lib, inventory, nasMount, ... }:
 let
-  # Everything the e-ink terminal displays: the calendar, the homelab stats and the arXiv feed.
+  # e-ink terminal: calendar, lab stats, arxiv
   terminalDir = "/var/lib/terminal";
   terminalPublic = "${terminalDir}/public";
   terminalPort = 8081;
 
-  # the collector needs to know which VMs are meant to exist; Prometheus alone cannot tell
+  # prometheus cannot tell which vms should exist
   terminalInventory = pkgs.writeText "inventory.json" (builtins.toJSON inventory);
 
   statsSync = pkgs.writers.writePython3Bin "stats-sync" {
@@ -21,15 +21,15 @@ let
   } (builtins.readFile ../scripts/arxiv-sync.py);
 
   # ---- calendar -------------------------------------------------------------
-  # The calendar is one dashboard among several now
+  # calendar is one dashboard among several
   calendarState = "/var/lib/calendar";
   incomingDir = "${calendarState}/incoming";
   uploadDir = "${calendarState}/uploads";
 
-  # kraken pair codes, not the display symbols: XXBTZEUR is BTC/EUR.
+  # kraken pair codes: XXBTZEUR is BTC/EUR
   krakenPairs = "XXBTZEUR,XETHZEUR";
 
-  # Calendars that cannot be subscribed to, only exported by hand.
+  # calendars only exported by hand
   uploadNames = [ "work" ];
 
   promote = pkgs.writers.writePython3Bin "calendar-promote" {
@@ -56,7 +56,7 @@ let
           try:
               calendar = Calendar.from_ical(open(src, "rb").read())
               events = [c for c in calendar.walk() if c.name == "VEVENT"]
-          except Exception as err:  # noqa: BLE001 - a bad push must not break the good copy
+          except Exception as err:  # noqa: BLE001, keep the good copy
               print(f"{entry}: not a calendar ({err}), keeping the previous copy")
               rc = 1
               os.replace(src, src + ".rejected")
@@ -74,20 +74,20 @@ let
 in {
   networking.hostName = "vm-104";
 
-  # every feed's working state lives on the NAS, so this VM holds nothing that matters
+  # feed state on the nas, vm is disposable
   fileSystems = nasMount calendarState "calendar"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   sops.secrets = {
-    # one URL per line as "NAME|URL".
+    # "NAME|URL" per line
     calendar-sources = {};
-    # separate from the read token: a leaked feed URL must not also grant the ability
+    # leaked feed url must not grant uploads
     calendar-upload-token = {};
     kraken-api-key = {};
     kraken-api-secret = {};
-    # write token for the TRMNL plugins: it can replace what the panels show.
+    # trmnl write token, can replace panels
     trmnl-api-key = {};
-    # read-only use here: the GitHub panel lists repos, CI state and open work.
+    # read-only: github panel
     github-mirror-token = { owner = "nginx"; };
   };
 
@@ -106,10 +106,10 @@ in {
         add_header Cache-Control "no-cache";
       '';
 
-      # push endpoint for calendars that cannot be subscribed to: curl -T work.ics
+      # push endpoint: curl -T work.ics
       locations."~ ^/upload/[^/]+/(${lib.concatStringsSep "|" uploadNames})\\.ics$" = {
         root = incomingDir;
-        # must be emitted before any other regex location: nginx takes the first match
+        # nginx takes the first matching regex
         priority = 100;
         extraConfig = ''
           limit_except PUT { deny all; }
@@ -117,8 +117,7 @@ in {
           dav_access user:rw group:r;
           client_max_body_size 8m;
           client_body_temp_path ${incomingDir}/.tmp;
-          # a PUT arriving as /upload/<token>/work.ics must land in
-          # <incomingDir>/<token>/work.ics, not <incomingDir>/upload/...
+          # /upload/<token>/x.ics -> <incomingDir>/<token>/x.ics
           rewrite ^/upload/(.*)$ /$1 break;
         '';
       };
@@ -138,8 +137,7 @@ in {
       fi
       TOKEN=$(cat ${terminalDir}/token)
       mkdir -p ${terminalPublic}/$TOKEN
-      # the collector runs as nginx and writes into the token directory, so
-      # nginx has to own the whole path, not just the leaf
+      # collector runs as nginx, owns the whole path
       chown -R nginx:nginx ${terminalDir}
       chmod 750 ${terminalDir}
       echo "terminal feed: https://terminal.lsck0.dev/$TOKEN/stats.json"
@@ -166,7 +164,7 @@ in {
     '';
   };
 
-  # arXiv announces once a day, so hourly is already generous; it exists to catch the batch
+  # arxiv announces daily, hourly catches the batch
   systemd.services.arxiv-sync = {
     description = "Fetch today's arXiv mathematics announcements";
     after = [ "terminal-token.service" "network-online.target" ];
@@ -183,7 +181,7 @@ in {
     '';
   };
 
-  # The .liquid files in this repo are the dashboards
+  # this repo's .liquid files are the dashboards
   systemd.services.trmnl-sync = {
     description = "Push the dashboard templates to TRMNL";
     after = [ "network-online.target" ];
@@ -191,7 +189,7 @@ in {
     path = [ pkgs.python3 ];
     serviceConfig = {
       Type = "oneshot";
-      # TRMNL is someone else's service; a bad afternoon there should not leave the templates
+      # trmnl outages should not strand stale templates
       Restart = "on-failure";
       RestartSec = 600;
       TimeoutStartSec = "10min";
@@ -209,7 +207,7 @@ in {
     '';
   };
 
-  # On boot and daily.
+  # on boot and daily
   systemd.timers.trmnl-sync = {
     description = "Keep the TRMNL plugins on this repo's templates";
     wantedBy = [ "timers.target" ];
@@ -221,7 +219,7 @@ in {
     };
   };
 
-  # GitHub: commits, repos, CI state and open work.
+  # github: commits, repos, ci, open work
   systemd.services.github-sync = {
     description = "Collect GitHub activity for the TRMNL terminal";
     after = [ "terminal-token.service" "network-online.target" ];
@@ -270,7 +268,7 @@ in {
     serviceConfig.Type = "oneshot";
     environment = {
       CALENDAR_SOURCES = config.sops.secrets.calendar-sources.path;
-      # a personal calendar is sparse: a short window renders an empty screen whenever the next
+      # sparse calendar needs a long window
       CALENDAR_HORIZON_DAYS = "90";
       CALENDAR_MAX_EVENTS = "12";
       KRAKEN_PAIRS = krakenPairs;
@@ -295,7 +293,7 @@ in {
     };
   };
 
-  # nginx accepts PUT only into a directory named after the upload token
+  # nginx puts only into the token-named dir
   systemd.services.calendar-upload-dir = {
     description = "Create the token-named upload directory";
     wantedBy = [ "multi-user.target" ];
@@ -308,7 +306,7 @@ in {
       [ -n "$TOKEN" ] || { echo "calendar-upload-token is empty"; exit 1; }
       DIR="${incomingDir}/$TOKEN"
       mkdir -p "$DIR" "${incomingDir}/.tmp" ${uploadDir}
-      # drop stale token directories after a rotation.
+      # drop stale token dirs after rotation
       for dir in ${incomingDir}/*; do
         [ -d "$dir" ] || continue
         [ "$dir" = "$DIR" ] || rm -rf "$dir"
@@ -317,15 +315,15 @@ in {
       chown nginx:nginx ${uploadDir}
       chmod 700 ${incomingDir}
       chmod 700 "$DIR"
-      # calendar-sync reads the promoted files back as file:// sources.
+      # calendar-sync reads these as file:// sources
       chmod 755 ${uploadDir}
     '';
   };
 
-  # the NixOS nginx unit runs with ProtectSystem=strict
+  # nginx unit has ProtectSystem=strict
   systemd.services.nginx.serviceConfig.ReadWritePaths = [ incomingDir terminalDir ];
 
-  # promote a pushed file to uploads/ as soon as it parses
+  # promote a pushed file once it parses
   systemd.timers.calendar-upload = {
     wantedBy = [ "timers.target" ];
     timerConfig = {
@@ -339,11 +337,10 @@ in {
     path = [ promote pkgs.coreutils pkgs.findutils pkgs.systemd ];
     serviceConfig.Type = "oneshot";
     script = ''
-      # nothing pushed since the last run: do not re-render, or the timer would
-      # refetch every remote calendar once a minute instead of every 15.
+      # nothing pushed: skip, else refetch every minute
       [ -n "$(find ${incomingDir} -mindepth 2 -maxdepth 2 -name '*.ics' -print -quit)" ] || exit 0
 
-      # the PUT lands in the token directory; collect from any of them.
+      # collect from any token dir
       find ${incomingDir} -mindepth 2 -maxdepth 2 -name '*.ics' -exec mv -t ${incomingDir} {} + 2>/dev/null || true
       calendar-promote ${incomingDir} ${uploadDir} || true
       chmod -R a+rX ${uploadDir} 2>/dev/null || true
@@ -363,6 +360,6 @@ in {
 
   networking.firewall.allowedTCPPorts = [ terminalPort ];
 
-  # the feeds carry no secret beyond the token in their path
+  # feeds carry no secret beyond the path token
   homelab.ingressOnly.ports = [ terminalPort ];
 }

@@ -6,7 +6,7 @@ export SHELL=/bin/bash
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TFVARS_PATH="$ROOT_DIR/src/terraform.tfvars"
 TFVARS_ENC_PATH="$ROOT_DIR/src/terraform.tfvars.sops.json"
-# the age key is owned by the dotfiles repo; secrets/age.txt here is normally a symlink
+# age key lives in the dotfiles repo
 AGE_KEY="$ROOT_DIR/secrets/age.txt"
 AGE_KEY_SOURCE="${AGE_KEY_SOURCE:-$HOME/projects/arch-dotfiles/configs/secrets/age.txt}"
 if [ ! -r "$AGE_KEY" ] && [ -r "$AGE_KEY_SOURCE" ]; then
@@ -22,7 +22,7 @@ trap 'rm -f "${CLEANUP_FILES[@]}"' EXIT
 
 echo ">>> SYNCING HARDWARE + OS..."
 
-# abort if branch is behind upstream (unpulled changes exist)
+# abort if behind upstream
 git -C "$ROOT_DIR" fetch origin --quiet 2>/dev/null || true
 BEHIND=$(git -C "$ROOT_DIR" rev-list "HEAD..@{u}" --count 2>/dev/null || echo "0")
 if [ "$BEHIND" -gt 0 ]; then
@@ -58,7 +58,7 @@ wait_for_ssh() {
   echo "ERROR: SSH not reachable at $ip"; return 1
 }
 
-# vmid: start the VM unless it is running.
+# returns 1 if it had to start the vm
 vm_wake() {
   local st
   st=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu/$1/status/current" -H "$PVE_AUTH" | jq -r '.data.status // "unknown"' 2>/dev/null)
@@ -90,11 +90,11 @@ deploy_nixos() {
       "cat > /var/lib/sops-nix/key.txt && chmod 600 /var/lib/sops-nix/key.txt" || return 1
   fi
 
-  # --no-check-sigs: the closures are built locally and pushed to our own VMs
+  # closures are local builds, no sigs
   nix copy --extra-experimental-features "nix-command flakes" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
     || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
 
-  # use 'switch', activates config in-place, restarts changed services, no reboot needed.
+  # switch in place, no reboot
   ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
     "nix-env -p /nix/var/nix/profiles/system --set '${toplevel}' \
      && '${toplevel}/bin/switch-to-configuration' switch"
@@ -105,12 +105,12 @@ deploy_nixos() {
 # MAIN
 load_tfvars
 
-# Git pull (skip if local changes)
+# pull unless the tree is dirty
 if git -C "$ROOT_DIR" diff --quiet && git -C "$ROOT_DIR" diff --cached --quiet; then
   git -C "$ROOT_DIR" pull --rebase 2>/dev/null || echo "WARNING: git pull failed."
 fi
 
-# SSH transport
+# ssh transport
 PROXMOX_SSH_HOST="$(read_tfvar proxmox_ssh_host)"; : "${PROXMOX_SSH_HOST:=127.0.0.1}"
 PROXMOX_SSH_PORT="$(read_tfvar proxmox_ssh_port)"; : "${PROXMOX_SSH_PORT:=22}"
 PROXMOX_SSH_USER="$(read_tfvar proxmox_ssh_user)"; : "${PROXMOX_SSH_USER:=root}"
@@ -123,7 +123,7 @@ else
   SSH_CMD=(ssh -p "$PROXMOX_SSH_PORT" -o StrictHostKeyChecking=accept-new)
 fi
 
-# The bpg provider imports every new VM's disk over SSH to the hypervisor
+# bpg provider imports vm disks over ssh
 if [ -f "$HOME/.ssh/id_ed25519" ]; then
   if ! ssh-add -l >/dev/null 2>&1; then
     eval "$(ssh-agent -s)" >/dev/null
@@ -142,7 +142,7 @@ ssh-keyscan -p "$PROXMOX_SSH_PORT" -H "$PROXMOX_SSH_HOST" >> "$HOME/.ssh/known_h
 
 SSH_CONFIG="$(mktemp --suffix=.ssh_config)"; CLEANUP_FILES+=("$SSH_CONFIG")
 
-# the router is a bastion for the 10.x subnets, but when the deployer already has a route
+# skip the router bastion when 10.x routes directly
 if timeout 4 bash -c "echo > /dev/tcp/10.100.0.100/22" 2>/dev/null; then
   echo ">>> Internal subnet directly routable: deploying without the router bastion."
   cat > "$SSH_CONFIG" <<EOF
@@ -162,7 +162,7 @@ fi
 BASTION_SSHOPTS=(-F "$SSH_CONFIG")
 export NIX_SSHOPTS="-F $SSH_CONFIG"
 
-# SSH key: generate if missing, push to all VMs via QEMU agent
+# ssh key: generate if missing
 [ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/id_ed25519" -C "homelab@$(hostname)" >/dev/null
 PUBKEY=$(cat "$HOME/.ssh/id_ed25519.pub")
 PROXMOX_API_TOKEN_ID="$(read_tfvar proxmox_api_token_id)"
@@ -172,7 +172,7 @@ PVE_API="https://$PROXMOX_SSH_HOST:8006/api2/json"
 PVE_AUTH="Authorization: PVEAPIToken=$PROXMOX_API_TOKEN_ID=$PROXMOX_API_TOKEN_SECRET"
 
 if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
-  # whole-VM vzdump jobs used to dump vm-108 (750 GB NAS disk) and vm-208 to `local`
+  # drop legacy vzdump jobs, they filled `local`
   for jid in homelab-daily homelab-weekly homelab-monthly; do
     if curl -sk "$PVE_API/cluster/backup/$jid" -H "$PVE_AUTH" | jq -e '.data.id' >/dev/null 2>&1; then
       curl -sk -X DELETE "$PVE_API/cluster/backup/$jid" -H "$PVE_AUTH" >/dev/null \
@@ -181,7 +181,7 @@ if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
   done
 fi
 
-# Hermes (vm-114) and this deployer get root on the Proxmox host too.
+# hermes and the deployer get proxmox root
 for pub in "$ROOT_DIR/src/modules/hermes.pub" "$HOME/.ssh/id_ed25519.pub"; do
   [ -f "$pub" ] || continue
   "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
@@ -190,7 +190,7 @@ for pub in "$ROOT_DIR/src/modules/hermes.pub" "$HOME/.ssh/id_ed25519.pub"; do
     2>/dev/null || echo "WARNING: Could not install $(basename "$pub") on Proxmox."
 done
 
-# Proxmox root (PAM) login = the Authelia password
+# proxmox root password = authelia password
 if PVE_ROOT_PASS=$(SOPS_AGE_KEY_FILE="$AGE_KEY" sops --decrypt \
      --extract '["authelia-admin-pass"]' "$ROOT_DIR/src/secrets.json" 2>/dev/null) \
    && [ -n "$PVE_ROOT_PASS" ]; then
@@ -203,10 +203,10 @@ if PVE_ROOT_PASS=$(SOPS_AGE_KEY_FILE="$AGE_KEY" sops --decrypt \
   unset PVE_ROOT_PASS
 fi
 
-# Proxmox host power savings (idempotent, best-effort)
+# proxmox power savings, best-effort
 "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
   'for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo powersave > "$f" 2>/dev/null; done
-   hdparm -S 241 /dev/sda 2>/dev/null || true   # spin down unused HDD after ~30min
+   hdparm -S 241 /dev/sda 2>/dev/null || true   # spin down after ~30min
    echo ">>> Proxmox: CPU powersave, HDD spin-down 30min"' \
   2>/dev/null || true
 
@@ -218,9 +218,9 @@ if ! "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f /var/lib/vz/
     "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:/var/lib/vz/template/iso/nixos.img"
 fi
 
-# Terraform
+# terraform
 [ -d "$ROOT_DIR/src/.terraform" ] || terraform -chdir="$ROOT_DIR/src" init
-# VM ids were renumbered to follow instances.tf; applying against the old state would recreate
+# pre-renumber state would recreate every vm
 if terraform -chdir="$ROOT_DIR/src" state list 2>/dev/null | grep -q '^module\.instances\.'; then
   echo "ERROR: Terraform state still has the old VM ids. Run src/scripts/renumber.sh first."
   exit 1
@@ -239,7 +239,7 @@ else
   echo ">>> Terraform: no changes."
 fi
 
-# inventory for the Nix side (src/inventory.json): evaluated from the Terraform config itself
+# nix inventory, evaluated from terraform
 INVENTORY="$ROOT_DIR/src/inventory.json"
 INVENTORY_NEW=$(echo 'jsonencode(local.inventory)' \
   | terraform -chdir="$ROOT_DIR/src" console -var-file="$ACTIVE_TFVARS_PATH" \
@@ -253,16 +253,16 @@ VM_IPS=$(jq -r 'to_entries[] | "\(.key)=\(.value.ip)"' "$INVENTORY")
 DISABLED_VMS=$(jq -r 'to_entries[] | select(.value.enabled == "false") | .key' "$INVENTORY")
 [ -n "$DISABLED_VMS" ] && echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')" || true
 
-# Every VM that is not disabled has to be running to receive a deploy. on-demand VMs
+# enabled vms must run to receive a deploy
 WAKE_VMS=$(jq -r 'to_entries[] | select(.value.enabled != "false") | .key' "$INVENTORY")
 if [ -n "$WAKE_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
   WOKE=0
   for vmid in $WAKE_VMS; do vm_wake "$vmid" || WOKE=1; done
-  # give cold VMs time to boot, but only when one was actually started.
+  # boot wait only if one started
   [ "$WOKE" = 1 ] && sleep 45 || true
 fi
 
-# push the SSH key to every running VM via the guest agent.
+# push ssh key via the guest agent
 if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
   echo ">>> Pushing SSH key to all running VMs..."
   payload=$(jq -cn --arg k "$PUBKEY" \
@@ -270,7 +270,7 @@ if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
   VMIDS=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu" -H "$PVE_AUTH" \
     | jq -r '.data[] | select(.status=="running") | .vmid' 2>/dev/null || true)
   for vmid in $VMIDS; do
-    for _ in $(seq 1 20); do   # a fresh VM's agent takes a while to answer
+    for _ in $(seq 1 20); do   # fresh agents answer slowly
       code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/agent/exec" \
         -H "$PVE_AUTH" -H "Content-Type: application/json" -d "$payload" 2>/dev/null)
       [ "$code" = "200" ] && break
@@ -279,10 +279,10 @@ if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
   done
 fi
 
-# Nix flakes only see files git knows about: stage new/renamed configs (and the inventory)
+# flakes only see git-tracked files
 git -C "$ROOT_DIR" add -A src
 
-# build all enabled closures in parallel
+# build enabled closures in parallel
 echo ">>> Building all VM closures (parallel)..."
 BUILD_LOG=$(mktemp --suffix=.build.log); CLEANUP_FILES+=("$BUILD_LOG")
 (
@@ -306,7 +306,7 @@ BUILD_LOG=$(mktemp --suffix=.build.log); CLEANUP_FILES+=("$BUILD_LOG")
 ) > "$BUILD_LOG" 2>&1 &
 BUILD_PID=$!
 
-# deploy router first (it's the SSH bastion for all other VMs)
+# router first, it is the ssh bastion
 echo ">>> Deploying 300-router to $ROUTER_WAN_IP..."
 deploy_nixos "300-router" "$ROUTER_WAN_IP" || { echo "WARNING: Router deploy failed"; DEPLOY_FAILURE=1; }
 
@@ -336,7 +336,7 @@ fi
 cat "$BUILD_LOG"
 echo ">>> All builds complete."
 
-# deploy all other VMs in parallel (HOMELAB_PARALLEL, default 6)
+# deploy the rest in parallel
 MAX_PARALLEL="${HOMELAB_PARALLEL:-6}"
 DEPLOY_PIDS=(); DEPLOY_NAMES=()
 
@@ -366,7 +366,7 @@ for f in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix; do
     reap; [ "${#DEPLOY_PIDS[@]}" -ge "$MAX_PARALLEL" ] && sleep 2
   done
 
-  # the reaper may have stopped an on-demand VM again while the closures built
+  # the reaper may have stopped it meanwhile
   if [ -n "$PROXMOX_API_TOKEN_ID" ] && echo "$WAKE_VMS" | grep -qx "$vm_id"; then
     vm_wake "$vm_id" || true
   fi
@@ -378,11 +378,11 @@ for i in "${!DEPLOY_PIDS[@]}"; do
   wait "${DEPLOY_PIDS[$i]}" || { echo "WARNING: Failed to deploy ${DEPLOY_NAMES[$i]}"; DEPLOY_FAILURE=1; }
 done
 
-# Git commit + push (always, even on partial failure)
+# commit + push, even on partial failure
 if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git -C "$ROOT_DIR" add -A
   if ! git -C "$ROOT_DIR" diff --cached --quiet; then
-    # highest generation so far, not the last commit: hand-written commits sit in between
+    # max generation, manual commits sit between
     last=$(git -C "$ROOT_DIR" log --format=%s | sed -n 's/^chore(deploy): generation \([0-9]\+\)$/\1/p' | sort -n | tail -1)
     next=$(( ${last:-0} + 1 ))
     echo ">>> Git: committing generation $next"

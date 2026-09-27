@@ -6,7 +6,7 @@ let
   key = name: "{{HOMEPAGE_VAR_${name}}}";
   arr = type: route: tok: { inherit type; url = ipOf route; key = key tok; };
 
-  # dashboard entries, in display order.
+  # dashboard entries, display order
   groups = [
     { name = "Media"; icon = "mdi-play-box-multiple"; columns = 4; entries = [
       { route = "jellyfin"; name = "Jellyfin"; icon = "jellyfin"; desc = "Movies & shows";
@@ -60,7 +60,7 @@ let
 
   stateOf = e: inventory.${toString routes.${e.route}.vmid}.enabled or "false";
 
-  # Every declared service is listed, in declaration order, whatever state its VM
+  # every service listed, whatever its vm state
   stateSuffix = state:
     if state == "onDemand" then " (on-demand)"
     else if state == "false" then " (disabled)"
@@ -179,7 +179,7 @@ in {
   fileSystems = nasMount "/var/lib/homepage" "homepage"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
-  # build env file from token files on NAS before container starts
+  # env file from nas tokens before start
   systemd.services.homepage-config = {
     description = "Sync Homepage config and collect API tokens";
     before = [ "podman-homepage.service" ];
@@ -208,7 +208,7 @@ in {
     '';
   };
 
-  # restart the container when any config file changes
+  # restart on config change
   systemd.services.podman-homepage.restartTriggers = [
     servicesYaml settingsYaml widgetsYaml bookmarksYaml
   ];
@@ -233,6 +233,6 @@ in {
 
   networking.firewall.allowedTCPPorts = [ 80 ];
 
-  # Homepage has no login of its own and carries every service's API key in its widgets
+  # no login but holds every api key
   homelab.ingressOnly.ports = [ 80 ];
 }

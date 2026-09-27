@@ -3,7 +3,7 @@
 
   fileSystems = nasMount "/var/lib/searxng" "searxng";
 
-  # write default settings.yml if missing (fresh install)
+  # default settings.yml on fresh install
   systemd.services.searxng-config = {
     description = "Ensure SearXNG settings exist";
     before = [ "podman-searxng.service" ];

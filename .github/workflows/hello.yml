@@ -1,10 +1,6 @@
 name: hello
 
-# Builds example/ and pushes it to GHCR. vm-209 polls ghcr.io/lsck0/hello:latest
-# every minute and rolls the new digest out start-first. The copy under
-# example/.github/ is the template for an app's own repo; Actions only reads
-# workflows from .github/workflows at the root, so that one never ran and the
-# hello-gh stack sat at 0/1 with "No such image".
+# builds example/ to ghcr, vm-209 polls it
 on:
   push:
     branches: [master]

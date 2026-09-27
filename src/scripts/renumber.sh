@@ -1,5 +1,5 @@
 #!/bin/bash
-# One-time migration: renumber the VMs so ids follow the order in instances.tf.
+# one-time migration: renumber vms to instances.tf order
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -9,14 +9,14 @@ FROM_STEP=1
 while [ $# -gt 0 ]; do
   case "$1" in
     --execute) EXECUTE=1 ;;
-    # resume after an interrupted run; steps 1-4 must never run twice, ids are reused
+    # resume a broken run; steps 1-4 must never repeat
     --from-step) FROM_STEP="${2:?--from-step needs a number}"; shift ;;
     *) echo "usage: $0 [--execute] [--from-step N]"; exit 1 ;;
   esac
   shift
 done
 
-# old new Current migration: 104 is freed for 104-internal-terminal
+# old new (104 freed for 104-internal-terminal)
 MAP="
 119 120
 118 119
@@ -63,9 +63,9 @@ fi
 VMSSH=(ssh -n -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 -o BatchMode=yes)
 pve() { run "${PVE[@]}" "$@"; }
 pve_out() { [ "$EXECUTE" = 1 ] && "${PVE[@]}" "$@" || true; }
-# dry run: pretend every VM exists so the whole plan is printed
+# dry run: pretend every vm exists
 exists_on_pve() { [ "$EXECUTE" = 1 ] || return 0; "${PVE[@]}" qm status "$1" >/dev/null 2>&1; }
-# never started by this script: rebinding a gpu the host still drives can take the whole host down
+# never auto-start gpu vms: rebinding can crash the host
 has_hostpci() { [ "$EXECUTE" = 1 ] || return 1; "${PVE[@]}" "grep -q '^hostpci' /etc/pve/qemu-server/$1.conf"; }
 
 echo ">>> Renumbering plan (old -> new):"
@@ -73,7 +73,7 @@ while read -r old new <&3; do
   [ -n "$old" ] || continue
   printf '    %s -> %s  %s\n' "$old" "$new" "$(name_of "$new")"
 done 3<<< "$MAP"
-# `&& echo` alone would make an empty REMOVED a failed command under set -e.
+# bare `&& echo` fails on empty REMOVED under set -e
 if [ -n "$REMOVED" ]; then echo "    destroy: $REMOVED (removed from instances.tf)"; fi
 
 if [ "$EXECUTE" = 1 ]; then
@@ -84,7 +84,7 @@ if [ "$EXECUTE" = 1 ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1.
+# 1. INSTALL NEW CONFIGS
 if [ "$FROM_STEP" -le 1 ]; then
 echo ">>> 1. Installing new configs (next boot) at the old addresses"
 while read -r old new <&3; do
@@ -122,7 +122,7 @@ done 3<<< "$MAP"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 2.
+# 2. SHUT DOWN
 if [ "$FROM_STEP" -le 2 ]; then
 echo ">>> 2. Shutting down renumbered VMs"
 while read -r old _ <&3; do
@@ -132,7 +132,7 @@ done 3<<< "$MAP"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3.
+# 3. DESTROY REMOVED
 if [ "$FROM_STEP" -le 3 ]; then
 echo ">>> 3. Destroying removed VMs"
 for id in $REMOVED; do
@@ -141,7 +141,7 @@ done
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4.
+# 4. RENAME ON PROXMOX
 RENAME_FN='
 renum() {
   old=$1 new=$2
@@ -185,14 +185,14 @@ while read -r old new <&3; do [ -n "$old" ] && pve "$RENAME_FN renum 9$new $new"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 5.
+# 5. TERRAFORM STATE
 if [ "$EXECUTE" = 1 ]; then
   bad=""
   new_ids=" $(awk 'NF {printf "%s ", $2}' <<< "$MAP")"
   while read -r old new <&3; do
     [ -n "$old" ] || continue
     exists_on_pve "$new" || bad="$bad missing:$new"
-    # an old id that is also some other VM's new id is supposed to exist
+    # an old id reused as a new id should exist
     case "$new_ids" in *" $old "*) continue ;; esac
     ! exists_on_pve "$old" || bad="$bad still-old:$old"
   done 3<<< "$MAP"
@@ -201,7 +201,7 @@ fi
 
 echo ">>> 5. Rewriting Terraform state"
 TF=(terraform -chdir="$SRC")
-# one rollback copy per migration, stamped.
+# one dated rollback copy per migration
 BACKUP="$SRC/terraform.tfstate.pre-renumber-$(date +%Y%m%d)"
 if [ -e "$BACKUP" ]; then
   echo "    keeping the existing rollback copy $(basename "$BACKUP")"
@@ -235,7 +235,7 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 6.
+# 6. START
 echo ">>> 6. Starting VMs with their new ids"
 start_failed=""
 while read -r _ new <&3; do
@@ -243,7 +243,7 @@ while read -r _ new <&3; do
   state=$(jq -r --arg id "$new" '.[$id].enabled' "$SRC/inventory.json")
   [ "$state" = false ] && continue
   has_hostpci "$new" && { echo "    vm $new has pci passthrough, not started"; continue; }
-  # one VM that does not start (e.g. gpu passthrough not ready) must not leave the rest down
+  # one failed start must not keep the rest down
   pve "qm start $new" || start_failed="$start_failed $new"
 done 3<<< "$MAP"
 [ -z "$start_failed" ] || echo "WARNING: could not start:$start_failed (check with qm start <id> on the host)"

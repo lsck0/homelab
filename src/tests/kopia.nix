@@ -1,4 +1,4 @@
-# Kopia on vm-107: repository init, snapshot, restore of a broken service dir
+# kopia on vm-107: init, snapshot, restore
 { pkgs, ... }:
 pkgs.testers.runNixOSTest {
   name = "kopia";
@@ -7,7 +7,7 @@ pkgs.testers.runNixOSTest {
     imports = [ ./stubs.nix ../instances/107-internal-kopia.nix ];
     virtualisation.memorySize = 2048;
     environment.systemPackages = [ pkgs.curl ];
-    # A tiny NAS tree: two services' data and the backup dir.
+    # tiny nas tree
     systemd.tmpfiles.rules = [
       "d /srv/nas/data/paperless 0777 root root -"
       "f /srv/nas/data/paperless/invoice.txt 0644 root root - invoice-v1"
@@ -16,7 +16,7 @@ pkgs.testers.runNixOSTest {
       "f /srv/nas/data/minecraft/world/level.dat 0644 root root - world-v1"
       "d /srv/nas/BACKUPS 0700 root root -"
     ];
-    # nothing else may run the NAS-wide snapshot concurrently in the test.
+    # no concurrent nas-wide snapshot
     systemd.services.kopia-metrics.wantedBy = pkgs.lib.mkForce [ ];
   };
 
@@ -58,10 +58,10 @@ pkgs.testers.runNixOSTest {
     with subtest("select by snapshot id and by date (stable when new snapshots are taken)"):
         import json
         snaps = json.loads(machine.succeed("kopia-nas snapshot list /srv/nas --json"))
-        # newest snapshot before the safety snapshot (retention may prune older ones)
+        # newest, retention may prune older ones
         first_id = snaps[-1]["id"]
         machine.succeed("echo CORRUPT > /srv/nas/data/paperless/invoice.txt")
-        machine.succeed("nas-restore now")  # safety snapshot of the broken state shifts ages
+        machine.succeed("nas-restore now")  # its safety snapshot shifts ages
         rc, out = machine.execute(f"nas-restore service paperless {first_id} --yes 2>&1")
         print(out)
         assert rc == 0, out

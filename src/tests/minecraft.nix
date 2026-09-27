@@ -1,4 +1,4 @@
-# Minecraft modpack switching (vm-208): `mc-modpack` writes the runtime env file the container
+# minecraft modpack switching on vm-208
 { pkgs, lib, ... }:
 pkgs.testers.runNixOSTest {
   name = "minecraft";
@@ -10,7 +10,7 @@ pkgs.testers.runNixOSTest {
       wantedBy = [ "multi-user.target" ];
       serviceConfig = {
         Type = "simple";
-        # same env files, same order as the real container.
+        # env files in the real container's order
         EnvironmentFile = [ "/var/lib/minecraft/rcon.env" "/var/lib/minecraft/modpack.env" ];
         ExecStart = pkgs.writeShellScript "fake-minecraft" ''
           env | grep -E '^(TYPE|MODRINTH_MODPACK|CF_PAGE_URL|VERSION|LEVEL|RCON_PASSWORD)=' | sort > /tmp/server-env

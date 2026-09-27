@@ -1,4 +1,4 @@
-# On-demand VMs: wake on first connection, power off after the cooldown
+# on-demand vms: wake on connect, stop after cooldown
 { pkgs, lib, ... }:
 let
   inventory = {
@@ -68,7 +68,7 @@ pkgs.testers.runNixOSTest {
 
   nodes.backend = {
     networking.firewall.allowedTCPPorts = [ 80 8006 ];
-    # the "VM": not started at boot, only through the fake Proxmox API.
+    # the "vm", started only via the fake api
     services.nginx = {
       enable = true;
       virtualHosts.default.locations."/".return = "200 'hello from the app\\n'";
@@ -125,7 +125,7 @@ pkgs.testers.runNixOSTest {
         proxy.succeed("curl -sfk -X POST https://backend:8006/api2/json/nodes/pve/qemu/150/status/start")
         backend.wait_for_unit("nginx.service")
         proxy.succeed("systemctl start ondemand-reaper.service")
-        backend.succeed("systemctl is-active nginx")  # younger than the cooldown: kept
+        backend.succeed("systemctl is-active nginx")  # younger than the cooldown
         proxy.sleep(25)
         proxy.succeed("systemctl start ondemand-reaper.service")
         backend.wait_until_fails("systemctl is-active nginx", timeout=30)

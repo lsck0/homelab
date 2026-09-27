@@ -1,4 +1,4 @@
-# vm-104 alerting: the provisioned Grafana "Instance down" rule is Normal while everything
+# vm-104 alerting: grafana instance-down rule
 { pkgs, lib, ... }:
 pkgs.testers.runNixOSTest {
   name = "monitoring";
@@ -12,7 +12,7 @@ pkgs.testers.runNixOSTest {
     _module.args.inventory = { };
     virtualisation.memorySize = 3072;
     environment.systemPackages = [ pkgs.curl pkgs.jq ];
-    # scrape the test target instead of the lab subnets.
+    # scrape the test target, not the lab
     services.prometheus.scrapeConfigs = lib.mkForce [{
       job_name = "homelab-node-exporter";
       scrape_interval = "10s";
@@ -66,17 +66,15 @@ pkgs.testers.runNixOSTest {
         print("state while down:", rule_state())
 
     with subtest("the firing alert is sent to Telegram and ntfy, once each"):
-        # no internet in the test VM: a failed delivery attempt through the
-        # telegram integration proves the routing.
+        # no internet: a failed delivery proves routing
         cps = vm_104.succeed("curl -sf -H 'Remote-User: admin' http://127.0.0.1:80/api/v1/provisioning/contact-points")
         print(cps)
         assert '"telegram"' in cps and '"webhook"' in cps, cps
-        # one receiver of each type, not two of either: a second one would mean
-        # the duplicate-notification bug is back.
+        # a second receiver means duplicate notifications
         assert cps.count('"telegram"') == 1 and cps.count('"webhook"') == 1, cps
-        # the Telegram receiver carries the HTML template, not Grafana's default.
+        # telegram uses the html template
         assert "parse_mode" in cps and "FIRING" in cps, cps
-        # ntfy is published to as a real user with its message template.
+        # ntfy as a real user, with template
         assert "template=yes" in cps and "grafana" in cps, cps
         vm_104.wait_until_succeeds(
             "journalctl -u grafana | grep -i 'notif' | grep -qi telegram", timeout=300)

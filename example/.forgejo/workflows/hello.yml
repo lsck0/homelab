@@ -1,8 +1,6 @@
 name: hello
 
-# Build on the Forgejo runner (vm-115), push to the internal registry. vm-209
-# polls the tag every minute and rolls the new digest out with a start-first
-# update (no downtime).
+# build on vm-115, vm-209 polls the registry
 on:
   push:
     branches: [master]

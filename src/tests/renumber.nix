@@ -1,4 +1,4 @@
-# The on-host part of src/scripts/renumber.sh: renaming VMs in place on Proxmox storage.
+# on-host part of renumber.sh
 { pkgs, ... }:
 let
   stubs = pkgs.runCommand "pve-stubs" { } ''
@@ -52,7 +52,7 @@ pkgs.testers.runNixOSTest {
         )
 
     def renum(pairs):
-        # same two passes as the script: all to 9<new>, then to <new>.
+        # two passes: 9<new>, then <new>
         script = "; ".join([f"renum {o} 9{n}" for o, n in pairs] + [f"renum 9{n} {n}" for o, n in pairs])
         return m.succeed(
             "set -e; eval \"$(sed -n \"/^RENAME_FN='/,/^'$/p\" /etc/renumber.sh)\"; eval \"$RENAME_FN\"; " + script

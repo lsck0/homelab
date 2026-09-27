@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Hermes agent end-to-end test: free Nous model (nous/welcome)
+# hermes agent e2e test on the free nous model
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -36,7 +36,7 @@ mkdir -p "$W"/{home,workspace,shims,log,tokens,mock}; : > "$W/home/.env"
 chmod -R 777 "$W"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HERMES CONFIG vm-114 settings, model switched to the Nous free tier With ANTHROPIC_API_KEY
+# HERMES CONFIG
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   MODEL_FILTER='.'
   printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY" > "$W/home/.env"; chmod 600 "$W/home/.env"
@@ -53,7 +53,7 @@ mkdir -p "$W/home/skills/homelab"
 cp -r "$SRC/modules/hermes/skills/." "$W/home/skills/homelab/"
 echo ">>> config.yaml:"; sed 's/^/    /' "$W/home/config.yaml"
 
-# the free tier mints a guest identity per fresh HERMES_HOME and rate-limits minting; reuse one
+# reuse one guest identity, minting is rate-limited
 CACHE=${XDG_CACHE_HOME:-$HOME/.cache}/homelab-hermes-test
 mkdir -p "$CACHE"; chmod 700 "$CACHE"
 [ -f "$CACHE/auth.json" ] && cp "$CACHE/auth.json" "$W/home/auth.json"
@@ -78,7 +78,7 @@ esac
 EOF
 cat > "$W/shims/ssh" <<'EOF'
 #!/bin/bash
-export PATH="@ENVBIN@:$PATH"   # coreutils date, not whatever the agent's shell has
+export PATH="@ENVBIN@:$PATH"   # coreutils date, not the agent's
 # ssh [opts] host command...
 args=("$@"); while [[ "${args[0]}" == -* ]]; do
   case "${args[0]}" in -o|-i|-p|-l|-F) args=("${args[@]:2}") ;; *) args=("${args[@]:1}") ;; esac
@@ -115,7 +115,7 @@ cat > "$W/shims/lab-token" <<'EOF'
 [ -z "$1" ] && { ls /work/tokens | sed 's/\.token$//'; exit 0; }
 cat "/work/tokens/$1.token"
 EOF
-# curl: lab IPs -> test backends, everything else untouched.
+# curl: lab ips -> test backends
 cat > "$W/shims/curl" <<'EOF'
 #!/bin/bash
 out=()
@@ -135,8 +135,8 @@ chmod +x "$W"/shims/*
 echo -n fake-paperless-token > "$W/tokens/paperless-key.token"
 echo -n fake-firefly-token > "$W/tokens/firefly-token.token"
 
-# the repo: a bare copy stands in for GitHub; lab-pr pushes there and answers with a fake pull
-git clone -q --bare --no-local "$SRC/.." "$W/remote.git"   # a copy: chmod below must not touch this repo
+# bare copy stands in for github
+git clone -q --bare --no-local "$SRC/.." "$W/remote.git"   # chmod below must not touch this repo
 MASTER=$(git -C "$W/remote.git" rev-parse master)
 nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.114-internal-hermes.config.programs.git.config" \
   | jq -r 'map(.user // empty) | add | "[user]\n\tname = \(.name)\n\temail = \(.email)"' > "$W/home/.gitconfig"
@@ -305,7 +305,7 @@ for s in $SCENARIOS; do
     fi
     ;;
   telegram)
-    # live: the real bot, polling Telegram, answering only TELEGRAM_ALLOWED_USERS. needs
+    # live bot, needs a real telegram token
     : "${TELEGRAM_BOT_TOKEN:?set TELEGRAM_BOT_TOKEN}" "${TELEGRAM_ALLOWED_USERS:?set TELEGRAM_ALLOWED_USERS}"
     WINDOW=${TELEGRAM_WINDOW:-300}
     : > "$W/log/calls.log"

@@ -4,7 +4,7 @@ let
   endpointHost = lib.head (lib.splitString ":" cfg.endpoint);
 in
 {
-  # One WireGuard tunnel on the router carrying forwarded traffic for every via = "vpn" member
+  # one router tunnel for every via = "vpn" member
   options.homelab.egress.vpn = {
     enable = lib.mkEnableOption "a shared WireGuard exit for egress.nix members";
 
@@ -48,18 +48,18 @@ in
     networking.wireguard.interfaces.wg-egress = {
       ips = [ cfg.address ];
       privateKeyFile = toString cfg.privateKeyFile;
-      # not as routes: 0.0.0.0/0 in the main table would tunnel everything
+      # 0.0.0.0/0 in main would tunnel everything
       allowedIPsAsRoutes = false;
       peers = [{
         publicKey = cfg.publicKey;
         allowedIPs = [ "0.0.0.0/0" ];
         endpoint = cfg.endpoint;
-        # the router is behind the FritzBox NAT
+        # router sits behind the fritzbox nat
         persistentKeepalive = 25;
       }];
       postSetup = ''
         ${pkgs.iproute2}/bin/ip route replace default dev wg-egress metric 1 table ${toString cfg.table}
-        # the provider's gateway, in the main table: see the option's comment.
+        # provider gateway in main, see option
         ${pkgs.iproute2}/bin/ip route replace ${cfg.gateway}/32 dev wg-egress
       '';
       postShutdown = ''
@@ -68,10 +68,10 @@ in
       '';
     };
 
-    # the endpoint must not route through the tunnel it is establishing
+    # endpoint must not route through its own tunnel
     networking.firewall.trustedInterfaces = [ "wg-egress" ];
 
-    # Traffic leaving the tunnel is NATed onto the address the provider gave.
+    # nat onto the provider-assigned address
     networking.nftables.tables.egress-nat = {
       family = "ip";
       content = ''
@@ -82,7 +82,7 @@ in
       '';
     };
 
-    # the router's blackhole is the killswitch; this just fails loudly
+    # the router blackhole is the killswitch
     systemd.services.wireguard-wg-egress.unitConfig.StartLimitIntervalSec = 0;
     systemd.services.wireguard-wg-egress.serviceConfig = {
       Restart = "on-failure";

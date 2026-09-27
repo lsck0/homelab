@@ -1,6 +1,6 @@
 { config, pkgs, nasMount, ... }:
 let
-  # sign in as Authelia's Remote-User; the first admin takes over the seeded akadmin
+  # authelia Remote-User login, first admin replaces akadmin
   remoteUser = pkgs.writeText "zz_remote_user.rb" ''
     Rails.application.config.to_prepare do
       ApplicationController.prepend_before_action do
@@ -37,9 +37,7 @@ in {
       local all all trust
       host all all 127.0.0.1/32 trust
       host all all ::1/128 trust
-      # all databases, not just huginn: the entrypoint runs `db:create`, which
-      # connects to the `postgres` maintenance database first and was refused
-      # with "no pg_hba.conf entry for ... database \"postgres\"".
+      # all dbs: db:create connects to `postgres` first
       host all huginn 10.88.0.0/16 trust
     '';
   };
@@ -83,10 +81,10 @@ in {
 
   networking.firewall.allowedTCPPorts = [ 80 ];
   homelab.ingressOnly.ports = [ 80 ];
-  # Postgres only for the container (podman bridge), not the subnet
+  # postgres for the podman bridge only
   networking.firewall.interfaces.podman0.allowedTCPPorts = [ 5432 ];
 
-  # /var/lib/postgresql is a live data directory on the NAS: Kopia's file copy of one
+  # dump, live data dirs on nfs copy inconsistently
   homelab.dbBackup.databases.huginn = {
     command = "${config.services.postgresql.package}/bin/pg_dumpall -U postgres --clean --if-exists";
     path = [ config.services.postgresql.package ];

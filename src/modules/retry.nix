@@ -1,5 +1,5 @@
 { pkgs, ... }: {
-  # `${retry} <attempts> <interval seconds> <command...>`: runs the command until it succeeds.
+  # usage: ${retry} <attempts> <interval> <command...>
   _module.args.retry = pkgs.writeShellScript "retry" ''
     if [ "$#" -lt 3 ] || ! [ "$1" -gt 0 ] 2>/dev/null || ! [ "$2" -ge 0 ] 2>/dev/null; then
       echo "usage: retry <attempts> <interval seconds> <command...>" >&2

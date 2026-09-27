@@ -1,13 +1,4 @@
-"""Build the TRMNL homelab dashboard payload.
-
-Runs on vm-104. Prometheus is on vm-105. The qBittorrent credentials come
-from the shared homepage-tokens mount and 10.100.0.104 is on that app's API
-whitelist, so the dashboard needs nothing else opened up.
-
-Writes <out-dir>/<token>/stats.json, which nginx serves and the TRMNL cloud
-polls. The token is the only thing protecting it, exactly like the calendar
-feed: the device cannot log in.
-"""
+"""Build the TRMNL homelab dashboard payload."""
 import json
 import os
 import socket
@@ -25,24 +16,23 @@ TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/homepage-tokens")
 # six columns of seven
 SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "42"))
 TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "4"))
-# Sending more rows than a panel can draw does not show more, it clips the last one in half
+# more rows than fit clips the last one
 REQUEST_ROWS = int(os.environ.get("STATS_REQUEST_ROWS", "13"))
 REQUEST_WINDOW = os.environ.get("STATS_REQUEST_WINDOW", "3h")
 DISK_ROWS = int(os.environ.get("STATS_DISK_ROWS", "4"))
-# longest torrent name the panel can hold on one line
+# longest torrent name fitting one line
 NAME_CHARS = int(os.environ.get("STATS_NAME_CHARS", "42"))
-# The "who is calling" strip.
+# the "who is calling" strip
 CLIENT_INGRESS = os.environ.get("STATS_CLIENT_INGRESS", "vm-200")
 CLIENT_WINDOW = os.environ.get("STATS_CLIENT_WINDOW", "24h")
 CLIENT_ROWS = int(os.environ.get("STATS_CLIENT_ROWS", "13"))
-# public suffix to drop from hostnames, which are all under one domain
+# shared domain suffix stripped from hostnames
 CLIENT_DOMAIN = os.environ.get("STATS_CLIENT_DOMAIN", ".lsck0.dev")
 TIMEOUT = 8
 
 
 def promql(query):
-    """One instant query. Returns [] rather than raising: a dashboard with a
-    missing panel beats a dashboard that never updates."""
+    """One instant query; [] on error, never raises."""
     url = PROMETHEUS + "/api/v1/query?" + urllib.parse.urlencode({"query": query})
     try:
         with urllib.request.urlopen(url, timeout=TIMEOUT) as r:
@@ -56,8 +46,7 @@ def promql(query):
 
 
 def by_instance(results):
-    """instance label -> float. Stale targets from earlier VM numbering are
-    still in the series database, so keep the newest sample per instance."""
+    """instance -> float, newest sample wins over stale targets."""
     out = {}
     for r in results:
         inst = r["metric"].get("instance")
@@ -89,23 +78,14 @@ def human_size(num):
 
 
 def scrape_instance(vm):
-    """The address Prometheus scrapes this VM on.
-
-    For a VM that is its inventory address. The router's inventory address is
-    its WAN side, 192.168.178.x, which nothing scrapes: node-exporter is only
-    reached on the two LAN legs. Grafana's relabelling already special-cases
-    the same pair. Without this the dashboard called the router down whatever
-    it was doing.
-    """
+    """Scrape address; the router is scraped on its lan leg."""
     if vm.get("type") == "router":
         return "10.100.0.1:9100"
     return f"{vm['ip']}:9100"
 
 
 def services():
-    """One row per declared VM, whatever state it is in - the same rule the
-    Homepage dashboard follows. A VM that is meant to be running and is not is
-    the single most useful thing on the screen, so it must not vanish."""
+    """One row per declared VM, down ones included."""
     try:
         with open(INVENTORY) as f:
             inv = json.load(f)
@@ -141,13 +121,13 @@ def services():
             "on_demand": enabled == "onDemand",
             "cpu": round(cpu.get(inst, 0.0), 1) if online else 0.0,
             "mem": round(mem.get(inst, 0.0), 1) if online else 0.0,
-            # the template draws a bar from these, so clamp here rather than emitting a width
+            # clamp: the template draws bars from these
             "cpu_pct": min(100, max(0, round(cpu.get(inst, 0.0)))) if online else 0,
             "mem_pct": min(100, max(0, round(mem.get(inst, 0.0)))) if online else 0,
         })
 
     expected = [r for r in rows if not r["disabled"]]
-    # Each headline tile carries a second line, and the CPU tile's is the VM doing the work
+    # cpu tile's second line names the busiest vm
     busiest = max(expected, key=lambda r: r["cpu_pct"], default=None)
     return rows, {
         "up": sum(1 for r in expected if r["online"]),
@@ -159,8 +139,7 @@ def services():
 
 
 def network():
-    """Lab-wide throughput, and the busiest hosts. Virtual devices are excluded
-    or container bridges would double-count every byte."""
+    """Lab throughput and busiest hosts, virtual devices excluded."""
     real = 'device!~"lo|veth.*|docker.*|podman.*|br-.*|cni.*|tailscale.*|wg.*"'
     rx = promql(f'sum(rate(node_network_receive_bytes_total{{{real}}}[5m]))')
     tx = promql(f'sum(rate(node_network_transmit_bytes_total{{{real}}}[5m]))')
@@ -183,13 +162,7 @@ def network():
 
 
 def totals():
-    """CPU and memory of the machine that actually has them.
-
-    Summing the guests was nonsense: 44 VMs add up to 108 vCPUs and 107GB on a
-    box with 12 cores and 32GB, because virtual CPUs and guest RAM are
-    oversubscribed by design. The host's own node_exporter is the only place
-    the real figures exist.
-    """
+    """Host cpu and memory; summed guests are oversubscribed."""
     host = os.environ.get("STATS_HOST_VM", "proxmox")
     sel = f'{{vm="{host}"}}'
     idle = f'{{vm="{host}",mode="idle"}}'
@@ -218,19 +191,7 @@ def totals():
 
 
 def requests():
-    """Requests per route, and which side of the house they came in on.
-
-    Traefik reports the router and the instance that served it, so
-    10.100.0.100 is a request that arrived over the LAN or the Headscale mesh
-    and 10.200.0.200 is one relayed in off the internet. There is no client
-    address in these metrics, so that split is as far as "from where" goes.
-
-    A count over a window rather than a rate, because this sits in the clients
-    band beside four other counts. The window is three hours: over fifteen
-    minutes only six routes had been touched at all and the column ran out of
-    rows, and a per-minute rate over three hours renders a route that served
-    three requests as "0.0".
-    """
+    """Request counts per route over 3h, lan vs internet."""
     rows = promql(f'sum by (router, instance)'
                   f' (increase(traefik_router_requests_total[{REQUEST_WINDOW}]))')
     by_router = {}
@@ -260,20 +221,20 @@ def requests():
             "name": e["name"],
             "rate": total,
             "rpm": human_count(total),
-            # where it came from, in one word, rather than two more columns
+            # origin in one word, not two columns
             "origin": "ext" if e["ext"] > e["int"] else ("int" if e["int"] else "ext"),
             "mixed": e["int"] > 0 and e["ext"] > 0,
         })
     out.sort(key=lambda x: -x["rate"])
     out = out[:REQUEST_ROWS]
-    # this list lives in the clients band now, whose rows all carry a bar of their share
+    # clients band rows carry a share bar
     top = out[0]["rate"] if out else 0
     for e in out:
         e["pct"] = round(100 * e.pop("rate") / top) if top else 0
     return out
 
 
-# Traefik logs the User-Agent verbatim, which is thousands of distinct strings and useless
+# raw user-agents are too many; bucket into families
 AGENT_FAMILY = (
     '{{ if or (contains "bot" .ua) (contains "Bot" .ua) (contains "crawl" .ua)'
     ' (contains "spider" .ua) }}bot'
@@ -288,8 +249,7 @@ AGENT_FAMILY = (
 
 
 def logql(query):
-    """One instant query against Loki. Same contract as promql: the dashboard
-    loses a panel rather than an update."""
+    """One instant Loki query; same contract as promql."""
     url = LOKI + "/loki/api/v1/query?" + urllib.parse.urlencode({"query": query})
     try:
         with urllib.request.urlopen(url, timeout=TIMEOUT) as r:
@@ -313,14 +273,7 @@ def human_count(n):
 
 
 def bars(pairs, scale=None):
-    """(name, count) pairs -> rows the template can draw without arithmetic.
-
-    `pct` is the share of the largest row, not of the total: at a glance the
-    question is which of these is big relative to its neighbours, and a total
-    share makes every row after the first a sliver. Pass `scale` to measure
-    against something else, which the traffic column does so its status
-    classes read as a share of all requests.
-    """
+    """(name, count) -> rows with pct of the largest (or scale)."""
     top = scale if scale is not None else max((c for _, c in pairs), default=0)
     return [{
         "name": n,
@@ -350,16 +303,13 @@ def scalar_logql(query):
 
 
 def clients():
-    """Who reached the lab from the internet over the last day: which country
-    Cloudflare says they were in, what they were running, and what they asked
-    for. The Prometheus metrics carry no client detail at all, so this comes
-    from the JSON access log that promtail already ships to Loki."""
-    # | __error__="" on every json stage: the access log contains lines that are not valid JSON
+    """Internet visitors over the last day, from the access log."""
+    # __error__="" drops non-json access log lines
     sel = f'{{job="traefik-access", host="{CLIENT_INGRESS}"}}'
     w = CLIENT_WINDOW
     k = CLIENT_ROWS
 
-    # a request with no Cf-Ipcountry did not come through Cloudflare
+    # no Cf-Ipcountry means it bypassed cloudflare
     countries = ranked(
         logql(f'topk({k}, sum by (country) (count_over_time({sel}[{w}])))'),
         "country", "direct")
@@ -376,10 +326,10 @@ def clients():
         if h["name"].endswith(CLIENT_DOMAIN):
             h["name"] = h["name"][: -len(CLIENT_DOMAIN)]
         elif h["name"][:1].isdigit():
-            # a bare address in the Host header is a scanner, not a visitor
+            # bare ip host header is a scanner
             h["name"] = "by address"
 
-    # How that traffic went.
+    # how that traffic went
     by_status, exact = {}, {}
     for r in logql(f'sum by (status) (count_over_time({sel}[{w}]))'):
         code = str(r["metric"].get("status") or "")
@@ -392,12 +342,12 @@ def clients():
         exact[code] = exact.get(code, 0.0) + n
     total = sum(by_status.values())
 
-    # ClientHost is the real address: the Cloudflare ranges are trusted on the entrypoint
+    # ClientHost is real: cloudflare ranges are trusted
     visitors = scalar_logql(
         f'count(count by (ip) (count_over_time({sel} | json ip="ClientHost"'
         f' | __error__="" [{w}])))')
 
-    # the method label is on the stream too, so this costs nothing
+    # method label is on the stream, so free
     by_method = {}
     for r in logql(f'sum by (method) (count_over_time({sel}[{w}]))'):
         try:
@@ -410,7 +360,7 @@ def clients():
     rows.extend((c, exact.get(c, 0.0)) for c in ("404", "403", "401"))
     rows.extend((m, by_method.get(m, 0.0)) for m in ("GET", "POST"))
     traffic = bars(rows, scale=total)
-    # the first two rows are not a share of the requests, so they get no bar
+    # first two rows aren't shares, so no bar
     for row in traffic[:2]:
         row["pct"] = 0
 
@@ -425,9 +375,7 @@ def clients():
 
 
 def storage():
-    """The fullest real filesystems in the lab. Virtual and network mounts are
-    excluded: tmpfs is RAM, and an NFS mount would report the NAS once per
-    client that has it mounted."""
+    """Fullest real filesystems; tmpfs and nfs excluded."""
     real = ('fstype!~"tmpfs|ramfs|overlay|squashfs|nfs.*|fuse.*|autofs",'
             'mountpoint!~"/nix/store|/run.*|/var/lib/docker.*|/var/lib/containers.*"')
     rows = promql(
@@ -451,9 +399,7 @@ def storage():
 
 
 def qb_session():
-    """Sign in with the generated password the *arr stack also uses, rather
-    than relying on the subnet whitelist: the whitelist skips the login for
-    the API, but a session works from anywhere the port is reachable."""
+    """Log in with the generated password; works beyond the whitelist."""
     try:
         with open(os.path.join(TOKENS, "qbittorrent-user.token")) as f:
             user = f.read().strip()
@@ -498,7 +444,7 @@ def qb_get(path, cookie):
         return None
 
 
-# qBittorrent has a dozen states; the screen only needs the distinction
+# qbittorrent's many states reduced to three buckets
 DOWNLOADING = {"downloading", "metaDL", "stalledDL", "queuedDL", "forcedDL", "checkingDL"}
 SEEDING = {"uploading", "stalledUP", "queuedUP", "forcedUP", "checkingUP"}
 PAUSED = {"pausedDL", "pausedUP", "stoppedDL", "stoppedUP"}
@@ -529,11 +475,11 @@ def torrents():
     for t in listing:
         counts[bucket(t.get("state", ""))] += 1
 
-    # active downloads first, fastest first: that is what someone glances
+    # active downloads first, fastest first
     active = sorted(
         (t for t in listing if bucket(t.get("state", "")) == "downloading"),
         key=lambda t: (t.get("dlspeed", 0), t.get("progress", 0)), reverse=True)
-    # unfinished only: a finished torrent is noise here
+    # unfinished only; finished torrents are noise
     rest = sorted((t for t in listing if float(t.get("progress", 0)) < 1),
                   key=lambda t: t.get("added_on", 0), reverse=True)
     ordered = active + [t for t in rest if t not in active]
@@ -542,7 +488,7 @@ def torrents():
     for t in ordered[:TORRENT_ROWS]:
         pct = round(float(t.get("progress", 0)) * 100)
         name = t.get("name", "?")
-        # scene releases run past 80 characters and a magnet-only torrent is a 40-character
+        # scene and magnet-only names overflow a line
         if len(name) > NAME_CHARS:
             name = name[:NAME_CHARS - 1].rstrip() + "\u2026"
         items.append({
@@ -567,7 +513,7 @@ def torrents():
 
 
 def eta(seconds, pct):
-    # qBittorrent reports 8640000 for "no estimate"
+    # 8640000 means "no estimate"
     if pct >= 100:
         return "done"
     if not seconds or seconds >= 8640000:
@@ -593,7 +539,7 @@ def main():
     out_dir = sys.argv[1]
 
     rows, summary = services()
-    # the grid shows what is meant to be up; the rest is one line of names
+    # grid shows enabled vms; disabled ones as names
     running = [r for r in rows if not r["disabled"]]
     switched_off = [r["name"] for r in rows if r["disabled"]]
     net = network()

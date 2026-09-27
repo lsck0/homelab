@@ -1,12 +1,12 @@
 { pkgs, nasMount, retry, ... }: {
   networking.hostName = "vm-128";
 
-  # Seerr (formerly Jellyseerr), request movies, series and anime; approved requests go
+  # seerr: media requests, approvals go to the arr
   fileSystems = nasMount "/var/lib/jellyseerr" "jellyseerr"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   virtualisation.oci-containers.containers.jellyseerr = {
-    # the old fallenbagel/jellyseerr image is frozen at 2.7 and cannot log in to Jellyfin 12
+    # old jellyseerr image cannot log in to jellyfin 12
     image = "ghcr.io/seerr-team/seerr:v3.4.1";
     extraOptions = [ "--init" ];
     ports = [ "80:5055" ];
@@ -19,7 +19,7 @@
 
   systemd.tmpfiles.rules = [
     "d /var/lib/jellyseerr 0750 1000 1000 -"
-    # the Seerr image runs as node:node (uid 1000); the old fallenbagel image ran as root
+    # seerr runs as uid 1000, the old image as root
     "Z /var/lib/jellyseerr - 1000 1000 -"
   ];
 

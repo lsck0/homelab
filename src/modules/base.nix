@@ -35,15 +35,15 @@
     };
 
     services.qemuGuest.enable = true;
-    # use simple eth0 naming so cloud-init network config matches
+    # eth0 naming so cloud-init config matches
     networking.usePredictableInterfaceNames = false;
     users.users.root.openssh.authorizedKeys.keys = [
-      # the deploy key sync.sh runs with
+      # sync.sh deploy key
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID3CzR77c6L49KNFZWmMc+SEQCda0+MdGBWTrEkZRly+ homelab@luca-pc"
-      # the owner's own key, kept in ~/projects/secrets/ssh_privatekey.asc
+      # owner's personal key
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOgxytZXc8MSkvCbwV/NZGnXw+6gklCUFxv+llwIIN6Z luca.sandrock@proton.me"
     ]
-    # Hermes (vm-114) has root everywhere. Written by src/scripts/hermes-secrets.sh.
+    # hermes (vm-114), written by hermes-secrets.sh
     ++ lib.optional (builtins.pathExists ./hermes.pub) (lib.removeSuffix "\n" (builtins.readFile ./hermes.pub));
 
     services.openssh = {
@@ -60,7 +60,7 @@
     services.prometheus.exporters.node = {
       enable = true;
       openFirewall = true;
-      # textfile collector: services publish their own metrics here
+      # services publish their own metrics here
       enabledCollectors = [ "textfile" ];
       extraFlags = [ "--collector.textfile.directory=/var/lib/node-exporter-textfile" ];
     };
@@ -69,7 +69,7 @@
     ];
     networking.firewall.allowedTCPPorts = [ 9100 ];
 
-    # journals to Loki; StateDirectory because promtail's namespaced start needs it
+    # promtail's namespaced start needs a statedir
     systemd.services.promtail.serviceConfig = lib.mkIf (config.networking.hostName != "vm-104") {
       StateDirectory = "promtail";
     };
@@ -91,7 +91,7 @@
             { source_labels = [ "__journal_priority_keyword" ]; target_label = "level"; }
           ];
         }]
-        # Traefik VMs also ship the access log, for the country on the world map
+        # access log feeds the world map
         ++ lib.optional (config.homelab.traefik.enable or false) {
           job_name = "traefik-access";
           static_configs = [{
@@ -116,21 +116,21 @@
       };
     };
 
-    # No syslog forwarding: promtail already ships journals.
+    # no syslog forwarding: promtail ships journals
 
-    # prefer IPv4: internal VMs have no IPv6 routing
+    # internal vms have no ipv6 routing
     networking.enableIPv6 = false;
 
-    # reduce idle CPU power; has no effect on throughput
+    # lower idle power, same throughput
     powerManagement.cpuFreqGovernor = "powersave";
 
-    # every deploy adds a system generation and nothing else ever collects them
+    # every deploy adds an uncollected generation
     nix.gc = { automatic = true; dates = "weekly"; options = "--delete-older-than 14d"; };
     nix.optimise.automatic = true;
 
     nix.settings.experimental-features = [ "nix-command" "flakes" ];
 
-    # attic (vm-110) as an extra substituter, read-only token via netrc
+    # attic (vm-110) substituter, read-only netrc token
     sops.secrets.attic-pull-token = {};
     sops.templates."nix-netrc".content = ''
       machine 10.100.0.110

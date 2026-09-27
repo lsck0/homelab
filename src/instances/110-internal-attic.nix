@@ -1,10 +1,10 @@
 { config, pkgs, ... }: {
   networking.hostName = "vm-110";
 
-  # attic client, for creating the cache + reading its public key on this host.
+  # attic client to create the cache and read its key
   environment.systemPackages = [ pkgs.attic-client ];
 
-  # attic: a Nix binary cache shared across every VM and the Forgejo runner
+  # nix binary cache for every vm and the forgejo runner
   sops.secrets.attic-server-token = {};
   sops.templates."atticd.env".content = ''
     ATTIC_SERVER_TOKEN_HS256_SECRET_BASE64=${config.sops.placeholder.attic-server-token}
@@ -16,12 +16,12 @@
     settings = {
       listen = "0.0.0.0:8080";
       database.url = "sqlite:///var/lib/atticd/db.sqlite?mode=rwc";
-      # under atticd's StateDirectory (/var/lib/atticd), created automatically.
+      # under atticd's StateDirectory
       storage = {
         type = "local";
         path = "/var/lib/atticd/storage";
       };
-      # deduplicate aggressively, Nix store paths share a lot.
+      # dedupe hard, store paths overlap a lot
       chunking = {
         nar-size-threshold = 65536;
         min-size = 16384;

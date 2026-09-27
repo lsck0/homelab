@@ -1,7 +1,7 @@
 { config, pkgs, nasMount, ... }:
 let
   data = "/var/lib/minecraft";
-  # runtime server type/modpack.
+  # runtime server type/modpack
   modpackEnv = "${data}/modpack.env";
   defaultModpack = ''
     TYPE=VANILLA
@@ -9,7 +9,7 @@ let
     LEVEL=vanilla
   '';
 
-  # mc-modpack <modrinth url|slug|curseforge url|vanilla> [version] Writes the env file
+  # mc-modpack <modrinth url|slug|curseforge url|vanilla> [version]
   mcModpack = pkgs.writeShellScriptBin "mc-modpack" ''
     set -euo pipefail
     arg="''${1:-}"; version="''${2:-LATEST}"
@@ -23,7 +23,7 @@ let
       vanilla)
         env="TYPE=VANILLA"; slug=vanilla ;;
       *curseforge.com*)
-        # needs CF_API_KEY in ${data}/rcon.env for most packs.
+        # most packs need CF_API_KEY in rcon.env
         env="TYPE=AUTO_CURSEFORGE
     CF_PAGE_URL=$arg" ;;
       *)
@@ -36,7 +36,7 @@ let
     systemctl restart podman-minecraft.service
   '';
 
-  # mc-rcon <command...>  e.g. mc-rcon list, mc-rcon whitelist add Steve
+  # mc-rcon <command...>
   mcRcon = pkgs.writeShellScriptBin "mc-rcon" ''
     exec ${pkgs.podman}/bin/podman exec minecraft rcon-cli "$@"
   '';
@@ -63,7 +63,7 @@ in {
   };
 
   virtualisation.oci-containers.containers.minecraft = {
-    # java25: vanilla 26.3 is compiled for it and the java21 image refused it
+    # java25: vanilla 26.3 needs it
     image = "itzg/minecraft-server:2026.9.1-java25";
     ports = [ "25565:25565" "25575:25575" ];
     extraOptions = [ "--dns=1.1.1.1" "--dns=8.8.8.8" ];
@@ -74,7 +74,7 @@ in {
     environmentFiles = [ "${data}/rcon.env" modpackEnv ];
     environment = {
       EULA = "TRUE";
-      # vanilla needs a fraction of the modded pack; must fit the balloon floor
+      # must fit the balloon floor
       MEMORY = "2G";
       DIFFICULTY = "hard";
       ICON = "https://d.furaffinity.net/art/skullfugg/1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png";
@@ -91,9 +91,9 @@ in {
         "apokryphos"
         "zidoio"
       ];
-      # drop mods of the previous pack when switching packs.
+      # drop the previous pack's mods
       REMOVE_OLD_MODS = "TRUE";
-      # the VM itself is on demand (instances.tf cooldown); no in-server pause.
+      # the vm idles out instead
       MAX_TICK_TIME = "-1";
     };
   };

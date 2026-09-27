@@ -2,7 +2,7 @@
 let
   T = "/var/lib/homepage-tokens";
 
-  # public indexers added to Prowlarr on first run (Prowlarr definition names). nyaasi covers
+  # public indexers seeded into prowlarr on first run
   indexers = [
     "nyaasi" "yts" "thepiratebay" "limetorrents" "Knaben"
     "ebookbay" "internetarchive" "postman"
@@ -32,7 +32,7 @@ let
 in {
   networking.hostName = "vm-133";
 
-  # media automation host, no web UI: arr-wire connects qBittorrent/Prowlarr/Jellyseerr/Bazarr
+  # no web ui, arr-wire links the media stack
   fileSystems = nasMount T "homepage-tokens";
 
   systemd.services.arr-wire = {

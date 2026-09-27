@@ -3,18 +3,18 @@ let
   routes = (import ../modules/routes.nix).internal;
   address = config.homelab.onDemand.address;
 
-  # SSO gateway guarding the protected routes.
+  # sso gateway for protected routes
   sso = "authelia";
 in {
   networking.hostName = "vm-100";
 
-  # every backend goes through homelab.onDemand: VMs with enabled = "onDemand" in instances.tf
+  # backends wake via homelab.onDemand
   sops.secrets.proxmox-api-token = {};
   homelab.onDemand = {
     enable = true;
     side = "internal";
     tokenFile = config.sops.secrets.proxmox-api-token.path;
-    # one local proxy port per route (20000 + position), since routes can share a VM.
+    # port 20000 + index, routes can share a vm
     services = lib.listToAttrs (lib.imap0 (i: name: lib.nameValuePair name {
       inherit (routes.${name}) vmid;
       targetPort = routes.${name}.port;
@@ -28,11 +28,11 @@ in {
   homelab.traefik = {
     enable = true;
 
-    # jellyfin-plugin-sso completes the login inside a hidden same-origin iframe
+    # sso login runs in a same-origin iframe
     sameOriginFrameRouters = [ "jellyfin-tls" ];
 
     middlewares = {
-      # auth = "token" routes have no gate of their own.
+      # auth = "token" routes have no own gate
       registry-clients.ipAllowList.sourceRange = [
         "10.100.0.116/32"   # forgejo runner, pushes
         "10.100.0.117/32"   # github runner, pushes
@@ -51,7 +51,7 @@ in {
         ];
       };
     }
-    # one per route that declares loginRedirect: send the app's own login page at its Authelia
+    # redirect the app's login page to authelia
     // lib.mapAttrs' (name: r: lib.nameValuePair "${name}-login" {
       redirectRegex = {
         regex = "^https://${r.host}\\.lsck0\\.dev${lib.escapeRegex r.loginRedirect.path}$";
@@ -59,7 +59,7 @@ in {
       };
     }) (lib.filterAttrs (_: r: r ? loginRedirect) routes);
 
-    # auth = "sso" gets Authelia ForwardAuth; "own"
+    # "sso" gets forwardauth, "own" does not
     routers = lib.mapAttrs' (name: r: lib.nameValuePair "${name}-tls" ({
       rule = "Host(`${r.host}.lsck0.dev`)";
       service = name;

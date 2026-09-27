@@ -1,16 +1,4 @@
-"""Merge remote ICS feeds into one calendar and render a TRMNL payload.
-
-Reads a sources file of "NAME|URL" lines, fetches each feed, and writes two
-files into the output directory:
-
-  merged.ics   every event from every source, for clients to subscribe to
-  trmnl.json   the next two weeks of events plus Kraken prices, for a TRMNL
-               private plugin to poll
-
-A source that fails to fetch is skipped with a warning rather than taking the
-whole run down, so one broken feed cannot empty a calendar that devices are
-already subscribed to.
-"""
+"""Merge ICS feeds into one calendar and a TRMNL payload."""
 
 import base64
 import hashlib
@@ -28,25 +16,25 @@ import recurring_ical_events
 from icalendar import Calendar
 
 TIMEOUT = 30
-# How far ahead to look, and how many events to keep.
+# lookahead and event cap
 HORIZON_DAYS = int(os.environ.get("CALENDAR_HORIZON_DAYS", "90"))
 MAX_EVENTS = int(os.environ.get("CALENDAR_MAX_EVENTS", "12"))
-# The week view is rendered in local time: a day column has to start at local midnight
+# day columns start at local midnight
 LOCAL_TZ = ZoneInfo(os.environ.get("CALENDAR_TZ", "Europe/Berlin"))
-# Which weeks to publish, as offsets from the current one.
+# weeks to publish, offsets from the current one
 WEEK_OFFSETS = [int(o) for o in os.environ.get("CALENDAR_WEEK_OFFSETS", "-1,0,1").split(",")]
-# how many events a month cell shows before collapsing the rest into "+n".
+# month cell events before collapsing into "+n"
 MONTH_CELL_EVENTS = int(os.environ.get("CALENDAR_MONTH_CELL_EVENTS", "3"))
-# All-day events sit above the time grid and push it down
+# all-day events push the time grid down
 ALLDAY_CELL_EVENTS = int(os.environ.get("CALENDAR_ALLDAY_CELL_EVENTS", "2"))
-# The time axis spans this window, every hour drawn
+# time axis window, every hour drawn
 GRID_START_MIN = int(os.environ.get("CALENDAR_GRID_START_MIN", "480"))
 GRID_END_MIN = int(os.environ.get("CALENDAR_GRID_END_MIN", "1260"))
-# Smallest block, as a percentage of the grid height.
+# smallest block, percent of grid height
 WEEK_MIN_BLOCK_PCT = float(os.environ.get("CALENDAR_WEEK_MIN_BLOCK_PCT", "4.7"))
 DAY_MIN_BLOCK_PCT = float(os.environ.get("CALENDAR_DAY_MIN_BLOCK_PCT", "9.5"))
 
-# Display names for the sources.
+# source display names
 SOURCE_LABELS = dict(
     pair.split("=", 1)
     for pair in os.environ.get(
@@ -55,7 +43,7 @@ SOURCE_LABELS = dict(
     if "=" in pair
 )
 
-# Monochrome e-ink has no colour to spend on categories
+# monochrome e-ink: borders instead of colours
 BORDER_STYLES = ["solid", "dashed", "dotted", "double"]
 _border_assigned = {}
 
@@ -105,12 +93,7 @@ def fetch(url, headers=None, data=None):
 
 
 def uploaded_sources(upload_dir):
-    """Every validated .ics pushed to the upload endpoint, as (name, file URL).
-
-    A calendar whose owner blocks publishing has no URL to poll, so it is PUT
-    here instead and picked up by filename. No entry in calendar-sources is
-    needed: dropping work.ics in is enough to make "work" a source.
-    """
+    """Uploaded .ics files as (name, file URL); filename is the source."""
     if not upload_dir or not os.path.isdir(upload_dir):
         return []
     found = []
@@ -153,7 +136,7 @@ def merge(calendars):
                 seen_timezones.add(tzid)
                 merged.add_component(component)
             elif kind in ("VEVENT", "VTODO"):
-                # Distinct sources can reuse a UID; without a prefix a client would treat
+                # prefix UIDs: sources may reuse them
                 uid = str(component.get("uid", ""))
                 component["UID"] = f"{name}-{uid}"
                 component["CATEGORIES"] = name
@@ -209,18 +192,18 @@ def event_row(name, event, day=None):
         "source": name,
         "source_label": SOURCE_LABELS.get(name, name.title()),
         "border_style": border_style(name),
-        # some invites in the work feed carry no SUMMARY at all; without a placeholder
+        # some work invites lack a SUMMARY
         "summary": str(event.get("SUMMARY", "")).strip() or "(no title)",
         "location": str(event.get("LOCATION", "")),
         "start": to_iso(start_value) if start_value is not None else None,
         "end": to_iso(stop_value) if stop_value is not None else None,
         "all_day": all_day,
-        # pre-rendered so the Liquid template does not have to parse a timestamp
+        # pre-rendered so liquid needn't parse timestamps
         "time": "" if all_day or start_value is None
                 else start_value.astimezone(LOCAL_TZ).strftime("%H:%M"),
     }
 
-    # Minute offsets let the template lay the week out as a real time grid
+    # minute offsets for a real time grid
     if day is not None and not all_day:
         begin = minutes_into(day, start_value)
         finish = minutes_into(day, stop_value) if stop_value is not None else None
@@ -235,17 +218,11 @@ def event_row(name, event, day=None):
 
 
 def assign_lanes(events):
-    """Give overlapping events side-by-side columns.
-
-    Greedy sweep: an event reuses the first lane whose previous occupant has
-    already ended, otherwise it opens a new one. `lanes` is then the width of
-    the densest cluster the event belongs to, so a pair that clashes each takes
-    half the day's width while an unclashed event still spans the whole column.
-    """
+    """Greedy lane packing; lanes is the densest cluster width."""
     timed = [e for e in events if "start_min" in e]
     timed.sort(key=lambda e: (e["start_min"], -(e["end_min"] - e["start_min"])))
 
-    lane_ends = []          # end minute of the last event placed in each lane
+    lane_ends = []          # end minute of each lane's last event
     cluster = []            # events in the current run of overlapping activity
     cluster_end = None
 
@@ -284,11 +261,7 @@ def local_day(value):
 
 
 def enforce_min_height(events, min_pct):
-    """Grow every block to a readable minimum and push the later ones down.
-
-    Works per lane, so events that genuinely overlap in time keep their
-    side-by-side placement and only a lane's own sequence is nudged.
-    """
+    """Enforce a minimum block height per lane, pushing later ones down."""
     lanes = {}
     for e in events:
         lanes.setdefault(e.get("lane", 0), []).append(e)
@@ -342,14 +315,14 @@ def week(calendars, offset):
             "all_day_events": [e for e in rows if e["all_day"]][:ALLDAY_CELL_EVENTS],
             "all_day_more": max(0, len([e for e in rows if e["all_day"]]) - ALLDAY_CELL_EVENTS),
             "timed_events": timed,
-            # how many columns this day needs: the template does not have to work
+            # lane count precomputed for the template
             "max_lanes": max([e.get("lanes", 1) for e in timed], default=1),
         })
 
-    # The axis spans the whole configured day, every hour drawn
+    # axis spans the whole configured day
     grid_start, grid_end = GRID_START_MIN, GRID_END_MIN
 
-    # The window is exactly what was asked
+    # clamp the window to one day
     grid_start, grid_end = max(0, grid_start), min(1440, grid_end)
     if grid_end - grid_start < 240:
         grid_end = min(1440, grid_start + 240)
@@ -375,7 +348,7 @@ def week(calendars, offset):
             e["left_pct"] = round(e.get("lane", 0) / lanes * 100, 3)
             e["width_pct"] = round(100 / lanes, 3)
             e["overlapping"] = lanes > 1
-            # How much text the block can hold.
+            # how much text the block can hold
             dur = e["end_min"] - e["start_min"]
             e["compact"] = dur < 90
             e["tall"] = dur >= 150
@@ -386,7 +359,7 @@ def week(calendars, offset):
         hours.append({
             "label": f"{m // 60:02d}:00",
             "hour": m // 60,
-            # the week packs 24 rows into one screen; labelling every other one keeps the axis
+            # label every other hour to keep the axis readable
             "major": (m // 60) % 2 == 0,
             "top_pct": round((m - grid_start) / span * 100, 3),
         })
@@ -443,18 +416,13 @@ def day_view(calendars, offset=0):
         "later": match.get("later", 0),
         "grid": grid["grid"],
         "day": match,
-        # the week template iterates `days`; expose the single day the same way so one markup
+        # same `days` shape so one markup serves both
         "days": [match],
     }
 
 
 def month_view(calendars, offset=0):
-    """A Monday-first month grid: every cell a day, every day its events.
-
-    Built from the week builder so a cell's events are packed and ordered
-    exactly as they are everywhere else; the month view just does not have the
-    vertical room to draw them against a time axis.
-    """
+    """Monday-first month grid built from the week builder."""
     today = datetime.now(LOCAL_TZ).date()
     first = date(today.year + (today.month + offset - 1) // 12,
                  (today.month + offset - 1) % 12 + 1, 1)
@@ -462,7 +430,7 @@ def month_view(calendars, offset=0):
     last = date(first.year + first.month // 12, first.month % 12 + 1, 1) - timedelta(days=1)
     grid_end = last + timedelta(days=6 - last.weekday())
 
-    # collect every day in the displayed range from the weeks it spans
+    # every displayed day, from the weeks it spans
     by_date = {}
     probe = grid_start
     while probe <= grid_end:
@@ -486,7 +454,7 @@ def month_view(calendars, offset=0):
                 "other_month": cursor.month != first.month,
                 "is_weekend": cursor.weekday() >= 5,
                 "count": len(events),
-                # only the first few fit in a month cell; the rest become "+n".
+                # only the first few fit; the rest become "+n"
                 "events": events[:MONTH_CELL_EVENTS],
                 "more": max(0, len(events) - MONTH_CELL_EVENTS),
             })
@@ -554,7 +522,7 @@ def kraken_balance(key, secret):
         log(f"kraken balance: {payload['error']}")
         return {}
 
-    # Kraken reports every asset it has ever held, most of them at zero.
+    # kraken lists every asset ever held, mostly zero
     return {
         asset: float(amount)
         for asset, amount in payload.get("result", {}).items()
@@ -592,7 +560,7 @@ def main():
 
     calendars = load_calendars(sources)
     if sources and not calendars:
-        # Every source failed.
+        # every source failed
         log("every source failed, keeping previous output")
         return 1
 
@@ -601,7 +569,7 @@ def main():
     key = read_secret(os.environ.get("KRAKEN_KEY_FILE"))
     secret = read_secret(os.environ.get("KRAKEN_SECRET_FILE"))
 
-    # `payload` is rebound by the per-view loop below; keep a stable handle.
+    # `payload` is rebound below; keep a stable handle
     out_payload = payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "sources": [name for name, _ in sources],
@@ -613,13 +581,13 @@ def main():
     }
     write_atomic(os.path.join(out_dir, "trmnl.json"), json.dumps(payload, indent=2))
 
-    # one file per week offset: the TRMNL device has no way to tell a plugin which week
+    # one file per week: the device can't pick a week
     weeks = []
     for offset in WEEK_OFFSETS:
         grid = week(calendars, offset)
         grid["generated_at"] = payload["generated_at"]
         grid["sources"] = payload["sources"]
-        # no "+" in the filename: it is legal in a path segment but enough clients and proxies
+        # no "+" in filenames: some clients and proxies mangle it
         if offset == 0:
             name = "week.json"
         elif offset == -1:

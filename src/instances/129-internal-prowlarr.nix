@@ -1,13 +1,13 @@
 { pkgs, ... }: {
   networking.hostName = "vm-129";
 
-  # indexer manager.
+  # indexer manager
   homelab.servarr.prowlarr = {
     image = "lscr.io/linuxserver/prowlarr:2.6.5.5623-ls161";
     port = 9696;
   };
 
-  # Every request to an indexer leaves through Tor
+  # indexer traffic leaves through tor
   systemd.services.prowlarr-tor-proxy = {
     description = "Send Prowlarr's indexer traffic through Tor";
     after = [ "podman-prowlarr.service" ];
@@ -28,9 +28,7 @@
       done
       [ -s /tmp/host.json ] || { echo "Prowlarr API did not answer"; exit 1; }
 
-      # allowedHosts has to go in the same write: Prowlarr refuses any host
-      # config update while it is empty and authentication is not required,
-      # which is also the standing health warning.
+      # allowedHosts in the same write or prowlarr refuses
       jq -c '.
         | .allowedHosts = "prowlarr.lsck0.dev,10.100.0.129,127.0.0.1,localhost"
         | .proxyEnabled = true
@@ -53,7 +51,7 @@
     '';
   };
 
-  # Half the useful public trackers sit behind Cloudflare's bot check and answer Prowlarr
+  # flaresolverr for cloudflare-guarded trackers
   virtualisation.oci-containers.containers.flaresolverr = {
     image = "ghcr.io/flaresolverr/flaresolverr:v3.4.2";
     ports = [ "10.88.0.1:8191:8191" ];

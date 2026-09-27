@@ -1,8 +1,6 @@
 name: hello
 
-# Build on GitHub, push to GHCR. vm-209 polls the tag every minute and rolls the
-# new digest out with a start-first update (no downtime). Make the package
-# public (or add registry credentials on vm-209) so the swarm can pull it.
+# ghcr package must be public for the swarm
 on:
   push:
     branches: [master]

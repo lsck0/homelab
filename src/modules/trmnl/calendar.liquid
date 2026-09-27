@@ -1,83 +1,39 @@
-{%- comment -%}
-One TRMNL markup for all three calendar views. It branches on `view` in the
-payload, so every instance gets the same markup and only the Polling URL differs:
-
-  day        https://cal.lsck0.dev/<token>/day.json
-  tomorrow   https://cal.lsck0.dev/<token>/day-next.json
-  this week  https://cal.lsck0.dev/<token>/week.json
-  last week  https://cal.lsck0.dev/<token>/week-prev.json
-  next week  https://cal.lsck0.dev/<token>/week-next.json
-  month      https://cal.lsck0.dev/<token>/month.json
-  next month https://cal.lsck0.dev/<token>/month-next.json
-
-Exactly ONE url per instance: TRMNL merges several into one payload for one
-screen, which breaks the top-level keys and cannot give you separate screens.
-
-Overlapping events are positioned, not listed: calendar-sync packs each day's
-clashes into lanes and ships top/height/left/width percentages, because Liquid
-cannot do the interval arithmetic. Two things at once sit side by side.
-
-The source is named in words on each block. An earlier version also coded it
-into the left border style, which was unreadable at this size and mislabelled
-itself anyway, so the border is now uniform.
-
-Kept flat, one tag per line. Do not run "Fix indentation" on it.
-{%- endcomment -%}
+{%- comment -%} one markup for all views; one polling url per instance; keep flat {%- endcomment -%}
 
 <style>
-/* TRMNL's own .layout centres and pads a single child, which rendered the day
-   view as a narrow column floating in the middle of the screen. This plugin
-   draws a full-bleed grid, so neutralise that wrapper. */
+/* undo trmnl's centring wrapper */
 .layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
-/* Fill the box we are given, not the viewport. 100vh was wrong because the
-   markup editor previews in a container far taller than it is tall: the rows
-   stretched past the visible area and only three of the month's six weeks
-   fitted. 100% tracks whatever TRMNL hands us, and min-height keeps the
-   layout from collapsing if that parent turns out to have no definite
-   height, which is what made an earlier version render blank. max-height
-   keeps the content clear of the title bar, which is drawn over the page. */
+/* fill the parent; min-height stops a blank collapse */
 .cal { display: flex; flex-direction: column; height: 100%; min-height: 422px; max-height: calc(100vh - 58px); width: 100%; gap: 0; padding: 8px 10px 4px; box-sizing: border-box; }
 .cal-row { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
-/* the all-day band sits between the headers and the grid, so it needs the
-   same hairline separating it from both */
+/* hairline between headers and grid */
 .tg-row--allday { border-top: 1px solid #c8c8c8; }
 
-/* ---- shared event chip ----------------------------------------------
-   One rule down the left edge rather than a box: a 2px frame around every
-   block turned a busy week into a grid of boxes inside boxes, and on e-ink
-   the frames read louder than the titles they hold. */
+/* ---- shared event chip ---------------------------------------------- */
+/* left rule, not a box: frames drown titles */
 .ev { border-left: 4px solid #000; padding: 0 0 1px 5px; overflow: hidden; background: #fff; }
 .ev-t { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .ev-s { font-size: 19px; line-height: 1.12; overflow-wrap: anywhere; }
 .ev-m { font-size: 14px; line-height: 1.15; overflow-wrap: anywhere; }
 .ev-src { font-size: 13px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; }
 
-/* ---- time grid (day + week) ------------------------------------------
-   Three rows that share one column template, so the hour axis and the event
-   area are the same box. Previously the axis spanned the full height while
-   events were positioned inside a shorter body below the day header, so every
-   block was drawn at the wrong time.
-
-   The columns are separated by hairlines inside one outer frame instead of
-   each carrying its own border, so the week reads as a single grid. */
+/* ---- time grid (day + week) ------------------------------------------ */
+/* rows share columns so axis and events align */
 .tg-row { display: flex; width: 100%; }
 .tg-row--grid { flex: 1 1 auto; min-height: 0; border-top: 2px solid #000; }
 .tg-gutter { width: 46px; flex: 0 0 46px; }
 .tg-gutter--label { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; align-self: center; text-align: right; padding-right: 6px; }
-/* one line each, capped: "Flo Abwesend (Studium)" wrapped to five lines per
-   day and pushed the time grid down to a third of the screen. */
+/* capped so all-day titles cannot push the grid */
 .tg-row--allday { flex: 0 0 auto; max-height: 52px; overflow: hidden; }
 .tg-axis { position: relative; }
 .tg-h { position: absolute; right: 6px; font-size: 12px; font-weight: 700; letter-spacing: .02em; transform: translateY(-50%); color: #555; }
-/* the first label sits on the grid's top edge, where half of it would be
-   cut off by the frame; hang it below the line instead of centred on it */
+/* hang below the edge, else the frame clips it */
 .tg-h--first { transform: none; }
 
 .tg-hd { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: 5px; padding: 0 6px 3px; }
 .tg-dow { font-size: 13px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: #555; }
 .tg-dom { font-size: 25px; font-weight: 700; line-height: 1; font-variant-numeric: tabular-nums; }
-/* today is the one thing worth picking out, so mark the number and nothing
-   else; a filled header cell drew the eye to the whole column instead. */
+/* mark only today's number */
 .tg-hd--today .tg-dow { color: #000; }
 .tg-hd--today .tg-dom { background: #000; color: #fff; padding: 0 6px 2px; }
 
@@ -92,31 +48,22 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .tg-line { position: absolute; left: 0; right: 0; border-top: 1px solid #ededed; }
 .tg-line--major { border-top-color: #c4c4c4; }
 
-/* Events are the only filled shapes on the grid, so they carry the weight:
-   a thick left rule and a hairline body, not a box. */
+/* thick left rule, hairline body */
 .tg-ev { position: absolute; box-sizing: border-box; border: 1px solid #909090; border-left: 5px solid #000; padding: 0 3px; overflow: hidden; background: #fff; display: flex; flex-direction: column; justify-content: center; line-height: 1.06; }
 .tg-ev .ev-t { font-size: 12px; font-weight: 700; white-space: nowrap; flex: 0 0 auto; }
-/* do not let the title shrink away: the source line below it would win the
-   space and the block would show a time and a category but no event. */
-/* one line: three lines of text only fit a 90-minute block if the title
-   is one of them, and a wrapped title pushed the source out of the box. */
+/* never shrink, one line: else the title vanishes */
 .tg-ev .ev-s { font-size: 13px; flex: 0 0 auto; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 
 .tg-ev .ev-src { font-size: 10px; flex: 0 0 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #555; }
-/* calendar-sync already grew every block to a readable minimum and pushed
-   the later ones down, so the height here is honest and no min-height is
-   needed; thin edges keep the one line inside it. */
+/* calendar-sync already enforces a minimum height */
 .tg-ev--compact { justify-content: flex-start; }
 .tg-ev--compact .ev-s { display: block; font-size: 11px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* the day view has one wide column, so put it all on a single readable row */
+/* day view: one row per event */
 .tg-ev--wide { flex-direction: row; align-items: center; gap: 10px; border-left-width: 7px; }
 .tg-ev--wide .ev-t { font-size: 19px; flex: 0 0 auto; }
 .tg-ev--wide .ev-s { font-size: 22px; -webkit-line-clamp: 1; flex: 1 1 auto; }
 .tg-ev--wide .ev-src { font-size: 13px; flex: 0 0 auto; margin-left: auto; }
-/* An all-afternoon block that shares its hours with something else is half a
-   column wide and a third of the screen tall. On one row that reads
-   "SDD..." beside an empty acre, so stack it and let the title use the
-   height it already has. */
+/* tall narrow blocks stack to use their height */
 .tg-ev--tall { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 1px; padding-top: 3px; }
 .tg-ev--tall .ev-s { font-size: 19px; line-height: 1.12; -webkit-line-clamp: 4; }
 .tg-ev--tall .ev-src { margin-left: 0; }
@@ -125,8 +72,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .mo { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; min-height: 0; box-sizing: border-box; border-top: 2px solid #000; }
 .mo-dows { display: flex; padding-bottom: 3px; }
 .mo-dow { flex: 1 1 0; font-size: 12px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; text-align: center; color: #555; }
-/* hairlines inside one frame, like the week grid: a 2px box per cell turned
-   the month into 42 boxes and buried the four that had anything in them. */
+/* hairlines, not a box per cell */
 .mo-wk { display: flex; flex: 1 1 0; min-height: 0; }
 .mo-wk + .mo-wk { border-top: 1px solid #c8c8c8; }
 .mo-cell { flex: 1 1 0; min-width: 0; padding: 2px 5px; display: flex; flex-direction: column; gap: 1px; overflow: hidden; }

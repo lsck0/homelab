@@ -1,7 +1,7 @@
-# CI/CD target (vm-209): the real stack definitions pull from a registry
+# ci/cd target vm-209 with a test registry
 { pkgs, lib, ... }:
 let
-  # tiny web app like example/: serves its version, has curl for the healthcheck.
+  # tiny app like example/, curl for healthcheck
   app = version: healthy: pkgs.dockerTools.buildLayeredImage {
     name = "hello";
     tag = version;
@@ -10,7 +10,7 @@ let
     config.Cmd = [ "httpd" "-f" "-p" "8000" "-h" "/www" ];
   };
 
-  # TLS like the real registries; the test CA is trusted by dockerd per host.
+  # tls like the real registries
   certs = pkgs.runCommand "registry-certs" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out && cd $out
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=test-ca -keyout ca.key -out ca.crt
@@ -38,7 +38,7 @@ pkgs.testers.runNixOSTest {
       enableDelete = true;
       extraConfig.http.tls = { certificate = "${certs}/tls.crt"; key = "${certs}/tls.key"; };
     };
-    # binding 443 as the registry's own user.
+    # bind 443 as the registry user
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
     # poll quickly in the test.
     homelab.swarm.updateInterval = lib.mkForce "15s";

@@ -3,11 +3,11 @@ let
   routes = import ../modules/routes.nix;
 
   # ── egress classes (modules/egress.nix) ────────────────────────────────────
-  # Policy routing, keyed on source address.
+  # policy routing keyed on source address
   egress = import ../modules/egress.nix;
-  # The VPN exit is a routing decision, so it needs a mark and a table.
+  # vpn exit needs a mark and a table
   torPorts = { trans = 9040; dns = 9053; socks = 9050; socksIsolated = 9055; };
-  # fwmark -> routing table.
+  # fwmark -> routing table
   egressMarks = { vpn = { mark = 1; table = 100; }; };
   membersOf = via: lib.sort (a: b: a < b)
     (lib.mapAttrsToList (_: e: inventory.${toString e.vmid}.ip)
@@ -15,18 +15,18 @@ let
   vpnMembers = membersOf "vpn";
   torMembers = membersOf "tor";
   torSet = lib.concatStringsSep ", " torMembers;
-  # nftables rejects an empty set literal, so each rule is emitted only when it has members.
+  # nftables rejects empty set literals
   markRule = via: members:
     lib.optionalString (members != [ ])
       "ip saddr { ${lib.concatStringsSep ", " members} } meta mark set ${toString egressMarks.${via}.mark}";
   vpnCfg = config.homelab.egress.vpn;
-  # the one member that takes unsolicited inbound connections through the exit.
+  # only member taking inbound through the exit
   peerHost = inventory."112".ip;
   hostsOf = side: lib.unique (map (r: r.host) (lib.attrValues routes.${side}));
-  # hosts served by internal Traefik that are not a VM route.
+  # internal traefik hosts without a vm route
   internalExtraHosts = [ "traefik" "proxmox" ];
 
-  # Whether a host is Cloudflare-PROXIED comes from `proxied` in routes.nix
+  # cloudflare proxying comes from routes.nix `proxied`
   routeHosts = side: lib.mapAttrsToList (_: r: {
     inherit (r) host;
     proxied = r.proxied or true;
@@ -35,12 +35,12 @@ let
     ++ map (h: { host = h; proxied = true; }) internalExtraHosts;
 
   proxiedHosts = lib.unique (map (r: r.host) (lib.filter (r: r.proxied) allRouteHosts));
-  # unproxied (raw WAN IP): the Anubis-fronted routes
+  # unproxied (raw wan ip): anubis-fronted routes
   rawHosts = lib.unique (
     map (r: r.host) (lib.filter (r: !r.proxied) allRouteHosts)
     ++ [ "wg" "mc" "tor" "*" ]
   );
-  # domain:proxied entries the DDNS loop consumes.
+  # domain:proxied entries for the ddns loop
   ddnsDomains = lib.concatStringsSep " " (
     (map (h: "${h}.lsck0.dev:true") proxiedHosts)
     ++ (map (h: "${h}.lsck0.dev:false") rawHosts)
@@ -48,7 +48,7 @@ let
 in {
   networking.hostName = "luca-router";
 
-  # mDNS on ens18 only, so the FritzBox shows "luca-router"
+  # mdns on wan only, fritzbox shows "luca-router"
   services.avahi = {
     enable = true;
     allowInterfaces = [ "ens18" ];
@@ -63,7 +63,7 @@ in {
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # NETWORK INTERFACES ens18 = WAN -> static lease from FritzBox ens19 = Internal LAN
+  # NETWORK INTERFACES (ens18 wan, ens19 lan, ens20 dmz)
 
   networking.usePredictableInterfaceNames = lib.mkForce true;
   networking.useDHCP = false;
@@ -76,27 +76,27 @@ in {
     "net.ipv4.ip_forward" = 1;
 
     # ── volumetric / spoofing hardening on the edge ──────────────────────────
-    # SYN cookies answer a SYN flood without keeping half-open state
+    # syn cookies survive a syn flood statelessly
     "net.ipv4.tcp_syncookies" = 1;
     "net.ipv4.tcp_max_syn_backlog" = 4096;
     "net.ipv4.tcp_synack_retries" = 2;
-    # loose reverse-path filter: drop packets whose source address has no route at all.
+    # loose rpf: drop sources with no route
     "net.ipv4.conf.all.rp_filter" = 2;
     "net.ipv4.conf.default.rp_filter" = 2;
-    # no source routing, no redirects: both let a remote host steer traffic.
+    # source routing and redirects let remotes steer
     "net.ipv4.conf.all.accept_source_route" = 0;
     "net.ipv4.conf.all.accept_redirects" = 0;
     "net.ipv4.conf.all.send_redirects" = 0;
     "net.ipv4.conf.default.accept_redirects" = 0;
-    # do not be an amplifier.
+    # no amplification
     "net.ipv4.icmp_echo_ignore_broadcasts" = 1;
     "net.ipv4.icmp_ignore_bogus_error_responses" = 1;
-    # headroom so a flood fills the conntrack table more slowly than it fills the per-source
+    # conntrack headroom outlasts per-source meters
     "net.netfilter.nf_conntrack_max" = 262144;
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # EGRESS CLASSES marked by source; the mark selects a table ending in a blackhole
+  # EGRESS CLASSES (mark by source, table ends in blackhole)
   assertions = [{
     assertion = vpnMembers == [ ] || vpnCfg.enable;
     message = "modules/egress.nix routes ${lib.concatStringsSep ", " vpnMembers} through the VPN, but homelab.egress.vpn is not enabled on the router.";
@@ -107,23 +107,23 @@ in {
     content = ''
       chain premark {
         type filter hook prerouting priority mangle; policy accept;
-        # never divert lab or house traffic, or ssh replies blackhole
+        # never divert lab/house traffic, ssh replies blackhole
         ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } return
         ${markRule "vpn" vpnMembers}
       }
       ${lib.optionalString (torMembers != [ ]) ''
         chain tor-redirect {
           type nat hook prerouting priority dstnat - 3; policy accept;
-          # same exception: an exit node cannot route 10.0.0.0/8
+          # exit nodes cannot route private ranges
           ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } return
-          # DNS first: a name must become a Tor virtual address
+          # dns first to get tor virtual addresses
           ip saddr { ${torSet} } udp dport 53 redirect to :${toString torPorts.dns}
           ip saddr { ${torSet} } tcp dport 53 redirect to :${toString torPorts.dns}
           ip saddr { ${torSet} } tcp flags & (fin|syn|rst|ack) == syn redirect to :${toString torPorts.trans}
         }
         chain tor-drop {
           type filter hook forward priority filter - 5; policy accept;
-          # what reaches here is non-DNS UDP, which Tor cannot carry
+          # non-dns udp, tor cannot carry it
           ip saddr { ${torSet} } ct state established,related accept
           ip saddr { ${torSet} } counter drop
         }
@@ -131,7 +131,7 @@ in {
     '';
   };
 
-  # The VPN exit needs policy routing; Tor does not, because it runs here.
+  # vpn needs policy routing, tor runs locally
   systemd.services.egress-policy = lib.mkIf (vpnMembers != [ ]) {
     description = "Policy routing for the VPN egress class";
     after = [ "network-setup.service" ];
@@ -142,11 +142,10 @@ in {
       set -eu
       ip rule del fwmark ${toString egressMarks.vpn.mark} table ${toString egressMarks.vpn.table} 2>/dev/null || true
       ip rule add fwmark ${toString egressMarks.vpn.mark} table ${toString egressMarks.vpn.table} priority 101
-      # the floor of the table: when the tunnel is down there is nowhere for a
-      # member's packets to go, rather than a quiet fall back to the house.
+      # tunnel down: drop, never fall back to house
       ip route replace blackhole default metric 1000 table ${toString egressMarks.vpn.table}
 
-      # rpfilter checks the source against the marked table, so it needs these
+      # rpfilter checks source against the marked table
       ip route replace 10.100.0.0/24 dev ens19 table ${toString egressMarks.vpn.table}
       ip route replace 10.200.0.0/24 dev ens20 table ${toString egressMarks.vpn.table}
       ip route replace 192.168.178.0/24 dev ens18 table ${toString egressMarks.vpn.table}
@@ -154,7 +153,7 @@ in {
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # TOR EXIT Tor runs here because TransPort needs SO_ORIGINAL_DST from the local redirect.
+  # TOR EXIT (here for SO_ORIGINAL_DST on redirect)
   services.tor = {
     enable = true;
     enableGeoIP = false;
@@ -164,15 +163,15 @@ in {
       socksListenAddress = {
         addr = "10.100.0.1";
         port = torPorts.socks;
-        # A torrent client opens connections to hundreds of peers at once and would build
+        # else every torrent peer builds its own circuit
         IsolateDestAddr = false;
       };
     };
     settings = {
-      # the lab, both sides.
+      # the lab, both sides
       SocksPolicy = [ "accept 10.100.0.0/24" "accept 10.200.0.0/24" "reject *" ];
 
-      # Second SOCKS port for the indexers (Prowlarr).
+      # isolated socks port for indexers (prowlarr)
       SOCKSPort = [{
         addr = "10.100.0.1";
         port = torPorts.socksIsolated;
@@ -180,15 +179,15 @@ in {
         IsolateDestPort = true;
       }];
 
-      # The transparent pair, for whole VMs listed via = "tor" in modules/egress.nix.
+      # transparent pair for via = "tor" vms
       TransPort = [{ addr = "10.100.0.1"; port = torPorts.trans; }];
       DNSPort = [{ addr = "10.100.0.1"; port = torPorts.dns; }];
       AutomapHostsOnResolve = true;
-      # keeps DNSPort's mapped answers resolvable by TransPort
+      # keeps dnsport answers routable by transport
       VirtualAddrNetworkIPv4 = "10.192.0.0/10";
       ClientUseIPv6 = false;
 
-      # Path rotation.
+      # path rotation
       MaxCircuitDirtiness = 600;
       NewCircuitPeriod = 120;
       CircuitBuildTimeout = 30;
@@ -198,7 +197,7 @@ in {
     };
   };
 
-  # MaxCircuitDirtiness only stops *new* streams reusing an old circuit.
+  # dirtiness only affects new streams, so force newnym
   systemd.services.tor-new-circuits = {
     description = "Ask Tor for a fresh set of circuits";
     after = [ "tor.service" ];
@@ -213,25 +212,25 @@ in {
   };
   systemd.timers.tor-new-circuits = {
     wantedBy = [ "timers.target" ];
-    # randomised so the rotation is not itself a clock-like fingerprint.
+    # jitter so rotation is no clock fingerprint
     timerConfig = { OnBootSec = "10m"; OnUnitActiveSec = "30m"; RandomizedDelaySec = "10m"; };
   };
 
-  # The VPN exit itself is modules/egress-vpn.nix: it owns the tunnel and the default route
+  # tunnel and default route: modules/egress-vpn.nix
   homelab.egress.vpn = {
     enable = true;
     table = egressMarks.vpn.table;
-    # the key vm-112 used to hold; two clients cannot share one
+    # former vm-112 key, clients cannot share one
     privateKeyFile = config.sops.secrets.protonvpn-private-key.path;
     address = "10.2.0.2/32";
     publicKey = "36G8+pInNcPK9F1TpHglWs9Pk5uJOY9o8SCNrCBgvHE=";
-    # CH#684. An address and not a name, because DNS is inside the tunnel.
+    # CH#684; address since dns is in the tunnel
     endpoint = "89.222.96.158:51820";
   };
   sops.secrets.protonvpn-private-key = { };
 
   # ── Proton's forwarded port ────────────────────────────────────────────────
-  # One tunnel, one port, one member. The port changes every lease, so the DNAT matches a set the renewal unit rewrites.
+  # port changes every lease, renewal rewrites the set
   networking.nftables.tables.proton-port = {
     family = "ip";
     content = ''
@@ -256,7 +255,7 @@ in {
   };
   systemd.timers.protonvpn-port = {
     wantedBy = [ "timers.target" ];
-    # the lease is 60s; a renewal that lands late is the same as none.
+    # 60s lease, a late renewal is none
     timerConfig = { OnBootSec = "90s"; OnUnitActiveSec = "45s"; AccuracySec = "5s"; };
   };
 
@@ -266,7 +265,7 @@ in {
     enable = true;
     externalInterface = "ens18";
     internalInterfaces = [ "ens19" "ens20" "wg0" ];
-    # forwardPorts left empty, NixOS forwardPorts matches ALL inbound traffic on ens18
+    # nixos forwardPorts would match all wan traffic
     forwardPorts = [];
   };
 
@@ -274,7 +273,7 @@ in {
   # FIREWALL
   networking.nftables.enable = true;
   networking.firewall = {
-    # loose, matching the sysctl above: strict drops every VPN reply
+    # strict drops every vpn reply
     checkReversePath = "loose";
     enable = true;
     filterForward = true;
@@ -296,7 +295,7 @@ in {
       allowedUDPPorts = [ 53 ];
     };
 
-    # per-source limits on traffic from the internet, applied before anything reaches a service.
+    # per-source wan limits before any service
     extraInputRules = ''
       iifname "ens18" tcp flags & (fin|syn|rst|ack) == syn \
         meter wan-syn size 65535 { ip saddr limit rate over 50/second burst 100 packets } \
@@ -305,7 +304,7 @@ in {
         meter wan-conns size 65535 { ip saddr ct count over 200 } \
         counter drop
 
-      # Tor for the lab only: 9050/9055 SOCKS, 9040/9053 the egress redirect
+      # tor for the lab: socks and egress redirect
       ip saddr { 10.100.0.0/24, 10.200.0.0/24 } tcp dport { ${toString torPorts.socks}, ${toString torPorts.socksIsolated}, ${toString torPorts.trans}, ${toString torPorts.dns} } accept
       ip saddr { 10.100.0.0/24, 10.200.0.0/24 } udp dport ${toString torPorts.dns} accept
     '';
@@ -313,38 +312,36 @@ in {
     extraForwardRules = ''
       ct state established,related accept
 
-      # WAN -> all internal networks: allow
+      # wan -> internal: allow
       iifname "ens18" accept
 
-      # internal LAN -> anywhere: allow
+      # lan -> anywhere: allow
       iifname "ens19" accept
 
-      # WireGuard VPN -> anywhere: allow
+      # wireguard -> anywhere: allow
       iifname "wg0" accept
 
-      # allow DMZ to reach internal Traefik, Git, and Registry (for CI/CD + image pulls)
+      # dmz -> internal traefik, git, registry (ci/cd)
       iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.115 } tcp dport { 80, 443 } accept
       iifname "ens20" ip daddr 10.100.0.118 tcp dport { 80, 443, 5000 } accept
 
-      # allow DMZ VMs to ship logs to Loki on vm-105
+      # dmz -> loki on vm-105
       iifname "ens20" ip daddr 10.100.0.105 tcp dport 3100 accept
 
-      # allow DMZ to reach NAS (NFS for persistent data)
+      # dmz -> nas nfs
       iifname "ens20" ip daddr 10.100.0.109 tcp dport { 111, 2049 } accept
       iifname "ens20" ip daddr 10.100.0.109 udp dport { 111, 2049 } accept
 
-      # external DMZ -> internal LAN: BLOCK
+      # dmz -> lan: block
       iifname "ens20" oifname "ens19" counter drop
 
-      # allow external Traefik to reach the Proxmox API for on-demand VM wake.
-      # narrow: only vm-200, only the hypervisor, only the API port. The token is
-      # scoped to VM.PowerMgmt/VM.Audit. Must precede the management-net drop.
+      # vm-200 -> proxmox api for wake, before mgmt drop
       iifname "ens20" ip saddr 10.200.0.200 ip daddr 192.168.178.200 tcp dport 8006 accept
 
-      # external DMZ -> local/management network: BLOCK
+      # dmz -> management net: block
       iifname "ens20" oifname "ens18" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } counter drop
 
-      # external DMZ -> internet: allow
+      # dmz -> internet: allow
       iifname "ens20" accept
     '';
   };
@@ -360,10 +357,7 @@ in {
         ip daddr 192.168.178.29 tcp dport 10100 dnat to 10.100.0.100:443
         ip daddr 192.168.178.29 tcp dport 10200 dnat to 10.200.0.200:443
         ip daddr 192.168.178.29 tcp dport 25565 dnat to 10.200.0.200:25565
-        # No qBittorrent forward: peer traffic leaves through Proton now, and
-        # the port peers reach it on is the one NAT-PMP leases inside that
-        # tunnel. A forward here would point at a port the client no longer
-        # listens on.
+        # no qbittorrent forward, peers arrive via proton
       }
     '';
   };
@@ -408,7 +402,7 @@ in {
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # DNS BLOCKLIST + DOT UPSTREAM (BLOCKY) loopback-only; CoreDNS forwards `.` here.
+  # DNS BLOCKLIST + DOT UPSTREAM (BLOCKY, loopback only)
   services.blocky = {
     enable = true;
     settings = {
@@ -417,7 +411,7 @@ in {
         "tcp-tls:1.1.1.1:853"
         "tcp-tls:9.9.9.9:853"
       ];
-      # resolve the DoT hostnames' bootstrap without a chicken-and-egg loop.
+      # bootstrap dot hostnames without a dns loop
       bootstrapDns = [
         { upstream = "tcp-tls:1.1.1.1:853"; ips = [ "1.1.1.1" ]; }
       ];
@@ -434,19 +428,19 @@ in {
   };
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # DNS SERVER (COREDNS) all services use *.lsck0.dev: internal DNS resolves to local traefik
+  # DNS SERVER (COREDNS, split horizon for *.lsck0.dev)
   services.resolved.enable = false;
   services.coredns = {
     enable = true;
     config = ''
       lsck0.dev:53 {
         hosts {
-          # internal services -> internal Traefik
+          # internal services -> internal traefik
           ${lib.concatMapStringsSep "\n    " (h: "10.100.0.100 ${h}.lsck0.dev") (hostsOf "internal" ++ internalExtraHosts)}
-          # direct: SMB/NFS on the NAS, sccache (Redis protocol)
+          # direct: nas smb/nfs, sccache redis
           10.100.0.109 smb.lsck0.dev
           10.100.0.111 sccache.lsck0.dev
-          # external services -> external Traefik
+          # external services -> external traefik
           ${lib.concatMapStringsSep "\n    " (h: "10.200.0.200 ${h}.lsck0.dev") (hostsOf "external" ++ [ "mc" ])}
           fallthrough
         }
@@ -456,9 +450,7 @@ in {
       }
 
       .:53 {
-        # forward to local blocky (ad/tracker/malware blocklists + DoT upstream)
-        # first; fall back to plain 1.1.1.1/8.8.8.8 if blocky is down, so DNS
-        # for the whole LAN never depends on blocky staying up.
+        # blocky first, plain fallback so dns survives it
         forward . 127.0.0.1:5335 1.1.1.1 8.8.8.8 {
           policy sequential
           health_check 5s
@@ -468,7 +460,7 @@ in {
     '';
   };
 
-  # after first boot, get server pubkey: wg show wg0 public-key Generate client config
+  # server pubkey: wg show wg0 public-key
   sops.secrets.wireguard-private-key = {};
   sops.secrets.cloudflare-token = {};
 
@@ -494,9 +486,7 @@ in {
         "https://api.cloudflare.com/client/v4/zones?name=$ZONE_NAME" | jq -r '.result[0].id')
       { [ -z "$ZONE_ID" ] || [ "$ZONE_ID" = "null" ]; } && { echo "Failed to get zone ID"; exit 1; }
 
-      # format: "domain:proxied", built from proxiedHosts/rawHosts in Nix so
-      # this list is the single source of truth for public DNS. Every HTTP
-      # service (internal + external) is proxied; L4 services stay raw.
+      # "domain:proxied", generated from routes.nix
       DOMAINS="${ddnsDomains}"
 
       for ENTRY in $DOMAINS; do
@@ -539,7 +529,7 @@ in {
     };
   };
   # ─────────────────────────────────────────────────────────────────────────────
-  # WIREGUARD VPN client config MUST include: DNS = 10.0.0.1 This enables split-horizon DNS
+  # WIREGUARD VPN (clients need DNS = 10.0.0.1)
   networking.wireguard.interfaces.wg0 = {
     ips = [ "10.0.0.1/24" ];
     listenPort = 51820;
@@ -557,7 +547,7 @@ in {
         publicKey = "AW4t+4glZqmUl8ZAtrq60K/GTDmzZJisz1+6EqYnmzI=";
         allowedIPs = [ "10.0.0.4/32" ];
       }
-      { # pc (luca-pc). Config and QR: secrets repo, wg0.pc.conf
+      { # pc, config in secrets repo wg0.pc.conf
         publicKey = "rvtqHdSDK3JGZhZkzVYIcb9gKHiZUTsenfpJtm4adT0=";
         allowedIPs = [ "10.0.0.5/32" ];
       }
@@ -566,7 +556,7 @@ in {
 
   virtualisation.docker.enable = lib.mkForce false;
 
-  # wake-on-LAN: wake luca-pc from VPN Usage: ssh root@10.0.0.1 wol-pc
+  # wol-pc wakes luca-pc from the vpn
   environment.etc."profile.d/wol.sh".text = ''
     alias wol-pc='wakeonlan -i 192.168.178.255 10:ff:e0:e4:04:4a'
   '';

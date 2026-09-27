@@ -2,7 +2,7 @@
 let
   T = "/var/lib/homepage-tokens";
 
-  # Janitorr: media not watched (janitorr-stats play history) or, if never watched
+  # janitorr: delete media unwatched this long
   unwatchedFor = "120d";
 
   janitorrConfig = pkgs.writeText "janitorr.yml.tmpl" ''
@@ -96,8 +96,7 @@ let
 in {
   networking.hostName = "vm-134";
 
-  # /data/media rw on the VM (Janitorr writes the leaving-soon links)
-  # jellyfin runs from local disk (SQLite locks on NFS); the NAS holds a nightly copy
+  # jellyfin db local (sqlite on nfs), nas keeps a copy
   fileSystems = nasMount "/var/lib/janitorr" "janitorr"
     // nasMount "/srv/jellyfin-nas" "jellyfin"
     // nasPath "/data" "bulk"
@@ -158,7 +157,7 @@ in {
         "/data/media:/data/media"
         "/data/torrents:/data/torrents"
       ];
-      # host network: its web port must not collide with Jellyfin's 8096/80.
+      # host network, avoid jellyfin's 8096/80
       environment.SERVER_PORT = "8082";
       extraOptions = [ "--network=host" "--memory=512m" ];
     };
@@ -171,7 +170,7 @@ in {
     "d /var/lib/janitorr/stats 0750 1000 1000 -"
   ];
 
-  # first run: admin user, libraries, API key for Homepage/Janitorr/Hermes
+  # first run: admin, libraries, api key
   systemd.services.jellyfin-setup = {
     description = "Initialise Jellyfin (admin, libraries, API key, janitorr user)";
     after = [ "podman-jellyfin.service" ];
@@ -194,7 +193,7 @@ in {
         curl -sf -X POST $J/Startup/Complete
       fi
 
-      # Jellyfin 12 only accepts the Authorization header (no X-Emby-*, no api_key).
+      # jellyfin 12 only accepts the Authorization header
       HDR='Authorization: MediaBrowser Client="homelab", Device="setup", DeviceId="homelab-setup", Version="1.0"'
       login() {
         curl -sf -X POST $J/Users/AuthenticateByName -H "Content-Type: application/json" -H "$HDR" \
@@ -202,7 +201,7 @@ in {
       }
       TOKEN=$(login "$ADMIN_PASS")
       api() { curl -sf -H "Authorization: MediaBrowser Token=\"$TOKEN\"" -H "Content-Type: application/json" "$@"; }
-      # older installs were created with admin/admin: move them to the generated password.
+      # migrate old admin/admin installs
       if [ -z "$TOKEN" ] && TOKEN=$(login admin) && [ -n "$TOKEN" ]; then
         ADMIN_ID=$(api $J/Users/Me | jq -r .Id)
         api -X POST "$J/Users/$ADMIN_ID/Password" -d "$(jq -cn --arg p "$ADMIN_PASS" '{CurrentPw:"admin", NewPw:$p}')"
@@ -211,7 +210,7 @@ in {
       fi
       [ -n "$TOKEN" ] || { echo "Jellyfin admin login failed"; exit 1; }
 
-      # API key shared by Homepage, Janitorr, Jellyseerr wiring and Hermes.
+      # shared by homepage, janitorr, jellyseerr, hermes
       KEY=$(api $J/Auth/Keys | jq -r '[.Items[] | select(.AppName=="homelab")][0].AccessToken // empty')
       if [ -z "$KEY" ]; then
         api -X POST "$J/Auth/Keys?app=homelab"
@@ -219,12 +218,7 @@ in {
       fi
       [ -n "$KEY" ] && echo -n "$KEY" > ${T}/jellyfin-key.token
 
-      # libraries on the shared media layout.
-      #
-      # EnableRealtimeMonitor is left on but does nothing here: it is inotify,
-      # and the library is an NFS mount, which does not deliver inotify events.
-      # What actually keeps the library current is the Jellyfin notification
-      # Radarr and Sonarr carry (arr-wire.sh), which asks for a scan on import.
+      # libraries; nfs has no inotify, arr imports trigger scans
       have=$(api $J/Library/VirtualFolders | jq -r '.[].Name')
       lib() { # name collectionType path
         echo "$have" | grep -qx "$1" && return 0
@@ -235,11 +229,7 @@ in {
       lib Shows tvshows /data/media/tv
       lib Anime tvshows /data/media/anime
 
-      # Metadata. A library created by the call above has internet providers
-      # off and no fetchers at all, which is a shelf of filenames: the one
-      # film that did match only did so because Radarr had named its folder
-      # "The Odyssey (2026)". Corrected on every run rather than only at
-      # creation, because the libraries already existed when this was noticed.
+      # new libraries have no metadata fetchers, fix every run
       fetchers() { # jq array of type names -> TypeOptions for those types
         jq -cn --argjson types "$1" '[$types[] | {
           Type: .,
@@ -264,7 +254,7 @@ in {
           && echo "library $name: metadata fetching enabled"
       done
 
-      # Janitorr needs a real user with deletion rights, not only an API key.
+      # janitorr needs a real user that can delete
       [ -s ${T}/janitorr-pass.token ] || openssl rand -hex 16 | tr -d '\n' > ${T}/janitorr-pass.token
       JPASS=$(cat ${T}/janitorr-pass.token)
       UID_J=$(api $J/Users | jq -r '.[] | select(.Name=="janitorr") | .Id')
@@ -276,7 +266,7 @@ in {
     '';
   };
 
-  # Jellyfin authenticates against lldap, so the lab account is the Jellyfin account
+  # lldap account is the jellyfin account
   sops.secrets.lldap-admin-password = {};
   systemd.services.jellyfin-ldap = {
     description = "Point Jellyfin authentication at lldap (LDAP-Auth plugin)";
@@ -303,8 +293,7 @@ in {
         echo "installing the LDAP Authentication plugin"
         api -X POST "$J/Packages/Installed/LDAP%20Authentication" >/dev/null \
           || { echo "plugin install request failed; leaving Jellyfin on local accounts"; exit 0; }
-        # the plugin is only loaded, and its configuration endpoint only exists,
-        # after a restart.
+        # plugin config endpoint appears only after restart
         systemctl restart podman-jellyfin.service
         ${retry} 90 2 curl -sf $J/health
         TOKEN=$(curl -sf -X POST $J/Users/AuthenticateByName -H "Content-Type: application/json" -H "$HDR" \
@@ -314,11 +303,7 @@ in {
         [ -n "$ID" ] || { echo "plugin did not appear after restart"; exit 0; }
       fi
 
-      # lldap's DN layout: users under ou=people, groups under ou=groups. The
-      # admin filter promotes members of the `admins` group to Jellyfin admins.
-      # Jellyfin builds the OIDC redirect_uri from the request scheme, and it
-      # only believes X-Forwarded-Proto from a proxy it knows. Without this it
-      # sent redirect_uri=http://... and Authelia rejected it as unregistered.
+      # trust traefik, else redirect_uri is http:// and rejected
       NET=$(api $J/System/Configuration/network | jq -c '
         .KnownProxies = ["10.100.0.100"]
         | .PublishedServerUriBySubnet = ["all=https://jellyfin.lsck0.dev"]')
@@ -355,7 +340,7 @@ in {
     '';
   };
 
-  # Second identity path, for browsers only: jellyfin-plugin-sso turns an existing Authelia
+  # browser sso via jellyfin-plugin-sso and authelia
   sops.secrets.jellyfin-oidc-secret = {};
   systemd.services.jellyfin-sso = {
     description = "Install and configure jellyfin-plugin-sso against Authelia";
@@ -394,8 +379,7 @@ in {
         ${retry} 90 2 curl -sf $J/health
         TOKEN=$(login)
         for _ in $(seq 1 30); do ID=$(plugin_id); [ -n "$ID" ] && break; sleep 5; done
-        # exit non-zero, unlike the LDAP unit used to: a slow install then gets
-        # retried instead of leaving the feature silently off forever.
+        # fail so a slow install gets retried
         [ -n "$ID" ] || { echo "SSO plugin did not appear after restart"; exit 1; }
       fi
 
@@ -418,10 +402,7 @@ in {
             OidScopes: ["groups"],
             CanonicalLinks: {},
             DisableHttps: false,
-            # the plugin defaults to Pushed Authorization Requests, which this
-            # Authelia client is not registered for:
-            #   Error preparing login: Unauthorized - Failed to push
-            #   authorization parameters
+            # authelia client is not registered for par
             DisablePushedAuthorization: true,
             DoNotValidateEndpoints: false,
             DoNotValidateIssuerName: false
@@ -433,7 +414,7 @@ in {
     '';
   };
 
-  # render Janitorr configs from the API keys the other VMs export.
+  # render janitorr configs from exported api keys
   systemd.services.janitorr-config = {
     description = "Render Janitorr configuration from exported API keys";
     after = [ "jellyfin-setup.service" ];

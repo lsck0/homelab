@@ -1,15 +1,15 @@
 { lib, pkgs, dmzShares, ... }: {
   networking.hostName = "vm-109";
 
-  # backups: Kopia on vm-107 snapshots this tree (see 106-internal-kopia.nix).
+  # kopia on vm-107 snapshots this tree
 
-  # DMZ exports come from dmzShares (modules/nas.nix)
+  # dmz exports come from dmzShares (modules/nas.nix)
   # ── bulk storage ───────────────────────────────────────────────────────────
-  # scsi1, the spinning disk. media and torrents share one filesystem so the *arr stack can hardlink between them.
+  # hdd; media and torrents share a fs for hardlinks
   fileSystems."/srv/nas/bulk" = {
     device = "/dev/disk/by-label/bulk";
     fsType = "ext4";
-    # nofail: the service-state exports matter more than media
+    # nofail: state exports matter more than media
     options = [ "defaults" "nofail" "x-systemd.device-timeout=30s" ];
   };
 
@@ -29,7 +29,7 @@
         echo "$disk already carries a filesystem; refusing to format"
         exit 0
       fi
-      # no partition table; -m 0 because a 5% reserve here is 90 GiB wasted
+      # no partition table; 5% reserve would waste 90 GiB
       mkfs.ext4 -m 0 -L bulk "$disk"
     '';
   };
@@ -70,7 +70,7 @@
         "force group" = "nogroup";
       };
       media = {
-        # the bulk disk, where the migration moved the media tree
+        # media tree on the bulk disk
         path = "/srv/nas/bulk/media";
         browseable = "yes";
         "read only" = "no";
@@ -126,7 +126,7 @@
     openFirewall = true;
   };
 
-  # mDNS advertisement: lets file managers (Nemo, Nautilus, Finder) auto-discover the NAS
+  # mdns so file managers find the nas
   services.avahi = {
     enable = true;
     nssmdns4 = true;
@@ -139,10 +139,10 @@
   };
 
   systemd.tmpfiles.rules = [
-    # root, not nobody: systemd-tmpfiles refuses to descend when ownership changes from one
+    # root: tmpfiles refuses unsafe ownership transitions
     "d /srv/nas 0755 root root -"
     "d /srv/nas/public 0775 nobody nogroup -"
-    # 1000, not nobody: every container that writes here
+    # 1000: the uid every writing container uses
     "d /srv/nas/bulk 0775 1000 1000 -"
     "d /srv/nas/bulk/media 0775 1000 1000 -"
     "d /srv/nas/bulk/media/tv 0775 1000 1000 -"
@@ -158,7 +158,7 @@
     "d /srv/nas/bulk/torrents 0775 1000 1000 -"
     # per-service persistent data
     "d /srv/nas/data 0777 nobody nogroup -"
-    # nightly database dumps (modules/db-backup.nix), one subdir per VM.
+    # nightly db dumps, one subdir per vm
     "d /srv/nas/data/db-dumps 0777 nobody nogroup -"
     "d /srv/nas/data/authelia 0777 nobody nogroup -"
     "d /srv/nas/data/loki 0777 nobody nogroup -"
@@ -200,7 +200,7 @@
     "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
   ] ++ map (s: "d /srv/nas/data/${s} 0777 nobody nogroup -") (lib.unique (lib.concatLists (lib.attrValues dmzShares)));
 
-  # FileBrowser web UI: authelia handles auth via traefik
+  # filebrowser, authelia gates it via traefik
   virtualisation.oci-containers.containers.filebrowser = {
     image = "filebrowser/filebrowser:v2.63.3";
     ports = [ "80:8080" ];
@@ -216,7 +216,7 @@
     };
   };
 
-  # Syncthing: continuous device sync, complements SMB/NFS GUI at sync.lsck0.dev behind
+  # syncthing gui at sync.lsck0.dev behind authelia
   systemd.services.syncthing.environment.HOME = "/var/lib/syncthing";
   services.syncthing = {
     enable = true;
@@ -228,14 +228,14 @@
     overrideDevices = false;
     overrideFolders = false;
     settings.gui = {
-      # Authelia ForwardAuth gates the route; disable Syncthing's own auth so it does
+      # authelia gates the route, skip own host check
       insecureSkipHostcheck = true;
     };
 
     settings.devices.luca-pc.id =
       "CJDJNIO-XF2HJN5-IOUMFGP-JLEPI4Q-IHEWABK-M4AFSV2-25VSZHA-NSBK3A3";
 
-    # /srv/nas/syncthing is also the "syncthing" SMB share
+    # also the "syncthing" smb share
     settings.folders.sync = {
       id = "sync";
       path = "/srv/nas/syncthing/sync";
@@ -250,6 +250,6 @@
   networking.firewall.allowedTCPPorts = [ 80 2049 111 8384 22000 ];
   networking.firewall.allowedUDPPorts = [ 2049 111 22000 21027 ];
 
-  # FileBrowser runs with FB_NOAUTH and the Syncthing GUI has its own auth disabled
+  # authelia is the only gate for 80 and 8384
   homelab.ingressOnly.ports = [ 80 8384 ];
 }

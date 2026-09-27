@@ -1,37 +1,9 @@
-{%- comment -%}
-Homelab status for the TRMNL terminal. One polling URL:
-
-  https://terminal.lsck0.dev/<token>/stats.json
-
-Everything is precomputed by src/scripts/stats-sync.py: Liquid cannot do
-arithmetic worth relying on, so percentages, human-readable rates and the bar
-widths all arrive ready to render.
-
-Monochrome e-ink, 800x480. No colour to spend, so state is carried by shape:
-a filled square is up and a hollow one is down. VMs switched off on purpose
-get no row at all - eighteen rows reading 0/0 for ever is where the free
-space went - and the Services tile carries their count.
-
-Kept flat, one tag per line. Do not run "Fix indentation" on it.
-{%- endcomment -%}
+{%- comment -%} homelab status, data from stats-sync.py; keep flat {%- endcomment -%}
 
 <style>
-/* TRMNL's .layout centres and pads a single child, which renders a full-bleed
-   dashboard as a narrow column in the middle of the screen. */
+/* undo trmnl's centring wrapper */
 .layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
-/* Fill the box we are given, not the viewport. 100vh was wrong because the
-   markup editor previews in a container far taller than it is tall: the rows
-   stretched past the visible area and only three of the month's six weeks
-   fitted. 100% tracks whatever TRMNL hands us, and min-height keeps the
-   A fixed 452px, not a percentage. TRMNL's container has no definite
-   height of its own, so height:100% collapsed and every child laid out at
-   its natural size and ran off the bottom of the panel - which is how the
-   footer ended up below the screen. This markup only ever goes to
-   markup_full, which is the whole 800x480 screen, and content starts 18px
-   down, so 452 is the panel less that offset and a 10px margin.
-   Measure changes against a device screenshot and not a local render:
-   TRMNL's font is not the one chromium picks here, and the same markup came
-   out 18px shorter in the band and 10px taller in the grid. */
+/* fixed 452px: 100% collapses; measure on device */
 .hl { display: flex; flex-direction: column; height: 452px; max-height: 452px; width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
 
 /* ---- headline numbers ------------------------------------------------- */
@@ -41,43 +13,25 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .hl-stat--bad .hl-k, .hl-stat--bad .hl-v, .hl-stat--bad .hl-sub { color: #fff; }
 .hl-k { font-size: 12px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; }
 .hl-v { font-size: 22px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
-/* two rates in one tile, so they have to give up some size */
+/* two rates share one tile */
 .hl-v--pair { font-size: 15px; white-space: nowrap; }
 .hl-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- services --------------------------------------------------------- */
 .hl-mid { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
 .hl-svc { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 10px; min-width: 0; min-height: 0; border: 2px solid #000; padding: 3px 6px; overflow: hidden; }
-/* Four columns of eight: only the VMs that are meant to be running. The
-   eighteen switched off on purpose spent a third of the panel saying 0/0 for
-   ever, so they are one line of names at the foot instead, which is what
-   bought the clients band its height. A quarter column is 128px, so the
-   numeric percentages had to go; the two bars carry the same reading. */
+/* running vms only; off ones listed at the foot */
 .hl-row { width: calc(16.666% - 9px); display: flex; align-items: center; gap: 4px; font-size: 13px; line-height: 1.3; min-width: 0; }
 .hl-dot { width: 8px; height: 8px; flex: 0 0 auto; border: 1px solid #000; background: #000; }
 .hl-dot--off { background: #fff; }
 .hl-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The two bars share one track so a busy VM reads at a glance without
-   numbers. 34px, not 22: the names in a quarter column leave 37px of slack
-   on the median row, and a wider bar is what that slack is worth - the
-   numeric percentages would need 38px and start eliding names instead. */
+/* one shared track reads load without numbers */
 .hl-bars { flex: 0 0 28px; display: flex; flex-direction: column; gap: 2px; }
 .hl-bar { height: 4px; background: #d2d2d2; }
 .hl-bar span { display: block; height: 100%; background: #000; }
 
 /* ---- who is calling ---------------------------------------------------- */
-/* The Prometheus metrics know nothing about clients, so this band comes from
-   Traefik's access log by way of Loki: the country Cloudflare stamped on the
-   request, the browser family, the hostname asked for, and how the lot went.
-   Each row carries a bar of its share of the biggest row in its column - a
-   share of the total would make everything under the leader a sliver.
-   Five columns, the fifth being the busiest Traefik routes: it reads the
-   same way as the other four and the side column could only give it five
-   rows, where the band gives it eight.
-   The grid above takes its natural height and this takes what is left, so
-   the band is the one that has to be cut to fit: eight rows of 15.6px in
-   the 133px left over once the header has its 16. At 1.34 the eighth row
-   ran 2px into the border. */
+/* from traefik logs via loki; rows cut to fit */
 .hl-who { flex: 1 1 auto; border: 2px solid #000; padding: 3px 7px; display: flex; gap: 12px; min-height: 0; overflow: hidden; }
 .hl-who-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
 .hl-who-h { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid #000; margin-bottom: 1px; display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; flex: 0 0 auto; }
@@ -85,19 +39,13 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .hl-who-l { position: relative; display: flex; justify-content: space-between; gap: 6px; font-size: 12px; line-height: 1.3; flex: 0 0 auto; }
 .hl-who-l i { position: absolute; left: 0; top: 1px; bottom: 1px; background: #e0e0e0; }
 .hl-who-l span, .hl-who-l b { position: relative; }
-/* int = arrived over the LAN or the mesh, ext = relayed in off the internet,
-   + = both. Traefik carries no client address, so this is as precise as the
-   route list gets about where its callers were. */
+/* int = lan/mesh, ext = internet, + = both */
 .hl-who-l em { font-style: normal; font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #555; }
 .hl-who-l span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; padding-left: 2px; }
 .hl-who-l b { flex: 0 0 auto; font-variant-numeric: tabular-nums; padding-right: 2px; }
 
 /* ---- footer ------------------------------------------------------------ */
-/* TRMNL's own title_bar is not used. It reserves 52px at the foot of an
-   800x480 panel to draw a plugin name and a timestamp, most of which is
-   white; this says the same in 16px and gives the rest back to the clients
-   band. Measured on a device screenshot: dropping title_bar moved the
-   content's bottom edge from 426 to 464. */
+/* own footer: title_bar wastes 52px */
 .hl-foot { flex: 0 0 auto; display: flex; justify-content: space-between; gap: 10px; font-size: 11px; line-height: 1.3; }
 .hl-foot b { font-weight: 700; letter-spacing: .10em; text-transform: uppercase; }
 .hl-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -105,18 +53,14 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 
 /* ---- side panels ------------------------------------------------------ */
 .hl-side { flex: 0 0 216px; min-width: 0; display: flex; flex-direction: column; gap: 5px; min-height: 0; }
-/* 0 0 auto, not the flex default: a shrinkable panel silently gives up the
-   bottom half of its last row when the column is tight, which is how the
-   requests list came to show three and a half entries. The lists are cut to
-   size in stats-sync instead, and only the torrents panel takes up slack. */
+/* no shrink: lists are cut in stats-sync */
 .hl-panel { flex: 0 0 auto; border: 2px solid #000; padding: 3px 7px; min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
 .hl-panel--grow { flex: 1 1 auto; }
 .hl-h { font-size: 12px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; border-bottom: 1px solid #000; margin-bottom: 2px; display: flex; justify-content: space-between; }
 .hl-line { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; line-height: 1.3; }
 .hl-line b { font-variant-numeric: tabular-nums; }
 .hl-t { font-size: 12px; line-height: 1.2; margin-top: 1px; min-width: 0; overflow: hidden; }
-/* a release name is longer than the panel and a magnet-only torrent is a
-   40-character hash, so one clamped line either way */
+/* one clamped line: names and hashes overflow */
 .hl-t-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; max-width: 100%; }
 .hl-t-meta { display: flex; justify-content: space-between; font-size: 11px; }
 .hl-prog { height: 4px; background: #d2d2d2; margin-top: 1px; }

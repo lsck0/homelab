@@ -1,13 +1,4 @@
-"""Build the TRMNL GitHub payload: what is failing, what is waiting, what moved.
-
-Runs on vm-104 beside the other terminal feeds and writes <out-dir>/github.json,
-which nginx serves under the same token.
-
-Shaped around real content: 0 open issues, 0 open PRs, 49 CI failures across
-2 repos. The repo list gets the wide column; the rest are counters.
-
-One call per section, six in total, well inside the 5000/hour limit.
-"""
+"""Build the TRMNL GitHub payload: failing, waiting, recently moved."""
 import json
 import os
 import sys
@@ -21,9 +12,9 @@ USER = os.environ.get("GITHUB_USER", "lsck0")
 TOKEN_FILE = os.environ.get("GITHUB_TOKEN_FILE")
 TIMEOUT = 30
 
-# Rows each list can show before it is cut.
+# rows per list before cutting
 CI_ROWS = int(os.environ.get("GITHUB_CI_ROWS", "9"))
-# two columns of 16 fill the wide box exactly; every repo gets a row.
+# two columns of 16 fill the wide box
 REPO_ROWS = int(os.environ.get("GITHUB_REPO_ROWS", "32"))
 WORK_ROWS = int(os.environ.get("GITHUB_WORK_ROWS", "6"))
 LANG_ROWS = int(os.environ.get("GITHUB_LANG_ROWS", "8"))
@@ -66,7 +57,7 @@ def ago(iso):
 def commits(token, days):
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
     q = urllib.parse.quote(f"author:{USER} author-date:>={since}", safe=":>=")
-    # the commit search needs its own Accept header; without it this 415s
+    # commit search needs its own Accept header, else 415
     r = safe(f"search/commits?q={q}&per_page=1", token, {},
              accept="application/vnd.github.cloak-preview+json")
     return r.get("total_count", 0)
@@ -97,7 +88,7 @@ def main():
     issues = search("issue")
     prs = search("pr")
 
-    # CI failures are the only actionable notifications; the rest are counted
+    # only ci failures are actionable; the rest are counted
     ci = [n for n in notes if n.get("reason") == "ci_activity"]
     alerts = [n for n in notes if n.get("reason") != "ci_activity"]
 
@@ -137,7 +128,7 @@ def main():
             })
     work = work[:WORK_ROWS]
 
-    # counted off the repo list: /languages would be one call per repo
+    # from the repo list, not per-repo /languages calls
     langs = {}
     for r in repos:
         lang = r.get("language")
@@ -145,11 +136,11 @@ def main():
             langs[lang] = langs.get(lang, 0) + 1
     ranked = sorted(langs.items(), key=lambda kv: (-kv[1], kv[0]))[:LANG_ROWS]
     top = ranked[0][1] if ranked else 1
-    # share of the leader: share of total makes everything else a sliver
+    # share of the leader, not the total
     top_langs = [{"name": k, "n": v, "pct": round(100 * v / top)}
                  for k, v in ranked]
 
-    # Liquid cannot slice, so the two sub-columns are split here.
+    # liquid can't slice; split columns here
     half = (len(active) + 1) // 2
 
     payload = {
@@ -168,7 +159,7 @@ def main():
         "active_a": active[:half],
         "active_b": active[half:],
         "work": work,
-        # empty is normal here; the panel says so rather than look broken
+        # empty is normal; the panel says so
         "langs": top_langs,
         "work_empty": not work,
     }

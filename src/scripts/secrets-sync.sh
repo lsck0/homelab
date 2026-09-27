@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Reconcile src/secrets.json with the keys the NixOS configs actually read. generated created
+# reconcile src/secrets.json with the keys nix configs read
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -13,10 +13,10 @@ for a in "$@"; do
   esac
 done
 
-# the age key lives in the dotfiles repo; secrets/age.txt here is a symlink to it.
+# secrets/age.txt symlinks to the dotfiles key
 export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$ROOT_DIR/secrets/age.txt}"
 
-# secrets whose value only has to be consistent inside the lab.
+# lab-internal secrets, only need to be consistent
 GENERATED=(
   lldap-admin-password lldap-jwt-secret authelia-admin-pass lldap-guest-password
   forgejo-admin-pass forgejo-oidc-secret headplane-oidc-secret
@@ -24,11 +24,11 @@ GENERATED=(
   firefly-db-password
   crowdsec-bouncer-key
   ntfy-admin-password ntfy-grafana-password ntfy-hermes-password
-  # unguessable URL path segments: the read feed and the push endpoint.
+  # unguessable url segments for feed and push
   calendar-token calendar-upload-token
 )
 
-# secrets that come from outside and cannot be invented.
+# external secrets that cannot be invented
 MANUAL=(
   cloudflare-token proxmox-api-token proxmox-user proxmox-pass
   attic-server-token attic-pull-token
@@ -38,7 +38,7 @@ MANUAL=(
   hermes-gemini-api-key hermes-glm-api-key
   github-runner-token
   wireguard-private-key firefly-app-key
-  # off-site backup (vm-107). proton-totp-secret is the TOTP seed from Proton's 2FA setup
+  # off-site backup (vm-107); totp seed from proton 2fa
   proton-username proton-password proton-totp-secret
 )
 
@@ -52,20 +52,13 @@ chmod 600 "$PLAIN" "$OUT"
 
 sops --decrypt "$SECRETS" > "$PLAIN"
 
-# Every name the Nix configs actually reference. The two lists above only say
-# how a missing key is filled; they are not the source of truth for what is in
-# use. They were, and five live secrets (anubis-ed25519-key, trmnl-api-key,
-# github-mirror-token, jellyfin-oidc-secret, protonvpn-private-key) were
-# reported as "no config reads it" because nobody had added them to a list.
-# sops.templates.* are rendered files, not stored keys, so they are excluded.
-# sops.templates.* are rendered files, not stored keys, so they are excluded.
-# A name cited only in an option's `example` (ghcr-token) shows up as an extra
-# empty key, which is harmless; a wrong *removal* is not, hence --prune.
+# names the configs reference: the real in-use set
+# templates are rendered files; example-only names are harmless extras
 referenced=$(grep -rhoE 'sops\.(secrets|placeholder)\.[a-zA-Z0-9_-]+' \
     "$ROOT_DIR/src" --include='*.nix' 2>/dev/null \
   | sed -E 's/.*\.//' | sort -u)
 
-# `sops.secrets.<alias>.key = "<real>"` stores <real>, not <alias>.
+# `sops.secrets.<alias>.key` stores the real name
 aliases=$(grep -rhoE 'sops\.secrets\.[a-zA-Z0-9_-]+\.key' "$ROOT_DIR/src" --include='*.nix' 2>/dev/null \
   | sed -E 's/^sops\.secrets\.//; s/\.key$//' | sort -u)
 if [ -n "$aliases" ]; then
@@ -111,7 +104,7 @@ if [ "$APPLY" -eq 0 ]; then
   exit 0
 fi
 
-# keep the sops metadata out of the plaintext we re-encrypt.
+# keep sops metadata out of the re-encrypted plaintext
 jq 'del(.sops)' "$OUT" > "$OUT.t" && mv "$OUT.t" "$OUT"
 cp "$OUT" "$SECRETS"
 sops --encrypt --in-place "$SECRETS"

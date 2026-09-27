@@ -1,6 +1,6 @@
 { pkgs, nasMount, retry, ... }:
 let
-  # local inference on the Hermes VM (vm-114). No external AI provider, no API key.
+  # local inference on vm-114, no external provider
   ollamaUrl = "http://10.100.0.114:11434";
   ollamaModel = "qwen3:8b";
 in {
@@ -9,7 +9,7 @@ in {
   fileSystems = nasMount "/var/lib/paperless-ai" "paperless-ai"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
-  # paperless-ai reads its settings from /app/data/.env, which the setup wizard normally writes.
+  # settings live in /app/data/.env, normally wizard-written
   systemd.services.paperless-ai-config = {
     description = "Seed paperless-ai configuration";
     before = [ "podman-paperless-ai.service" ];
@@ -23,8 +23,7 @@ in {
     };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/paperless-key.token"
-      # vm-121 generates the token on first boot; wait for it rather than
-      # writing a config that silently cannot talk to Paperless.
+      # wait for vm-121's token, never write a dead config
       ${retry} 60 5 test -s "$TOKEN_FILE" || { echo "Paperless API token not available"; exit 1; }
 
       mkdir -p /var/lib/paperless-ai
@@ -59,7 +58,7 @@ in {
       PUID = "1000";
       PGID = "1000";
       PAPERLESS_AI_PORT = "3000";
-      # RAG service runs inside the same container.
+      # rag service runs in the same container
       RAG_SERVICE_URL = "http://localhost:8000";
       RAG_SERVICE_ENABLED = "true";
     };

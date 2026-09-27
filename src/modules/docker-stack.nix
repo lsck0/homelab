@@ -4,24 +4,21 @@ let
 
   stackFile = name: pkgs.writeText "stack-${name}.yaml" cfg.stacks.${name};
 
-  # log in to every registry that has credentials, then deploy all stacks. --resolve-image
+  # log in to registries, then deploy all stacks
   deployScript = pkgs.writeShellScript "swarm-deploy" ''
     set -uo pipefail
     export PATH="${lib.makeBinPath [ pkgs.docker pkgs.coreutils pkgs.gnugrep pkgs.gawk ]}"
     rc=0
 
-    # A tag whose newest build failed its healthcheck was rolled back. Deploying
-    # it again every poll would loop update -> rollback forever; wait for a new
-    # push instead (the tag's digest changes).
+    # skip rolled-back builds, else update/rollback loops forever
     rolled_back_build() { # stack
       local svc cur prev img digest state
       for svc in $(docker stack services "$1" --format '{{.Name}}' 2>/dev/null); do
         state=$(docker service inspect "$svc" --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{end}}')
-        # never interrupt a rollout or rollback that is still running.
+        # never interrupt a running rollout
         case "$state" in updating|rollback_started) echo "$svc: $state, skipping this round"; return 0 ;; esac
         [ "$state" = rollback_completed ] || continue
-        # swarm drops PreviousSpec on rollback; the failed build's digest is on
-        # its failed tasks.
+        # failed digest lives on the failed tasks
         cur=$(docker service inspect "$svc" --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}')
         prev=$(docker service ps "$svc" --no-trunc --format '{{.Image}}|{{.Error}}' \
           | awk -F'|' -v cur="$cur" '$2 != "" && $1 != cur { print $1; exit }')
@@ -102,23 +99,20 @@ in {
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script = ''
         ${retry} 30 1 docker info
-        # self-heal: only an "active" swarm is usable. Any other state (a stale
-        # "pending"/"locked" swarm after a reboot makes `swarm init` fail with
-        # "already part of a swarm") is reset.
+        # reset any non-active swarm left after reboot
         state=$(docker info --format '{{.Swarm.LocalNodeState}}' 2>/dev/null || echo unknown)
         if [ "$state" != "active" ]; then
           docker swarm leave --force >/dev/null 2>&1 || true
-          # explicit advertise address: init refuses to guess on hosts with
-          # more than one address.
+          # init refuses to guess with several addresses
           addr=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "src") print $(i + 1)}')
           docker swarm init ''${addr:+--advertise-addr "$addr"} || true
         fi
-        # fail loudly here instead of in every deploy.
+        # fail here, not in every deploy
         [ "$(docker info --format '{{.Swarm.LocalNodeState}}')" = active ] || { echo "swarm is not active"; exit 1; }
       '';
     };
 
-    # deploy on boot and whenever a stack definition changes (restartTriggers).
+    # on boot and whenever a stack changes
     systemd.services.swarm-deploy = {
       description = "Deploy Swarm stacks";
       after = [ "docker-swarm-init.service" "network-online.target" ];
@@ -133,7 +127,7 @@ in {
       };
     };
 
-    # CD: poll registries; a new digest behind a tag triggers a rolling update.
+    # new digest behind a tag rolls an update
     systemd.services.swarm-update = {
       description = "Roll out new images for Swarm stacks";
       after = [ "swarm-deploy.service" ];

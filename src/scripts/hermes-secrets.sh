@@ -1,5 +1,5 @@
 #!/bin/bash
-# Fill the secrets Hermes (vm-114) needs, then run ./sync.sh. hermes-ssh-key generated here
+# fill hermes (vm-114) secrets, then run ./sync.sh
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -34,7 +34,7 @@ fi
 # GITHUB APP (PULL REQUESTS)
 APP_JSON="$ROOT_DIR/src/modules/hermes/github-app.json"
 if [ -z "$(current hermes-github-app-key)" ] || [ ! -f "$APP_JSON" ] || [ "$FORCE" = --force ]; then
-  # manifest flow: a local page posts the manifest to GitHub, you confirm
+  # manifest flow: local page posts to github, you confirm
   python3 - "$REPO" "$tmp/app.json" <<'PY'
 import html, http.server, json, secrets, subprocess, sys, urllib.parse, urllib.request
 repo, out = sys.argv[1], sys.argv[2]
@@ -97,7 +97,7 @@ selection=$(curl -sf -H "Authorization: Bearer $(cat "$tmp/token")" https://api.
 [ "$selection" = "$REPO" ] || echo "WARNING: the app can reach $selection; limit its installation to $REPO"
 echo ">>> GitHub App installed on $REPO"
 
-# master: only repo admins (the owner, sync.sh) may update or delete it
+# master: only repo admins may update or delete
 ruleset=$(jq -n '{
   name: "protect-master", target: "branch", enforcement: "active",
   conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },

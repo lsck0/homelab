@@ -17,7 +17,7 @@
       FORGEJO__server__ROOT_URL = "https://git.lsck0.dev/";
       FORGEJO__security__INSTALL_LOCK = "true";
       FORGEJO__actions__ENABLED = "true";
-      # SSO-only: no self-service signup, and nothing is visible without logging
+      # sso-only, nothing visible without login
       FORGEJO__service__DISABLE_REGISTRATION = "true";
       FORGEJO__service__ALLOW_ONLY_EXTERNAL_REGISTRATION = "true";
       FORGEJO__service__REQUIRE_SIGNIN_VIEW = "true";
@@ -29,7 +29,7 @@
     };
   };
 
-  # create the initial admin user if Forgejo has no users yet. idempotent: exits immediately
+  # create the first admin once, idempotent
   systemd.services.forgejo-init = {
     description = "Initialise Forgejo admin user";
     after = [ "podman-forgejo.service" ];
@@ -57,7 +57,7 @@
     '';
   };
 
-  # configure OAuth2 auth source after Forgejo starts and is initialised
+  # configure the oauth2 source once forgejo is up
   systemd.services.forgejo-oauth2-setup = {
     description = "Configure Forgejo OAuth2 with Authelia";
     after = [ "podman-forgejo.service" "forgejo-init.service" ];
@@ -73,13 +73,7 @@
       OIDC_SECRET=$(cat ${config.sops.secrets.forgejo-oidc-secret.path})
       DISCOVER_URL="https://auth.lsck0.dev/.well-known/openid-configuration"
 
-      # The sign-in button is labelled with the auth source's name, which is why
-      # the login page used to say "authentik" long after Authelia replaced it.
-      # Forgejo also derives the callback path from that name, so a rename would
-      # normally invalidate the redirect URI: Authelia has both
-      # /user/oauth2/{authelia,authentik}/callback registered
-      # (101-internal-authelia.nix), so renaming the source in place is safe and
-      # keeps every already-linked account working.
+      # name is the button label; authelia registers both callbacks
       sources=$(podman exec -u git forgejo forgejo admin auth list 2>/dev/null || true)
       AUTH_ID=$(echo "$sources" | grep -w authelia  | awk '{print $1}')
       OLD_ID=$(echo "$sources"  | grep -w authentik | awk '{print $1}')
@@ -91,13 +85,7 @@
           --id "$AUTH_ID" --name authelia || true
       fi
 
-      # The scopes are explicit because Forgejo asks for "openid" alone
-      # otherwise, and an id_token with no profile and no email carries no
-      # username and no address to create an account from. Auto-registration
-      # then cannot run and the login lands on /user/link_account, which says
-      # "Registration is disabled" because it is.
-      # Errors are not sent to /dev/null: this step failing quietly is how the
-      # source kept its one-scope configuration through several deploys.
+      # explicit scopes, "openid" alone breaks signup; errors shown
       if [ -n "$AUTH_ID" ]; then
         echo "OAuth2 source exists (id=$AUTH_ID), updating..."
         podman exec -u git forgejo forgejo admin auth update-oauth \
@@ -123,7 +111,7 @@
     '';
   };
 
-  # generate API token for Homepage widget
+  # api token for the homepage widget
   systemd.services.forgejo-homepage-token = {
     description = "Generate Forgejo API token for Homepage";
     after = [ "podman-forgejo.service" "forgejo-oauth2-setup.service" ];
@@ -136,7 +124,7 @@
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/forgejo-key.token"
 
-      # check existing token validity; only clear on explicit 401 (stale), not network errors
+      # clear only on 401, not on network errors
       if [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ]; then
         HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
           -H "Authorization: token $(cat "$TOKEN_FILE")" \
@@ -150,22 +138,14 @@
 
       ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
 
-      # create a local bot user for API access
+      # local bot user for api access
       podman exec -u git forgejo forgejo admin user create \
         --username homepage-bot \
         --password "homepage-bot-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
         --email homepage@lsck0.dev \
         --must-change-password=false 2>/dev/null || true
 
-      # generate token with required scopes (skip if already exists)
-      # The CLI prints "Access token was successfully created: <token>", so the
-      # value is the last field. It printed "... <token>" in some older
-      # release, and the pattern that matched that one silently captured
-      # nothing here for as long as this unit has existed - the token row was
-      # created every boot and the file it feeds was never written, which is
-      # why the Homepage widget had no Forgejo data. The name is stamped for
-      # the same reason the mirror token's is: a duplicate is refused, so a
-      # fixed name cannot be retried.
+      # token is the last field; timestamped name allows retry
       TOKEN=$(podman exec -u git forgejo forgejo admin user generate-access-token \
         --username homepage-bot \
         --token-name "homepage-$(date +%s)" \
@@ -181,7 +161,7 @@
     '';
   };
 
-  # Hermes drives Forgejo too, and homepage-bot is read-only and not an admin.
+  # hermes needs an admin token, homepage-bot is read-only
   systemd.services.forgejo-hermes-token = {
     description = "Generate a Forgejo admin token for Hermes";
     after = [ "podman-forgejo.service" ];
@@ -211,7 +191,7 @@
         --admin \
         --must-change-password=false 2>/dev/null || true
 
-      # "all" rather than a scope list: Hermes is meant to operate the forge.
+      # "all": hermes operates the forge
       TOKEN=$(podman exec -u git forgejo forgejo admin user generate-access-token \
         --username hermes-bot \
         --token-name "hermes-$(date +%s)" \
@@ -227,7 +207,7 @@
     '';
   };
 
-  # generate runner registration token and save to NAS for runner VM
+  # runner registration token, shared via nas
   systemd.services.forgejo-runner-token = {
     description = "Generate Forgejo runner registration token";
     after = [ "podman-forgejo.service" "forgejo-oauth2-setup.service" ];
@@ -240,7 +220,7 @@
     script = ''
       ${retry} 60 2 podman exec -u git forgejo forgejo admin user list
 
-      # always regenerate token (they're one-use for registration)
+      # always regenerate, tokens are one-use
       TOKEN=$(podman exec -u git forgejo forgejo actions generate-runner-token 2>/dev/null || true)
       if [ -n "$TOKEN" ]; then
         echo -n "$TOKEN" > /var/lib/homepage-tokens/forgejo-runner.token
@@ -250,7 +230,7 @@
   };
 
   # ---- GitHub mirrors -------------------------------------------------------
-  # GitHub stays the place repositories are pushed to; Forgejo keeps a pull mirror of each one
+  # github is the source, forgejo pull-mirrors each repo
   sops.secrets.github-mirror-token = {};
 
   systemd.services.forgejo-mirror = {
@@ -264,7 +244,7 @@
     environment = {
       FORGEJO_OWNER = "luca";
       GITHUB_OWNER = "lsck0";
-      # how often Forgejo re-fetches each mirror on its own
+      # forgejo's own re-fetch interval
       MIRROR_INTERVAL = "8h";
       FORGEJO_TOKEN_FILE = "/var/lib/forgejo-mirror/token";
       GITHUB_TOKEN_FILE = config.sops.secrets.github-mirror-token.path;
@@ -272,16 +252,7 @@
     script = ''
       ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
 
-      # A token of its own rather than the Homepage bot's: that one is
-      # deliberately read-only, and creating a mirror is a write.
-      #
-      # The name carries a timestamp because Forgejo refuses a duplicate with
-      # "access token name has been used already", and a run that creates the
-      # token but fails to capture it would otherwise never be able to retry.
-      # The value is the last field of
-      # created: <token>", and it is checked before it is stored rather than
-      # after: writing an empty file here is what makes every later run fail
-      # on a name that is already taken.
+      # own write token, timestamped for retries, checked before storing
       if [ ! -s /var/lib/forgejo-mirror/token ]; then
         out=$(podman exec -u git forgejo forgejo admin user generate-access-token \
           --username luca --token-name "mirror-$(date +%s)" \
@@ -298,7 +269,7 @@
     '';
   };
 
-  # Daily: Forgejo does the fetching itself on MIRROR_INTERVAL
+  # daily repo discovery, forgejo fetches on MIRROR_INTERVAL
   systemd.timers.forgejo-mirror = {
     wantedBy = [ "timers.target" ];
     timerConfig = {

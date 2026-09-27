@@ -1,18 +1,6 @@
 # shellcheck shell=bash
-# Wires the media stack together through the apps' own APIs. Idempotent: every
-# step checks first and only creates what is missing, so it runs on a timer
-# and converges as VMs come up. API keys come from the NAS token dir, where
-# each VM exports its own.
-#
-#   qBittorrent  <- download client in Prowlarr/Radarr/Sonarr/Lidarr/Bookshelf
-#   root folders   movies, tv + anime, music, books under /data/media
-#   Prowlarr     -> apps (full indexer sync) + default public indexers
-#                   + Tor SOCKS5 indexer proxy applied to every indexer
-#   Jellyseerr   -> Jellyfin login, libraries, Radarr + Sonarr (anime folder)
-#   Bazarr       -> Radarr + Sonarr, English profile
-#
-# Env: INDEXERS (space-separated Prowlarr definition names). Addresses default
-# to the lab; tests override them (src/tests/media-stack.sh).
+# wires the media stack via app apis; idempotent, runs on a timer
+# env: INDEXERS; addresses overridden by src/tests/media-stack.sh
 
 T=${TOKEN_DIR:-/var/lib/homepage-tokens}
 QBIT_HOST=${QBIT_HOST:-10.100.0.112};       QBIT_PORT=${QBIT_PORT:-80}
@@ -24,11 +12,11 @@ BOOKSHELF_HOST=${BOOKSHELF_HOST:-10.100.0.135}; BOOKSHELF_PORT=${BOOKSHELF_PORT:
 LIDARR_HOST=${LIDARR_HOST:-10.100.0.136};     LIDARR_PORT=${LIDARR_PORT:-8686}
 JELLYSEERR_URL=${JELLYSEERR_URL:-http://10.100.0.128}
 BAZARR_URL=${BAZARR_URL:-http://10.100.0.132}
-# the router's isolated SOCKS port
+# router's isolated socks port
 TOR_HOST=${TOR_HOST:-10.100.0.1};           TOR_PORT=${TOR_PORT:-9055}
-# When Radarr is allowed to start looking.
+# when radarr starts looking
 MIN_AVAILABILITY=${MIN_AVAILABILITY:-announced}
-# The Jellyfin account that owns this lab.
+# jellyfin account that owns the lab
 OWNER_USER=${OWNER_USER:-luca}
 OWNER_PERMISSIONS=${OWNER_PERMISSIONS:-160}
 pending=0
@@ -43,7 +31,7 @@ api() { # method url apikey [json]
 }
 later() { echo "$1"; pending=1; }
 
-# Existence is not the same as being right: a renumber leaves every row in place pointing
+# existing rows go stale after a renumber; correct them
 fix_fields() {
   local label=$1 url=$2 k=$3 cur=$4 want
   shift 4
@@ -57,7 +45,7 @@ fix_fields() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SERVARR APPS wire_servarr <name> <base url> <api version> <category field> <category> <root
+# SERVARR APPS
 wire_servarr() {
   local name=$1 url=$2 v=$3 catfield=$4 cat=$5; shift 5
   local k a body qpass
@@ -102,7 +90,7 @@ wire_servarr() {
   for path in "$@"; do
     api GET "$a/rootfolder" "$k" | jq -e --arg p "$path" 'any(.[]; .path == $p)' >/dev/null && continue
     if [ "$v" = v1 ]; then
-      # Lidarr/Bookshelf root folders carry default profiles.
+      # lidarr/bookshelf root folders need default profiles
       qp=$(api GET "$a/qualityprofile" "$k" | jq '.[0].id')
       mp=$(api GET "$a/metadataprofile" "$k" | jq '.[0].id')
       body=$(jq -cn --arg p "$path" --arg n "$(basename "$path")" --argjson qp "$qp" --argjson mp "$mp" \
@@ -121,7 +109,7 @@ wire_servarr() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# JELLYFIN NOTIFICATION Tell Jellyfin to look when a file lands
+# JELLYFIN NOTIFICATION
 wire_jellyfin_notify() {
   local name=$1 url=$2 k jk cur id body
   k=$(key "$name-key") || { later "$name: API key not exported yet"; return; }
@@ -148,7 +136,7 @@ wire_jellyfin_notify() {
     --arg h "$JELLYFIN_HOST" --arg p "$JELLYFIN_PORT" --arg jk "$jk" '
     first(.[] | select(.implementation == "MediaBrowser"))
     | .name = "Jellyfin"
-    # on import and on rename: the two moments the library changed on disk
+    # library changes on import and rename
     | .onDownload = true | .onUpgrade = true | .onRename = true
     | .fields |= map(
         if .name == "host" then .value = $h
@@ -202,7 +190,7 @@ wire_prowlarr() {
     fi
   done
 
-  # Tor SOCKS5 in front of the indexers.
+  # tor socks5 in front of the indexers
   local tag proxies ind id
   tag=$(api GET "$P/tag" "$pk" | jq -r '.[] | select(.label == "tor") | .id')
   if [ -z "$tag" ]; then
@@ -211,7 +199,7 @@ wire_prowlarr() {
   if [ -n "$tag" ]; then
     proxies=$(api GET "$P/indexerproxy" "$pk")
     if echo "$proxies" | jq -e 'any(.[]; .implementation == "Socks5")' >/dev/null; then
-      # this is what actually carries indexer traffic; stale here means every search times
+      # carries indexer traffic; stale means every search times out
       local cur id
       cur=$(echo "$proxies" | jq -c 'first(.[] | select(.implementation == "Socks5"))')
       id=$(echo "$cur" | jq -r .id)
@@ -233,7 +221,7 @@ wire_prowlarr() {
       if api POST "$P/indexerproxy?forceSave=true" "$pk" "$body" >/dev/null; then
         echo "prowlarr: added Tor SOCKS5 indexer proxy ($TOR_HOST:$TOR_PORT)"
       else
-        # same reasoning as the indexers below: a proxy that is momentarily unreachable must
+        # unreachable proxy must not fail the run
         echo "prowlarr: Tor indexer proxy not added (is the router up?), retried next run"
       fi
     fi
@@ -248,7 +236,7 @@ wire_prowlarr() {
     body=$(echo "$schema" | jq -c --arg d "$def" \
       'first(.[] | select(.definitionName == $d)) | .enable = true | .appProfileId = 1 | .priority = 25')
     [ -n "$body" ] || { echo "prowlarr: unknown indexer definition '$def'"; continue; }
-    # Prowlarr tests the site even with forceSave; a blocked or down site must not keep
+    # prowlarr tests the site even with forceSave
     if api POST "$P/indexer?forceSave=true" "$pk" "$body" >/dev/null; then
       echo "prowlarr: added indexer $def"
     else
@@ -256,7 +244,7 @@ wire_prowlarr() {
     fi
   done
 
-  # after the indexers exist: put the tor tag on any that lack
+  # tag untagged indexers with tor
   if [ -n "$tag" ]; then
     for id in $(api GET "$P/indexer" "$pk" | jq -r --argjson t "$tag" \
                   '.[] | select((.tags // []) | index($t) | not) | .id'); do
@@ -280,7 +268,7 @@ wire_jellyseerr() {
   jar=$(mktemp); trap 'rm -f "$jar"' RETURN
   js() { curl -sf -c "$jar" -b "$jar" -H "Content-Type: application/json" "$@"; }
 
-  # Two shapes of the same endpoint: before initialisation it also carries the Jellyfin server
+  # endpoint shape differs before initialisation
   if [ "$initialised" = true ]; then
     js -X POST "$S/auth/jellyfin" -d "$(jq -cn --arg p "$(key jellyfin-admin-pass)" \
       '{username: "admin", password: $p}')" >/dev/null || true
@@ -292,14 +280,14 @@ wire_jellyseerr() {
   fi
   js "$S/auth/me" >/dev/null || { later "jellyseerr: Jellyfin login failed"; return; }
 
-  # An already-initialised Jellyseerr used to be skipped outright
+  # initialised jellyseerr still gets corrected
   if [ "$initialised" = true ]; then
     local cur want
     cur=$(js "$S/settings/radarr" | jq -c '.[0] // empty')
     if [ -z "$cur" ]; then
       later "jellyseerr: initialised but has no Radarr server"
     else
-      # id is read-only on the way back in: request/body/id is read-only
+      # id is read-only on the way back in
       want=$(echo "$cur" | jq -c --arg k "$rk" --arg h "$RADARR_HOST" \
         --argjson port "$RADARR_PORT" --arg min "$MIN_AVAILABILITY" \
         '.apiKey = $k | .hostname = $h | .port = $port | .minimumAvailability = $min')
@@ -310,7 +298,7 @@ wire_jellyseerr() {
           || later "jellyseerr: correcting the Radarr server failed"
       fi
     fi
-    # A request that is never approved never reaches Radarr
+    # unapproved requests never reach radarr
     local uid
     uid=$(js "$S/user?take=100" | jq -r --arg u "$OWNER_USER" \
       'first(.results[] | select(.displayName == $u or .jellyfinUsername == $u)) | .id // empty')
@@ -369,9 +357,9 @@ wire_jellyseerr() {
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
-# BAZARR Subtitle languages, in the order Bazarr should prefer them.
+# BAZARR (languages in preference order)
 SUBTITLE_LANGUAGES=${SUBTITLE_LANGUAGES:-de en}
-# Providers that need no account. opensubtitles.com is the best source for German but wants
+# no-account providers; opensubtitles.com needs one
 SUBTITLE_PROVIDERS=${SUBTITLE_PROVIDERS:-podnapisi gestdown tvsubtitles yifysubtitles}
 
 wire_bazarr() {
@@ -381,12 +369,12 @@ wire_bazarr() {
   fi
   cur=$(curl -sf -H "X-API-KEY: $bk" "$B/system/settings") || { later "bazarr: unreachable"; return; }
 
-  # Everything below is sent on every run, not only when Bazarr is unconfigured.
+  # sent every run, not only when unconfigured
   local profile items i=0 lang
   items=""
   for lang in $SUBTITLE_LANGUAGES; do
     i=$((i + 1))
-    # audio_only_include is not optional: without it every indexer run dies with KeyError
+    # audio_only_include required, else KeyError on indexing
     items="$items${items:+,}$(jq -cn --arg l "$lang" --argjson id "$i" \
       '{id: $id, language: $l, audio_exclude: "False", audio_only_include: "False",
         hi: "False", forced: "False"}')"
@@ -422,7 +410,7 @@ wire_bazarr() {
     return
   fi
 
-  # Bazarr reads the languages profile once at start
+  # bazarr reads the profile only at start
   if [ "$(echo "$cur" | jq -r '[.radarr.ip, .sonarr.ip] | join(",")')" != "$RADARR_HOST,$SONARR_HOST" ]; then
     echo "bazarr: corrected the Radarr/Sonarr addresses, restarting it to reload the profile"
     curl -sf -X POST -H "X-API-KEY: $bk" "$B/system?action=restart" >/dev/null || true
@@ -430,7 +418,7 @@ wire_bazarr() {
   echo "bazarr: ${SUBTITLE_LANGUAGES// /+} subtitles from ${SUBTITLE_PROVIDERS// /, }"
 }
 
-# Prowlarr needs its own download client: "Grab" in its search UI hands the release
+# prowlarr needs its own client for search-ui grabs
 wire_servarr prowlarr  "http://$PROWLARR_HOST:$PROWLARR_PORT"   v1 category     prowlarr
 wire_servarr radarr    "http://$RADARR_HOST:$RADARR_PORT"       v3 movieCategory radarr    /data/media/movies
 wire_jellyfin_notify radarr "http://$RADARR_HOST:$RADARR_PORT"

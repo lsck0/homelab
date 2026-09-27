@@ -49,8 +49,7 @@ let
         exit 0
       fi
       tmp=$(mktemp -p "$out" .${name}.XXXXXX.sqlite)
-      # .backup is the online backup API: it takes a read lock per page instead
-      # of copying bytes underneath a writer.
+      # online backup api, safe under a writer
       sqlite3 ${lib.escapeShellArg db.sqlite} ".backup '$tmp'"
       zstd -q -19 -o "$out/${name}-$stamp.sqlite.zst" "$tmp"
       rm -f "$tmp"
@@ -61,8 +60,7 @@ let
       zstd -q -19 -o "$out/${name}-$stamp.${db.suffix}.zst" "$tmp"
       rm -f "$tmp"
     ''}
-    # keep the newest ${toString cfg.keep} dumps; Kopia's own retention then
-    # covers the longer history.
+    # kopia retention covers the longer history
     ls -1t "$out"/${name}-*.zst 2>/dev/null | tail -n +${toString (cfg.keep + 1)} | xargs -r rm -f
     echo "${name}: dumped to $out"
   '';
@@ -97,7 +95,7 @@ in {
   };
 
   config = lib.mkIf (cfg.databases != { }) {
-    # the dumps have to live on the NAS: that is the only tree Kopia snapshots.
+    # kopia only snapshots the nas
     fileSystems = nasPath dir "data/db-dumps";
 
     systemd.services = lib.mapAttrs' (name: db: lib.nameValuePair "db-backup-${name}" {

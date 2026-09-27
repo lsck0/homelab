@@ -2,10 +2,10 @@
 let
   stateDir = "/var/lib/authelia-main";
 
-  # the access rules are generated from modules/routes.nix
+  # access rules come from modules/routes.nix
   routes = (import ../modules/routes.nix).internal;
   ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
-  # per page: admins, the page's own app-<route> group, or its bundle group.
+  # admins, app-<route> group, or bundle group
   routeSubjects = name: r: lib.unique [ [ "group:admins" ] [ "group:app-${name}" ] [ "group:${r.group or "users"}" ] ];
   routeRules = lib.concatLists (lib.mapAttrsToList (name: r: [
     {
@@ -19,7 +19,7 @@ let
     }
   ]) ssoRoutes);
 
-  # runtime-generated config fragments.
+  # runtime-generated config fragments
   oidcClientsFile = "${stateDir}/oidc-clients.yml";
   ldapFile = "${stateDir}/ldap.yml";
   secretsDir = "${stateDir}/secrets";
@@ -29,9 +29,9 @@ let
       id = "forgejo";
       name = "Forgejo";
       secretName = "forgejo-oidc-secret";
-      # Forgejo's go-oauth2 client posts the secret, verified against 7.0.16+gitea-1.21.11.
+      # forgejo posts the secret (7.0.16+gitea-1.21.11)
       tokenAuthMethod = "client_secret_post";
-      # Forgejo derives the callback path from the auth source name.
+      # callback path follows the forgejo source name
       redirectUris = [
         "https://git.lsck0.dev/user/oauth2/authelia/callback"
         "https://git.lsck0.dev/user/oauth2/authentik/callback"
@@ -41,7 +41,7 @@ let
       id = "jellyfin";
       name = "Jellyfin";
       secretName = "jellyfin-oidc-secret";
-      # jellyfin-plugin-sso posts the secret, as Authelia's own Jellyfin integration note says.
+      # jellyfin-plugin-sso posts the secret
       tokenAuthMethod = "client_secret_post";
       redirectUris = [ "https://jellyfin.lsck0.dev/sso/OID/redirect/authelia" ];
     }
@@ -54,7 +54,7 @@ let
     }
   ];
 
-  # OIDC logins obey the same per-page groups as ForwardAuth.
+  # oidc obeys the forwardauth groups
   mkPolicyYaml = c: lib.concatStringsSep "\n" [
     "        ${c.id}:"
     "          default_policy: deny"
@@ -63,17 +63,17 @@ let
     "              subject: ['group:admins', 'group:app-${c.id}']"
   ] + "\n";
 
-  # built line by line rather than as an indented block: Nix strips the common indentation
+  # line by line, nix strips common indentation
   mkClientYaml = c: lib.concatStringsSep "\n" ([
     "      - client_id: ${c.id}"
     "        client_name: ${c.name}"
     "        client_secret: '$CLIENT_HASH_${c.id}'"
     "        public: false"
-    # same bar as the ForwardAuth routes: an OIDC login must not be a cheaper way into Forgejo
+    # oidc must not be a cheaper way in
     "        authorization_policy: ${c.id}"
     "        require_pkce: false"
     "        consent_mode: implicit"
-    # client_secret_basic is the OAuth 2.0 default and what Forgejo sends.
+    # client_secret_basic is the oauth 2.0 default
     "        token_endpoint_auth_method: ${c.tokenAuthMethod or "client_secret_basic"}"
     "        redirect_uris:"
   ] ++ map (u: "          - ${u}") c.redirectUris ++ [
@@ -83,7 +83,7 @@ let
 in {
   networking.hostName = "vm-101";
 
-  # session store for Authelia, see session.redis below.
+  # authelia session store
   services.redis.servers.authelia = {
     enable = true;
     port = 0;
@@ -93,21 +93,21 @@ in {
   users.users.authelia-main.extraGroups = [ "redis-authelia" ];
   systemd.services.authelia-main.after = [ "redis-authelia.service" ];
 
-  # state on LOCAL disk, not NFS: a NAS stall must not wedge the auth gateway. it's small
+  # local disk: nas stalls must not wedge auth
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0700 authelia-main authelia-main -"
   ];
 
-  # ...but "a rebuild regenerates it" only covers the keys.
+  # db is backed up, only keys regenerate
   homelab.dbBackup.databases.authelia.sqlite = "${stateDir}/db.sqlite3";
 
-  # bind password for the lldap backend (same secret lldap itself uses).
+  # lldap bind password, shared with lldap
   sops.secrets.lldap-admin-password = {};
   sops.secrets.forgejo-oidc-secret = {};
   sops.secrets.jellyfin-oidc-secret = {};
   sops.secrets.headplane-oidc-secret = {};
 
-  # Authelia's own cryptographic material is generated here rather than kept in sops: none
+  # own crypto generated here, not in sops
   systemd.services.authelia-bootstrap = {
     description = "Generate Authelia secrets, users and OIDC clients";
     before = [ "authelia-main.service" ];
@@ -134,7 +134,7 @@ in {
         openssl genrsa -out ${secretsDir}/oidc-issuer.pem 4096
       fi
 
-      # --- LDAP bind password (kept out of the Nix store) ---
+      # --- ldap bind password, out of the store ---
       LDAP_PASS=$(cat ${config.sops.secrets.lldap-admin-password.path})
       cat > ${ldapFile} <<EOF
       authentication_backend:
@@ -142,7 +142,7 @@ in {
           password: "$LDAP_PASS"
       EOF
 
-      # --- OIDC clients ---
+      # --- oidc clients ---
       hash_secret() {
         authelia crypto hash generate pbkdf2 --variant sha512 --password "$1" --no-confirm \
           | sed -n 's/^Digest: //p'
@@ -185,10 +185,10 @@ in {
       log.level = "info";
       log.format = "text";
 
-      # lldap (vm-102) is the single identity store.
+      # lldap (vm-102) is the identity store
       authentication_backend = {
         password_reset.disable = false;
-        # group changes land within 5m; 1m queued binds behind homepage's ping burst
+        # 5m: 1m queued binds behind homepage's pings
         refresh_interval = "5m";
         ldap = {
           implementation = "lldap";
@@ -199,7 +199,7 @@ in {
         };
       };
 
-      # WebAuthn (FIDO2) is the strong second factor: a hardware key IS the identity.
+      # webauthn: hardware key as second factor
       webauthn = {
         disable = false;
         display_name = "lsck0.dev";
@@ -207,7 +207,7 @@ in {
         timeout = "60s";
       };
 
-      # everything internal demands two_factor (lldap password + TOTP/FIDO2).
+      # internal routes demand two_factor
       access_control = {
         default_policy = "deny";
         rules = [
@@ -216,7 +216,7 @@ in {
             policy = "bypass";
           }
         ] ++ routeRules ++ [
-          # anything with a route but no entry in routes.nix
+          # routes missing from routes.nix
           {
             domain = [ "*.lsck0.dev" "lsck0.dev" ];
             policy = "two_factor";
@@ -236,7 +236,7 @@ in {
           default_redirection_url = "https://homepage.lsck0.dev";
         }];
 
-        # Without this Authelia keeps sessions in memory
+        # else sessions live in memory
         redis = {
           host = "/run/redis-authelia/redis.sock";
           port = 0;
@@ -245,7 +245,7 @@ in {
 
       storage.local.path = "${stateDir}/db.sqlite3";
 
-      # no SMTP in the lab, so password resets and 2FA enrolment links are written to a file
+      # no smtp, notifications go to a file
       notifier = {
         disable_startup_check = true;
         filesystem.filename = "${stateDir}/notification.txt";

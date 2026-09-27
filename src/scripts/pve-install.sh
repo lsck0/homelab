@@ -7,12 +7,12 @@ if [ -z "$PVE_TF_PASSWORD" ]; then
     echo "ERROR: Terraform Proxmox user password is required."
     exit 1
 fi
-# Optional second argument: the lldap bind password.
+# optional second arg: lldap bind password
 LLDAP_BIND_PASSWORD="${2:-}"
 LLDAP_HOST="${LLDAP_HOST:-10.100.0.102}"
 LLDAP_PORT="${LLDAP_PORT:-3890}"
 LLDAP_BASE_DN="${LLDAP_BASE_DN:-dc=lsck0,dc=dev}"
-# the lldap group whose members get Administrator on the whole datacentre
+# lldap group granted datacentre admin
 LLDAP_ADMIN_GROUP="${LLDAP_ADMIN_GROUP:-admins}"
 
 if ! command -v pveversion &>/dev/null; then
@@ -22,13 +22,13 @@ if ! command -v pveversion &>/dev/null; then
 fi
 echo ">>> Proxmox VE $(pveversion) detected."
 
-# configure APT repos for non-subscription installs.
+# apt repos for non-subscription installs
 CODENAME="$(
     . /etc/os-release
     echo "${VERSION_CODENAME:-bookworm}"
 )"
 
-# disable enterprise repos that require paid subscription.
+# enterprise repos need a paid subscription
 echo ">>> Disabling enterprise repos..."
 for file in $(grep -rl "enterprise.proxmox.com" /etc/apt/ || true); do
     if [[ "$file" == *.sources ]]; then
@@ -40,12 +40,12 @@ for file in $(grep -rl "enterprise.proxmox.com" /etc/apt/ || true); do
     fi
 done
 
-# ensure Proxmox no-subscription repo exists.
+# ensure the no-subscription repo exists
 cat > /etc/apt/sources.list.d/pve-no-subscription.list <<EOF
 deb http://download.proxmox.com/debian/pve ${CODENAME} pve-no-subscription
 EOF
 
-# vmbr0 is created by the Proxmox installer. vmbr100/vmbr200 are purely virtual networks
+# vmbr0 comes from the installer; vmbr100/200 are virtual
 
 if ! grep -q "auto vmbr100" /etc/network/interfaces; then
     cat <<EOF >> /etc/network/interfaces
@@ -71,14 +71,14 @@ fi
 
 ifreload -a || true
 
-# quiet + low-power tuning (server lives in a bedroom) powersave governor caps clocks at idle
+# low-power tuning: server lives in a bedroom
 for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
     echo powersave > "$g" 2>/dev/null || true
 done
-# AMD global boost toggle (cpufreq) and, as fallback, the pstate knob.
+# disable amd boost; pstate knob as fallback
 echo 0 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
 echo 1 > /sys/devices/system/cpu/amd_pstate/cpb_boost 2>/dev/null || true
-# spin down idle spinning disks after ~10 min.
+# spin down idle disks after ~10 min
 for d in /dev/sd?; do hdparm -S 120 "$d" 2>/dev/null || true; done
 
 cat > /etc/systemd/system/lab-lowpower.service <<'EOF'
@@ -97,23 +97,23 @@ EOF
 systemctl daemon-reload
 systemctl enable --now lab-lowpower.service >/dev/null 2>&1 || true
 
-# GPU passthrough (NVIDIA RTX 2060 / TU106) Bind the GPU and its HDMI-audio function
+# gpu passthrough (rtx 2060 / tu106)
 GPU_IDS="10de:1f08,10de:10f9,10de:1ada,10de:1adb"
 
-# AMD host: enable the IOMMU in passthrough mode on the GRUB kernel cmdline.
+# amd iommu in passthrough mode
 if ! grep -q "amd_iommu=on" /etc/default/grub; then
     echo ">>> Enabling IOMMU on kernel cmdline..."
     sed -i 's/\(GRUB_CMDLINE_LINUX_DEFAULT="[^"]*\)"/\1 amd_iommu=on iommu=pt"/' /etc/default/grub
     UPDATE_BOOT=1
 fi
 
-# load the vfio stack at boot.
+# load vfio at boot
 if [ ! -f /etc/modules-load.d/vfio.conf ]; then
     printf 'vfio\nvfio_iommu_type1\nvfio_pci\n' > /etc/modules-load.d/vfio.conf
     UPDATE_BOOT=1
 fi
 
-# claim the GPU for vfio-pci and keep the host's nouveau/nvidia drivers off it.
+# hand the gpu to vfio-pci, not nouveau
 if [ ! -f /etc/modprobe.d/vfio.conf ]; then
     echo "options vfio-pci ids=${GPU_IDS}" > /etc/modprobe.d/vfio.conf
     printf 'blacklist nouveau\nblacklist nvidia\nblacklist nvidiafb\nblacklist snd_hda_intel\n' > /etc/modprobe.d/blacklist-gpu.conf
@@ -127,7 +127,7 @@ if [ "${UPDATE_BOOT:-0}" = "1" ]; then
     echo ">>> GPU passthrough staged. REBOOT the Proxmox host to bind vfio-pci."
 fi
 
-# Proxmox host metrics exporter for Prometheus/Grafana.
+# host metrics exporter for prometheus
 export DEBIAN_FRONTEND=noninteractive
 apt-get update >/dev/null
 apt-get install -y prometheus-node-exporter >/dev/null
@@ -141,7 +141,7 @@ fi
 
 pveum acl modify / -user terraform-prov@pve -role Administrator
 
-# recreate token on each run so src/scripts/init.sh always gets a fresh secret.
+# fresh token each run for init.sh
 pveum user token delete terraform-prov@pve terraform-token >/dev/null 2>&1 || true
 TOKEN_SECRET="$(
     pveum user token add terraform-prov@pve terraform-token --privsep 0 \
@@ -156,13 +156,13 @@ fi
 printf '%s\n' "$TOKEN_SECRET" > /root/terraform_token.txt
 chmod 600 /root/terraform_token.txt
 
-# Homepage read-only user for dashboard widget
+# read-only user for the homepage widget
 if ! pveum user list 2>/dev/null | grep -q "homepage@pve"; then
     pveum user add homepage@pve --password "homepage-readonly" >/dev/null 2>&1 || true
 fi
 pveum acl modify / -user homepage@pve -role PVEAuditor
 
-# recreate homepage API token
+# recreate homepage api token
 pveum user token delete homepage@pve homepage >/dev/null 2>&1 || true
 HOMEPAGE_TOKEN="$(
     pveum user token add homepage@pve homepage --privsep 0 \
@@ -173,17 +173,17 @@ chmod 600 /root/homepage_token.txt
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LDAP REALM (lldap) So the one lldap account signs in here too
+# LDAP REALM (lldap)
 if [ -z "$LLDAP_BIND_PASSWORD" ]; then
     echo ">>> No lldap bind password given, skipping the LDAP realm."
 else
     echo ">>> Configuring the lldap LDAP realm..."
-    # The bind password lives in a file Proxmox owns; there is no CLI flag.
+    # bind password is file-only, no cli flag
     mkdir -p /etc/pve/priv/realm
     printf '%s' "$LLDAP_BIND_PASSWORD" > /etc/pve/priv/realm/lldap.pw
     chmod 600 /etc/pve/priv/realm/lldap.pw
 
-    # add or update: re-running init.sh must not fail on an existing realm.
+    # add or update so reruns never fail
     REALM_VERB=add
     pveum realm list --output-format json 2>/dev/null | grep -q '"lldap"' && REALM_VERB=modify
     pveum realm "$REALM_VERB" lldap \
@@ -201,26 +201,26 @@ else
         --comment "lldap (single sign-on account store)"
 
     pveum realm sync lldap
-    # Administrator on / for the lldap admins group.
+    # administrator on / for lldap admins
     pveum acl modify / --group "$LLDAP_ADMIN_GROUP-lldap" --role Administrator
     echo ">>> lldap realm ready: sign in as <user>@lldap"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# BULK STORAGE (the spinning disk) NVMes carry the VMs and their state; the 2 TB spinning disk
+# BULK STORAGE (the spinning disk)
 BULK_DISK=${BULK_DISK:-/dev/disk/by-id/ata-WDC_WD20EZRZ-00Z5HB0_WD-WCC4N3KNZ2KS}
 if ! vgs bulk >/dev/null 2>&1; then
     if [ ! -b "$BULK_DISK" ]; then
         echo ">>> bulk disk $BULK_DISK not present; skipping bulk storage"
     elif lsblk -no FSTYPE "$BULK_DISK" 2>/dev/null | grep -q .; then
-        # Refuse to wipe a disk that still holds a filesystem.
+        # never wipe a disk holding a filesystem
         echo ">>> $BULK_DISK still has a filesystem on it; refusing to wipe."
         echo ">>> Clear it by hand once its contents are safe, then re-run."
     else
         echo ">>> Creating bulk storage on $BULK_DISK"
         pvcreate -ff -y "$BULK_DISK"
         vgcreate bulk "$BULK_DISK"
-        # Leave 1% for thin-pool metadata growth: a thin pool whose metadata fills is as wedged
+        # 1% spare: full thin metadata wedges the pool
         lvcreate --type thin-pool -l 99%FREE -Zn --thinpool data bulk
     fi
 fi
@@ -230,7 +230,7 @@ if vgs bulk >/dev/null 2>&1 && ! pvesm status --storage bulk >/dev/null 2>&1; th
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-# OSSEC (host intrusion detection) The hypervisor is the one machine a HIDS earns its keep
+# OSSEC (host intrusion detection)
 OSSEC_VERSION=${OSSEC_VERSION:-3.8.0}
 if [ ! -d /var/ossec ]; then
     echo ">>> Building OSSEC $OSSEC_VERSION"
@@ -240,7 +240,7 @@ if [ ! -d /var/ossec ]; then
     wget -qO "$tmp/ossec.tar.gz" \
         "https://github.com/ossec/ossec-hids/archive/refs/tags/$OSSEC_VERSION.tar.gz"
     tar -xzf "$tmp/ossec.tar.gz" -C "$tmp"
-    # Unattended: install.sh is interactive, but every prompt has a USER_* override.
+    # install.sh is interactive; USER_* answers it
     (
         cd "$tmp/ossec-hids-$OSSEC_VERSION"
         USER_LANGUAGE=en USER_NO_STOP=y USER_INSTALL_TYPE=local USER_DIR=/var/ossec \
@@ -254,8 +254,7 @@ fi
 # What to watch.
 if [ -d /var/ossec ]; then
     cat > /var/ossec/etc/local_internal_options.conf <<'OPTS'
-# report changes in real time where the kernel can tell us, rather than only
-# on the scan interval.
+# realtime where the kernel supports it
 syscheck.sleep=2
 OPTS
     if ! grep -q "homelab-managed" /var/ossec/etc/ossec.conf 2>/dev/null; then
@@ -263,8 +262,7 @@ OPTS
 import re
 p = "/var/ossec/etc/ossec.conf"
 s = open(p).read()
-# 6h rather than the 12h default: a change to /etc/pve wants finding the same
-# day, and the tree is small enough that scanning it costs nothing.
+# 6h not 12h: catch /etc/pve changes same day
 s = s.replace("<frequency>43200</frequency>", "<frequency>21600</frequency>")
 watch = """  <!-- homelab-managed: see src/scripts/pve-install.sh -->
   <syscheck>
@@ -287,7 +285,7 @@ PY
     systemctl enable --now ossec 2>/dev/null || /var/ossec/bin/ossec-control restart
 fi
 
-# OSSEC's alerts reach Grafana the same way the backup dead-man does: a gauge
+# alerts reach grafana as a textfile gauge
 if [ -d /var/ossec ]; then
     install -d -m 0755 /var/lib/node-exporter-textfile
     if ! grep -q "node-exporter-textfile" /etc/default/prometheus-node-exporter 2>/dev/null; then
@@ -297,8 +295,7 @@ if [ -d /var/ossec ]; then
     fi
     cat > /usr/local/bin/ossec-metrics <<'METRICS'
 #!/usr/bin/env bash
-# Count today's OSSEC alerts by severity for the node_exporter textfile
-# collector. Levels: 7+ is worth seeing, 10+ is worth waking up for.
+# today's ossec alerts by severity (7+ notable, 10+ urgent)
 set -euo pipefail
 log=/var/ossec/logs/alerts/alerts.log
 d=/var/lib/node-exporter-textfile

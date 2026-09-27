@@ -1,7 +1,7 @@
 { config, pkgs, nasMount, ... }: {
   networking.hostName = "vm-124";
 
-  # Firefly III: self-hosted personal finance. app + its own Postgres
+  # firefly iii with its own postgres
   fileSystems = nasMount "/var/lib/firefly" "firefly"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
@@ -17,7 +17,7 @@
     DB_PASSWORD=${config.sops.placeholder.firefly-db-password}
     APP_URL=https://firefly.lsck0.dev
     TRUSTED_PROXIES=*
-    # login is Authelia's Remote-Email header
+    # login via authelia's Remote-Email
     AUTHENTICATION_GUARD=remote_user_guard
     AUTHENTICATION_GUARD_HEADER=HTTP_REMOTE_EMAIL
     AUTHENTICATION_GUARD_EMAIL=HTTP_REMOTE_EMAIL
@@ -38,20 +38,20 @@
     firefly = {
       image = "docker.io/fireflyiii/core:version-6.7.2";
       dependsOn = [ "firefly-db" ];
-      # host network: firefly listens on :8080, reaches postgres on 127.0.0.1:5432.
+      # host network: :8080, postgres on 127.0.0.1:5432
       volumes = [ "/var/lib/firefly/upload:/var/www/html/storage/upload" ];
       environmentFiles = [ config.sops.templates."firefly.env".path ];
       extraOptions = [ "--network=host" ];
     };
   };
 
-  # /var/lib/firefly/db is a live Postgres data directory on the NAS.
+  # dump, the nas holds a live data dir
   homelab.dbBackup.databases.firefly = {
     command = "podman exec firefly-db pg_dump -U firefly --clean --if-exists firefly";
     path = [ pkgs.podman ];
   };
 
-  # personal access token for Hermes (logs bills as transactions).
+  # hermes token for logging bills
   systemd.services.firefly-hermes-token = {
     description = "Export a Firefly III API token for Hermes";
     after = [ "podman-firefly.service" ];
@@ -61,7 +61,7 @@
       out=/var/lib/homepage-tokens/firefly-token.token
       tinker() { podman exec firefly php artisan tinker --execute="$1" 2>/dev/null | tail -1; }
       [ "$(tinker 'echo \FireflyIII\User::count();')" -gt 0 ] 2>/dev/null || { echo "no Firefly user yet"; exit 0; }
-      # the header login matches by email: keep the owner on the lldap address
+      # header login matches email, keep the lldap address
       tinker '$u = \FireflyIII\User::orderBy("id")->first(); $u->email = "${config.homelab.acmeEmail}"; $u->save();' >/dev/null
       [ -s "$out" ] && exit 0
       podman exec firefly php artisan passport:client --personal --no-interaction --name=homelab >/dev/null 2>&1 || true
@@ -77,7 +77,7 @@
 
   systemd.tmpfiles.rules = [
     "d /var/lib/firefly 0750 1000 1000 -"
-    # 70, not 999: postgres:*-alpine runs as uid 70.
+    # 70: alpine postgres uid
     "d /var/lib/firefly/db 0750 70 70 -"
     "d /var/lib/firefly/upload 0750 1000 1000 -"
   ];

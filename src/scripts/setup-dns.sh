@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Split DNS setup for homelab Routes *.lsck0.dev queries to the homelab router (CoreDNS)
+# split dns: route *.lsck0.dev to the homelab coredns
 
 set -euo pipefail
 

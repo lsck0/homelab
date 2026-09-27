@@ -1,6 +1,6 @@
 { config, lib, pkgs, inputs, ... }:
 let
-  # see the nixpkgs-unstable comment in flake.nix
+  # see nixpkgs-unstable in flake.nix
   runnerPackage = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-runner;
 
   # ───────────────────────────────────────────────────────────────────────────
@@ -11,12 +11,12 @@ let
     "lsck0/webapp-template" = 1;
   };
 
-  # a token with Administration: read and write on those repos (sops: github-runner-token)
+  # needs Administration: read and write on the repos
   apiTokenFile = config.sops.secrets.github-runner-token.path;
 
   slug = repo: lib.replaceStrings [ "/" ] [ "-" ] (lib.toLower repo);
 
-  # The module treats the token file as a PAT only when it starts with "ghp_" or "github_pat_"
+  # module takes only ghp_/github_pat_ as a pat, so mint
   regTokenDir = "/run/github-runner-regtoken";
   regTokenFile = name: "${regTokenDir}/${name}";
 
@@ -32,7 +32,7 @@ let
       | ${pkgs.coreutils}/bin/tr -d '\n' > ${regTokenFile name}
   '';
 
-  # name -> owner/repo, for the minting script above
+  # name -> owner/repo for the minting script
   runnerRepos = lib.listToAttrs (lib.concatLists (lib.mapAttrsToList (repo: count:
     map (n: lib.nameValuePair "${slug repo}-${toString n}" repo) (lib.range 1 count)
   ) repos));
@@ -41,24 +41,24 @@ let
     map (n: lib.nameValuePair "${slug repo}-${toString n}" {
       enable = true;
       package = runnerPackage;
-      # 2.337.0 dropped node20; the module's default would fail its assertion.
+      # 2.337.0 dropped node20
       nodeRuntimes = [ "node24" ];
       url = "https://github.com/${repo}";
       name = "vm-117-${slug repo}-${toString n}";
       tokenFile = regTokenFile "${slug repo}-${toString n}";
 
-      # one job per runner process, then it de-registers
+      # one job per process, then de-register
       ephemeral = true;
 
-      # take over a stale registration with the same name instead of refusing to start
+      # take over a stale same-name registration
       replace = true;
 
       extraLabels = [ "nixos" "homelab" ];
       user = "github-runner";
       group = "github-runner";
-      # No workDir: it defaults to the runtime dir, and setting it to the state dir made
+      # no workDir, the runtime dir default works
 
-      # what a workflow can reasonably expect on the PATH without installing it.
+      # tools workflows expect on PATH
       extraPackages = with pkgs; [
         bash coreutils findutils gnugrep gnused gnutar gzip xz which
         git gh curl jq
@@ -69,19 +69,17 @@ let
       ];
 
       extraEnvironment = {
-        # the internal registry and the Nix cache are reachable from this VM.
+        # internal registry and nix cache reachable
         DOCKER_BUILDKIT = "1";
       };
 
       serviceOverrides = {
-        # CI is bursty and this VM is shared: keep one job from starving the rest of the box
+        # shared vm, keep one job from starving it
         CPUWeight = 50;
         IOWeight = 50;
         MemoryHigh = "2G";
         MemoryMax = "3G";
-        # bounds a hung job, but it also stops a listener that has merely been
-        # idle for 3h, and ephemeral's Restart=on-success does not cover a
-        # timeout, so the unit stayed failed. Restart on any exit instead.
+        # timeout also kills idle listeners, restart always
         RuntimeMaxSec = "3h";
         Restart = lib.mkForce "always";
         RestartSec = 10;
@@ -92,21 +90,21 @@ let
 in {
   networking.hostName = "vm-117";
 
-  # General-purpose GitHub Actions runners, one registration per repo replica.
+  # one github actions runner per repo replica
 
   users.users.github-runner = {
     isSystemUser = true;
     group = "github-runner";
     home = "/var/lib/github-runner";
     createHome = true;
-    # docker for container jobs and `docker build`/`push` to vm-118.
+    # docker jobs and pushes to vm-118
     extraGroups = [ "docker" ];
   };
   users.groups.github-runner = { };
 
   virtualisation.docker = {
     enable = true;
-    # a workflow that leaks images or layers must not fill the disk silently.
+    # leaked images must not fill the disk
     autoPrune = {
       enable = true;
       dates = "daily";
@@ -114,7 +112,7 @@ in {
     };
   };
 
-  # the internal registry (vm-118) serves plain HTTP: allow it explicitly rather than making
+  # registry (vm-118) is plain http
   virtualisation.docker.daemon.settings.insecure-registries = [
     "10.100.0.118:5000"
     "registry.lsck0.dev"
@@ -133,22 +131,22 @@ in {
     "d ${regTokenDir} 0700 root root -"
   ];
 
-  # resolve the lab's own names without going out to Cloudflare.
+  # lab names without cloudflare
   networking.hosts = {
     "10.100.0.118" = [ "registry.lsck0.dev" ];
     "10.100.0.115" = [ "git.lsck0.dev" ];
     "10.100.0.111" = [ "sccache.lsck0.dev" ];
   };
 
-  # nothing listens here: the runners connect out to GitHub.
+  # runners connect out, nothing listens
   networking.firewall.allowedTCPPorts = [ ];
 
   systemd.services = lib.mapAttrs' (n: repo: lib.nameValuePair "github-runner-${n}" {
     serviceConfig = {
-      # "+": as root and outside the sandbox, so it can read the sops secret
+      # "+": root outside the sandbox reads sops
       ExecStartPre = lib.mkBefore [ "+${mintToken n repo}" ];
 
-      # The module emits these with no "-" prefix, but its own unconfigure.sh pre-start deletes
+      # "-" prefix, unconfigure.sh deletes the file
       InaccessiblePaths = lib.mkForce [
         "-${regTokenFile n}"
         "-/var/lib/github-runner/${n}/.current-token"

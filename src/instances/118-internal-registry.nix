@@ -30,7 +30,7 @@
 
   networking.firewall.allowedTCPPorts = [ 80 5000 ];
 
-  # the registry has no authentication and the UI has no login: only the ingress
+  # no auth anywhere, ingress allowlist is the gate
   homelab.ingressOnly = {
     ports = [ 80 5000 ];
     extraSources = [

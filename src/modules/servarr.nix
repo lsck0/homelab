@@ -18,7 +18,7 @@ let
     };
   };
 in {
-  # Radarr/Sonarr/Lidarr/Prowlarr/Bookshelf all share one shape: a linuxserver- style
+  # the *arr apps share one linuxserver container shape
   options.homelab.servarr = lib.mkOption {
     type = lib.types.attrsOf appType;
     default = {};
@@ -26,7 +26,7 @@ in {
   };
 
   config = lib.mkIf (cfg != {}) {
-    # mkDefault: a host that mounts the same path itself (e.g. the token dir) wins instead
+    # a host's own mount of the same path wins
     fileSystems = lib.mkMerge ([
       (lib.mapAttrs (_: lib.mkDefault) (
         nasPath "/data" "bulk" // nasMount tokens "homepage-tokens"
@@ -38,7 +38,7 @@ in {
       ports = [ "${toString app.hostPort}:${toString app.port}" ];
       volumes = [
         "/var/lib/${name}:/config"
-        # one bind: imports hardlink torrents into media
+        # one bind so imports can hardlink
         "/data:/data"
       ];
       environment = {
@@ -60,7 +60,7 @@ in {
         conf=/var/lib/${name}/config.xml
         ${retry} 90 2 test -f "$conf"
 
-        # edit while stopped: the app may write its config back on shutdown.
+        # edit stopped: the app rewrites config on shutdown
         if ! grep -q '<AuthenticationMethod>External</AuthenticationMethod>' "$conf"; then
           systemctl stop podman-${name}.service
           sed -i 's|<AuthenticationMethod>.*</AuthenticationMethod>|<AuthenticationMethod>External</AuthenticationMethod>|' "$conf"
@@ -79,7 +79,7 @@ in {
 
     networking.firewall.allowedTCPPorts = lib.mapAttrsToList (_: app: app.hostPort) cfg;
 
-    # these apps have AuthenticationRequired=DisabledForLocalAddresses
+    # local addresses skip auth, so guard the port
     homelab.ingressOnly = {
       ports = lib.mapAttrsToList (_: app: app.hostPort) cfg;
       extraSources = map (id: "10.100.0.${toString id}/32")

@@ -10,7 +10,7 @@
     address = "0.0.0.0";
     port = 8080;
     settings = {
-      # Authelia ForwardAuth gates access and passes the user in Remote-User
+      # authelia passes the user in Remote-User
       PAPERLESS_ENABLE_HTTP_REMOTE_USER = "true";
       PAPERLESS_HTTP_REMOTE_USER_HEADER_NAME = "HTTP_REMOTE_USER";
       PAPERLESS_URL = "https://paperless.lsck0.dev";
@@ -45,12 +45,12 @@
     '';
   };
 
-  # the documents themselves are plain files the snapshot handles
+  # documents are plain files, snapshots cover them
   homelab.dbBackup.databases.paperless.sqlite = "/var/lib/paperless/db.sqlite3";
 
   networking.firewall.allowedTCPPorts = [ 8080 ];
 
-  # PAPERLESS_ENABLE_HTTP_REMOTE_USER makes Paperless trust the Remote-User header
+  # paperless trusts Remote-User, so ingress only
   homelab.ingressOnly = {
     ports = [ 8080 ];
     extraSources = [ "10.100.0.122/32" ];

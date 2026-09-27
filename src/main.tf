@@ -93,7 +93,7 @@ provider "proxmox" {
   insecure  = var.proxmox_insecure
 
   ssh {
-    # The provider imports every new VM's disk over SSH.
+    # provider imports new vm disks over ssh
     agent    = var.proxmox_ssh_password == null || var.proxmox_ssh_password == ""
     username = var.proxmox_ssh_user
     password = var.proxmox_ssh_password == "" ? null : var.proxmox_ssh_password
@@ -105,7 +105,7 @@ provider "proxmox" {
   }
 }
 
-# Proxmox storage holding bulk media, on the 2 TB spinning disk.
+# bulk media storage on the 2 tb hdd
 variable "bulk_datastore" {
   type    = string
   default = ""

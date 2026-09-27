@@ -1,6 +1,6 @@
 { ... }:
 let
-  # zero-downtime rollout: the new task must pass its healthcheck before the old one
+  # zero-downtime: new task must be healthy first
   webService = image: publishedPort: ''
     image: ${image}
     ports:
@@ -26,7 +26,7 @@ let
 in {
   networking.hostName = "vm-209";
 
-  # CI/CD target.
+  # ci/cd target
   homelab.swarm = {
     enable = true;
     updateInterval = "1m";
@@ -44,7 +44,7 @@ in {
       '';
     };
 
-    # private image example (token in sops): registries."ghcr.io" =
+    # private images: add a registries."ghcr.io" entry
   };
 
   networking.firewall.allowedTCPPorts = [ 80 8080 ];

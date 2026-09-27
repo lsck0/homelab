@@ -9,7 +9,7 @@ let
     scene: !include scenes.yaml
   '';
 
-  # 2026.9 ignores the YAML http: block; hass-http writes it to .storage/http
+  # 2026.9 ignores yaml http:, hass-http writes .storage
   httpStable = builtins.toJSON {
     server_port = 8123;
     server_host = [ "0.0.0.0" ];
@@ -56,7 +56,7 @@ in {
     "f /var/lib/homeassistant/scenes.yaml 0640 1000 1000 -"
   ];
 
-  # generate long-lived access token for Homepage widget
+  # long-lived token for the homepage widget
   systemd.services.hass-homepage-token = {
     description = "Generate Home Assistant token for Homepage";
     after = [ "podman-homeassistant.service" ];
@@ -68,17 +68,16 @@ in {
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/hass-key.token"
       [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
-      # wait for HA to be ready
+      # wait for ha
       for i in $(seq 1 120); do
         curl -sf http://127.0.0.1:80/api/ >/dev/null 2>&1 && break
-        # also accept 401 (means HA is up but needs auth)
+        # 401 still means up
         CODE=$(curl -sf -o /dev/null -w "%{http_code}" http://127.0.0.1:80/api/ 2>/dev/null || true)
         [ "$CODE" = "401" ] && break
         sleep 2
       done
 
-      # onboarding is the only unattended way to a token: HA has no password
-      # grant, so an onboarded instance without a token file needs a manual one.
+      # onboarding is the only unattended token path
       ONBOARD=$(curl -sf http://127.0.0.1:80/api/onboarding 2>/dev/null || true)
       if echo "$ONBOARD" | grep -q '"done":false'; then
         [ -s /var/lib/homepage-tokens/hass-pass.token ] || openssl rand -hex 16 | tr -d '\n' > /var/lib/homepage-tokens/hass-pass.token
@@ -92,7 +91,7 @@ in {
           -d "grant_type=authorization_code&code=$AUTH_CODE&client_id=http://127.0.0.1:80/" 2>/dev/null \
           | grep -oP '"access_token"\s*:\s*"\K[^"]+' || true)
 
-        # complete remaining onboarding steps
+        # finish remaining onboarding steps
         for step in core_config analytics; do
           curl -sf -X POST "http://127.0.0.1:80/api/onboarding/$step" \
             -H "Authorization: Bearer $ACCESS_TOKEN" \
@@ -108,7 +107,7 @@ in {
       fi
       [ -z "$ACCESS_TOKEN" ] && exit 1
 
-      # create long-lived access token via WebSocket API
+      # long-lived token via websocket api
       LLAT=$(python3 -c "
       import asyncio, json, websockets
       async def main():

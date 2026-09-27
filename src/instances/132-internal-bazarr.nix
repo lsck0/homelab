@@ -1,7 +1,7 @@
 { pkgs, nasMount, nasPath, retry, ... }: {
   networking.hostName = "vm-132";
 
-  # Bazarr: subtitles for the Radarr/Sonarr libraries.
+  # bazarr: subtitles for radarr and sonarr
   fileSystems = nasMount "/var/lib/bazarr" "bazarr"
     // nasPath "/data/media" "bulk/media"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
@@ -41,7 +41,7 @@
 
   networking.firewall.allowedTCPPorts = [ 80 ];
 
-  # Bazarr's own login is off (Authelia gates the route); vm-133 drives its API.
+  # authelia gates the route, vm-133 drives the api
   homelab.ingressOnly = {
     ports = [ 80 ];
     extraSources = [ "10.100.0.133/32" ];

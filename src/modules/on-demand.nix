@@ -12,7 +12,7 @@ let
       systemctl is-active --quiet ondemand-${n}.service && exit 0
     '') active);
 
-  # "15m" -> 900.
+  # "15m" -> 900
   toSeconds = s:
     let m = builtins.match "([0-9]+)(s|m|h|d)" s;
         unit = { s = 1; m = 60; h = 3600; d = 86400; };
@@ -31,26 +31,16 @@ let
     export PATH="${lib.makeBinPath [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.netcat-gnu ]}"
     ${apiEnv svc}
 
-    # keep the client waiting until the app really answers. An open port is not
-    # enough, apps often return 5xx for a while after starting.
-    #
-    # Two consecutive good checks are required, one second apart. A single one is
-    # not enough: when a connection arrives while the VM is still shutting down
-    # (the previous proxy's ExecStopPost asked for a shutdown moments earlier),
-    # the port is briefly still accepting, this script would declare the backend
-    # ready, and systemd-socket-proxyd would then hit "Failed to connect to
-    # remote host: Connection refused" - which is the 502 the clients saw.
+    # two good checks: a shutting-down vm still accepts briefly (502)
     good=0
     for i in $(seq 1 ${toString svc.bootTimeout}); do
-      # check the power state every 10s, the VM might be shutting down right now.
-      # API errors just mean we try again next round.
+      # recheck power state every 10s; api errors retry
       if [ $((i % 10)) -eq 1 ]; then
         STATUS=$(vm_status || echo unknown)
         if [ "$STATUS" = "stopped" ]; then
           echo "vm-${toString svc.vmid} is stopped, starting for ${name}"
           pve -X POST "$API/status/start" >/dev/null || echo "start request failed, retrying"
-          # a start was just requested: anything that answered before it is the
-          # old instance on its way out, so do not count it.
+          # earlier answers came from the dying instance
           good=0
         fi
       fi
@@ -74,8 +64,7 @@ let
     set -euo pipefail
     export PATH="${lib.makeBinPath [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ]}"
 
-    # only power down after a clean idle exit. A crash or a failed wake must
-    # leave the VM alone, otherwise a boot loop would keep shutting it off.
+    # only after a clean idle exit, never on crash
     [ "''${SERVICE_RESULT:-}" = "success" ] || exit 0
     ${siblingsBusy svc}
     ${apiEnv svc}
@@ -84,7 +73,7 @@ let
     pve -X POST "$API/status/shutdown" >/dev/null
   '';
 
-  # the proxy only powers a VM off after it served a connection.
+  # powers off vms the proxy never served
   reaperScript = pkgs.writeShellScript "ondemand-reaper" ''
     set -uo pipefail
     export PATH="${lib.makeBinPath [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ]}"
@@ -201,14 +190,14 @@ in {
         message = "vm ${id} (${vm.name}) is onDemand but has no homelab.onDemand.services entry on the ${cfg.side} Traefik";
       }) inventory);
 
-    # the first connection waits in the socket queue while the VM boots.
+    # first connection queues while the vm boots
     systemd.sockets = lib.mapAttrs' (name: svc:
       lib.nameValuePair "ondemand-${name}" {
         description = "On-demand activation socket for ${name}";
         wantedBy = [ "sockets.target" ];
         socketConfig = {
           ListenStream = "127.0.0.1:${toString svc.listenPort}";
-          # one proxy process for all connections, not one per connection.
+          # one proxy for all connections
           Accept = false;
         };
       }
@@ -221,14 +210,14 @@ in {
         wants = [ "network-online.target" ];
         after = [ "ondemand-${name}.socket" "network-online.target" ];
         serviceConfig = {
-          # start-pre holds the client while the VM boots; systemd's default 90s start timeout
+          # default 90s is shorter than a boot
           TimeoutStartSec = svc.bootTimeout + 60;
           ExecStartPre = wakeScript name svc;
           ExecStart = "${pkgs.systemd}/lib/systemd/systemd-socket-proxyd"
             + " --exit-idle-time=${(vmOf svc).cooldown}"
             + " ${(vmOf svc).ip}:${toString svc.targetPort}";
           ExecStopPost = sleepScript name svc;
-          # A failed wake should not blacklist the unit; the next connection retries.
+          # next connection retries a failed wake
           Restart = "no";
         };
       }

@@ -1,15 +1,4 @@
-"""Push the TRMNL dashboard templates from this repo to the plugins.
-
-The .liquid files under src/modules/trmnl are the dashboards, and until this
-existed nothing carried them anywhere: every change was uploaded by hand with
-curl. So the repo held the source of truth for how the panels look and the
-panels held whatever had last been pasted into them - the one place in the lab
-where a service's visible behaviour lived outside git.
-
-Reconciles rather than pushes: TRMNL will hand back the markup a plugin
-currently has, so a run that changes nothing sends nothing. That matters more
-than saving a request - a push is rate-limited, and pushing six templates that
-were already correct is how a run ends in 429.
+"""Push the repo's TRMNL templates to the plugins; no-op if unchanged.
 
 Usage: trmnl-sync.py <id>=<path> [<id>=<path> ...]
 The key comes from TRMNL_API_KEY_FILE.
@@ -23,7 +12,7 @@ import urllib.error
 import urllib.request
 
 BASE = "https://trmnl.com/api/plugin_settings"
-# TRMNL rate-limits writes; six back-to-back pushes answered 429 when these were uploaded
+# rate-limited: six back-to-back pushes hit 429
 PUSH_INTERVAL = float(os.environ.get("TRMNL_PUSH_INTERVAL", "12"))
 TIMEOUT = 40
 
@@ -33,7 +22,7 @@ def call(path, token, body=None, method=None):
     req = urllib.request.Request(BASE + path, data=data, method=method)
     req.add_header("Authorization", "Bearer " + token)
     req.add_header("Content-Type", "application/json")
-    # TRMNL is behind Cloudflare, which refuses urllib's default agent with a bare 403
+    # cloudflare 403s urllib's default user agent
     req.add_header("User-Agent", "homelab-trmnl-sync/1.0 (+https://lsck0.dev)")
     with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
         raw = r.read()
@@ -47,7 +36,7 @@ def current(plugin_id, token):
     except (urllib.error.URLError, ValueError) as e:
         print(f"{plugin_id}: could not read the current markup: {e}", file=sys.stderr)
         return None
-    # A freshly created plugin answers 200 with no markup at all; that is empty
+    # fresh plugins return 200 with no markup
     return (body or {}).get("data", {}).get("markup") or ""
 
 
@@ -79,7 +68,7 @@ def main():
             unchanged += 1
             continue
 
-        # spacing only between writes, so a run with one change is not slow
+        # space only between writes
         if pushed:
             time.sleep(PUSH_INTERVAL)
         try:

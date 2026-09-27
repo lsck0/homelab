@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# End-to-end test of the media stack wiring, against the real app containers.
+# media stack wiring e2e test, real app containers
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# tools from the flake's nixpkgs, so the scripts run with the same versions.
+# same tool versions as the lab
 if [ -z "${MEDIA_TEST_SHELL:-}" ]; then
   exec nix shell --inputs-from "$SRC" \
     nixpkgs#bash nixpkgs#curl nixpkgs#jq nixpkgs#yq-go nixpkgs#gnused nixpkgs#gnugrep \
@@ -15,7 +15,7 @@ fi
 W=$(mktemp -d /tmp/media-stack.XXXXXX)
 NET=mediatest
 SUBNET=172.30.99.0/24
-P=mt-   # container name prefix on the host; aliases are the plain names
+P=mt-   # container prefix, aliases stay plain
 FAILED=0
 KEEP=${KEEP:-0}
 
@@ -36,11 +36,11 @@ check() { local desc=$1; shift; if "$@" >/dev/null 2>&1; then ok "$desc"; else f
 nixeval() { nix eval --no-warn-dirty --raw "$SRC#nixosConfigurations.$1.config.$2"; }
 image() { nixeval "$1" "virtualisation.oci-containers.containers.$2.image"; }
 
-# script body of a NixOS unit, with lab-specific strings replaced. unit_script <host> <unit>
+# unit_script <host> <unit> [sed exprs...]
 unit_script() {
   local host=$1 unit=$2 out="$W/scripts/$2.sh"; shift 2
   mkdir -p "$W/scripts"
-  # realise the unit so every store path its script references exists here
+  # realise the store paths the script references
   nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.$host.config.systemd.units.\"$unit.service\".unit"
   { echo 'set -e'; nixeval "$host" "systemd.services.\"$unit\".script"; } > "$out"
   local e; for e in "$@"; do sed -i "$e" "$out"; done
@@ -48,7 +48,7 @@ unit_script() {
 }
 run_unit() { local s; s=$(unit_script "$@"); echo ">>> $2"; bash "$s"; }
 
-# the unit scripts call podman on the VMs; Docker here.
+# podman on the vms, docker here
 mkdir -p "$W/bin" "$W/tokens"
 printf '#!/bin/sh\nexec docker "$@"\n' > "$W/bin/podman"; chmod +x "$W/bin/podman"
 export PATH="$W/bin:$PATH"
@@ -95,7 +95,7 @@ Q="s#/var/lib/qbittorrent#$W/qbittorrent#g"
 run_unit 112-internal-qbittorrent qbittorrent-disable-auth "$Q" \
   "s#systemctl stop podman-qbittorrent.service#docker stop ${P}qbittorrent#" \
   "s#systemctl start podman-qbittorrent.service#docker start ${P}qbittorrent#"
-# the API whitelist lists the lab VMs; here the *arrs live on the test subnet.
+# whitelist the test subnet, not the lab vms
 nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.112-internal-qbittorrent.config.systemd.units.\"qbittorrent-settings.service\".unit"
 QPREFS=$(nixeval 112-internal-qbittorrent systemd.services.qbittorrent-settings.script | grep -o '/nix/store/[^ ]*-qbittorrent-prefs.json')
 jq --arg s "$SUBNET" '.bypass_auth_subnet_whitelist = $s' "$QPREFS" > "$W/qbittorrent-prefs.json"
@@ -113,7 +113,7 @@ done
 run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:18096#g"
 run_unit 128-internal-jellyseerr jellyseerr-token "$TOK" "s#/var/lib/jellyseerr#$W/jellyseerr#g"
 run_unit 132-internal-bazarr bazarr-token "$TOK" "s#/var/lib/bazarr#$W/bazarr#g"
-# an install from before generated passwords: admin with the old default
+# simulate a pre-generated-password install
 for i in $(seq 1 60); do
   curl -s -X POST http://127.0.0.1:15000/api/Account/register -H "Content-Type: application/json" \
     -d '{"username":"admin","password":"Admin123!","email":"admin@internal"}' >/dev/null || true
@@ -155,7 +155,7 @@ echo ">>> Checks"
 
 key() { cat "$W/tokens/$1.token"; }
 api() { curl -sf -H "X-Api-Key: $2" "$1"; }
-test_client() { # base apiver key  -> run the app's own connection test on its qBittorrent client
+test_client() { # base apiver key: app's own qbit test
   local body; body=$(api "$1/api/$2/downloadclient" "$3" | jq -c 'first(.[] | select(.implementation=="QBittorrent"))')
   curl -sf -X POST -H "X-Api-Key: $3" -H "Content-Type: application/json" --data "$body" "$1/api/$2/downloadclient/test"
 }
@@ -198,7 +198,7 @@ check "jellyseerr: sonarr anime folder set" sh -c "curl -sf -H 'X-Api-Key: $jk' 
 bk=$(key bazarr-key)
 check "bazarr: radarr + sonarr enabled" sh -c "curl -sf -H 'X-API-KEY: $bk' http://127.0.0.1:16767/api/system/settings | jq -e '.general.use_radarr and .general.use_sonarr'"
 
-# every test client is on the API whitelist, where any login succeeds: check the stored PBKDF2
+# whitelisted logins always succeed, check the hash
 qbit_password_is() {
   python3 - "$W/qbittorrent/qBittorrent/qBittorrent.conf" "$1" <<'PY'
 import base64, hashlib, re, sys

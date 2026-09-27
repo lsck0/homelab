@@ -4,12 +4,12 @@ let
   routes = allRoutes.external;
   address = config.homelab.onDemand.address;
 
-  # internal hosts that must NOT be reachable from the internet: headless routes whose
+  # headless token-only hosts stay off the internet
   blockedInternal = lib.filterAttrs
     (_: r: !(r.publicRelay or ((r.auth or "sso") != "token")))
     allRoutes.internal;
 
-  # Anubis PoW bot filter on the browser-facing routes: on = Traefik points at the Anubis
+  # anubis pow filter on browser-facing routes
   anubisEnable = true;
   anubisRoutes = [ "searxng" "privatebin" "share" "hello" "hello-gh" ];
   anubisPort = name: 27000 + lib.lists.findFirstIndex (n: n == name) 0 anubisRoutes;
@@ -17,7 +17,7 @@ let
 in {
   networking.hostName = "vm-200";
 
-  # every backend goes through homelab.onDemand: VMs with enabled = "onDemand" in instances.tf
+  # backends wake via homelab.onDemand
   sops.secrets.proxmox-api-token = {};
   homelab.onDemand = {
     enable = true;
@@ -28,7 +28,7 @@ in {
       targetPort = routes.${name}.port;
       listenPort = 20000 + i;
     }) (lib.attrNames routes)) // {
-      # raw TCP: the wake proxy holds the player's connection while the VM boots.
+      # raw tcp, proxy holds the player while booting
       minecraft = { vmid = 208; targetPort = 25565; listenPort = 25566; bootTimeout = 300; httpCheck = false; };
     };
   };
@@ -39,21 +39,21 @@ in {
   homelab.traefik = {
     enable = true;
 
-    # the relay re-applies its own headers on top of the internal Traefik's
+    # relay re-applies headers over internal traefik's
     sameOriginFrameRouters = [ "jellyfin-relay" ];
-    # behind Cloudflare: take the real client IP from X-Forwarded-For so Anubis and CrowdSec
+    # real client ip from cloudflare's x-forwarded-for
     trustCloudflare = true;
 
-    # deny public access to headless internal-only services (no own auth): every request here
+    # headless internal-only services: private ranges only
     middlewares.internal-only.ipAllowList.sourceRange = [
       "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16"
     ];
 
-    # CrowdSec bouncer (blocklist + bans) + AppSec/WAF on every route
+    # crowdsec bouncer plus appsec waf everywhere
     crowdsecBouncer.enable = true;
     crowdsecBouncer.appsec = true;
     crowdsecBouncer.noAppsecRouters = [ "headscale-tls" "ntfy-tls" ];
-    # The bouncer's own whitelist, which only stops it acting on a decision.
+    # bouncer whitelist only skips decisions
     crowdsecBouncer.whitelistCidrs = [
       "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16"
     ];
@@ -66,18 +66,18 @@ in {
       });
     };
 
-    # robots.txt + llms.txt on every public host, and iocaine for the crawlers that ignore both.
+    # robots.txt, llms.txt, iocaine for ignorers
     botDefense.enable = true;
 
-    # Cloudflare is only a chokepoint if the origin turns away everyone else.
+    # origin refuses everyone but cloudflare
     cloudflareOnly.enable = true;
     cloudflareOnly.exemptRouters =
       map (name: "${name}-tls") (lib.attrNames (lib.filterAttrs (_: r: !(r.proxied or true)) routes))
       ++ [ "calendar-tls" "terminal-tls" "wellknown-tls" "labyrinth-tls" ]
-      # already restricted to private ranges by the internal-only middleware.
+      # already private-only via internal-only
       ++ map (name: "${name}-block") (lib.attrNames blockedInternal);
 
-    # cap request bodies on the routes that only ever take small posts.
+    # cap bodies on small-post routes
     bodyLimit = 32 * 1024 * 1024;
     bodyLimitRouters = [ "searxng-tls" "hello-tls" "hello-gh-tls" ];
 
@@ -89,12 +89,12 @@ in {
       entryPoints = [ "websecure" ];
       tls.certResolver = "cloudflare";
     }) routes // {
-      # the calendar lives on the internal side; only this one host is relayed through
+      # calendar is internal, only this host is relayed
       calendar-tls   = { rule = "Host(`cal.lsck0.dev`)"; service = "calendar"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-      # same for the terminal's stats feed.
+      # same for the terminal stats feed
       terminal-tls   = { rule = "Host(`terminal.lsck0.dev`)"; service = "calendar"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
 
-      # catch-all (lowest priority): any *.lsck0.dev not matched above is an internal service
+      # catch-all: unmatched hosts relay to internal traefik
       internal-relay = {
         rule = "HostRegexp(`^[a-z0-9-]+\\.lsck0\\.dev$`)";
         service = "internal-relay";
@@ -104,7 +104,7 @@ in {
         tls.domains = [{ main = "lsck0.dev"; sans = [ "*.lsck0.dev" ]; }];
       };
 
-      # same upstream as internal-relay, but outranks it so the SAMEORIGIN header applies
+      # outranks internal-relay for SAMEORIGIN
       jellyfin-relay = {
         rule = "Host(`jellyfin.lsck0.dev`)";
         service = "internal-relay";
@@ -114,7 +114,7 @@ in {
         tls.domains = [{ main = "lsck0.dev"; sans = [ "*.lsck0.dev" ]; }];
       };
     }
-    # one higher-priority router per token-only internal host
+    # one blocking router per token-only host
     // lib.mapAttrs' (name: r: lib.nameValuePair "${name}-block" {
       rule = "Host(`${r.host}.lsck0.dev`)";
       service = "internal-relay";
@@ -133,13 +133,13 @@ in {
     }) routes // {
       calendar.loadBalancer.servers = [{ url = "https://10.100.0.100:443"; }];
       calendar.loadBalancer.serversTransport = "internal-traefik";
-      # relay backend for the catch-all: forward to internal Traefik over HTTPS
+      # catch-all relay to internal traefik over https
       internal-relay.loadBalancer.servers = [{ url = "https://10.100.0.100:443"; }];
       internal-relay.loadBalancer.serversTransport = "internal-relay";
       internal-relay.loadBalancer.passHostHeader = true;
     };
 
-    # Traefik takes SNI from the server URL, which is an IP here
+    # sni comes from the url, an ip here
     serversTransports.internal-traefik.serverName = "cal.lsck0.dev";
     serversTransports.internal-relay.insecureSkipVerify = true;
 

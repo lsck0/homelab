@@ -2,11 +2,11 @@
 
 let
   nasIP = "10.100.0.109";
-  # read-write mounts are `hard`: a `soft` rw mount returns an I/O error to the application
+  # soft rw mounts surface i/o errors to apps
   nfsOpts = [ "nfsvers=4" "rw" "hard" "timeo=50" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
   nfsOptsRo = [ "nfsvers=4" "ro" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
 
-  # the only /srv/nas/data shares the DMZ may mount
+  # the only shares the dmz may mount
   dmzShares = {
     "200" = [ "crowdsec-external" "traefik-acme-external" ];
     "204" = [ "searxng" ];
@@ -53,20 +53,21 @@ in {
     };
   };
 
-  # Postgres on NFS is slow to stop; the 45s default kills it and it stays failed a DMZ mount
+  # dmz vms may only mount their own shares
   assertions = lib.optionals external (map (d: {
     assertion = lib.elem d allowed;
     message = "${config.networking.hostName} mounts ${d}, which is not in dmzShares.\"${vmid}\" (modules/nas.nix)";
   }) nasDevices);
 
   systemd.services = {
+    # nfs postgres outlives the 45s stop default
     postgresql.serviceConfig = lib.mkIf (config.services.postgresql.enable or false) {
       TimeoutStopSec = "3min";
       Restart = lib.mkForce "on-failure";
       RestartSec = 10;
     };
 
-    # systemd-tmpfiles skips paths below an automount that is not mounted yet
+    # tmpfiles skips unmounted automounts
     nas-tmpfiles = lib.mkIf (nasMountpoints != [ ]) {
       description = "Create tmpfiles directories inside the NAS mounts";
       wants = [ "network-online.target" ];
@@ -83,11 +84,11 @@ in {
       '';
     };
   }
-  # a container that starts before its share is ready fails: keep retrying instead of giving
+  # keep retrying containers until the share is up
   // lib.genAttrs containerUnits (_: {
     startLimitIntervalSec = 0;
     serviceConfig.RestartSec = lib.mkDefault 10;
-    # `before` alone does not stop a container starting with the share unmounted
+    # before alone allows an unmounted start
     requires = nasAutomounts;
     after = nasAutomounts;
   });

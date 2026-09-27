@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Keep a pull mirror in Forgejo of every GitHub repository this account owns.
+# pull-mirror every owned github repo into forgejo
 set -euo pipefail
 
 FORGEJO_URL=${FORGEJO_URL:-http://127.0.0.1:80}
@@ -17,7 +17,7 @@ GITHUB_TOKEN=$(cat "${GITHUB_TOKEN_FILE:?}")
 problems=0
 later() { echo "$*"; problems=$((problems + 1)); }
 
-# Forgejo normalises a mirror interval on the way in: "8h" is reported back as "8h0m0s".
+# forgejo reports "8h" back as "8h0m0s"
 dur_seconds() {
   echo "$1" | awk '{
     s = 0; t = $0
@@ -77,7 +77,7 @@ while read -r repo; do
   existing=$(fj GET "/repos/$FORGEJO_OWNER/$name" || true)
   if [ "$(echo "$existing" | jq -r '.id // empty')" != "" ]; then
     if [ "$(echo "$existing" | jq -r '.mirror')" != "true" ]; then
-      # a real repository living at the name we want. Never clobber it.
+      # a real repo owns the name; never clobber it
       later "$name: exists in Forgejo and is not a mirror, left alone"
       skipped=$((skipped + 1))
       continue
@@ -94,7 +94,7 @@ while read -r repo; do
       continue
     fi
   else
-    # Only a private repository gets the token.
+    # only private repos get the token
     body=$(jq -cn \
       --arg addr "$clone" --arg name "$name" --arg owner "$FORGEJO_OWNER" \
       --arg interval "$MIRROR_INTERVAL" --arg tok "$GITHUB_TOKEN" \
@@ -103,19 +103,19 @@ while read -r repo; do
         clone_addr: $addr, repo_name: $name, repo_owner: $owner,
         service: "github", mirror: true, mirror_interval: $interval,
         private: $private,
-        # copied once by the migration; GitHub has no incremental feed for them
+        # copied once; github has no incremental feed
         issues: true, labels: true, milestones: true, releases: true, wiki: true
       } + (if $private then {auth_token: $tok} else {} end)')
     if fj POST "/repos/migrate" -d "$body" >/dev/null; then
       echo "$name: mirror created"
       created=$((created + 1))
-      continue   # migration clones straight away; no need to ask for a sync
+      continue   # migration clones immediately
     fi
     later "$name: migration failed"
     continue
   fi
 
-  # An existing mirror is only as good as its last fetch
+  # a mirror is only as good as its last fetch
   fj POST "/repos/$FORGEJO_OWNER/$name/mirror-sync" >/dev/null \
     || later "$name: sync request failed"
 done <<< "$repos"

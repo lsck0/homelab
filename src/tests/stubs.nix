@@ -1,7 +1,7 @@
-# Test stand-ins for things the VMs get from the lab: sops secrets and templates
+# test stand-ins for lab secrets and templates
 { lib, config, ... }:
 let
-  # numeric where the consumer parses a number (the Telegram chat id).
+  # numeric where parsed as a number
   dummy = name: if lib.hasSuffix "chat-id" name then "12345" else "test-${name}";
 in
 {
@@ -40,7 +40,7 @@ in
   config = {
     sops.placeholder = lib.mapAttrs (name: _: dummy name) config.sops.secrets;
 
-    # readable by everyone: tests only, dummy values.
+    # world-readable, dummy values
     system.activationScripts.sopsStub = lib.stringAfter [ "users" ] (''
       mkdir -p /run/secrets/rendered
     '' + lib.concatStrings (lib.mapAttrsToList (_: s: ''
@@ -53,7 +53,7 @@ in
       nasMount = _: _: { };
       nasPath = _: _: { };
       nasMedia = _: _: { };
-      # network.nix (imported above for the homelab.ingressOnly option) reads the inventory.
+      # network.nix reads the inventory
       inventory = lib.mkDefault { };
     };
   };

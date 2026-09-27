@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Turn a group of VMs on or off in src/instances.tf, then deploy with ./sync.sh.
+# toggle a vm group in src/instances.tf, then ./sync.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -62,7 +62,7 @@ for id in $(group_ids "$GROUP"); do
   printf '  %-4s %-34s %s -> %s\n' "$id" "$(name_of "$id")" "$cur" "$want_bare"
   CHANGED=1
   if [ "$APPLY" = 1 ]; then
-    # replace `enabled = <x>,` only inside this id's block: the first such line after
+    # replace `enabled` only inside this id's block
     python3 - "$TF" "$id" "$VALUE" <<'PY'
 import re, sys
 path, vm_id, value = sys.argv[1], sys.argv[2], sys.argv[3]

@@ -1,6 +1,6 @@
 { config, pkgs, lib, retry, ... }:
 let
-  # one ntfy account per publisher, each restricted to the topics it needs. ntfy has
+  # one account per publisher, limited to its topics
   users = {
     luca = { secret = "ntfy-admin-password"; role = "admin"; access = { }; };
     grafana = { secret = "ntfy-grafana-password"; role = "user"; access = { "homelab-alerts" = "write-only"; }; };
@@ -11,7 +11,7 @@ in {
 
   sops.secrets = lib.mapAttrs' (_: u: lib.nameValuePair u.secret { }) users;
 
-  # ntfy push notifications.
+  # ntfy push notifications
   services.ntfy-sh = {
     enable = true;
     settings = {
@@ -22,7 +22,7 @@ in {
       auth-default-access = "deny-all";
       cache-file = "/var/lib/ntfy-sh/cache.db";
       attachment-cache-dir = "/var/lib/ntfy-sh/attachments";
-      # an unauthenticated flood must not be able to fill the disk or the connection table
+      # unauthenticated floods must not fill disk or conntrack
       visitor-request-limit-burst = 60;
       visitor-request-limit-replenish = "5s";
       visitor-subscription-limit = 30;
@@ -36,7 +36,7 @@ in {
     "d /var/lib/ntfy-sh 0750 ntfy-sh ntfy-sh -"
   ];
 
-  # seed the accounts and their per-topic ACLs.
+  # seed accounts and per-topic acls
   systemd.services.ntfy-users = {
     description = "Seed ntfy users and per-topic access";
     after = [ "ntfy-sh.service" ];

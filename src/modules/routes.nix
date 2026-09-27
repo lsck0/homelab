@@ -1,26 +1,26 @@
-# <host>.lsck0.dev -> backend.
+# <host>.lsck0.dev -> backend
 {
   internal = {
     authelia       = { host = "auth";        vmid = 101; port = 9091;  auth = "portal"; };
-    # the directory itself: only the owner may edit accounts and groups.
+    # only admins edit accounts
     lldap          = { host = "lldap";       vmid = 102; port = 17170; group = "admins"; };
     homepage       = { host = "homepage";    vmid = 103; port = 80; };
     grafana        = { host = "grafana";     vmid = 105; port = 80;    group = "admins"; };
     kopia          = { host = "backup";      vmid = 107; port = 51515; group = "admins"; };
     nas            = { host = "nas";         vmid = 109; port = 80;    group = "admins"; };
     syncthing      = { host = "sync";        vmid = 109; port = 8384;  group = "admins"; };
-    # nix clients authenticate to attic with their own token
+    # nix clients use attic tokens
     attic          = { host = "attic";       vmid = 110; port = 8080;  auth = "token"; };
     qbittorrent    = { host = "torrent";     vmid = 112; port = 80;    group = "media"; };
-    # Forgejo signs in through Authelia OIDC; git clients use tokens/SSH.
+    # authelia oidc; git clients use tokens/ssh
     forgejo        = { host = "git";         vmid = 115; port = 80;    auth = "own";
                        loginRedirect = { path = "/user/login"; to = "/user/oauth2/authelia"; }; };
-    # headless API: docker clients cannot follow a browser login.
+    # docker clients cannot follow a browser login
     registry-api   = { host = "registry";    vmid = 118; port = 5000;  auth = "token"; };
     registry-ui    = { host = "registry-ui"; vmid = 118; port = 80;    group = "admins"; };
-    # the TRMNL cloud polls this and cannot log
+    # the trmnl cloud polls this, cannot log in
     calendar       = { host = "cal";         vmid = 104; port = 8081; auth = "token"; publicRelay = true; proxied = false; };
-    # the e-ink terminal's data feeds.
+    # e-ink terminal data feeds
     terminal       = { host = "terminal";    vmid = 104; port = 8081; auth = "token"; publicRelay = true; proxied = false; };
     paperless      = { host = "paperless";   vmid = 121; port = 8080; };
     paperless-ai   = { host = "paperless-ai"; vmid = 122; port = 80;   group = "admins"; };
@@ -32,12 +32,12 @@
     radarr         = { host = "radarr";      vmid = 130; port = 80;    group = "admins"; };
     sonarr         = { host = "sonarr";      vmid = 131; port = 80;    group = "admins"; };
     bazarr         = { host = "subs";        vmid = 132; port = 80;    group = "admins"; };
-    # Jellyfin authenticates against lldap (LDAP plugin)
+    # authenticates via lldap plugin
     jellyfin       = { host = "jellyfin";    vmid = 134; port = 80;    auth = "own";
                        loginRedirect = { path = "/"; to = "/sso/OID/start/authelia"; }; };
     navidrome      = { host = "music";       vmid = 136; port = 80;    group = "media"; };
     lidarr         = { host = "lidarr";      vmid = 136; port = 8686;  group = "admins"; };
-    # A tailscale client cannot log in to Authelia, so no ForwardAuth here; Headscale
+    # tailscale clients cannot log in to authelia
     headscale      = { host = "hs";          vmid = 138; port = 80;    auth = "own"; };
     headplane      = { host = "hs-ui";       vmid = 138; port = 3000;  group = "admins";
                        loginRedirect = { path = "/"; to = "/admin/"; }; };
@@ -48,7 +48,7 @@
     privatebin = { host = "paste";    vmid = 206; port = 80; proxied = false; };
     share      = { host = "share";    vmid = 207; port = 80; proxied = false; };
     ntfy       = { host = "ntfy";     vmid = 203; port = 80; };
-    # CI/CD targets on the swarm host: hello <- Forgejo, hello-gh <- GitHub.
+    # ci targets: hello <- forgejo, hello-gh <- github
     hello      = { host = "hello";    vmid = 209; port = 80; proxied = false; };
     hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; proxied = false; };
   };

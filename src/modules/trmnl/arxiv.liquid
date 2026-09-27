@@ -1,21 +1,9 @@
-{%- comment -%}
-Today's arXiv mathematics announcements. One polling URL:
-
-  https://terminal.lsck0.dev/<token>/arxiv.json
-
-src/scripts/arxiv-sync.py reads the daily announcement feed, keeps the papers
-announced as new, strips the TeX out of the titles and shortens the author
-lists, so this only has to lay them out.
-
-Kept flat, one tag per line. Do not run "Fix indentation" on it.
-{%- endcomment -%}
+{%- comment -%} daily arxiv math; kept flat, do not reindent {%- endcomment -%}
 
 <style>
-/* TRMNL's .layout centres and pads a single child, which renders a full-bleed
-   list as a narrow column in the middle of the screen. */
+/* undo trmnl's centring wrapper */
 .layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
-/* vh, not %: the renderer gives .layout no definite height, so a percentage
-   chain collapses to zero. */
+/* vh, not %: .layout has no definite height */
 .ax { display: flex; flex-direction: column; height: 100%; min-height: 422px; max-height: calc(100vh - 58px); width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
 
 .ax-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 2px solid #000; padding-bottom: 3px; flex: 0 0 auto; }
@@ -23,9 +11,7 @@ Kept flat, one tag per line. Do not run "Fix indentation" on it.
 .ax-subjects { font-size: 12px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ax-list { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-/* 12 rows have to land on the panel edge: the list is the page, so any slack
-   here is a paper that could have been shown. 378px for twelve leaves 31px a
-   row, which is why the two line-heights are as tight as they are. */
+/* 12 rows in 378px, 31px each */
 .ax-p { border-bottom: 1px solid #d2d2d2; padding: 1px 0; min-width: 0; }
 .ax-p:last-child { border-bottom: 0; }
 .ax-t { font-size: 14px; line-height: 1.1; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }

@@ -2,13 +2,13 @@
 let
   T = "/var/lib/homepage-tokens";
   routes = import ../modules/routes.nix;
-  # via a template, not the raw secret: the stored value has no trailing newline and OpenSSH
+  # template adds the trailing newline openssh needs
   sshKey = config.sops.templates."hermes-ssh-key".path;
 
   # ─────────────────────────────────────────────────────────────────────────────
   # CLI HELPERS ON THE AGENT'S PATH
   pve = pkgs.writeShellScriptBin "pve" ''
-    # pve <METHOD> <api path> [curl args]   e.g. pve GET /nodes/luca-server/qemu
+    # pve <method> <api path> [curl args]
     m="''${1:?method}"; p="''${2:?path}"; shift 2
     exec ${pkgs.curl}/bin/curl -sk -X "$m" \
       -H "Authorization: PVEAPIToken=$(cat ${config.sops.secrets.proxmox-api-token.path})" \
@@ -38,31 +38,29 @@ let
   '';
 
   labToken = pkgs.writeShellScriptBin "lab-token" ''
-    # tokens written by DMZ VMs sit in external/, the only part they can reach
+    # dmz vms write to external/
     if [ -z "''${1:-}" ]; then cd ${T} && ls *.token external/*.token | sed 's|^external/||; s/\.token$//'; exit 0; fi
     [ -f "${T}/$1.token" ] && exec cat "${T}/$1.token"
     exec cat "${T}/external/$1.token"
   '';
 
-  # mc <command...> e.g. mc list, mc "whitelist add Steve" vm-208 already owns the rcon
+  # mc <command...>: rcon through vm-208
   mc = pkgs.writeShellScriptBin "mc" ''
     exec ${pkgs.openssh}/bin/ssh 10.200.0.208 mc-rcon "$@"
   '';
 
-  # lab-deploy [vm ...] apply the workspace clone to the lab, or to named VMs.
+  # lab-deploy [vm ...]: sync the workspace clone
   labDeploy = pkgs.writeShellScriptBin "lab-deploy" ''
     set -euo pipefail
     repo=/var/lib/hermes/workspace/homelab
     [ -d "$repo/.git" ] || { echo "lab-deploy: no clone at $repo" >&2; exit 1; }
     cd "$repo"
-    # sync.sh wants the key at secrets/age.txt, which is gitignored. It is not
-    # kept in sops: it is the key that decrypts sops. sync.sh already places a
-    # copy on every VM, and the tmpfiles rule below makes this one readable.
+    # age key is not in sops, it decrypts sops
     install -m 600 /var/lib/hermes/age.txt secrets/age.txt
     exec ./sync.sh "$@"
   '';
 
-  # GitHub App (src/scripts/hermes-secrets.sh): may push branches and open pull requests
+  # github app: may push branches and open prs
   githubApp = lib.importJSON ../modules/hermes/github-app.json;
   githubAppToken = pkgs.writeShellApplication {
     name = "github-app-token";
@@ -72,13 +70,13 @@ let
   labGithubToken = pkgs.writeShellScriptBin "lab-github-token" ''
     exec ${githubAppToken}/bin/github-app-token ${toString githubApp.id} ${config.sops.secrets.hermes-github-app-key.path}
   '';
-  # git credential helper for https://github.com: a fresh installation token
+  # git credential helper: fresh installation token
   gitCredential = pkgs.writeShellScript "git-credential-lab-github" ''
     [ "''${1:-}" = get ] || exit 0
     printf 'username=x-access-token\npassword=%s\n' "$(${labGithubToken}/bin/lab-github-token)"
   '';
 
-  # push the current hermes/<topic> branch of the homelab clone and open (or find) its pull
+  # push the hermes/<topic> branch and open its pr
   labPr = pkgs.writeShellScriptBin "lab-pr" ''
     set -euo pipefail
     export PATH="${lib.makeBinPath [ pkgs.git pkgs.curl pkgs.jq pkgs.coreutils labGithubToken ]}:$PATH"
@@ -88,7 +86,7 @@ let
     [ -z "$(git status --porcelain)" ] || { echo "lab-pr: commit or discard your changes first" >&2; exit 1; }
     git fetch -q origin master
     [ "$(git rev-list --count origin/master..HEAD)" -gt 0 ] || { echo "lab-pr: no commits on top of master" >&2; exit 1; }
-    # GitHub's "create a pull request" hint on stderr is noise here
+    # drop github's pr hint noise
     git push -q --force-with-lease -u origin HEAD 2>&1 | { grep -v '^remote:' || true; } >&2
 
     token=$(lab-github-token)
@@ -105,7 +103,7 @@ let
   '';
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # WORKSPACE CONTEXT the inventory as the agent sees
+  # WORKSPACE CONTEXT (inventory as the agent sees it)
   urlOf = id: lib.concatStringsSep ", " (lib.concatLists (lib.mapAttrsToList (_: side:
     lib.mapAttrsToList (_: r: "https://${r.host}.lsck0.dev") (lib.filterAttrs (_: r: toString r.vmid == id) side)
   ) routes));
@@ -159,7 +157,7 @@ let
   skillsDir = ../modules/hermes/skills;
   skillNames = lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir skillsDir));
 
-  # the owner's own skills, straight from the dotfiles repo (flake.nix input)
+  # owner's skills from the dotfiles flake input
   lucaSkillsDir = "${inputs.dotfiles}/skills";
   lucaSkillNames = lib.attrNames (lib.filterAttrs
     (n: t: t == "directory" && builtins.pathExists "${lucaSkillsDir}/${n}/SKILL.md")
@@ -183,7 +181,7 @@ in {
     telegram-chat-id = {};
     proxmox-api-token = { owner = "hermes"; mode = "0400"; };
   };
-  # see the sshKey comment at the top: this only re-adds the trailing newline.
+  # re-adds the trailing newline, see sshKey
   sops.templates."hermes-ssh-key" = {
     owner = "hermes";
     mode = "0400";
@@ -200,20 +198,18 @@ in {
       TELEGRAM_ALLOWED_USERS=${config.sops.placeholder.telegram-chat-id}
       GATEWAY_ALLOW_ALL_USERS=false
       TELEGRAM_HOME_CHANNEL=${config.sops.placeholder.telegram-chat-id}
-      # free-tier keys for the fallback chain below. Empty is fine: a provider
-      # without a credential is skipped ("provider not configured") and the chain
-      # moves to the next one.
+      # empty keys are skipped by the fallback chain
       GEMINI_API_KEY=${config.sops.placeholder.hermes-gemini-api-key}
       GLM_API_KEY=${config.sops.placeholder.hermes-glm-api-key}
     '';
   };
 
   fileSystems = nasMount T "homepage-tokens"
-    # where downloads go: /srv/sync is the same tree as the owner's ~/Sync.
+    # /srv/sync is the owner's ~/Sync
     // nasPath "/srv/sync" "syncthing/sync"
     // nasPath "/srv/media" "bulk/media";
 
-  # root on every VM and the Proxmox host with the Hermes key.
+  # root on every vm and the proxmox host
   programs.ssh.extraConfig = ''
     Host 10.100.0.* 10.200.0.* 192.168.178.200 192.168.178.29
       User root
@@ -238,27 +234,27 @@ in {
     environmentFiles = [ config.sops.templates."hermes.env".path ];
 
     settings = {
-      # Anthropic first, then free tiers.
+      # anthropic first, then free tiers
       model = {
         provider = "anthropic";
         default = "claude-sonnet-5";
       };
 
-      # tried in order when the primary is rate-limited, out of credit or unauthenticated.
+      # tried in order when the primary fails
       fallback_providers = [
-        # Nous Portal free tier.
+        # nous portal free tier
         { provider = "nous"; model = "nous/welcome"; }
-        # Google AI Studio free tier (GEMINI_API_KEY).
+        # google ai studio free tier
         { provider = "gemini"; model = "gemini-2.5-flash"; }
-        # z.ai GLM free tier (GLM_API_KEY).
+        # z.ai glm free tier
         { provider = "zai"; model = "glm-4.6-flash"; }
       ];
 
-      # fail over quickly instead of retrying a dead primary three times.
+      # fail over fast
       agent.api_max_retries = 1;
-      # full access: the owner granted root on the lab; no per-command prompts.
+      # owner granted root, no prompts
       approvals.mode = "off";
-      # only the owner: TELEGRAM_ALLOWED_USERS holds the owner's numeric user id
+      # owner only, via TELEGRAM_ALLOWED_USERS
       unauthorized_dm_behavior = "ignore";
       gateway.allow_all_users = false;
       terminal = {
@@ -271,25 +267,25 @@ in {
       pve vm mc labDeploy labToken labPr labGithubToken config.nix.package
       openssh curl jq yq-go git gnugrep gnused coreutils findutils netcat-gnu
       poppler-utils python3
-      # fetching things the owner asks for, into /srv/sync or /srv/media
+      # fetching into /srv/sync or /srv/media
       wget aria2 yt-dlp rsync unzip
-      # lab-deploy runs sync.sh, which needs these
+      # sync.sh dependencies
       terraform sops age openssl
     ];
 
     workingDirectory = "/var/lib/hermes/workspace";
     documents."AGENTS.md" = agentsMd;
-    # every directory in src/modules/hermes/skills becomes a skill.
+    # each skills/ directory becomes a skill
     hermesHomeFiles = lib.genAttrs' skillNames
       (name: lib.nameValuePair "skills/homelab/${name}/SKILL.md" (skillsDir + "/${name}/SKILL.md"))
       // lib.genAttrs' lucaSkillNames
       (name: lib.nameValuePair "skills/luca/${name}/SKILL.md" "${lucaSkillsDir}/${name}/SKILL.md");
   };
 
-  # the module's hardening makes the filesystem read-only; the token dir is where Hermes reads
+  # hardening makes the fs read-only
   systemd.services.hermes-agent.serviceConfig.ReadWritePaths = [ T "/srv/sync" "/srv/media" ];
 
-  # lab-deploy runs sync.sh, which needs the age key. sync.sh already drops it on every VM
+  # sync.sh needs the age key
   systemd.tmpfiles.rules = [
     "C+ /var/lib/hermes/age.txt 0400 hermes hermes - /var/lib/sops-nix/key.txt"
   ];

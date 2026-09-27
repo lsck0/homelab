@@ -2,7 +2,7 @@
 let
 
 
-  # only real VMs: down now, up sometime in the last 6h
+  # real vms only: down now, up within 6h
   onDemandIps = lib.mapAttrsToList (_: v: v.ip) (lib.filterAttrs (_: v: v.enabled == "onDemand") inventory);
   instanceDownExpr = "up{job=\"homelab-node-exporter\""
     + lib.optionalString (onDemandIps != []) ",instance!~\"(${lib.concatMapStringsSep "|" (ip: lib.replaceStrings [ "." ] [ "\\\\." ] ip) onDemandIps}):9100\""
@@ -10,7 +10,7 @@ let
   subnetTargets = subnet:
     builtins.map (host: "${subnet}.${toString host}:9100") (lib.range 1 254);
 
-  # A readable `vm` label on every node-exporter series ("homepage", not "10.100.0.103:9100").
+  # readable `vm` label, not ip:port
   shortName = v:
     let m = builtins.match "[0-9]+-(internal|external)-(.*)" v.name;
     in if m == null then v.name else builtins.elemAt m 1;
@@ -30,11 +30,11 @@ let
     ++ [ (vmLabel "192.168.178.200" "proxmox") ];
 
   # ── blackbox probes ────────────────────────────────────────────────────────
-  # Aimed at backends: the public name answers 302 from Authelia whatever the app is doing.
+  # probe backends, public names always 302 via authelia
   routes = import ../modules/routes.nix;
   probes =
     let
-      # on-demand and disabled VMs would be a permanent false alarm monitor = false opts
+      # on-demand/disabled vms would alarm forever
       alwaysOn = r: (inventory.${toString r.vmid}.enabled or "false") == "true"
         && (r.monitor or true);
       ofSide = side: lib.mapAttrsToList (name: r: {
@@ -43,19 +43,19 @@ let
       }) (lib.filterAttrs (_: alwaysOn) side);
     in
     lib.concatLists (lib.mapAttrsToList (_: ofSide) routes)
-    # the two ingresses themselves, which own no route of their own
+    # the ingresses own no route
     ++ [
       { name = "traefik-internal"; url = "http://10.100.0.100:80"; }
       { name = "traefik-external"; url = "http://10.200.0.200:80"; }
     ];
 
-  # alerts also go to the Hermes Telegram bot
+  # alerts also go to hermes telegram
   enableTelegram = true;
 
-  # ntfy topic for alerts. ntfy (vm-203) requires a login now
+  # ntfy (vm-203) requires a login
   ntfyAlertTopic = "homelab-alerts";
 
-  # ntfy renders these Go templates against Grafana's webhook JSON body (?template=yes)
+  # ntfy renders go templates on the webhook body
   ntfyQuery = lib.concatStringsSep "&" [
     "template=yes"
     "title=${lib.escapeURL "{{if eq .status \"firing\"}}FIRING{{else}}RESOLVED{{end}}: {{.commonLabels.alertname}}"}"
@@ -63,7 +63,7 @@ let
     "tags=${lib.escapeURL "rotating_light"}"
   ];
 
-  # Telegram message: one compact HTML block per alert instead of Grafana's default wall
+  # compact html per alert, not grafana's wall
   telegramMessage = ''
     {{ if eq .Status "firing" }}🔴 <b>FIRING</b>{{ else }}✅ <b>RESOLVED</b>{{ end }} · <b>{{ .CommonLabels.alertname }}</b>
     {{ range .Alerts }}
@@ -85,7 +85,7 @@ let
         settings = {
           url = "https://ntfy.lsck0.dev/${ntfyAlertTopic}?${ntfyQuery}";
           httpMethod = "POST";
-          # ntfy denies anonymous publishing now (see 203-external-ntfy.nix).
+          # ntfy denies anonymous publishing
           username = "grafana";
           password = config.sops.placeholder.ntfy-grafana-password;
         };
@@ -107,7 +107,7 @@ let
 in {
   networking.hostName = "vm-105";
 
-  # bot token, chat id and the ntfy publisher password come from sops: rendered into Grafana's
+  # bot token, chat id, ntfy password from sops
   sops.secrets = {
     ntfy-grafana-password = {};
   } // lib.optionalAttrs enableTelegram {
@@ -123,13 +123,13 @@ in {
     // nasMount "/var/lib/prometheus2" "prometheus"
     // nasMount "/var/lib/loki" "loki";
 
-  # Loki: log aggregation for all VMs (promtail in base.nix pushes here)
+  # loki: logs from promtail on every vm
   services.loki = {
     enable = true;
     configuration = {
       auth_enabled = false;
       server.http_listen_port = 3100;
-      # tempo also runs on this VM and defaults its gRPC to 9095; move Loki's off it to avoid
+      # tempo already holds grpc 9095
       server.grpc_listen_port = 9096;
       common = {
         instance_addr = "127.0.0.1";
@@ -158,7 +158,7 @@ in {
     };
   };
 
-  # tempo: distributed tracing (OTLP), for services that emit spans
+  # tempo: otlp tracing
   services.tempo = {
     enable = true;
     settings = {
@@ -179,18 +179,18 @@ in {
   systemd.tmpfiles.rules = [
     "d /var/lib/loki 0750 loki loki -"
     "d /var/lib/tempo 0750 tempo tempo -"
-    # /var/lib/grafana is a 0777 NFS share, so the database inherits 0644 and Grafana logs
+    # nfs share leaks 0644, grafana warns
     "z /var/lib/grafana/data/grafana.db 0640 grafana grafana -"
   ];
 
-  # localhost only: it is an unauthenticated prober
+  # localhost only, unauthenticated prober
   services.prometheus.exporters.blackbox = {
     enable = true;
     listenAddress = "127.0.0.1";
     port = 9115;
     configFile = pkgs.writeText "blackbox.yml" (builtins.toJSON {
       modules = {
-        # Liveness, not authorization: 401/403 is up-and-refusing, 3xx is its own login, 404 is no page at /. 5xx is absent on purpose.
+        # liveness: 401/403/3xx/404 count as up, 5xx not
         http_up = {
           prober = "http";
           timeout = "10s";
@@ -198,7 +198,7 @@ in {
             valid_status_codes = [ 200 201 204 301 302 303 307 308 401 403 404 ];
             follow_redirects = false;
             preferred_ip_protocol = "ip4";
-            # routes.nix marks a backend scheme = "https" only when it serves its own
+            # self-signed backends (scheme = "https")
             tls_config.insecure_skip_verify = true;
           };
         };
@@ -216,7 +216,7 @@ in {
     retentionTime = "30d";
     scrapeConfigs = [
       {
-        # standard blackbox relabel: target as a param, scrape to the exporter
+        # standard blackbox relabel
         job_name = "blackbox-http";
         metrics_path = "/probe";
         params.module = [ "http_up" ];
@@ -232,7 +232,7 @@ in {
         ];
       }
       {
-        # sccache speaks Redis, not HTTP
+        # sccache speaks redis, not http
         job_name = "blackbox-tcp";
         metrics_path = "/probe";
         params.module = [ "tcp_up" ];
@@ -260,20 +260,20 @@ in {
         }];
       }
       {
-        # Traefik's own Prometheus endpoint (:8082) on both ingresses.
+        # traefik metrics (:8082) on both ingresses
         job_name = "traefik";
         static_configs = [{
           targets = [ "10.100.0.100:8082" "10.200.0.200:8082" ];
         }];
       }
     ];
-    # no Prometheus-native alerting path: Grafana unified alerting below owns every rule
+    # grafana unified alerting owns every rule
   };
 
-  # both keep state on NFS and are slow to stop; the 45s default killed them
+  # nfs state stops slowly, 45s default killed them
   systemd.services.prometheus.serviceConfig = {
     TimeoutStopSec = "5min";
-    # the upstream module already sets Restart; override rather than add.
+    # upstream sets Restart already, so override
     Restart = lib.mkForce "on-failure";
     RestartSec = 10;
   };
@@ -291,7 +291,7 @@ in {
         http_port = 80;
         root_url = "https://grafana.lsck0.dev";
       };
-      # access is gated by Authelia ForwardAuth on the Traefik route
+      # gated by authelia forwardauth
       auth = {
         disable_login_form = true;
       };
@@ -304,7 +304,7 @@ in {
       };
       users = {
         allow_sign_up = false;
-        # single-user lab: anyone Authelia lets through is the admin.
+        # single-user lab: authelia users are admin
         auto_assign_org_role = "Admin";
       };
     };
@@ -345,9 +345,9 @@ in {
           }
         ];
       };
-      # alerting is always on and delivers to ntfy
+      # alerting always on, delivers to ntfy
       alerting = {
-        # rendered by sops at activation with the secrets filled
+        # rendered by sops with secrets filled
         contactPoints.path = config.sops.templates."grafana-contact-points.yaml".path;
         policies.settings = {
           apiVersion = 1;
@@ -371,7 +371,7 @@ in {
               uid = "instance_down";
               title = "Instance down";
               condition = "C";
-              # A node-exporter target that has been unreachable for 5m.
+              # node-exporter target unreachable for 5m
               data = [
                 {
                   refId = "A";
@@ -390,7 +390,7 @@ in {
                     refId = "C";
                     type = "threshold";
                     expression = "A";
-                    # `up == 0 and …` keeps the value of `up`
+                    # `up == 0 and ...` keeps the value of `up`
                     conditions = [{
                       evaluator = { type = "lt"; params = [ 1 ]; };
                     }];
@@ -398,7 +398,7 @@ in {
                 }
               ];
               for = "5m";
-              # empty result = nothing is down, not missing data.
+              # empty result means nothing is down
               noDataState = "OK";
               execErrState = "Error";
               labels.severity = "critical";
@@ -409,7 +409,7 @@ in {
               uid = "backup_stale";
               title = "NAS backup stale (dead-man)";
               condition = "C";
-              # no successful daily backup for > 26h. no_data also fires
+              # no daily backup for > 26h, no_data fires too
               data = [
                 {
                   refId = "A";
@@ -444,7 +444,7 @@ in {
               uid = "service_down";
               title = "Service not answering";
               condition = "C";
-              # the gap node-exporter leaves: the VM answers while the container crash-loops
+              # vm up while the container crash-loops
               data = [
                 {
                   refId = "A";
@@ -470,7 +470,7 @@ in {
                 }
               ];
               for = "5m";
-              # never-reported is a scrape problem, not an outage
+              # never-reported is a scrape problem
               noDataState = "OK";
               execErrState = "Error";
               labels.severity = "warning";
@@ -481,7 +481,7 @@ in {
               uid = "ossec_alert";
               title = "OSSEC alert on the hypervisor";
               condition = "C";
-              # level 7+ is OSSEC's "worth a human"; the count only grows, so alert on the increase
+              # ossec level 7+, alert on the increase
               data = [
                 {
                   refId = "A";
@@ -507,7 +507,7 @@ in {
                 }
               ];
               for = "0m";
-              # absent until OSSEC is installed, which is not an intrusion
+              # absent until ossec is installed
               noDataState = "OK";
               execErrState = "Error";
               labels.severity = "critical";
@@ -520,18 +520,18 @@ in {
     };
   };
 
-  # one consolidated board: world map + HTTP + system + logs.
+  # one board: map, http, system, logs
   environment.etc."grafana-dashboards/homelab.json".source = ../modules/dashboards/homelab.json;
 
-  # Grafana's file provider only rescans at startup; restart when the dashboard changes.
+  # file provider rescans only at startup
   systemd.services.grafana.restartTriggers = [ ../modules/dashboards/homelab.json ];
 
-  # 3100 Loki push, 3200 Tempo, 4317/4318 OTLP trace ingest.
+  # 3100 loki, 3200 tempo, 4317/4318 otlp
   networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 ];
 
-  # Grafana trusts the Remote-User header (auth.proxy)
+  # grafana trusts Remote-User (auth.proxy)
   homelab.ingressOnly.ports = [ 80 9090 3200 ];
-  # the desktop status widget (arch-dotfiles quickshell homelab-status.py) scrapes Prometheus
+  # desktop status widget scrapes prometheus
   homelab.ingressOnly.portSources."9090" = [ "192.168.178.0/24" "10.100.0.104/32" ];
 
 }

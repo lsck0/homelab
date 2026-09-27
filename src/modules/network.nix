@@ -1,12 +1,12 @@
 { config, lib, inventory, ... }:
 let
-  # "vm-136" -> the inventory entry for 135 (address from src/lib.tf); null for hosts outside
+  # "vm-136" -> its inventory entry, else null
   match = builtins.match "vm-([0-9]+)" config.networking.hostName;
   vm = if match == null then null else inventory.${builtins.head match} or null;
 
   cfg = config.homelab.ingressOnly;
 
-  # who may talk to a guarded port.
+  # who may reach a guarded port
   trustedSources = [
     "127.0.0.0/8"
     "10.88.0.0/16"     # podman default bridge
@@ -14,12 +14,11 @@ let
     "10.100.0.100/32"
     "10.200.0.200/32"
     "10.100.0.103/32"
-    # The prober.
+    # the prober
     "10.100.0.105/32"
     "10.100.0.114/32"
   ]
-  # its own address: a container that calls a sibling by the VM's IP is not
-  # coming from the bridge subnet.
+  # containers calling siblings via the vm ip
   ++ lib.optional (vm != null) "${vm.ip}/32"
   ++ cfg.extraSources;
 in {
@@ -66,10 +65,10 @@ in {
       networking.defaultGateway = { address = vm.gateway; interface = "eth0"; };
       networking.nameservers = [ vm.gateway ];
 
-      # a fresh VM boots as "nixos"; switching does not rename the running kernel
+      # switching does not rename the running kernel
       system.activationScripts.hostname = "echo ${config.networking.hostName} > /proc/sys/kernel/hostname";
 
-      # network-setup adds the default route and gives up permanently if the interface
+      # retry forever if eth0 is not up yet
       systemd.services.network-setup = {
         startLimitIntervalSec = 0;
         serviceConfig = {
@@ -86,13 +85,13 @@ in {
           message = "homelab.ingressOnly.ports must not contain 22 or 9100: SSH and node-exporter are the recovery path.";
         }
         {
-          # the rules below are iptables.
+          # the rules below are iptables
           assertion = !config.networking.nftables.enable;
           message = "homelab.ingressOnly uses networking.firewall.extraCommands (iptables); port this module to extraInputRules before enabling networking.nftables on ${config.networking.hostName}.";
         }
       ];
 
-      # own chain jumped into at the top of nixos-fw
+      # own chain at the top of nixos-fw
       networking.firewall.extraCommands = ''
         iptables -N homelab-ingress 2>/dev/null || iptables -F homelab-ingress
         ${lib.concatMapStrings (s: ''
@@ -108,12 +107,7 @@ in {
         iptables -D nixos-fw -j homelab-ingress 2>/dev/null || true
         iptables -I nixos-fw 1 -j homelab-ingress
 
-        # Same guard again in mangle PREROUTING, which is the only place that
-        # sees a published container port. nixos-fw is INPUT, but podman
-        # publishes with a netavark DNAT, so the packet is forwarded to the
-        # container and never traverses INPUT: FileBrowser (FB_NOAUTH) and the
-        # registry (anonymous push) were reachable from the whole house.
-        # PREROUTING runs before that DNAT, so it catches both paths.
+        # again pre-dnat: podman-published ports skip INPUT
         iptables -t mangle -N homelab-ingress-pre 2>/dev/null || iptables -t mangle -F homelab-ingress-pre
         ${lib.concatMapStrings (s: ''
           iptables -t mangle -A homelab-ingress-pre -s ${s} -j RETURN

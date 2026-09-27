@@ -1,5 +1,5 @@
 #!/bin/bash
-# Initialize homelab against an existing Proxmox VE server.
+# initialize the homelab against an existing proxmox ve
 set -e
 
 TARGET_IP=$1
@@ -15,7 +15,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# check for required tools.
+# check required tools
 for tool in sops age-keygen jq sshpass; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "ERROR: '$tool' is required but not installed."
@@ -61,7 +61,7 @@ fi
 echo ">>> Connected to $("${SSH_CMD[@]}" root@"$TARGET_IP" "pveversion")"
 
 if [ -z "${HOMELAB_PVE_TF_PASSWORD:-}" ]; then
-    # use the root password for the terraform user to avoid prompting twice. if using SSH keys
+    # reuse the root password to avoid a second prompt
     if [ -n "$ROOT_PASS" ]; then
         PVE_TF_PASSWORD="$ROOT_PASS"
     else
@@ -82,7 +82,7 @@ else
 fi
 
 
-# the age key belongs to the dotfiles repo, which is the source of truth for all key material.
+# age key's source of truth is the dotfiles repo
 AGE_KEY="$ROOT_DIR/secrets/age.txt"
 AGE_KEY_SOURCE="${AGE_KEY_SOURCE:-$HOME/projects/arch-dotfiles/configs/secrets/age.txt}"
 mkdir -p "$ROOT_DIR/secrets"
@@ -110,7 +110,7 @@ if [ ! -f "$SECRETS_FILE" ]; then
     echo ">>> Generating secrets..."
     WG_PRIVKEY=$(wg genkey 2>/dev/null || openssl rand -base64 32)
 
-    # generated locally where possible; external credentials are placeholders to fill
+    # generated where possible; external ones are placeholders
     jq -n \
       --arg wg "$WG_PRIVKEY" \
       --arg s1 "$(generate_secret)" --arg s2 "$(generate_secret)" --arg s3 "$(generate_secret)" \
@@ -138,7 +138,7 @@ if [ ! -f "$SECRETS_FILE" ]; then
     echo ">>> NOTE: fill the external tokens with: sops src/secrets.json"
 fi
 
-# add whatever the configs have grown since (and drop what they no longer read).
+# sync keys with what the configs read now
 "$ROOT_DIR/src/scripts/secrets-sync.sh" --apply
 
 
@@ -157,7 +157,7 @@ fi
 
 
 echo ">>> Configuring Proxmox (bridges + API token)..."
-# second argument wires the LDAP realm; without the secret the step is skipped
+# second arg wires ldap; skipped without the secret
 LLDAP_BIND_PASSWORD=$(sops -d "$ROOT_DIR/src/secrets.json" 2>/dev/null \
   | jq -r '."lldap-admin-password" // empty')
 "${SSH_CMD[@]}" root@"$TARGET_IP" "bash -s" < "$SCRIPT_DIR/pve-install.sh" \

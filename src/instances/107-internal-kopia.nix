@@ -13,21 +13,20 @@ let
     export PATH="${lib.makeBinPath [ pkgs.kopia pkgs.jq pkgs.coreutils pkgs.curl pkgs.systemd ]}:$PATH"
   '';
 
-  # `kopia` with the repository already connected, for humans and Hermes.
+  # `kopia` pre-connected, for humans and hermes
   kopiaWrapper = pkgs.writeShellScriptBin "kopia-nas" ''
     ${kopiaEnv}
     exec kopia "$@"
   '';
 
-  # restore helper. Non-interactive with --yes so Hermes can drive it.
+  # restore helper, --yes lets hermes drive it
   restoreScript = pkgs.writeShellScriptBin "nas-restore" ''
     set -euo pipefail
     ${kopiaEnv}
     cmd="''${1:-help}"; shift || true
     export TZ=Europe/Berlin TZDIR=''${TZDIR:-/etc/zoneinfo}
     snapshots() { kopia snapshot list ${source} --json; }
-    # pick <age|snapshot-id|YYYY-MM-DD> -> snapshot JSON. Ages count back from
-    # the newest and shift when a snapshot is taken; ids and dates do not.
+    # ages shift with new snapshots, ids and dates do not
     pick() {
       case "$1" in
         [0-9]|[0-9][0-9]) snapshots | jq -c ".[-1-$1] // empty" ;;
@@ -92,10 +91,10 @@ EOF
 in {
   networking.hostName = "vm-107";
 
-  # whole NAS tree (the NAS exports /srv/nas to this VM only), except /bulk.
+  # whole nas tree except /bulk
   fileSystems = nasPath source "";
 
-  # same secret the old restic setup used; only the name changed.
+  # old restic secret, renamed
   sops.secrets.kopia-password.key = "restic-password";
 
   environment.systemPackages = [ kopiaWrapper restoreScript ];
@@ -106,7 +105,7 @@ in {
     "d /var/cache/kopia 0700 root root -"
   ];
 
-  # connect (or create) the repository and pin the policy. Idempotent.
+  # connect or create the repo, pin policy
   systemd.services.kopia-init = {
     description = "Connect Kopia repository and apply backup policy";
     after = [ "network-online.target" "remote-fs.target" ];
@@ -119,7 +118,7 @@ in {
         kopia repository connect filesystem --path=${repo} --override-hostname=nas --override-username=root \
           || kopia repository create filesystem --path=${repo} --override-hostname=nas --override-username=root
       fi
-      # daily at 02:00, deduplicated + compressed, 7 daily / 8 weekly / 12 monthly.
+      # 02:00 daily, keep 7d / 8w / 12m
       kopia policy set ${source} \
         --snapshot-time=02:00 \
         --compression=zstd \
@@ -130,7 +129,7 @@ in {
     '';
   };
 
-  # server + web UI.
+  # server and web ui
   systemd.services.kopia-server = {
     description = "Kopia server and web UI";
     after = [ "kopia-init.service" ];
@@ -144,7 +143,7 @@ in {
     '';
   };
 
-  # dead-man metric for the Grafana "backup stale" alert: age of the newest snapshot
+  # dead-man metric for the "backup stale" alert
   systemd.services.kopia-metrics = {
     description = "Publish Kopia snapshot freshness";
     after = [ "kopia-init.service" ];
@@ -172,15 +171,15 @@ in {
     timerConfig = { OnBootSec = "10m"; OnUnitActiveSec = "15m"; };
   };
 
-  # the Kopia server runs --without-password: internal Traefik (Authelia in front) and Homepage
+  # --without-password, authelia gates traefik
   networking.firewall.allowedTCPPorts = [ 51515 ];
   homelab.ingressOnly.ports = [ 51515 ];
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # OFF-SITE: PROTON DRIVE The Kopia repository above lives on the same disk as the data
+  # OFF-SITE: PROTON DRIVE (repo shares the data's disk)
   sops.secrets.proton-username = {};
   sops.secrets.proton-password = {};
-  # the TOTP *seed* from Proton's 2FA setup, not a 6-digit code: rclone derives the code
+  # totp seed, not a code; rclone derives codes
   sops.secrets.proton-totp-secret = {};
 
   systemd.services.proton-sync = {
@@ -189,7 +188,7 @@ in {
     wants = [ "network-online.target" ];
     serviceConfig = {
       Type = "oneshot";
-      # Proton throttles and the first run uploads everything.
+      # proton throttles, first run uploads everything
       TimeoutStartSec = "12h";
     };
     path = [ pkgs.rclone pkgs.coreutils ];
@@ -201,8 +200,7 @@ in {
       user=$(cat ${config.sops.secrets.proton-username.path})
       [ -n "$user" ] || { echo "proton-username is empty; fill it with scripts/secrets-sync.sh"; exit 0; }
 
-      # Written every run, because rclone rewrites this file to cache its
-      # session tokens and we want a credential change to take effect.
+      # created once, rclone caches session tokens in it
       if [ ! -s "$conf" ]; then
         rclone --config "$conf" config create proton protondrive \
           username="$user" \
@@ -211,9 +209,7 @@ in {
           --non-interactive >/dev/null
       fi
 
-      # sync, not copy: the remote should mirror the source. --backup-dir keeps
-      # anything deleted or overwritten for 30 days instead of dropping it, so a
-      # local mistake cannot erase the off-site copy.
+      # sync mirrors; --backup-dir keeps 30 days of changes
       stamp=$(date +%Y-%m-%d)
       for tree in BACKUPS documents; do
         echo ">>> $tree -> proton:homelab/$tree"
@@ -234,7 +230,7 @@ in {
     '';
   };
 
-  # after the 02:00 Kopia snapshot, so the repository it uploads is the fresh one
+  # after the 02:00 snapshot
   systemd.timers.proton-sync = {
     wantedBy = [ "timers.target" ];
     timerConfig = { OnCalendar = "04:00"; Persistent = true; RandomizedDelaySec = "30m"; };

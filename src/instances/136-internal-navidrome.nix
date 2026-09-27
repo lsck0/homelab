@@ -5,7 +5,7 @@
     // nasMedia "/srv/music" "music"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
-  # Lidarr: music manager.
+  # lidarr: music manager
   homelab.servarr.lidarr = {
     image = "lscr.io/linuxserver/lidarr:3.1.0.4875-ls41";
     port = 8686;
@@ -32,7 +32,7 @@
     "d /var/lib/navidrome 0750 1000 1000 -"
   ];
 
-  # admin with a generated password, and its Subsonic credentials for the Homepage widget
+  # admin and subsonic credentials for homepage
   systemd.services.navidrome-homepage-token = {
     description = "Initialise Navidrome admin and export Subsonic credentials for Homepage";
     after = [ "podman-navidrome.service" ];
@@ -56,7 +56,7 @@
         -d "$(json "$PASS" '{username:"admin", password:$p}')" >/dev/null || true
 
       RESP=$(login "$PASS" || true)
-      # installs from before generated passwords still have admin/admin.
+      # migrate old admin/admin installs
       if [ -z "$RESP" ] && OLD=$(login admin); then
         curl -sf -X PUT "$N/api/user/$(echo "$OLD" | jq -r .id)" \
           -H "x-nd-authorization: Bearer $(echo "$OLD" | jq -r .token)" -H "Content-Type: application/json" \

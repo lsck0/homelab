@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prints an installation token (valid 1 h) of a GitHub App for one repository
+# print a 1h github app installation token for one repo
 set -euo pipefail
 
 app_id=${1:?usage: github-app-token.sh <app id> <private key file> [owner/repo]}
@@ -13,7 +13,7 @@ api() { # bearer, curl args...
     -H "X-GitHub-Api-Version: 2022-11-28" "${@:2}"
 }
 
-# app JWT: GitHub accepts at most 10 minutes; iat is backdated for clock skew
+# app jwt: max 10 min; iat backdated for clock skew
 now=$(date +%s)
 header=$(printf '{"alg":"RS256","typ":"JWT"}' | b64url)
 payload=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' $((now - 60)) $((now + 540)) "$app_id" | b64url)

@@ -1,34 +1,34 @@
-# VM plumbing: turns each entry of local.instances (instances.tf) into a Proxmox VM.
+# vm plumbing: local.instances -> proxmox vms
 
 locals {
   defaults = {
     enabled  = true
     cooldown = "30m"
-    # measured working set of a plain VM: 445-600 MiB
+    # plain vm working set measured 445-600 MiB
     memory = 768
-    # Balloon floor as a fraction of memory.
+    # balloon floor as a fraction of memory
     balloon_ratio = 0.5
     cores         = 2
     disk          = 8
     machine       = null
     hostpci       = []
-    # [{ size, datastore }].
+    # [{ size, datastore }]
     extra_disks = []
     boot_order  = 3
   }
 
-  # pause after each VM that boots before the default group
+  # pause after each vm booting before the default group
   boot_wait_seconds = 30
 
   vms = {
     for id, i in local.instances : id => {
       name = i.name
       type = i.type
-      # as a string, the for-expression would unify bool and string anyway
+      # string, the for-expression unifies bool and string anyway
       enabled  = tostring(try(i.enabled, local.defaults.enabled))
       cooldown = try(i.cooldown, local.defaults.cooldown)
       memory   = try(i.memory, local.defaults.memory)
-      # never below 512: squeezed to 384 a VM stops answering ssh
+      # floor 512: at 384 a vm drops ssh
       balloon     = try(i.balloon, max(512, floor(try(i.memory, local.defaults.memory) * try(i.balloon_ratio, local.defaults.balloon_ratio))))
       cores       = try(i.cores, local.defaults.cores)
       disk        = try(i.disk, local.defaults.disk)
@@ -70,14 +70,14 @@ check "instance_fields" {
   }
 }
 
-# PCI hardware mapping for the RTX 2060.
+# pci mapping for the rtx 2060
 resource "proxmox_virtual_environment_hardware_mapping_pci" "gpu" {
   name = "gpu"
   map = [{
     node = var.target_node
     id   = "10de:1f08"
     path = "0000:2b:00.0"
-    # without these two the start fails with
+    # vm start fails without these two
     iommu_group  = 3
     subsystem_id = "10de:12fd"
   }]
@@ -86,15 +86,15 @@ resource "proxmox_virtual_environment_hardware_mapping_pci" "gpu" {
 resource "proxmox_virtual_environment_vm" "vm" {
   for_each = local.vms
 
-  # the GPU mapping must exist before a VM can reference it by name.
+  # mapping must exist before a vm references it
   depends_on = [proxmox_virtual_environment_hardware_mapping_pci.gpu]
 
   name      = each.value.name
   node_name = var.target_node
   vm_id     = tonumber(each.key)
-  # onDemand VMs start once so the first deploy reaches them; the on-demand proxy powers them
+  # ondemand vms start once so the first deploy reaches them
   started = each.value.enabled != "false"
-  # onDemand VMs stay off at host boot until a request wakes them.
+  # ondemand vms stay off at host boot
   on_boot = each.value.enabled == "true"
   machine = each.value.machine
 
@@ -103,7 +103,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
     up_delay = each.value.boot_order < local.defaults.boot_order ? local.boot_wait_seconds : 0
   }
 
-  # one hostpciN entry per passed-through mapping.
+  # one hostpciN per mapping
   dynamic "hostpci" {
     for_each = each.value.hostpci
     content {
@@ -114,7 +114,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
 
   lifecycle {
-    # file_id is only the image a disk was created from; imported VMs
+    # file_id only seeds a new disk, never replace
     ignore_changes = [
       initialization[0].user_account,
       mac_addresses,
@@ -131,7 +131,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
   memory {
     dedicated = each.value.memory
-    # floating turns the balloon device on. dedicated stays the ceiling; the host may reclaim
+    # floating enables ballooning, dedicated stays the ceiling
     floating = each.value.balloon
   }
 
@@ -145,7 +145,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
     discard      = "on"
   }
 
-  # scsi1 onward.
+  # scsi1 onward
   dynamic "disk" {
     for_each = each.value.extra_disks
     content {
@@ -153,7 +153,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
       file_format  = "raw"
       interface    = "scsi${disk.key + 1}"
       size         = disk.value.size
-      # a 5400 rpm disk: ssd = false so the guest schedules for a rotating device
+      # 5400 rpm hdd, guest schedules for rotation
       ssd     = false
       discard = "on"
     }
@@ -184,7 +184,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
 }
 
-# sync.sh writes local.inventory to src/inventory.json; the Nix configs read
+# sync.sh writes this to src/inventory.json for nix
 
 locals {
   inventory = {
