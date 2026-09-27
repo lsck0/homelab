@@ -97,11 +97,35 @@ in {
   networking.hostName = "vm-134";
 
   # /data/media rw on the VM (Janitorr writes the leaving-soon links)
-  fileSystems = nasMount "/var/lib/jellyfin" "jellyfin"
-    // nasMount "/var/lib/janitorr" "janitorr"
-    // nasPath "/data/media" "bulk/media"
-    // nasPath "/data/torrents" "bulk/torrents"
+  # jellyfin runs from local disk (SQLite locks on NFS); the NAS holds a nightly copy
+  fileSystems = nasMount "/var/lib/janitorr" "janitorr"
+    // nasMount "/srv/jellyfin-nas" "jellyfin"
+    // nasPath "/data" "bulk"
     // nasMount T "homepage-tokens";
+
+  # fresh disk: restore from the NAS copy
+  systemd.services.jellyfin-seed = {
+    before = [ "podman-jellyfin.service" ];
+    requiredBy = [ "podman-jellyfin.service" ];
+    unitConfig.RequiresMountsFor = [ "/srv/jellyfin-nas" ];
+    unitConfig.ConditionPathExists = "!/var/lib/jellyfin/config";
+    path = [ pkgs.rsync ];
+    serviceConfig.Type = "oneshot";
+    script = "rsync -a /srv/jellyfin-nas/ /var/lib/jellyfin/";
+  };
+
+  systemd.services.jellyfin-mirror = {
+    startAt = "01:15";
+    unitConfig.RequiresMountsFor = [ "/srv/jellyfin-nas" ];
+    path = [ pkgs.rsync pkgs.sqlite ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      rsync -a --delete --exclude cache --exclude 'config/data/*.db*' /var/lib/jellyfin/ /srv/jellyfin-nas/
+      for db in /var/lib/jellyfin/config/data/*.db; do
+        sqlite3 "$db" ".backup /srv/jellyfin-nas/config/data/$(basename "$db")"
+      done
+    '';
+  };
 
   virtualisation.oci-containers.containers = {
     jellyfin = {
@@ -316,7 +340,7 @@ in {
         LdapBindUser: "uid=admin,ou=people,dc=lsck0,dc=dev",
         LdapBindPassword: $pass,
         LdapBaseDn: "ou=people,dc=lsck0,dc=dev",
-        LdapSearchFilter: "(objectClass=person)",
+        LdapSearchFilter: "(|(memberOf=cn=admins,ou=groups,dc=lsck0,dc=dev)(memberOf=cn=app-jellyfin,ou=groups,dc=lsck0,dc=dev))",
         LdapAdminFilter: "(memberOf=cn=admins,ou=groups,dc=lsck0,dc=dev)",
         LdapSearchAttributes: "uid, cn, mail, displayName",
         LdapUsernameAttribute: "uid",

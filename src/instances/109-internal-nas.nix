@@ -37,6 +37,7 @@
   services.nfs.server = {
     enable = true;
     exports = ''
+      /srv/nas/bulk       10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/bulk/media 10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/documents  10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/public     10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
@@ -165,7 +166,7 @@
     "d /srv/nas/data/jellyseerr 0777 nobody nogroup -"
     "d /srv/nas/data/bazarr 0777 nobody nogroup -"
     "d /srv/nas/data/firefly 0777 nobody nogroup -"
-    "d /srv/nas/data/firefly/db 0750 999 999 -"
+    "d /srv/nas/data/firefly/db 0750 70 70 -"
     "d /srv/nas/data/firefly/upload 0750 1000 1000 -"
     "d /srv/nas/syncthing 0775 nobody nogroup -"
     "d /srv/nas/syncthing/sync 0775 nobody nogroup -"

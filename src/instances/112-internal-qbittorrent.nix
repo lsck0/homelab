@@ -32,6 +32,12 @@ let
     # downloads plus the one upload slot, so a full download queue never starves seeding
     max_active_torrents = 6;
     dont_count_slow_torrents = true;
+    # stop seeding at ratio 1 or 7 days so the *arr can clean up
+    max_ratio_enabled = true;
+    max_ratio = 1.0;
+    max_seeding_time_enabled = true;
+    max_seeding_time = 10080;
+    max_ratio_act = 0;
   });
 in {
   networking.hostName = "vm-112";
@@ -40,7 +46,7 @@ in {
   # No tunnel here: the router holds the key and the killswitch (modules/egress.nix).
 
   fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
-    // nasPath "/data/torrents" "bulk/torrents"
+    // nasPath "/data" "bulk"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   # Host networking, not a published port.

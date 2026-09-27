@@ -249,7 +249,7 @@ in {
   systemd.services.protonvpn-port = {
     description = "Renew the Proton forwarded port and publish it";
     after = [ "wireguard-wg-egress.service" ];
-    path = [ pkgs.libnatpmp pkgs.nftables pkgs.curl pkgs.coreutils pkgs.gnused ];
+    path = [ pkgs.libnatpmp pkgs.nftables pkgs.curl pkgs.coreutils pkgs.gnused pkgs.jq ];
     serviceConfig = { Type = "oneshot"; StateDirectory = "protonvpn"; };
     environment.PEER_HOST = peerHost;
     script = "exec ${pkgs.bash}/bin/bash ${../scripts/protonvpn-port.sh}";
@@ -360,8 +360,6 @@ in {
         ip daddr 192.168.178.29 tcp dport 10100 dnat to 10.100.0.100:443
         ip daddr 192.168.178.29 tcp dport 10200 dnat to 10.200.0.200:443
         ip daddr 192.168.178.29 tcp dport 25565 dnat to 10.200.0.200:25565
-        # Tor relay ORPort: must also be forwarded on the FritzBox.
-        ip daddr 192.168.178.29 tcp dport 9001 dnat to 10.200.0.202:9001
         # No qBittorrent forward: peer traffic leaves through Proton now, and
         # the port peers reach it on is the one NAT-PMP leases inside that
         # tunnel. A forward here would point at a port the client no longer

@@ -29,7 +29,7 @@ in {
     # mkDefault: a host that mounts the same path itself (e.g. the token dir) wins instead
     fileSystems = lib.mkMerge ([
       (lib.mapAttrs (_: lib.mkDefault) (
-        nasPath "/data/media" "bulk/media" // nasPath "/data/torrents" "bulk/torrents" // nasMount tokens "homepage-tokens"
+        nasPath "/data" "bulk" // nasMount tokens "homepage-tokens"
       ))
     ] ++ lib.mapAttrsToList (name: _: nasMount "/var/lib/${name}" name) cfg);
 
@@ -38,8 +38,8 @@ in {
       ports = [ "${toString app.hostPort}:${toString app.port}" ];
       volumes = [
         "/var/lib/${name}:/config"
-        "/data/media:/data/media"
-        "/data/torrents:/data/torrents"
+        # one bind: imports hardlink torrents into media
+        "/data:/data"
       ];
       environment = {
         PUID = "1000";

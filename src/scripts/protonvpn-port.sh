@@ -24,7 +24,7 @@ done
 
 # The DNAT first.
 current_element=$(nft -j list set ip "$TABLE" "$SET" 2>/dev/null \
-  | sed -n 's/.*"val":\([0-9]\+\).*/\1/p' | head -1)
+  | jq -r '.nftables[] | .set? | select(.) | .elem[0] // empty' | head -1)
 if [ "$current_element" != "$port" ]; then
   nft flush set ip "$TABLE" "$SET"
   nft add element ip "$TABLE" "$SET" "{ $port }"
