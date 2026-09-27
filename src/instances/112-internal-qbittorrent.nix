@@ -27,10 +27,9 @@ let
     upnp = false;
     queueing_enabled = true;
     max_active_downloads = 5;
-    # one torrent seeds at a time
-    max_active_uploads = 1;
-    # room for the upload slot beside downloads
-    max_active_torrents = 6;
+    # queued seeds never reach the ratio limit, so seed enough to drain
+    max_active_uploads = 8;
+    max_active_torrents = 13;
     dont_count_slow_torrents = true;
     # stop at ratio 1 or 7 days for arr cleanup
     max_ratio_enabled = true;
