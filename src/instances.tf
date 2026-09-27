@@ -175,7 +175,9 @@ locals {
       enabled = true,
       name    = "129-internal-prowlarr",
       type    = "internal",
-      memory  = 1024,
+      # flaresolverr's chromium thrashed at a 512 floor
+      memory  = 1536,
+      balloon = 1024,
     }
     "130" = { # movie library manager
       enabled = true,
