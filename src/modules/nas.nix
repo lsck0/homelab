@@ -9,10 +9,7 @@ let
   # the only /srv/nas/data shares the DMZ may mount
   dmzShares = {
     "200" = [ "crowdsec-external" "traefik-acme-external" ];
-    "201" = [ "headscale" ];
-    "202" = [ "tor-relay-keys" ];
     "204" = [ "searxng" ];
-    "205" = [ "shlink" "homepage-tokens/external" ];
     "206" = [ "privatebin" ];
     "207" = [ "share" ];
     "208" = [ "minecraft" "minecraft-modpacks" ];

@@ -1,23 +1,17 @@
 ---
 name: public-apps
-description: Shlink links, PrivateBin, file share, SearXNG.
+description: PrivateBin, file share, SearXNG.
 version: 1.0.0
 author: homelab
 license: MIT
 platforms: [linux]
 metadata:
   hermes:
-    tags: [Homelab, Shlink, SearXNG, Sharing]
+    tags: [Homelab, SearXNG, Sharing]
     related_skills: [homelab-ops]
 ---
 
 # Public apps (DMZ)
-
-## Shlink URL shortener (vm-205, https://shlink.lsck0.dev)
-
-API key: `lab-token shlink-key`, base `http://10.200.0.205/rest/v3`, header `X-Api-Key`.
-- Shorten: `POST /short-urls {"longUrl":"https://...","customSlug":"optional","tags":["hermes"]}` -> `.shortUrl`.
-- List: `GET /short-urls?searchTerm=<t>`; stats `GET /short-urls/<code>/visits`; delete `DELETE /short-urls/<code>`.
 
 ## SearXNG (vm-204, on demand, https://search.lsck0.dev)
 

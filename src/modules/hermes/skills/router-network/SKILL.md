@@ -19,7 +19,7 @@ metadata:
   ens20 DMZ 10.200.0.0/24, wg0 WireGuard 10.0.0.0/24.
 - Firewall/NAT: nftables. `nft list ruleset`; forward rules: DMZ may only reach
   internal Traefik/registry/git, Loki (3100) and NFS.
-  Port forwards (WAN IP): 443 -> vm-200, 25565 -> vm-200 (Minecraft), 9001 -> vm-202.
+  Port forwards (WAN IP): 443 -> vm-200, 25565 -> vm-200 (Minecraft).
 - DNS: CoreDNS (split horizon: *.lsck0.dev -> Traefik IPs) -> blocky (ad block, DoT).
   Test: `dig +short grafana.lsck0.dev @10.100.0.1`. Blocky: `journalctl -u blocky -n 50`;
   temporarily disable blocking: `curl -X GET http://127.0.0.1:4000/api/blocking/disable?duration=10m` (if the API port is enabled) or restart blocky.
