@@ -1,4 +1,4 @@
-{ config, pkgs, nasMount, nasPath, retry, ... }:
+{ config, lib, pkgs, nasMount, nasPath, retry, ... }:
 let
   T = "/var/lib/homepage-tokens";
 
@@ -96,6 +96,18 @@ let
 in {
   networking.hostName = "vm-134";
 
+  # rtx 2060 passthrough for nvenc/nvdec
+  nixpkgs.config.allowUnfreePredicate = p: builtins.elem (lib.getName p) [ "nvidia-x11" "nvidia-settings" ];
+  services.xserver.videoDrivers = [ "nvidia" ];
+  boot.blacklistedKernelModules = [ "nouveau" ];
+  hardware.graphics.enable = true;
+  hardware.nvidia = {
+    open = false;
+    nvidiaSettings = false;
+    package = config.boot.kernelPackages.nvidiaPackages.stable;
+  };
+  hardware.nvidia-container-toolkit.enable = true;
+
   # jellyfin db local (sqlite on nfs), nas keeps a copy
   fileSystems = nasMount "/var/lib/janitorr" "janitorr"
     // nasMount "/srv/jellyfin-nas" "jellyfin"
@@ -144,6 +156,7 @@ in {
         "/data/media:/data/media:ro"
       ];
       environment.JELLYFIN_PublishedServerUrl = "https://jellyfin.lsck0.dev";
+      extraOptions = [ "--device=nvidia.com/gpu=all" ];
     };
 
     janitorr-stats = {
@@ -273,6 +286,17 @@ in {
       fi
       POLICY=$(api "$J/Users/$UID_J" | jq -c '.Policy | .IsAdministrator=true | .EnableContentDeletion=true | .IsHidden=true')
       api -X POST "$J/Users/$UID_J/Policy" -d "$POLICY"
+
+      # turing: no av1 decode
+      ENC=$(api $J/System/Configuration/encoding | jq -c '
+        .HardwareAccelerationType = "nvenc"
+        | .EnableHardwareEncoding = true
+        | .HardwareDecodingCodecs = ["h264","hevc","mpeg2video","vc1","vp8","vp9"]
+        | .EnableDecodingColorDepth10Hevc = true
+        | .EnableDecodingColorDepth10Vp9 = true
+        | .EnableTonemapping = true
+        | .AllowHevcEncoding = true')
+      api -X POST $J/System/Configuration/encoding -d "$ENC"
     '';
   };
 

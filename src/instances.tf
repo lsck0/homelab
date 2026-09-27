@@ -210,11 +210,13 @@ locals {
       enabled = true,
       name    = "134-internal-jellyfin",
       type    = "internal",
-      # no balloon: squeezed to 1 GiB it was OOM-killed mid-stream
+      # vfio pins all ram, so no balloon
       memory  = 3072,
-      balloon = 3072,
+      balloon = 0,
       cores   = 4,
       disk    = 16,
+      machine = "q35",
+      hostpci = ["gpu"],
     }
     "136" = { # music streaming (Subsonic API) + Lidarr (music manager)
       enabled = true,
