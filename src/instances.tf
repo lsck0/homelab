@@ -183,13 +183,17 @@ locals {
       enabled = true,
       name    = "130-internal-radarr",
       type    = "internal",
+      # .net thrashed at a 512 floor
       memory  = 1024,
+      balloon = 1024,
     }
     "131" = { # series + anime library manager
       enabled = true,
       name    = "131-internal-sonarr",
       type    = "internal",
+      # .net thrashed at a 512 floor
       memory  = 1024,
+      balloon = 1024,
     }
     "132" = { # subtitle downloader for *arr
       enabled = true,
