@@ -1,5 +1,13 @@
-{ pkgs, nasMount, ... }:
+{ config, pkgs, nasMount, ... }:
 let
+  # login through authelia oidc
+  oidcAuth = pkgs.fetchFromGitHub {
+    owner = "christiaangoossens";
+    repo = "hass-oidc-auth";
+    rev = "v1.2.1";
+    hash = "sha256-vwQDrMM4phbrXT85Syyz6hWEIhLB3TKNNTM04OdvNWk=";
+  };
+
   hassConfig = pkgs.writeText "configuration.yaml" ''
     default_config:
     frontend:
@@ -7,6 +15,17 @@ let
     automation: !include automations.yaml
     script: !include scripts.yaml
     scene: !include scenes.yaml
+    auth_oidc:
+      client_id: homeassistant
+      client_secret: !secret oidc_secret
+      discovery_url: https://auth.lsck0.dev/.well-known/openid-configuration
+      display_name: Authelia
+      features:
+        automatic_user_linking: true
+        default_redirect: true
+        force_https: true
+      roles:
+        admin: admins
   '';
 
   # 2026.9 ignores yaml http:, hass-http writes .storage
@@ -28,8 +47,11 @@ in {
     volumes = [
       "/var/lib/homeassistant:/config"
       "${hassConfig}:/config/configuration.yaml:ro"
+      "${oidcAuth}/custom_components/auth_oidc:/config/custom_components/auth_oidc:ro"
     ];
   };
+
+  sops.secrets.homeassistant-oidc-secret = {};
 
   systemd.services.hass-http = {
     before = [ "podman-homeassistant.service" ];
@@ -44,7 +66,9 @@ in {
       jq --argjson h '${httpStable}' \
         '.data.stable += $h | .data.stable.error = null | .data.pending = null | .data.yaml_migration_done = true' \
         $f > $f.new && mv $f.new $f
-      chown 1000:1000 $f
+      printf 'oidc_secret: "%s"\n' "$(cat ${config.sops.secrets.homeassistant-oidc-secret.path})" > /var/lib/homeassistant/secrets.yaml
+      chmod 600 /var/lib/homeassistant/secrets.yaml
+      chown 1000:1000 $f /var/lib/homeassistant/secrets.yaml
     '';
   };
 

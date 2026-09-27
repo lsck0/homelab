@@ -4,7 +4,7 @@ let
   routes = (import ../modules/routes.nix).internal;
   ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
   routeGroups = lib.unique (lib.mapAttrsToList (_: r: r.group or "users") ssoRoutes);
-  appGroups = map (n: "app-${n}") (lib.attrNames ssoRoutes ++ [ "forgejo" "jellyfin" ]);
+  appGroups = map (n: "app-${n}") (lib.attrNames ssoRoutes ++ [ "forgejo" "jellyfin" "headplane" "homeassistant" ]);
   groups = lib.unique ([ "admins" "users" ] ++ routeGroups ++ appGroups);
 
   # example account, three pages

@@ -52,6 +52,13 @@ let
       tokenAuthMethod = "client_secret_post";
       redirectUris = [ "https://hs-ui.lsck0.dev/admin/oidc/callback" ];
     }
+    {
+      id = "homeassistant";
+      name = "Home Assistant";
+      secretName = "homeassistant-oidc-secret";
+      tokenAuthMethod = "client_secret_post";
+      redirectUris = [ "https://hass.lsck0.dev/auth/oidc/callback" ];
+    }
   ];
 
   # oidc obeys the forwardauth groups
@@ -106,6 +113,7 @@ in {
   sops.secrets.forgejo-oidc-secret = {};
   sops.secrets.jellyfin-oidc-secret = {};
   sops.secrets.headplane-oidc-secret = {};
+  sops.secrets.homeassistant-oidc-secret = {};
 
   # own crypto generated here, not in sops
   systemd.services.authelia-bootstrap = {
