@@ -203,7 +203,6 @@ in {
           address = "ldap://10.100.0.102:3890";
           base_dn = "dc=lsck0,dc=dev";
           user = "uid=admin,ou=people,dc=lsck0,dc=dev";
-          pooling = { enable = true; count = 8; retries = 2; timeout = "10s"; };
         };
       };
 
