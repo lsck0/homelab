@@ -180,6 +180,8 @@ in {
 
   # first run: admin, libraries, api key
   systemd.services.jellyfin-setup = {
+    # rerun on every jellyfin restart: the db may have been swapped
+    partOf = [ "podman-jellyfin.service" ];
     description = "Initialise Jellyfin (admin, libraries, API key, janitorr user)";
     after = [ "podman-jellyfin.service" ];
     wantedBy = [ "multi-user.target" ];
@@ -277,6 +279,8 @@ in {
   # lldap account is the jellyfin account
   sops.secrets.lldap-admin-password = {};
   systemd.services.jellyfin-ldap = {
+    # rerun on every jellyfin restart: the db may have been swapped
+    partOf = [ "podman-jellyfin.service" ];
     description = "Point Jellyfin authentication at lldap (LDAP-Auth plugin)";
     after = [ "jellyfin-setup.service" ];
     requires = [ "jellyfin-setup.service" ];
@@ -351,6 +355,8 @@ in {
   # browser sso via jellyfin-plugin-sso and authelia
   sops.secrets.jellyfin-oidc-secret = {};
   systemd.services.jellyfin-sso = {
+    # rerun on every jellyfin restart: the db may have been swapped
+    partOf = [ "podman-jellyfin.service" ];
     description = "Install and configure jellyfin-plugin-sso against Authelia";
     after = [ "jellyfin-ldap.service" ];
     requires = [ "jellyfin-setup.service" ];
