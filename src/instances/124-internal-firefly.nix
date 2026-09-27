@@ -7,6 +7,8 @@
 
   sops.secrets.firefly-app-key = {};
   sops.secrets.firefly-db-password = {};
+  sops.templates."firefly.env".restartUnits = [ "podman-firefly.service" ];
+  systemd.services.podman-firefly.restartTriggers = [ config.sops.templates."firefly.env".content ];
   sops.templates."firefly.env".content = ''
     APP_KEY=${config.sops.placeholder.firefly-app-key}
     DB_CONNECTION=pgsql
