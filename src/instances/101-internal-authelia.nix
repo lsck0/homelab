@@ -5,11 +5,13 @@ let
   # the access rules are generated from modules/routes.nix
   routes = (import ../modules/routes.nix).internal;
   ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
-  routeRules = lib.concatLists (lib.mapAttrsToList (_: r: [
+  # per page: admins, the page's own app-<route> group, or its bundle group.
+  routeSubjects = name: r: lib.unique [ [ "group:admins" ] [ "group:app-${name}" ] [ "group:${r.group or "users"}" ] ];
+  routeRules = lib.concatLists (lib.mapAttrsToList (name: r: [
     {
       domain = [ "${r.host}.lsck0.dev" ];
       policy = "two_factor";
-      subject = [ [ "group:${r.group or "users"}" ] ];
+      subject = routeSubjects name r;
     }
     {
       domain = [ "${r.host}.lsck0.dev" ];
@@ -43,7 +45,23 @@ let
       tokenAuthMethod = "client_secret_post";
       redirectUris = [ "https://jellyfin.lsck0.dev/sso/OID/redirect/authelia" ];
     }
+    {
+      id = "headplane";
+      name = "Headplane";
+      secretName = "headplane-oidc-secret";
+      tokenAuthMethod = "client_secret_post";
+      redirectUris = [ "https://hs-ui.lsck0.dev/admin/oidc/callback" ];
+    }
   ];
+
+  # OIDC logins obey the same per-page groups as ForwardAuth.
+  mkPolicyYaml = c: lib.concatStringsSep "\n" [
+    "        ${c.id}:"
+    "          default_policy: deny"
+    "          rules:"
+    "            - policy: two_factor"
+    "              subject: ['group:admins', 'group:app-${c.id}']"
+  ] + "\n";
 
   # built line by line rather than as an indented block: Nix strips the common indentation
   mkClientYaml = c: lib.concatStringsSep "\n" ([
@@ -52,7 +70,7 @@ let
     "        client_secret: '$CLIENT_HASH_${c.id}'"
     "        public: false"
     # same bar as the ForwardAuth routes: an OIDC login must not be a cheaper way into Forgejo
-    "        authorization_policy: two_factor"
+    "        authorization_policy: ${c.id}"
     "        require_pkce: false"
     "        consent_mode: implicit"
     # client_secret_basic is the OAuth 2.0 default and what Forgejo sends.
@@ -87,6 +105,7 @@ in {
   sops.secrets.lldap-admin-password = {};
   sops.secrets.forgejo-oidc-secret = {};
   sops.secrets.jellyfin-oidc-secret = {};
+  sops.secrets.headplane-oidc-secret = {};
 
   # Authelia's own cryptographic material is generated here rather than kept in sops: none
   systemd.services.authelia-bootstrap = {
@@ -136,6 +155,8 @@ in {
       cat > ${oidcClientsFile} <<EOF
       identity_providers:
         oidc:
+          authorization_policies:
+      ${lib.concatMapStrings mkPolicyYaml oidcClients}
           clients:
       ${lib.concatMapStrings mkClientYaml oidcClients}
       EOF
@@ -167,12 +188,14 @@ in {
       # lldap (vm-102) is the single identity store.
       authentication_backend = {
         password_reset.disable = false;
-        refresh_interval = "1m";
+        # group changes land within 5m; 1m queued binds behind homepage's ping burst
+        refresh_interval = "5m";
         ldap = {
           implementation = "lldap";
           address = "ldap://10.100.0.102:3890";
           base_dn = "dc=lsck0,dc=dev";
           user = "uid=admin,ou=people,dc=lsck0,dc=dev";
+          pooling = { enable = true; count = 8; retries = 2; timeout = "10s"; };
         };
       };
 

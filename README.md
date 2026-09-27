@@ -17,9 +17,12 @@ of its IP.
 lldap (vm-102) is the only account store; Authelia (vm-101) is the only login.
 Nothing internal is reachable without one of them:
 
-- `auth = "sso"` routes get Authelia ForwardAuth. The route's `group` says which
-  lldap group may enter, so **granting or revoking a service for a person is a
-  group edit in the lldap dashboard** and takes effect within a minute.
+- `auth = "sso"` routes get Authelia ForwardAuth. Every page has its own lldap
+  group `app-<route>` (e.g. `app-grafana`); `admins` and the route's bundle
+  `group` (`users`, `media`) also get in. **Granting or revoking one page for a
+  person is a group edit in the lldap dashboard**, live within 5 minutes. The
+  example user `guest` holds only `app-homepage`, `app-jellyfin` and
+  `app-jellyseerr`.
 - `auth = "own"` routes run their own login backed by the same directory:
   Forgejo through Authelia OIDC,
   Jellyfin by binding to lldap directly (its apps cannot follow a portal
@@ -59,7 +62,7 @@ src/tests/media-stack.sh                                    # media stack agains
 src/tests/hermes-agent.sh                                   # hermes scenarios (free nous model, or ANTHROPIC_API_KEY)
 src/scripts/secrets-sync.sh [--apply]                       # add missing secrets, drop unused ones
 src/scripts/stack.sh status                                 # which VM groups are on
-src/scripts/stack.sh {media|apps|gpu} {on|off} [--apply]     # swap a group in or out (the box cannot host all of them)
+src/scripts/stack.sh {media|apps} {on|off} [--apply]     # swap a group in or out (the box cannot host all of them)
 src/scripts/renumber.sh [--execute]                         # rename vm ids on proxmox to match instances.tf
 ```
 

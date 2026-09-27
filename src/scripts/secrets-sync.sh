@@ -18,8 +18,8 @@ export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$ROOT_DIR/secrets/age.txt}"
 
 # secrets whose value only has to be consistent inside the lab.
 GENERATED=(
-  lldap-admin-password lldap-jwt-secret authelia-admin-pass
-  forgejo-admin-pass forgejo-oidc-secret
+  lldap-admin-password lldap-jwt-secret authelia-admin-pass lldap-guest-password
+  forgejo-admin-pass forgejo-oidc-secret headplane-oidc-secret
   restic-password minecraft-rcon-password
   firefly-db-password
   crowdsec-bouncer-key

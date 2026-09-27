@@ -64,9 +64,11 @@ in {
       rule = "Host(`${r.host}.lsck0.dev`)";
       service = name;
       entryPoints = [ "websecure" ];
-    } // lib.optionalAttrs ((r.auth or "sso") == "sso") { middlewares = [ sso ]; }
-      // lib.optionalAttrs (r ? loginRedirect) { middlewares = [ "${name}-login" ]; }
-      // lib.optionalAttrs (name == "registry-api") { middlewares = [ "registry-clients" ]; })) routes // {
+    } // lib.optionalAttrs ((r.auth or "sso") == "sso" || r ? loginRedirect || name == "registry-api") {
+      middlewares = lib.optional ((r.auth or "sso") == "sso") sso
+        ++ lib.optional (r ? loginRedirect) "${name}-login"
+        ++ lib.optional (name == "registry-api") "registry-clients";
+    })) routes // {
       traefik-dash-tls = { rule = "Host(`traefik.lsck0.dev`)";  service = "api@internal"; entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
       proxmox-tls      = { rule = "Host(`proxmox.lsck0.dev`)";  service = "proxmox";      entryPoints = [ "websecure" ]; middlewares = [ sso ]; };
     };

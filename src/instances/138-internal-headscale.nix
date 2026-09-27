@@ -50,10 +50,14 @@ in
   };
 
   # Headplane refuses to start without a 32-character cookie secret, and it signs sessions
+  sops.secrets.headplane-oidc-secret = {};
   systemd.services.headplane-secret = {
     description = "Generate the Headplane cookie secret";
     before = [ "podman-headplane.service" ];
     requiredBy = [ "podman-headplane.service" ];
+    # OIDC sessions act through this key
+    after = [ "headplane-apikey.service" ];
+    requires = [ "headplane-apikey.service" ];
     path = [ pkgs.openssl pkgs.coreutils ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
@@ -64,6 +68,8 @@ in
         chmod 600 /var/lib/headplane/cookie.env
       fi
       secret=$(cut -d= -f2 /var/lib/headplane/cookie.env)
+      install -m 600 ${config.sops.secrets.headplane-oidc-secret.path} /var/lib/headplane/oidc-secret
+      apikey=$(cat /var/lib/homepage-tokens/headplane-key.token)
 
       # Written every run so the settings stay in this repo, but the secret is
       # only generated once above.
@@ -80,6 +86,14 @@ in
       integration:
         agent:
           enabled: false
+      oidc:
+        issuer: "https://auth.lsck0.dev"
+        client_id: "headplane"
+        client_secret_path: "/var/lib/headplane/oidc-secret"
+        token_endpoint_auth_method: "client_secret_post"
+        redirect_uri: "https://hs-ui.lsck0.dev/admin/oidc/callback"
+        disable_api_key_login: true
+        headscale_api_key: "$apikey"
       EOF
       # the heredoc above is indented for readability; strip it back out.
       sed -i 's/^      //' /var/lib/headplane/config.yaml
@@ -113,4 +127,5 @@ in
 
   # 80 Headscale (relayed in for client registration)
   networking.firewall.allowedTCPPorts = [ 80 3000 ];
+  homelab.ingressOnly.ports = [ 3000 ];
 }

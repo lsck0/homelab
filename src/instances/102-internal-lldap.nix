@@ -1,10 +1,14 @@
 { config, lib, pkgs, retry, ... }:
 let
-  # every group referenced by a route in modules/routes.nix, plus the two base groups.
+  # bundle groups from routes.nix, plus one app-<route> group per login page.
   routes = (import ../modules/routes.nix).internal;
-  routeGroups = lib.unique (lib.mapAttrsToList (_: r: r.group or "users")
-    (lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes));
-  groups = lib.unique ([ "admins" "users" ] ++ routeGroups);
+  ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
+  routeGroups = lib.unique (lib.mapAttrsToList (_: r: r.group or "users") ssoRoutes);
+  appGroups = map (n: "app-${n}") (lib.attrNames ssoRoutes ++ [ "forgejo" "jellyfin" ]);
+  groups = lib.unique ([ "admins" "users" ] ++ routeGroups ++ appGroups);
+
+  # example account: sees exactly three pages.
+  guestGroups = [ "app-homepage" "app-jellyfin" "app-jellyseerr" ];
 in {
   networking.hostName = "vm-102";
 
@@ -36,6 +40,7 @@ in {
 
   # luca's own password (reused from the Authelia admin secret) so the seeded user can log
   sops.secrets.authelia-admin-pass = { owner = "lldap"; group = "lldap"; };
+  sops.secrets.lldap-guest-password = { owner = "lldap"; group = "lldap"; };
 
   # seed the directory: groups (admins, users) + the admin user luca.
   systemd.services.lldap-bootstrap = {
@@ -55,6 +60,7 @@ in {
       URL="http://127.0.0.1:17170"
       ADMIN_PASS=$(cat ${config.sops.secrets.lldap-admin-password.path})
       LUCA_PASS=$(cat ${config.sops.secrets.authelia-admin-pass.path})
+      GUEST_PASS=$(cat ${config.sops.secrets.lldap-guest-password.path})
 
       ${retry} 60 2 curl -sf "$URL/health"
 
@@ -80,17 +86,24 @@ in {
       # password via the OPAQUE flow.
       lldap_set_password --base-url "$URL" --token "$TOKEN" --username luca --password "$LUCA_PASS"
 
-      # the owner belongs to every group: a route whose group is not granted to
-      # anyone would lock the owner out of that service. Additional accounts are
-      # created in the dashboard and get only the groups they should have.
-      ALL_GROUPS=$(gql '{"query":"{groups{id displayName}}"}')
-      for g in ${lib.escapeShellArgs groups}; do
-        gid=$(echo "$ALL_GROUPS" | jq -r --arg g "$g" '.data.groups[] | select(.displayName==$g) | .id')
-        [ -n "$gid" ] || { echo "group $g not found after seeding"; exit 1; }
-        gql "{\"query\":\"mutation{addUserToGroup(userId:\\\"luca\\\",groupId:$gid){ok}}\"}" || true
-      done
+      # example user guest.
+      gql '{"query":"mutation($u:CreateUserInput!){createUser(user:$u){id}}","variables":{"u":{"id":"guest","email":"guest@lsck0.dev","displayName":"Guest"}}}' || true
+      lldap_set_password --base-url "$URL" --token "$TOKEN" --username guest --password "$GUEST_PASS"
 
-      echo "lldap seeded: luca in ${lib.concatStringsSep ", " groups}"
+      ALL_GROUPS=$(gql '{"query":"{groups{id displayName}}"}')
+      join() { # user group...
+        u=$1; shift
+        for g in "$@"; do
+          gid=$(echo "$ALL_GROUPS" | jq -r --arg g "$g" '.data.groups[] | select(.displayName==$g) | .id')
+          [ -n "$gid" ] || { echo "group $g not found after seeding"; exit 1; }
+          gql "{\"query\":\"mutation{addUserToGroup(userId:\\\"$u\\\",groupId:$gid){ok}}\"}" || true
+        done
+      }
+      # owner gets every group so no page locks them out.
+      join luca ${lib.escapeShellArgs groups}
+      join guest ${lib.escapeShellArgs guestGroups}
+
+      echo "lldap seeded: luca in all groups, guest in ${lib.concatStringsSep ", " guestGroups}"
     '';
   };
 
