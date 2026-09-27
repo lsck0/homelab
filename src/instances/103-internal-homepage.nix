@@ -10,7 +10,7 @@ let
   groups = [
     { name = "Media"; icon = "mdi-play-box-multiple"; columns = 4; entries = [
       { route = "jellyfin"; name = "Jellyfin"; icon = "jellyfin"; desc = "Movies & shows";
-        widget = arr "jellyfin" "jellyfin" "JELLYFIN_KEY" // { enableBlocks = true; enableNowPlaying = true; }; }
+        widget = arr "jellyfin" "jellyfin" "JELLYFIN_KEY" // { version = 2; enableBlocks = true; enableNowPlaying = true; }; }
       { route = "jellyseerr"; name = "Jellyseerr"; icon = "jellyseerr"; desc = "Requests";
         widget = arr "jellyseerr" "jellyseerr" "JELLYSEERR_KEY"; }
       { route = "navidrome"; name = "Navidrome"; icon = "navidrome"; desc = "Music"; }
