@@ -1,8 +1,5 @@
 { config, lib, pkgs, inputs, inventory, nasMount, nasPath, ... }:
 let
-  # the RTX 2060 passthrough; see the GPU section below.
-  gpu = true;
-
   T = "/var/lib/homepage-tokens";
   routes = import ../modules/routes.nix;
   # via a template, not the raw secret: the stored value has no trailing newline and OpenSSH
@@ -120,7 +117,7 @@ let
     # Homelab
 
     You are Hermes, the operator of this homelab. The owner talks to you on
-    Telegram. You run on vm-114 (10.100.0.114) with an RTX 2060 and have root
+    Telegram. You run on vm-114 (10.100.0.114), use only cloud model APIs, and have root
     SSH on every VM and on the Proxmox host (192.168.178.200). Start with the
     `homelab-ops` skill; there is one skill per subsystem:
     ${lib.concatMapStringsSep ", " (n: "`${n}`") skillNames}.
@@ -171,36 +168,8 @@ in {
   imports = [ inputs.hermes-agent.nixosModules.default ];
 
   networking.hostName = "vm-114";
-
-  # ─────────────────────────────────────────────────────────────────────────────
-  # GPU + LOCAL INFERENCE NVIDIA RTX 2060 (Turing) passed through from the host
-  nixpkgs.config.allowUnfree = true;
-  services.xserver.videoDrivers = lib.mkIf gpu [ "nvidia" ];
-  boot.blacklistedKernelModules = lib.mkIf gpu [ "nouveau" ];
-  hardware.graphics.enable = gpu;
-  hardware.nvidia = lib.mkIf gpu {
-    modesetting.enable = true;
-    nvidiaSettings = false;
-    open = false;
-    package = config.boot.kernelPackages.nvidiaPackages.stable;
-  };
-
-  # Ollama: Hermes' fallback model when the cloud API is unreachable
-  services.ollama = {
-    enable = gpu;
-    host = "0.0.0.0";
-    port = 11434;
-    openFirewall = true;
-    acceleration = "cuda";
-    # qwen3:8b (~5 GB at Q4) fits the 6 GB card and handles tool calls.
-    loadModels = [ "qwen3:8b" ];
-    syncModels = true;
-    environmentVariables = {
-      OLLAMA_KEEP_ALIVE = "60m";
-      OLLAMA_NUM_PARALLEL = "1";
-      OLLAMA_MAX_LOADED_MODELS = "1";
-    };
-  };
+  # terraform is BSL
+  nixpkgs.config.allowUnfreePredicate = p: lib.getName p == "terraform";
 
   # ─────────────────────────────────────────────────────────────────────────────
   # SECRETS (FILL WITH SRC/SCRIPTS/HERMES-SECRETS.SH)
@@ -269,7 +238,7 @@ in {
     environmentFiles = [ config.sops.templates."hermes.env".path ];
 
     settings = {
-      # Anthropic first, free tiers next, the local card last.
+      # Anthropic first, then free tiers.
       model = {
         provider = "anthropic";
         default = "claude-sonnet-5";
@@ -283,12 +252,6 @@ in {
         { provider = "gemini"; model = "gemini-2.5-flash"; }
         # z.ai GLM free tier (GLM_API_KEY).
         { provider = "zai"; model = "glm-4.6-flash"; }
-        # local Ollama on the passed-through RTX 2060. Last resort, always there.
-        {
-          provider = "custom";
-          model = "qwen3:8b";
-          base_url = "http://127.0.0.1:11434/v1";
-        }
       ];
 
       # fail over quickly instead of retrying a dead primary three times.
