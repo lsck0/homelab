@@ -37,6 +37,5 @@ terraform.tfstate.backup
 *.tfstate.*.backup
 
 # the pasted task list; scratch, not part of the repo
-errors.txt
 __pycache__/
 *.pyc
