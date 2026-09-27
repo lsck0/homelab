@@ -11,7 +11,7 @@ let
 
   # Anubis PoW bot filter on the browser-facing routes: on = Traefik points at the Anubis
   anubisEnable = true;
-  anubisRoutes = [ "searxng" "shlink" "privatebin" "share" "hello" "hello-gh" ];
+  anubisRoutes = [ "searxng" "privatebin" "share" "hello" "hello-gh" ];
   anubisPort = name: 27000 + lib.lists.findFirstIndex (n: n == name) 0 anubisRoutes;
   upstream = name: "http://${address.${name}}";
 in {
@@ -79,7 +79,7 @@ in {
 
     # cap request bodies on the routes that only ever take small posts.
     bodyLimit = 32 * 1024 * 1024;
-    bodyLimitRouters = [ "searxng-tls" "shlink-tls" "hello-tls" "hello-gh-tls" ];
+    bodyLimitRouters = [ "searxng-tls" "hello-tls" "hello-gh-tls" ];
 
     entryPoints.minecraft.address = ":25565";
 
