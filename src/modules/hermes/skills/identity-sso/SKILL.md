@@ -15,8 +15,8 @@ metadata:
 
 - lldap vm-102 (10.100.0.102): the only account store, UI https://lldap.lsck0.dev.
 - Authelia vm-101 (10.100.0.101:9091): SSO portal https://auth.lsck0.dev,
-  ForwardAuth for Traefik, OIDC for Forgejo,
-  Audiobookshelf and Kavita. Jellyfin binds to lldap directly (LDAP-Auth
+  ForwardAuth for Traefik, OIDC for Forgejo, Jellyfin, Headplane and
+  Home Assistant. Jellyfin binds to lldap directly (LDAP-Auth
   plugin) because its TV and phone apps cannot follow a portal redirect.
   Policy: `two_factor` everywhere, including the OIDC clients.
 
@@ -32,7 +32,8 @@ an allow rule plus a deny rule for the same host. So:
   deploy. lldap seeds every group the routes mention, and the owner is put in
   all of them, so a new group name cannot lock the owner out.
 - groups in use today: `admins` (everything operational), `users` (the ordinary
-  apps), `media` (Jellyseerr, Navidrome, qBittorrent, Suwayomi).
+  apps), `media` (Jellyseerr, Navidrome, qBittorrent), plus one
+  `app-<route>` group per page (e.g. `app-grafana`) to grant a single page.
 - a host with no entry in routes.nix falls through to the last rule, which
   requires `admins`. Adding a route without a `group` defaults it to `users`.
 

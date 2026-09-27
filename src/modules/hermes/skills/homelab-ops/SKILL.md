@@ -28,7 +28,7 @@ working directory first: it has the VM inventory, IPs, hostnames and rules.
 - `pve <METHOD> <path> [curl args]`, Proxmox API, e.g.
   `pve GET /nodes/luca-server/qemu/208/status/current`.
 - `lab-token <name>`, API keys the VMs export: `radarr-key`, `sonarr-key`,
-  `lidarr-key`, `bookshelf-key`, `prowlarr-key`, `jellyfin-key`,
+  `lidarr-key`, `prowlarr-key`, `jellyfin-key`,
   `jellyseerr-key`, `bazarr-key`, `paperless-key`, `firefly-token`, ... (`lab-token` alone lists them).
 
 ## Services

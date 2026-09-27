@@ -8,7 +8,6 @@ PROWLARR_HOST=${PROWLARR_HOST:-10.100.0.129}; PROWLARR_PORT=${PROWLARR_PORT:-80}
 RADARR_HOST=${RADARR_HOST:-10.100.0.130};     RADARR_PORT=${RADARR_PORT:-80}
 SONARR_HOST=${SONARR_HOST:-10.100.0.131};     SONARR_PORT=${SONARR_PORT:-80}
 JELLYFIN_HOST=${JELLYFIN_HOST:-10.100.0.134}; JELLYFIN_PORT=${JELLYFIN_PORT:-80}
-BOOKSHELF_HOST=${BOOKSHELF_HOST:-10.100.0.135}; BOOKSHELF_PORT=${BOOKSHELF_PORT:-8787}
 LIDARR_HOST=${LIDARR_HOST:-10.100.0.136};     LIDARR_PORT=${LIDARR_PORT:-8686}
 JELLYSEERR_URL=${JELLYSEERR_URL:-http://10.100.0.128}
 BAZARR_URL=${BAZARR_URL:-http://10.100.0.132}
@@ -90,7 +89,7 @@ wire_servarr() {
   for path in "$@"; do
     api GET "$a/rootfolder" "$k" | jq -e --arg p "$path" 'any(.[]; .path == $p)' >/dev/null && continue
     if [ "$v" = v1 ]; then
-      # lidarr/bookshelf root folders need default profiles
+      # lidarr root folders need default profiles
       qp=$(api GET "$a/qualityprofile" "$k" | jq '.[0].id')
       mp=$(api GET "$a/metadataprofile" "$k" | jq '.[0].id')
       body=$(jq -cn --arg p "$path" --arg n "$(basename "$path")" --argjson qp "$qp" --argjson mp "$mp" \
@@ -159,7 +158,7 @@ wire_prowlarr() {
   apps=$(api GET "$P/applications" "$pk") || { later "prowlarr: unreachable"; return; }
 
   for spec in "Radarr radarr http://$RADARR_HOST:$RADARR_PORT" "Sonarr sonarr http://$SONARR_HOST:$SONARR_PORT" \
-              "Lidarr lidarr http://$LIDARR_HOST:$LIDARR_PORT" "Readarr bookshelf http://$BOOKSHELF_HOST:$BOOKSHELF_PORT"; do
+              "Lidarr lidarr http://$LIDARR_HOST:$LIDARR_PORT"; do
     read -r impl name url <<< "$spec"
     k=$(key "$name-key") || { later "prowlarr: waiting for $name API key"; continue; }
     if echo "$apps" | jq -e --arg i "$impl" 'any(.[]; .implementation == $i)' >/dev/null; then
@@ -425,7 +424,6 @@ wire_jellyfin_notify radarr "http://$RADARR_HOST:$RADARR_PORT"
 wire_jellyfin_notify sonarr "http://$SONARR_HOST:$SONARR_PORT"
 wire_servarr sonarr    "http://$SONARR_HOST:$SONARR_PORT"       v3 tvCategory    sonarr    /data/media/tv /data/media/anime
 wire_servarr lidarr    "http://$LIDARR_HOST:$LIDARR_PORT"       v1 musicCategory lidarr    /data/media/music
-wire_servarr bookshelf "http://$BOOKSHELF_HOST:$BOOKSHELF_PORT" v1 bookCategory  bookshelf /data/media/books
 wire_prowlarr
 wire_jellyseerr
 wire_bazarr

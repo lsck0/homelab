@@ -15,7 +15,7 @@ metadata:
 
 Layout under `/srv/nas`:
 - `data/<service>` persistent data of every service (NFS-mounted by the VMs)
-- `media/{movies,tv,anime,music,books,manga,audiobooks,leaving-soon}`
+- `media/{movies,tv,anime,music,leaving-soon}`
 - `torrents` downloads, `documents` (Paperless consume dir), `public`, `syncthing`
 - `BACKUPS/kopia` Kopia repository (see `backups`)
 

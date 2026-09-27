@@ -34,5 +34,5 @@ metadata:
   matches, set `enable: true`, `appProfileId: 1`, `POST /indexer`. Private trackers need
   the owner's credentials in the fields.
 - Manual search across indexers: `GET /search?query=<q>&type=search`.
-- Apps (sync to Radarr/Sonarr/Lidarr/Bookshelf): `GET /applications`; force sync `POST /command {"name":"ApplicationIndexerSync"}`.
+- Apps (sync to Radarr/Sonarr/Lidarr): `GET /applications`; force sync `POST /command {"name":"ApplicationIndexerSync"}`.
 - Wiring is maintained by `arr-wire` on vm-133 (`ssh 10.100.0.133 'systemctl start arr-wire; journalctl -u arr-wire -n 40'`).

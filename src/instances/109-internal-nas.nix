@@ -196,9 +196,7 @@
     "d /srv/nas/data/homepage-tokens 0777 nobody nogroup -"
     "d /srv/nas/data/crowdsec-internal 0777 nobody nogroup -"
     "d /srv/nas/data/lidarr 0777 nobody nogroup -"
-    "d /srv/nas/data/bookshelf 0777 nobody nogroup -"
     "d /srv/nas/data/janitorr 0777 nobody nogroup -"
-    "d /srv/nas/data/hermes 0777 nobody nogroup -"
     "d /var/lib/filebrowser 0750 1000 1000 -"
     "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
   ] ++ map (s: "d /srv/nas/data/${s} 0777 nobody nogroup -") (lib.unique (lib.concatLists (lib.attrValues dmzShares)));

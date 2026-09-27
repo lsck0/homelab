@@ -1,6 +1,6 @@
 ---
 name: media
-description: Get movies, series, anime, music, books and manga.
+description: Get movies, series, anime and music.
 version: 1.0.0
 author: homelab
 license: MIT
@@ -24,8 +24,6 @@ through Prowlarr. Media nobody watched for ~4 months is deleted by Janitorr
 | Series | Sonarr `http://10.100.0.131/api/v3` | `sonarr-key` | `/data/media/tv` | Jellyfin |
 | Anime | Sonarr, `seriesType: "anime"` | `sonarr-key` | `/data/media/anime` | Jellyfin |
 | Music | Lidarr `http://10.100.0.136:8686/api/v1` | `lidarr-key` | `/data/media/music` | Navidrome |
-| Ebooks | Bookshelf `http://10.100.0.135:8787/api/v1` (Readarr API) | `bookshelf-key` | `/data/media/books` | Kavita |
-| Manga | Suwayomi `http://10.100.0.137:4567/api/graphql` | none | `/data/media/manga` | Kavita |
 
 Send the key as header `X-Api-Key: $(lab-token <key>)`. Use `terminal` with
 `curl` + `jq`.
@@ -65,27 +63,6 @@ Send the key as header `X-Api-Key: $(lab-token <key>)`. Use `terminal` with
 For one album: `GET /api/v1/album/lookup?term=<album>`, add the artist with
 `monitor: "none"`, then monitor that album and `POST /api/v1/command`
 `{"name":"AlbumSearch","albumIds":[id]}`.
-
-## Ebooks (Bookshelf)
-
-`GET /api/v1/search?term=<title author>` -> `POST /api/v1/book` (or
-`/api/v1/author`) with `qualityProfileId`, `metadataProfileId`,
-`rootFolderPath: "/data/media/books"`, `monitored: true`,
-`addOptions: {"searchForNewBook": true}`.
-
-## Manga (Suwayomi GraphQL, no auth)
-
-POST JSON `{"query": "..."}` to `http://10.100.0.137:4567/api/graphql`.
-1. Sources: `{ sources { nodes { id displayName lang } } }` (sources are
-   installed extensions; if none fit, install one:
-   `{ extensions(condition:{isInstalled:false}) { nodes { pkgName name lang } } }` then
-   `mutation { updateExtension(input:{id:"<pkgName>", patch:{install:true}}) { clientMutationId } }`).
-2. Search: `mutation { fetchSourceManga(input:{source:"<id>", type:SEARCH, query:"<title>", page:1}) { mangas { id title } } }`
-3. Add to library: `mutation { updateManga(input:{id:<id>, patch:{inLibrary:true}}) { manga { id } } }`
-4. Chapters: `mutation { fetchChapters(input:{mangaId:<id>}) { chapters { id name chapterNumber } } }`
-5. Download: `mutation { enqueueChapterDownloads(input:{ids:[...]}) { clientMutationId } }`
-New chapters of library manga download automatically every 6 hours. If a
-query fails, introspect the schema (`{ __schema { mutationType { fields { name } } } }`).
 
 ## Status
 
