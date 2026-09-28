@@ -5,11 +5,22 @@ let
     "Steuern" "Versicherung" "Bank" "Wohnen" "Nebenkosten" "Energie" "Wasser" "Auto"
     "Gesundheit" "Arbeit" "Behörde" "Einkauf" "Telefon & Internet" "Bildung" "Familie" "Reise"
   ];
-  documentTypes = [
-    "Rechnung" "Bescheid" "Vertrag" "Brief" "Kontoauszug" "Gehaltsabrechnung" "Versicherungsschein"
-    "Quittung" "Mahnung" "Kündigung" "Angebot" "Zeugnis" "Sonstiges"
-  ];
+  # document types match by keyword here: paperless-ai 3.0.9 only restricts tags and correspondents in code
+  documentTypes = {
+    "Rechnung" = "Rechnung Gebührenbescheid Abrechnung";
+    "Bescheid" = "Bescheid Steuerbescheid Festsetzung";
+    "Vertrag" = "Vertrag Vereinbarung";
+    "Kontoauszug" = "Kontoauszug Kontostand";
+    "Gehaltsabrechnung" = "Gehaltsabrechnung Entgeltabrechnung Lohnabrechnung Verdienstabrechnung";
+    "Versicherungsschein" = "Versicherungsschein Police Versicherungsnachweis";
+    "Quittung" = "Quittung Kassenbon Beleg";
+    "Mahnung" = "Mahnung Zahlungserinnerung";
+    "Kündigung" = "Kündigung";
+    "Angebot" = "Angebot Kostenvoranschlag";
+    "Zeugnis" = "Zeugnis Zertifikat";
+  };
   pyList = xs: "[" + lib.concatMapStringsSep ", " (x: "'${x}'") xs + "]";
+  pyDict = d: "{" + lib.concatStringsSep ", " (lib.mapAttrsToList (k: v: "'${k}': '${v}'") d) + "}";
 in {
   networking.hostName = "vm-121";
 
@@ -62,8 +73,8 @@ in {
       # MATCH_NONE: paperless's own matcher must not assign these
       for n in ${pyList tags}:
           Tag.objects.get_or_create(name=n, defaults={'matching_algorithm': MatchingModel.MATCH_NONE, 'owner': owner})
-      for n in ${pyList documentTypes}:
-          DocumentType.objects.get_or_create(name=n, defaults={'matching_algorithm': MatchingModel.MATCH_NONE, 'owner': owner})
+      for n, words in ${pyDict documentTypes}.items():
+          DocumentType.objects.update_or_create(name=n, defaults={'matching_algorithm': MatchingModel.MATCH_ANY, 'match': words, 'is_insensitive': True, 'owner': owner})
       print(Token.objects.get_or_create(user=bot)[0].key)
       " | tail -1)
       [ -n "$TOKEN" ] || { echo "no API token from paperless-manage"; exit 1; }

@@ -8,7 +8,7 @@ let
     "Du analysierst deutsche Dokumente (Briefe, Rechnungen, Bescheide), oft als Handyfoto mit OCR-Fehlern."
     "Titel: kurz, deutsch, beschreibend, mit Absender und Gegenstand, z.B. 'Abwassergebühren 2026 Zweckverband Obereichsfeld'."
     "Korrespondent: die absendende Organisation oder Person, nie der Empfänger, keine Adressen oder Kundennummern."
-    "Tags und Dokumenttyp nur aus den vorgegebenen Listen, höchstens drei Tags."
+    "Tags nur aus der vorgegebenen Liste, höchstens drei."
     "Datum: das Ausstellungsdatum des Dokuments."
   ];
 in {
@@ -19,7 +19,7 @@ in {
 
   # settings live in /app/data/.env, normally wizard-written
   # new .env: restart the app with it
-  systemd.services.podman-paperless-ai.restartTriggers = [ llmModel llmUrl "homepage-bot" prompt "restrict-v1" ];
+  systemd.services.podman-paperless-ai.restartTriggers = [ llmModel llmUrl "homepage-bot" prompt "restrict-v2" ];
   systemd.services.paperless-ai-config = {
     description = "Seed paperless-ai configuration";
     before = [ "podman-paperless-ai.service" ];
@@ -49,12 +49,12 @@ in {
       SCAN_INTERVAL=*/5 * * * *
       ACTIVATE_TAGGING=yes
       ACTIVATE_CORRESPONDENTS=yes
-      ACTIVATE_DOCUMENT_TYPE=yes
+      # types come from paperless keyword matching (vm-121)
+      ACTIVATE_DOCUMENT_TYPE=no
       ACTIVATE_TITLE=yes
       ACTIVATE_CUSTOM_FIELDS=no
       RESTRICT_TO_EXISTING_TAGS=yes
       RESTRICT_TO_EXISTING_CORRESPONDENTS=no
-      RESTRICT_TO_EXISTING_DOCUMENT_TYPES=yes
       SYSTEM_PROMPT="${prompt}"
       TOKEN_LIMIT=128000
       RESPONSE_TOKENS=1000
