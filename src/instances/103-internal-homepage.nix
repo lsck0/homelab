@@ -1,4 +1,4 @@
-{ config, lib, pkgs, inventory, nasMount, ... }:
+{ config, lib, pkgs, inventory, nasMount, retry, ... }:
 let
   routes = let r = import ../modules/routes.nix; in r.internal // r.external;
 
@@ -225,6 +225,12 @@ in {
       chmod 600 "$ENV_FILE"
     '';
   };
+
+  # a fresh container serves its prebuilt page, settings empty; browsers only
+  # rebuild it when the config hash changes, so rebuild once after every start
+  systemd.services.podman-homepage.postStart = ''
+    ${retry} 90 1 ${pkgs.curl}/bin/curl -sf -o /dev/null -H 'Host: homepage.lsck0.dev' http://127.0.0.1/api/revalidate
+  '';
 
   # restart on config change
   systemd.services.podman-homepage.restartTriggers = [
