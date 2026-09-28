@@ -9,31 +9,30 @@ let
   # dashboard entries, display order
   groups = [
     { name = "Core"; icon = "mdi-server-network"; columns = 4; entries = [
-      { route = "grafana"; name = "Grafana"; icon = "grafana"; desc = "Metrics & alerts";
+      { route = "authelia"; name = "Authelia"; icon = "authelia"; }
+      { route = "lldap"; name = "LLDAP"; icon = "mdi-account-group"; }
+      { route = "grafana"; name = "Grafana"; icon = "grafana";
         widget = { type = "prometheus"; url = "http://10.100.0.105:9090"; }; }
-      { route = "authelia"; name = "Authelia"; icon = "authelia"; desc = "SSO"; }
-      { route = "lldap"; name = "LLDAP"; icon = "mdi-account-group"; desc = "Users & groups"; }
-      { route = "headplane"; name = "Headplane"; icon = "headscale"; desc = "VPN mesh admin"; }
-      { route = "nas"; name = "NAS"; icon = "mdi-nas"; desc = "Files"; }
-      { route = "syncthing"; name = "Syncthing"; icon = "syncthing"; desc = "Device sync"; }
-      { route = "kopia"; name = "Kopia"; icon = "kopia"; desc = "Backups"; }
+      { route = "headplane"; name = "Headplane"; icon = "headscale"; }
+      { route = "nas"; name = "NAS"; icon = "mdi-nas"; }
+      { route = "syncthing"; name = "Syncthing"; icon = "syncthing"; }
+      { route = "kopia"; name = "Kopia"; icon = "kopia"; }
     ]; }
     { name = "Dev"; icon = "mdi-source-branch"; columns = 4; entries = [
-      { route = "forgejo"; name = "Forgejo"; icon = "forgejo"; desc = "Git";
+      { route = "forgejo"; name = "Forgejo"; icon = "forgejo";
         widget = arr "gitea" "forgejo" "FORGEJO_KEY"; }
-      { route = "registry-ui"; name = "Registry"; icon = "docker-moby"; desc = "Images"; }
-      { route = "hello"; name = "Hello"; icon = "mdi-hand-wave"; desc = "Swarm demo (Forgejo)"; }
-      { route = "hello-gh"; name = "Hello GH"; icon = "github"; desc = "Swarm demo (GitHub)"; }
+      { route = "registry-ui"; name = "Registry"; icon = "docker-moby"; }
     ]; }
     { name = "Apps"; icon = "mdi-apps"; columns = 4; entries = [
-      { route = "homeassistant"; name = "Home Assistant"; icon = "home-assistant"; desc = "Home";
+      { route = "homeassistant"; name = "Home Assistant"; icon = "home-assistant";
         widget = arr "homeassistant" "homeassistant" "HASS_KEY"; }
-      { route = "paperless"; name = "Paperless"; icon = "paperless-ngx"; desc = "Documents";
+      { route = "huginn"; name = "Huginn"; icon = "huginn"; }
+      { route = "paperless"; name = "Paperless"; icon = "paperless-ngx";
         widget = arr "paperlessngx" "paperless" "PAPERLESS_KEY"; }
-      { route = "paperless-ai"; name = "Paperless AI"; icon = "paperless-ngx"; desc = "Auto-tagging"; }
-      { route = "firefly"; name = "Firefly III"; icon = "firefly-iii"; desc = "Finance"; }
-      { route = "huginn"; name = "Huginn"; icon = "huginn"; desc = "Agents"; }
+      { route = "paperless-ai"; name = "Paperless AI"; icon = "paperless-ngx"; }
+      { route = "firefly"; name = "Firefly III"; icon = "firefly-iii"; }
     ]; }
+    # the only group with descriptions: several apps here share a medium
     { name = "Media"; icon = "mdi-play-box-multiple"; columns = 4; entries = [
       { route = "jellyfin"; name = "Jellyfin"; icon = "jellyfin"; desc = "Movies & shows";
         widget = arr "jellyfin" "jellyfin" "JELLYFIN_KEY" // { version = 2; enableBlocks = true; enableNowPlaying = true; }; }
@@ -42,18 +41,20 @@ let
       { route = "navidrome"; name = "Navidrome"; icon = "navidrome"; desc = "Music"; }
       { route = "qbittorrent"; name = "qBittorrent"; icon = "qbittorrent"; desc = "Downloads (VPN)";
         widget = { type = "qbittorrent"; url = ipOf "qbittorrent"; username = key "QBITTORRENT_USER"; password = key "QBITTORRENT_PASS"; }; }
-      { route = "radarr"; name = "Radarr"; icon = "radarr"; desc = "Movies"; widget = arr "radarr" "radarr" "RADARR_KEY"; }
       { route = "sonarr"; name = "Sonarr"; icon = "sonarr"; desc = "Series & anime"; widget = arr "sonarr" "sonarr" "SONARR_KEY"; }
+      { route = "radarr"; name = "Radarr"; icon = "radarr"; desc = "Movies"; widget = arr "radarr" "radarr" "RADARR_KEY"; }
+      { route = "bazarr"; name = "Bazarr"; icon = "bazarr"; desc = "Subtitles"; widget = arr "bazarr" "bazarr" "BAZARR_KEY"; }
       { route = "lidarr"; name = "Lidarr"; icon = "lidarr"; desc = "Music"; widget = arr "lidarr" "lidarr" "LIDARR_KEY"; }
       { route = "prowlarr"; name = "Prowlarr"; icon = "prowlarr"; desc = "Indexers (Tor)"; widget = arr "prowlarr" "prowlarr" "PROWLARR_KEY"; }
-      { route = "bazarr"; name = "Bazarr"; icon = "bazarr"; desc = "Subtitles"; widget = arr "bazarr" "bazarr" "BAZARR_KEY"; }
     ]; }
     { name = "Public"; icon = "mdi-earth"; columns = 5; entries = [
-      { route = "headscale"; name = "Headscale"; icon = "headscale"; desc = "VPN control"; }
-      { route = "ntfy"; name = "ntfy"; icon = "ntfy"; desc = "Notifications"; }
-      { route = "searxng"; name = "SearXNG"; icon = "searxng"; desc = "Search"; }
-      { route = "privatebin"; name = "PrivateBin"; icon = "privatebin"; desc = "Paste"; }
-      { route = "share"; name = "Share"; icon = "pingvin-share"; desc = "File sharing"; }
+      { route = "headscale"; name = "Headscale"; icon = "headscale"; }
+      { route = "ntfy"; name = "ntfy"; icon = "ntfy"; }
+      { route = "searxng"; name = "SearXNG"; icon = "searxng"; }
+      { route = "privatebin"; name = "PrivateBin"; icon = "privatebin"; }
+      { route = "share"; name = "Share"; icon = "pingvin-share"; }
+      { route = "hello"; name = "Hello"; icon = "mdi-hand-wave"; }
+      { route = "hello-gh"; name = "Hello GH"; icon = "github"; }
     ]; }
   ];
 
@@ -64,13 +65,16 @@ let
     if state == "onDemand" then " (on-demand)"
     else if state == "false" then " (disabled)"
     else "";
-  entryYaml = e: let r = routes.${e.route}; state = stateOf e; in lib.concatMapStrings (l: l + "\n") [
+  entryYaml = e: let
+    r = routes.${e.route};
+    desc = lib.removePrefix " " ((e.desc or "") + stateSuffix (stateOf e));
+  in lib.concatMapStrings (l: l + "\n") [
     "    - ${e.name}:"
     "        icon: ${e.icon}"
     "        href: https://${r.host}.lsck0.dev"
-    "        description: ${e.desc}${stateSuffix state}"
     "        siteMonitor: ${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}${r.health or ""}"
-  ] + lib.optionalString (e ? widget) "        widget: ${builtins.toJSON e.widget}\n";
+  ] + lib.optionalString (desc != "") "        description: ${desc}\n"
+    + lib.optionalString (e ? widget) "        widget: ${builtins.toJSON e.widget}\n";
   groupYaml = g: "- ${g.name}:\n" + lib.concatMapStrings entryYaml g.entries;
 
   servicesYaml = pkgs.writeText "services.yaml" (''
@@ -78,7 +82,6 @@ let
         - Cloudflare:
             icon: cloudflare
             href: https://dash.cloudflare.com
-            description: DNS & CDN
         - FritzBox:
             icon: mdi-router-wireless
             href: http://192.168.178.1
@@ -96,6 +99,9 @@ let
               username: "{{HOMEPAGE_VAR_PROXMOX_USER}}"
               password: "{{HOMEPAGE_VAR_PROXMOX_PASS}}"
               node: luca-server
+        - Router:
+            icon: nixos
+            ping: http://10.100.0.1
         - Traefik:
             icon: traefik
             href: https://traefik.lsck0.dev
@@ -104,15 +110,10 @@ let
         - Traefik DMZ:
             icon: traefik
             ping: http://10.200.0.200
-            description: Public ingress (no dashboard route)
-        - Router:
-            icon: nixos
-            ping: http://10.100.0.1
-            description: NixOS Gateway
+            description: Public ingress
         - Terminal:
             icon: mdi-tablet-dashboard
             href: https://trmnl.com/dashboard
-            description: E-ink dashboard (TRMNL)
   '' + lib.concatMapStrings groupYaml groups);
 
   settingsYaml = pkgs.writeText "settings.yaml" (''
