@@ -8,6 +8,33 @@ let
 
   # dashboard entries, display order
   groups = [
+    { name = "Core"; icon = "mdi-server-network"; columns = 4; entries = [
+      { route = "grafana"; name = "Grafana"; icon = "grafana"; desc = "Metrics & alerts";
+        widget = { type = "prometheus"; url = "http://10.100.0.105:9090"; }; }
+      { route = "authelia"; name = "Authelia"; icon = "authelia"; desc = "SSO"; }
+      { route = "lldap"; name = "LLDAP"; icon = "mdi-account-group"; desc = "Users & groups"; }
+      { route = "headplane"; name = "Headplane"; icon = "headscale"; desc = "VPN mesh admin"; }
+      { route = "nas"; name = "NAS"; icon = "mdi-nas"; desc = "Files"; }
+      { route = "syncthing"; name = "Syncthing"; icon = "syncthing"; desc = "Device sync"; }
+      { route = "kopia"; name = "Kopia"; icon = "kopia"; desc = "Backups"; }
+    ]; }
+    { name = "Dev"; icon = "mdi-source-branch"; columns = 4; entries = [
+      { route = "forgejo"; name = "Forgejo"; icon = "forgejo"; desc = "Git";
+        widget = arr "gitea" "forgejo" "FORGEJO_KEY"; }
+      { route = "registry-ui"; name = "Registry"; icon = "docker-moby"; desc = "Images"; }
+      { route = "attic"; name = "Attic"; icon = "nixos"; desc = "Nix cache"; }
+      { route = "hello"; name = "Hello"; icon = "mdi-hand-wave"; desc = "Swarm demo (Forgejo)"; }
+      { route = "hello-gh"; name = "Hello GH"; icon = "github"; desc = "Swarm demo (GitHub)"; }
+    ]; }
+    { name = "Apps"; icon = "mdi-apps"; columns = 4; entries = [
+      { route = "homeassistant"; name = "Home Assistant"; icon = "home-assistant"; desc = "Home";
+        widget = arr "homeassistant" "homeassistant" "HASS_KEY"; }
+      { route = "paperless"; name = "Paperless"; icon = "paperless-ngx"; desc = "Documents";
+        widget = arr "paperlessngx" "paperless" "PAPERLESS_KEY"; }
+      { route = "paperless-ai"; name = "Paperless AI"; icon = "paperless-ngx"; desc = "Auto-tagging"; }
+      { route = "firefly"; name = "Firefly III"; icon = "firefly-iii"; desc = "Finance"; }
+      { route = "huginn"; name = "Huginn"; icon = "huginn"; desc = "Agents"; }
+    ]; }
     { name = "Media"; icon = "mdi-play-box-multiple"; columns = 4; entries = [
       { route = "jellyfin"; name = "Jellyfin"; icon = "jellyfin"; desc = "Movies & shows";
         widget = arr "jellyfin" "jellyfin" "JELLYFIN_KEY" // { version = 2; enableBlocks = true; enableNowPlaying = true; }; }
@@ -21,33 +48,6 @@ let
       { route = "lidarr"; name = "Lidarr"; icon = "lidarr"; desc = "Music"; widget = arr "lidarr" "lidarr" "LIDARR_KEY"; }
       { route = "prowlarr"; name = "Prowlarr"; icon = "prowlarr"; desc = "Indexers (Tor)"; widget = arr "prowlarr" "prowlarr" "PROWLARR_KEY"; }
       { route = "bazarr"; name = "Bazarr"; icon = "bazarr"; desc = "Subtitles"; widget = arr "bazarr" "bazarr" "BAZARR_KEY"; }
-    ]; }
-    { name = "Apps"; icon = "mdi-apps"; columns = 4; entries = [
-      { route = "homeassistant"; name = "Home Assistant"; icon = "home-assistant"; desc = "Home";
-        widget = arr "homeassistant" "homeassistant" "HASS_KEY"; }
-      { route = "paperless"; name = "Paperless"; icon = "paperless-ngx"; desc = "Documents";
-        widget = arr "paperlessngx" "paperless" "PAPERLESS_KEY"; }
-      { route = "paperless-ai"; name = "Paperless AI"; icon = "paperless-ngx"; desc = "Auto-tagging"; }
-      { route = "firefly"; name = "Firefly III"; icon = "firefly-iii"; desc = "Finance"; }
-      { route = "huginn"; name = "Huginn"; icon = "huginn"; desc = "Agents"; }
-    ]; }
-    { name = "Dev"; icon = "mdi-source-branch"; columns = 4; entries = [
-      { route = "forgejo"; name = "Forgejo"; icon = "forgejo"; desc = "Git";
-        widget = arr "gitea" "forgejo" "FORGEJO_KEY"; }
-      { route = "registry-ui"; name = "Registry"; icon = "docker-moby"; desc = "Images"; }
-      { route = "attic"; name = "Attic"; icon = "nixos"; desc = "Nix cache"; }
-      { route = "hello"; name = "Hello"; icon = "mdi-hand-wave"; desc = "Swarm demo (Forgejo)"; }
-      { route = "hello-gh"; name = "Hello GH"; icon = "github"; desc = "Swarm demo (GitHub)"; }
-    ]; }
-    { name = "Core"; icon = "mdi-server-network"; columns = 4; entries = [
-      { route = "grafana"; name = "Grafana"; icon = "grafana"; desc = "Metrics & alerts";
-        widget = { type = "prometheus"; url = "http://10.100.0.105:9090"; }; }
-      { route = "authelia"; name = "Authelia"; icon = "authelia"; desc = "SSO"; }
-      { route = "lldap"; name = "LLDAP"; icon = "mdi-account-group"; desc = "Users & groups"; }
-      { route = "headplane"; name = "Headplane"; icon = "headscale"; desc = "VPN mesh admin"; }
-      { route = "nas"; name = "NAS"; icon = "mdi-nas"; desc = "Files"; }
-      { route = "syncthing"; name = "Syncthing"; icon = "syncthing"; desc = "Device sync"; }
-      { route = "kopia"; name = "Kopia"; icon = "kopia"; desc = "Backups"; }
     ]; }
     { name = "Public"; icon = "mdi-earth"; columns = 5; entries = [
       { route = "headscale"; name = "Headscale"; icon = "headscale"; desc = "VPN control"; }
