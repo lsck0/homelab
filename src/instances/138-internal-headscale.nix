@@ -31,7 +31,8 @@ in
   # the web ui headscale does not ship
   virtualisation.oci-containers.containers.headplane = {
     image = "ghcr.io/tale/headplane:0.6.0";
-    ports = [ "3000:3000" ];
+    # host network: headscaleLocal must be the host's loopback
+    extraOptions = [ "--network=host" ];
     volumes = [
       "/var/lib/headplane:/var/lib/headplane"
       # headplane 0.6.0 needs this file to start
