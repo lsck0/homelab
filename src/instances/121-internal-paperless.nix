@@ -17,6 +17,12 @@
       PAPERLESS_CSRF_TRUSTED_ORIGINS = "https://paperless.lsck0.dev";
       PAPERLESS_TIME_ZONE = "Europe/Berlin";
       PAPERLESS_OCR_LANGUAGE = "deu+eng";
+      # phone photos: no real dpi, often rotated and skewed
+      PAPERLESS_OCR_IMAGE_DPI = 300;
+      PAPERLESS_OCR_ROTATE_PAGES = true;
+      PAPERLESS_OCR_DESKEW = true;
+      PAPERLESS_OCR_CLEAN = "clean";
+      PAPERLESS_FILENAME_FORMAT = "{{ created_year }}/{{ correspondent }}/{{ created }} {{ title }}";
       PAPERLESS_CONSUMER_POLLING = "30";
     };
   };
