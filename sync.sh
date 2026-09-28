@@ -232,6 +232,26 @@ fi
    for m in nfs nfsv4 overlay br_netfilter ip_vs ip_vs_rr vxlan; do modprobe "$m"; done' \
   2>/dev/null || echo "WARNING: could not load the lxc kernel modules on Proxmox."
 
+# bulk (hdd) stays disabled in proxmox: pvestatd polls enabled storages every 10s, which keeps the disk
+# spinning; vm-109's hookscript enables it only around its own start and stop
+"${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+  'set -e
+   grep -A3 "^dir: local$" /etc/pve/storage.cfg | grep -q snippets || pvesm set local --content backup,vztmpl,iso,snippets
+   install -d /var/lib/vz/snippets
+   cat > /var/lib/vz/snippets/homelab-bulk.sh <<"HOOK"
+#!/bin/sh
+case "$2" in
+  pre-start|pre-stop) pvesm set bulk --disable 0 ;;
+  post-start|post-stop) pvesm set bulk --disable 1 ;;
+esac
+exit 0
+HOOK
+   chmod 755 /var/lib/vz/snippets/homelab-bulk.sh
+   qm config 109 | grep -q "^hookscript: local:snippets/homelab-bulk.sh" || qm set 109 --hookscript local:snippets/homelab-bulk.sh >/dev/null
+   [ "$(qm status 109 | cut -d" " -f2)" = running ] && pvesm set bulk --disable 1
+   echo ">>> Proxmox: bulk storage idle-disabled, vm-109 hookscript in place"' \
+  || echo "WARNING: could not set up the bulk storage hookscript."
+
 # golden image
 if ! "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
   [ -f "$ROOT_DIR/images/nixos.img" ] || { echo "ERROR: Golden image missing. Run: sudo nix build ./src#cloud-image"; exit 1; }

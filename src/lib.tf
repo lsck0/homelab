@@ -140,6 +140,8 @@ resource "proxmox_virtual_environment_vm" "vm" {
       initialization[0].user_account,
       mac_addresses,
       disk[0].file_id,
+      # sync.sh sets it as root (vm-109 bulk storage); the api token may not
+      hook_script_file_id,
     ]
   }
 
