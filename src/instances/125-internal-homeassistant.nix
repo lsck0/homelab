@@ -1,11 +1,10 @@
 { config, pkgs, nasMount, ... }:
 let
-  # login through authelia oidc
-  oidcAuth = pkgs.fetchFromGitHub {
-    owner = "christiaangoossens";
-    repo = "hass-oidc-auth";
-    rev = "v1.2.1";
-    hash = "sha256-vwQDrMM4phbrXT85Syyz6hWEIhLB3TKNNTM04OdvNWk=";
+  # login through authelia oidc; the release zip, not the git tag: only it carries the built style.css
+  oidcAuth = pkgs.fetchzip {
+    url = "https://github.com/christiaangoossens/hass-oidc-auth/releases/download/v1.2.1/hass-oidc-auth.zip";
+    stripRoot = false;
+    hash = "sha256-zrOc7cRcME7v7dy4d+6kSyALdyKx+3LjetOc/cauN1c=";
   };
 
   hassConfig = pkgs.writeText "configuration.yaml" ''
@@ -171,7 +170,7 @@ in {
     volumes = [
       "/var/lib/homeassistant:/config"
       "${hassConfig}:/config/configuration.yaml:ro"
-      "${oidcAuth}/custom_components/auth_oidc:/config/custom_components/auth_oidc:ro"
+      "${oidcAuth}:/config/custom_components/auth_oidc:ro"
     ];
   };
 
