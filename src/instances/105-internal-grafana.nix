@@ -535,6 +535,36 @@ in {
   # file provider rescans only at startup
   systemd.services.grafana.restartTriggers = [ ../modules/dashboards/homelab.json ];
 
+  # firing grafana alerts as a gauge, for readers that may not reach grafana (the desktop bar);
+  # value is the start time, fingerprint keeps two alerts with equal labels apart
+  systemd.services.grafana-alerts-export = {
+    description = "Export firing Grafana alerts to Prometheus";
+    after = [ "grafana.service" ];
+    path = [ pkgs.curl pkgs.jq pkgs.coreutils ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      d=/var/lib/node-exporter-textfile
+      out=$d/grafana_alerts.prom
+      # no answer means no data, never a stale alert list
+      if ! json=$(curl -sf -m10 -H 'Remote-User: admin' \
+          'http://127.0.0.1:80/api/alertmanager/grafana/api/v2/alerts?active=true&silenced=false&inhibited=false'); then
+        rm -f "$out"; exit 0
+      fi
+      {
+        echo "# HELP homelab_alert_firing Start time of a firing Grafana alert."
+        echo "# TYPE homelab_alert_firing gauge"
+        echo "$json" | jq -r '
+          def esc: tostring | gsub("\\\\"; "\\\\") | gsub("\""; "\\\"") | gsub("\n"; "\\n");
+          .[] | "homelab_alert_firing{alertname=\"\(.labels.alertname // "alert" | esc)\",target=\"\(.labels.vm // .labels.instance // "" | esc)\",severity=\"\(.labels.severity // "" | esc)\",summary=\"\(.annotations.summary // "" | esc)\",fingerprint=\"\(.fingerprint | esc)\"} \(.startsAt | sub("\\.[0-9]+"; "") | try fromdateiso8601 catch now | floor)"'
+      } > "$out.tmp"
+      mv "$out.tmp" "$out"
+    '';
+  };
+  systemd.timers.grafana-alerts-export = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnBootSec = "2m"; OnUnitActiveSec = "30s"; };
+  };
+
   # 3100 loki, 3200 tempo, 4317/4318 otlp, 19532 journal-remote
   networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 19532 ];
 
