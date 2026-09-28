@@ -31,7 +31,7 @@
     prowlarr       = { host = "prowlarr";    vmid = 130; port = 9696;  group = "admins"; };
     radarr         = { host = "radarr";      vmid = 130; port = 7878;  group = "admins"; };
     sonarr         = { host = "sonarr";      vmid = 130; port = 8989;  group = "admins"; };
-    bazarr         = { host = "subs";        vmid = 130; port = 6767;  group = "admins"; };
+    bazarr         = { host = "bazarr";      vmid = 130; port = 6767;  group = "admins"; };
     # authenticates via lldap plugin
     jellyfin       = { host = "jellyfin";    vmid = 134; port = 80;    auth = "own";
                        loginRedirect = { path = "/"; to = "/sso/OID/start/authelia"; }; };

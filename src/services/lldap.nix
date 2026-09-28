@@ -97,8 +97,8 @@ in {
           gql "{\"query\":\"mutation{addUserToGroup(userId:\\\"$u\\\",groupId:$gid){ok}}\"}" || true
         done
       }
-      # owner gets every group
-      join luca ${lib.escapeShellArgs groups}
+      # owner gets every group, lldap_admin included: lldap's own rights come only from that built-in group
+      join luca ${lib.escapeShellArgs groups} lldap_admin
       join guest ${lib.escapeShellArgs guestGroups}
 
       echo "lldap seeded: luca in all groups, guest in ${lib.concatStringsSep ", " guestGroups}"
