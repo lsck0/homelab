@@ -129,7 +129,7 @@ in {
     listen = "http";
     port = 19532;
     # loki is the long-term store, this is a buffer
-    settings.Remote = { SplitMode = "host"; MaxUse = "2G"; };
+    settings.Remote = { SplitMode = "host"; MaxUse = "1G"; };
   };
 
   # loki: logs from promtail on every vm
