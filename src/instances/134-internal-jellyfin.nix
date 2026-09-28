@@ -97,7 +97,8 @@ in {
   networking.hostName = "vm-134";
 
   # rtx 2060 passthrough for nvenc/nvdec
-  nixpkgs.config.allowUnfreePredicate = p: builtins.elem (lib.getName p) [ "nvidia-x11" "nvidia-settings" ];
+  # nvidia driver and cuda are unfree
+  nixpkgs.config.allowUnfree = true;
   services.xserver.videoDrivers = [ "nvidia" ];
   boot.blacklistedKernelModules = [ "nouveau" ];
   hardware.graphics.enable = true;
@@ -107,6 +108,20 @@ in {
     package = config.boot.kernelPackages.nvidiaPackages.stable;
   };
   hardware.nvidia-container-toolkit.enable = true;
+
+  # local llm for paperless-ai; 4b leaves vram for nvenc
+  services.ollama = {
+    enable = true;
+    host = "0.0.0.0";
+    port = 11434;
+    acceleration = "cuda";
+    loadModels = [ "qwen3:4b" ];
+    environmentVariables = {
+      OLLAMA_KEEP_ALIVE = "10m";
+      OLLAMA_MAX_LOADED_MODELS = "1";
+      OLLAMA_NUM_PARALLEL = "1";
+    };
+  };
 
   # jellyfin db local (sqlite on nfs), nas keeps a copy
   fileSystems = nasMount "/var/lib/janitorr" "janitorr"
@@ -478,5 +493,8 @@ in {
     '';
   };
 
-  networking.firewall.allowedTCPPorts = [ 80 ];
+  networking.firewall.allowedTCPPorts = [ 80 11434 ];
+
+  homelab.ingressOnly.ports = [ 11434 ];
+  homelab.ingressOnly.portSources."11434" = [ "10.100.0.122/32" ];
 }

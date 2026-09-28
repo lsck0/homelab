@@ -1,8 +1,8 @@
-{ config, pkgs, nasMount, retry, ... }:
+{ pkgs, nasMount, retry, ... }:
 let
-  # claude via anthropic's openai-compatible endpoint
-  llmUrl = "https://api.anthropic.com/v1/";
-  llmModel = "claude-sonnet-5";
+  # local ollama beside jellyfin on the rtx 2060; documents stay in the lab
+  llmUrl = "http://10.100.0.134:11434";
+  llmModel = "qwen3:4b";
 in {
   networking.hostName = "vm-122";
 
@@ -10,7 +10,6 @@ in {
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   # settings live in /app/data/.env, normally wizard-written
-  sops.secrets.hermes-llm-api-key = {};
   # new .env: restart the app with it
   systemd.services.podman-paperless-ai.restartTriggers = [ llmModel llmUrl ];
   systemd.services.paperless-ai-config = {
@@ -34,10 +33,9 @@ in {
       cat > /var/lib/paperless-ai/.env <<EOF
       PAPERLESS_API_URL=http://10.100.0.121:8080/api
       PAPERLESS_API_TOKEN=$(cat "$TOKEN_FILE")
-      AI_PROVIDER=custom
-      CUSTOM_BASE_URL=${llmUrl}
-      CUSTOM_API_KEY=$(cat ${config.sops.secrets.hermes-llm-api-key.path})
-      CUSTOM_MODEL=${llmModel}
+      AI_PROVIDER=ollama
+      OLLAMA_API_URL=${llmUrl}
+      OLLAMA_MODEL=${llmModel}
       SCAN_INTERVAL=*/5 * * * *
       ACTIVATE_TAGGING=yes
       ACTIVATE_CORRESPONDENTS=yes
