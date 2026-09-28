@@ -14,7 +14,7 @@ of its IP.
 
 ## Identity
 
-lldap (vm-102) is the only account store; Authelia (vm-101) is the only login.
+lldap and Authelia (both on vm-101) are the only account store and the only login.
 Nothing internal is reachable without one of them:
 
 - `auth = "sso"` routes get Authelia ForwardAuth. Every page has its own lldap
@@ -70,10 +70,10 @@ src/scripts/renumber.sh [--execute]                         # rename vm ids on p
 
 Two kinds, both internal:
 
-- **Forgejo** (vm-115): one runner for `git.lsck0.dev`.
-- **GitHub** (vm-116): one ephemeral runner per replica, registered straight to a
+- **Forgejo** (vm-115): one runner beside Forgejo for `git.lsck0.dev`.
+- **GitHub** (vm-117): one ephemeral runner per replica, registered straight to a
   repo. Add or remove a repo by editing the `repos` attribute set at the top of
-  `src/instances/116-internal-github-runner.nix` (`<owner>/<repo> = <parallel
+  `src/instances/117-internal-github-runner.nix` (`<owner>/<repo> = <parallel
   jobs>`) and running `./sync.sh`. Target them with
   `runs-on: [self-hosted, nixos]`.
 
@@ -84,12 +84,12 @@ Two kinds, both internal:
 
 ## Backups
 
-Kopia (vm-106) snapshots `/srv/nas` nightly at 02:00. A file-level snapshot of a
+Kopia on the NAS (vm-109) snapshots `/srv/nas` nightly at 02:00. A file-level snapshot of a
 live database is not a backup, so every database dumps itself to
 `/srv/nas/data/db-dumps/<vm>/` at 01:30 first (`src/modules/db-backup.nix`):
 SQLite through `.backup`, Postgres through `pg_dump`. That also covers the two
 things whose state is on local disk and not on the NAS at all — the Authelia
 second-factor enrolments and the whole lldap directory.
 
-Restore with `nas-restore` on vm-106 (`nas-restore` with no arguments prints the
+Restore with `nas-restore` on vm-109 (`nas-restore` with no arguments prints the
 usage).

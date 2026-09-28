@@ -1,5 +1,10 @@
 { config, pkgs, nasMount, retry, ... }: {
+  imports = [ ../services/forgejo-runner.nix ];
+
   networking.hostName = "vm-115";
+
+  # the runner needs docker for its job containers, so forgejo runs on docker too
+  virtualisation.oci-containers.backend = "docker";
 
   fileSystems = nasMount "/var/lib/forgejo" "forgejo"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
@@ -32,9 +37,9 @@
   # create the first admin once, idempotent
   systemd.services.forgejo-init = {
     description = "Initialise Forgejo admin user";
-    after = [ "podman-forgejo.service" ];
+    after = [ "docker-forgejo.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.podman ];
+    path = [ pkgs.curl pkgs.docker ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -43,11 +48,11 @@
       ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
 
       # skip if users already exist
-      COUNT=$(podman exec -u git forgejo forgejo admin user list 2>/dev/null | grep -c '^[0-9]' || echo 0)
+      COUNT=$(docker exec -u git forgejo forgejo admin user list 2>/dev/null | grep -c '^[0-9]' || echo 0)
       [ "$COUNT" -gt 0 ] && { echo "Users exist ($COUNT), skipping init"; exit 0; }
 
       PASS=$(cat ${config.sops.secrets.forgejo-admin-pass.path})
-      podman exec -u git forgejo forgejo admin user create \
+      docker exec -u git forgejo forgejo admin user create \
         --admin \
         --username luca \
         --password "$PASS" \
@@ -60,9 +65,9 @@
   # configure the oauth2 source once forgejo is up
   systemd.services.forgejo-oauth2-setup = {
     description = "Configure Forgejo OAuth2 with Authelia";
-    after = [ "podman-forgejo.service" "forgejo-init.service" ];
+    after = [ "docker-forgejo.service" "forgejo-init.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq pkgs.podman pkgs.gawk pkgs.gnugrep ];
+    path = [ pkgs.curl pkgs.jq pkgs.docker pkgs.gawk pkgs.gnugrep ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -74,21 +79,21 @@
       DISCOVER_URL="https://auth.lsck0.dev/.well-known/openid-configuration"
 
       # name is the button label; authelia registers both callbacks
-      sources=$(podman exec -u git forgejo forgejo admin auth list 2>/dev/null || true)
+      sources=$(docker exec -u git forgejo forgejo admin auth list 2>/dev/null || true)
       AUTH_ID=$(echo "$sources" | grep -w authelia  | awk '{print $1}')
       OLD_ID=$(echo "$sources"  | grep -w authentik | awk '{print $1}')
 
       if [ -z "$AUTH_ID" ] && [ -n "$OLD_ID" ]; then
         echo "renaming the authentik OAuth2 source to authelia (id=$OLD_ID)"
         AUTH_ID="$OLD_ID"
-        podman exec -u git forgejo forgejo admin auth update-oauth \
+        docker exec -u git forgejo forgejo admin auth update-oauth \
           --id "$AUTH_ID" --name authelia || true
       fi
 
       # explicit scopes, "openid" alone breaks signup; errors shown
       if [ -n "$AUTH_ID" ]; then
         echo "OAuth2 source exists (id=$AUTH_ID), updating..."
-        podman exec -u git forgejo forgejo admin auth update-oauth \
+        docker exec -u git forgejo forgejo admin auth update-oauth \
           --id "$AUTH_ID" \
           --name authelia \
           --secret "$OIDC_SECRET" \
@@ -99,7 +104,7 @@
       fi
 
       # create via Forgejo CLI inside container
-      podman exec -u git forgejo forgejo admin auth add-oauth \
+      docker exec -u git forgejo forgejo admin auth add-oauth \
         --name authelia \
         --provider openidConnect \
         --key forgejo \
@@ -114,9 +119,9 @@
   # api token for the homepage widget
   systemd.services.forgejo-homepage-token = {
     description = "Generate Forgejo API token for Homepage";
-    after = [ "podman-forgejo.service" "forgejo-oauth2-setup.service" ];
+    after = [ "docker-forgejo.service" "forgejo-oauth2-setup.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq pkgs.podman pkgs.gawk pkgs.coreutils ];
+    path = [ pkgs.curl pkgs.jq pkgs.docker pkgs.gawk pkgs.coreutils ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -139,14 +144,14 @@
       ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
 
       # local bot user for api access
-      podman exec -u git forgejo forgejo admin user create \
+      docker exec -u git forgejo forgejo admin user create \
         --username homepage-bot \
         --password "homepage-bot-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
         --email homepage@lsck0.dev \
         --must-change-password=false 2>/dev/null || true
 
       # token is the last field; timestamped name allows retry
-      TOKEN=$(podman exec -u git forgejo forgejo admin user generate-access-token \
+      TOKEN=$(docker exec -u git forgejo forgejo admin user generate-access-token \
         --username homepage-bot \
         --token-name "homepage-$(date +%s)" \
         --scopes read:activitypub,read:issue,read:misc,read:notification,read:organization,read:package,read:repository,read:user \
@@ -164,9 +169,9 @@
   # hermes needs an admin token, homepage-bot is read-only
   systemd.services.forgejo-hermes-token = {
     description = "Generate a Forgejo admin token for Hermes";
-    after = [ "podman-forgejo.service" ];
+    after = [ "docker-forgejo.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.podman pkgs.curl pkgs.coreutils pkgs.gawk ];
+    path = [ pkgs.docker pkgs.curl pkgs.coreutils pkgs.gawk ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/forgejo-hermes.token"
@@ -184,7 +189,7 @@
 
       ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
 
-      podman exec -u git forgejo forgejo admin user create \
+      docker exec -u git forgejo forgejo admin user create \
         --username hermes-bot \
         --password "hermes-bot-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
         --email hermes@lsck0.dev \
@@ -192,7 +197,7 @@
         --must-change-password=false 2>/dev/null || true
 
       # "all": hermes operates the forge
-      TOKEN=$(podman exec -u git forgejo forgejo admin user generate-access-token \
+      TOKEN=$(docker exec -u git forgejo forgejo admin user generate-access-token \
         --username hermes-bot \
         --token-name "hermes-$(date +%s)" \
         --scopes all \
@@ -210,18 +215,18 @@
   # runner registration token, shared via nas
   systemd.services.forgejo-runner-token = {
     description = "Generate Forgejo runner registration token";
-    after = [ "podman-forgejo.service" "forgejo-oauth2-setup.service" ];
+    after = [ "docker-forgejo.service" "forgejo-oauth2-setup.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.podman ];
+    path = [ pkgs.docker ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
     };
     script = ''
-      ${retry} 60 2 podman exec -u git forgejo forgejo admin user list
+      ${retry} 60 2 docker exec -u git forgejo forgejo admin user list
 
       # always regenerate, tokens are one-use
-      TOKEN=$(podman exec -u git forgejo forgejo actions generate-runner-token 2>/dev/null || true)
+      TOKEN=$(docker exec -u git forgejo forgejo actions generate-runner-token 2>/dev/null || true)
       if [ -n "$TOKEN" ]; then
         echo -n "$TOKEN" > /var/lib/homepage-tokens/forgejo-runner.token
         echo "Runner token generated"
@@ -235,8 +240,8 @@
 
   systemd.services.forgejo-mirror = {
     description = "Mirror every GitHub repository into Forgejo";
-    after = [ "podman-forgejo.service" "forgejo-init.service" ];
-    path = [ pkgs.curl pkgs.jq pkgs.podman pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.bash ];
+    after = [ "docker-forgejo.service" "forgejo-init.service" ];
+    path = [ pkgs.curl pkgs.jq pkgs.docker pkgs.coreutils pkgs.gnugrep pkgs.gawk pkgs.bash ];
     serviceConfig = {
       Type = "oneshot";
       StateDirectory = "forgejo-mirror";
@@ -254,7 +259,7 @@
 
       # own write token, timestamped for retries, checked before storing
       if [ ! -s /var/lib/forgejo-mirror/token ]; then
-        out=$(podman exec -u git forgejo forgejo admin user generate-access-token \
+        out=$(docker exec -u git forgejo forgejo admin user generate-access-token \
           --username luca --token-name "mirror-$(date +%s)" \
           --scopes write:repository,read:user)
         tok=$(printf '%s' "$out" | tr -d '\r' | awk 'END {print $NF}')

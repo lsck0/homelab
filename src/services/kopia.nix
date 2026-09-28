@@ -1,4 +1,5 @@
-{ config, lib, pkgs, nasPath, ... }:
+# kopia: snapshots the nas it runs on, mirrors backups off-site to proton drive
+{ config, lib, pkgs, ... }:
 let
   source = "/srv/nas";
   repo = "/srv/nas/BACKUPS/kopia";
@@ -52,7 +53,7 @@ let
                obj=$(echo "$snap" | jq -r .rootEntry.obj)
                when=$(date -d "$(echo "$snap" | jq -r .startTime)" '+%F %T %Z')
                echo ">>> Restore ${source}/data/$name from snapshot $(echo "$snap" | jq -r .id) of $when, IN PLACE."
-               echo ">>> Stop the VM that uses it first (see src/instances.tf)."
+               echo ">>> Stop the service that uses it first (see src/instances.tf)."
                if [ "$yes" != "--yes" ]; then
                  printf ">>> type 'yes' to proceed: "; read -r ok; [ "$ok" = yes ] || { echo aborted; exit 1; }
                fi
@@ -89,11 +90,6 @@ EOF
     esac
   '';
 in {
-  networking.hostName = "vm-107";
-
-  # whole nas tree except /bulk
-  fileSystems = nasPath source "";
-
   # old restic secret, renamed
   sops.secrets.kopia-password.key = "restic-password";
 
@@ -108,8 +104,7 @@ in {
   # connect or create the repo, pin policy
   systemd.services.kopia-init = {
     description = "Connect Kopia repository and apply backup policy";
-    after = [ "network-online.target" "remote-fs.target" ];
-    wants = [ "network-online.target" ];
+    after = [ "local-fs.target" ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
       ${kopiaEnv}

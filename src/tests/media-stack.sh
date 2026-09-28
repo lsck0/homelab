@@ -77,15 +77,15 @@ echo ">>> Starting containers (images from the NixOS configs)"
 DATA=(-v "$W/media:/data/media" -v "$W/torrents:/data/torrents")
 run_app qbittorrent "$(image 112-internal-qbittorrent qbittorrent)" 18080:8080 -e WEBUI_PORT=8080 \
   -v "$W/qbittorrent:/config" -v "$W/torrents:/data/torrents"
-run_app prowlarr  "$(image 129-internal-prowlarr prowlarr)"      19696:9696 -v "$W/prowlarr:/config" "${DATA[@]}"
-run_app radarr    "$(image 130-internal-radarr radarr)"          17878:7878 -v "$W/radarr:/config" "${DATA[@]}"
-run_app sonarr    "$(image 131-internal-sonarr sonarr)"          18989:8989 -v "$W/sonarr:/config" "${DATA[@]}"
-run_app lidarr    "$(image 136-internal-navidrome lidarr)"       18686:8686 -v "$W/lidarr:/config" "${DATA[@]}"
+run_app prowlarr  "$(image 130-internal-arr prowlarr)"           19696:9696 -v "$W/prowlarr:/config" "${DATA[@]}"
+run_app radarr    "$(image 130-internal-arr radarr)"             17878:7878 -v "$W/radarr:/config" "${DATA[@]}"
+run_app sonarr    "$(image 130-internal-arr sonarr)"             18989:8989 -v "$W/sonarr:/config" "${DATA[@]}"
+run_app lidarr    "$(image 130-internal-arr lidarr)"             18686:8686 -v "$W/lidarr:/config" "${DATA[@]}"
 mkdir -p "$W/jellyfin/config" "$W/jellyfin/cache"
 run_app jellyfin  "$(image 134-internal-jellyfin jellyfin)"      18096:8096 \
   -v "$W/jellyfin/config:/config" -v "$W/jellyfin/cache:/cache" -v "$W/media:/data/media:ro"
 run_app jellyseerr "$(image 128-internal-jellyseerr jellyseerr)" 15055:5055 --init -e PORT=5055 -v "$W/jellyseerr:/app/config"
-run_app bazarr    "$(image 132-internal-bazarr bazarr)"          16767:6767 -v "$W/bazarr:/config" -v "$W/media:/data/media"
+run_app bazarr    "$(image 130-internal-arr bazarr)"             16767:6767 -v "$W/bazarr:/config" -v "$W/media:/data/media"
 mkdir -p "$W/manga" "$W/books"
   -v "$W/media/manga:/manga:ro" -v "$W/media/books:/books:ro"
 
@@ -103,16 +103,14 @@ run_unit 112-internal-qbittorrent qbittorrent-settings "$TOK" \
   "s#$QPREFS#$W/qbittorrent-prefs.json#" \
   "s#podman exec qbittorrent#podman exec ${P}qbittorrent#"
 
-for app in prowlarr:129-internal-prowlarr radarr:130-internal-radarr sonarr:131-internal-sonarr \
-           lidarr:136-internal-navidrome; do
-  name=${app%%:*}; host=${app#*:}
-  run_unit "$host" "$name-setup" "$TOK" "s#/var/lib/$name#$W/$name#g" \
+for name in prowlarr radarr sonarr lidarr; do
+  run_unit 130-internal-arr "$name-setup" "$TOK" "s#/var/lib/$name#$W/$name#g" \
     "s#systemctl stop podman-$name.service#docker stop $P$name#" "s#systemctl start podman-$name.service#docker start $P$name#"
 done
 
 run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:18096#g"
 run_unit 128-internal-jellyseerr jellyseerr-token "$TOK" "s#/var/lib/jellyseerr#$W/jellyseerr#g"
-run_unit 132-internal-bazarr bazarr-token "$TOK" "s#/var/lib/bazarr#$W/bazarr#g"
+run_unit 130-internal-arr bazarr-token "$TOK" "s#/var/lib/bazarr#$W/bazarr#g"
 # simulate a pre-generated-password install
 for i in $(seq 1 60); do
   curl -s -X POST http://127.0.0.1:15000/api/Account/register -H "Content-Type: application/json" \
@@ -125,9 +123,9 @@ done
 echo ">>> Exported tokens: $(cd "$W/tokens" && echo *)"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ARR-WIRE (THE REAL SCRIPT BUILT FOR VM-132, RUN ON THE TEST NETWORK)
-nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.133-internal-recyclarr.config.systemd.services.arr-wire.serviceConfig.ExecStart"
-WIRE=$(nixeval 133-internal-recyclarr systemd.services.arr-wire.serviceConfig.ExecStart)
+# ARR-WIRE (THE REAL SCRIPT BUILT FOR VM-130, RUN ON THE TEST NETWORK)
+nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.130-internal-arr.config.systemd.services.arr-wire.serviceConfig.ExecStart"
+WIRE=$(nixeval 130-internal-arr systemd.services.arr-wire.serviceConfig.ExecStart)
 arr_wire() {
   docker run --rm --network "$NET" -v /nix/store:/nix/store:ro -v "$W/tokens:/tokens" \
     -e TOKEN_DIR=/tokens \
@@ -223,7 +221,7 @@ echo ">>> Janitorr with the config NixOS renders"
 mkdir -p "$W/janitorr/logs" "$W/janitorr/stats"; chmod -R 777 "$W/janitorr"
 run_unit 134-internal-jellyfin janitorr-config "$TOK" "s#/var/lib/janitorr#$W/janitorr#g" "s#chown 1000:1000#true#"
 for f in application.yml stats.yml; do
-  sed -i -e 's#http://10.100.0.131#http://sonarr:8989#; s#http://10.100.0.130#http://radarr:7878#' \
+  sed -i -e 's#http://10.100.0.130:8989#http://sonarr:8989#; s#http://10.100.0.130:7878#http://radarr:7878#' \
          -e 's#http://10.100.0.134#http://jellyfin:8096#; s#http://10.100.0.128#http://jellyseerr:5055#' \
          -e 's#http://127.0.0.1:8081#http://janitorr-stats:8081#' "$W/janitorr/$f"
 done

@@ -1,10 +1,12 @@
-{ pkgs, ... }: {
-  networking.hostName = "vm-129";
-
-  # indexer manager
+# prowlarr: indexer manager, indexer traffic through tor, flaresolverr beside it
+{ config, lib, pkgs, ... }:
+let
+  hostIp = (lib.head config.networking.interfaces.eth0.ipv4.addresses).address;
+in {
   homelab.servarr.prowlarr = {
     image = "lscr.io/linuxserver/prowlarr:2.6.5.5623-ls161";
     port = 9696;
+    hostPort = 9696;
   };
 
   # indexer traffic leaves through tor
@@ -20,7 +22,7 @@
       RestartSec = 30;
     };
     script = ''
-      API=http://127.0.0.1:80/api/v1
+      API=http://127.0.0.1:9696/api/v1
       KEY=$(cat /var/lib/homepage-tokens/prowlarr-key.token)
       for _ in $(seq 1 60); do
         curl -fsS -H "X-Api-Key: $KEY" "$API/config/host" -o /tmp/host.json && break
@@ -30,7 +32,7 @@
 
       # allowedHosts in the same write or prowlarr refuses
       jq -c '.
-        | .allowedHosts = "prowlarr.lsck0.dev,10.100.0.129,127.0.0.1,localhost"
+        | .allowedHosts = "prowlarr.lsck0.dev,${hostIp},127.0.0.1,localhost"
         | .proxyEnabled = true
         | .proxyType = "socks5"
         | .proxyHostname = "10.100.0.1"

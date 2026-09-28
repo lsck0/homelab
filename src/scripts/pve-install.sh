@@ -9,7 +9,7 @@ if [ -z "$PVE_TF_PASSWORD" ]; then
 fi
 # optional second arg: lldap bind password
 LLDAP_BIND_PASSWORD="${2:-}"
-LLDAP_HOST="${LLDAP_HOST:-10.100.0.102}"
+LLDAP_HOST="${LLDAP_HOST:-10.100.0.101}"
 LLDAP_PORT="${LLDAP_PORT:-3890}"
 LLDAP_BASE_DN="${LLDAP_BASE_DN:-dc=lsck0,dc=dev}"
 # lldap group granted datacentre admin

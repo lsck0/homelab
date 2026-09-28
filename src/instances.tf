@@ -9,26 +9,29 @@ locals {
       type    = "internal",
       memory  = 1024,
     }
-    "101" = { # SSO: OIDC provider + ForwardAuth (backed by lldap)
+    "101" = { # SSO: authelia (OIDC + ForwardAuth) and lldap, its identity store
       enabled = true,
       name    = "101-internal-authelia",
       type    = "internal",
-    }
-    "102" = { # LDAP identity store + admin dashboard (users/groups)
-      enabled = true,
-      name    = "102-internal-lldap",
-      type    = "internal",
+      memory  = 1024,
     }
 
     "103" = { # dashboard / service landing page
       enabled = true,
+      kind    = "lxc",
       name    = "103-internal-homepage",
       type    = "internal",
+      # nfs mounts need a privileged container
+      privileged = true,
+      features   = "nesting=1,mount=nfs",
     }
     "104" = { # e-ink terminal feeds: calendar, homelab stats, arXiv
-      enabled = true,
-      name    = "104-internal-terminal",
-      type    = "internal",
+      enabled    = true,
+      kind       = "lxc",
+      name       = "104-internal-terminal",
+      type       = "internal",
+      privileged = true,
+      features   = "nesting=1,mount=nfs",
     }
     "105" = { # observability: prometheus, loki, tempo, grafana
       enabled = true,
@@ -39,22 +42,15 @@ locals {
       # explicit floor: tsdb head and loki chunks are working memory
       balloon = 2048,
     }
-    "107" = { # backups: Kopia server + web UI, snapshots the NAS
-      enabled = true,
-      name    = "107-internal-kopia",
-      type    = "internal",
-      # snapshots the whole nas, measured 624 MiB
-      memory = 1024,
-      disk   = 16,
-    }
 
-    "109" = { # storage: NFS + SMB + Syncthing + FileBrowser
+    "109" = { # storage: NFS + SMB + Syncthing + FileBrowser, Kopia backups of it
       enabled    = true,
       name       = "109-internal-nas",
       type       = "internal",
       boot_order = 2,
-      memory     = 2048,
-      balloon    = 2048,
+      # kopia snapshots the whole nas, measured 624 MiB
+      memory  = 3072,
+      balloon = 2048,
       # nvme root: state, backups, documents
       disk = 750,
       # bulk storage on the 2 tb hdd
@@ -85,17 +81,13 @@ locals {
       machine = "q35",
     }
 
-    "115" = { # git forge (OIDC + SSH)
+    "115" = { # git forge (OIDC + SSH) and its CI runner
       enabled = true,
       name    = "115-internal-forgejo",
       type    = "internal",
-      memory  = 1024,
-    }
-    "116" = { # CI runner for Forgejo
-      enabled = true,
-      name    = "116-internal-forgejo-runner",
-      type    = "internal",
-      memory  = 1024,
+      memory  = 2048,
+      # runner job images
+      disk = 24,
     }
     "117" = { # ci runners for github repos (ephemeral)
       # token is the gh cli's gho_ token
@@ -114,22 +106,15 @@ locals {
       type    = "internal",
     }
 
-    "121" = { # document management (paperless-ngx)
+    "121" = { # document management (paperless-ngx) and paperless-ai auto-tagging
       enabled = true,
       name    = "121-internal-paperless",
       type    = "internal",
-      # ocr plus its own postgres
-      memory  = 2048,
-      balloon = 1536,
-    }
-    "122" = { # AI auto-tagging for paperless
-      enabled = true,
-      name    = "122-internal-paperless-ai",
-      type    = "internal",
-      # large model image, 8 GiB was 80% full at rest
-      disk = 16,
-      memory  = 1024,
-      balloon = 1024,
+      # ocr plus the paperless-ai node process
+      memory  = 3072,
+      balloon = 2048,
+      # paperless-ai image alone is 8.3 GiB
+      disk = 24,
     }
     "124" = { # Firefly III personal finance
       enabled = true,
@@ -165,40 +150,14 @@ locals {
       type    = "internal",
       memory  = 1024,
     }
-    "129" = { # indexer manager, syncs indexers into every *arr
+    "130" = { # *arr stack: prowlarr + flaresolverr, radarr, sonarr, lidarr, bazarr, recyclarr
       enabled = true,
-      name    = "129-internal-prowlarr",
+      name    = "130-internal-arr",
       type    = "internal",
-      # flaresolverr's chromium thrashed at a 512 floor
-      memory  = 1536,
-      balloon = 1024,
-    }
-    "130" = { # movie library manager
-      enabled = true,
-      name    = "130-internal-radarr",
-      type    = "internal",
-      # .net thrashed at a 512 floor
-      memory  = 1024,
-      balloon = 1024,
-    }
-    "131" = { # series + anime library manager
-      enabled = true,
-      name    = "131-internal-sonarr",
-      type    = "internal",
-      # .net thrashed at a 512 floor
-      memory  = 1024,
-      balloon = 1024,
-    }
-    "132" = { # subtitle downloader for *arr
-      enabled = true,
-      name    = "132-internal-bazarr",
-      type    = "internal",
-      memory  = 1024,
-    }
-    "133" = { # TRaSH-guide sync + *arr/qBittorrent/Prowlarr wiring
-      enabled = true,
-      name    = "133-internal-recyclarr",
-      type    = "internal",
+      # four .net apps thrashed at a 512 floor each, flaresolverr's chromium at 1024
+      memory  = 4096,
+      balloon = 3072,
+      disk    = 16,
     }
     "134" = { # media streaming + Janitorr (deletes media unwatched for months)
       enabled = true,
@@ -212,11 +171,10 @@ locals {
       machine = "q35",
       hostpci = ["gpu"],
     }
-    "136" = { # music streaming (Subsonic API) + Lidarr (music manager)
+    "136" = { # music streaming (Subsonic API)
       enabled = true,
       name    = "136-internal-navidrome",
       type    = "internal",
-      memory  = 1024,
     }
     "138" = { # Tailscale control server (VPN mesh) + Headplane UI
       # internal, not dmz: it controls mesh membership
@@ -267,8 +225,11 @@ locals {
     }
     "209" = { # app host: Docker Swarm stacks deployed by CI (Forgejo + GitHub)
       enabled = true,
+      kind    = "lxc",
       name    = "209-external-hello",
       type    = "external",
+      # dockerd needs keyctl; dmz, so never privileged
+      features = "nesting=1,keyctl=1",
     }
 
     # router

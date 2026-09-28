@@ -447,7 +447,7 @@ in {
               noDataState = "Alerting";
               labels.severity = "critical";
               annotations.summary = "NAS daily backup has not succeeded in over 26h";
-              annotations.description = "Kopia on vm-107 has not completed a snapshot of /srv/nas. Check `systemctl status kopia-server` and https://backup.lsck0.dev.";
+              annotations.description = "Kopia on vm-109 has not completed a snapshot of /srv/nas. Check `systemctl status kopia-server` and https://backup.lsck0.dev.";
             }
             {
               uid = "service_down";

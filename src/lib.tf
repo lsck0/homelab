@@ -2,9 +2,13 @@
 
 locals {
   defaults = {
-    enabled  = true
+    enabled = true
     # "vm" or "lxc"; lxc has no balloon, gpu or extra disks
-    kind     = "vm"
+    kind = "vm"
+    # lxc only: root in a privileged container is root on the host, use it only for nfs mounts
+    privileged = false
+    # lxc only, proxmox feature string; sync.sh sets it as root, the api token may not
+    features = "nesting=1"
     cooldown = "30m"
     # plain vm working set measured 445-600 MiB
     memory = 768
@@ -27,10 +31,12 @@ locals {
       name = i.name
       type = i.type
       # string, the for-expression unifies bool and string anyway
-      enabled  = tostring(try(i.enabled, local.defaults.enabled))
-      kind     = try(i.kind, local.defaults.kind)
-      cooldown = try(i.cooldown, local.defaults.cooldown)
-      memory   = try(i.memory, local.defaults.memory)
+      enabled    = tostring(try(i.enabled, local.defaults.enabled))
+      kind       = try(i.kind, local.defaults.kind)
+      privileged = try(i.privileged, local.defaults.privileged)
+      features   = try(i.features, local.defaults.features)
+      cooldown   = try(i.cooldown, local.defaults.cooldown)
+      memory     = try(i.memory, local.defaults.memory)
       # floor 512: at 384 a vm drops ssh
       balloon     = try(i.balloon, max(512, floor(try(i.memory, local.defaults.memory) * try(i.balloon_ratio, local.defaults.balloon_ratio))))
       cores       = try(i.cores, local.defaults.cores)
@@ -74,6 +80,10 @@ check "instance_fields" {
   assert {
     condition     = alltrue([for id, v in local.vms : v.kind == "vm" || (length(v.hostpci) == 0 && length(v.extra_disks) == 0 && v.type != "router")])
     error_message = "lxc instances take no gpu, extra disks or router role."
+  }
+  assert {
+    condition     = alltrue([for id, v in local.vms : !v.privileged || (v.kind == "lxc" && v.type == "internal")])
+    error_message = "privileged is lxc only, and never in the dmz."
   }
   assert {
     condition     = alltrue([for id, v in local.vms : startswith(v.name, "${id}-") || v.type == "router"])
@@ -200,17 +210,12 @@ resource "proxmox_virtual_environment_container" "ct" {
 
   node_name     = var.target_node
   vm_id         = tonumber(each.key)
-  unprivileged  = true
+  unprivileged  = !each.value.privileged
   started       = each.value.enabled != "false"
   start_on_boot = each.value.enabled == "true"
 
   startup {
     order = each.value.boot_order
-  }
-
-  # systemd inside needs its own cgroup tree
-  features {
-    nesting = true
   }
 
   operating_system {
@@ -219,8 +224,8 @@ resource "proxmox_virtual_environment_container" "ct" {
   }
 
   lifecycle {
-    # the template only seeds a new container, never replace
-    ignore_changes = [operating_system[0].template_file_id, initialization[0].user_account]
+    # the template only seeds a new container, never replace; sync.sh sets features as root
+    ignore_changes = [operating_system[0].template_file_id, initialization[0].user_account, features]
   }
 
   cpu {
@@ -261,14 +266,16 @@ resource "proxmox_virtual_environment_container" "ct" {
 locals {
   inventory = {
     for id, v in local.vms : id => {
-      name     = v.name
-      type     = v.type
-      kind     = v.kind
-      ip       = v.ip
-      prefix   = tonumber(v.prefix)
-      gateway  = v.gateway
-      enabled  = v.enabled
-      cooldown = v.cooldown
+      name       = v.name
+      type       = v.type
+      kind       = v.kind
+      privileged = v.privileged
+      features   = v.features
+      ip         = v.ip
+      prefix     = tonumber(v.prefix)
+      gateway    = v.gateway
+      enabled    = v.enabled
+      cooldown   = v.cooldown
     }
   }
 }

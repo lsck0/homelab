@@ -94,6 +94,8 @@ let
   ] ++ map (sc: "          - ${sc}") (c.scopes or [ "openid" "profile" "email" "groups" ]) ++ [
   ]) + "\n";
 in {
+  imports = [ ../services/lldap.nix ];
+
   networking.hostName = "vm-101";
 
   # authelia session store
@@ -104,7 +106,8 @@ in {
     unixSocketPerm = 660;
   };
   users.users.authelia-main.extraGroups = [ "redis-authelia" ];
-  systemd.services.authelia-main.after = [ "redis-authelia.service" ];
+  # binds to lldap on start
+  systemd.services.authelia-main.after = [ "redis-authelia.service" "lldap.service" ];
 
   # local disk: nas stalls must not wedge auth
   systemd.tmpfiles.rules = [
@@ -114,8 +117,7 @@ in {
   # db is backed up, only keys regenerate
   homelab.dbBackup.databases.authelia.sqlite = "${stateDir}/db.sqlite3";
 
-  # lldap bind password, shared with lldap
-  sops.secrets.lldap-admin-password = {};
+  # lldap bind password: sops.secrets.lldap-admin-password, declared by services/lldap.nix
   sops.secrets.forgejo-oidc-secret = {};
   sops.secrets.jellyfin-oidc-secret = {};
   sops.secrets.headplane-oidc-secret = {};
@@ -200,14 +202,14 @@ in {
       log.level = "info";
       log.format = "text";
 
-      # lldap (vm-102) is the identity store
+      # lldap on this host is the identity store
       authentication_backend = {
         password_reset.disable = false;
         # 5m: 1m queued binds behind homepage's pings
         refresh_interval = "5m";
         ldap = {
           implementation = "lldap";
-          address = "ldap://10.100.0.102:3890";
+          address = "ldap://127.0.0.1:3890";
           base_dn = "dc=lsck0,dc=dev";
           user = "uid=admin,ou=people,dc=lsck0,dc=dev";
         };

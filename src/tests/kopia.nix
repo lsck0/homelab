@@ -1,10 +1,10 @@
-# kopia on vm-107: init, snapshot, restore
+# kopia on the nas: init, snapshot, restore
 { pkgs, ... }:
 pkgs.testers.runNixOSTest {
   name = "kopia";
 
   nodes.machine = {
-    imports = [ ./stubs.nix ../instances/107-internal-kopia.nix ];
+    imports = [ ./stubs.nix ../services/kopia.nix ];
     virtualisation.memorySize = 2048;
     environment.systemPackages = [ pkgs.curl ];
     # tiny nas tree

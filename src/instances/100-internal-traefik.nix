@@ -34,7 +34,7 @@ in {
     middlewares = {
       # auth = "token" routes have no own gate
       registry-clients.ipAllowList.sourceRange = [
-        "10.100.0.116/32"   # forgejo runner, pushes
+        "10.100.0.115/32"   # forgejo runner, pushes
         "10.100.0.117/32"   # github runner, pushes
         "10.200.0.209/32"   # swarm host, pulls
         "192.168.178.0/24"  # the workstation, for manual inspection

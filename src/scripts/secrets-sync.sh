@@ -38,7 +38,7 @@ MANUAL=(
   hermes-gemini-api-key hermes-glm-api-key
   github-runner-token
   wireguard-private-key firefly-app-key
-  # off-site backup (vm-107); totp seed from proton 2fa
+  # off-site backup (kopia on vm-109); totp seed from proton 2fa
   proton-username proton-password proton-totp-secret
 )
 

@@ -13,7 +13,7 @@ metadata:
 
 # Identity
 
-- lldap vm-102 (10.100.0.102): the only account store, UI https://lldap.lsck0.dev.
+- lldap on vm-101 (10.100.0.101, beside Authelia): the only account store, UI https://lldap.lsck0.dev.
 - Authelia vm-101 (10.100.0.101:9091): SSO portal https://auth.lsck0.dev,
   ForwardAuth for Traefik, OIDC for Forgejo, Jellyfin, Headplane and
   Home Assistant. Jellyfin binds to lldap directly (LDAP-Auth
@@ -37,17 +37,17 @@ an allow rule plus a deny rule for the same host. So:
 - a host with no entry in routes.nix falls through to the last rule, which
   requires `admins`. Adding a route without a `group` defaults it to `users`.
 
-## lldap via its GraphQL API (run on vm-102)
+## lldap via its GraphQL API (run on vm-101)
 
 ```
-ssh 10.100.0.102 'TOKEN=$(curl -s -X POST localhost:17170/auth/simple/login -H "Content-Type: application/json" \
+ssh 10.100.0.101 'TOKEN=$(curl -s -X POST localhost:17170/auth/simple/login -H "Content-Type: application/json" \
   -d "{\"username\":\"admin\",\"password\":\"$(cat /run/secrets/lldap-admin-password)\"}" | jq -r .token); \
   curl -s localhost:17170/api/graphql -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d "{\"query\":\"{ users { id email displayName groups { displayName } } }\"}"'
 ```
 - Create user: mutation `createUser(user:{id:"name", email:"...", displayName:"..."})`.
 - Add to group: `addUserToGroup(userId:"name", groupId:<int>)` (groups: `{ groups { id displayName } }`).
-- Set password: `ssh 10.100.0.102 lldap_set_password --base-url http://localhost:17170 --admin-username admin --admin-password "$(cat /run/secrets/lldap-admin-password)" --username <user> --password <new>`.
+- Set password: `ssh 10.100.0.101 lldap_set_password --base-url http://localhost:17170 --admin-username admin --admin-password "$(cat /run/secrets/lldap-admin-password)" --username <user> --password <new>`.
   Send new passwords to the owner privately, never into a group chat.
 
 ## Authelia

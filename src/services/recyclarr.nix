@@ -1,4 +1,5 @@
-{ lib, pkgs, nasMount, ... }:
+# recyclarr and arr-wire: no web ui, they configure and link the media stack; the token share comes from servarr
+{ lib, pkgs, ... }:
 let
   T = "/var/lib/homepage-tokens";
 
@@ -18,23 +19,18 @@ let
   recyclarrTemplate = pkgs.writeText "recyclarr.yml.tmpl" ''
     radarr:
       main:
-        base_url: http://10.100.0.130
+        base_url: http://127.0.0.1:7878
         api_key: @RADARR@
         quality_definition:
           type: movie
     sonarr:
       main:
-        base_url: http://10.100.0.131
+        base_url: http://127.0.0.1:8989
         api_key: @SONARR@
         quality_definition:
           type: series
   '';
 in {
-  networking.hostName = "vm-133";
-
-  # no web ui, arr-wire links the media stack
-  fileSystems = nasMount T "homepage-tokens";
-
   systemd.services.arr-wire = {
     description = "Wire the media stack (*arr, qBittorrent, Prowlarr, Jellyseerr, Bazarr)";
     after = [ "network-online.target" "remote-fs.target" ];

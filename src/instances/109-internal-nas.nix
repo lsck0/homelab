@@ -1,7 +1,8 @@
 { lib, pkgs, dmzShares, ... }: {
-  networking.hostName = "vm-109";
+  # kopia snapshots this tree in place
+  imports = [ ../services/kopia.nix ];
 
-  # kopia on vm-107 snapshots this tree
+  networking.hostName = "vm-109";
 
   # dmz exports come from dmzShares (modules/nas.nix)
   # ── bulk storage ───────────────────────────────────────────────────────────
@@ -44,7 +45,6 @@
       /srv/nas/bulk/torrents 10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/data       10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
       /srv/nas/syncthing  10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
-      /srv/nas            10.100.0.107(rw,sync,no_subtree_check,no_root_squash)
     '' + lib.concatStrings (lib.mapAttrsToList (id: shares: lib.concatMapStrings (s: ''
       /srv/nas/data/${s} 10.200.0.${id}(rw,sync,subtree_check,no_root_squash)
     '') shares) dmzShares);

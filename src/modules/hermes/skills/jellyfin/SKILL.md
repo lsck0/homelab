@@ -32,4 +32,4 @@ Header `Authorization: MediaBrowser Token="$(lab-token jellyfin-key)"` (Jellyfin
 - Keep something forever: add tag `janitorr_keep` in Radarr/Sonarr
   (`POST /api/v3/tag {"label":"janitorr_keep"}`, then add the tag id to the movie/series and `PUT` it).
 - Logs: `ssh 10.100.0.134 'podman logs --tail 100 janitorr'`.
-- Config (rendered): `/var/lib/janitorr/application.yml`; thresholds are Nix (`133-internal-jellyfin.nix`).
+- Config (rendered): `/var/lib/janitorr/application.yml`; thresholds are Nix (`134-internal-jellyfin.nix`).

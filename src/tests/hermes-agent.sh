@@ -69,7 +69,7 @@ cat > "$W/shims/vm" <<'EOF'
 #!/bin/sh
 /work/shims/_log vm "$@"
 case "$1" in
-  list|"") printf '107\trunning\t107-internal-kopia\n121\trunning\t121-internal-paperless\n124\tstopped\t124-internal-firefly\n208\tstopped\t208-external-minecraft\n' ;;
+  list|"") printf '109\trunning\t109-internal-nas\n121\trunning\t121-internal-paperless\n124\tstopped\t124-internal-firefly\n208\tstopped\t208-external-minecraft\n' ;;
   status) echo running ;;
   start) echo "vm-$2 up" ;;
   stop) echo "vm-$2 shutting down" ;;
@@ -91,17 +91,17 @@ case "$host:$cmd" in
   10.200.0.208:*mc-modpack*) printf 'current:\nTYPE=MODRINTH\nMODRINTH_MODPACK=https://modrinth.com/modpack/cobbleverse\nVERSION=LATEST\nLEVEL=world\n' ;;
   10.200.0.208:*podman\ logs*|10.200.0.208:*journalctl*) echo '[Server thread/INFO]: Done (41.237s)! For help, type "help"' ;;
   10.200.0.208:*mc-rcon*list*) echo "There are 0 of a max of 42069 players online:" ;;
-  10.100.0.106:*nas-restore\ list*|10.100.0.106:*kopia*snapshot\ list*)
+  10.100.0.109:*nas-restore\ list*|10.100.0.109:*kopia*snapshot\ list*)
     [ -f /work/log/snapshots ] || for d in 3 2 1 0; do
       printf '%s  %s 02:00 CEST  files:%s\n' "$(printf 'snap%028d' "$d")" "$(date -d "$d days ago" +%F)" "8130$d"
     done > /work/log/snapshots
     cat /work/log/snapshots ;;
-  10.100.0.106:*nas-restore\ now*)
+  10.100.0.109:*nas-restore\ now*)
     id=$(printf 'safe%028d' "$(date +%s)")
     printf '%s  %s CEST  files:81401\n' "$id" "$(date '+%F %H:%M')" >> /work/log/snapshots
     echo "Created snapshot with ID $id" ;;
-  10.100.0.106:*nas-restore\ service*) echo ">>> done: /srv/nas/data/paperless restored" ;;
-  10.100.0.106:*ls*data*) printf 'authelia\nfirefly\nforgejo\nminecraft\npaperless\nsonarr\n' ;;
+  10.100.0.109:*nas-restore\ service*) echo ">>> done: /srv/nas/data/paperless restored" ;;
+  10.100.0.109:*ls*data*) printf 'authelia\nfirefly\nforgejo\nminecraft\npaperless\nsonarr\n' ;;
   *) echo "ok" ;;
 esac
 EOF
@@ -120,8 +120,7 @@ cat > "$W/shims/curl" <<'EOF'
 #!/bin/bash
 out=()
 for a in "$@"; do
-  a=${a//http:\/\/10.100.0.131:80/http://sonarr:8989}
-  a=${a//http:\/\/10.100.0.131/http://sonarr:8989}
+  a=${a//http:\/\/10.100.0.130:8989/http://sonarr:8989}
   a=${a//http:\/\/10.100.0.121:8080/http://mock:8000/paperless}
   a=${a//http:\/\/10.100.0.124:8080/http://mock:8000/firefly}
   out+=("$a")
@@ -202,7 +201,7 @@ if [[ " $SCENARIOS " == *" media "* ]]; then
   mkdir -p "$W/sonarr" "$W/media/tv" "$W/media/anime"; chmod -R 777 "$W/sonarr" "$W/media"
   docker run -d --name ht-sonarr --network "$NET" --network-alias sonarr -p 127.0.0.1:28989:8989 \
     -e PUID=1000 -e PGID=1000 -v "$W/sonarr:/config" -v "$W/media:/data/media" \
-    "$(nix eval --no-warn-dirty --raw "$SRC#nixosConfigurations.131-internal-sonarr.config.virtualisation.oci-containers.containers.sonarr.image")" >/dev/null
+    "$(nix eval --no-warn-dirty --raw "$SRC#nixosConfigurations.130-internal-arr.config.virtualisation.oci-containers.containers.sonarr.image")" >/dev/null
   for _ in $(seq 90); do [ -f "$W/sonarr/config.xml" ] && grep -q ApiKey "$W/sonarr/config.xml" && break; sleep 2; done
   SK=$(grep -oP '<ApiKey>\K[^<]+' "$W/sonarr/config.xml"); echo -n "$SK" > "$W/tokens/sonarr-key.token"
   for _ in $(seq 60); do curl -sf -H "X-Api-Key: $SK" http://127.0.0.1:28989/api/v3/system/status >/dev/null && break; sleep 2; done

@@ -41,13 +41,13 @@ let
     clients:
       sonarr:
         enabled: true
-        url: "http://10.100.0.131"
+        url: "http://10.100.0.130:8989"
         api-key: "@SONARR@"
         delete-empty-shows: true
         determine-age-by: most_recent
       radarr:
         enabled: true
-        url: "http://10.100.0.130"
+        url: "http://10.100.0.130:7878"
         api-key: "@RADARR@"
         only-delete-files: false
         determine-age-by: most_recent
@@ -370,7 +370,7 @@ in {
 
       api -X POST "$J/Plugins/$ID/Configuration" -d "$(jq -cn \
         --arg pass "$(cat ${config.sops.secrets.lldap-admin-password.path})" '{
-        LdapServer: "10.100.0.102",
+        LdapServer: "10.100.0.101",
         LdapPort: 3890,
         UseSsl: false,
         UseStartTls: false,
@@ -498,7 +498,7 @@ in {
   networking.firewall.allowedTCPPorts = [ 80 11434 ];
 
   homelab.ingressOnly.ports = [ 11434 ];
-  homelab.ingressOnly.portSources."11434" = [ "10.100.0.122/32" ];
+  homelab.ingressOnly.portSources."11434" = [ "10.100.0.121/32" ];
 
   # hot page cache is the point here (nfs serving, tsdb, streams)
   homelab.dropCaches = false;

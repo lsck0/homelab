@@ -1,6 +1,6 @@
 { config, lib, nasMount, nasPath, ... }:
 let
-  # fixed vocabulary; paperless-ai may only pick from these (vm-122)
+  # fixed vocabulary; paperless-ai may only pick from these
   tags = [
     "Steuern" "Versicherung" "Bank" "Wohnen" "Nebenkosten" "Energie" "Wasser" "Auto"
     "Gesundheit" "Arbeit" "Behörde" "Einkauf" "Telefon & Internet" "Bildung" "Familie" "Reise"
@@ -22,6 +22,8 @@ let
   pyList = xs: "[" + lib.concatMapStringsSep ", " (x: "'${x}'") xs + "]";
   pyDict = d: "{" + lib.concatStringsSep ", " (lib.mapAttrsToList (k: v: "'${k}': '${v}'") d) + "}";
 in {
+  imports = [ ../services/paperless-ai.nix ];
+
   networking.hostName = "vm-121";
 
   fileSystems = nasMount "/var/lib/paperless" "paperless"
@@ -88,8 +90,5 @@ in {
   networking.firewall.allowedTCPPorts = [ 8080 ];
 
   # paperless trusts Remote-User, so ingress only
-  homelab.ingressOnly = {
-    ports = [ 8080 ];
-    extraSources = [ "10.100.0.122/32" ];
-  };
+  homelab.ingressOnly.ports = [ 8080 ];
 }

@@ -5,13 +5,6 @@
     // nasMedia "/srv/music" "music"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
-  # lidarr: music manager
-  homelab.servarr.lidarr = {
-    image = "lscr.io/linuxserver/lidarr:3.1.0.4875-ls41";
-    port = 8686;
-    hostPort = 8686;
-  };
-
   virtualisation.oci-containers.containers.navidrome = {
     image = "deluan/navidrome:0.64.0";
     ports = [ "80:4533" ];

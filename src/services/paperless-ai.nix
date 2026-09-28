@@ -1,5 +1,8 @@
-{ lib, pkgs, nasMount, retry, ... }:
+# paperless-ai: llm tagging for paperless; the host mounts /var/lib/homepage-tokens
+{ config, lib, pkgs, nasMount, retry, ... }:
 let
+  # the host address, the container's loopback is its own
+  hostIp = (lib.head config.networking.interfaces.eth0.ipv4.addresses).address;
   # local ollama beside jellyfin on the rtx 2060; documents stay in the lab
   llmUrl = "http://10.100.0.134:11434";
   # 7b: 4b left titles empty; no thinking model, answers are capped at 256 tokens
@@ -12,10 +15,7 @@ let
     "Datum: das Ausstellungsdatum des Dokuments."
   ];
 in {
-  networking.hostName = "vm-122";
-
-  fileSystems = nasMount "/var/lib/paperless-ai" "paperless-ai"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+  fileSystems = nasMount "/var/lib/paperless-ai" "paperless-ai";
 
   # settings live in /app/data/.env, normally wizard-written
   # new .env: restart the app with it
@@ -33,15 +33,15 @@ in {
     };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/paperless-key.token"
-      # wait for vm-121's token, never write a dead config
+      # wait for paperless-setup's token, never write a dead config
       ${retry} 60 5 test -s "$TOKEN_FILE" || { echo "Paperless API token not available"; exit 1; }
 
       mkdir -p /var/lib/paperless-ai
       umask 077
       cat > /var/lib/paperless-ai/.env <<EOF
-      PAPERLESS_API_URL=http://10.100.0.121:8080/api
+      PAPERLESS_API_URL=http://${hostIp}:8080/api
       PAPERLESS_API_TOKEN=$(cat "$TOKEN_FILE")
-      # owner of that token (vm-121 paperless-setup); unset aborts every scan
+      # owner of that token (paperless-setup); unset aborts every scan
       PAPERLESS_USERNAME=homepage-bot
       AI_PROVIDER=ollama
       OLLAMA_API_URL=${llmUrl}
@@ -49,7 +49,7 @@ in {
       SCAN_INTERVAL=*/5 * * * *
       ACTIVATE_TAGGING=yes
       ACTIVATE_CORRESPONDENTS=yes
-      # types come from paperless keyword matching (vm-121)
+      # types come from paperless keyword matching
       ACTIVATE_DOCUMENT_TYPE=no
       ACTIVATE_TITLE=yes
       ACTIVATE_CUSTOM_FIELDS=no

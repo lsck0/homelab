@@ -70,8 +70,8 @@ in {
 
     # promtail only on the collector and where a file log exists (traefik access)
     # namespaced start needs a statedir
-    systemd.services.promtail.serviceConfig = lib.mkIf promtailOn {
-      StateDirectory = "promtail";
+    systemd.services.promtail = lib.mkIf promtailOn {
+      serviceConfig.StateDirectory = "promtail";
     };
     services.promtail = lib.mkIf promtailOn {
       enable = true;

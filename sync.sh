@@ -226,6 +226,12 @@ fi
    echo ">>> Proxmox: CPU powersave, HDD spin-down 30min"' \
   2>/dev/null || true
 
+# containers cannot load kernel modules: nfs for the privileged ones, the rest for docker swarm
+"${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+  'printf "%s\n" nfs nfsv4 overlay br_netfilter ip_vs ip_vs_rr vxlan > /etc/modules-load.d/homelab-lxc.conf
+   for m in nfs nfsv4 overlay br_netfilter ip_vs ip_vs_rr vxlan; do modprobe "$m"; done' \
+  2>/dev/null || echo "WARNING: could not load the lxc kernel modules on Proxmox."
+
 # golden image
 if ! "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
   [ -f "$ROOT_DIR/images/nixos.img" ] || { echo "ERROR: Golden image missing. Run: sudo nix build ./src#cloud-image"; exit 1; }
@@ -274,6 +280,18 @@ if [ "$INVENTORY_NEW" != "$(cat "$INVENTORY" 2>/dev/null)" ]; then
   echo "$INVENTORY_NEW" > "$INVENTORY"
   echo ">>> Inventory updated: src/inventory.json"
 fi
+
+# lxc features: root@pam only, so not terraform; a change needs a restart
+sorted_features() { tr , '\n' | sort | paste -sd, -; }
+for vmid in $(jq -r 'to_entries[] | select(.value.kind == "lxc" and .value.enabled != "false") | .key' "$INVENTORY"); do
+  want=$(jq -r --arg id "$vmid" '.[$id].features' "$INVENTORY" | sorted_features)
+  have=$("${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "pct config $vmid 2>/dev/null | sed -n 's/^features: //p'" | sorted_features || true)
+  [ "$want" = "$have" ] && continue
+  echo ">>> lxc-$vmid features: ${have:-none} -> $want"
+  "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+    "pct set $vmid --features $want && if pct status $vmid | grep -q running; then pct reboot $vmid; fi" \
+    || echo "WARNING: could not set features on lxc-$vmid"
+done
 
 VM_IPS=$(jq -r 'to_entries[] | "\(.key)=\(.value.ip)"' "$INVENTORY")
 DISABLED_VMS=$(jq -r 'to_entries[] | select(.value.enabled == "false") | .key' "$INVENTORY")

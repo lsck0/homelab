@@ -4,13 +4,13 @@
 
 T=${TOKEN_DIR:-/var/lib/homepage-tokens}
 QBIT_HOST=${QBIT_HOST:-10.100.0.112};       QBIT_PORT=${QBIT_PORT:-80}
-PROWLARR_HOST=${PROWLARR_HOST:-10.100.0.129}; PROWLARR_PORT=${PROWLARR_PORT:-80}
-RADARR_HOST=${RADARR_HOST:-10.100.0.130};     RADARR_PORT=${RADARR_PORT:-80}
-SONARR_HOST=${SONARR_HOST:-10.100.0.131};     SONARR_PORT=${SONARR_PORT:-80}
+PROWLARR_HOST=${PROWLARR_HOST:-10.100.0.130}; PROWLARR_PORT=${PROWLARR_PORT:-9696}
+RADARR_HOST=${RADARR_HOST:-10.100.0.130};     RADARR_PORT=${RADARR_PORT:-7878}
+SONARR_HOST=${SONARR_HOST:-10.100.0.130};     SONARR_PORT=${SONARR_PORT:-8989}
 JELLYFIN_HOST=${JELLYFIN_HOST:-10.100.0.134}; JELLYFIN_PORT=${JELLYFIN_PORT:-80}
-LIDARR_HOST=${LIDARR_HOST:-10.100.0.136};     LIDARR_PORT=${LIDARR_PORT:-8686}
+LIDARR_HOST=${LIDARR_HOST:-10.100.0.130};     LIDARR_PORT=${LIDARR_PORT:-8686}
 JELLYSEERR_URL=${JELLYSEERR_URL:-http://10.100.0.128}
-BAZARR_URL=${BAZARR_URL:-http://10.100.0.132}
+BAZARR_URL=${BAZARR_URL:-http://10.100.0.130:6767}
 # router's isolated socks port
 TOR_HOST=${TOR_HOST:-10.100.0.1};           TOR_PORT=${TOR_PORT:-9055}
 # when radarr starts looking
@@ -410,7 +410,8 @@ wire_bazarr() {
   fi
 
   # bazarr reads the profile only at start
-  if [ "$(echo "$cur" | jq -r '[.radarr.ip, .sonarr.ip] | join(",")')" != "$RADARR_HOST,$SONARR_HOST" ]; then
+  if [ "$(echo "$cur" | jq -r '[.radarr.ip, .radarr.port, .sonarr.ip, .sonarr.port] | map(tostring) | join(",")')" \
+       != "$RADARR_HOST,$RADARR_PORT,$SONARR_HOST,$SONARR_PORT" ]; then
     echo "bazarr: corrected the Radarr/Sonarr addresses, restarting it to reload the profile"
     curl -sf -X POST -H "X-API-KEY: $bk" "$B/system?action=restart" >/dev/null || true
   fi

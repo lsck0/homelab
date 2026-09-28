@@ -18,21 +18,25 @@ let
   vm = pkgs.writeShellScriptBin "vm" ''
     set -euo pipefail
     export PATH="${lib.makeBinPath [ pve pkgs.jq pkgs.openssh pkgs.coreutils ]}:$PATH"
-    N=/nodes/luca-server/qemu
+    # guests are qemu vms or lxc containers
+    at() { if pve GET "/nodes/luca-server/lxc/$1/status/current" | jq -e .data >/dev/null; then
+             echo "/nodes/luca-server/lxc/$1"; else echo "/nodes/luca-server/qemu/$1"; fi; }
     ip() { if [ "$1" -ge 200 ] && [ "$1" -lt 300 ]; then echo 10.200.0.$1; else echo 10.100.0.$1; fi; }
+    case "''${1:-list}" in status|start|stop|reboot) N=$(at "''${2:?id}") ;; esac
     case "''${1:-list}" in
-      list)   pve GET $N | jq -r '.data | sort_by(.vmid)[] | "\(.vmid)\t\(.status)\t\(.name)"' ;;
-      status) pve GET $N/''${2:?id}/status/current | jq -r '.data.status' ;;
+      list)   { pve GET /nodes/luca-server/qemu; pve GET /nodes/luca-server/lxc; } \
+                | jq -rs 'map(.data) | add | sort_by(.vmid)[] | "\(.vmid)\t\(.status)\t\(.name)"' ;;
+      status) pve GET $N/status/current | jq -r '.data.status' ;;
       start)  id=''${2:?id}
-              [ "$(pve GET $N/$id/status/current | jq -r .data.status)" = running ] \
-                || pve POST $N/$id/status/start >/dev/null
+              [ "$(pve GET $N/status/current | jq -r .data.status)" = running ] \
+                || pve POST $N/status/start >/dev/null
               for _ in $(seq 1 60); do
                 ssh -o ConnectTimeout=3 -o BatchMode=yes "$(ip "$id")" true 2>/dev/null && { echo "vm-$id up"; exit 0; }
                 sleep 5
               done
               echo "vm-$id did not answer SSH within 5 minutes"; exit 1 ;;
-      stop)   pve POST $N/''${2:?id}/status/shutdown >/dev/null; echo "vm-$2 shutting down" ;;
-      reboot) pve POST $N/''${2:?id}/status/reboot >/dev/null; echo "vm-$2 rebooting" ;;
+      stop)   pve POST $N/status/shutdown >/dev/null; echo "vm-$2 shutting down" ;;
+      reboot) pve POST $N/status/reboot >/dev/null; echo "vm-$2 rebooting" ;;
       *)      echo "usage: vm list | status <id> | start <id> | stop <id> | reboot <id>"; exit 1 ;;
     esac
   '';
@@ -141,7 +145,7 @@ let
     - Public names *.lsck0.dev go through Traefik (vm-100 internal, vm-200
       external) with Authelia SSO; from here, call VMs by IP instead.
     - NAS vm-109: all persistent service data under /srv/nas/data/<service>,
-      media under /srv/nas/media. Backups: Kopia on vm-107.
+      media under /srv/nas/media. Backups: Kopia on vm-109 itself.
 
     ## VMs
 

@@ -26,7 +26,7 @@ working directory first: it has the VM inventory, IPs, hostnames and rules.
 - `ssh <ip> <command>`: root on any VM (10.100.0.<id> internal,
   10.200.0.<id> external). `ssh 192.168.178.200` is the Proxmox host (`qm`, `pvesh`).
 - `pve <METHOD> <path> [curl args]`, Proxmox API, e.g.
-  `pve GET /nodes/luca-server/qemu/208/status/current`.
+  `pve GET /nodes/luca-server/qemu/208/status/current` (containers: `/lxc/<id>`, see `vm list`).
 - `lab-token <name>`, API keys the VMs export: `radarr-key`, `sonarr-key`,
   `lidarr-key`, `prowlarr-key`, `jellyfin-key`,
   `jellyseerr-key`, `bazarr-key`, `paperless-key`, `firefly-token`, ... (`lab-token` alone lists them).

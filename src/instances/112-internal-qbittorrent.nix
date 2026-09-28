@@ -1,7 +1,7 @@
 { config, pkgs, lib, nasMount, nasPath, retry, ... }:
 let
   # webui api without login for these hosts
-  apiClients = map (id: "10.100.0.${toString id}/32") [ 1 100 104 114 130 131 133 135 136 ];
+  apiClients = map (id: "10.100.0.${toString id}/32") [ 1 100 104 114 130 ];
 
   # router routes peer traffic, no proxy here
   prefs = pkgs.writeText "qbittorrent-prefs.json" (builtins.toJSON {

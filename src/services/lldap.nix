@@ -1,3 +1,4 @@
+# lldap: the lab's single account store, authelia binds to it
 { config, lib, pkgs, retry, ... }:
 let
   # bundle groups plus one app-<route> group per page
@@ -10,9 +11,6 @@ let
   # example account, three pages
   guestGroups = [ "app-homepage" "app-jellyfin" "app-jellyseerr" ];
 in {
-  networking.hostName = "vm-102";
-
-  # lldap: the lab's single account store
   sops.secrets.lldap-jwt-secret = { owner = "lldap"; group = "lldap"; };
   sops.secrets.lldap-admin-password = { owner = "lldap"; group = "lldap"; };
 

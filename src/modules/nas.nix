@@ -2,9 +2,12 @@
 
 let
   nasIP = "10.100.0.109";
+  # systemd refuses automounts inside a container, so lxc guests mount at boot
+  container = config.boot.isContainer;
+  mountOpts = if container then [ "_netdev" ] else [ "x-systemd.automount" "x-systemd.idle-timeout=60" ];
   # soft rw mounts surface i/o errors to apps
-  nfsOpts = [ "nfsvers=4" "rw" "hard" "timeo=50" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
-  nfsOptsRo = [ "nfsvers=4" "ro" "soft" "timeo=15" "x-systemd.automount" "x-systemd.idle-timeout=60" ];
+  nfsOpts = [ "nfsvers=4" "rw" "hard" "timeo=50" ] ++ mountOpts;
+  nfsOptsRo = [ "nfsvers=4" "ro" "soft" "timeo=15" ] ++ mountOpts;
 
   # the only shares the dmz may mount
   dmzShares = {
@@ -22,8 +25,9 @@ let
   nasFileSystems = lib.filterAttrs (_: fs: lib.hasPrefix "${nasIP}:" (fs.device or "")) config.fileSystems;
   nasDevices = lib.mapAttrsToList (_: fs: fs.device) nasFileSystems;
   nasMountpoints = lib.attrNames nasFileSystems;
-  containerUnits = map (n: "podman-${n}") (lib.attrNames config.virtualisation.oci-containers.containers);
-  nasAutomounts = map (m: "${utils.escapeSystemdPath m}.automount") nasMountpoints;
+  # podman-<name> or docker-<name>, whichever backend the host runs
+  containerUnits = map (c: c.serviceName) (lib.attrValues config.virtualisation.oci-containers.containers);
+  nasAutomounts = map (m: "${utils.escapeSystemdPath m}.${if container then "mount" else "automount"}") nasMountpoints;
 in {
   _module.args = {
     inherit dmzShares;

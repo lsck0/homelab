@@ -1,12 +1,10 @@
-{ pkgs, nasMount, retry, ... }: {
-  networking.hostName = "vm-116";
+# forgejo actions runner; the host mounts /var/lib/homepage-tokens
+{ config, pkgs, nasMount, retry, ... }: {
+  fileSystems = nasMount "/var/lib/forgejo-runner" "forgejo-runner";
 
-  fileSystems = nasMount "/var/lib/forgejo-runner" "forgejo-runner"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
-
+  # job containers; the host sets virtualisation.oci-containers.backend = "docker"
   virtualisation.docker.enable = true;
 
-  virtualisation.oci-containers.backend = "docker";
   virtualisation.oci-containers.containers.forgejo-runner = {
     image = "code.forgejo.org/forgejo/runner:6.2.1";
     cmd = [ "forgejo-runner" "daemon" "--config" "/data/config.yaml" ];
@@ -25,7 +23,7 @@
     };
   };
 
-  # register with the nas token from vm-115
+  # register with the token forgejo exports to the nas
   systemd.services.forgejo-runner-register = {
     description = "Register Forgejo runner";
     before = [ "docker-forgejo-runner.service" ];
@@ -68,7 +66,7 @@
 
       # registration token from the nas
       TOKEN_FILE="/var/lib/homepage-tokens/forgejo-runner.token"
-      ${retry} 30 5 test -s "$TOKEN_FILE" || { echo "runner token missing at $TOKEN_FILE: is vm-115 (Forgejo) up?"; exit 1; }
+      ${retry} 30 5 test -s "$TOKEN_FILE" || { echo "runner token missing at $TOKEN_FILE: did forgejo-runner-token run?"; exit 1; }
 
       REG_TOKEN=$(cat "$TOKEN_FILE")
 
@@ -79,7 +77,7 @@
         forgejo-runner register \
           --instance https://git.lsck0.dev \
           --token "$REG_TOKEN" \
-          --name vm-116-runner \
+          --name ${config.networking.hostName}-runner \
           --labels "docker:docker://catthehacker/ubuntu:act-22.04,ubuntu-latest:docker://catthehacker/ubuntu:act-22.04,rust:docker://rust:1.80-bookworm" \
           --no-interactive
 
@@ -91,5 +89,4 @@
     "d /var/lib/forgejo-runner 0750 1000 1000 -"
   ];
 
-  networking.firewall.allowedTCPPorts = [];
 }

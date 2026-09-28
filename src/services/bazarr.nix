@@ -1,14 +1,10 @@
-{ pkgs, nasMount, nasPath, retry, ... }: {
-  networking.hostName = "vm-132";
-
-  # bazarr: subtitles for radarr and sonarr
-  fileSystems = nasMount "/var/lib/bazarr" "bazarr"
-    // nasPath "/data/media" "bulk/media"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+# bazarr: subtitles for radarr and sonarr; /data and the token share come from the servarr module
+{ pkgs, nasMount, retry, ... }: {
+  fileSystems = nasMount "/var/lib/bazarr" "bazarr";
 
   virtualisation.oci-containers.containers.bazarr = {
     image = "lscr.io/linuxserver/bazarr:v1.6.1-ls364";
-    ports = [ "80:6767" ];
+    ports = [ "6767:6767" ];
     volumes = [
       "/var/lib/bazarr:/config"
       "/data/media:/data/media"
@@ -39,11 +35,8 @@
     '';
   };
 
-  networking.firewall.allowedTCPPorts = [ 80 ];
+  networking.firewall.allowedTCPPorts = [ 6767 ];
 
-  # authelia gates the route, vm-133 drives the api
-  homelab.ingressOnly = {
-    ports = [ 80 ];
-    extraSources = [ "10.100.0.133/32" ];
-  };
+  # authelia gates the route, arr-wire drives the api from this host
+  homelab.ingressOnly.ports = [ 6767 ];
 }

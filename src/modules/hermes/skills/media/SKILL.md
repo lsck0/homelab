@@ -20,10 +20,10 @@ through Prowlarr. Media nobody watched for ~4 months is deleted by Janitorr
 
 | Kind | Manager (API) | Key | Folder | Player |
 |---|---|---|---|---|
-| Movies | Radarr `http://10.100.0.130/api/v3` | `radarr-key` | `/data/media/movies` | Jellyfin |
-| Series | Sonarr `http://10.100.0.131/api/v3` | `sonarr-key` | `/data/media/tv` | Jellyfin |
+| Movies | Radarr `http://10.100.0.130:7878/api/v3` | `radarr-key` | `/data/media/movies` | Jellyfin |
+| Series | Sonarr `http://10.100.0.130:8989/api/v3` | `sonarr-key` | `/data/media/tv` | Jellyfin |
 | Anime | Sonarr, `seriesType: "anime"` | `sonarr-key` | `/data/media/anime` | Jellyfin |
-| Music | Lidarr `http://10.100.0.136:8686/api/v1` | `lidarr-key` | `/data/media/music` | Navidrome |
+| Music | Lidarr `http://10.100.0.130:8686/api/v1` | `lidarr-key` | `/data/media/music` | Navidrome |
 
 Send the key as header `X-Api-Key: $(lab-token <key>)`. Use `terminal` with
 `curl` + `jq`.
