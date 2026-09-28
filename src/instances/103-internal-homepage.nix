@@ -172,8 +172,9 @@ let
   '';
 
   # center the dashboard vertically; footer leaves the flow so its mt-auto stops pinning content to the top
+  # safe: plain center pushes overflow above the scroll origin once the page is taller than the window
   customCss = pkgs.writeText "custom.css" ''
-    #inner_wrapper > div { justify-content: center; }
+    #inner_wrapper > div { justify-content: safe center; }
     #footer { position: absolute; bottom: 0; }
   '';
 in {
