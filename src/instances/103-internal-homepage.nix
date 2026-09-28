@@ -200,11 +200,14 @@ in {
     serviceConfig.Type = "oneshot";
     path = [ pkgs.coreutils ];
     script = ''
-      cp -f ${servicesYaml}  /var/lib/homepage/services.yaml
-      cp -f ${settingsYaml}  /var/lib/homepage/settings.yaml
-      cp -f ${bookmarksYaml} /var/lib/homepage/bookmarks.yaml
-      cp -f ${widgetsYaml}   /var/lib/homepage/widgets.yaml
-      cp -f ${customCss}     /var/lib/homepage/custom.css
+      # rename, not cp -f: cp unlinks the read-only target first, and a homepage render
+      # in that gap caches empty settings (default layout, no background) until the next change
+      put() { install -m 0444 "$1" "$2.tmp" && mv -f "$2.tmp" "$2"; }
+      put ${servicesYaml}  /var/lib/homepage/services.yaml
+      put ${settingsYaml}  /var/lib/homepage/settings.yaml
+      put ${bookmarksYaml} /var/lib/homepage/bookmarks.yaml
+      put ${widgetsYaml}   /var/lib/homepage/widgets.yaml
+      put ${customCss}     /var/lib/homepage/custom.css
 
       ENV_FILE="/var/lib/homepage/homepage.env"
       : > "$ENV_FILE"
