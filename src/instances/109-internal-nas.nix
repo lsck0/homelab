@@ -10,8 +10,8 @@
   fileSystems."/srv/nas/bulk" = {
     device = "/dev/disk/by-label/bulk";
     fsType = "ext4";
-    # nofail: state exports matter more than media
-    options = [ "defaults" "nofail" "x-systemd.device-timeout=30s" ];
+    # nofail: state exports matter more than media; noatime: a read must not write the hdd awake
+    options = [ "defaults" "noatime" "nofail" "x-systemd.device-timeout=30s" ];
   };
 
   # formats once, guarded on the label
@@ -189,6 +189,8 @@
     "d /srv/nas/data/paperless 0777 nobody nogroup -"
     "d /srv/nas/data/paperless-ai 0777 nobody nogroup -"
     "d /srv/nas/data/qbittorrent 0777 nobody nogroup -"
+    # unfinished downloads on nvme; qbittorrent moves them to the hdd once complete
+    "d /srv/nas/data/qbittorrent-incomplete 0777 nobody nogroup -"
     "d /srv/nas/data/prowlarr 0777 nobody nogroup -"
     "d /srv/nas/data/sonarr 0777 nobody nogroup -"
     "d /srv/nas/data/radarr 0777 nobody nogroup -"

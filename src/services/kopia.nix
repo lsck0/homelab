@@ -119,7 +119,7 @@ in {
         --compression=zstd \
         --keep-latest=3 --keep-hourly=0 --keep-daily=7 --keep-weekly=8 --keep-monthly=12 --keep-annual=2 \
         --add-ignore=/BACKUPS --add-ignore=lost+found --add-ignore='*.tmp' \
-        --add-ignore=/bulk \
+        --add-ignore=/bulk --add-ignore=/data/qbittorrent-incomplete \
         --one-file-system=false
     '';
   };

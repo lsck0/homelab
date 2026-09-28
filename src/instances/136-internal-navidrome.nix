@@ -13,7 +13,8 @@
       "/srv/music:/music:ro"
     ];
     environment = {
-      ND_SCANSCHEDULE = "1h";
+      # daily: every scan walks the music tree and spins up the hdd
+      ND_SCANSCHEDULE = "24h";
       ND_LOGLEVEL = "info";
       ND_BASEURL = "";
       ND_REVERSEPROXYUSERHEADER = "Remote-User";

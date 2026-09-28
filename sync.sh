@@ -222,8 +222,8 @@ fi
 # proxmox power savings, best-effort
 "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
   'for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo powersave > "$f" 2>/dev/null; done
-   hdparm -S 241 /dev/sda 2>/dev/null || true   # spin down after ~30min
-   echo ">>> Proxmox: CPU powersave, HDD spin-down 30min"' \
+   hdparm -S 120 /dev/sda 2>/dev/null || true   # spin down after 10min
+   echo ">>> Proxmox: CPU powersave, HDD spin-down 10min"' \
   2>/dev/null || true
 
 # containers cannot load kernel modules: nfs for the privileged ones, the rest for docker swarm

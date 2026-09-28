@@ -13,6 +13,9 @@ let
     # anonymous_mode hides fingerprint and ip; off
     anonymous_mode = false;
     save_path = "/data/torrents";
+    # download to nvme, move to the hdd once: the hdd sleeps between finished downloads
+    temp_path_enabled = true;
+    temp_path = "/data/incomplete";
     bypass_auth_subnet_whitelist_enabled = true;
     bypass_auth_subnet_whitelist = lib.concatStringsSep ", " apiClients;
     # dht and pex find the swarm
@@ -46,6 +49,7 @@ in {
 
   fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
     // nasPath "/data" "bulk"
+    // nasMount "/var/lib/qbittorrent-incomplete" "qbittorrent-incomplete"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   # host networking, not a published port
@@ -55,6 +59,7 @@ in {
     volumes = [
       "/var/lib/qbittorrent:/config"
       "/data/torrents:/data/torrents"
+      "/var/lib/qbittorrent-incomplete:/data/incomplete"
     ];
     environment = {
       PUID = "1000";
