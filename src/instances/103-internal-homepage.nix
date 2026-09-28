@@ -101,6 +101,11 @@ let
             icon: traefik
             href: https://traefik.lsck0.dev
             ping: http://10.100.0.100
+            description: Internal ingress
+        - Traefik DMZ:
+            icon: traefik
+            ping: http://10.200.0.200
+            description: Public ingress (no dashboard route)
         - Router:
             icon: nixos
             ping: http://10.100.0.1
