@@ -11,7 +11,7 @@ in {
 
   # settings live in /app/data/.env, normally wizard-written
   # new .env: restart the app with it
-  systemd.services.podman-paperless-ai.restartTriggers = [ llmModel llmUrl ];
+  systemd.services.podman-paperless-ai.restartTriggers = [ llmModel llmUrl "homepage-bot" ];
   systemd.services.paperless-ai-config = {
     description = "Seed paperless-ai configuration";
     before = [ "podman-paperless-ai.service" ];
@@ -33,6 +33,8 @@ in {
       cat > /var/lib/paperless-ai/.env <<EOF
       PAPERLESS_API_URL=http://10.100.0.121:8080/api
       PAPERLESS_API_TOKEN=$(cat "$TOKEN_FILE")
+      # owner of that token (vm-121 paperless-setup); unset aborts every scan
+      PAPERLESS_USERNAME=homepage-bot
       AI_PROVIDER=ollama
       OLLAMA_API_URL=${llmUrl}
       OLLAMA_MODEL=${llmModel}
