@@ -60,11 +60,14 @@ wait_for_ssh() {
 
 # returns 1 if it had to start the vm
 vm_wake() {
-  local st
-  st=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu/$1/status/current" -H "$PVE_AUTH" | jq -r '.data.status // "unknown"' 2>/dev/null)
+  local st kind
+  # containers live under /lxc, vms under /qemu
+  kind=$(jq -r --arg id "$1" '.[$id].kind // "vm"' "$ROOT_DIR/src/inventory.json" 2>/dev/null)
+  [ "$kind" = lxc ] && kind=lxc || kind=qemu
+  st=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/$kind/$1/status/current" -H "$PVE_AUTH" | jq -r '.data.status // "unknown"' 2>/dev/null)
   [ "$st" = "running" ] && return 0
   echo ">>>   starting vm-$1 ($st)"
-  curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$1/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
+  curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/$kind/$1/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
   return 1
 }
 

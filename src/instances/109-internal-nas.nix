@@ -253,4 +253,7 @@
 
   # authelia is the only gate for 80 and 8384
   homelab.ingressOnly.ports = [ 80 8384 ];
+
+  # hot page cache is the point here (nfs serving, tsdb, streams)
+  homelab.dropCaches = false;
 }

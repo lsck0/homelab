@@ -115,7 +115,7 @@ in {
     host = "0.0.0.0";
     port = 11434;
     acceleration = "cuda";
-    loadModels = [ "qwen3:4b" ];
+    loadModels = [ "qwen3:4b-instruct-2507-q4_K_M" ];
     environmentVariables = {
       OLLAMA_KEEP_ALIVE = "10m";
       OLLAMA_MAX_LOADED_MODELS = "1";
@@ -497,4 +497,7 @@ in {
 
   homelab.ingressOnly.ports = [ 11434 ];
   homelab.ingressOnly.portSources."11434" = [ "10.100.0.122/32" ];
+
+  # hot page cache is the point here (nfs serving, tsdb, streams)
+  homelab.dropCaches = false;
 }

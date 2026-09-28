@@ -2,7 +2,8 @@
 let
   # local ollama beside jellyfin on the rtx 2060; documents stay in the lab
   llmUrl = "http://10.100.0.134:11434";
-  llmModel = "qwen3:4b";
+  # instruct, not thinking: paperless-ai caps answers at 256 tokens and thinking ate them all
+  llmModel = "qwen3:4b-instruct-2507-q4_K_M";
 in {
   networking.hostName = "vm-122";
 

@@ -123,6 +123,15 @@ in {
     // nasMount "/var/lib/prometheus2" "prometheus"
     // nasMount "/var/lib/loki" "loki";
 
+  # every host uploads its journal here (base.nix); promtail forwards to loki
+  services.journald.remote = {
+    enable = true;
+    listen = "http";
+    port = 19532;
+    # loki is the long-term store, this is a buffer
+    settings.Remote = { SplitMode = "host"; MaxUse = "2G"; };
+  };
+
   # loki: logs from promtail on every vm
   services.loki = {
     enable = true;
@@ -526,12 +535,15 @@ in {
   # file provider rescans only at startup
   systemd.services.grafana.restartTriggers = [ ../modules/dashboards/homelab.json ];
 
-  # 3100 loki, 3200 tempo, 4317/4318 otlp
-  networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 ];
+  # 3100 loki, 3200 tempo, 4317/4318 otlp, 19532 journal-remote
+  networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 19532 ];
 
   # grafana trusts Remote-User (auth.proxy)
   homelab.ingressOnly.ports = [ 80 9090 3200 ];
   # desktop status widget scrapes prometheus
   homelab.ingressOnly.portSources."9090" = [ "192.168.178.0/24" "10.100.0.104/32" ];
 
+
+  # hot page cache is the point here (nfs serving, tsdb, streams)
+  homelab.dropCaches = false;
 }

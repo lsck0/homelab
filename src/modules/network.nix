@@ -66,7 +66,9 @@ in {
       networking.nameservers = [ vm.gateway ];
 
       # switching does not rename the running kernel
-      system.activationScripts.hostname = "echo ${config.networking.hostName} > /proc/sys/kernel/hostname";
+      # read-only in an unprivileged container; it takes the name at start
+      system.activationScripts.hostname = lib.mkIf (!config.boot.isContainer)
+        "echo ${config.networking.hostName} > /proc/sys/kernel/hostname";
 
       # retry forever if eth0 is not up yet; scripted networking only (lxc uses networkd)
       systemd.services.network-setup = lib.mkIf (!config.networking.useNetworkd) {

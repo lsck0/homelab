@@ -1,4 +1,9 @@
-{ config, pkgs, lib, modulesPath, ... }: {
+{ config, pkgs, lib, ... }:
+let
+  # vm-105 collects every journal and feeds loki
+  isCollector = config.networking.hostName == "vm-105";
+  promtailOn = isCollector || (config.homelab.traefik.enable or false);
+in {
   imports = [
     ./db-backup.nix
     ./docker-stack.nix
@@ -57,28 +62,35 @@
     ];
     networking.firewall.allowedTCPPorts = [ 9100 ];
 
-    # promtail's namespaced start needs a statedir
-    systemd.services.promtail.serviceConfig = lib.mkIf (config.networking.hostName != "vm-104") {
+    # journals ship to vm-105's journal-remote; a few MB each instead of a promtail per host
+    services.journald.upload = lib.mkIf (!isCollector) {
+      enable = true;
+      settings.Upload.URL = "http://10.100.0.105:19532";
+    };
+
+    # promtail only on the collector and where a file log exists (traefik access)
+    # namespaced start needs a statedir
+    systemd.services.promtail.serviceConfig = lib.mkIf promtailOn {
       StateDirectory = "promtail";
     };
-    services.promtail = lib.mkIf (config.networking.hostName != "vm-104") {
+    services.promtail = lib.mkIf promtailOn {
       enable = true;
       configuration = {
         server = { http_listen_port = 9080; grpc_listen_port = 0; };
         positions.filename = "/var/lib/promtail/positions.yaml";
         clients = [{ url = "http://10.100.0.105:3100/loki/api/v1/push"; }];
-        scrape_configs = [{
-          job_name = "journal";
+        scrape_configs = lib.optionals isCollector (map (j: {
+          job_name = j.name;
           journal = {
             max_age = "12h";
             labels = { job = "systemd-journal"; };
-          };
+          } // lib.optionalAttrs (j.path != null) { inherit (j) path; };
           relabel_configs = [
             { source_labels = [ "__journal__systemd_unit" ]; target_label = "unit"; }
             { source_labels = [ "__journal__hostname" ]; target_label = "host"; }
             { source_labels = [ "__journal_priority_keyword" ]; target_label = "level"; }
           ];
-        }]
+        }) [ { name = "journal"; path = null; } { name = "journal-remote"; path = "/var/log/journal/remote"; } ])
         # access log feeds the world map
         ++ lib.optional (config.homelab.traefik.enable or false) {
           job_name = "traefik-access";

@@ -327,6 +327,7 @@ in {
 
       # dmz -> loki on vm-105
       iifname "ens20" ip daddr 10.100.0.105 tcp dport 3100 accept
+      iifname "ens20" ip daddr 10.100.0.105 tcp dport 19532 accept
 
       # dmz -> nas nfs
       iifname "ens20" ip daddr 10.100.0.109 tcp dport { 111, 2049 } accept
