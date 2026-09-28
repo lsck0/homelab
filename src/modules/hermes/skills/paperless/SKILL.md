@@ -23,7 +23,7 @@ Header: `Authorization: Token $(lab-token paperless-key)`. API docs: `/api/schem
 - Metadata: `GET/POST /api/tags/`, `/api/correspondents/`, `/api/document_types/`;
   update a document `PATCH /api/documents/<id>/ {"tags":[..], "correspondent":<id>}`.
 - Bulk: `POST /api/documents/bulk_edit/ {"documents":[ids], "method":"add_tag", "parameters":{"tag":<id>}}`.
-- Files dropped into the NAS `documents` share are consumed automatically (polled every 30 s).
+- Files dropped into `documents/inbox` on the NAS share are consumed automatically (polled every 30 s); `documents/archive` is a read-only view of every stored document as searchable PDF.
 - Send the owner a document: download it and attach it in Telegram.
 
 Bills -> also book them in Firefly: skill `bills`.

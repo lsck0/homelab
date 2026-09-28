@@ -27,7 +27,7 @@ in {
   networking.hostName = "vm-121";
 
   fileSystems = nasMount "/var/lib/paperless" "paperless"
-    // nasPath "/var/lib/paperless/consume" "documents"
+    // nasPath "/var/lib/paperless/consume" "documents/inbox"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   services.paperless = {

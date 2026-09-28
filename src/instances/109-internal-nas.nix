@@ -14,6 +14,14 @@
     options = [ "defaults" "noatime" "nofail" "x-systemd.device-timeout=30s" ];
   };
 
+  # the documents share shows every paperless document, however it was added: a read-only view of
+  # the searchable pdf archive (<year>/<correspondent>/<date> <title>.pdf) next to the inbox paperless consumes
+  fileSystems."/srv/nas/documents/archive" = {
+    device = "/srv/nas/data/paperless/media/documents/archive";
+    fsType = "none";
+    options = [ "bind" "ro" ];
+  };
+
   # formats once, guarded on the label
   systemd.services.bulk-format = {
     description = "Create the bulk filesystem on first boot";
@@ -157,8 +165,10 @@
     "d /srv/nas/bulk/media/books 0775 1000 1000 -"
     "d /srv/nas/bulk/media/leaving-soon 0775 1000 1000 -"
     "d /srv/nas/BACKUPS 0700 root root -"
+    # read-only root: documents go into inbox/, archive/ is the paperless view
+    "d /srv/nas/documents 0755 nobody nogroup -"
     # paperless (uid 315) consumes and deletes what smb drops here as nobody
-    "d /srv/nas/documents 0777 nobody nogroup -"
+    "d /srv/nas/documents/inbox 0777 nobody nogroup -"
     "d /srv/nas/bulk/torrents 0775 1000 1000 -"
     # per-service persistent data
     "d /srv/nas/data 0777 nobody nogroup -"
