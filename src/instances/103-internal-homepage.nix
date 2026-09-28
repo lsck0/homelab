@@ -70,7 +70,7 @@ let
     "        icon: ${e.icon}"
     "        href: https://${r.host}.lsck0.dev"
     "        description: ${e.desc}${stateSuffix state}"
-    "        siteMonitor: ${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}"
+    "        siteMonitor: ${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}${r.health or ""}"
   ] + lib.optionalString (e ? widget) "        widget: ${builtins.toJSON e.widget}\n";
   groupYaml = g: "- ${g.name}:\n" + lib.concatMapStrings entryYaml g.entries;
 
@@ -112,7 +112,7 @@ let
   '' + lib.concatMapStrings groupYaml groups);
 
   settingsYaml = pkgs.writeText "settings.yaml" (''
-    title: lsck0 lab
+    title: home
     favicon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/homepage.svg
     background:
       image: https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=2560
@@ -170,6 +170,12 @@ let
   bookmarksYaml = pkgs.writeText "bookmarks.yaml" ''
     []
   '';
+
+  # center the dashboard vertically; footer leaves the flow so its mt-auto stops pinning content to the top
+  customCss = pkgs.writeText "custom.css" ''
+    #inner_wrapper > div { justify-content: center; }
+    #footer { position: absolute; bottom: 0; }
+  '';
 in {
   networking.hostName = "vm-103";
 
@@ -191,6 +197,7 @@ in {
       cp -f ${settingsYaml}  /var/lib/homepage/settings.yaml
       cp -f ${bookmarksYaml} /var/lib/homepage/bookmarks.yaml
       cp -f ${widgetsYaml}   /var/lib/homepage/widgets.yaml
+      cp -f ${customCss}     /var/lib/homepage/custom.css
 
       ENV_FILE="/var/lib/homepage/homepage.env"
       : > "$ENV_FILE"
@@ -210,11 +217,11 @@ in {
 
   # restart on config change
   systemd.services.podman-homepage.restartTriggers = [
-    servicesYaml settingsYaml widgetsYaml bookmarksYaml
+    servicesYaml settingsYaml widgetsYaml bookmarksYaml customCss
   ];
 
   virtualisation.oci-containers.containers.homepage = {
-    image = "ghcr.io/gethomepage/homepage:v1.12.3";
+    image = "ghcr.io/gethomepage/homepage:v1.13.2";
     ports = [ "80:3000" ];
     volumes = [
       "/var/lib/homepage:/app/config"

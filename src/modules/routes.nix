@@ -38,8 +38,8 @@
     navidrome      = { host = "music";       vmid = 136; port = 80;    group = "media"; };
     lidarr         = { host = "lidarr";      vmid = 136; port = 8686;  group = "admins"; };
     # tailscale clients cannot log in to authelia
-    headscale      = { host = "hs";          vmid = 138; port = 80;    auth = "own"; };
-    headplane      = { host = "hs-ui";       vmid = 138; port = 3000;  group = "admins";
+    headscale      = { host = "hs";          vmid = 138; port = 80;    auth = "own"; health = "/health"; };
+    headplane      = { host = "hs-ui";       vmid = 138; port = 3000;  group = "admins"; health = "/admin/healthz";
                        loginRedirect = { path = "/"; to = "/admin/"; }; };
   };
 
