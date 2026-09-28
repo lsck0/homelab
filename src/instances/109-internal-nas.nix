@@ -16,11 +16,13 @@
 
   # the documents share shows every paperless document, however it was added: a read-only view of
   # the searchable pdf archive (<year>/<correspondent>/<date> <title>.pdf) next to the inbox paperless consumes
+  # bindfs, not a bind mount: paperless keeps the tree 0700, the smb guest must be able to read it
   fileSystems."/srv/nas/documents/archive" = {
     device = "/srv/nas/data/paperless/media/documents/archive";
-    fsType = "none";
-    options = [ "bind" "ro" ];
+    fsType = "fuse.bindfs";
+    options = [ "ro" "perms=a+rX" "force-user=nobody" "force-group=nogroup" "allow_other" ];
   };
+  system.fsPackages = [ pkgs.bindfs ];
 
   # formats once, guarded on the label
   systemd.services.bulk-format = {
