@@ -179,7 +179,7 @@ in {
   sops.secrets.proton-totp-secret = {};
 
   systemd.services.proton-sync = {
-    description = "Mirror the NAS backups and documents to Proton Drive";
+    description = "Mirror the NAS, all but bulk, to Proton Drive";
     after = [ "network-online.target" "remote-fs.target" ];
     wants = [ "network-online.target" ];
     serviceConfig = {
@@ -205,16 +205,19 @@ in {
           --non-interactive >/dev/null
       fi
 
-      # sync mirrors; --backup-dir keeps 30 days of changes
+      # everything but bulk, as plain browsable folders beside the kopia repo in BACKUPS;
+      # sync mirrors, --backup-dir keeps 30 days of changes and deletions
       stamp=$(date +%Y-%m-%d)
-      for tree in BACKUPS documents; do
-        echo ">>> $tree -> proton:homelab/$tree"
-        rclone --config "$conf" sync "${source}/$tree" "proton:homelab/$tree" \
-          --backup-dir "proton:homelab/.trash/$stamp/$tree" \
+      remote=proton:homelab-offsite
+      for tree in BACKUPS data documents syncthing; do
+        echo ">>> $tree -> $remote/$tree"
+        rclone --config "$conf" sync "${source}/$tree" "$remote/$tree" \
+          --backup-dir "$remote/.trash/$stamp/$tree" \
+          --exclude "/qbittorrent-incomplete/**" \
           --transfers 4 --checkers 8 --retries 3 --low-level-retries 10 \
           --stats 5m --stats-one-line
       done
-      rclone --config "$conf" delete "proton:homelab/.trash" --min-age 30d --rmdirs || true
+      rclone --config "$conf" delete "$remote/.trash" --min-age 30d --rmdirs || true
 
       d=/var/lib/node-exporter-textfile; mkdir -p $d
       {
