@@ -188,6 +188,8 @@ in {
   # env file from nas tokens before start
   systemd.services.homepage-config = {
     description = "Sync Homepage config and collect API tokens";
+    # an lxc mounts nfs at boot, not on access: never write under the mountpoint
+    unitConfig.RequiresMountsFor = [ "/var/lib/homepage" "/var/lib/homepage-tokens" ];
     before = [ "podman-homepage.service" ];
     requiredBy = [ "podman-homepage.service" ];
     serviceConfig.Type = "oneshot";

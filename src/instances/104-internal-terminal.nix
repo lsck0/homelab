@@ -78,6 +78,13 @@ in {
   fileSystems = nasMount calendarState "calendar"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
+  # an lxc mounts nfs at boot, not on access: nothing may run before the shares are up
+  imports = [{
+    systemd.services = lib.genAttrs [
+      "nginx" "terminal-sync" "arxiv-sync" "trmnl-sync" "github-sync" "calendar-sync" "calendar-upload-dir" "calendar-upload"
+    ] (_: { unitConfig.RequiresMountsFor = [ calendarState "/var/lib/homepage-tokens" ]; });
+  }];
+
   sops.secrets = {
     # "NAME|URL" per line
     calendar-sources = {};
