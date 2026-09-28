@@ -41,14 +41,25 @@
     checks.${system} = lib.genAttrs [ "on-demand" "kopia" "swarm" "minecraft" "monitoring" "renumber" ]
       (name: import ./tests/${name}.nix { inherit pkgs lib inputs; });
 
-    packages.${system}.cloud-image = import ./modules/cloud-image.nix {
-      inherit pkgs lib nixpkgs common specialArgs;
+    packages.${system} = {
+      cloud-image = import ./modules/cloud-image.nix {
+        inherit pkgs lib nixpkgs specialArgs;
+        common = { imports = [ common ./modules/platform-vm.nix ]; };
+      };
+      # proxmox vztmpl: sync.sh uploads it before terraform creates containers
+      lxc-template = (lib.nixosSystem {
+        inherit system specialArgs;
+        modules = [ common ./modules/platform-lxc.nix ];
+      }).config.system.build.tarball;
     };
 
     nixosConfigurations = lib.mapAttrs' (file: _:
-      lib.nameValuePair (lib.removeSuffix ".nix" file) (lib.nixosSystem {
+      let
+        name = lib.removeSuffix ".nix" file;
+        kind = inventory.${builtins.substring 0 3 name}.kind or "vm";
+      in lib.nameValuePair name (lib.nixosSystem {
         inherit system specialArgs;
-        modules = [ common ./instances/${file} ];
+        modules = [ common ./modules/platform-${kind}.nix ./instances/${file} ];
       })
     ) hostFiles;
   };

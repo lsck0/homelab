@@ -135,7 +135,7 @@ in {
   networking.hosts = {
     "10.100.0.118" = [ "registry.lsck0.dev" ];
     "10.100.0.115" = [ "git.lsck0.dev" ];
-    "10.100.0.111" = [ "sccache.lsck0.dev" ];
+    "10.100.0.110" = [ "sccache.lsck0.dev" ];
   };
 
   # runners connect out, nothing listens

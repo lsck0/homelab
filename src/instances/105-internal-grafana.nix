@@ -238,7 +238,7 @@ in {
         params.module = [ "tcp_up" ];
         scrape_interval = "60s";
         static_configs = [{
-          targets = [ "10.100.0.111:6379" ];
+          targets = [ "10.100.0.110:6379" ];
           labels.service = "sccache";
         }];
         relabel_configs = [

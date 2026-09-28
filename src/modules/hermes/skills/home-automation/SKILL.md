@@ -13,10 +13,10 @@ metadata:
 
 # Home automation
 
-## MQTT (vm-127, 10.100.0.127:1883, anonymous on the LAN)
+## MQTT (vm-125 (with Home Assistant), 10.100.0.125:1883, anonymous on the LAN)
 
-- Publish: `mosquitto_pub -h 10.100.0.127 -t <topic> -m '<payload>'` (install on demand: `nix shell nixpkgs#mosquitto`, or run it on vm-127 via ssh).
-- Watch: `ssh 10.100.0.127 "mosquitto_sub -t '#' -v -W 10"`.
+- Publish: `mosquitto_pub -h 10.100.0.125 -t <topic> -m '<payload>'` (install on demand: `nix shell nixpkgs#mosquitto`, or run it on vm-125 via ssh).
+- Watch: `ssh 10.100.0.125 "mosquitto_sub -t '#' -v -W 10"`.
 
 ## Home Assistant (vm-125, http://10.100.0.125, currently enabled = false)
 

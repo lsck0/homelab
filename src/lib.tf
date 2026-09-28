@@ -3,6 +3,8 @@
 locals {
   defaults = {
     enabled  = true
+    # "vm" or "lxc"; lxc has no balloon, gpu or extra disks
+    kind     = "vm"
     cooldown = "30m"
     # plain vm working set measured 445-600 MiB
     memory = 768
@@ -26,6 +28,7 @@ locals {
       type = i.type
       # string, the for-expression unifies bool and string anyway
       enabled  = tostring(try(i.enabled, local.defaults.enabled))
+      kind     = try(i.kind, local.defaults.kind)
       cooldown = try(i.cooldown, local.defaults.cooldown)
       memory   = try(i.memory, local.defaults.memory)
       # floor 512: at 384 a vm drops ssh
@@ -65,6 +68,14 @@ check "instance_fields" {
     error_message = "enabled must be true, false or \"onDemand\"."
   }
   assert {
+    condition     = alltrue([for id, v in local.vms : contains(["vm", "lxc"], v.kind)])
+    error_message = "kind must be \"vm\" or \"lxc\"."
+  }
+  assert {
+    condition     = alltrue([for id, v in local.vms : v.kind == "vm" || (length(v.hostpci) == 0 && length(v.extra_disks) == 0 && v.type != "router")])
+    error_message = "lxc instances take no gpu, extra disks or router role."
+  }
+  assert {
     condition     = alltrue([for id, v in local.vms : startswith(v.name, "${id}-") || v.type == "router"])
     error_message = "Instance name must start with its id (\"<id>-<type>-<service>\")."
   }
@@ -84,7 +95,7 @@ resource "proxmox_virtual_environment_hardware_mapping_pci" "gpu" {
 }
 
 resource "proxmox_virtual_environment_vm" "vm" {
-  for_each = local.vms
+  for_each = { for id, v in local.vms : id => v if v.kind == "vm" }
 
   # mapping must exist before a vm references it
   depends_on = [proxmox_virtual_environment_hardware_mapping_pci.gpu]
@@ -184,6 +195,67 @@ resource "proxmox_virtual_environment_vm" "vm" {
   }
 }
 
+resource "proxmox_virtual_environment_container" "ct" {
+  for_each = { for id, v in local.vms : id => v if v.kind == "lxc" }
+
+  node_name     = var.target_node
+  vm_id         = tonumber(each.key)
+  unprivileged  = true
+  started       = each.value.enabled != "false"
+  start_on_boot = each.value.enabled == "true"
+
+  startup {
+    order = each.value.boot_order
+  }
+
+  # systemd inside needs its own cgroup tree
+  features {
+    nesting = true
+  }
+
+  operating_system {
+    template_file_id = var.nixos_lxc_template
+    type             = "nixos"
+  }
+
+  lifecycle {
+    # the template only seeds a new container, never replace
+    ignore_changes = [operating_system[0].template_file_id, initialization[0].user_account]
+  }
+
+  cpu {
+    cores = each.value.cores
+  }
+  # no balloon in a container: the limit is only a ceiling, unused ram stays with the host
+  memory {
+    dedicated = each.value.memory
+    swap      = 0
+  }
+
+  disk {
+    datastore_id = var.proxmox_datastore
+    size         = each.value.disk
+  }
+
+  network_interface {
+    name   = "eth0"
+    bridge = each.value.bridge
+  }
+
+  initialization {
+    hostname = each.value.name
+    ip_config {
+      ipv4 {
+        address = "${each.value.ip}/${each.value.prefix}"
+        gateway = each.value.gateway
+      }
+    }
+    user_account {
+      keys = [var.ssh_public_key]
+    }
+  }
+}
+
 # sync.sh writes this to src/inventory.json for nix
 
 locals {
@@ -191,6 +263,7 @@ locals {
     for id, v in local.vms : id => {
       name     = v.name
       type     = v.type
+      kind     = v.kind
       ip       = v.ip
       prefix   = tonumber(v.prefix)
       gateway  = v.gateway

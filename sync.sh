@@ -231,6 +231,16 @@ if ! "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f /var/lib/vz/
     "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:/var/lib/vz/template/iso/nixos.img"
 fi
 
+# lxc template; only seeds new containers, so upload once
+LXC_TEMPLATE=/var/lib/vz/template/cache/nixos-homelab.tar.xz
+if ! "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f $LXC_TEMPLATE" 2>/dev/null; then
+  echo ">>> Building and uploading the LXC template..."
+  tarball=$(nix build "$ROOT_DIR/src#lxc-template" --extra-experimental-features "nix-command flakes" \
+    --no-link --print-out-paths)
+  scp -o StrictHostKeyChecking=accept-new "$tarball"/tarball/*.tar.xz \
+    "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:$LXC_TEMPLATE"
+fi
+
 # terraform
 [ -d "$ROOT_DIR/src/.terraform" ] || terraform -chdir="$ROOT_DIR/src" init
 # pre-renumber state would recreate every vm

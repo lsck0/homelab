@@ -68,8 +68,8 @@ in {
       # switching does not rename the running kernel
       system.activationScripts.hostname = "echo ${config.networking.hostName} > /proc/sys/kernel/hostname";
 
-      # retry forever if eth0 is not up yet
-      systemd.services.network-setup = {
+      # retry forever if eth0 is not up yet; scripted networking only (lxc uses networkd)
+      systemd.services.network-setup = lib.mkIf (!config.networking.useNetworkd) {
         startLimitIntervalSec = 0;
         serviceConfig = {
           Restart = "on-failure";

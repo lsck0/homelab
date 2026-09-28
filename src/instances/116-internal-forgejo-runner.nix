@@ -18,7 +18,7 @@
     extraOptions = [
       "--add-host=git.lsck0.dev:10.100.0.100"
       "--add-host=registry.lsck0.dev:10.100.0.118"
-      "--add-host=sccache.lsck0.dev:10.100.0.111"
+      "--add-host=sccache.lsck0.dev:10.100.0.110"
     ];
     environment = {
       SCCACHE_REDIS = "redis://sccache.lsck0.dev";
@@ -46,7 +46,7 @@
       # docker socket in job containers for build/push
       sed -i 's|docker_host: "-"|docker_host: "automount"|' /var/lib/forgejo-runner/config.yaml
       # internal hostnames in job containers
-      sed -i '/^container:/,/^[^ ]/{s|^  options: .*|  options: "--add-host=git.lsck0.dev:10.100.0.100 --add-host=registry.lsck0.dev:10.100.0.118 --add-host=sccache.lsck0.dev:10.100.0.111"|}' \
+      sed -i '/^container:/,/^[^ ]/{s|^  options: .*|  options: "--add-host=git.lsck0.dev:10.100.0.100 --add-host=registry.lsck0.dev:10.100.0.118 --add-host=sccache.lsck0.dev:10.100.0.110"|}' \
         /var/lib/forgejo-runner/config.yaml
 
       # wait for the forgejo api

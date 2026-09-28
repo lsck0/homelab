@@ -30,4 +30,4 @@ Admin CLI inside the container: `ssh 10.100.0.115 podman exec -u git forgejo for
   (runner runs under docker: `docker logs forgejo-runner`).
 - Labels: `docker` (node:20), `ubuntu-latest` (catthehacker act image), `rust`.
 - Re-register after a Forgejo reset: `systemctl restart forgejo-runner-register`.
-- Build cache: sccache on vm-111 (`redis://sccache.lsck0.dev`).
+- Build cache: sccache on vm-110 (`redis://sccache.lsck0.dev`).

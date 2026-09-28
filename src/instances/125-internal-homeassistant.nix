@@ -153,6 +153,18 @@ in {
     '';
   };
 
-  networking.firewall.allowedTCPPorts = [ 80 ];
+  # mqtt bus for home assistant, zigbee2mqtt, esphome; lan only, never forwarded
+  services.mosquitto = {
+    enable = true;
+    listeners = [{
+      address = "0.0.0.0";
+      port = 1883;
+      settings.allow_anonymous = true;
+      omitPasswordAuth = true;
+      acl = [ "topic readwrite #" ];
+    }];
+  };
+
+  networking.firewall.allowedTCPPorts = [ 80 1883 ];
   homelab.ingressOnly.ports = [ 80 ];
 }

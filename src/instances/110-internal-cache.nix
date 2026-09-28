@@ -1,8 +1,7 @@
+# build caches: attic (nix substituter) + redis for sccache
 { config, pkgs, ... }: {
   networking.hostName = "vm-110";
 
-  # attic client to create the cache and read its key
-  environment.systemPackages = [ pkgs.attic-client ];
 
   # nix binary cache for every vm and the forgejo runner
   sops.secrets.attic-server-token = {};
@@ -31,5 +30,18 @@
     };
   };
 
-  networking.firewall.allowedTCPPorts = [ 8080 ];
+  services.redis.servers.sccache = {
+    enable = true;
+    port = 6379;
+    bind = "0.0.0.0";
+    settings = {
+      protected-mode = "no";
+      maxmemory = "768mb";
+      maxmemory-policy = "allkeys-lru";
+      appendonly = "yes";
+    };
+  };
+  environment.systemPackages = [ pkgs.attic-client pkgs.sccache ];
+
+  networking.firewall.allowedTCPPorts = [ 8080 6379 ];
 }

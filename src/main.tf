@@ -45,6 +45,12 @@ variable "proxmox_ssh_password" {
 # ─────────────────────────────────────────────────────────────────────────────
 # VM DEFAULTS
 variable "ssh_public_key" { type = string }
+variable "nixos_lxc_template" {
+  description = "NixOS container template (sync.sh uploads packages.lxc-template)."
+  type        = string
+  default     = "local:vztmpl/nixos-homelab.tar.xz"
+}
+
 variable "nixos_image_id" {
   type    = string
   default = "local:iso/nixos.img"

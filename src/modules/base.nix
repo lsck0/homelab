@@ -1,6 +1,5 @@
 { config, pkgs, lib, modulesPath, ... }: {
   imports = [
-    (modulesPath + "/profiles/qemu-guest.nix")
     ./db-backup.nix
     ./docker-stack.nix
     ./nas.nix
@@ -18,23 +17,12 @@
   };
 
   config = {
-    boot.loader.grub.enable = true;
-    boot.loader.grub.device = "/dev/sda";
-    boot.growPartition = true;
-
-    fileSystems."/" = {
-      device = "/dev/disk/by-label/nixos";
-      fsType = "ext4";
-      autoResize = true;
-    };
-
     sops = {
       defaultSopsFile = ../secrets.json;
       age.keyFile = "/var/lib/sops-nix/key.txt";
       gnupg.sshKeyPaths = [];
     };
 
-    services.qemuGuest.enable = true;
     # eth0 naming so cloud-init config matches
     networking.usePredictableInterfaceNames = false;
     users.users.root.openssh.authorizedKeys.keys = [
@@ -120,9 +108,6 @@
 
     # internal vms have no ipv6 routing
     networking.enableIPv6 = false;
-
-    # lower idle power, same throughput
-    powerManagement.cpuFreqGovernor = "powersave";
 
     # every deploy adds an uncollected generation
     nix.gc = { automatic = true; dates = "weekly"; options = "--delete-older-than 14d"; };

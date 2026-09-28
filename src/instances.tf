@@ -60,16 +60,13 @@ locals {
       # bulk storage on the 2 tb hdd
       extra_disks = var.bulk_datastore == "" ? [] : [{ size = 1800, datastore = var.bulk_datastore }],
     }
-    "110" = { # Nix binary cache (substituter)
+    "110" = { # build caches: attic (nix) + sccache redis
       enabled = true,
-      name    = "110-internal-attic",
+      kind    = "lxc",
+      name    = "110-internal-cache",
       type    = "internal",
+      memory  = 1536,
       disk    = 40,
-    }
-    "111" = { # shared Rust/C++ compile cache
-      enabled = true,
-      name    = "111-internal-sccache",
-      type    = "internal",
     }
 
     "112" = { # torrent client (egress via tor-router)
@@ -160,11 +157,6 @@ locals {
       balloon = 1536,
       # image plus postgres left 396 MiB free on 8 GiB
       disk = 16,
-    }
-    "127" = { # MQTT broker (Home Assistant / IoT)
-      enabled = true,
-      name    = "127-internal-mosquitto",
-      type    = "internal",
     }
 
     "128" = { # media requests: movies, series, anime (-> Radarr/Sonarr)

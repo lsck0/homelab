@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TF="$ROOT_DIR/src/instances.tf"
 
 MEDIA="112 128 129 130 131 132 133 134 136"
-APPS="121 122 124 125 126 127"
+APPS="121 122 124 125 126"
 
 usage() { echo "usage: $0 status | {media|apps} {on|off|onDemand} [--apply]"; exit 1; }
 

@@ -6,7 +6,8 @@
     "ip": "10.100.0.100",
     "name": "100-internal-traefik",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "101": {
     "cooldown": "30m",
@@ -15,7 +16,8 @@
     "ip": "10.100.0.101",
     "name": "101-internal-authelia",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "102": {
     "cooldown": "30m",
@@ -24,7 +26,8 @@
     "ip": "10.100.0.102",
     "name": "102-internal-lldap",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "103": {
     "cooldown": "30m",
@@ -33,7 +36,8 @@
     "ip": "10.100.0.103",
     "name": "103-internal-homepage",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "104": {
     "cooldown": "30m",
@@ -42,7 +46,8 @@
     "ip": "10.100.0.104",
     "name": "104-internal-terminal",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "105": {
     "cooldown": "30m",
@@ -51,7 +56,8 @@
     "ip": "10.100.0.105",
     "name": "105-internal-grafana",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "107": {
     "cooldown": "30m",
@@ -60,7 +66,8 @@
     "ip": "10.100.0.107",
     "name": "107-internal-kopia",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "109": {
     "cooldown": "30m",
@@ -69,25 +76,18 @@
     "ip": "10.100.0.109",
     "name": "109-internal-nas",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "110": {
     "cooldown": "30m",
     "enabled": "true",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.110",
-    "name": "110-internal-attic",
+    "name": "110-internal-cache",
     "prefix": 24,
-    "type": "internal"
-  },
-  "111": {
-    "cooldown": "30m",
-    "enabled": "true",
-    "gateway": "10.100.0.1",
-    "ip": "10.100.0.111",
-    "name": "111-internal-sccache",
-    "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "lxc"
   },
   "112": {
     "cooldown": "30m",
@@ -96,7 +96,8 @@
     "ip": "10.100.0.112",
     "name": "112-internal-qbittorrent",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "114": {
     "cooldown": "30m",
@@ -105,7 +106,8 @@
     "ip": "10.100.0.114",
     "name": "114-internal-hermes",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "115": {
     "cooldown": "30m",
@@ -114,7 +116,8 @@
     "ip": "10.100.0.115",
     "name": "115-internal-forgejo",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "116": {
     "cooldown": "30m",
@@ -123,7 +126,8 @@
     "ip": "10.100.0.116",
     "name": "116-internal-forgejo-runner",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "117": {
     "cooldown": "30m",
@@ -132,7 +136,8 @@
     "ip": "10.100.0.117",
     "name": "117-internal-github-runner",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "118": {
     "cooldown": "30m",
@@ -141,7 +146,8 @@
     "ip": "10.100.0.118",
     "name": "118-internal-registry",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "121": {
     "cooldown": "30m",
@@ -150,7 +156,8 @@
     "ip": "10.100.0.121",
     "name": "121-internal-paperless",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "122": {
     "cooldown": "30m",
@@ -159,7 +166,8 @@
     "ip": "10.100.0.122",
     "name": "122-internal-paperless-ai",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "124": {
     "cooldown": "30m",
@@ -168,7 +176,8 @@
     "ip": "10.100.0.124",
     "name": "124-internal-firefly",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "125": {
     "cooldown": "30m",
@@ -177,7 +186,8 @@
     "ip": "10.100.0.125",
     "name": "125-internal-homeassistant",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "126": {
     "cooldown": "30m",
@@ -186,16 +196,8 @@
     "ip": "10.100.0.126",
     "name": "126-internal-huginn",
     "prefix": 24,
-    "type": "internal"
-  },
-  "127": {
-    "cooldown": "30m",
-    "enabled": "true",
-    "gateway": "10.100.0.1",
-    "ip": "10.100.0.127",
-    "name": "127-internal-mosquitto",
-    "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "128": {
     "cooldown": "30m",
@@ -204,7 +206,8 @@
     "ip": "10.100.0.128",
     "name": "128-internal-jellyseerr",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "129": {
     "cooldown": "30m",
@@ -213,7 +216,8 @@
     "ip": "10.100.0.129",
     "name": "129-internal-prowlarr",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "130": {
     "cooldown": "30m",
@@ -222,7 +226,8 @@
     "ip": "10.100.0.130",
     "name": "130-internal-radarr",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "131": {
     "cooldown": "30m",
@@ -231,7 +236,8 @@
     "ip": "10.100.0.131",
     "name": "131-internal-sonarr",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "132": {
     "cooldown": "30m",
@@ -240,7 +246,8 @@
     "ip": "10.100.0.132",
     "name": "132-internal-bazarr",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "133": {
     "cooldown": "30m",
@@ -249,7 +256,8 @@
     "ip": "10.100.0.133",
     "name": "133-internal-recyclarr",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "134": {
     "cooldown": "30m",
@@ -258,7 +266,8 @@
     "ip": "10.100.0.134",
     "name": "134-internal-jellyfin",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "136": {
     "cooldown": "30m",
@@ -267,7 +276,8 @@
     "ip": "10.100.0.136",
     "name": "136-internal-navidrome",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "138": {
     "cooldown": "30m",
@@ -276,7 +286,8 @@
     "ip": "10.100.0.138",
     "name": "138-internal-headscale",
     "prefix": 24,
-    "type": "internal"
+    "type": "internal",
+    "kind": "vm"
   },
   "200": {
     "cooldown": "30m",
@@ -285,7 +296,8 @@
     "ip": "10.200.0.200",
     "name": "200-external-traefik",
     "prefix": 24,
-    "type": "external"
+    "type": "external",
+    "kind": "vm"
   },
   "203": {
     "cooldown": "30m",
@@ -294,7 +306,8 @@
     "ip": "10.200.0.203",
     "name": "203-external-ntfy",
     "prefix": 24,
-    "type": "external"
+    "type": "external",
+    "kind": "vm"
   },
   "204": {
     "cooldown": "30m",
@@ -303,7 +316,8 @@
     "ip": "10.200.0.204",
     "name": "204-external-searxng",
     "prefix": 24,
-    "type": "external"
+    "type": "external",
+    "kind": "vm"
   },
   "206": {
     "cooldown": "30m",
@@ -312,7 +326,8 @@
     "ip": "10.200.0.206",
     "name": "206-external-privatebin",
     "prefix": 24,
-    "type": "external"
+    "type": "external",
+    "kind": "vm"
   },
   "207": {
     "cooldown": "30m",
@@ -321,7 +336,8 @@
     "ip": "10.200.0.207",
     "name": "207-external-share",
     "prefix": 24,
-    "type": "external"
+    "type": "external",
+    "kind": "vm"
   },
   "208": {
     "cooldown": "30m",
@@ -330,7 +346,8 @@
     "ip": "10.200.0.208",
     "name": "208-external-minecraft",
     "prefix": 24,
-    "type": "external"
+    "type": "external",
+    "kind": "vm"
   },
   "209": {
     "cooldown": "30m",
@@ -339,7 +356,8 @@
     "ip": "10.200.0.209",
     "name": "209-external-hello",
     "prefix": 24,
-    "type": "external"
+    "type": "external",
+    "kind": "vm"
   },
   "300": {
     "cooldown": "30m",
@@ -348,6 +366,7 @@
     "ip": "192.168.178.29",
     "name": "luca-router",
     "prefix": 24,
-    "type": "router"
+    "type": "router",
+    "kind": "vm"
   }
 }

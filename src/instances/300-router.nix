@@ -439,7 +439,7 @@ in {
           ${lib.concatMapStringsSep "\n    " (h: "10.100.0.100 ${h}.lsck0.dev") (hostsOf "internal" ++ internalExtraHosts)}
           # direct: nas smb/nfs, sccache redis
           10.100.0.109 smb.lsck0.dev
-          10.100.0.111 sccache.lsck0.dev
+          10.100.0.110 sccache.lsck0.dev
           # external services -> external traefik
           ${lib.concatMapStringsSep "\n    " (h: "10.200.0.200 ${h}.lsck0.dev") (hostsOf "external" ++ [ "mc" ])}
           fallthrough
