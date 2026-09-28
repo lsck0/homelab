@@ -187,7 +187,8 @@ in {
       # proton throttles, first run uploads everything
       TimeoutStartSec = "12h";
     };
-    path = [ pkgs.rclone pkgs.coreutils ];
+    # getent: rclone looks up the home dir even with --config
+    path = [ pkgs.rclone pkgs.coreutils pkgs.getent ];
     script = ''
       set -euo pipefail
       conf=/var/lib/rclone/rclone.conf
@@ -201,7 +202,7 @@ in {
         rclone --config "$conf" config create proton protondrive \
           username="$user" \
           password="$(rclone obscure "$(cat ${config.sops.secrets.proton-password.path})")" \
-          otp_secret_key="$(cat ${config.sops.secrets.proton-totp-secret.path})" \
+          otp_secret_key="$(rclone obscure "$(cat ${config.sops.secrets.proton-totp-secret.path})")" \
           --non-interactive >/dev/null
       fi
 
