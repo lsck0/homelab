@@ -80,6 +80,11 @@ in {
       };
     })
 
+    # netavark enables forwarding at runtime, 60-nixos.conf resets it on every systemd-sysctl restart
+    (lib.mkIf config.virtualisation.podman.enable {
+      boot.kernel.sysctl."net.ipv4.conf.all.forwarding" = true;
+    })
+
     (lib.mkIf (cfg.ports != [ ]) {
       assertions = [
         {
