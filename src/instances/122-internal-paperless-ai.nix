@@ -1,9 +1,16 @@
-{ pkgs, nasMount, retry, ... }:
+{ lib, pkgs, nasMount, retry, ... }:
 let
   # local ollama beside jellyfin on the rtx 2060; documents stay in the lab
   llmUrl = "http://10.100.0.134:11434";
   # 7b: 4b left titles empty; no thinking model, answers are capped at 256 tokens
   llmModel = "qwen2.5:7b-instruct";
+  prompt = lib.concatStringsSep " " [
+    "Du analysierst deutsche Dokumente (Briefe, Rechnungen, Bescheide), oft als Handyfoto mit OCR-Fehlern."
+    "Titel: kurz, deutsch, beschreibend, mit Absender und Gegenstand, z.B. 'Abwassergebühren 2026 Zweckverband Obereichsfeld'."
+    "Korrespondent: die absendende Organisation oder Person, nie der Empfänger, keine Adressen oder Kundennummern."
+    "Tags und Dokumenttyp nur aus den vorgegebenen Listen, höchstens drei Tags."
+    "Datum: das Ausstellungsdatum des Dokuments."
+  ];
 in {
   networking.hostName = "vm-122";
 
@@ -12,7 +19,7 @@ in {
 
   # settings live in /app/data/.env, normally wizard-written
   # new .env: restart the app with it
-  systemd.services.podman-paperless-ai.restartTriggers = [ llmModel llmUrl "homepage-bot" ];
+  systemd.services.podman-paperless-ai.restartTriggers = [ llmModel llmUrl "homepage-bot" prompt "restrict-v1" ];
   systemd.services.paperless-ai-config = {
     description = "Seed paperless-ai configuration";
     before = [ "podman-paperless-ai.service" ];
@@ -45,9 +52,10 @@ in {
       ACTIVATE_DOCUMENT_TYPE=yes
       ACTIVATE_TITLE=yes
       ACTIVATE_CUSTOM_FIELDS=no
-      RESTRICT_TO_EXISTING_TAGS=no
+      RESTRICT_TO_EXISTING_TAGS=yes
       RESTRICT_TO_EXISTING_CORRESPONDENTS=no
-      RESTRICT_TO_EXISTING_DOCUMENT_TYPES=no
+      RESTRICT_TO_EXISTING_DOCUMENT_TYPES=yes
+      SYSTEM_PROMPT="${prompt}"
       TOKEN_LIMIT=128000
       RESPONSE_TOKENS=1000
       EOF

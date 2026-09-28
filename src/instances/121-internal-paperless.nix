@@ -1,4 +1,16 @@
-{ config, nasMount, nasPath, ... }: {
+{ config, lib, nasMount, nasPath, ... }:
+let
+  # fixed vocabulary; paperless-ai may only pick from these (vm-122)
+  tags = [
+    "Steuern" "Versicherung" "Bank" "Wohnen" "Nebenkosten" "Energie" "Wasser" "Auto"
+    "Gesundheit" "Arbeit" "Behörde" "Einkauf" "Telefon & Internet" "Bildung" "Familie" "Reise"
+  ];
+  documentTypes = [
+    "Rechnung" "Bescheid" "Vertrag" "Brief" "Kontoauszug" "Gehaltsabrechnung" "Versicherungsschein"
+    "Quittung" "Mahnung" "Kündigung" "Angebot" "Zeugnis" "Sonstiges"
+  ];
+  pyList = xs: "[" + lib.concatMapStringsSep ", " (x: "'${x}'") xs + "]";
+in {
   networking.hostName = "vm-121";
 
   fileSystems = nasMount "/var/lib/paperless" "paperless"
@@ -46,6 +58,12 @@
       bot, _ = User.objects.get_or_create(username='homepage-bot', defaults={'email': 'homepage@internal'})
       bot.is_staff = bot.is_superuser = True
       bot.save()
+      from documents.models import Tag, DocumentType, MatchingModel
+      # MATCH_NONE: paperless's own matcher must not assign these
+      for n in ${pyList tags}:
+          Tag.objects.get_or_create(name=n, defaults={'matching_algorithm': MatchingModel.MATCH_NONE, 'owner': owner})
+      for n in ${pyList documentTypes}:
+          DocumentType.objects.get_or_create(name=n, defaults={'matching_algorithm': MatchingModel.MATCH_NONE, 'owner': owner})
       print(Token.objects.get_or_create(user=bot)[0].key)
       " | tail -1)
       [ -n "$TOKEN" ] || { echo "no API token from paperless-manage"; exit 1; }
