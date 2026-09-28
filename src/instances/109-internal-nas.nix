@@ -157,7 +157,8 @@
     "d /srv/nas/bulk/media/books 0775 1000 1000 -"
     "d /srv/nas/bulk/media/leaving-soon 0775 1000 1000 -"
     "d /srv/nas/BACKUPS 0700 root root -"
-    "d /srv/nas/documents 0775 nobody nogroup -"
+    # paperless (uid 315) consumes and deletes what smb drops here as nobody
+    "d /srv/nas/documents 0777 nobody nogroup -"
     "d /srv/nas/bulk/torrents 0775 1000 1000 -"
     # per-service persistent data
     "d /srv/nas/data 0777 nobody nogroup -"
