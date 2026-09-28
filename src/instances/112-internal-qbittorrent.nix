@@ -27,15 +27,15 @@ let
     upnp = false;
     queueing_enabled = true;
     max_active_downloads = 5;
-    # queued seeds never reach the ratio limit, so seed enough to drain
+    # no seeding, so upload slots only matter for queued finished torrents
     max_active_uploads = 8;
     max_active_torrents = 13;
     dont_count_slow_torrents = true;
-    # stop at ratio 1 or 7 days for arr cleanup
+    # download only: stop on completion, the arr imports then removes it
     max_ratio_enabled = true;
-    max_ratio = 1.0;
+    max_ratio = 0;
     max_seeding_time_enabled = true;
-    max_seeding_time = 10080;
+    max_seeding_time = 0;
     max_ratio_act = 0;
   });
 in {
