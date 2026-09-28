@@ -17,10 +17,10 @@ of its IP.
 lldap and Authelia (both on vm-101) are the only account store and the only login.
 Nothing internal is reachable without one of them:
 
-- `auth = "sso"` routes get Authelia ForwardAuth. Every page has its own lldap
-  group `app-<route>` (e.g. `app-grafana`); `admins` and the route's bundle
-  `group` (`users`, `media`) also get in. **Granting or revoking one page for a
-  person is a group edit in the lldap dashboard**, live within 5 minutes. The
+- `auth = "sso"` routes get Authelia ForwardAuth. `admins` reach everything and
+  are lldap admins too; anyone else needs the page's own group `app-<route>`
+  (e.g. `app-grafana`). **Granting or revoking one page for a person is a group
+  edit in the lldap dashboard**, live within 5 minutes. The
   example user `guest` holds only `app-homepage`, `app-jellyfin` and
   `app-jellyseerr`.
 - `auth = "own"` routes run their own login backed by the same directory:

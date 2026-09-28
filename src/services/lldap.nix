@@ -1,12 +1,11 @@
 # lldap: the lab's single account store, authelia binds to it
 { config, lib, pkgs, retry, ... }:
 let
-  # bundle groups plus one app-<route> group per page
+  # admins reach everything; everyone else gets one app-<service> group per service
   routes = (import ../modules/routes.nix).internal;
   ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
-  routeGroups = lib.unique (lib.mapAttrsToList (_: r: r.group or "users") ssoRoutes);
   appGroups = map (n: "app-${n}") (lib.attrNames ssoRoutes ++ [ "forgejo" "jellyfin" "headplane" "homeassistant" "headscale" ]);
-  groups = lib.unique ([ "admins" "users" ] ++ routeGroups ++ appGroups);
+  groups = lib.unique ([ "admins" ] ++ appGroups);
 
   # example account, three pages
   guestGroups = [ "app-homepage" "app-jellyfin" "app-jellyseerr" ];
@@ -97,11 +96,15 @@ in {
           gql "{\"query\":\"mutation{addUserToGroup(userId:\\\"$u\\\",groupId:$gid){ok}}\"}" || true
         done
       }
-      # owner gets every group, lldap_admin included: lldap's own rights come only from that built-in group
-      join luca ${lib.escapeShellArgs groups} lldap_admin
+      join luca admins
+      # lldap's own rights come only from its built-in lldap_admin, so every admin gets it too
+      ADMINS_GID=$(echo "$ALL_GROUPS" | jq -r '.data.groups[] | select(.displayName=="admins") | .id')
+      for u in $(gql "{\"query\":\"{group(groupId:$ADMINS_GID){users{id}}}\"}" | jq -r '.data.group.users[].id'); do
+        join "$u" lldap_admin
+      done
       join guest ${lib.escapeShellArgs guestGroups}
 
-      echo "lldap seeded: luca in all groups, guest in ${lib.concatStringsSep ", " guestGroups}"
+      echo "lldap seeded: admins are lldap admins, guest in ${lib.concatStringsSep ", " guestGroups}"
     '';
   };
 

@@ -28,14 +28,12 @@ an allow rule plus a deny rule for the same host. So:
 
 - **to take a service away from someone**, remove them from that route's group
   in the lldap UI. It takes effect within `refresh_interval` (1 minute).
-- **to change which group guards a service**, edit `group` in routes.nix and
-  deploy. lldap seeds every group the routes mention, and the owner is put in
-  all of them, so a new group name cannot lock the owner out.
-- groups in use today: `admins` (everything operational), `users` (the ordinary
-  apps), `media` (Jellyseerr, Navidrome, qBittorrent), plus one
-  `app-<route>` group per page (e.g. `app-grafana`) to grant a single page.
+- groups: `admins` reach every page and are also put in lldap's built-in
+  `lldap_admin`; everyone else gets one `app-<route>` group per page (e.g.
+  `app-grafana`). There are no bundle groups. lldap seeds an `app-<route>`
+  group for every sso route in routes.nix.
 - a host with no entry in routes.nix falls through to the last rule, which
-  requires `admins`. Adding a route without a `group` defaults it to `users`.
+  requires `admins`.
 
 ## lldap via its GraphQL API (run on vm-101)
 

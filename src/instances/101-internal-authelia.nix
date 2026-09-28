@@ -5,8 +5,8 @@ let
   # access rules come from modules/routes.nix
   routes = (import ../modules/routes.nix).internal;
   ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
-  # admins, app-<route> group, or bundle group
-  routeSubjects = name: r: lib.unique [ [ "group:admins" ] [ "group:app-${name}" ] [ "group:${r.group or "users"}" ] ];
+  # admins reach everything, anyone else needs the page's own app-<route> group
+  routeSubjects = name: _: [ [ "group:admins" ] [ "group:app-${name}" ] ];
   routeRules = lib.concatLists (lib.mapAttrsToList (name: r: [
     {
       domain = [ "${r.host}.lsck0.dev" ];
