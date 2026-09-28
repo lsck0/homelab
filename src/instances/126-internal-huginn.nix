@@ -4,10 +4,11 @@ let
   remoteUser = pkgs.writeText "zz_remote_user.rb" ''
     Rails.application.config.to_prepare do
       ApplicationController.prepend_before_action do
-        name = request.headers["Remote-User"]
+        # REMOTE_USER is a cgi var, headers["Remote-User"] never sees the http header
+        name = request.get_header("HTTP_REMOTE_USER")
         next if name.blank? || (user_signed_in? && current_user.username == name)
-        email = request.headers["Remote-Email"].presence || "#{name}@lsck0.dev"
-        admin = request.headers["Remote-Groups"].to_s.split(",").map(&:strip).include?("admins")
+        email = request.get_header("HTTP_REMOTE_EMAIL").presence || "#{name}@lsck0.dev"
+        admin = request.get_header("HTTP_REMOTE_GROUPS").to_s.split(",").map(&:strip).include?("admins")
         user = User.find_by(username: name)
         user ||= User.find_by(username: "akadmin")&.tap { |u| u.update!(username: name, email: email) } if admin
         user ||= User.new(username: name, email: email, password: SecureRandom.hex(32), admin: admin).tap do |u|
