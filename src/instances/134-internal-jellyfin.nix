@@ -109,13 +109,15 @@ in {
   };
   hardware.nvidia-container-toolkit.enable = true;
 
-  # local llm for paperless-ai; 4b leaves vram for nvenc
+  # local llm for paperless-ai; ~4.7 GB, nvenc fits in the rest of the 6 GB
   services.ollama = {
     enable = true;
     host = "0.0.0.0";
     port = 11434;
     acceleration = "cuda";
-    loadModels = [ "qwen3:4b-instruct-2507-q4_K_M" ];
+    loadModels = [ "qwen2.5:7b-instruct" ];
+    # drop models no longer listed
+    syncModels = true;
     environmentVariables = {
       OLLAMA_KEEP_ALIVE = "10m";
       OLLAMA_MAX_LOADED_MODELS = "1";
