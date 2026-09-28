@@ -150,7 +150,6 @@ let
 
   widgetsYaml = pkgs.writeText "widgets.yaml" ''
     - resources:
-        label: vm-103
         cpu: true
         memory: true
         uptime: true
