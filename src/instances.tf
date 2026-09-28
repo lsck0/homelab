@@ -134,7 +134,8 @@ locals {
       disk = 16,
     }
     "126" = { # automation agents / scraping
-      enabled = true,
+      # not in use yet
+      enabled = false,
       name    = "126-internal-huginn",
       type    = "internal",
       # rails plus postgres, measured 1003 MiB
@@ -145,10 +146,13 @@ locals {
     }
 
     "128" = { # media requests: movies, series, anime (-> Radarr/Sonarr)
-      enabled = true,
-      name    = "128-internal-jellyseerr",
-      type    = "internal",
-      memory  = 1024,
+      enabled    = true,
+      kind       = "lxc",
+      name       = "128-internal-jellyseerr",
+      type       = "internal",
+      memory     = 1024,
+      privileged = true,
+      features   = "nesting=1,mount=nfs",
     }
     "130" = { # *arr stack: prowlarr + flaresolverr, radarr, sonarr, lidarr, bazarr, recyclarr
       enabled = true,
@@ -172,9 +176,12 @@ locals {
       hostpci = ["gpu"],
     }
     "136" = { # music streaming (Subsonic API)
-      enabled = true,
-      name    = "136-internal-navidrome",
-      type    = "internal",
+      enabled    = true,
+      kind       = "lxc",
+      name       = "136-internal-navidrome",
+      type       = "internal",
+      privileged = true,
+      features   = "nesting=1,mount=nfs",
     }
     "138" = { # Tailscale control server (VPN mesh) + Headplane UI
       # internal, not dmz: it controls mesh membership
@@ -194,13 +201,17 @@ locals {
     }
     "203" = { # push notifications (alert delivery)
       enabled = true,
+      kind    = "lxc",
       name    = "203-external-ntfy",
       type    = "external",
     }
     "204" = { # privacy metasearch
       enabled = true,
+      kind    = "lxc",
       name    = "204-external-searxng",
       type    = "external",
+      # podman needs keyctl; dmz, so never privileged
+      features = "nesting=1,keyctl=1",
     }
     "206" = { # encrypted pastebin
       enabled = true,

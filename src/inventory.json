@@ -181,7 +181,7 @@
   },
   "126": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "features": "nesting=1",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.126",
@@ -194,13 +194,13 @@
   "128": {
     "cooldown": "30m",
     "enabled": "true",
-    "features": "nesting=1",
+    "features": "nesting=1,mount=nfs",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.128",
-    "kind": "vm",
+    "kind": "lxc",
     "name": "128-internal-jellyseerr",
     "prefix": 24,
-    "privileged": false,
+    "privileged": true,
     "type": "internal"
   },
   "130": {
@@ -230,13 +230,13 @@
   "136": {
     "cooldown": "30m",
     "enabled": "true",
-    "features": "nesting=1",
+    "features": "nesting=1,mount=nfs",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.136",
-    "kind": "vm",
+    "kind": "lxc",
     "name": "136-internal-navidrome",
     "prefix": 24,
-    "privileged": false,
+    "privileged": true,
     "type": "internal"
   },
   "138": {
@@ -269,7 +269,7 @@
     "features": "nesting=1",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.203",
-    "kind": "vm",
+    "kind": "lxc",
     "name": "203-external-ntfy",
     "prefix": 24,
     "privileged": false,
@@ -278,10 +278,10 @@
   "204": {
     "cooldown": "30m",
     "enabled": "true",
-    "features": "nesting=1",
+    "features": "nesting=1,keyctl=1",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.204",
-    "kind": "vm",
+    "kind": "lxc",
     "name": "204-external-searxng",
     "prefix": 24,
     "privileged": false,

@@ -1,164 +1,136 @@
 {%- comment -%} github panel, data from github-sync.py; keep flat {%- endcomment -%}
 
 <style>
-.layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
-/* 480 - 18px offset - 10px margin; 100% collapses */
-.gh { display: flex; flex-direction: column; height: 452px; max-height: 452px; width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
+/* undo trmnl's centring wrapper; the framework keeps the height, and it is the size container */
+.layout { display: block !important; width: 100% !important; padding: 0 !important; margin: 0 !important; container-type: size; }
+/* --u: 1px on the 780x460 og layout, the smaller ratio on bigger panels */
+.gh { --u: min(calc(100cqw / 780), calc(100cqh / 460)); display: flex; flex-direction: column; height: 100%; width: 100%; gap: calc(5 * var(--u)); padding: calc(6 * var(--u)) calc(8 * var(--u)) calc(2 * var(--u)); box-sizing: border-box; font-family: "Inter Variable", Inter, sans-serif; color: #000; }
 
 /* ---- headline numbers ------------------------------------------------- */
-.gh-top { display: flex; gap: 6px; flex: 0 0 auto; }
-.gh-stat { flex: 1 1 0; border: 2px solid #000; padding: 2px 7px; min-width: 0; }
-.gh-stat--bad { background: #000; }
-.gh-stat--bad .gh-k, .gh-stat--bad .gh-v, .gh-stat--bad .gh-sub { color: #fff; }
-.gh-k { font-size: 12px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; }
-.gh-v { font-size: 25px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
-.gh-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gh-top { display: flex; gap: calc(6 * var(--u)); flex: 0 0 auto; }
+.gh-stat { flex: 1 1 0; border: calc(2 * var(--u)) solid #000; border-radius: calc(4 * var(--u)); padding: calc(3 * var(--u)) calc(8 * var(--u)) calc(4 * var(--u)); min-width: 0; }
+.gh-stat--bad { background: #000; color: #fff; }
+.gh-k { font-size: calc(11 * var(--u)); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; }
+.gh-v { font-size: calc(30 * var(--u)); font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.gh-sub { font-size: calc(12 * var(--u)); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- body: repos wide, CI and work narrow ------------------------------ */
-.gh-mid { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
-.gh-box { border: 2px solid #000; padding: 3px 7px; display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.gh-mid { display: flex; gap: calc(6 * var(--u)); flex: 1 1 auto; min-height: 0; }
+.gh-box { border: calc(2 * var(--u)) solid #000; border-radius: calc(4 * var(--u)); padding: calc(3 * var(--u)) calc(8 * var(--u)); display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 /* repos have the volume, so they get width */
-.gh-repos { flex: 1.25 1 0; }
-.gh-side { flex: 1 1 0; display: flex; flex-direction: column; gap: 5px; min-width: 0; min-height: 0; }
-.gh-ci { flex: 0 0 auto; max-height: 176px; }
-.gh-work { flex: 0 0 auto; max-height: 116px; }
-/* languages fill space issues and prs leave */
-.gh-lang { flex: 1 1 0; }
-.gh-bar { flex: 0 0 46px; height: 5px; background: #d2d2d2; }
-.gh-bar span { display: block; height: 100%; background: #000; }
-/* two columns: 16 repos instead of 9 */
-.gh-cols { display: flex; gap: 12px; min-height: 0; overflow: hidden; }
-.gh-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.gh-repos { flex: 1.3 1 0; }
+.gh-side { flex: 1 1 0; display: flex; flex-direction: column; gap: calc(5 * var(--u)); min-width: 0; min-height: 0; }
+.gh-ci, .gh-work { flex: 0 0 auto; }
+/* languages take what ci and work leave */
+.gh-lang { flex: 1 1 auto; }
+.gh-cols { display: flex; gap: calc(14 * var(--u)); min-height: 0; overflow: hidden; flex: 1 1 auto; }
+.gh-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; }
 
-.gh-h { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid #000; margin-bottom: 1px; display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; flex: 0 0 auto; }
-.gh-h i { font-style: normal; font-weight: 400; color: #555; }
+.gh-h { font-size: calc(11 * var(--u)); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; border-bottom: calc(2 * var(--u)) solid #000; margin-bottom: calc(2 * var(--u)); padding-bottom: calc(1 * var(--u)); display: flex; justify-content: space-between; gap: calc(6 * var(--u)); white-space: nowrap; flex: 0 0 auto; }
+.gh-h i { font-style: normal; font-weight: 500; letter-spacing: 0; text-transform: none; }
 
-.gh-l { display: flex; align-items: center; gap: 5px; font-size: 13px; line-height: 1.42; flex: 0 0 auto; min-width: 0; }
-.gh-dot { width: 8px; height: 8px; flex: 0 0 auto; border: 1px solid #000; background: #fff; }
+.gh-l { display: flex; align-items: center; gap: calc(6 * var(--u)); font-size: calc(13.5 * var(--u)); font-weight: 500; line-height: 1.35; flex: 0 0 auto; min-width: 0; }
+.gh-dot { width: calc(9 * var(--u)); height: calc(9 * var(--u)); flex: 0 0 auto; border: calc(1.5 * var(--u)) solid #000; border-radius: 50%; background: #fff; box-sizing: border-box; }
 .gh-dot--ok { background: #000; }
 .gh-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.gh-meta { flex: 0 0 auto; color: #555; font-size: 11px; font-variant-numeric: tabular-nums; }
-.gh-n { flex: 0 0 auto; font-weight: 700; font-variant-numeric: tabular-nums; }
+.gh-meta { flex: 0 0 auto; font-size: calc(11.5 * var(--u)); font-variant-numeric: tabular-nums; }
+.gh-n { flex: 0 0 auto; font-weight: 800; font-variant-numeric: tabular-nums; }
+/* star count reads as a badge, not another number */
+.gh-star { flex: 0 0 auto; font-size: calc(11 * var(--u)); font-weight: 800; border: calc(1.5 * var(--u)) solid #000; border-radius: calc(3 * var(--u)); padding: 0 calc(3 * var(--u)); line-height: 1.2; }
+.gh-bar { flex: 0 0 calc(70 * var(--u)); height: calc(8 * var(--u)); border: calc(1.5 * var(--u)) solid #000; box-sizing: border-box; }
+.gh-bar span { display: block; height: 100%; background: #000; }
 
 /* say empty, else it reads as broken */
-.gh-none { font-size: 12px; color: #555; padding: 3px 0; }
+.gh-none { font-size: calc(13 * var(--u)); font-weight: 500; padding: calc(2 * var(--u)) 0; }
 
-.gh-foot { flex: 0 0 16px; display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #555; white-space: nowrap; }
+.gh-foot { flex: 0 0 auto; display: flex; justify-content: space-between; align-items: center; font-size: calc(11 * var(--u)); line-height: 1.25; white-space: nowrap; }
+.gh-foot b { letter-spacing: .08em; text-transform: uppercase; }
 </style>
 
+<div class="layout">
 <div class="gh">
 
-  <div class="gh-top">
-    <div class="gh-stat">
-      <div class="gh-k">Commits 7d</div>
-      <div class="gh-v">{{ commits7 }}</div>
-      <div class="gh-sub">{{ commits30 }} in 30d</div>
-    </div>
-    <div class="gh-stat">
-      <div class="gh-k">Repos</div>
-      <div class="gh-v">{{ repos }}</div>
-      <div class="gh-sub">{{ stars }} stars</div>
-    </div>
-    <div class="gh-stat{% if ci_failing > 0 %} gh-stat--bad{% endif %}">
-      <div class="gh-k">CI failing</div>
-      <div class="gh-v">{{ ci_failing }}</div>
-      <div class="gh-sub">{{ ci_runs }} runs</div>
-    </div>
-    <div class="gh-stat">
-      <div class="gh-k">Open</div>
-      <div class="gh-v">{{ issues }}/{{ prs }}</div>
-      <div class="gh-sub">issues / PRs</div>
-    </div>
-    <div class="gh-stat{% if alerts > 0 %} gh-stat--bad{% endif %}">
-      <div class="gh-k">Alerts</div>
-      <div class="gh-v">{{ alerts }}</div>
-      <div class="gh-sub">security</div>
-    </div>
-  </div>
+<div class="gh-top">
+<div class="gh-stat">
+<div class="gh-k">Commits 7d</div>
+<div class="gh-v">{{ commits7 }}</div>
+<div class="gh-sub">{{ commits30 }} in 30d</div>
+</div>
+<div class="gh-stat">
+<div class="gh-k">Repos</div>
+<div class="gh-v">{{ repos }}</div>
+<div class="gh-sub">{{ stars }} stars</div>
+</div>
+<div class="gh-stat{% if ci_failing > 0 %} gh-stat--bad{% endif %}">
+<div class="gh-k">CI failing</div>
+<div class="gh-v">{{ ci_failing }}</div>
+<div class="gh-sub">{{ ci_runs }} runs</div>
+</div>
+<div class="gh-stat">
+<div class="gh-k">Open</div>
+<div class="gh-v">{{ issues }}/{{ prs }}</div>
+<div class="gh-sub">issues / PRs</div>
+</div>
+<div class="gh-stat{% if alerts > 0 %} gh-stat--bad{% endif %}">
+<div class="gh-k">Alerts</div>
+<div class="gh-v">{{ alerts }}</div>
+<div class="gh-sub">security</div>
+</div>
+</div>
 
-  <div class="gh-mid">
+<div class="gh-mid">
 
-    <div class="gh-box gh-repos">
-      <div class="gh-h"><span>Recently pushed</span><i>lang / stars / ago</i></div>
-      <div class="gh-cols">
-        <div class="gh-col">
-        {%- for r in active_a %}
-        <div class="gh-l">
-          <span class="gh-name">{{ r.name }}</span>
-          <span class="gh-meta">{{ r.lang }}</span>
-          {%- if r.stars > 0 %}
-          <span class="gh-n">{{ r.stars }}</span>
-          {%- endif %}
-          <span class="gh-meta">{{ r.age }}</span>
-        </div>
-        {%- endfor %}
-        </div>
-        <div class="gh-col">
-        {%- for r in active_b %}
-        <div class="gh-l">
-          <span class="gh-name">{{ r.name }}</span>
-          <span class="gh-meta">{{ r.lang }}</span>
-          {%- if r.stars > 0 %}
-          <span class="gh-n">{{ r.stars }}</span>
-          {%- endif %}
-          <span class="gh-meta">{{ r.age }}</span>
-        </div>
-        {%- endfor %}
-        </div>
-      </div>
-    </div>
+<div class="gh-box gh-repos">
+<div class="gh-h"><span>Recently pushed</span><i>language &middot; stars &middot; ago</i></div>
+<div class="gh-cols">
+<div class="gh-col">
+{%- for r in active_a %}
+<div class="gh-l"><span class="gh-name">{{ r.name }}</span><span class="gh-meta">{{ r.lang }}</span>{%- if r.stars > 0 %}<span class="gh-star">{{ r.stars }}</span>{%- endif %}<span class="gh-meta">{{ r.age }}</span></div>
+{%- endfor %}
+</div>
+<div class="gh-col">
+{%- for r in active_b %}
+<div class="gh-l"><span class="gh-name">{{ r.name }}</span><span class="gh-meta">{{ r.lang }}</span>{%- if r.stars > 0 %}<span class="gh-star">{{ r.stars }}</span>{%- endif %}<span class="gh-meta">{{ r.age }}</span></div>
+{%- endfor %}
+</div>
+</div>
+</div>
 
-    <div class="gh-side">
-    <div class="gh-box gh-ci">
-      <div class="gh-h"><span>Failing CI</span><i>runs / last</i></div>
-      {%- if ci_failing == 0 %}
-      <div class="gh-none">every workflow green</div>
-      {%- endif %}
-      {%- for c in ci %}
-      <div class="gh-l">
-        <span class="gh-dot"></span>
-        <span class="gh-name">{{ c.name }}</span>
-        <span class="gh-meta">{{ c.what }}</span>
-        <span class="gh-n">{{ c.n }}</span>
-        <span class="gh-meta">{{ c.age }}</span>
-      </div>
-      {%- endfor %}
-    </div>
+<div class="gh-side">
+<div class="gh-box gh-ci">
+<div class="gh-h"><span>Failing CI</span><i>runs &middot; last</i></div>
+{%- if ci_failing == 0 %}
+<div class="gh-none">every workflow green</div>
+{%- endif %}
+{%- for c in ci %}
+<div class="gh-l"><span class="gh-dot"></span><span class="gh-name">{{ c.name }}</span><span class="gh-meta">{{ c.what }}</span><span class="gh-n">{{ c.n }}</span><span class="gh-meta">{{ c.age }}</span></div>
+{%- endfor %}
+</div>
 
+<div class="gh-box gh-work">
+<div class="gh-h"><span>Issues &amp; PRs</span><i>filled = PR</i></div>
+{%- if work_empty %}
+<div class="gh-none">nothing open</div>
+{%- endif %}
+{%- for w in work %}
+<div class="gh-l"><span class="gh-dot{% if w.kind == 'pr' %} gh-dot--ok{% endif %}"></span><span class="gh-name">{{ w.title }}</span><span class="gh-meta">{{ w.repo }}</span><span class="gh-meta">{{ w.age }}</span></div>
+{%- endfor %}
+</div>
 
-      <div class="gh-box gh-work">
-        <div class="gh-h"><span>Issues &amp; PRs</span><i>open</i></div>
-        {%- if work_empty %}
-        <div class="gh-none">nothing open</div>
-        {%- endif %}
-        {%- for w in work %}
-        <div class="gh-l">
-          <span class="gh-dot{% if w.kind == 'pr' %} gh-dot--ok{% endif %}"></span>
-          <span class="gh-name">{{ w.title }}</span>
-          <span class="gh-meta">{{ w.repo }}</span>
-          <span class="gh-meta">{{ w.age }}</span>
-        </div>
-        {%- endfor %}
-      </div>
+<div class="gh-box gh-lang">
+<div class="gh-h"><span>Languages</span><i>repos</i></div>
+{%- for l in langs %}
+<div class="gh-l"><span class="gh-name">{{ l.name }}</span><span class="gh-bar"><span style="width:{{ l.pct }}%"></span></span><span class="gh-n">{{ l.n }}</span></div>
+{%- endfor %}
+</div>
+</div>
 
-      <div class="gh-box gh-lang">
-        <div class="gh-h"><span>Languages</span><i>repos</i></div>
-        {%- for l in langs %}
-        <div class="gh-l">
-          <span class="gh-name">{{ l.name }}</span>
-          <span class="gh-bar"><span style="width:{{ l.pct }}%"></span></span>
-          <span class="gh-n">{{ l.n }}</span>
-        </div>
-        {%- endfor %}
-      </div>
+</div>
 
-    </div>
-  </div>
+<div class="gh-foot">
+<span><b>GitHub</b> &middot; github.com/{{ user }}</span>
+<span>{{ generated }}</span>
+</div>
 
-  <div class="gh-foot">
-    <span>github.com/{{ user }}</span>
-    <span>filled = PR, hollow = issue</span>
-    <span>{{ generated }}</span>
-  </div>
-
+</div>
 </div>

@@ -1,71 +1,66 @@
 {%- comment -%} homelab status, data from stats-sync.py; keep flat {%- endcomment -%}
 
 <style>
-/* undo trmnl's centring wrapper */
-.layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
-/* fixed 452px: 100% collapses; measure on device */
-.hl { display: flex; flex-direction: column; height: 452px; max-height: 452px; width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
+/* undo trmnl's centring wrapper; the framework keeps the height, and it is the size container */
+.layout { display: block !important; width: 100% !important; padding: 0 !important; margin: 0 !important; container-type: size; }
+/* --u: 1px on the 780x460 og layout, the smaller ratio on bigger panels so nothing overflows */
+.hl { --u: min(calc(100cqw / 780), calc(100cqh / 460)); display: flex; flex-direction: column; height: 100%; width: 100%; gap: calc(5 * var(--u)); padding: calc(6 * var(--u)) calc(8 * var(--u)) calc(2 * var(--u)); box-sizing: border-box; font-family: "Inter Variable", Inter, sans-serif; color: #000; }
+.hl b { font-weight: 700; }
 
 /* ---- headline numbers ------------------------------------------------- */
-.hl-top { display: flex; gap: 6px; flex: 0 0 auto; }
-.hl-stat { flex: 1 1 0; border: 2px solid #000; padding: 2px 7px; min-width: 0; }
-.hl-stat--bad { background: #000; }
-.hl-stat--bad .hl-k, .hl-stat--bad .hl-v, .hl-stat--bad .hl-sub { color: #fff; }
-.hl-k { font-size: 12px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; }
-.hl-v { font-size: 22px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
-/* two rates share one tile */
-.hl-v--pair { font-size: 15px; white-space: nowrap; }
-.hl-sub { font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hl-top { display: flex; gap: calc(6 * var(--u)); flex: 0 0 auto; }
+.hl-stat { flex: 1 1 0; border: calc(2 * var(--u)) solid #000; border-radius: calc(4 * var(--u)); padding: calc(3 * var(--u)) calc(8 * var(--u)) calc(4 * var(--u)); min-width: 0; }
+.hl-stat--bad { background: #000; color: #fff; }
+.hl-k { font-size: calc(11 * var(--u)); font-weight: 700; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hl-v { font-size: calc(28 * var(--u)); font-weight: 800; line-height: 1.05; font-variant-numeric: tabular-nums; white-space: nowrap; }
+/* two rates share one tile: stacked, same height as one big number */
+.hl-v--pair { font-size: calc(14 * var(--u)); line-height: 1.05; }
+.hl-sub { font-size: calc(12 * var(--u)); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- services --------------------------------------------------------- */
-.hl-mid { display: flex; gap: 6px; flex: 1 1 auto; min-height: 0; }
-.hl-svc { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 0 10px; min-width: 0; min-height: 0; border: 2px solid #000; padding: 3px 6px; overflow: hidden; }
-/* running vms only; off ones listed at the foot */
-.hl-row { width: calc(16.666% - 9px); display: flex; align-items: center; gap: 4px; font-size: 13px; line-height: 1.3; min-width: 0; }
-.hl-dot { width: 8px; height: 8px; flex: 0 0 auto; border: 1px solid #000; background: #000; }
+.hl-svc { flex: 0 0 auto; display: grid; grid-template-columns: repeat(6, 1fr); gap: calc(1 * var(--u)) calc(12 * var(--u)); border: calc(2 * var(--u)) solid #000; border-radius: calc(4 * var(--u)); padding: calc(4 * var(--u)) calc(8 * var(--u)); }
+.hl-row { display: flex; align-items: center; gap: calc(5 * var(--u)); font-size: calc(13 * var(--u)); font-weight: 500; line-height: 1.3; min-width: 0; }
+.hl-dot { width: calc(8 * var(--u)); height: calc(8 * var(--u)); flex: 0 0 auto; border: calc(1.5 * var(--u)) solid #000; border-radius: 50%; background: #000; }
 .hl-dot--off { background: #fff; }
 .hl-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* one shared track reads load without numbers */
-.hl-bars { flex: 0 0 28px; display: flex; flex-direction: column; gap: 2px; }
-.hl-bar { height: 4px; background: #d2d2d2; }
+/* cpu over mem, read as load without numbers */
+.hl-bars { flex: 0 0 calc(26 * var(--u)); display: flex; flex-direction: column; gap: calc(2 * var(--u)); }
+.hl-bar { height: calc(4 * var(--u)); border: calc(1 * var(--u)) solid #000; box-sizing: border-box; }
 .hl-bar span { display: block; height: 100%; background: #000; }
 
-/* ---- who is calling ---------------------------------------------------- */
+/* ---- bottom: traffic + side panels ------------------------------------- */
+.hl-mid { display: flex; gap: calc(6 * var(--u)); flex: 1 1 auto; min-height: 0; }
+.hl-box { border: calc(2 * var(--u)) solid #000; border-radius: calc(4 * var(--u)); padding: calc(3 * var(--u)) calc(8 * var(--u)); min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.hl-h { font-size: calc(11 * var(--u)); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; border-bottom: calc(2 * var(--u)) solid #000; margin-bottom: calc(2 * var(--u)); padding-bottom: calc(1 * var(--u)); display: flex; justify-content: space-between; gap: calc(6 * var(--u)); white-space: nowrap; flex: 0 0 auto; }
+.hl-h i { font-style: normal; font-weight: 500; letter-spacing: 0; text-transform: none; }
+
 /* from traefik logs via loki; rows cut to fit */
-.hl-who { flex: 1 1 auto; border: 2px solid #000; padding: 3px 7px; display: flex; gap: 12px; min-height: 0; overflow: hidden; }
+.hl-who { flex: 1 1 auto; flex-direction: row; gap: calc(12 * var(--u)); }
 .hl-who-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
-.hl-who-h { font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; border-bottom: 1px solid #000; margin-bottom: 1px; display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; flex: 0 0 auto; }
-.hl-who-h i { font-style: normal; font-weight: 400; color: #555; }
-.hl-who-l { position: relative; display: flex; justify-content: space-between; gap: 6px; font-size: 12px; line-height: 1.3; flex: 0 0 auto; }
-.hl-who-l i { position: absolute; left: 0; top: 1px; bottom: 1px; background: #e0e0e0; }
-.hl-who-l span, .hl-who-l b { position: relative; }
+/* a bar under the row, not a fill behind it: 1-bit dither eats text */
+.hl-who-l { display: flex; justify-content: space-between; gap: calc(6 * var(--u)); font-size: calc(12.5 * var(--u)); line-height: 1.12; flex: 0 0 auto; }
+.hl-who-l span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hl-who-l b { flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+.hl-who-bar { height: calc(1.5 * var(--u)); min-width: calc(1 * var(--u)); background: #000; margin-bottom: calc(1.5 * var(--u)); flex: 0 0 auto; }
 /* int = lan/mesh, ext = internet, + = both */
-.hl-who-l em { font-style: normal; font-size: 9px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: #555; }
-.hl-who-l span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; padding-left: 2px; }
-.hl-who-l b { flex: 0 0 auto; font-variant-numeric: tabular-nums; padding-right: 2px; }
+.hl-who-l em { font-style: normal; font-size: calc(9 * var(--u)); font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
 
-/* ---- footer ------------------------------------------------------------ */
-/* own footer: title_bar wastes 52px */
-.hl-foot { flex: 0 0 auto; display: flex; justify-content: space-between; gap: 10px; font-size: 11px; line-height: 1.3; }
-.hl-foot b { font-weight: 700; letter-spacing: .10em; text-transform: uppercase; }
-.hl-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.hl-foot em { font-style: normal; font-weight: 700; }
-
-/* ---- side panels ------------------------------------------------------ */
-.hl-side { flex: 0 0 216px; min-width: 0; display: flex; flex-direction: column; gap: 5px; min-height: 0; }
-/* no shrink: lists are cut in stats-sync */
-.hl-panel { flex: 0 0 auto; border: 2px solid #000; padding: 3px 7px; min-height: 0; min-width: 0; overflow: hidden; display: flex; flex-direction: column; }
-.hl-panel--grow { flex: 1 1 auto; }
-.hl-h { font-size: 12px; font-weight: 700; letter-spacing: .10em; text-transform: uppercase; border-bottom: 1px solid #000; margin-bottom: 2px; display: flex; justify-content: space-between; }
-.hl-line { display: flex; justify-content: space-between; gap: 6px; font-size: 13px; line-height: 1.3; }
+.hl-side { flex: 0 0 calc(214 * var(--u)); min-width: 0; display: flex; flex-direction: column; gap: calc(5 * var(--u)); min-height: 0; }
+.hl-box--grow { flex: 1 1 auto; }
+.hl-line { display: flex; justify-content: space-between; gap: calc(6 * var(--u)); font-size: calc(13 * var(--u)); font-weight: 500; line-height: 1.35; }
 .hl-line b { font-variant-numeric: tabular-nums; }
-.hl-t { font-size: 12px; line-height: 1.2; margin-top: 1px; min-width: 0; overflow: hidden; }
-/* one clamped line: names and hashes overflow */
-.hl-t-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; max-width: 100%; }
-.hl-t-meta { display: flex; justify-content: space-between; font-size: 11px; }
-.hl-prog { height: 4px; background: #d2d2d2; margin-top: 1px; }
+.hl-t { font-size: calc(12 * var(--u)); line-height: 1.2; margin-top: calc(2 * var(--u)); min-width: 0; overflow: hidden; }
+.hl-t-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+.hl-t-meta { display: flex; justify-content: space-between; font-size: calc(11 * var(--u)); }
+.hl-prog { height: calc(5 * var(--u)); border: calc(1 * var(--u)) solid #000; box-sizing: border-box; margin-top: calc(1 * var(--u)); }
 .hl-prog span { display: block; height: 100%; background: #000; }
-.hl-empty { font-size: 12px; }
+.hl-empty { font-size: calc(12 * var(--u)); }
+
+/* ---- footer: own line, title_bar costs 40px ------------------------------ */
+.hl-foot { flex: 0 0 auto; display: flex; justify-content: space-between; gap: calc(10 * var(--u)); font-size: calc(11 * var(--u)); line-height: 1.25; }
+.hl-foot b { letter-spacing: .08em; text-transform: uppercase; }
+.hl-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hl-foot em { font-style: normal; font-weight: 800; }
 </style>
 
 {% if view == 'stats' %}
@@ -90,7 +85,7 @@
 </div>
 <div class="hl-stat">
 <div class="hl-k">Network</div>
-<div class="hl-v hl-v--pair">&darr;{{ network.rx }} &uarr;{{ network.tx }}</div>
+<div class="hl-v hl-v--pair">&darr; {{ network.rx }}<br>&uarr; {{ network.tx }}</div>
 <div class="hl-sub">{% if network.top.size > 0 %}{{ network.top[0].vm }} {{ network.top[0].rate }}{% endif %}</div>
 </div>
 <div class="hl-stat">
@@ -112,56 +107,54 @@
 
 <div class="hl-mid">
 
-<div class="hl-who">
+<div class="hl-box hl-who">
 {% if clients.available %}
 <div class="hl-who-col">
-<div class="hl-who-h"><span>From</span><i>{{ clients.window }}</i></div>
+<div class="hl-h"><span>From</span><i>{{ clients.window }}</i></div>
 {% for c in clients.countries %}
-<div class="hl-who-l"><i style="width:{{ c.pct }}%"></i><span>{{ c.name }}</span><b>{{ c.count }}</b></div>
+<div class="hl-who-l"><span>{{ c.name }}</span><b>{{ c.count }}</b></div><div class="hl-who-bar" style="width:{{ c.pct }}%"></div>
 {% endfor %}
 </div>
 <div class="hl-who-col">
-<div class="hl-who-h"><span>Clients</span></div>
+<div class="hl-h"><span>Clients</span></div>
 {% for a in clients.agents %}
-<div class="hl-who-l"><i style="width:{{ a.pct }}%"></i><span>{{ a.name }}</span><b>{{ a.count }}</b></div>
+<div class="hl-who-l"><span>{{ a.name }}</span><b>{{ a.count }}</b></div><div class="hl-who-bar" style="width:{{ a.pct }}%"></div>
 {% endfor %}
 </div>
 <div class="hl-who-col">
-<div class="hl-who-h"><span>Asking for</span></div>
+<div class="hl-h"><span>Asking for</span></div>
 {% for h in clients.hosts %}
-<div class="hl-who-l"><i style="width:{{ h.pct }}%"></i><span>{{ h.name }}</span><b>{{ h.count }}</b></div>
+<div class="hl-who-l"><span>{{ h.name }}</span><b>{{ h.count }}</b></div><div class="hl-who-bar" style="width:{{ h.pct }}%"></div>
 {% endfor %}
 </div>
 <div class="hl-who-col">
-<div class="hl-who-h"><span>How it went</span></div>
+<div class="hl-h"><span>How it went</span></div>
 {% for t in clients.traffic %}
-<div class="hl-who-l"><i style="width:{{ t.pct }}%"></i><span>{{ t.name }}</span><b>{{ t.count }}</b></div>
+<div class="hl-who-l"><span>{{ t.name }}</span><b>{{ t.count }}</b></div><div class="hl-who-bar" style="width:{{ t.pct }}%"></div>
 {% endfor %}
 </div>
 <div class="hl-who-col">
-<div class="hl-who-h"><span>Routes</span><i>3h</i></div>
+<div class="hl-h"><span>Routes</span><i>3h</i></div>
 {% for r in requests %}
-<div class="hl-who-l"><i style="width:{{ r.pct }}%"></i><span>{{ r.name }} <em>{{ r.origin }}{% if r.mixed %}+{% endif %}</em></span><b>{{ r.rpm }}</b></div>
+<div class="hl-who-l"><span>{{ r.name }} <em>{{ r.origin }}{% if r.mixed %}+{% endif %}</em></span><b>{{ r.rpm }}</b></div><div class="hl-who-bar" style="width:{{ r.pct }}%"></div>
 {% endfor %}
 {% if requests.size == 0 %}<div class="hl-who-l"><span>no traffic</span></div>{% endif %}
 </div>
 {% else %}
-<div class="hl-who-col"><div class="hl-who-h"><span>Who is calling</span></div><div class="hl-who-l"><span>no access log in Loki</span></div></div>
+<div class="hl-who-col"><div class="hl-h"><span>Who is calling</span></div><div class="hl-who-l"><span>no access log in Loki</span></div></div>
 {% endif %}
 </div>
 
 <div class="hl-side">
-
-
-<div class="hl-panel">
-<div class="hl-h"><span>Disks</span><span>{{ storage.free_total }} free</span></div>
+<div class="hl-box">
+<div class="hl-h"><span>Disks</span><i>{{ storage.free_total }} free</i></div>
 {% for d in storage.top %}
 <div class="hl-line"><span>{{ d.vm }}{% unless d.mount == '/' %} {{ d.mount }}{% endunless %}</span><b>{{ d.pct }}%</b></div>
 {% endfor %}
 </div>
 
-<div class="hl-panel hl-panel--grow">
-<div class="hl-h"><span>Torrents</span><span>&darr;{{ torrents.dl }} &uarr;{{ torrents.ul }}</span></div>
+<div class="hl-box hl-box--grow">
+<div class="hl-h"><span>Torrents</span><i>&darr;{{ torrents.dl }} &uarr;{{ torrents.ul }}</i></div>
 {% if torrents.available %}
 {% for t in torrents.items %}
 <div class="hl-t">
@@ -174,8 +167,6 @@
 {% else %}
 <div class="hl-empty">qBittorrent unreachable</div>
 {% endif %}
-</div>
-
 </div>
 </div>
 

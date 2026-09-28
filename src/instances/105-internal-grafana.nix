@@ -104,6 +104,23 @@ let
       };
     }];
   };
+
+  # inverter solar api, polled per scrape
+  froniusExporter = pkgs.writers.writePython3Bin "fronius-exporter" {
+    flakeIgnore = [ "E501" ];
+  } (builtins.readFile ../scripts/fronius-exporter.py);
+  froniusListen = "127.0.0.1:9118";
+  # local copy: a missing nas token must fail one scrape, not prometheus
+  hassScrapeToken = "/run/prometheus-hass/token";
+
+  # generated, so the json cannot drift from the queries in energy.py
+  energyDashboard = pkgs.runCommand "energy.json" { } ''
+    ${pkgs.python3}/bin/python3 ${../modules/dashboards/energy.py} $out
+  '';
+
+  spotPrice = pkgs.writers.writePython3Bin "spot-price" {
+    flakeIgnore = [ "E501" ];
+  } (builtins.readFile ../scripts/spot-price.py);
 in {
   networking.hostName = "vm-105";
 
@@ -121,7 +138,9 @@ in {
 
   fileSystems = nasMount "/var/lib/grafana" "grafana"
     // nasMount "/var/lib/prometheus2" "prometheus"
-    // nasMount "/var/lib/loki" "loki";
+    // nasMount "/var/lib/loki" "loki"
+    # home assistant's long-lived token, for its prometheus export
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   # every host uploads its journal here (base.nix); promtail forwards to loki
   services.journald.remote = {
@@ -222,7 +241,9 @@ in {
 
   services.prometheus = {
     enable = true;
-    retentionTime = "30d";
+    # energy history is the long-lived data; ~1GB a month on the nas
+    retentionTime = "10y";
+    extraFlags = [ "--storage.tsdb.retention.size=200GB" ];
     scrapeConfigs = [
       {
         # standard blackbox relabel
@@ -275,8 +296,40 @@ in {
           targets = [ "10.100.0.100:8082" "10.200.0.200:8082" ];
         }];
       }
+      {
+        # house power: pv, grid meter, battery
+        job_name = "fronius";
+        scrape_interval = "10s";
+        static_configs = [{ targets = [ froniusListen ]; }];
+      }
+      {
+        # gas and water readings typed in by hand
+        job_name = "homeassistant";
+        scrape_interval = "60s";
+        metrics_path = "/api/prometheus";
+        authorization.credentials_file = hassScrapeToken;
+        static_configs = [{ targets = [ "10.100.0.125:80" ]; }];
+      }
     ];
+    # the hass token file only exists at runtime
+    checkConfig = "syntax-only";
     # grafana unified alerting owns every rule
+  };
+
+  systemd.services.prometheus-hass-token = {
+    description = "Stage the Home Assistant token for the Prometheus scrape";
+    before = [ "prometheus.service" ];
+    requiredBy = [ "prometheus.service" ];
+    after = [ "remote-fs.target" ];
+    path = [ pkgs.coreutils ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = ''
+      install -d -m 750 -o prometheus -g prometheus ${builtins.dirOf hassScrapeToken}
+      # empty token: the scrape answers 401 until the file shows up
+      install -m 400 -o prometheus -g prometheus \
+        "$(test -s /var/lib/homepage-tokens/hass-key.token && echo /var/lib/homepage-tokens/hass-key.token || echo /dev/null)" \
+        ${hassScrapeToken}
+    '';
   };
 
   # nfs state stops slowly, 45s default killed them
@@ -531,9 +584,43 @@ in {
 
   # one board: map, http, system, logs
   environment.etc."grafana-dashboards/homelab.json".source = ../modules/dashboards/homelab.json;
+  # house power, gas and water
+  environment.etc."grafana-dashboards/energy.json".source = energyDashboard;
 
   # file provider rescans only at startup
-  systemd.services.grafana.restartTriggers = [ ../modules/dashboards/homelab.json ];
+  systemd.services.grafana.restartTriggers = [ ../modules/dashboards/homelab.json energyDashboard ];
+
+  # wholesale price beside the contract price, for the cost panels
+  systemd.services.spot-price = {
+    description = "Export the day-ahead spot price";
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    serviceConfig.Type = "oneshot";
+    script = "${spotPrice}/bin/spot-price /var/lib/node-exporter-textfile/spot_price.prom";
+  };
+
+  # quarter-hour slots
+  systemd.timers.spot-price = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnCalendar = "*:00/15:05"; Persistent = true; };
+  };
+
+  systemd.services.fronius-exporter = {
+    description = "Prometheus exporter for the Fronius inverter";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    environment = {
+      FRONIUS_HOST = "192.168.178.46";
+      FRONIUS_LISTEN = froniusListen;
+    };
+    serviceConfig = {
+      ExecStart = "${froniusExporter}/bin/fronius-exporter";
+      DynamicUser = true;
+      Restart = "always";
+      RestartSec = 10;
+    };
+  };
 
   # firing grafana alerts as a gauge, for readers that may not reach grafana (the desktop bar);
   # value is the start time, fingerprint keeps two alerts with equal labels apart

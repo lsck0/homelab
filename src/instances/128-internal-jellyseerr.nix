@@ -26,6 +26,8 @@
   systemd.services.jellyseerr-token = {
     description = "Export Jellyseerr API key";
     after = [ "podman-jellyseerr.service" ];
+    # an lxc mounts nfs at boot, not on access: never write under an empty mountpoint
+    unitConfig.RequiresMountsFor = [ "/var/lib/jellyseerr" "/var/lib/homepage-tokens" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.jq pkgs.coreutils ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };

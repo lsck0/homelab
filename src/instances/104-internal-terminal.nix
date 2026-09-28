@@ -1,6 +1,6 @@
 { config, pkgs, lib, inventory, nasMount, ... }:
 let
-  # e-ink terminal: calendar, lab stats, arxiv
+  # e-ink terminal: calendar, lab stats, arxiv, energy
   terminalDir = "/var/lib/terminal";
   terminalPublic = "${terminalDir}/public";
   terminalPort = 8081;
@@ -15,6 +15,10 @@ let
   githubSync = pkgs.writers.writePython3Bin "github-sync" {
     flakeIgnore = [ "E501" ];
   } (builtins.readFile ../scripts/github-sync.py);
+
+  energySync = pkgs.writers.writePython3Bin "energy-sync" {
+    flakeIgnore = [ "E501" ];
+  } (builtins.readFile ../scripts/energy-sync.py);
 
   arxivSync = pkgs.writers.writePython3Bin "arxiv-sync" {
     flakeIgnore = [ "E501" ];
@@ -81,7 +85,7 @@ in {
   # an lxc mounts nfs at boot, not on access: nothing may run before the shares are up
   imports = [{
     systemd.services = lib.genAttrs [
-      "nginx" "terminal-sync" "arxiv-sync" "trmnl-sync" "github-sync" "calendar-sync" "calendar-upload-dir" "calendar-upload"
+      "nginx" "terminal-sync" "energy-sync" "arxiv-sync" "trmnl-sync" "github-sync" "calendar-sync" "calendar-upload-dir" "calendar-upload"
     ] (_: { unitConfig.RequiresMountsFor = [ calendarState "/var/lib/homepage-tokens" ]; });
   }];
 
@@ -171,6 +175,35 @@ in {
     '';
   };
 
+  # house power, gas, water, prices
+  systemd.services.energy-sync = {
+    description = "Collect house energy for the TRMNL terminal";
+    after = [ "terminal-token.service" "network-online.target" ];
+    requires = [ "terminal-token.service" ];
+    wants = [ "network-online.target" ];
+    path = [ energySync pkgs.coreutils ];
+    environment.ENERGY_PROMETHEUS = "http://10.100.0.105:9090";
+    serviceConfig = {
+      Type = "oneshot";
+      User = "nginx";
+      Group = "nginx";
+    };
+    script = ''
+      energy-sync ${terminalPublic}/$(cat ${terminalDir}/token)
+    '';
+  };
+
+  # the panel refreshes every few minutes; power is a snapshot anyway
+  systemd.timers.energy-sync = {
+    description = "Refresh the energy feed for the terminal";
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "3m";
+      OnUnitActiveSec = "5m";
+      Unit = "energy-sync.service";
+    };
+  };
+
   # arxiv announces daily, hourly catches the batch
   systemd.services.arxiv-sync = {
     description = "Fetch today's arXiv mathematics announcements";
@@ -205,6 +238,7 @@ in {
     script = ''
       exec python3 ${../scripts/trmnl-sync.py} \
         484687=${../modules/trmnl/terminal.liquid} \
+        2f3cbe6f-8b44-46fe-90a2-86d4d2543280=${../modules/trmnl/energy.liquid} \
         484717=${../modules/trmnl/arxiv.liquid} \
         487323=${../modules/trmnl/github.liquid} \
         484254=${../modules/trmnl/calendar.liquid} \

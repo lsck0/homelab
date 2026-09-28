@@ -4,7 +4,7 @@
     authelia       = { host = "auth";        vmid = 101; port = 9091;  auth = "portal"; };
     # only admins edit accounts
     lldap          = { host = "lldap";       vmid = 101; port = 17170; };
-    homepage       = { host = "homepage";    vmid = 103; port = 80; };
+    homepage       = { host = "homelab";     vmid = 103; port = 80; };
     grafana        = { host = "grafana";     vmid = 105; port = 80; };
     kopia          = { host = "backup";      vmid = 109; port = 51515; };
     nas            = { host = "nas";         vmid = 109; port = 80; };

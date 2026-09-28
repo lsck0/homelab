@@ -30,6 +30,126 @@ let
       roles:
         admin: admins
         user: app-homeassistant
+
+    # meter readings typed in daily from the app
+    input_number:
+      gas_meter:
+        name: Gaszähler
+        icon: mdi:meter-gas
+        unit_of_measurement: "m³"
+        mode: box
+        min: 0
+        max: 999999
+        step: 0.001
+      water_meter:
+        name: Wasserzähler
+        icon: mdi:water
+        unit_of_measurement: "m³"
+        mode: box
+        min: 0
+        max: 999999
+        step: 0.001
+      # contract prices, kept here so a tariff change is one edit in the app
+      price_electricity:
+        name: Strompreis
+        icon: mdi:cash
+        unit_of_measurement: "EUR/kWh"
+        mode: box
+        min: 0
+        max: 10
+        step: 0.0001
+      price_feed_in:
+        name: Einspeisevergütung
+        icon: mdi:cash-plus
+        unit_of_measurement: "EUR/kWh"
+        mode: box
+        min: 0
+        max: 10
+        step: 0.0001
+      price_gas:
+        name: Gaspreis
+        icon: mdi:cash
+        unit_of_measurement: "EUR/kWh"
+        mode: box
+        min: 0
+        max: 10
+        step: 0.0001
+      # brennwert times zustandszahl, from the gas bill
+      gas_kwh_per_m3:
+        name: Gas Umrechnung
+        icon: mdi:swap-horizontal
+        unit_of_measurement: "kWh/m³"
+        mode: box
+        min: 0
+        max: 20
+        step: 0.0001
+      price_water:
+        name: Wasserpreis
+        icon: mdi:cash
+        unit_of_measurement: "EUR/m³"
+        mode: box
+        min: 0
+        max: 100
+        step: 0.01
+      fee_electricity:
+        name: Grundpreis Strom
+        icon: mdi:calendar-month
+        unit_of_measurement: "EUR/Monat"
+        mode: box
+        min: 0
+        max: 1000
+        step: 0.01
+      fee_gas:
+        name: Grundpreis Gas
+        icon: mdi:calendar-month
+        unit_of_measurement: "EUR/Monat"
+        mode: box
+        min: 0
+        max: 1000
+        step: 0.01
+      fee_water:
+        name: Grundpreis Wasser
+        icon: mdi:calendar-month
+        unit_of_measurement: "EUR/Monat"
+        mode: box
+        min: 0
+        max: 1000
+        step: 0.01
+
+    # energy dashboard only takes sensors with a state class
+    template:
+      - sensor:
+          - name: Gaszählerstand
+            unique_id: gas_meter_reading
+            unit_of_measurement: "m³"
+            device_class: gas
+            state_class: total_increasing
+            state: "{{ states('input_number.gas_meter') | float(0) }}"
+            # 0 is the unset helper, not a reading
+            availability: "{{ states('input_number.gas_meter') | float(0) > 0 }}"
+          - name: Wasserzählerstand
+            unique_id: water_meter_reading
+            unit_of_measurement: "m³"
+            device_class: water
+            state_class: total_increasing
+            state: "{{ states('input_number.water_meter') | float(0) }}"
+            availability: "{{ states('input_number.water_meter') | float(0) > 0 }}"
+
+    # scraped by prometheus on vm-105
+    prometheus:
+      namespace: hass
+      filter:
+        include_entities:
+          - sensor.gas_meter_reading
+          - sensor.water_meter_reading
+        include_entity_globs:
+          - input_number.*
+      # default name escapes the unit to sensor_gas_mu0xb3
+      component_config:
+        sensor.gas_meter_reading:
+          override_metric: gas_meter_cubic_meters
+        sensor.water_meter_reading:
+          override_metric: water_meter_cubic_meters
   '';
 
   # 2026.9 ignores yaml http:, hass-http writes .storage

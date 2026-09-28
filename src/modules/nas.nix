@@ -12,7 +12,6 @@ let
   # the only shares the dmz may mount
   dmzShares = {
     "200" = [ "crowdsec-external" "traefik-acme-external" ];
-    "204" = [ "searxng" ];
     "206" = [ "privatebin" ];
     "207" = [ "share" ];
     "208" = [ "minecraft" "minecraft-modpacks" ];

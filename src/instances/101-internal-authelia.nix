@@ -249,7 +249,7 @@ in {
         cookies = [{
           domain = "lsck0.dev";
           authelia_url = "https://auth.lsck0.dev";
-          default_redirection_url = "https://homepage.lsck0.dev";
+          default_redirection_url = "https://homelab.lsck0.dev";
         }];
 
         # else sessions live in memory

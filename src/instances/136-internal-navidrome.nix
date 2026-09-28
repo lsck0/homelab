@@ -30,6 +30,8 @@
   systemd.services.navidrome-homepage-token = {
     description = "Initialise Navidrome admin and export Subsonic credentials for Homepage";
     after = [ "podman-navidrome.service" ];
+    # an lxc mounts nfs at boot, not on access: never write under an empty mountpoint
+    unitConfig.RequiresMountsFor = [ "/var/lib/homepage-tokens" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.curl pkgs.coreutils pkgs.jq pkgs.openssl ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };

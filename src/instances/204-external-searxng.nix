@@ -1,8 +1,7 @@
-{ pkgs, nasMount, ... }: {
+{ pkgs, ... }: {
   networking.hostName = "vm-204";
 
-  fileSystems = nasMount "/var/lib/searxng" "searxng";
-
+  # no nas share: settings are regenerated on a fresh disk, only the secret key changes
   # default settings.yml on fresh install
   systemd.services.searxng-config = {
     description = "Ensure SearXNG settings exist";

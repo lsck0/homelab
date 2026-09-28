@@ -229,7 +229,7 @@ in {
   # a fresh container serves its prebuilt page, settings empty; browsers only
   # rebuild it when the config hash changes, so rebuild once after every start
   systemd.services.podman-homepage.postStart = ''
-    ${retry} 90 1 ${pkgs.curl}/bin/curl -sf -o /dev/null -H 'Host: homepage.lsck0.dev' http://127.0.0.1/api/revalidate
+    ${retry} 90 1 ${pkgs.curl}/bin/curl -sf -o /dev/null -H 'Host: homelab.lsck0.dev' http://127.0.0.1/api/revalidate
   '';
 
   # restart on config change
@@ -244,7 +244,7 @@ in {
       "/var/lib/homepage:/app/config"
     ];
     environment = {
-      HOMEPAGE_ALLOWED_HOSTS = "homepage.lsck0.dev";
+      HOMEPAGE_ALLOWED_HOSTS = "homelab.lsck0.dev";
       NODE_TLS_REJECT_UNAUTHORIZED = "0";
     };
     environmentFiles = [ "/var/lib/homepage/homepage.env" ];
