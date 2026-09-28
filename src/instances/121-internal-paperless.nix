@@ -20,6 +20,8 @@
       # phone photos: no real dpi, often rotated and skewed
       PAPERLESS_OCR_IMAGE_DPI = 300;
       PAPERLESS_OCR_ROTATE_PAGES = true;
+      # photos score ~6, default 12 never rotates them
+      PAPERLESS_OCR_ROTATE_PAGES_THRESHOLD = 5;
       PAPERLESS_OCR_DESKEW = true;
       PAPERLESS_OCR_CLEAN = "clean";
       PAPERLESS_FILENAME_FORMAT = "{{ created_year }}/{{ correspondent }}/{{ created }} {{ title }}";
