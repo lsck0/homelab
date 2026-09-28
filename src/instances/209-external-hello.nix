@@ -1,10 +1,18 @@
-{ ... }:
+{ config, ... }:
 let
-  # zero-downtime: new task must be healthy first
+  # an unprivileged lxc may not program ipvs, so no routing mesh or vip there:
+  # publish on the host and stop the old task first, a few seconds of downtime per deploy
+  meshless = config.boot.isContainer;
+  order = if meshless then "stop-first" else "start-first";
+
+  # vm: zero-downtime, the new task must be healthy first
   webService = image: publishedPort: ''
     image: ${image}
     ports:
-      - "${toString publishedPort}:8000"
+      - target: 8000
+        published: ${toString publishedPort}
+        protocol: tcp
+        mode: ${if meshless then "host" else "ingress"}
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
       interval: 10s
@@ -13,12 +21,13 @@ let
       start_period: 5s
     deploy:
       replicas: 1
+      endpoint_mode: ${if meshless then "dnsrr" else "vip"}
       update_config:
         parallelism: 1
-        order: start-first
+        order: ${order}
         failure_action: rollback
       rollback_config:
-        order: start-first
+        order: ${order}
       restart_policy:
         condition: any
   '';

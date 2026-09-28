@@ -14,7 +14,7 @@ in {
     description = "Send Prowlarr's indexer traffic through Tor";
     after = [ "podman-prowlarr.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq pkgs.coreutils ];
+    path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -49,6 +49,8 @@ in {
 
       curl -fsS -X PUT "$API/config/host/$(jq -r .id /tmp/host.json)" -H "X-Api-Key: $KEY" \
         -H "Content-Type: application/json" --data-binary @/tmp/host.new -o /dev/null
+      # kestrel reads allowedHosts only at start
+      systemctl restart podman-prowlarr.service
       echo "Prowlarr now reaches indexers through Tor (10.100.0.1:9055)"
     '';
   };
