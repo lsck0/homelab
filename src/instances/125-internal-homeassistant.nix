@@ -9,6 +9,9 @@ let
   };
 
   hassConfig = pkgs.writeText "configuration.yaml" ''
+    homeassistant:
+      # authelia oidc only: the route has no forwardauth, a password login would skip its 2fa
+      auth_providers: []
     default_config:
     frontend:
       themes: !include_dir_merge_named themes
@@ -26,6 +29,7 @@ let
         force_https: true
       roles:
         admin: admins
+        user: app-homeassistant
   '';
 
   # 2026.9 ignores yaml http:, hass-http writes .storage

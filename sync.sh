@@ -249,6 +249,18 @@ HOOK
    chmod 755 /var/lib/vz/snippets/homelab-bulk.sh
    qm config 109 | grep -q "^hookscript: local:snippets/homelab-bulk.sh" || qm set 109 --hookscript local:snippets/homelab-bulk.sh >/dev/null
    [ "$(qm status 109 | cut -d" " -f2)" = running ] && pvesm set bulk --disable 1
+   # disabled or not, pvestatd'"'"'s lvm scans for local-lvm read every pv label, the hdd too:
+   # give it its own lvm config that rejects every name of the bulk pv, rebuilt from the real one each run
+   pv=$(pvs --noheadings -o pv_name,vg_name | awk '"'"'$2=="bulk"{print $1}'"'"')
+   rej=$(for n in "$pv" /dev/disk/by-id/*; do [ "$(readlink -f "$n")" = "$(readlink -f "$pv")" ] && printf ",\"r|^%s$|\"" "$n"; done)
+   rm -rf /etc/lvm-pvestatd.new && cp -a /etc/lvm /etc/lvm-pvestatd.new
+   sed -i "s#^\(\s*global_filter=\[.*\)\]#\1$rej]#" /etc/lvm-pvestatd.new/lvm.conf
+   LVM_SYSTEM_DIR=/etc/lvm-pvestatd.new vgs pve >/dev/null
+   rm -rf /etc/lvm-pvestatd && mv /etc/lvm-pvestatd.new /etc/lvm-pvestatd
+   d=/etc/systemd/system/pvestatd.service.d; install -d $d
+   printf "[Service]\nEnvironment=LVM_SYSTEM_DIR=/etc/lvm-pvestatd\n" > $d/homelab-no-hdd.conf.new
+   if cmp -s $d/homelab-no-hdd.conf.new $d/homelab-no-hdd.conf; then rm -f $d/homelab-no-hdd.conf.new
+   else mv $d/homelab-no-hdd.conf.new $d/homelab-no-hdd.conf; systemctl daemon-reload; systemctl restart pvestatd; fi
    echo ">>> Proxmox: bulk storage idle-disabled, vm-109 hookscript in place"' \
   || echo "WARNING: could not set up the bulk storage hookscript."
 
