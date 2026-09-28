@@ -22,7 +22,6 @@ let
       { route = "forgejo"; name = "Forgejo"; icon = "forgejo"; desc = "Git";
         widget = arr "gitea" "forgejo" "FORGEJO_KEY"; }
       { route = "registry-ui"; name = "Registry"; icon = "docker-moby"; desc = "Images"; }
-      { route = "attic"; name = "Attic"; icon = "nixos"; desc = "Nix cache"; }
       { route = "hello"; name = "Hello"; icon = "mdi-hand-wave"; desc = "Swarm demo (Forgejo)"; }
       { route = "hello-gh"; name = "Hello GH"; icon = "github"; desc = "Swarm demo (GitHub)"; }
     ]; }
