@@ -59,6 +59,12 @@ let
       tokenAuthMethod = "client_secret_post";
       redirectUris = [ "https://hass.lsck0.dev/auth/oidc/callback" ];
     }
+    {
+      id = "headscale";
+      name = "Headscale";
+      secretName = "headscale-oidc-secret";
+      redirectUris = [ "https://hs.lsck0.dev/oidc/callback" ];
+    }
   ];
 
   # oidc obeys the forwardauth groups
@@ -114,6 +120,7 @@ in {
   sops.secrets.jellyfin-oidc-secret = {};
   sops.secrets.headplane-oidc-secret = {};
   sops.secrets.homeassistant-oidc-secret = {};
+  sops.secrets.headscale-oidc-secret = {};
 
   # own crypto generated here, not in sops
   systemd.services.authelia-bootstrap = {

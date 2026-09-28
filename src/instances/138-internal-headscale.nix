@@ -24,8 +24,20 @@ in
         v4 = "100.64.0.0/10";
         v6 = "fd7a:115c:a1e0::/48";
       };
+      # device registration logs in through authelia
+      oidc = {
+        issuer = "https://auth.lsck0.dev";
+        client_id = "headscale";
+        client_secret_path = config.sops.secrets.headscale-oidc-secret.path;
+        scope = [ "openid" "profile" "email" "groups" ];
+        allowed_groups = [ "admins" "app-headscale" ];
+        pkce.enabled = true;
+        # vpn keeps running when authelia is down
+        only_start_if_oidc_is_available = false;
+      };
     };
   };
+  sops.secrets.headscale-oidc-secret = { owner = "headscale"; };
 
   # ── Headplane ──────────────────────────────────────────────────────────────
   # the web ui headscale does not ship
