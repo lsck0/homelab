@@ -131,6 +131,8 @@ locals {
       type    = "internal",
       # large model image, 8 GiB was 80% full at rest
       disk = 16,
+      memory  = 1024,
+      balloon = 1024,
     }
     "124" = { # Firefly III personal finance
       enabled = true,

@@ -62,9 +62,8 @@ in {
       PUID = "1000";
       PGID = "1000";
       PAPERLESS_AI_PORT = "3000";
-      # rag service runs in the same container
-      RAG_SERVICE_URL = "http://localhost:8000";
-      RAG_SERVICE_ENABLED = "true";
+      # rag loads a local embedding model and thrashed the vm; classification skips it
+      RAG_SERVICE_ENABLED = "false";
     };
     extraOptions = [ "--cap-drop=ALL" "--security-opt=no-new-privileges" ];
   };
