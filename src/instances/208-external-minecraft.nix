@@ -96,6 +96,9 @@ in {
     description = "Generate Minecraft env + lazymc config";
     before = [ "lazymc.service" ];
     requiredBy = [ "lazymc.service" ];
+    # regenerate the toml (and re-run) whenever the start command changes, else a deploy
+    # leaves lazymc pointing at a stale mc-start (old memory/env)
+    restartTriggers = [ mcStart ];
     serviceConfig.Type = "oneshot";
     script = ''
       pw=$(cat ${config.sops.secrets.minecraft-rcon-password.path})
@@ -138,6 +141,8 @@ in {
     after = [ "network-online.target" "minecraft-env.service" ];
     wants = [ "network-online.target" ];
     wantedBy = [ "multi-user.target" ];
+    # restart with a new start command so the deployed memory/env actually takes effect
+    restartTriggers = [ mcStart ];
     path = [ pkgs.podman ];
     serviceConfig = {
       ExecStart = "${pkgs.lazymc}/bin/lazymc start --config ${lazymcToml}";
