@@ -45,6 +45,16 @@
       environmentFiles = [ config.sops.templates."firefly.env".path ];
       extraOptions = [ "--network=host" ];
     };
+    # FinTS import: web ui that pulls Sparkasse transactions over FinTS into firefly.
+    # bridge network (firefly holds host :8080), reaches firefly at the vm ip, which the
+    # podman bridge (10.88.0.0/16) is a trusted source for past firefly's ingressOnly guard.
+    firefly-fints-importer = {
+      image = "docker.io/benkl/firefly-iii-fints-importer@sha256:9912f29e7c56587fbee2fceb146efe8f9f6ec924d5569f72aa7336b5c26e2a8e";
+      # holds the saved config incl. the fints persistence string (bank access): local, 0700
+      volumes = [ "/var/lib/firefly-fints:/app/configurations" ];
+      ports = [ "8090:8080" ];
+      environment.TZ = "Europe/Berlin";
+    };
   };
 
   # dump, the nas holds a live data dir
@@ -77,13 +87,41 @@
     timerConfig = { OnBootSec = "5m"; OnUnitActiveSec = "30m"; };
   };
 
+  # seed the fints importer with firefly's url + token, so only the bank fields
+  # are left to fill in the web ui; never clobbers a config the owner has saved.
+  systemd.services.firefly-fints-seed = {
+    description = "Pre-fill the FinTS importer config with Firefly URL and token";
+    after = [ "firefly-hermes-token.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.coreutils pkgs.jq ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      tok=/var/lib/homepage-tokens/firefly-token.token
+      [ -s "$tok" ] || { echo "no firefly token yet"; exit 0; }
+      out=/var/lib/firefly-fints/homelab.json
+      [ -s "$out" ] && exit 0
+      jq -n --arg url "http://10.100.0.124:8080" --arg t "$(cat "$tok")" '{
+        bank_username:"", bank_password:"", bank_code:"", bank_url:"",
+        bank_2fa:"", bank_2fa_device:"", bank_fints_persistence:"",
+        firefly_url:$url, firefly_access_token:$t, skip_transaction_review:"false",
+        description_regex_match:"", description_regex_replace:"",
+        auto_submit_form_via_js:false, force_mt940:false,
+        choose_account_automation:{bank_account_iban:"", firefly_account_id:"", from:"now - 7 days", to:"now"}
+      }' > "$out"
+      chmod 600 "$out"
+    '';
+  };
+
   systemd.tmpfiles.rules = [
     "d /var/lib/firefly 0750 1000 1000 -"
     # 70: alpine postgres uid
     "d /var/lib/firefly/db 0750 70 70 -"
     "d /var/lib/firefly/upload 0750 1000 1000 -"
+    # fints importer config + saved fints session, root-only (bank access)
+    "d /var/lib/firefly-fints 0700 root root -"
   ];
 
-  networking.firewall.allowedTCPPorts = [ 8080 ];
-  homelab.ingressOnly.ports = [ 8080 ];
+  # 8090 is the fints importer ui; behind Traefik + Authelia like firefly, never raw on the LAN
+  networking.firewall.allowedTCPPorts = [ 8080 8090 ];
+  homelab.ingressOnly.ports = [ 8080 8090 ];
 }

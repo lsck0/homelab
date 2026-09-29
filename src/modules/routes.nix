@@ -25,6 +25,7 @@
     paperless      = { host = "paperless";   vmid = 121; port = 8080; };
     paperless-ai   = { host = "paperless-ai"; vmid = 121; port = 80; };
     firefly        = { host = "firefly";     vmid = 124; port = 8080; };
+    fints          = { host = "fints";       vmid = 124; port = 8090; };
     # the companion app calls /auth/token and /api/websocket natively, it cannot pass a portal
     homeassistant  = { host = "hass";        vmid = 125; port = 80;    auth = "own"; };
     huginn         = { host = "huginn";      vmid = 126; port = 80; };
