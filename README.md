@@ -1,11 +1,11 @@
 # Homelab
 
-Proxmox host, one NixOS VM per service. Terraform creates the VMs, a Nix flake
-builds their configs, `./sync.sh` applies both and commits the result.
+Proxmox host running NixOS guests, VMs and LXC containers. Terraform creates the guests,
+a Nix flake builds their configs, `./sync.sh` applies both and commits the result.
 
-- `src/instances.tf`: every VM with its id, `enabled` (`true` / `"onDemand"` / `false`), cooldown and size
-- `src/instances/<id>-<zone>-<service>.nix`: the NixOS config of that VM
-- `src/modules/routes.nix`: every `*.lsck0.dev` hostname, the VM/port behind it, how it is authenticated and which lldap group may reach it
+- `src/instances.tf`: every guest with its id, `kind` (vm or lxc), `enabled` (`true` / `"onDemand"` / `false`), cooldown and size
+- `src/instances/<id>-<zone>-<service>.nix`: the NixOS config of that guest, importing services from `src/services/`
+- `src/modules/routes.nix`: every `*.lsck0.dev` hostname, the VM/port behind it, how it is authenticated (`admins` or its `app-<route>` lldap group may reach it)
 - `src/modules/hermes/skills/`: what Hermes (Telegram bot, root on the lab) knows how to do
 
 Internal services live in `10.100.0.0/24` behind Traefik + Authelia, public ones
@@ -57,13 +57,14 @@ src/scripts/secrets-sync.sh        # reconcile src/secrets.json with what the co
 
 ```sh
 ./sync.sh                                                   # deploy everything
-nix build ./src#checks.x86_64-linux.<test>                  # nixos vm tests: on-demand kopia swarm minecraft monitoring renumber
+nix build ./src#checks.x86_64-linux.<test>                  # nixos vm tests: on-demand kopia swarm minecraft monitoring
 src/tests/media-stack.sh                                    # media stack against the real containers (docker)
 src/tests/hermes-agent.sh                                   # hermes scenarios (free nous model, or ANTHROPIC_API_KEY)
 src/scripts/secrets-sync.sh [--apply]                       # add missing secrets, drop unused ones
+sudo src/scripts/setup-dns.sh                               # workstation: resolve *.lsck0.dev through the lab dns
+src/scripts/deinit.sh                                       # tear the lab down again
 src/scripts/stack.sh status                                 # which VM groups are on
-src/scripts/stack.sh {media|apps} {on|off} [--apply]     # swap a group in or out (the box cannot host all of them)
-src/scripts/renumber.sh [--execute]                         # rename vm ids on proxmox to match instances.tf
+src/scripts/stack.sh {media|apps} {on|off|onDemand} [--apply] # swap a group in or out (the box cannot host all of them)
 ```
 
 ## CI runners
@@ -88,7 +89,7 @@ Kopia on the NAS (vm-109) snapshots `/srv/nas` nightly at 02:00. A file-level sn
 live database is not a backup, so every database dumps itself to
 `/srv/nas/data/db-dumps/<vm>/` at 01:30 first (`src/modules/db-backup.nix`):
 SQLite through `.backup`, Postgres through `pg_dump`. That also covers the two
-things whose state is on local disk and not on the NAS at all — the Authelia
+things whose state is on local disk and not on the NAS at all: the Authelia
 second-factor enrolments and the whole lldap directory.
 
 Restore with `nas-restore` on vm-109 (`nas-restore` with no arguments prints the

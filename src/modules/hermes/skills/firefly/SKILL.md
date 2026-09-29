@@ -13,7 +13,7 @@ metadata:
 
 # Firefly III (vm-124, on demand, http://10.100.0.124:8080, https://firefly.lsck0.dev)
 
-Before any call: `vm start 123` and wait for HTTP. Headers:
+Before any call: `vm start 124` and wait for HTTP. Headers:
 `Authorization: Bearer $(lab-token firefly-token)`, `Accept: application/json`,
 `Content-Type: application/json`. API base `/api/v1`.
 

@@ -43,7 +43,7 @@ fix_fields() {
   fi
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # SERVARR APPS
 wire_servarr() {
   local name=$1 url=$2 v=$3 catfield=$4 cat=$5; shift 5
@@ -107,7 +107,7 @@ wire_servarr() {
   done
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # JELLYFIN NOTIFICATION
 wire_jellyfin_notify() {
   local name=$1 url=$2 k jk cur id body
@@ -150,7 +150,7 @@ wire_jellyfin_notify() {
   fi
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # PROWLARR
 wire_prowlarr() {
   local P="http://$PROWLARR_HOST:$PROWLARR_PORT/api/v1" pk apps spec impl name url k body have schema="" def
@@ -254,7 +254,7 @@ wire_prowlarr() {
   fi
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # JELLYSEERR
 wire_jellyseerr() {
   local S="$JELLYSEERR_URL/api/v1" jar rk sk rp sp ids initialised
@@ -355,7 +355,7 @@ wire_jellyseerr() {
   js -X POST "$S/settings/initialize" >/dev/null && echo "jellyseerr: initialised"
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # BAZARR (languages in preference order)
 SUBTITLE_LANGUAGES=${SUBTITLE_LANGUAGES:-de en}
 # no-account providers; opensubtitles.com needs one

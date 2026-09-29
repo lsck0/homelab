@@ -61,8 +61,9 @@ locals {
       kind    = "lxc",
       name    = "110-internal-cache",
       type    = "internal",
-      memory  = 1536,
-      disk    = 40,
+      # redis caps itself at 768mb
+      memory = 1024,
+      disk   = 40,
     }
 
     "112" = { # torrent client (egress via tor-router)
@@ -111,8 +112,9 @@ locals {
       name    = "121-internal-paperless",
       type    = "internal",
       # ocr plus the paperless-ai node process
-      memory  = 3072,
-      balloon = 2048,
+      memory = 3072,
+      # ran at 98% of a 2048 floor
+      balloon = 2560,
       # paperless-ai image alone is 8.3 GiB
       disk = 24,
     }
@@ -171,7 +173,8 @@ locals {
       memory  = 3072,
       balloon = 0,
       cores   = 4,
-      disk    = 16,
+      # ollama model 4.4G beside jellyfin
+      disk    = 24,
       machine = "q35",
       hostpci = ["gpu"],
     }

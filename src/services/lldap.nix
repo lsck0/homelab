@@ -4,7 +4,9 @@ let
   # admins reach everything; everyone else gets one app-<service> group per service
   routes = (import ../modules/routes.nix).internal;
   ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
-  appGroups = map (n: "app-${n}") (lib.attrNames ssoRoutes ++ [ "forgejo" "jellyfin" "headplane" "homeassistant" "headscale" ]);
+  # own-login routes (forgejo, jellyfin, hass, headscale) check the same groups through oidc or ldap
+  ownRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "own") routes;
+  appGroups = map (n: "app-${n}") (lib.attrNames ssoRoutes ++ lib.attrNames ownRoutes);
   groups = lib.unique ([ "admins" ] ++ appGroups);
 
   # example account, three pages
@@ -101,6 +103,12 @@ in {
   sops.secrets.lldap-guest-password = { owner = "lldap"; group = "lldap"; };
 
   # seed groups and the admin user
+  # server_key derives every opaque password: a restored users.db is useless without it
+  sops.secrets.lldap-server-key = { owner = "lldap"; group = "lldap"; };
+  systemd.services.lldap.preStart = lib.mkBefore ''
+    [ -s /var/lib/lldap/server_key ] || ${pkgs.coreutils}/bin/base64 -d ${config.sops.secrets.lldap-server-key.path} > /var/lib/lldap/server_key
+  '';
+
   systemd.services.lldap-bootstrap = {
     description = "Seed lldap groups and users";
     after = [ "lldap.service" ];

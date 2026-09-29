@@ -2,13 +2,11 @@
 let
 
 
-  # real vms only: down now, up within 6h
-  onDemandIps = lib.mapAttrsToList (_: v: v.ip) (lib.filterAttrs (_: v: v.enabled == "onDemand") inventory);
+  # guests meant to run only: onDemand ones sleep and disabled ones are off on purpose; down now, up within 6h
+  notRunningIps = lib.mapAttrsToList (_: v: v.ip) (lib.filterAttrs (_: v: v.enabled != "true") inventory);
   instanceDownExpr = "up{job=\"homelab-node-exporter\""
-    + lib.optionalString (onDemandIps != []) ",instance!~\"(${lib.concatMapStringsSep "|" (ip: lib.replaceStrings [ "." ] [ "\\\\." ] ip) onDemandIps}):9100\""
+    + lib.optionalString (notRunningIps != []) ",instance!~\"(${lib.concatMapStringsSep "|" (ip: lib.replaceStrings [ "." ] [ "\\\\." ] ip) notRunningIps}):9100\""
     + "} == 0 and max_over_time(up{job=\"homelab-node-exporter\"}[6h]) > 0";
-  subnetTargets = subnet:
-    builtins.map (host: "${subnet}.${toString host}:9100") (lib.range 1 254);
 
   # readable `vm` label, not ip:port
   shortName = v:
@@ -26,10 +24,10 @@ let
   vmRelabels =
     [{ source_labels = [ "__address__" ]; regex = "([^:]+):.*"; target_label = "vm"; replacement = "$1"; }]
     ++ lib.mapAttrsToList (_: v: vmLabel v.ip (vmName v)) (lib.filterAttrs (_: v: v.type != "router") inventory)
-    ++ lib.optionals (router != null) [ (vmLabel "10.100.0.1" "router") (vmLabel "10.200.0.1" "router") ]
+    ++ lib.optional (router != null) (vmLabel "10.100.0.1" "router")
     ++ [ (vmLabel "192.168.178.200" "proxmox") ];
 
-  # ── blackbox probes ────────────────────────────────────────────────────────
+  # -- blackbox probes --------------------------------------------------------
   # probe backends, public names always 302 via authelia
   routes = import ../modules/routes.nix;
   probes =
@@ -39,7 +37,7 @@ let
         && (r.monitor or true);
       ofSide = side: lib.mapAttrsToList (name: r: {
         inherit name;
-        url = "${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}";
+        url = "${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}${r.health or ""}";
       }) (lib.filterAttrs (_: alwaysOn) side);
     in
     lib.concatLists (lib.mapAttrsToList (_: ofSide) routes)
@@ -63,22 +61,51 @@ let
     "tags=${lib.escapeURL "rotating_light"}"
   ];
 
-  # compact html per alert, not grafana's wall
+  # one header per category and one line per alert; html-escaped, an unescaped "<id>" once made
+  # telegram reject every message with 400
   telegramMessage = ''
-    {{ if eq .Status "firing" }}🔴 <b>FIRING</b>{{ else }}✅ <b>RESOLVED</b>{{ end }} · <b>{{ .CommonLabels.alertname }}</b>
-    {{ range .Alerts }}
-    {{ if .Labels.vm }}<code>{{ .Labels.vm }}</code>{{ else if .Labels.instance }}<code>{{ .Labels.instance }}</code>{{ end }}{{ if .Labels.severity }} [{{ .Labels.severity }}]{{ end }}
-    {{ if .Annotations.summary }}{{ .Annotations.summary }}{{ end }}
-    {{ if .Annotations.description }}<i>{{ .Annotations.description }}</i>{{ end }}
-    {{ end }}
-    <a href="https://grafana.lsck0.dev/alerting/list">open Grafana</a>'';
+    {{ if .Alerts.Firing }}🔴 <b>{{ .CommonAnnotations.firing | html }}</b>
+    {{ range .Alerts.Firing }}• {{ .Annotations.summary | html }}
+    {{ end }}{{ end }}{{ if .Alerts.Resolved }}✅ <b>{{ .CommonAnnotations.resolved | html }}</b>
+    {{ range .Alerts.Resolved }}• {{ .Annotations.summary | html }}
+    {{ end }}{{ end }}'';
+
+  # grafana-managed rule, one query A thresholded by C
+  mkRule = r: {
+    inherit (r) uid title;
+    condition = "C";
+    data = [
+      {
+        refId = "A";
+        relativeTimeRange = { from = r.range or 600; to = 0; };
+        datasourceUid = r.datasource or "prometheus";
+        model = { refId = "A"; expr = r.expr; instant = true; }
+          // lib.optionalAttrs ((r.datasource or "") == "loki") { queryType = "instant"; };
+      }
+      {
+        refId = "C";
+        datasourceUid = "__expr__";
+        model = {
+          refId = "C";
+          type = "threshold";
+          expression = "A";
+          conditions = [{ evaluator = { type = r.op or "gt"; params = [ r.threshold ]; }; }];
+        };
+      }
+    ];
+    for = r.for or "5m";
+    noDataState = r.noData or "OK";
+    execErrState = "Error";
+    labels = { severity = r.severity or "critical"; } // lib.optionalAttrs (r.telegram or true) { notify = "telegram"; };
+    annotations = { inherit (r) firing resolved summary description; };
+  };
 
   # single delivery path: Grafana unified alerting
   contactPoints = {
     apiVersion = 1;
     contactPoints = [{
       orgId = 1;
-      name = "homelab-alerts";
+      name = "ntfy";
       receivers = [{
         uid = "ntfy_cp";
         type = "webhook";
@@ -90,7 +117,11 @@ let
           password = config.sops.placeholder.ntfy-grafana-password;
         };
         disableResolveMessage = false;
-      }] ++ lib.optional enableTelegram {
+      }];
+    }] ++ lib.optional enableTelegram {
+      orgId = 1;
+      name = "telegram";
+      receivers = [{
         uid = "telegram_cp";
         type = "telegram";
         settings = {
@@ -101,8 +132,8 @@ let
           disable_web_page_preview = true;
         };
         disableResolveMessage = false;
-      };
-    }];
+      }];
+    };
   };
 
   # inverter solar api, polled per scrape
@@ -143,6 +174,14 @@ in {
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   # every host uploads its journal here (base.nix); promtail forwards to loki
+  # journal-remote ignores MaxUse for the received files, so they outgrew the disk
+  systemd.services.journal-remote-vacuum = {
+    description = "Cap received journals at 1G";
+    startAt = "hourly";
+    serviceConfig.Type = "oneshot";
+    script = "${config.systemd.package}/bin/journalctl --directory=/var/log/journal/remote --vacuum-size=1G";
+  };
+
   services.journald.remote = {
     enable = true;
     listen = "http";
@@ -281,12 +320,11 @@ in {
         job_name = "homelab-node-exporter";
         relabel_configs = vmRelabels;
         static_configs = [{
+          # the inventory, not a sweep of both /24s: 480 dead targets a minute bought nothing
           targets =
-            (subnetTargets "10.100.0")
-            ++ (subnetTargets "10.200.0")
-            ++ [
-              "192.168.178.200:9100"
-            ];
+            lib.mapAttrsToList (_: v: "${v.ip}:9100") (lib.filterAttrs (_: v: v.type != "router") inventory)
+            ++ lib.optional (router != null) "10.100.0.1:9100"
+            ++ [ "192.168.178.200:9100" ];
         }];
       }
       {
@@ -413,13 +451,18 @@ in {
         contactPoints.path = config.sops.templates."grafana-contact-points.yaml".path;
         policies.settings = {
           apiVersion = 1;
+          # one message per category, re-sent at most daily while it lasts
           policies = [{
             orgId = 1;
-            receiver = "homelab-alerts";
-            group_by = [ "grafana_folder" "alertname" ];
-            group_wait = "30s";
-            group_interval = "5m";
-            repeat_interval = "4h";
+            receiver = "ntfy";
+            group_by = [ "alertname" ];
+            group_wait = "1m";
+            group_interval = "15m";
+            repeat_interval = "24h";
+            routes = lib.optional enableTelegram {
+              receiver = "telegram";
+              object_matchers = [ [ "notify" "=" "telegram" ] ];
+            };
           }];
         };
         rules.settings = {
@@ -429,153 +472,101 @@ in {
             name = "homelab";
             folder = "Homelab";
             interval = "1m";
-            rules = [{
-              uid = "instance_down";
-              title = "Instance down";
-              condition = "C";
-              # node-exporter target unreachable for 5m
-              data = [
-                {
-                  refId = "A";
-                  relativeTimeRange = { from = 600; to = 0; };
-                  datasourceUid = "prometheus";
-                  model = {
-                    refId = "A";
-                    expr = instanceDownExpr;
-                    instant = true;
-                  };
-                }
-                {
-                  refId = "C";
-                  datasourceUid = "__expr__";
-                  model = {
-                    refId = "C";
-                    type = "threshold";
-                    expression = "A";
-                    # `up == 0 and ...` keeps the value of `up`
-                    conditions = [{
-                      evaluator = { type = "lt"; params = [ 1 ]; };
-                    }];
-                  };
-                }
-              ];
-              for = "5m";
-              # empty result means nothing is down
-              noDataState = "OK";
-              execErrState = "Error";
-              labels.severity = "critical";
-              annotations.summary = "{{ $labels.vm }} ({{ $labels.instance }}) stopped answering";
-              annotations.description = "node-exporter on this VM has been unreachable for 5 minutes. Check `vm status <id>` on Proxmox and the VM's journal.";
-            }
-            {
-              uid = "backup_stale";
-              title = "NAS backup stale (dead-man)";
-              condition = "C";
-              # no daily backup for > 26h, no_data fires too
-              data = [
-                {
-                  refId = "A";
-                  relativeTimeRange = { from = 600; to = 0; };
-                  datasourceUid = "prometheus";
-                  model = {
-                    refId = "A";
-                    expr = "time() - max(homelab_backup_last_success_timestamp_seconds{type=\"daily\"})";
-                    instant = true;
-                  };
-                }
-                {
-                  refId = "C";
-                  datasourceUid = "__expr__";
-                  model = {
-                    refId = "C";
-                    type = "threshold";
-                    expression = "A";
-                    conditions = [{
-                      evaluator = { type = "gt"; params = [ 93600 ]; };
-                    }];
-                  };
-                }
-              ];
-              for = "10m";
-              noDataState = "Alerting";
-              labels.severity = "critical";
-              annotations.summary = "NAS daily backup has not succeeded in over 26h";
-              annotations.description = "Kopia on vm-109 has not completed a snapshot of /srv/nas. Check `systemctl status kopia-server` and https://backup.lsck0.dev.";
-            }
-            {
-              uid = "service_down";
-              title = "Service not answering";
-              condition = "C";
-              # vm up while the container crash-loops
-              data = [
-                {
-                  refId = "A";
-                  relativeTimeRange = { from = 600; to = 0; };
-                  datasourceUid = "prometheus";
-                  model = {
-                    refId = "A";
-                    expr = "probe_success";
-                    instant = true;
-                  };
-                }
-                {
-                  refId = "C";
-                  datasourceUid = "__expr__";
-                  model = {
-                    refId = "C";
-                    type = "threshold";
-                    expression = "A";
-                    conditions = [{
-                      evaluator = { type = "lt"; params = [ 1 ]; };
-                    }];
-                  };
-                }
-              ];
-              for = "5m";
-              # never-reported is a scrape problem
-              noDataState = "OK";
-              execErrState = "Error";
-              labels.severity = "warning";
-              annotations.summary = "{{ $labels.service }} is not answering on {{ $labels.instance }}";
-              annotations.description = "The blackbox probe of this service's own port has failed for 5 minutes while its VM is still up. Check the unit and `podman ps` on that VM.";
-            }
-            {
-              uid = "ossec_alert";
-              title = "OSSEC alert on the hypervisor";
-              condition = "C";
-              # ossec level 7+, alert on the increase
-              data = [
-                {
-                  refId = "A";
-                  relativeTimeRange = { from = 3600; to = 0; };
-                  datasourceUid = "prometheus";
-                  model = {
-                    refId = "A";
-                    expr = "increase(homelab_ossec_alerts_high[1h])";
-                    instant = true;
-                  };
-                }
-                {
-                  refId = "C";
-                  datasourceUid = "__expr__";
-                  model = {
-                    refId = "C";
-                    type = "threshold";
-                    expression = "A";
-                    conditions = [{
-                      evaluator = { type = "gt"; params = [ 0 ]; };
-                    }];
-                  };
-                }
-              ];
-              for = "0m";
-              # absent until ossec is installed
-              noDataState = "OK";
-              execErrState = "Error";
-              labels.severity = "critical";
-              annotations.summary = "OSSEC raised {{ $value }} level 7+ alerts on the hypervisor";
-              annotations.description = "File integrity or rootcheck findings on 192.168.178.200. Read them with `tail -50 /var/ossec/logs/alerts/alerts.log`.";
-            }];
+            rules = map mkRule [
+              # offline
+              {
+                uid = "instance_down";
+                title = "Guest offline";
+                expr = instanceDownExpr;
+                op = "lt"; threshold = 1;
+                firing = "Offline"; resolved = "Back online";
+                summary = "{{ $labels.vm }}";
+                description = "node-exporter has been unreachable for 5 minutes. Check `vm status <id>` and the guest's journal.";
+              }
+              {
+                uid = "service_down";
+                title = "Service not answering";
+                expr = "probe_success";
+                op = "lt"; threshold = 1;
+                for = "10m";
+                firing = "Service down"; resolved = "Service back";
+                summary = "{{ $labels.service }}";
+                description = "The blackbox probe of the service's own port has failed for 10 minutes while its guest is up.";
+              }
+              # no backups taken
+              {
+                uid = "backup_stale";
+                title = "NAS snapshot stale";
+                expr = "time() - max(homelab_backup_last_success_timestamp_seconds{type=\"daily\"})";
+                threshold = 26 * 3600;
+                for = "0m";
+                noData = "Alerting";
+                firing = "Backups missing"; resolved = "Backups running again";
+                summary = "NAS snapshot: none in over 26h";
+                description = "Kopia on vm-109 has not completed a snapshot of /srv/nas. Check `systemctl status kopia-server`.";
+              }
+              {
+                uid = "offsite_stale";
+                title = "Off-site copy stale";
+                expr = "time() - max(homelab_offsite_last_success_timestamp_seconds)";
+                threshold = 26 * 3600;
+                for = "0m";
+                noData = "Alerting";
+                firing = "Backups missing"; resolved = "Backups running again";
+                summary = "Off-site (Proton Drive): no upload in over 26h";
+                description = "proton-sync on vm-109 has not finished. Check `journalctl -u proton-sync`.";
+              }
+              {
+                uid = "db_dump_stale";
+                title = "Database dump stale";
+                expr = "time() - max by (vm, db) (homelab_db_dump_last_success_timestamp_seconds)";
+                threshold = 26 * 3600;
+                for = "0m";
+                firing = "Backups missing"; resolved = "Backups running again";
+                summary = "{{ $labels.db }} dump on {{ $labels.vm }}: none in over 26h";
+                description = "The nightly db-backup-<name> unit on that guest failed; the snapshot then holds only a live copy.";
+              }
+              # attacks
+              {
+                uid = "crowdsec_burst";
+                title = "Attack burst blocked";
+                # the internet scans all day; tens per hour is a campaign against us
+                expr = "max by (vm, top) (homelab_crowdsec_alerts_1h)";
+                threshold = 25;
+                for = "0m";
+                severity = "warning";
+                firing = "Attack detected"; resolved = "Attack over";
+                summary = "{{ $labels.vm }}: {{ $values.A.Value }} blocked attempts in 1h, mostly {{ $labels.top }}";
+                description = "CrowdSec blocked these at the ingress. `podman exec crowdsec cscli alerts list --since 1h` on that guest.";
+              }
+              {
+                uid = "sso_bruteforce";
+                title = "Failed SSO logins";
+                datasource = "loki";
+                range = 900;
+                # one failed login a week is normal
+                expr = "sum(count_over_time({unit=\"authelia-main.service\"} |= \"Unsuccessful 1FA\" [15m]))";
+                threshold = 4;
+                for = "0m";
+                severity = "warning";
+                firing = "Attack detected"; resolved = "Attack over";
+                summary = "{{ $values.A.Value }} failed SSO logins in 15 minutes";
+                description = "Authelia rejected these passwords; it bans a user after 3 tries in 2 minutes.";
+              }
+              # not urgent, ntfy only
+              {
+                uid = "disk_full";
+                title = "Disk almost full";
+                expr = "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"})";
+                threshold = 90;
+                for = "30m";
+                severity = "warning";
+                telegram = false;
+                firing = "Disk almost full"; resolved = "Disk space ok";
+                summary = "{{ $labels.vm }}: {{ printf \"%.0f\" $values.A.Value }}% used";
+                description = "The guest's root filesystem is over 90%. Old generations, journal or images usually.";
+              }
+            ];
           }];
         };
       };
@@ -663,4 +654,7 @@ in {
 
   # hot page cache is the point here (nfs serving, tsdb, streams)
   homelab.dropCaches = false;
+
+  # consistent copy for the snapshot, the live file may be mid-write
+  homelab.dbBackup.databases.grafana.sqlite = "/var/lib/grafana/data/grafana.db";
 }

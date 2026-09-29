@@ -1,4 +1,4 @@
-# vm-104 alerting: grafana instance-down rule
+# vm-105 alerting: grafana instance-down rule
 { pkgs, lib, ... }:
 pkgs.testers.runNixOSTest {
   name = "monitoring";

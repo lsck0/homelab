@@ -7,7 +7,7 @@ terraform {
   }
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # PROXMOX CONNECTION
 variable "proxmox_api_url" { type = string }
 variable "proxmox_api_token_id" { type = string }
@@ -42,7 +42,7 @@ variable "proxmox_ssh_password" {
   default   = null
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # VM DEFAULTS
 variable "ssh_public_key" { type = string }
 variable "nixos_lxc_template" {
@@ -56,7 +56,7 @@ variable "nixos_image_id" {
   default = "local:iso/nixos.img"
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # NETWORK BRIDGES
 variable "wan_bridge" {
   type    = string
@@ -71,7 +71,7 @@ variable "external_bridge" {
   default = "vmbr200"
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # SUBNETS
 variable "internal_subnet" {
   type    = string
@@ -82,7 +82,7 @@ variable "external_subnet" {
   default = "10.200.0.0/24"
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # ROUTER VM (VM-300)
 variable "router_internal_ip" {
   type    = string

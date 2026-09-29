@@ -18,7 +18,7 @@ current() { sops -d --extract "[\"$1\"]" "$SECRETS" 2>/dev/null || true; }
 put() { sops set "$SECRETS" "[\"$1\"]" "$(jq -Rs . <<< "$2" | sed 's/\\n"$/"/')"; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # SSH KEY (LAB)
 if [ -z "$(current hermes-ssh-key)" ] || [ "$FORCE" = --force ] || [ ! -f "$PUB" ]; then
   ssh-keygen -q -t ed25519 -N "" -C "hermes@vm-114" -f "$tmp/lab"
@@ -30,7 +30,7 @@ else
   echo ">>> hermes-ssh-key already set"
 fi
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # GITHUB APP (PULL REQUESTS)
 APP_JSON="$ROOT_DIR/src/modules/hermes/github-app.json"
 if [ -z "$(current hermes-github-app-key)" ] || [ ! -f "$APP_JSON" ] || [ "$FORCE" = --force ]; then
@@ -112,7 +112,7 @@ else
 fi
 echo ">>> ruleset protect-master active"
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # PROMPTED
 ask() { # name prompt
   if [ -n "$(current "$1")" ] && [ "$FORCE" != --force ]; then

@@ -7,6 +7,7 @@ in {
   imports = [
     ./db-backup.nix
     ./docker-stack.nix
+    ./local-state.nix
     ./nas.nix
     ./network.nix
     ./traefik.nix
@@ -72,6 +73,8 @@ in {
     # namespaced start needs a statedir
     systemd.services.promtail = lib.mkIf promtailOn {
       serviceConfig.StateDirectory = "promtail";
+      # journal-remote writes its files 0640 to its own group; without it no remote host reaches loki
+      serviceConfig.SupplementaryGroups = lib.optional isCollector "systemd-journal-remote";
     };
     services.promtail = lib.mkIf promtailOn {
       enable = true;
@@ -122,7 +125,9 @@ in {
     networking.enableIPv6 = false;
 
     # every deploy adds an uncollected generation
-    nix.gc = { automatic = true; dates = "weekly"; options = "--delete-older-than 14d"; };
+    # deploys come in bursts; 14d kept 20+ generations and filled small disks
+    nix.gc = { automatic = true; dates = "daily"; options = "--delete-older-than 3d"; };
+    services.journald.extraConfig = "SystemMaxUse=200M";
     nix.optimise.automatic = true;
 
     nix.settings.experimental-features = [ "nix-command" "flakes" ];

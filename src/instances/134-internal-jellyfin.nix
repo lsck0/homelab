@@ -125,43 +125,18 @@ in {
     };
   };
 
-  # jellyfin db local (sqlite on nfs), nas keeps a copy
   fileSystems = nasMount "/var/lib/janitorr" "janitorr"
-    // nasMount "/srv/jellyfin-nas" "jellyfin"
     // nasPath "/data" "bulk"
     // nasMount T "homepage-tokens";
 
-  # fresh disk: restore from the NAS copy
-  # marker, not config/: tmpfiles creates config/ first
-  systemd.services.jellyfin-seed = {
-    before = [ "podman-jellyfin.service" ];
-    requiredBy = [ "podman-jellyfin.service" ];
-    unitConfig.RequiresMountsFor = [ "/srv/jellyfin-nas" ];
-    unitConfig.ConditionPathExists = "!/var/lib/jellyfin/.seeded";
-    path = [ pkgs.rsync ];
-    serviceConfig.Type = "oneshot";
-    script = ''
-      rsync -a --delete --exclude cache --exclude .seeded /srv/jellyfin-nas/ /var/lib/jellyfin/
-      touch /var/lib/jellyfin/.seeded
-    '';
+  # jellyfin db local, the nas keeps a nightly copy
+  homelab.localState.jellyfin = {
+    path = "/var/lib/jellyfin";
+    share = "jellyfin";
+    unit = "podman-jellyfin";
+    sqlite = [ "config/data/*.db" ];
   };
-  # restart so the seed runs before jellyfin on this deploy
-  systemd.services.podman-jellyfin.restartTriggers = [ config.systemd.services.jellyfin-seed.script ];
 
-  systemd.services.jellyfin-mirror = {
-    startAt = "01:15";
-    unitConfig.RequiresMountsFor = [ "/srv/jellyfin-nas" ];
-    # never mirror an unseeded install over the nas copy
-    unitConfig.ConditionPathExists = "/var/lib/jellyfin/.seeded";
-    path = [ pkgs.rsync pkgs.sqlite ];
-    serviceConfig.Type = "oneshot";
-    script = ''
-      rsync -a --delete --exclude cache --exclude .seeded --exclude 'config/data/*.db*' /var/lib/jellyfin/ /srv/jellyfin-nas/
-      for db in /var/lib/jellyfin/config/data/*.db; do
-        sqlite3 "$db" ".backup /srv/jellyfin-nas/config/data/$(basename "$db")"
-      done
-    '';
-  };
 
   virtualisation.oci-containers.containers = {
     jellyfin = {
@@ -451,7 +426,7 @@ in {
             EnableAllFolders: true,
             EnabledFolders: [],
             AdminRoles: ["admins"],
-            Roles: ["media"],
+            Roles: ["app-jellyfin"],
             EnableFolderRoles: false,
             RoleClaim: "groups",
             OidScopes: ["groups"],

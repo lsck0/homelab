@@ -38,7 +38,7 @@
     ) (builtins.readDir ./instances);
   in {
     # usage: nix build .#checks.x86_64-linux.<name>
-    checks.${system} = lib.genAttrs [ "on-demand" "kopia" "swarm" "minecraft" "monitoring" "renumber" ]
+    checks.${system} = lib.genAttrs [ "on-demand" "kopia" "swarm" "minecraft" "monitoring" ]
       (name: import ./tests/${name}.nix { inherit pkgs lib inputs; });
 
     packages.${system} = {

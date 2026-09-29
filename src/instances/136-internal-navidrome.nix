@@ -68,4 +68,7 @@
   };
 
   networking.firewall.allowedTCPPorts = [ 80 ];
+
+  # consistent copy for the snapshot, the live file may be mid-write
+  homelab.dbBackup.databases.navidrome.sqlite = "/var/lib/navidrome/navidrome.db";
 }

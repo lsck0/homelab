@@ -83,7 +83,7 @@ in {
     homelab.ingressOnly = {
       ports = lib.mapAttrsToList (_: app: app.hostPort) cfg;
       extraSources = map (id: "10.100.0.${toString id}/32")
-        [ 112 128 134 ];
+        [ 128 134 ];
     };
   };
 }

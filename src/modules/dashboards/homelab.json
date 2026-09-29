@@ -236,7 +236,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "count(ALERTS{alertstate=\"firing\"}) or vector(0)",
+          "expr": "count(homelab_alert_firing) or vector(0)",
           "instant": true,
           "range": false
         }
@@ -1500,7 +1500,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "topk(15, sum by (ClientHost) (count_over_time({job=\"traefik-access\"} | json [$__range])))",
+          "expr": "topk(15, sum by (ClientHost) (count_over_time({job=\"traefik-access\"} | json ClientHost | __error__=\"\" [$__range])))",
           "instant": true,
           "queryType": "instant"
         }
@@ -1606,7 +1606,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "topk(15, sum by (request_User_Agent) (count_over_time({job=\"traefik-access\"} | json [$__range])))",
+          "expr": "topk(15, sum by (request_User_Agent) (count_over_time({job=\"traefik-access\"} | json request_User_Agent=\"[\\\"request_User-Agent\\\"]\" | __error__=\"\" [$__range])))",
           "instant": true,
           "queryType": "instant"
         }
@@ -1712,7 +1712,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "topk(15, sum by (RequestPath) (count_over_time({job=\"traefik-access\"} | json [$__range])))",
+          "expr": "topk(15, sum by (RequestPath) (count_over_time({job=\"traefik-access\"} | json RequestPath | __error__=\"\" [$__range])))",
           "instant": true,
           "queryType": "instant"
         }
@@ -1818,7 +1818,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "topk(15, sum by (ClientHost) (count_over_time({job=\"traefik-access\"} | json | DownstreamStatus >= 400 [$__range])))",
+          "expr": "topk(15, sum by (ClientHost) (count_over_time({job=\"traefik-access\"} | json ClientHost, DownstreamStatus | __error__=\"\" | DownstreamStatus >= 400 [$__range])))",
           "instant": true,
           "queryType": "instant"
         }
@@ -1916,7 +1916,7 @@
     },
     {
       "type": "table",
-      "title": "Sign-ins by user (Authelia)",
+      "title": "Failed sign-ins by user (Authelia)",
       "datasource": {
         "type": "loki",
         "uid": "loki"
@@ -1924,7 +1924,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "topk(10, sum by (user) (count_over_time({host=\"vm-101\", unit=\"authelia-main.service\"} |= \"Successful\" | regexp \"by user '(?P<user>[^']+)'\" [$__range])))",
+          "expr": "topk(10, sum by (user) (count_over_time({unit=\"authelia-main.service\"} |= \"Unsuccessful 1FA\" | regexp \"by user '(?P<user>[^']+)'\" [$__range])))",
           "instant": true,
           "queryType": "instant"
         }
@@ -2598,7 +2598,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (host) (count_over_time({job=\"systemd-journal\", level=~\"err|warning|crit|alert|emerg\"} [$__interval]))",
+          "expr": "sum by (host) (count_over_time({job=\"systemd-journal\", level=~\"error|warning|crit|alert|emerg\"} [$__interval]))",
           "legendFormat": "{{host}}"
         }
       ],
@@ -2626,7 +2626,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "{job=\"systemd-journal\", level=~\"err|crit|alert|emerg\"}"
+          "expr": "{job=\"systemd-journal\", level=~\"error|crit|alert|emerg\"}"
         }
       ],
       "gridPos": {

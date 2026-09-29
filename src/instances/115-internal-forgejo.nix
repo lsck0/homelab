@@ -289,4 +289,7 @@
   ];
 
   networking.firewall.allowedTCPPorts = [ 80 2222 ];
+
+  # consistent copy for the snapshot, the live file may be mid-write
+  homelab.dbBackup.databases.forgejo.sqlite = "/var/lib/forgejo/gitea/gitea.db";
 }

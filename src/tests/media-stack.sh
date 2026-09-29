@@ -89,7 +89,7 @@ run_app bazarr    "$(image 130-internal-arr bazarr)"             16767:6767 -v "
 mkdir -p "$W/manga" "$W/books"
   -v "$W/media/manga:/manga:ro" -v "$W/media/books:/books:ro"
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # PER-VM SETUP UNITS
 Q="s#/var/lib/qbittorrent#$W/qbittorrent#g"
 run_unit 112-internal-qbittorrent qbittorrent-disable-auth "$Q" \
@@ -122,7 +122,7 @@ done
 
 echo ">>> Exported tokens: $(cd "$W/tokens" && echo *)"
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # ARR-WIRE (THE REAL SCRIPT BUILT FOR VM-130, RUN ON THE TEST NETWORK)
 nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.130-internal-arr.config.systemd.services.arr-wire.serviceConfig.ExecStart"
 WIRE=$(nixeval 130-internal-arr systemd.services.arr-wire.serviceConfig.ExecStart)
@@ -215,7 +215,7 @@ echo ">>> Idempotence: second arr-wire run must change nothing"
 out=$(arr_wire 2>&1); echo "$out"
 if echo "$out" | grep -vE "unreachable, skipped" | grep -qE "added|connected|initialised|failed"; then fail "arr-wire second run made changes"; else ok "arr-wire second run is a no-op"; fi
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # JANITORR
 echo ">>> Janitorr with the config NixOS renders"
 mkdir -p "$W/janitorr/logs" "$W/janitorr/stats"; chmod -R 777 "$W/janitorr"

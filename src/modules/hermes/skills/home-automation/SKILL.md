@@ -18,9 +18,9 @@ metadata:
 - Publish: `mosquitto_pub -h 10.100.0.125 -t <topic> -m '<payload>'` (install on demand: `nix shell nixpkgs#mosquitto`, or run it on vm-125 via ssh).
 - Watch: `ssh 10.100.0.125 "mosquitto_sub -t '#' -v -W 10"`.
 
-## Home Assistant (vm-125, http://10.100.0.125, currently enabled = false)
+## Home Assistant (vm-125, http://10.100.0.125)
 
-If enabled: token `lab-token hass-key`, header `Authorization: Bearer <token>`.
+Token `lab-token hass-key`, header `Authorization: Bearer <token>`.
 - States: `GET /api/states`, one entity `GET /api/states/<entity_id>`.
 - Call a service: `POST /api/services/<domain>/<service> {"entity_id":"light.kitchen"}`.
 - Automations live in `/var/lib/homeassistant/automations.yaml` (NAS); reload `POST /api/services/automation/reload`.

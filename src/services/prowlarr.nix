@@ -1,8 +1,5 @@
 # prowlarr: indexer manager, indexer traffic through tor, flaresolverr beside it
-{ config, lib, pkgs, ... }:
-let
-  hostIp = (lib.head config.networking.interfaces.eth0.ipv4.addresses).address;
-in {
+{ pkgs, hostIp, ... }: {
   homelab.servarr.prowlarr = {
     image = "lscr.io/linuxserver/prowlarr:2.6.5.5623-ls161";
     port = 9696;

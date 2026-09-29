@@ -108,7 +108,7 @@ let
     crowdsec-noappsec = mkBouncer false;
   });
 
-  # ── bot defence: robots.txt / llms.txt and the labyrinth ────────────────────
+  # -- bot defence: robots.txt / llms.txt and the labyrinth --------------------
   robotsTxt = pkgs.writeText "robots.txt" (''
     # Crawlers that collect training data are not welcome here. The ones that
     # ignore this file are served https://iocaine.madhouse-project.org/ instead.
@@ -518,6 +518,32 @@ in {
         OnUnitActiveSec = "5min";
         AccuracySec = "30s";
       };
+    };
+
+    # the access log is only ever appended to
+    services.logrotate.settings."/var/log/traefik/access.log" = {
+      frequency = "daily";
+      rotate = 7;
+      compress = true;
+      copytruncate = true;
+      missingok = true;
+    };
+
+    # blocked attempts of the last hour and their main scenario, for grafana's attack alert
+    systemd.services.crowdsec-alerts-metric = lib.mkIf cfg.crowdsecBouncer.enable {
+      description = "Publish CrowdSec alerts of the last hour";
+      after = [ "podman-crowdsec.service" ];
+      startAt = "*:0/5";
+      path = [ pkgs.podman pkgs.jq pkgs.coreutils ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        a=$(podman exec crowdsec cscli alerts list --since 1h -o json) || exit 0
+        n=$(echo "$a" | jq 'length')
+        top=$(echo "$a" | jq -r 'if length == 0 then "" else (group_by(.scenario) | max_by(length) | .[0].scenario) end')
+        d=/var/lib/node-exporter-textfile
+        printf '# TYPE homelab_crowdsec_alerts_1h gauge\nhomelab_crowdsec_alerts_1h{top="%s"} %s\n' "$top" "$n" > $d/crowdsec.prom.tmp
+        mv $d/crowdsec.prom.tmp $d/crowdsec.prom
+      '';
     };
 
     systemd.services.crowdsec-register-bouncer = lib.mkIf cfg.crowdsecBouncer.enable {

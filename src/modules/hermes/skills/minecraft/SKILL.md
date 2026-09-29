@@ -13,8 +13,8 @@ metadata:
 
 # Minecraft (vm-208, 10.200.0.208, mc.lsck0.dev)
 
-The VM is on demand: it boots when a player connects and shuts down after
-its cooldown without players. Use `terminal` for all steps.
+The VM is disabled (`enabled = false` in instances.tf). Once set to `"onDemand"` it boots when a
+player connects and shuts down after its cooldown without players. Use `terminal` for all steps.
 
 ## Start the server
 

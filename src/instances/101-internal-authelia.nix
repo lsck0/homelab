@@ -22,20 +22,16 @@ let
   # runtime-generated config fragments
   oidcClientsFile = "${stateDir}/oidc-clients.yml";
   ldapFile = "${stateDir}/ldap.yml";
-  secretsDir = "${stateDir}/secrets";
 
   oidcClients = [
     {
       id = "forgejo";
       name = "Forgejo";
       secretName = "forgejo-oidc-secret";
-      # forgejo posts the secret (7.0.16+gitea-1.21.11)
-      tokenAuthMethod = "client_secret_post";
+      # forgejo 7.0.16 tries basic first and only falls back to post, logging an error each login
+      tokenAuthMethod = "client_secret_basic";
       # callback path follows the forgejo source name
-      redirectUris = [
-        "https://git.lsck0.dev/user/oauth2/authelia/callback"
-        "https://git.lsck0.dev/user/oauth2/authentik/callback"
-      ];
+      redirectUris = [ "https://git.lsck0.dev/user/oauth2/authelia/callback" ];
     }
     {
       id = "jellyfin";
@@ -118,6 +114,11 @@ in {
   homelab.dbBackup.databases.authelia.sqlite = "${stateDir}/db.sqlite3";
 
   # lldap bind password: sops.secrets.lldap-admin-password, declared by services/lldap.nix
+  sops.secrets.authelia-jwt-secret = { owner = "authelia-main"; };
+  sops.secrets.authelia-storage-key = { owner = "authelia-main"; };
+  sops.secrets.authelia-session-secret = { owner = "authelia-main"; };
+  sops.secrets.authelia-oidc-hmac = { owner = "authelia-main"; };
+  sops.secrets.authelia-oidc-issuer-key = { owner = "authelia-main"; };
   sops.secrets.forgejo-oidc-secret = {};
   sops.secrets.jellyfin-oidc-secret = {};
   sops.secrets.headplane-oidc-secret = {};
@@ -129,7 +130,7 @@ in {
     description = "Generate Authelia secrets, users and OIDC clients";
     before = [ "authelia-main.service" ];
     requiredBy = [ "authelia-main.service" ];
-    path = [ pkgs.openssl pkgs.authelia pkgs.coreutils pkgs.gnused ];
+    path = [ pkgs.authelia pkgs.coreutils pkgs.gnused ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -137,19 +138,6 @@ in {
     script = ''
       set -euo pipefail
       umask 077
-      mkdir -p ${secretsDir}
-
-      gen_hex() {
-        [ -s "$1" ] || openssl rand -hex 32 | tr -d '\n' > "$1"
-      }
-      gen_hex ${secretsDir}/jwt
-      gen_hex ${secretsDir}/storage-encryption-key
-      gen_hex ${secretsDir}/session
-      gen_hex ${secretsDir}/oidc-hmac
-
-      if [ ! -s ${secretsDir}/oidc-issuer.pem ]; then
-        openssl genrsa -out ${secretsDir}/oidc-issuer.pem 4096
-      fi
 
       # --- ldap bind password, out of the store ---
       LDAP_PASS=$(cat ${config.sops.secrets.lldap-admin-password.path})
@@ -179,7 +167,6 @@ in {
       EOF
 
       chown -R authelia-main:authelia-main ${stateDir}
-      chmod 700 ${secretsDir}
     '';
   };
 
@@ -187,11 +174,12 @@ in {
     enable = true;
 
     secrets = {
-      jwtSecretFile = "${secretsDir}/jwt";
-      storageEncryptionKeyFile = "${secretsDir}/storage-encryption-key";
-      sessionSecretFile = "${secretsDir}/session";
-      oidcHmacSecretFile = "${secretsDir}/oidc-hmac";
-      oidcIssuerPrivateKeyFile = "${secretsDir}/oidc-issuer.pem";
+      # in sops, not generated here: the storage key decrypts the 2fa data in the db dumps
+      jwtSecretFile = config.sops.secrets.authelia-jwt-secret.path;
+      storageEncryptionKeyFile = config.sops.secrets.authelia-storage-key.path;
+      sessionSecretFile = config.sops.secrets.authelia-session-secret.path;
+      oidcHmacSecretFile = config.sops.secrets.authelia-oidc-hmac.path;
+      oidcIssuerPrivateKeyFile = config.sops.secrets.authelia-oidc-issuer-key.path;
     };
 
     settingsFiles = [ oidcClientsFile ldapFile ];

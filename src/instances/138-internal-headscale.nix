@@ -39,7 +39,7 @@ in
   };
   sops.secrets.headscale-oidc-secret = { owner = "headscale"; };
 
-  # ── Headplane ──────────────────────────────────────────────────────────────
+  # -- Headplane --------------------------------------------------------------
   # the web ui headscale does not ship
   virtualisation.oci-containers.containers.headplane = {
     image = "ghcr.io/tale/headplane:0.6.0";
@@ -139,4 +139,7 @@ in
   # 80 headscale (relayed for client registration)
   networking.firewall.allowedTCPPorts = [ 80 3000 ];
   homelab.ingressOnly.ports = [ 3000 ];
+
+  # consistent copy for the snapshot, the live file may be mid-write
+  homelab.dbBackup.databases.headscale.sqlite = "/var/lib/headscale/db.sqlite";
 }

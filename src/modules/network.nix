@@ -59,6 +59,9 @@ in {
   };
 
   config = lib.mkMerge [
+    # the guest's own address, for services that hand it to their containers
+    { _module.args.hostIp = if vm != null then vm.ip else null; }
+
     (lib.mkIf (vm != null) {
       networking.useDHCP = lib.mkDefault false;
       networking.interfaces.eth0.ipv4.addresses = [{ address = vm.ip; prefixLength = vm.prefix; }];

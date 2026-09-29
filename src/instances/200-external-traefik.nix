@@ -18,11 +18,12 @@ in {
   networking.hostName = "vm-200";
 
   # backends wake via homelab.onDemand
-  sops.secrets.proxmox-api-token = {};
+  # wake@pve!ondemand: vm status, start, shutdown only, not the terraform admin token
+  sops.secrets.proxmox-wake-token = {};
   homelab.onDemand = {
     enable = true;
     side = "external";
-    tokenFile = config.sops.secrets.proxmox-api-token.path;
+    tokenFile = config.sops.secrets.proxmox-wake-token.path;
     services = lib.listToAttrs (lib.imap0 (i: name: lib.nameValuePair name {
       inherit (routes.${name}) vmid;
       targetPort = routes.${name}.port;

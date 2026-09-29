@@ -3,7 +3,7 @@ let
   # see nixpkgs-unstable in flake.nix
   runnerPackage = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-runner;
 
-  # ───────────────────────────────────────────────────────────────────────────
+  # ---------------------------------------------------------------------------
   # ADD OR REMOVE A REPO HERE.
   repos = {
     "lsck0/homelab" = 2;
@@ -134,7 +134,8 @@ in {
   # lab names without cloudflare
   networking.hosts = {
     "10.100.0.118" = [ "registry.lsck0.dev" ];
-    "10.100.0.115" = [ "git.lsck0.dev" ];
+    # the ingress, not forgejo itself: only traefik terminates https for it
+    "10.100.0.100" = [ "git.lsck0.dev" ];
     "10.100.0.110" = [ "sccache.lsck0.dev" ];
   };
 

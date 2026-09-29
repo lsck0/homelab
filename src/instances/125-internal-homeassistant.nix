@@ -4,7 +4,9 @@ let
   oidcAuth = pkgs.fetchzip {
     url = "https://github.com/christiaangoossens/hass-oidc-auth/releases/download/v1.2.1/hass-oidc-auth.zip";
     stripRoot = false;
-    hash = "sha256-zrOc7cRcME7v7dy4d+6kSyALdyKx+3LjetOc/cauN1c=";
+    # bump the css cache-buster: cloudflare cached the pre-fix 404 for 31 days under ?v=5
+    postFetch = "sed -i 's|style.css?v=5|style.css?v=lab1|' $out/views/templates/base.html";
+    hash = "sha256-BJD5E5nG9CosPdbsSqP5t2bDKXYWD0HLcVWNgCVcFH4=";
   };
 
   hassConfig = pkgs.writeText "configuration.yaml" ''
@@ -290,4 +292,7 @@ in {
 
   networking.firewall.allowedTCPPorts = [ 80 1883 ];
   homelab.ingressOnly.ports = [ 80 ];
+
+  # consistent copy for the snapshot, the live file may be mid-write
+  homelab.dbBackup.databases.homeassistant.sqlite = "/var/lib/homeassistant/home-assistant_v2.db";
 }

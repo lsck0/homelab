@@ -25,7 +25,7 @@ digest with start-first updates (no downtime; failed healthcheck = rollback).
 Note: the `hello-gh` stack has no image yet. `example/.github/workflows/hello.yml`
 is a template, not an active workflow in this repo, so nothing has ever pushed
 `ghcr.io/lsck0/hello` and the swarm task stays `Rejected: No such image`. That
-route is marked `monitor = false` in routes.nix so it is not a standing alert.
+route stays red on Homepage and in the blackbox probe until an image is pushed.
 
 ## Runners
 

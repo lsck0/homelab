@@ -1,8 +1,6 @@
 # paperless-ai: llm tagging for paperless; the host mounts /var/lib/homepage-tokens
-{ config, lib, pkgs, nasMount, retry, ... }:
+{ lib, pkgs, nasMount, retry, hostIp, ... }:
 let
-  # the host address, the container's loopback is its own
-  hostIp = (lib.head config.networking.interfaces.eth0.ipv4.addresses).address;
   # local ollama beside jellyfin on the rtx 2060; documents stay in the lab
   llmUrl = "http://10.100.0.134:11434";
   # 7b: 4b left titles empty; no thinking model, answers are capped at 256 tokens
@@ -39,6 +37,7 @@ in {
       mkdir -p /var/lib/paperless-ai
       umask 077
       cat > /var/lib/paperless-ai/.env <<EOF
+      # the host address: the container's loopback is its own
       PAPERLESS_API_URL=http://${hostIp}:8080/api
       PAPERLESS_API_TOKEN=$(cat "$TOKEN_FILE")
       # owner of that token (paperless-setup); unset aborts every scan
@@ -82,4 +81,9 @@ in {
   ];
 
   networking.firewall.allowedTCPPorts = [ 80 ];
+  # its /setup page asks for no login and the container holds the paperless api token
+  homelab.ingressOnly.ports = [ 80 ];
+
+  # consistent copy for the snapshot, the live file may be mid-write
+  homelab.dbBackup.databases.paperless-ai.sqlite = "/var/lib/paperless-ai/documents.db";
 }

@@ -72,8 +72,9 @@ let
     "    - ${e.name}:"
     "        icon: ${e.icon}"
     "        href: https://${r.host}.lsck0.dev"
-    "        siteMonitor: ${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}${r.health or ""}"
-  ] + lib.optionalString (desc != "") "        description: ${desc}\n"
+  ] + lib.optionalString (stateOf e != "false")
+      "        siteMonitor: ${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}${r.health or ""}\n"
+    + lib.optionalString (desc != "") "        description: ${desc}\n"
     + lib.optionalString (e ? widget) "        widget: ${builtins.toJSON e.widget}\n";
   groupYaml = g: "- ${g.name}:\n" + lib.concatMapStrings entryYaml g.entries;
 

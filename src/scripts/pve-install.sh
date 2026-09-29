@@ -156,6 +156,15 @@ fi
 printf '%s\n' "$TOKEN_SECRET" > /root/terraform_token.txt
 chmod 600 /root/terraform_token.txt
 
+# on-demand wake from the traefiks: status, start, shutdown and nothing else; its token goes into
+# src/secrets.json as proxmox-wake-token ("wake@pve!ondemand=<secret>")
+pveum role list 2>/dev/null | grep -q HomelabWake || pveum role add HomelabWake --privs "VM.Audit,VM.PowerMgmt"
+pveum user list 2>/dev/null | grep -q "wake@pve" || pveum user add wake@pve --comment "on-demand wake"
+pveum acl modify /vms --users wake@pve --roles HomelabWake
+pveum user token list wake@pve 2>/dev/null | grep -q ondemand \
+  || pveum user token add wake@pve ondemand --privsep 1 --comment "traefik on-demand" > /root/wake_token.txt
+pveum acl modify /vms --tokens 'wake@pve!ondemand' --roles HomelabWake
+
 # read-only user for the homepage widget
 if ! pveum user list 2>/dev/null | grep -q "homepage@pve"; then
     pveum user add homepage@pve --password "homepage-readonly" >/dev/null 2>&1 || true
@@ -172,7 +181,7 @@ printf '%s\n' "$HOMEPAGE_TOKEN" > /root/homepage_token.txt
 chmod 600 /root/homepage_token.txt
 
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # LDAP REALM (lldap)
 if [ -z "$LLDAP_BIND_PASSWORD" ]; then
     echo ">>> No lldap bind password given, skipping the LDAP realm."
@@ -206,7 +215,7 @@ else
     echo ">>> lldap realm ready: sign in as <user>@lldap"
 fi
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # BULK STORAGE (the spinning disk)
 BULK_DISK=${BULK_DISK:-/dev/disk/by-id/ata-WDC_WD20EZRZ-00Z5HB0_WD-WCC4N3KNZ2KS}
 if ! vgs bulk >/dev/null 2>&1; then
@@ -229,7 +238,7 @@ if vgs bulk >/dev/null 2>&1 && ! pvesm status --storage bulk >/dev/null 2>&1; th
     echo ">>> Proxmox storage 'bulk' ready"
 fi
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # OSSEC (host intrusion detection)
 OSSEC_VERSION=${OSSEC_VERSION:-3.8.0}
 if [ ! -d /var/ossec ]; then

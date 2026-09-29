@@ -9,11 +9,12 @@ in {
   networking.hostName = "vm-100";
 
   # backends wake via homelab.onDemand
-  sops.secrets.proxmox-api-token = {};
+  # wake@pve!ondemand: vm status, start, shutdown only, not the terraform admin token
+  sops.secrets.proxmox-wake-token = {};
   homelab.onDemand = {
     enable = true;
     side = "internal";
-    tokenFile = config.sops.secrets.proxmox-api-token.path;
+    tokenFile = config.sops.secrets.proxmox-wake-token.path;
     # port 20000 + index, routes can share a vm
     services = lib.listToAttrs (lib.imap0 (i: name: lib.nameValuePair name {
       inherit (routes.${name}) vmid;

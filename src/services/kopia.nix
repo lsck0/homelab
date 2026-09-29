@@ -122,6 +122,13 @@ in {
         --add-ignore=/bulk --add-ignore=/data/qbittorrent-incomplete \
         --add-ignore=/documents/archive \
         --one-file-system=false
+      # the nas's own local state: syncthing identity and filebrowser users live off /srv/nas
+      for extra in /var/lib/syncthing /var/lib/filebrowser; do
+        kopia policy set "$extra" --snapshot-time=02:00 --compression=zstd \
+          --keep-latest=3 --keep-daily=7 --keep-weekly=8 --keep-monthly=12
+        # the server only schedules sources that already have a snapshot
+        kopia snapshot list "$extra" --json | jq -e 'length > 0' >/dev/null || kopia snapshot create "$extra"
+      done
     '';
   };
 
@@ -171,7 +178,7 @@ in {
   networking.firewall.allowedTCPPorts = [ 51515 ];
   homelab.ingressOnly.ports = [ 51515 ];
 
-  # ─────────────────────────────────────────────────────────────────────────────
+  # -----------------------------------------------------------------------------
   # OFF-SITE: PROTON DRIVE (repo shares the data's disk)
   sops.secrets.proton-username = {};
   sops.secrets.proton-password = {};

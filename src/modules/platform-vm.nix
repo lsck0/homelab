@@ -20,6 +20,8 @@
     };
 
     services.qemuGuest.enable = true;
+    # hands freed blocks back to the thin pools (disks are discard=on)
+    services.fstrim.enable = true;
     # lower idle power, same throughput
     powerManagement.cpuFreqGovernor = "powersave";
 

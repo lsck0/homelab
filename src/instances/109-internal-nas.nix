@@ -5,7 +5,7 @@
   networking.hostName = "vm-109";
 
   # dmz exports come from dmzShares (modules/nas.nix)
-  # ── bulk storage ───────────────────────────────────────────────────────────
+  # -- bulk storage -----------------------------------------------------------
   # hdd; media and torrents share a fs for hardlinks
   fileSystems."/srv/nas/bulk" = {
     device = "/dev/disk/by-label/bulk";

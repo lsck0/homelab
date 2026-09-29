@@ -2,8 +2,16 @@
   networking.hostName = "vm-128";
 
   # seerr: media requests, approvals go to the arr
-  fileSystems = nasMount "/var/lib/jellyseerr" "jellyseerr"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+  fileSystems = nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+
+  # sqlite on local disk: over nfs it died of SIGBUS every few minutes; the nas keeps a nightly copy
+  homelab.localState.jellyseerr = {
+    path = "/var/lib/jellyseerr";
+    share = "jellyseerr";
+    unit = "podman-jellyseerr";
+    sqlite = [ "db/db.sqlite3" ];
+    exclude = [ "cache" "logs" ];
+  };
 
   virtualisation.oci-containers.containers.jellyseerr = {
     # old jellyseerr image cannot log in to jellyfin 12
@@ -27,7 +35,7 @@
     description = "Export Jellyseerr API key";
     after = [ "podman-jellyseerr.service" ];
     # an lxc mounts nfs at boot, not on access: never write under an empty mountpoint
-    unitConfig.RequiresMountsFor = [ "/var/lib/jellyseerr" "/var/lib/homepage-tokens" ];
+    unitConfig.RequiresMountsFor = [ "/var/lib/homepage-tokens" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.jq pkgs.coreutils ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };

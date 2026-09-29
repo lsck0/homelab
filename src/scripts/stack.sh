@@ -6,7 +6,8 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TF="$ROOT_DIR/src/instances.tf"
 
 MEDIA="112 128 130 134 136"
-APPS="121 124 125 126"
+# 126 huginn stays off until it is needed
+APPS="121 124 125"
 
 usage() { echo "usage: $0 status | {media|apps} {on|off|onDemand} [--apply]"; exit 1; }
 

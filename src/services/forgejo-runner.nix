@@ -4,6 +4,8 @@
 
   # job containers; the host sets virtualisation.oci-containers.backend = "docker"
   virtualisation.docker.enable = true;
+  # job images pile up with every ci run
+  virtualisation.docker.autoPrune = { enable = true; dates = "weekly"; flags = [ "--all" "--filter" "until=168h" ]; };
 
   virtualisation.oci-containers.containers.forgejo-runner = {
     image = "code.forgejo.org/forgejo/runner:6.2.1";

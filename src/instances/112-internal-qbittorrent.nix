@@ -44,7 +44,7 @@ let
 in {
   networking.hostName = "vm-112";
 
-  # ── egress ──────────────────────────────────────────────────────────────
+  # -- egress --------------------------------------------------------------
   # router holds the tunnel and killswitch
 
   fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"

@@ -11,12 +11,14 @@
     path = [ pkgs.coreutils ];
     script = ''
       if [ ! -f /var/lib/searxng/settings.yml ]; then
-        cat > /var/lib/searxng/settings.yml << 'YAML'
+        # unquoted heredoc: the key must be generated here, a literal would be public in this repo
+        key=$(head -c 32 /dev/urandom | base64 | tr -d '/+=')
+        cat > /var/lib/searxng/settings.yml << YAML
       use_default_settings: true
       server:
         bind_address: "0.0.0.0"
         port: 8080
-        secret_key: "searxng-homelab-secret-$(head -c 32 /dev/urandom | base64)"
+        secret_key: "$key"
         limiter: false
         image_proxy: true
       search:

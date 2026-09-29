@@ -1,13 +1,8 @@
 """Merge ICS feeds into one calendar and a TRMNL payload."""
 
-import base64
-import hashlib
-import hmac
 import json
 import os
 import sys
-import time
-import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -55,7 +50,6 @@ def border_style(name):
 
 
 USER_AGENT = "homelab-calendar-sync/1"
-KRAKEN_API = "https://api.kraken.com"
 
 
 def log(msg):
@@ -472,72 +466,6 @@ def month_view(calendars, offset=0):
     }
 
 
-def kraken_ticker(pairs):
-    if not pairs:
-        return {}
-    try:
-        url = f"{KRAKEN_API}/0/public/Ticker?pair={urllib.parse.quote(','.join(pairs))}"
-        payload = json.loads(fetch(url))
-    except Exception as err:  # noqa: BLE001 - prices are optional decoration
-        log(f"kraken ticker: {err}")
-        return {}
-
-    if payload.get("error"):
-        log(f"kraken ticker: {payload['error']}")
-        return {}
-
-    ticker = {}
-    for pair, values in payload.get("result", {}).items():
-        try:
-            last = float(values["c"][0])
-            opening = float(values["o"])
-            change = ((last - opening) / opening * 100) if opening else 0.0
-            ticker[pair] = {"last": round(last, 2), "change_pct": round(change, 2)}
-        except (KeyError, ValueError, TypeError) as err:
-            log(f"kraken ticker {pair}: {err}")
-    return ticker
-
-
-def kraken_balance(key, secret):
-    """Call the private Balance endpoint, which needs an HMAC-SHA512 signature."""
-    path = "/0/private/Balance"
-    nonce = str(int(time.time() * 1000))
-    body = urllib.parse.urlencode({"nonce": nonce}).encode()
-
-    digest = hashlib.sha256(nonce.encode() + body).digest()
-    signature = hmac.new(base64.b64decode(secret), path.encode() + digest, hashlib.sha512)
-    headers = {
-        "API-Key": key,
-        "API-Sign": base64.b64encode(signature.digest()).decode(),
-        "Content-Type": "application/x-www-form-urlencoded",
-    }
-
-    try:
-        payload = json.loads(fetch(KRAKEN_API + path, headers=headers, data=body))
-    except Exception as err:  # noqa: BLE001 - balances are optional
-        log(f"kraken balance: {err}")
-        return {}
-
-    if payload.get("error"):
-        log(f"kraken balance: {payload['error']}")
-        return {}
-
-    # kraken lists every asset ever held, mostly zero
-    return {
-        asset: float(amount)
-        for asset, amount in payload.get("result", {}).items()
-        if float(amount) != 0
-    }
-
-
-def read_secret(path):
-    if not path or not os.path.exists(path):
-        return None
-    with open(path, encoding="utf-8") as handle:
-        value = handle.read().strip()
-    return value or None
-
-
 def write_atomic(path, data):
     """Write through a temporary file so a reader never sees a half-written feed."""
     tmp = f"{path}.tmp"
@@ -550,7 +478,6 @@ def write_atomic(path, data):
 def main():
     sources_file = os.environ["CALENDAR_SOURCES"]
     out_dir = os.environ["CALENDAR_OUT"]
-    pairs = [p for p in os.environ.get("KRAKEN_PAIRS", "").split(",") if p.strip()]
 
     os.makedirs(out_dir, exist_ok=True)
 
@@ -566,20 +493,12 @@ def main():
 
     write_atomic(os.path.join(out_dir, "merged.ics"), merge(calendars).to_ical())
 
-    key = read_secret(os.environ.get("KRAKEN_KEY_FILE"))
-    secret = read_secret(os.environ.get("KRAKEN_SECRET_FILE"))
-
     # `payload` is rebound below; keep a stable handle
     out_payload = payload = {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "sources": [name for name, _ in sources],
         "events": upcoming(calendars, HORIZON_DAYS),
-        "kraken": {
-            "ticker": kraken_ticker(pairs),
-            "balance": kraken_balance(key, secret) if key and secret else {},
-        },
     }
-    write_atomic(os.path.join(out_dir, "trmnl.json"), json.dumps(payload, indent=2))
 
     # one file per week: the device can't pick a week
     weeks = []

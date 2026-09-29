@@ -42,7 +42,7 @@ correspondent with `PATCH /api/documents/<id>/`.
 
 ## 3. Book it in Firefly III (vm-124, on demand)
 
-1. `vm start 123`, then wait until `curl -s -o /dev/null http://10.100.0.124:8080/` answers.
+1. `vm start 124`, then wait until `curl -s -o /dev/null http://10.100.0.124:8080/` answers.
 2. Token: `lab-token firefly-token`. If it does not exist, the owner has not
    registered in Firefly yet (https://firefly.lsck0.dev); tell them and stop here.
 3. Asset account to pay from: `GET /api/v1/accounts?type=asset`, use the

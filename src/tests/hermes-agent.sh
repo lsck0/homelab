@@ -35,7 +35,7 @@ ENV=$(nix build --no-warn-dirty --no-link --print-out-paths --impure --expr "
 mkdir -p "$W"/{home,workspace,shims,log,tokens,mock}; : > "$W/home/.env"
 chmod -R 777 "$W"
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # HERMES CONFIG
 if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
   MODEL_FILTER='.'
@@ -59,7 +59,7 @@ mkdir -p "$CACHE"; chmod 700 "$CACHE"
 [ -f "$CACHE/auth.json" ] && cp "$CACHE/auth.json" "$W/home/auth.json"
 save_identity() { [ -s "$W/home/auth.json" ] && cp "$W/home/auth.json" "$CACHE/auth.json"; true; }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # LAB SHIMS
 cat > "$W/shims/_log" <<'EOF'
 #!/bin/sh
@@ -147,7 +147,7 @@ git push -q -u origin HEAD && echo "pull request: https://github.com/lsck0/homel
 EOF
 chmod -R 777 "$W/remote.git"; chmod +x "$W/shims/lab-pr"
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # RECORDING MOCK FOR PAPERLESS + FIREFLY
 cat > "$W/mock/mock.py" <<'EOF'
 import json, http.server, uuid
@@ -194,7 +194,7 @@ docker rm -f ht-mock >/dev/null 2>&1 || true
 docker run -d --name ht-mock --network "$NET" --network-alias mock -v /nix/store:/nix/store:ro -v "$W:/work" \
   alpine "$ENV/bin/python3" /work/mock/mock.py >/dev/null
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # REAL SONARR FOR THE MEDIA SCENARIO
 if [[ " $SCENARIOS " == *" media "* ]]; then
   echo ">>> Starting Sonarr"
@@ -210,7 +210,7 @@ if [[ " $SCENARIOS " == *" media "* ]]; then
   done
 fi
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # AGENT RUNNER
 ask() { # ask <scenario> <prompt> [extra hermes args]
   local name=$1 prompt=$2; shift 2
@@ -247,12 +247,12 @@ for s in $SCENARIOS; do
     ask backup "Paperless broke yesterday evening around 20:00. Restore it from the last backup before that."
     yesterday=$(date -d yesterday +%F); good_id=$(printf 'snap%028d' 1)
     called 'nas-restore (list|files)|kopia.*snapshot list' && ok "backup: listed snapshots" || fail "backup: did not list snapshots"
-    called 'vm stop 120' && ok "backup: stopped vm-121 first" || fail "backup: did not stop vm-121"
+    called 'vm stop 121' && ok "backup: stopped vm-121 first" || fail "backup: did not stop vm-121"
     called 'nas-restore service paperless [^ ]+ --yes' && ok "backup: restored paperless" || fail "backup: did not run nas-restore service paperless"
-    if called 'vm stop 120' && called 'nas-restore service paperless'; then
-      [ "$(line_of 'vm stop 120')" -lt "$(line_of 'nas-restore service paperless')" ] && ok "backup: stop before restore" || fail "backup: restored while vm-121 running"
+    if called 'vm stop 121' && called 'nas-restore service paperless'; then
+      [ "$(line_of 'vm stop 121')" -lt "$(line_of 'nas-restore service paperless')" ] && ok "backup: stop before restore" || fail "backup: restored while vm-121 running"
     fi
-    called 'vm start 120' && ok "backup: started vm-121 again" || fail "backup: did not start vm-121 again"
+    called 'vm start 121' && ok "backup: started vm-121 again" || fail "backup: did not start vm-121 again"
     called "nas-restore service paperless ($good_id|$yesterday)( |\$)" \
       && ok "backup: restored yesterday's 02:00 snapshot by id/date" || fail "backup: wrong or age-based snapshot selection"
     ;;
@@ -273,7 +273,7 @@ for s in $SCENARIOS; do
     printf '.ps 14\nStadtwerke Duesseldorf AG\n.sp\nRechnung Nr. SW-2026-0815\n.br\nRechnungsdatum: 01.09.2026\n.br\nFaellig am: 15.09.2026\n.sp\nStrom August 2026 ........ 84,20 EUR\n.sp\nGesamtbetrag: 84,20 EUR\n' \
       | groff -Tpdf > "$W/workspace/rechnung-stadtwerke.pdf"
     ask bill "Here is a bill I got (attached: /work/workspace/rechnung-stadtwerke.pdf). File it in paperless and log it in firefly."
-    called 'vm start 123' && ok "bill: started Firefly VM" || fail "bill: did not start Firefly VM"
+    called 'vm start 124' && ok "bill: started Firefly VM" || fail "bill: did not start Firefly VM"
     grep -q '"path": "/paperless/api/documents/post_document/' "$W/log/mock.jsonl" && ok "bill: uploaded to Paperless" || fail "bill: no Paperless upload"
     grep -q 'Token fake-paperless-token' "$W/log/mock.jsonl" && ok "bill: Paperless token used" || fail "bill: Paperless token missing"
     tx=$(grep '"path": "/firefly/api/v1/transactions' "$W/log/mock.jsonl" | grep '"POST"' | tail -1 || true)
@@ -297,7 +297,7 @@ for s in $SCENARIOS; do
       git -C "$W/remote.git" diff "master...$branch" | sed -n '1,30p' | sed 's/^/      /'
       [ "$(git -C "$W/remote.git" diff --name-only "master...$branch")" = src/instances.tf ] \
         && ok "repo: only src/instances.tf changed" || fail "repo: unexpected files changed"
-      git -C "$W/remote.git" show "$branch:src/instances.tf" | grep -A4 '"123" = {' | grep -q 'cooldown = "1h"' \
+      git -C "$W/remote.git" show "$branch:src/instances.tf" | grep -A4 '"124" = {' | grep -q 'cooldown = "1h"' \
         && ok "repo: vm-124 cooldown is 1h" || fail "repo: vm-124 cooldown not 1h"
       git -C "$W/remote.git" log --format=%s "master..$branch" | grep -qE '^[a-z]+(\([a-z0-9-]+\))?!?: ' \
         && ok "repo: conventional commit" || fail "repo: commit message not conventional"

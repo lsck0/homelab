@@ -13,9 +13,9 @@ metadata:
 
 # VPN
 
-## Headscale (vm-201, https://hs.lsck0.dev, MagicDNS domain vpn.lsck0.dev)
+## Headscale (vm-138, https://hs.lsck0.dev, MagicDNS domain vpn.lsck0.dev)
 
-Run on the VM: `ssh 10.200.0.201 headscale <cmd>`.
+Run on the VM: `ssh 10.100.0.138 headscale <cmd>`.
 - Users: `headscale users list`, create `headscale users create <name>`.
 - Nodes: `headscale nodes list`; remove `headscale nodes delete -i <id>`; rename `headscale nodes rename -i <id> <name>`.
 - Join key for a new device: `headscale preauthkeys create --user <id-or-name> --expiration 1h`

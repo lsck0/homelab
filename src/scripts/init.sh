@@ -126,7 +126,7 @@ if [ ! -f "$SECRETS_FILE" ]; then
         "restic-password": $s9, "minecraft-rcon-password": $s10,
         "firefly-db-password": $s11, "firefly-app-key": $s12,
         "crowdsec-bouncer-key": "", "attic-server-token": "", "attic-pull-token": "",
-        "calendar-sources": "", "calendar-token": "", "kraken-api-key": "", "kraken-api-secret": "",
+        "calendar-sources": "", 
         "telegram-bot-token": "", "telegram-chat-id": "",
         "hermes-ssh-key": "", "hermes-llm-api-key": "",
         "wireguard-private-key": $wg

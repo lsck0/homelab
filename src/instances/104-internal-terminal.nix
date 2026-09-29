@@ -30,8 +30,6 @@ let
   incomingDir = "${calendarState}/incoming";
   uploadDir = "${calendarState}/uploads";
 
-  # kraken pair codes: XXBTZEUR is BTC/EUR
-  krakenPairs = "XXBTZEUR,XETHZEUR";
 
   # calendars only exported by hand
   uploadNames = [ "work" ];
@@ -77,6 +75,8 @@ let
   } (builtins.readFile ../scripts/calendar-sync.py);
 in {
   networking.hostName = "vm-104";
+  # footers and "today" in the payloads are local time
+  time.timeZone = "Europe/Berlin";
 
   # feed state on the nas, vm is disposable
   fileSystems = nasMount calendarState "calendar"
@@ -94,8 +94,6 @@ in {
     calendar-sources = {};
     # leaked feed url must not grant uploads
     calendar-upload-token = {};
-    kraken-api-key = {};
-    kraken-api-secret = {};
     # trmnl write token, can replace panels
     trmnl-api-key = {};
     # read-only: github panel
@@ -135,17 +133,18 @@ in {
     };
   };
 
+  sops.secrets.terminal-token = {};
+
   systemd.services.terminal-token = {
-    description = "Create the terminal feed directory and its access token";
+    description = "Create the terminal feed directory and place its access token";
     wantedBy = [ "multi-user.target" ];
     before = [ "nginx.service" "terminal-sync.service" ];
-    path = [ pkgs.coreutils pkgs.openssl ];
+    path = [ pkgs.coreutils ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
       mkdir -p ${terminalDir}
-      if [ ! -s ${terminalDir}/token ]; then
-        openssl rand -hex 24 | tr -d '\n' > ${terminalDir}/token
-      fi
+      # the token is in the trmnl plugin urls; from sops so a rebuilt guest keeps them working
+      install -m 600 ${config.sops.secrets.terminal-token.path} ${terminalDir}/token
       TOKEN=$(cat ${terminalDir}/token)
       mkdir -p ${terminalPublic}/$TOKEN
       # collector runs as nginx, owns the whole path
@@ -312,9 +311,6 @@ in {
       # sparse calendar needs a long window
       CALENDAR_HORIZON_DAYS = "90";
       CALENDAR_MAX_EVENTS = "12";
-      KRAKEN_PAIRS = krakenPairs;
-      KRAKEN_KEY_FILE = config.sops.secrets.kraken-api-key.path;
-      KRAKEN_SECRET_FILE = config.sops.secrets.kraken-api-secret.path;
     };
     script = ''
       OUT=${terminalPublic}/$(cat ${terminalDir}/token)

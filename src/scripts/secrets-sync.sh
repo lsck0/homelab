@@ -25,14 +25,14 @@ GENERATED=(
   crowdsec-bouncer-key
   ntfy-admin-password ntfy-grafana-password ntfy-hermes-password
   # unguessable url segments for feed and push
-  calendar-token calendar-upload-token
+  calendar-upload-token
 )
 
 # external secrets that cannot be invented
 MANUAL=(
   cloudflare-token proxmox-api-token proxmox-user proxmox-pass
   attic-server-token attic-pull-token
-  calendar-sources kraken-api-key kraken-api-secret
+  calendar-sources
   telegram-bot-token telegram-chat-id
   hermes-ssh-key hermes-llm-api-key hermes-github-app-key
   hermes-gemini-api-key hermes-glm-api-key

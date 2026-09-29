@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sync the entire lab: apply Terraform, deploy NixOS.
+# sync the entire lab: apply terraform, deploy nixos
 set -euo pipefail
 export SHELL=/bin/bash
 
@@ -18,7 +18,8 @@ ACTIVE_TFVARS_PATH=""
 ROUTER_WAN_IP="192.168.178.29"
 DEPLOY_FAILURE=0
 CLEANUP_FILES=()
-trap 'rm -f "${CLEANUP_FILES[@]}"' EXIT
+CLEANUP_AGENT=0
+trap '[ "$CLEANUP_AGENT" = 1 ] && ssh-agent -k >/dev/null 2>&1; rm -f "${CLEANUP_FILES[@]}"' EXIT
 
 echo ">>> SYNCING HARDWARE + OS..."
 
@@ -30,7 +31,7 @@ if [ "$BEHIND" -gt 0 ]; then
   exit 1
 fi
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # HELPERS
 read_tfvar() {
   jq -r --arg k "$1" 'if has($k) and .[$k] != null then .[$k] else empty end' "$ACTIVE_TFVARS_PATH"
@@ -117,14 +118,9 @@ deploy_nixos() {
   echo ">>> $name deployed."
 }
 
-# ─────────────────────────────────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
 # MAIN
 load_tfvars
-
-# pull unless the tree is dirty
-if git -C "$ROOT_DIR" diff --quiet && git -C "$ROOT_DIR" diff --cached --quiet; then
-  git -C "$ROOT_DIR" pull --rebase 2>/dev/null || echo "WARNING: git pull failed."
-fi
 
 # ssh transport
 PROXMOX_SSH_HOST="$(read_tfvar proxmox_ssh_host)"; : "${PROXMOX_SSH_HOST:=127.0.0.1}"
@@ -133,11 +129,15 @@ PROXMOX_SSH_USER="$(read_tfvar proxmox_ssh_user)"; : "${PROXMOX_SSH_USER:=root}"
 PROXMOX_SSH_PASSWORD="$(read_tfvar proxmox_ssh_password)"
 
 if [ -n "$PROXMOX_SSH_PASSWORD" ]; then
-  SSH_CMD=(sshpass -p "$PROXMOX_SSH_PASSWORD" ssh -p "$PROXMOX_SSH_PORT" -o StrictHostKeyChecking=accept-new)
+  # -e reads SSHPASS: -p would show the password in ps
   export SSHPASS="$PROXMOX_SSH_PASSWORD"
+  SSH_CMD=(sshpass -e ssh -p "$PROXMOX_SSH_PORT" -o StrictHostKeyChecking=accept-new)
 else
   SSH_CMD=(ssh -p "$PROXMOX_SSH_PORT" -o StrictHostKeyChecking=accept-new)
 fi
+
+# ssh key: generate if missing
+[ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/id_ed25519" -C "homelab@$(hostname)" >/dev/null
 
 # bpg provider imports vm disks over ssh
 if [ -f "$HOME/.ssh/id_ed25519" ]; then
@@ -149,7 +149,6 @@ if [ -f "$HOME/.ssh/id_ed25519" ]; then
     || ssh-add "$HOME/.ssh/id_ed25519" </dev/null >/dev/null 2>&1 \
     || echo "WARNING: could not add the deploy key to the ssh-agent."
 fi
-trap '[ "${CLEANUP_AGENT:-0}" = 1 ] && ssh-agent -k >/dev/null 2>&1; rm -f "${CLEANUP_FILES[@]}"' EXIT
 
 mkdir -p "$HOME/.ssh" && touch "$HOME/.ssh/known_hosts"
 ssh-keygen -R "[$PROXMOX_SSH_HOST]:$PROXMOX_SSH_PORT" >/dev/null 2>&1 || true
@@ -178,24 +177,12 @@ fi
 BASTION_SSHOPTS=(-F "$SSH_CONFIG")
 export NIX_SSHOPTS="-F $SSH_CONFIG"
 
-# ssh key: generate if missing
-[ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/id_ed25519" -C "homelab@$(hostname)" >/dev/null
 PUBKEY=$(cat "$HOME/.ssh/id_ed25519.pub")
 PROXMOX_API_TOKEN_ID="$(read_tfvar proxmox_api_token_id)"
 PROXMOX_API_TOKEN_SECRET="$(read_tfvar proxmox_api_token_secret)"
 PROXMOX_NODE="$(read_tfvar target_node)"
 PVE_API="https://$PROXMOX_SSH_HOST:8006/api2/json"
 PVE_AUTH="Authorization: PVEAPIToken=$PROXMOX_API_TOKEN_ID=$PROXMOX_API_TOKEN_SECRET"
-
-if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
-  # drop legacy vzdump jobs, they filled `local`
-  for jid in homelab-daily homelab-weekly homelab-monthly; do
-    if curl -sk "$PVE_API/cluster/backup/$jid" -H "$PVE_AUTH" | jq -e '.data.id' >/dev/null 2>&1; then
-      curl -sk -X DELETE "$PVE_API/cluster/backup/$jid" -H "$PVE_AUTH" >/dev/null \
-        && echo ">>> Removed vzdump job $jid (see /var/lib/vz/dump for old dumps)"
-    fi
-  done
-fi
 
 # hermes and the deployer get proxmox root
 for pub in "$ROOT_DIR/src/modules/hermes.pub" "$HOME/.ssh/id_ed25519.pub"; do
@@ -284,11 +271,6 @@ fi
 
 # terraform
 [ -d "$ROOT_DIR/src/.terraform" ] || terraform -chdir="$ROOT_DIR/src" init
-# pre-renumber state would recreate every vm
-if terraform -chdir="$ROOT_DIR/src" state list 2>/dev/null | grep -q '^module\.instances\.'; then
-  echo "ERROR: Terraform state still has the old VM ids. Run src/scripts/renumber.sh first."
-  exit 1
-fi
 TF_STAMP="$ROOT_DIR/src/.tf-last-apply"
 if [ ! -f "$TF_STAMP" ] || find "$ROOT_DIR/src" -maxdepth 2 \( -name '*.tf' -o -name '*.tfvars*' \) -newer "$TF_STAMP" | grep -q .; then
   echo ">>> Terraform: applying..."

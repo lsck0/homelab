@@ -21,7 +21,7 @@ let
         default = null;
         description = ''
           Shell command that writes a dump to stdout, for anything that is not
-          SQLite: `pg_dumpall`, `podman exec <ctr> pg_dump …`, `mysqldump`.
+          SQLite: `pg_dumpall`, `podman exec <ctr> pg_dump ...`, `mysqldump`.
         '';
       };
 
@@ -49,12 +49,15 @@ let
         exit 0
       fi
       tmp=$(mktemp -p "$out" .${name}.XXXXXX.sqlite)
+      trap 'rm -f "$tmp"' EXIT
       # online backup api, safe under a writer
       sqlite3 ${lib.escapeShellArg db.sqlite} ".backup '$tmp'"
       zstd -q -19 -o "$out/${name}-$stamp.sqlite.zst" "$tmp"
       rm -f "$tmp"
     '' else ''
       tmp=$(mktemp -p "$out" .${name}.XXXXXX)
+      # a failed dump must not leave its temp file behind
+      trap 'rm -f "$tmp"' EXIT
       ${db.command} > "$tmp"
       [ -s "$tmp" ] || { rm -f "$tmp"; echo "${name}: dump was empty"; exit 1; }
       zstd -q -19 -o "$out/${name}-$stamp.${db.suffix}.zst" "$tmp"
@@ -63,6 +66,10 @@ let
     # kopia retention covers the longer history
     ls -1t "$out"/${name}-*.zst 2>/dev/null | tail -n +${toString (cfg.keep + 1)} | xargs -r rm -f
     echo "${name}: dumped to $out"
+    # grafana's backup alert watches this
+    d=/var/lib/node-exporter-textfile
+    printf '# TYPE homelab_db_dump_last_success_timestamp_seconds gauge\nhomelab_db_dump_last_success_timestamp_seconds{db="%s"} %s\n' ${name} "$(date +%s)" > $d/db_dump_${name}.prom.tmp
+    mv $d/db_dump_${name}.prom.tmp $d/db_dump_${name}.prom
   '';
 in {
   options.homelab.dbBackup = {
@@ -102,6 +109,8 @@ in {
       description = "Dump ${name} to the NAS";
       after = [ "remote-fs.target" "network-online.target" ];
       wants = [ "network-online.target" ];
+      # lxc guests mount the nas at boot, not on access
+      unitConfig.RequiresMountsFor = [ dir ];
       path = [ pkgs.sqlite pkgs.zstd pkgs.coreutils pkgs.findutils ] ++ db.path;
       serviceConfig = { Type = "oneshot"; };
       script = script name db;
