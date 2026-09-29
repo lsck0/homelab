@@ -100,8 +100,10 @@
       [ -s "$tok" ] || { echo "no firefly token yet"; exit 0; }
       out=/var/lib/firefly-fints/homelab.json
       [ -s "$out" ] && exit 0
+      # bank_code/bank_url: Kreissparkasse Eichsfeld, from the hbci4java institute list
       jq -n --arg url "http://10.100.0.124:8080" --arg t "$(cat "$tok")" '{
-        bank_username:"", bank_password:"", bank_code:"", bank_url:"",
+        bank_username:"", bank_password:"",
+        bank_code:"82057070", bank_url:"https://banking-th5.s-fints-pt-th.de/fints30",
         bank_2fa:"", bank_2fa_device:"", bank_fints_persistence:"",
         firefly_url:$url, firefly_access_token:$t, skip_transaction_review:"false",
         description_regex_match:"", description_regex_replace:"",

@@ -29,7 +29,7 @@ let
   # into protonDir. run it once on the nas; proton-sync reuses and auto-refreshes the session.
   protonLogin = pkgs.writeShellScriptBin "proton-drive-login" ''
     export HOME=${protonDir} PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file PROTON_DRIVE_CACHE_DIR=${protonDir}
-    mkdir -p ${protonDir}
+    ${pkgs.coreutils}/bin/mkdir -p ${protonDir}
     exec ${protonDriveCli}/bin/proton-drive auth login "$@"
   '';
   source = "/srv/nas";
@@ -241,9 +241,10 @@ in {
         exit 0
       fi
 
-      root=MyFiles/homelab-offsite
+      # posix paths; the top-level section is /my-files (see `filesystem list /`)
+      root=/my-files/homelab-offsite
       # remote parents must exist before an upload; create-folder errors if present, so ignore it
-      proton-drive filesystem create-folder MyFiles homelab-offsite >/dev/null 2>&1 || true
+      proton-drive filesystem create-folder /my-files homelab-offsite >/dev/null 2>&1 || true
       proton-drive filesystem create-folder "$root" data >/dev/null 2>&1 || true
 
       # upload skips unchanged files by content hash; changed files keep a new revision, folders merge.
