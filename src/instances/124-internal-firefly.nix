@@ -162,8 +162,9 @@ in {
         bank_2fa:"911", bank_2fa_device:"", bank_fints_persistence:"",
         firefly_url:$url, firefly_access_token:$t, skip_transaction_review:"false",
         description_regex_match:"", description_regex_replace:"",
-        auto_submit_form_via_js:false, force_mt940:false,
-        choose_account_automation:{bank_account_iban:"", firefly_account_id:"", from:"now - 7 days", to:"now"}
+        # no choose_account_automation: pick the bank + firefly account interactively in the ui;
+        # an empty iban there makes the importer fail verification instead of prompting
+        auto_submit_form_via_js:false, force_mt940:false
       }' > "$out"
       chmod 600 "$out"
     '';
