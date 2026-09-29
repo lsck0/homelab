@@ -36,7 +36,7 @@
 
 /* from traefik logs via loki; rows cut to fit */
 .hl-who { flex: 1 1 auto; flex-direction: row; gap: calc(12 * var(--u)); }
-.hl-who-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.hl-who-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; justify-content: space-between; }
 /* a bar under the row, not a fill behind it: 1-bit dither eats text */
 .hl-who-l { display: flex; justify-content: space-between; gap: calc(6 * var(--u)); font-size: calc(12.5 * var(--u)); line-height: 1.12; flex: 0 0 auto; }
 .hl-who-l span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

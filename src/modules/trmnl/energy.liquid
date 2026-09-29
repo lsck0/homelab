@@ -3,8 +3,8 @@
 <style>
 /* undo trmnl's centring wrapper */
 .layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; }
-/* fixed 452px like terminal.liquid: 100% collapses */
-.en { display: flex; flex-direction: column; height: 452px; max-height: 452px; width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
+/* fill the panel height, not the og 452px, so the trmnl x is not left half blank */
+.en { display: flex; flex-direction: column; height: 100%; width: 100%; gap: 5px; padding: 8px 10px 4px; box-sizing: border-box; }
 
 /* ---- now --------------------------------------------------------------- */
 .en-top { display: flex; gap: 6px; flex: 0 0 auto; }
