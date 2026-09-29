@@ -1,8 +1,37 @@
 # kopia: snapshots the nas it runs on, mirrors backups off-site to proton drive
-{ config, lib, pkgs, inputs, ... }:
+{ config, lib, pkgs, ... }:
 let
-  # proton force-upgraded its api sdk; stable rclone 1.72 is rejected as "no longer supported"
-  rcloneNew = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.rclone;
+  # off-site is proton drive via proton's own drive cli. rclone's proton backend is dead:
+  # proton moved its api past rclone's unmaintained go-proton-api and rejects every rclone
+  # version/app_version with 422 "no longer supported". the official cli is the only client
+  # proton keeps working, so we vendor its prebuilt linux-x64 binary (bun-compiled elf).
+  protonDir = "/var/lib/proton-drive";
+  protonDriveCli = pkgs.stdenv.mkDerivation rec {
+    pname = "proton-drive-cli";
+    version = "0.8.0";
+    src = pkgs.fetchurl {
+      url = "https://proton.me/download/drive/cli/${version}/linux-x64/proton-drive";
+      hash = "sha256-lEPXcXGciSeQ2xfm8C7Nma18U1kzKfOmfHdnfc5XdzU=";
+    };
+    dontUnpack = true;
+    dontStrip = true; # stripping corrupts the bun-compiled binary
+    nativeBuildInputs = [ pkgs.autoPatchelfHook pkgs.makeWrapper ];
+    buildInputs = [ (pkgs.lib.getLib pkgs.stdenv.cc.cc) ];
+    installPhase = "install -Dm755 $src $out/bin/proton-drive";
+    # libsecret/glib are dlopened by the keychain store; we use unsafe_file, but wrap them
+    # in so the binary never fails to find them and the keychain store stays available.
+    postFixup = ''
+      wrapProgram $out/bin/proton-drive \
+        --prefix LD_LIBRARY_PATH : ${pkgs.lib.makeLibraryPath [ pkgs.libsecret pkgs.glib ]}
+    '';
+  };
+  # one-time interactive sign-in: prints an account.proton.me url, poll-forks the session
+  # into protonDir. run it once on the nas; proton-sync reuses and auto-refreshes the session.
+  protonLogin = pkgs.writeShellScriptBin "proton-drive-login" ''
+    export HOME=${protonDir} PROTON_DRIVE_CREDENTIALS_STORE=unsafe_file PROTON_DRIVE_CACHE_DIR=${protonDir}
+    mkdir -p ${protonDir}
+    exec ${protonDriveCli}/bin/proton-drive auth login "$@"
+  '';
   source = "/srv/nas";
   repo = "/srv/nas/BACKUPS/kopia";
   configFile = "/var/lib/kopia/repository.config";
@@ -182,10 +211,9 @@ in {
 
   # -----------------------------------------------------------------------------
   # OFF-SITE: PROTON DRIVE (repo shares the data's disk)
-  sops.secrets.proton-username = {};
-  sops.secrets.proton-password = {};
-  # totp seed, not a code; rclone derives codes
-  sops.secrets.proton-totp-secret = {};
+  environment.systemPackages = [ protonDriveCli protonLogin ];
+  # session store lives here, written by the one-time login and refreshed by proton-sync
+  systemd.tmpfiles.rules = [ "d ${protonDir} 0700 root root -" ];
 
   systemd.services.proton-sync = {
     description = "Mirror the NAS, all but bulk, to Proton Drive";
@@ -193,45 +221,52 @@ in {
     wants = [ "network-online.target" ];
     serviceConfig = {
       Type = "oneshot";
-      # proton throttles, first run uploads everything
+      # first run uploads everything; unchanged files are content-skipped on later runs
       TimeoutStartSec = "12h";
     };
-    # getent: rclone looks up the home dir even with --config
-    path = [ rcloneNew pkgs.coreutils pkgs.getent ];
+    environment = {
+      HOME = protonDir;
+      PROTON_DRIVE_CREDENTIALS_STORE = "unsafe_file";
+      PROTON_DRIVE_CACHE_DIR = protonDir;
+    };
+    path = [ protonDriveCli pkgs.coreutils ];
     script = ''
-      set -euo pipefail
-      conf=/var/lib/rclone/rclone.conf
-      mkdir -p /var/lib/rclone && chmod 700 /var/lib/rclone
+      # not -e: one tree failing must not skip the rest, and create-folder-exists is non-fatal
+      set -uo pipefail
+      shopt -s nullglob
 
-      user=$(cat ${config.sops.secrets.proton-username.path})
-      [ -n "$user" ] || { echo "proton-username is empty; fill it with scripts/secrets-sync.sh"; exit 0; }
-
-      # created once, rclone caches session tokens in it
-      if [ ! -s "$conf" ]; then
-        # no app_version override: rclone's own default is external-drive-rclone@<its version>,
-        # which proton whitelists server-side (rclone/rclone#9189). a fake version like
-        # @100.0.0 is not a real rclone release, so proton rejects it with 2028 "no longer supported".
-        rclone --config "$conf" config create proton protondrive \
-          username="$user" \
-          password="$(rclone obscure "$(cat ${config.sops.secrets.proton-password.path})")" \
-          otp_secret_key="$(rclone obscure "$(cat ${config.sops.secrets.proton-totp-secret.path})")" \
-          --non-interactive >/dev/null
+      if [ ! -s ${protonDir}/auth-session.json ]; then
+        echo "no proton session; run 'proton-drive-login' on this host once (opens a sign-in url)"
+        exit 0
       fi
 
-      # everything but bulk, as plain browsable folders beside the kopia repo in BACKUPS;
-      # sync mirrors, --backup-dir keeps 30 days of changes and deletions
-      stamp=$(date +%Y-%m-%d)
-      remote=proton:homelab-offsite
-      for tree in BACKUPS data documents syncthing; do
-        echo ">>> $tree -> $remote/$tree"
-        rclone --config "$conf" sync "${source}/$tree" "$remote/$tree" \
-          --backup-dir "$remote/.trash/$stamp/$tree" \
-          --exclude "/qbittorrent-incomplete/**" \
-          --transfers 4 --checkers 8 --retries 3 --low-level-retries 10 \
-          --stats 5m --stats-one-line
-      done
-      rclone --config "$conf" delete "$remote/.trash" --min-age 30d --rmdirs || true
+      root=MyFiles/homelab-offsite
+      # remote parents must exist before an upload; create-folder errors if present, so ignore it
+      proton-drive filesystem create-folder MyFiles homelab-offsite >/dev/null 2>&1 || true
+      proton-drive filesystem create-folder "$root" data >/dev/null 2>&1 || true
 
+      # upload skips unchanged files by content hash; changed files keep a new revision, folders merge.
+      # the cli has no exclude flag, so bulk (never here) and data's churny incomplete-torrents dir
+      # are handled by uploading data's children one by one instead of the whole tree.
+      ok=1
+      for tree in BACKUPS documents syncthing; do
+        echo ">>> $tree -> $root/$tree"
+        proton-drive filesystem upload -f create-new-revision -d merge -t "${source}/$tree" "$root" || ok=0
+      done
+
+      kids=()
+      for p in ${source}/data/*; do
+        [ "$(basename "$p")" = qbittorrent-incomplete ] && continue
+        kids+=("$p")
+      done
+      if [ "''${#kids[@]}" -gt 0 ]; then
+        echo ">>> data (''${#kids[@]} items) -> $root/data"
+        proton-drive filesystem upload -f create-new-revision -d merge -t "''${kids[@]}" "$root/data" || ok=0
+      fi
+
+      [ "$ok" = 1 ] || { echo "one or more uploads failed"; exit 1; }
+
+      # freshness metric only on a fully successful run
       d=/var/lib/node-exporter-textfile; mkdir -p $d
       {
         echo "# HELP homelab_offsite_last_success_timestamp_seconds Unix time of the last Proton Drive sync."

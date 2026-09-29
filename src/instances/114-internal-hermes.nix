@@ -256,6 +256,9 @@ in {
 
       # fail over fast
       agent.api_max_retries = 1;
+      # telegram photos: always hand the model native pixels, never a file path, so it
+      # actually sees images the owner sends (default auto can route them through text)
+      agent.image_input_mode = "native";
       # owner granted root, no prompts
       approvals.mode = "off";
       # owner only, via TELEGRAM_ALLOWED_USERS
