@@ -21,7 +21,7 @@ let
 
   apiEnv = svc: ''
     TOKEN=$(cat ${cfg.tokenFile})
-    API="${cfg.apiUrl}/nodes/${cfg.node}/qemu/${toString svc.vmid}"
+    API="${cfg.apiUrl}/nodes/${cfg.node}/${if (vmOf svc).kind or "vm" == "lxc" then "lxc" else "qemu"}/${toString svc.vmid}"
     pve() { curl -sfk --max-time 20 -H "Authorization: PVEAPIToken=$TOKEN" "$@"; }
     vm_status() { pve "$API/status/current" | jq -r '.data.status // "unknown"'; }
   '';

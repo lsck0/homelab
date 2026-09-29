@@ -149,7 +149,7 @@ locals {
     }
 
     "128" = { # media requests: movies, series, anime (-> Radarr/Sonarr)
-      enabled    = true,
+      enabled    = "onDemand",
       kind       = "lxc",
       name       = "128-internal-jellyseerr",
       type       = "internal",
@@ -180,7 +180,7 @@ locals {
       hostpci = ["gpu"],
     }
     "136" = { # music streaming (Subsonic API)
-      enabled    = true,
+      enabled    = "onDemand",
       kind       = "lxc",
       name       = "136-internal-navidrome",
       type       = "internal",

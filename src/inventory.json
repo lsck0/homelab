@@ -193,7 +193,7 @@
   },
   "128": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "onDemand",
     "features": "nesting=1,mount=nfs",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.128",
@@ -229,7 +229,7 @@
   },
   "136": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "onDemand",
     "features": "nesting=1,mount=nfs",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.136",
