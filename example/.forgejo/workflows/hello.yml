@@ -2,26 +2,26 @@ name: hello
 
 # build on vm-115, vm-209 polls the registry
 on:
-  push:
-    branches: [master]
+    push:
+        branches: [master]
 
 jobs:
-  build-and-push:
-    runs-on: docker
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+    build-and-push:
+        runs-on: docker
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v4
 
-      - name: Build image
-        run: |
-          docker build \
-            --network=host \
-            --build-arg SCCACHE_REDIS=redis://sccache.lsck0.dev \
-            -t registry.lsck0.dev/hello:latest \
-            -t registry.lsck0.dev/hello:${{ github.sha }} \
-            .
+            - name: Build image
+              run: |
+                  docker build \
+                    --network=host \
+                    --build-arg SCCACHE_REDIS=redis://sccache.lsck0.dev \
+                    -t registry.lsck0.dev/hello:latest \
+                    -t registry.lsck0.dev/hello:${{ github.sha }} \
+                    .
 
-      - name: Push to registry
-        run: |
-          docker push registry.lsck0.dev/hello:latest
-          docker push registry.lsck0.dev/hello:${{ github.sha }}
+            - name: Push to registry
+              run: |
+                  docker push registry.lsck0.dev/hello:latest
+                  docker push registry.lsck0.dev/hello:${{ github.sha }}

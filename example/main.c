@@ -14,7 +14,6 @@ static void handle_request(struct http_request_s* req) {
     struct http_response_s* res = http_response_init();
     http_response_status(res, 200);
     http_response_header(res, "Content-Type", "text/plain; charset=utf-8");
-    // a body on HEAD breaks strict clients (node's parser)
     if (!request_is_head(req)) http_response_body(res, BODY, sizeof(BODY) - 1);
     http_respond(req, res);
 }

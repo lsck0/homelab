@@ -116,6 +116,20 @@ deploy_nixos() {
   fi
   rm -f "$out"
   echo ">>> $name deployed."
+
+  # a terraform disk bump grows the qcow live but not the guest partition; reboot so
+  # boot.growPartition expands it. no-op for lxc (no /dev/sda) and once the partition fills.
+  local disk part
+  disk=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@${ip}" \
+    "lsblk -brno SIZE /dev/sda 2>/dev/null | head -1" 2>/dev/null || true)
+  part=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@${ip}" \
+    "lsblk -brno SIZE /dev/sda1 2>/dev/null | head -1" 2>/dev/null || true)
+  if [ -n "$disk" ] && [ -n "$part" ] && [ $((disk - part)) -gt 67108864 ]; then
+    echo ">>> $name: disk grew to $((disk / 1024 / 1024 / 1024))G, rebooting to expand the partition"
+    ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" "systemctl reboot" 2>/dev/null || true
+    sleep 5
+    wait_for_ssh "$ip" 60 5 || echo "WARNING: $name did not return after the grow reboot"
+  fi
 }
 
 # -----------------------------------------------------------------------------
@@ -440,11 +454,10 @@ done
 if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   git -C "$ROOT_DIR" add -A
   if ! git -C "$ROOT_DIR" diff --cached --quiet; then
-    # max generation, manual commits sit between
-    last=$(git -C "$ROOT_DIR" log --format=%s | sed -n 's/^chore(deploy): generation \([0-9]\+\)$/\1/p' | sort -n | tail -1)
-    next=$(( ${last:-0} + 1 ))
+    # every commit is Generation: <n>, numbered by position
+    next=$(( $(git -C "$ROOT_DIR" rev-list --count HEAD) + 1 ))
     echo ">>> Git: committing generation $next"
-    git -C "$ROOT_DIR" commit -m "chore(deploy): generation $next"
+    git -C "$ROOT_DIR" commit -m "Generation: $next"
     git -C "$ROOT_DIR" push || echo "WARNING: git push failed."
   fi
 fi

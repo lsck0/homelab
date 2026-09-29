@@ -1,41 +1,5 @@
 # Homelab
 
-Proxmox host running NixOS guests, VMs and LXC containers. Terraform creates the guests,
-a Nix flake builds their configs, `./sync.sh` applies both and commits the result.
-
-- `src/instances.tf`: every guest with its id, `kind` (vm or lxc), `enabled` (`true` / `"onDemand"` / `false`), cooldown and size
-- `src/instances/<id>-<zone>-<service>.nix`: the NixOS config of that guest, importing services from `src/services/`
-- `src/modules/routes.nix`: every `*.lsck0.dev` hostname, the VM/port behind it, how it is authenticated (`admins` or its `app-<route>` lldap group may reach it)
-- `src/modules/hermes/skills/`: what Hermes (Telegram bot, root on the lab) knows how to do
-
-Internal services live in `10.100.0.0/24` behind Traefik + Authelia, public ones
-in the `10.200.0.0/24` DMZ behind Traefik + CrowdSec. The VM id is the last octet
-of its IP.
-
-## Identity
-
-lldap and Authelia (both on vm-101) are the only account store and the only login.
-Nothing internal is reachable without one of them:
-
-- `auth = "sso"` routes get Authelia ForwardAuth. `admins` reach everything and
-  are lldap admins too; anyone else needs the page's own group `app-<route>`
-  (e.g. `app-grafana`). **Granting or revoking one page for a person is a group
-  edit in the lldap dashboard**, live within 5 minutes. The
-  example user `guest` holds only `app-homepage`, `app-jellyfin` and
-  `app-jellyseerr`.
-- `auth = "own"` routes run their own login backed by the same directory:
-  Forgejo through Authelia OIDC,
-  Jellyfin by binding to lldap directly (its apps cannot follow a portal
-  redirect).
-- `auth = "token"` routes are headless (a Nix client, the Docker registry) and
-  are not relayed from the internet at all.
-
-Services whose built-in login is switched off also have their port restricted to
-the ingress (`homelab.ingressOnly`), so Authelia cannot be skipped by calling a
-VM directly from the LAN.
-
-## Clone
-
 ```sh
 git clone https://github.com/lsck0/homelab
 cd homelab
@@ -66,31 +30,3 @@ src/scripts/deinit.sh                                       # tear the lab down 
 src/scripts/stack.sh status                                 # which VM groups are on
 src/scripts/stack.sh {media|apps} {on|off|onDemand} [--apply] # swap a group in or out (the box cannot host all of them)
 ```
-
-## CI runners
-
-Two kinds, both internal:
-
-- **Forgejo** (vm-115): one runner beside Forgejo for `git.lsck0.dev`.
-- **GitHub** (vm-117): one ephemeral runner per replica, registered straight to a
-  repo. Add or remove a repo by editing the `repos` attribute set at the top of
-  `src/instances/117-internal-github-runner.nix` (`<owner>/<repo> = <parallel
-  jobs>`) and running `./sync.sh`. Target them with
-  `runs-on: [self-hosted, nixos]`.
-
-  Each job gets a freshly registered runner and a wiped state directory, then the
-  runner de-registers itself. Registration uses a fine-grained PAT
-  (`github-runner-token` in sops) with *Administration: read and write* on those
-  repos.
-
-## Backups
-
-Kopia on the NAS (vm-109) snapshots `/srv/nas` nightly at 02:00. A file-level snapshot of a
-live database is not a backup, so every database dumps itself to
-`/srv/nas/data/db-dumps/<vm>/` at 01:30 first (`src/modules/db-backup.nix`):
-SQLite through `.backup`, Postgres through `pg_dump`. That also covers the two
-things whose state is on local disk and not on the NAS at all: the Authelia
-second-factor enrolments and the whole lldap directory.
-
-Restore with `nas-restore` on vm-109 (`nas-restore` with no arguments prints the
-usage).
