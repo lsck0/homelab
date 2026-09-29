@@ -84,7 +84,7 @@ in {
       cid=$(podman create ${fintsImage})
       podman cp "$cid:/app/TanHandler.php" "$out.orig"
       podman rm "$cid" >/dev/null
-      sed 's/[\\]RuntimeException/\\\\Throwable/' "$out.orig" > "$out"
+      sed 's/[\]RuntimeException/\\Throwable/' "$out.orig" > "$out"
       rm -f "$out.orig"
     '';
   };
