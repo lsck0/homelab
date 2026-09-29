@@ -51,7 +51,13 @@
     firefly-fints-importer = {
       image = "docker.io/benkl/firefly-iii-fints-importer@sha256:9912f29e7c56587fbee2fceb146efe8f9f6ec924d5569f72aa7336b5c26e2a8e";
       # holds the saved config incl. the fints persistence string (bank access): local, 0700
-      volumes = [ "/var/lib/firefly-fints:/app/configurations" ];
+      volumes = [
+        "/var/lib/firefly-fints:/app/configurations"
+        # patched TanHandler: upstream catches RuntimeException but the image parse throws
+        # InvalidArgumentException, so a text/flicker chipTAN challenge crashes instead of
+        # rendering the startcode. the mounted copy catches Throwable. re-copy if the image updates.
+        "/var/lib/firefly-fints/TanHandler.php:/app/TanHandler.php:ro"
+      ];
       ports = [ "8090:8080" ];
       environment.TZ = "Europe/Berlin";
     };
@@ -125,10 +131,9 @@
       jq -n --arg url "http://10.100.0.124:8080" --arg t "$t" '{
         bank_username:"", bank_password:"",
         bank_code:"82057070", bank_url:"https://banking-th5.s-fints-pt-th.de/fints30",
-        # 912 = chipTAN optisch (flicker): the importer only renders image challenges, and the
-        # sparkassen reader reads the flicker. bank rejects pushTAN 923; 911 manuell is text-only
-        # (importer crashes rendering it), 913 QR needs a camera reader.
-        bank_2fa:"912", bank_2fa_device:"", bank_fints_persistence:"",
+        # 911 = chipTAN manuell (insert card, type the startcode, read the tan) matches the reader.
+        # bank rejects pushTAN 923; the patched TanHandler (mounted) renders the text startcode.
+        bank_2fa:"911", bank_2fa_device:"", bank_fints_persistence:"",
         firefly_url:$url, firefly_access_token:$t, skip_transaction_review:"false",
         description_regex_match:"", description_regex_replace:"",
         auto_submit_form_via_js:false, force_mt940:false,
