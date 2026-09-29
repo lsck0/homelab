@@ -31,6 +31,7 @@ let
         widget = arr "paperlessngx" "paperless" "PAPERLESS_KEY"; }
       { route = "paperless-ai"; name = "Paperless AI"; icon = "paperless-ngx"; }
       { route = "firefly"; name = "Firefly III"; icon = "firefly-iii"; }
+      { route = "fints"; name = "FinTS Import"; icon = "mdi-bank-transfer"; }
     ]; }
     # the only group with descriptions: several apps here share a medium
     { name = "Media"; icon = "mdi-play-box-multiple"; columns = 4; entries = [
