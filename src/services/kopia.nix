@@ -1,6 +1,8 @@
 # kopia: snapshots the nas it runs on, mirrors backups off-site to proton drive
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, inputs, ... }:
 let
+  # proton force-upgraded its api sdk; stable rclone 1.72 is rejected as "no longer supported"
+  rcloneNew = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.rclone;
   source = "/srv/nas";
   repo = "/srv/nas/BACKUPS/kopia";
   configFile = "/var/lib/kopia/repository.config";
@@ -195,7 +197,7 @@ in {
       TimeoutStartSec = "12h";
     };
     # getent: rclone looks up the home dir even with --config
-    path = [ pkgs.rclone pkgs.coreutils pkgs.getent ];
+    path = [ rcloneNew pkgs.coreutils pkgs.getent ];
     script = ''
       set -euo pipefail
       conf=/var/lib/rclone/rclone.conf
