@@ -40,8 +40,10 @@ EXPORT_W = "clamp_min(-fronius_grid_watts, 0)"
 SELF_W = f"({LOAD} - {IMPORT_W})"
 IMPORT_WH = "fronius_meter_import_wh"
 EXPORT_WH = "fronius_meter_export_wh"
-GAS = 'hass_gas_meter_cubic_meters{entity="sensor.gas_meter_reading"}'
-WATER = 'hass_water_meter_cubic_meters{entity="sensor.water_meter_reading"}'
+# the reading is the input_number itself; hass prometheus suffixes the metric with the unit
+# (m³ mangles to mu0xb3), so match by entity and the state prefix instead of the exact name
+GAS = '{__name__=~"hass_input_number_state.*", entity="input_number.gas_meter"}'
+WATER = '{__name__=~"hass_input_number_state.*", entity="input_number.water_meter"}'
 HELPERS = ("price_electricity", "price_feed_in", "price_gas", "gas_kwh_per_m3", "price_water",
            "fee_electricity", "fee_gas", "fee_water")
 WEEKDAYS = ("Mo", "Di", "Mi", "Do", "Fr", "Sa", "So")
