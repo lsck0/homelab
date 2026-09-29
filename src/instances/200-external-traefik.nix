@@ -28,10 +28,9 @@ in {
       inherit (routes.${name}) vmid;
       targetPort = routes.${name}.port;
       listenPort = 20000 + i;
-    }) (lib.attrNames routes)) // {
-      # raw tcp, proxy holds the player while booting
-      minecraft = { vmid = 208; targetPort = 25565; listenPort = 25566; bootTimeout = 300; httpCheck = false; };
-    };
+    }) (lib.attrNames routes));
+    # minecraft (208) is no longer onDemand: lazymc on the vm handles sleep/wake itself
+    # (a public port is scanned constantly, which defeats a blind tcp wake proxy).
   };
 
   fileSystems = (nasMount "/var/lib/crowdsec" "crowdsec-external")
@@ -150,7 +149,8 @@ in {
         service = "minecraft";
         entryPoints = [ "minecraft" ];
       };
-      services.minecraft.loadBalancer.servers = [{ address = address.minecraft; }];
+      # straight to lazymc on vm-208, which fronts the game port
+      services.minecraft.loadBalancer.servers = [{ address = "10.200.0.208:25565"; }];
     };
   };
 

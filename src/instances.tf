@@ -228,14 +228,14 @@ locals {
       type    = "external",
       memory  = 1024,
     }
-    "208" = { # Minecraft server, boots when a player connects
-      # boots when a player connects, shuts down after idle
-      enabled = "onDemand",
+    "208" = { # Minecraft server; lazymc sleeps/wakes the server per real player logins
+      # always on but tiny when idle: lazymc stops the jvm after 30m of no players,
+      # ballooning lets the host reclaim the freed heap (min 1g floor, up to 6656 in use)
+      enabled = true,
       name    = "208-external-minecraft",
       type    = "external",
-      # vanilla; jvm commits its 6g heap at start
       memory  = 6656,
-      balloon = 6656,
+      balloon = 1024,
       cores   = 4,
       disk    = 16,
     }
