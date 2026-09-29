@@ -10,6 +10,8 @@ in {
 
   sops.secrets.firefly-app-key = {};
   sops.secrets.firefly-db-password = {};
+  # the sparkasse iban the fints importer matches; kept out of git
+  sops.secrets.firefly-fints-iban = {};
   sops.templates."firefly.env".restartUnits = [ "podman-firefly.service" ];
   systemd.services.podman-firefly.restartTriggers = [ config.sops.templates."firefly.env".content ];
   sops.templates."firefly.env".content = ''
@@ -153,8 +155,9 @@ in {
       # firefly token is filled once it exists; the bank fields do not depend on it
       tok=/var/lib/homepage-tokens/firefly-token.token
       t=""; [ -s "$tok" ] && t="$(cat "$tok")"
-      # bank_code/bank_url: Kreissparkasse Eichsfeld (hbci4java institute list); 2fa 923 = pushTAN 2.0
-      jq -n --arg url "http://10.100.0.124:8080" --arg t "$t" '{
+      iban=$(cat ${config.sops.secrets.firefly-fints-iban.path})
+      # bank_code/bank_url: Kreissparkasse Eichsfeld (hbci4java institute list); 2fa 911 chipTAN manuell
+      jq -n --arg url "http://10.100.0.124:8080" --arg t "$t" --arg iban "$iban" '{
         bank_username:"", bank_password:"",
         bank_code:"82057070", bank_url:"https://banking-th5.s-fints-pt-th.de/fints30",
         # 911 = chipTAN manuell (insert card, type the startcode, read the tan) matches the reader.
@@ -162,9 +165,9 @@ in {
         bank_2fa:"911", bank_2fa_device:"", bank_fints_persistence:"",
         firefly_url:$url, firefly_access_token:$t, skip_transaction_review:"false",
         description_regex_match:"", description_regex_replace:"",
-        # no choose_account_automation: pick the bank + firefly account interactively in the ui;
-        # an empty iban there makes the importer fail verification instead of prompting
-        auto_submit_form_via_js:false, force_mt940:false
+        auto_submit_form_via_js:false, force_mt940:false,
+        # the importer has no account picker: bank iban (sops) -> firefly asset account id 5 (Sparkasse)
+        choose_account_automation:{bank_account_iban:$iban, firefly_account_id:"5", from:"now - 7 days", to:"now"}
       }' > "$out"
       chmod 600 "$out"
     '';
