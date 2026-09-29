@@ -87,24 +87,27 @@
     timerConfig = { OnBootSec = "5m"; OnUnitActiveSec = "30m"; };
   };
 
-  # seed the fints importer with firefly's url + token, so only the bank fields
-  # are left to fill in the web ui; never clobbers a config the owner has saved.
+  # seed the fints importer config so the web ui only needs username + PIN + TAN.
+  # runs at boot and after every token refresh; rewrites until the owner saves a
+  # config with real bank credentials, then leaves it alone (persistence string).
   systemd.services.firefly-fints-seed = {
-    description = "Pre-fill the FinTS importer config with Firefly URL and token";
+    description = "Pre-fill the FinTS importer config (bank + Firefly)";
     after = [ "firefly-hermes-token.service" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.coreutils pkgs.jq ];
     serviceConfig.Type = "oneshot";
     script = ''
-      tok=/var/lib/homepage-tokens/firefly-token.token
-      [ -s "$tok" ] || { echo "no firefly token yet"; exit 0; }
       out=/var/lib/firefly-fints/homelab.json
-      [ -s "$out" ] && exit 0
-      # bank_code/bank_url: Kreissparkasse Eichsfeld, from the hbci4java institute list
-      jq -n --arg url "http://10.100.0.124:8080" --arg t "$(cat "$tok")" '{
+      # once the owner has saved bank credentials in the ui, never touch it again
+      if [ -s "$out" ] && [ -n "$(jq -r '.bank_username // ""' "$out")" ]; then exit 0; fi
+      # firefly token is filled once it exists; the bank fields do not depend on it
+      tok=/var/lib/homepage-tokens/firefly-token.token
+      t=""; [ -s "$tok" ] && t="$(cat "$tok")"
+      # bank_code/bank_url: Kreissparkasse Eichsfeld (hbci4java institute list); 2fa 923 = pushTAN 2.0
+      jq -n --arg url "http://10.100.0.124:8080" --arg t "$t" '{
         bank_username:"", bank_password:"",
         bank_code:"82057070", bank_url:"https://banking-th5.s-fints-pt-th.de/fints30",
-        bank_2fa:"", bank_2fa_device:"", bank_fints_persistence:"",
+        bank_2fa:"923", bank_2fa_device:"", bank_fints_persistence:"",
         firefly_url:$url, firefly_access_token:$t, skip_transaction_review:"false",
         description_regex_match:"", description_regex_replace:"",
         auto_submit_form_via_js:false, force_mt940:false,
@@ -112,6 +115,11 @@
       }' > "$out"
       chmod 600 "$out"
     '';
+  };
+  # refill (esp. the firefly token) shortly after boot and periodically, like the token export
+  systemd.timers.firefly-fints-seed = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnBootSec = "6m"; OnUnitActiveSec = "30m"; };
   };
 
   systemd.tmpfiles.rules = [
