@@ -124,8 +124,7 @@ in {
     # internal vms have no ipv6 routing
     networking.enableIPv6 = false;
 
-    # every deploy adds an uncollected generation
-    # deploys come in bursts; 14d kept 20+ generations and filled small disks
+    # deploys come in bursts, each an uncollected generation; 14d kept 20+ and filled small disks
     nix.gc = { automatic = true; dates = "daily"; options = "--delete-older-than 3d"; };
     services.journald.extraConfig = "SystemMaxUse=200M";
     nix.optimise.automatic = true;

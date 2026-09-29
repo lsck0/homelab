@@ -39,7 +39,7 @@ in
   };
   sops.secrets.headscale-oidc-secret = { owner = "headscale"; };
 
-  # -- Headplane --------------------------------------------------------------
+  # Headplane
   # the web ui headscale does not ship
   virtualisation.oci-containers.containers.headplane = {
     image = "ghcr.io/tale/headplane:0.6.0";

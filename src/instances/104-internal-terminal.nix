@@ -24,7 +24,6 @@ let
     flakeIgnore = [ "E501" ];
   } (builtins.readFile ../scripts/arxiv-sync.py);
 
-  # ---- calendar -------------------------------------------------------------
   # calendar is one dashboard among several
   calendarState = "/var/lib/calendar";
   incomingDir = "${calendarState}/incoming";
@@ -247,7 +246,6 @@ in {
     '';
   };
 
-  # on boot and daily
   systemd.timers.trmnl-sync = {
     description = "Keep the TRMNL plugins on this repo's templates";
     wantedBy = [ "timers.target" ];

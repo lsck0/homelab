@@ -124,7 +124,7 @@ in {
   # old restic secret, renamed
   sops.secrets.kopia-password.key = "restic-password";
 
-  # protonDriveCli + protonLogin front the off-site backup (see the PROTON DRIVE section)
+  # protonDriveCli + protonLogin front the off-site backup (see proton-sync below)
   environment.systemPackages = [ kopiaWrapper restoreScript protonDriveCli protonLogin ];
 
   systemd.tmpfiles.rules = [
@@ -212,16 +212,12 @@ in {
   networking.firewall.allowedTCPPorts = [ 51515 ];
   homelab.ingressOnly.ports = [ 51515 ];
 
-  # -----------------------------------------------------------------------------
-  # OFF-SITE: PROTON DRIVE (repo shares the data's disk)
-  # the cli package, login helper and session-store dir are wired in with kopia's
-  # own environment.systemPackages and tmpfiles.rules above (one definition each).
+  # off-site proton drive mirror (local repo shares the data's disk); cli, login and session dir defined with kopia's above
   systemd.services.proton-sync = {
     description = "Mirror the NAS, all but bulk, to Proton Drive";
     after = [ "network-online.target" "remote-fs.target" ];
     wants = [ "network-online.target" ];
-    # never restart on a nixos switch: this oneshot is a multi-hour upload, and a switch
-    # that restarts it blocks the whole deploy until it finishes. the timer picks up changes.
+    # never restart on a nixos switch: this multi-hour upload would block the whole deploy; the timer picks up changes
     restartIfChanged = false;
     serviceConfig = {
       Type = "oneshot";

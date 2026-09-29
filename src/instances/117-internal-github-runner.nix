@@ -3,7 +3,6 @@ let
   # see nixpkgs-unstable in flake.nix
   runnerPackage = inputs.nixpkgs-unstable.legacyPackages.${pkgs.stdenv.hostPlatform.system}.github-runner;
 
-  # ---------------------------------------------------------------------------
   # ADD OR REMOVE A REPO HERE.
   repos = {
     "lsck0/homelab" = 2;

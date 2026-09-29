@@ -5,7 +5,6 @@ let
   # template adds the trailing newline openssh needs
   sshKey = config.sops.templates."hermes-ssh-key".path;
 
-  # -----------------------------------------------------------------------------
   # CLI HELPERS ON THE AGENT'S PATH
   pve = pkgs.writeShellScriptBin "pve" ''
     # pve <method> <api path> [curl args]
@@ -106,7 +105,6 @@ let
     echo "pull request: $url"
   '';
 
-  # -----------------------------------------------------------------------------
   # WORKSPACE CONTEXT (inventory as the agent sees it)
   urlOf = id: lib.concatStringsSep ", " (lib.concatLists (lib.mapAttrsToList (_: side:
     lib.mapAttrsToList (_: r: "https://${r.host}.lsck0.dev") (lib.filterAttrs (_: r: toString r.vmid == id) side)
@@ -173,7 +171,6 @@ in {
   # terraform is BSL
   nixpkgs.config.allowUnfreePredicate = p: lib.getName p == "terraform";
 
-  # -----------------------------------------------------------------------------
   # SECRETS (FILL WITH SRC/SCRIPTS/HERMES-SECRETS.SH)
   sops.secrets = {
     hermes-ssh-key = { owner = "hermes"; mode = "0400"; };
@@ -230,7 +227,6 @@ in {
     };
   };
 
-  # -----------------------------------------------------------------------------
   # AGENT
   services.hermes-agent = {
     enable = true;

@@ -260,7 +260,6 @@ if [ ! -d /var/ossec ]; then
     rm -rf "$tmp"
 fi
 
-# What to watch.
 if [ -d /var/ossec ]; then
     cat > /var/ossec/etc/local_internal_options.conf <<'OPTS'
 # realtime where the kernel supports it

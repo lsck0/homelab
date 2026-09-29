@@ -234,7 +234,7 @@
     '';
   };
 
-  # ---- GitHub mirrors -------------------------------------------------------
+  # GitHub mirrors
   # github is the source, forgejo pull-mirrors each repo
   sops.secrets.github-mirror-token = {};
 

@@ -15,7 +15,6 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# check required tools
 for tool in sops age-keygen jq sshpass; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "ERROR: '$tool' is required but not installed."

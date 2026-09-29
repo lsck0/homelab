@@ -27,7 +27,7 @@ let
     ++ lib.optional (router != null) (vmLabel "10.100.0.1" "router")
     ++ [ (vmLabel "192.168.178.200" "proxmox") ];
 
-  # -- blackbox probes --------------------------------------------------------
+  # blackbox probes
   # probe backends, public names always 302 via authelia
   routes = import ../modules/routes.nix;
   probes =

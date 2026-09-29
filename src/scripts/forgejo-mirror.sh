@@ -46,7 +46,7 @@ gh_api() {
     -H "X-GitHub-Api-Version: 2022-11-28"
 }
 
-# Every repository the token's account owns, private ones included.
+# every repository the token's account owns, private ones included
 repos=$(
   page=1
   while :; do

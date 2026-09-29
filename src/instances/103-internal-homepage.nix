@@ -232,7 +232,6 @@ in {
     ${retry} 90 1 ${pkgs.curl}/bin/curl -sf -o /dev/null -H 'Host: homelab.lsck0.dev' http://127.0.0.1/api/revalidate
   '';
 
-  # restart on config change
   systemd.services.podman-homepage.restartTriggers = [
     servicesYaml settingsYaml widgetsYaml bookmarksYaml customCss
   ];

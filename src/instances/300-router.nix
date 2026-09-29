@@ -2,7 +2,7 @@
 let
   routes = import ../modules/routes.nix;
 
-  # -- egress classes (modules/egress.nix) ------------------------------------
+  # egress classes (modules/egress.nix)
   # policy routing keyed on source address
   egress = import ../modules/egress.nix;
   # vpn exit needs a mark and a table
@@ -62,7 +62,6 @@ in {
     };
   };
 
-  # -----------------------------------------------------------------------------
   # NETWORK INTERFACES (ens18 wan, ens19 lan, ens20 dmz)
 
   networking.usePredictableInterfaceNames = lib.mkForce true;
@@ -75,7 +74,7 @@ in {
   boot.kernel.sysctl = {
     "net.ipv4.ip_forward" = 1;
 
-    # -- volumetric / spoofing hardening on the edge --------------------------
+    # volumetric / spoofing hardening on the edge
     # syn cookies survive a syn flood statelessly
     "net.ipv4.tcp_syncookies" = 1;
     "net.ipv4.tcp_max_syn_backlog" = 4096;
@@ -95,7 +94,6 @@ in {
     "net.netfilter.nf_conntrack_max" = 262144;
   };
 
-  # -----------------------------------------------------------------------------
   # EGRESS CLASSES (mark by source, table ends in blackhole)
   assertions = [{
     assertion = vpnMembers == [ ] || vpnCfg.enable;
@@ -152,7 +150,6 @@ in {
     '';
   };
 
-  # -----------------------------------------------------------------------------
   # TOR EXIT (here for SO_ORIGINAL_DST on redirect)
   services.tor = {
     enable = true;
@@ -229,7 +226,7 @@ in {
   };
   sops.secrets.protonvpn-private-key = { };
 
-  # -- Proton's forwarded port ------------------------------------------------
+  # Proton's forwarded port
   # port changes every lease, renewal rewrites the set
   networking.nftables.tables.proton-port = {
     family = "ip";
@@ -259,7 +256,6 @@ in {
     timerConfig = { OnBootSec = "90s"; OnUnitActiveSec = "45s"; AccuracySec = "5s"; };
   };
 
-  # -----------------------------------------------------------------------------
   # NAT + PORT FORWARDING
   networking.nat = {
     enable = true;
@@ -269,7 +265,6 @@ in {
     forwardPorts = [];
   };
 
-  # -----------------------------------------------------------------------------
   # FIREWALL
   networking.nftables.enable = true;
   networking.firewall = {
@@ -347,7 +342,6 @@ in {
     '';
   };
 
-  # -----------------------------------------------------------------------------
   # PORT FORWARDS (DNAT ONLY FOR ROUTER'S OWN WAN IP)
   networking.nftables.tables.port-forwards = {
     family = "ip";
@@ -363,7 +357,6 @@ in {
     '';
   };
 
-  # -----------------------------------------------------------------------------
   # DHCP SERVER (KEA)
   services.kea.dhcp4 = {
     enable = true;
@@ -402,7 +395,6 @@ in {
     };
   };
 
-  # -----------------------------------------------------------------------------
   # DNS BLOCKLIST + DOT UPSTREAM (BLOCKY, loopback only)
   services.blocky = {
     enable = true;
@@ -428,7 +420,6 @@ in {
     };
   };
 
-  # -----------------------------------------------------------------------------
   # DNS SERVER (COREDNS, split horizon for *.lsck0.dev)
   services.resolved.enable = false;
   services.coredns = {
@@ -465,7 +456,6 @@ in {
   sops.secrets.wireguard-private-key = {};
   sops.secrets.cloudflare-token = {};
 
-  # -----------------------------------------------------------------------------
   # DDNS (CLOUDFLARE)
   systemd.services.ddns-cloudflare = {
     description = "Update vpn.lsck0.dev A record with current public IP";
@@ -530,7 +520,6 @@ in {
       OnUnitActiveSec = "5min";
     };
   };
-  # -----------------------------------------------------------------------------
   # WIREGUARD VPN (clients need DNS = 10.0.0.1)
   networking.wireguard.interfaces.wg0 = {
     ips = [ "10.0.0.1/24" ];

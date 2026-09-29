@@ -8,6 +8,8 @@
     ports = [ "5000:5000" ];
     volumes = [ "/var/lib/registry:/var/lib/registry" ];
     environment = {
+      # without this the registry 405s on DELETE, so the ui delete button fails
+      REGISTRY_STORAGE_DELETE_ENABLED = "true";
       REGISTRY_HTTP_HEADERS_Access-Control-Allow-Origin = "[\"*\"]";
       REGISTRY_HTTP_HEADERS_Access-Control-Allow-Methods = "[\"HEAD\", \"GET\", \"OPTIONS\", \"DELETE\"]";
     };
