@@ -210,6 +210,7 @@ in {
           username="$user" \
           password="$(rclone obscure "$(cat ${config.sops.secrets.proton-password.path})")" \
           otp_secret_key="$(rclone obscure "$(cat ${config.sops.secrets.proton-totp-secret.path})")" \
+          app_version="web-drive@5.2.0" \
           --non-interactive >/dev/null
       fi
 
@@ -217,6 +218,8 @@ in {
       # sync mirrors, --backup-dir keeps 30 days of changes and deletions
       stamp=$(date +%Y-%m-%d)
       remote=proton:homelab-offsite
+      # web-drive app version: proton fingerprints the client and CAPTCHA-blocks the default macos one
+      export RCLONE_PROTONDRIVE_APP_VERSION="web-drive@5.2.0"
       for tree in BACKUPS data documents syncthing; do
         echo ">>> $tree -> $remote/$tree"
         rclone --config "$conf" sync "${source}/$tree" "$remote/$tree" \
