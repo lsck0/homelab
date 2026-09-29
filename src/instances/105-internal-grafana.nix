@@ -528,16 +528,17 @@ in {
               }
               # attacks
               {
-                uid = "crowdsec_burst";
-                title = "Attack burst blocked";
-                # the internet scans all day; tens per hour is a campaign against us
-                expr = "max by (vm, top) (homelab_crowdsec_alerts_1h)";
-                threshold = 25;
-                for = "0m";
+                uid = "attack_flood";
+                title = "Traffic flood";
+                # crowdsec blocks background scans all day (tens/hour); only a real flood, orders of
+                # magnitude over baseline, is worth waking for. sustained, so a brief spike is ignored.
+                expr = "sum(rate(traefik_entrypoint_requests_total{entrypoint=\"websecure\"}[5m]))";
+                threshold = 50;
+                for = "15m";
                 severity = "warning";
-                firing = "Attack detected"; resolved = "Attack over";
-                summary = "{{ $labels.vm }}: {{ $values.A.Value }} blocked attempts in 1h, mostly {{ $labels.top }}";
-                description = "CrowdSec blocked these at the ingress. `podman exec crowdsec cscli alerts list --since 1h` on that guest.";
+                firing = "Traffic flood"; resolved = "Flood over";
+                summary = "{{ $values.A.Value | printf \"%.0f\" }} req/s sustained 15m: possible DoS";
+                description = "Requests are far above baseline for 15 minutes. CrowdSec blocks known-bad; check `cscli metrics` and top talkers on vm-200. Routine scans do not trigger this.";
               }
               {
                 uid = "sso_bruteforce";
