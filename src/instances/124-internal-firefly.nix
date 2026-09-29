@@ -125,7 +125,7 @@
       jq -n --arg url "http://10.100.0.124:8080" --arg t "$t" '{
         bank_username:"", bank_password:"",
         bank_code:"82057070", bank_url:"https://banking-th5.s-fints-pt-th.de/fints30",
-        # 913 = chipTAN-QR; this ksk's fints rejects pushTAN (923). alternatives: 912 flicker, 911/910 manuell
+        # 913 = chipTAN-QR; this bank rejects pushTAN 923 over fints. alternatives: 912 flicker, 911/910 manuell
         bank_2fa:"913", bank_2fa_device:"", bank_fints_persistence:"",
         firefly_url:$url, firefly_access_token:$t, skip_transaction_review:"false",
         description_regex_match:"", description_regex_replace:"",
