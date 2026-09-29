@@ -1,4 +1,7 @@
-{ config, pkgs, nasMount, ... }: {
+{ config, pkgs, nasMount, ... }:
+let
+  fintsImage = "docker.io/benkl/firefly-iii-fints-importer@sha256:9912f29e7c56587fbee2fceb146efe8f9f6ec924d5569f72aa7336b5c26e2a8e";
+in {
   networking.hostName = "vm-124";
 
   # firefly iii with its own postgres
@@ -49,7 +52,7 @@
     # bridge network (firefly holds host :8080), reaches firefly at the vm ip, which the
     # podman bridge (10.88.0.0/16) is a trusted source for past firefly's ingressOnly guard.
     firefly-fints-importer = {
-      image = "docker.io/benkl/firefly-iii-fints-importer@sha256:9912f29e7c56587fbee2fceb146efe8f9f6ec924d5569f72aa7336b5c26e2a8e";
+      image = fintsImage;
       # holds the saved config incl. the fints persistence string (bank access): local, 0700
       volumes = [
         "/var/lib/firefly-fints:/app/configurations"
@@ -61,6 +64,29 @@
       ports = [ "8090:8080" ];
       environment.TZ = "Europe/Berlin";
     };
+  };
+
+  # extract TanHandler.php from the pinned image and patch its catch to Throwable, so a
+  # text/flicker chipTAN challenge renders the startcode instead of crashing (mounted by the
+  # container). re-derives from the image, so a pinned-image bump stays correct.
+  systemd.services.firefly-fints-tanpatch = {
+    description = "Patch the FinTS importer TanHandler for text/flicker chipTAN";
+    before = [ "podman-firefly-fints-importer.service" ];
+    requiredBy = [ "podman-firefly-fints-importer.service" ];
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    path = [ pkgs.podman pkgs.gnused pkgs.coreutils ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      out=/var/lib/firefly-fints/TanHandler.php
+      mkdir -p /var/lib/firefly-fints
+      podman image exists ${fintsImage} || podman pull ${fintsImage}
+      cid=$(podman create ${fintsImage})
+      podman cp "$cid:/app/TanHandler.php" "$out.orig"
+      podman rm "$cid" >/dev/null
+      sed 's/[\\]RuntimeException/\\\\Throwable/' "$out.orig" > "$out"
+      rm -f "$out.orig"
+    '';
   };
 
   # dump, the nas holds a live data dir
