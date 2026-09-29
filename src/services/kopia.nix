@@ -246,20 +246,22 @@ in {
       proton-drive filesystem create-folder /my-files homelab-offsite >/dev/null 2>&1 || true
 
       # upload skips unchanged files by content hash; changed files keep a new revision, folders merge.
-      # each tree is uploaded child by child, not whole: the cli has no exclude flag (so data's churny
-      # incomplete-torrents dir is dropped) and it refuses to recurse across a mount point, so a bind
-      # mount like documents/archive must be its own upload root rather than something it descends into.
+      # each tree is uploaded child by child, not whole: the cli has no exclude flag, and it refuses to
+      # recurse across a mount point, so a bind mount like documents/archive must be its own upload root.
+      # one process per child: the cli holds per-file state for its whole call, and all of data in one
+      # call grew to 1.9G and was oom-killed on this 3G guest (2026-09-29).
+      # skipped in data: incomplete torrents, and the prometheus/loki tsdbs, which rewrite thousands of
+      # chunk files a day (a new remote revision each) and are only regenerable monitoring history.
       ok=1
       for tree in BACKUPS documents syncthing data; do
         proton-drive filesystem create-folder "$root" "$tree" >/dev/null 2>&1 || true
-        kids=()
         for p in ${source}/$tree/*; do
-          [ "$tree" = data ] && [ "$(basename "$p")" = qbittorrent-incomplete ] && continue
-          kids+=("$p")
+          if [ "$tree" = data ]; then
+            case "$(basename "$p")" in qbittorrent-incomplete|prometheus|loki) continue ;; esac
+          fi
+          echo ">>> $p -> $root/$tree"
+          proton-drive filesystem upload -f create-new-revision -d merge -t "$p" "$root/$tree" || ok=0
         done
-        [ "''${#kids[@]}" -gt 0 ] || continue
-        echo ">>> $tree (''${#kids[@]} items) -> $root/$tree"
-        proton-drive filesystem upload -f create-new-revision -d merge -t "''${kids[@]}" "$root/$tree" || ok=0
       done
 
       [ "$ok" = 1 ] || { echo "one or more uploads failed"; exit 1; }
