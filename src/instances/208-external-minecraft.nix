@@ -28,8 +28,7 @@ let
       -v ${data}:/data -v /var/lib/minecraft-modpacks:/modpacks:ro \
       --env-file ${data}/rcon.env --env-file ${modpackEnv} \
       -e EULA=TRUE \
-      -e INIT_MEMORY=1G \
-      -e MAX_MEMORY=6G \
+      -e MEMORY=6G \
       -e DIFFICULTY=hard \
       -e ICON=https://d.furaffinity.net/art/skullfugg/1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png \
       -e OVERRIDE_ICON=TRUE \
