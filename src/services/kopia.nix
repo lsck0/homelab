@@ -124,12 +124,15 @@ in {
   # old restic secret, renamed
   sops.secrets.kopia-password.key = "restic-password";
 
-  environment.systemPackages = [ kopiaWrapper restoreScript ];
+  # protonDriveCli + protonLogin front the off-site backup (see the PROTON DRIVE section)
+  environment.systemPackages = [ kopiaWrapper restoreScript protonDriveCli protonLogin ];
 
   systemd.tmpfiles.rules = [
     "d /var/lib/kopia 0700 root root -"
     "d /var/log/kopia 0700 root root -"
     "d /var/cache/kopia 0700 root root -"
+    # proton session store, written by the one-time login and refreshed by proton-sync
+    "d ${protonDir} 0700 root root -"
   ];
 
   # connect or create the repo, pin policy
@@ -211,10 +214,8 @@ in {
 
   # -----------------------------------------------------------------------------
   # OFF-SITE: PROTON DRIVE (repo shares the data's disk)
-  environment.systemPackages = [ protonDriveCli protonLogin ];
-  # session store lives here, written by the one-time login and refreshed by proton-sync
-  systemd.tmpfiles.rules = [ "d ${protonDir} 0700 root root -" ];
-
+  # the cli package, login helper and session-store dir are wired in with kopia's
+  # own environment.systemPackages and tmpfiles.rules above (one definition each).
   systemd.services.proton-sync = {
     description = "Mirror the NAS, all but bulk, to Proton Drive";
     after = [ "network-online.target" "remote-fs.target" ];
