@@ -220,6 +220,9 @@ in {
     description = "Mirror the NAS, all but bulk, to Proton Drive";
     after = [ "network-online.target" "remote-fs.target" ];
     wants = [ "network-online.target" ];
+    # never restart on a nixos switch: this oneshot is a multi-hour upload, and a switch
+    # that restarts it blocks the whole deploy until it finishes. the timer picks up changes.
+    restartIfChanged = false;
     serviceConfig = {
       Type = "oneshot";
       # first run uploads everything; unchanged files are content-skipped on later runs
@@ -245,26 +248,23 @@ in {
       root=/my-files/homelab-offsite
       # remote parents must exist before an upload; create-folder errors if present, so ignore it
       proton-drive filesystem create-folder /my-files homelab-offsite >/dev/null 2>&1 || true
-      proton-drive filesystem create-folder "$root" data >/dev/null 2>&1 || true
 
       # upload skips unchanged files by content hash; changed files keep a new revision, folders merge.
-      # the cli has no exclude flag, so bulk (never here) and data's churny incomplete-torrents dir
-      # are handled by uploading data's children one by one instead of the whole tree.
+      # each tree is uploaded child by child, not whole: the cli has no exclude flag (so data's churny
+      # incomplete-torrents dir is dropped) and it refuses to recurse across a mount point, so a bind
+      # mount like documents/archive must be its own upload root rather than something it descends into.
       ok=1
-      for tree in BACKUPS documents syncthing; do
-        echo ">>> $tree -> $root/$tree"
-        proton-drive filesystem upload -f create-new-revision -d merge -t "${source}/$tree" "$root" || ok=0
+      for tree in BACKUPS documents syncthing data; do
+        proton-drive filesystem create-folder "$root" "$tree" >/dev/null 2>&1 || true
+        kids=()
+        for p in ${source}/$tree/*; do
+          [ "$tree" = data ] && [ "$(basename "$p")" = qbittorrent-incomplete ] && continue
+          kids+=("$p")
+        done
+        [ "''${#kids[@]}" -gt 0 ] || continue
+        echo ">>> $tree (''${#kids[@]} items) -> $root/$tree"
+        proton-drive filesystem upload -f create-new-revision -d merge -t "''${kids[@]}" "$root/$tree" || ok=0
       done
-
-      kids=()
-      for p in ${source}/data/*; do
-        [ "$(basename "$p")" = qbittorrent-incomplete ] && continue
-        kids+=("$p")
-      done
-      if [ "''${#kids[@]}" -gt 0 ]; then
-        echo ">>> data (''${#kids[@]} items) -> $root/data"
-        proton-drive filesystem upload -f create-new-revision -d merge -t "''${kids[@]}" "$root/data" || ok=0
-      fi
 
       [ "$ok" = 1 ] || { echo "one or more uploads failed"; exit 1; }
 
