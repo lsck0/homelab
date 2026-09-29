@@ -118,7 +118,7 @@ let
   '' + lib.concatMapStrings groupYaml groups);
 
   settingsYaml = pkgs.writeText "settings.yaml" (''
-    title: home
+    title: Homelab
     favicon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/homepage.svg
     background:
       image: https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=2560
