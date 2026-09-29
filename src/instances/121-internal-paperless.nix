@@ -1,5 +1,24 @@
-{ config, lib, nasMount, nasPath, ... }:
+{ config, lib, pkgs, nasMount, nasPath, ... }:
 let
+  # pre-consume: straighten and crop image uploads (contracts photographed/scanned) to the
+  # document, so the stored file and its ocr are not full of background. pdfs are left alone.
+  cropImages = pkgs.writeShellScript "paperless-crop-images" ''
+    set -eu
+    f="''${DOCUMENT_WORKING_PATH:-''${1:-}}"
+    [ -n "$f" ] && [ -f "$f" ] || exit 0
+    case "$(${pkgs.file}/bin/file --mime-type -b "$f")" in
+      image/*) ;;
+      *) exit 0 ;;
+    esac
+    tmp="$f.cropped"
+    # auto-orient, deskew, then trim the near-uniform border so the page fills the frame
+    if ${pkgs.imagemagick}/bin/magick "$f" -auto-orient -deskew 40% -fuzz 12% -trim +repage "$tmp" 2>/dev/null \
+       && [ -s "$tmp" ]; then
+      mv "$tmp" "$f"
+    else
+      rm -f "$tmp"
+    fi
+  '';
   # fixed vocabulary; paperless-ai may only pick from these
   tags = [
     "Steuern" "Versicherung" "Bank" "Wohnen" "Nebenkosten" "Energie" "Wasser" "Auto"
@@ -51,6 +70,8 @@ in {
       PAPERLESS_OCR_CLEAN = "clean";
       PAPERLESS_FILENAME_FORMAT = "{{ created_year }}/{{ correspondent }}/{{ created }} {{ title }}";
       PAPERLESS_CONSUMER_POLLING = "30";
+      # crop/deskew photographed or scanned images before consuming (see cropImages)
+      PAPERLESS_PRE_CONSUME_SCRIPT = toString cropImages;
     };
   };
 
