@@ -230,12 +230,13 @@ locals {
     }
     "208" = { # Minecraft server; lazymc sleeps/wakes the server per real player logins
       # always on but tiny when idle: lazymc stops the jvm after 30m of no players,
-      # ballooning lets the host reclaim the freed heap (min 1g floor, up to 6656 in use)
+      # ballooning lets the host reclaim the freed heap when it is pressured. floor 2g so
+      # the jvm (init 1g, grows to max 6g) has headroom to start before the balloon deflates.
       enabled = true,
       name    = "208-external-minecraft",
       type    = "external",
       memory  = 6656,
-      balloon = 1024,
+      balloon = 2048,
       cores   = 4,
       disk    = 16,
     }

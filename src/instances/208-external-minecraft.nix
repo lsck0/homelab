@@ -28,7 +28,8 @@ let
       -v ${data}:/data -v /var/lib/minecraft-modpacks:/modpacks:ro \
       --env-file ${data}/rcon.env --env-file ${modpackEnv} \
       -e EULA=TRUE \
-      -e MEMORY=6G \
+      -e INIT_MEMORY=1G \
+      -e MAX_MEMORY=6G \
       -e DIFFICULTY=hard \
       -e ICON=https://d.furaffinity.net/art/skullfugg/1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png \
       -e OVERRIDE_ICON=TRUE \
@@ -86,6 +87,9 @@ in {
     // nasMount "/var/lib/minecraft-modpacks" "minecraft-modpacks";
 
   sops.secrets.minecraft-rcon-password = {};
+
+  # lazymc runs the server as a raw `podman run`, not via oci-containers, so enable podman explicitly
+  virtualisation.podman.enable = true;
 
   environment.systemPackages = [ mcModpack mcRcon ];
 
