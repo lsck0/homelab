@@ -63,23 +63,41 @@
     path = [ pkgs.podman ];
   };
 
-  # hermes token for logging bills
+  # api token for hermes (and the fints importer). the firefly image dropped `tinker`,
+  # so bootstrap the framework directly and mint a passport personal access token.
   systemd.services.firefly-hermes-token = {
     description = "Export a Firefly III API token for Hermes";
     after = [ "podman-firefly.service" ];
-    path = [ pkgs.podman pkgs.coreutils pkgs.gnugrep ];
+    path = [ pkgs.podman pkgs.coreutils pkgs.gnused ];
     serviceConfig.Type = "oneshot";
     script = ''
       out=/var/lib/homepage-tokens/firefly-token.token
-      tinker() { podman exec firefly php artisan tinker --execute="$1" 2>/dev/null | tail -1; }
-      [ "$(tinker 'echo \FireflyIII\User::count();')" -gt 0 ] 2>/dev/null || { echo "no Firefly user yet"; exit 0; }
-      # header login matches email, keep the lldap address
-      tinker '$u = \FireflyIII\User::orderBy("id")->first(); $u->email = "${config.homelab.acmeEmail}"; $u->save();' >/dev/null
       [ -s "$out" ] && exit 0
-      podman exec firefly php artisan passport:client --personal --no-interaction --name=homelab >/dev/null 2>&1 || true
-      token=$(tinker 'echo \FireflyIII\User::orderBy("id")->first()->createToken("hermes")->accessToken;')
-      echo "$token" | grep -q '^ey' || { echo "token creation failed: $token"; exit 1; }
-      echo -n "$token" > "$out"
+
+      # runs inside the firefly container: sets the owner's email to match the
+      # lldap/authelia address, then prints a fresh token between markers. firefly
+      # logs warnings to stdout, so the markers let us extract just the jwt.
+      script=$(mktemp)
+      cat > "$script" <<'PHP'
+      <?php
+      require "/var/www/html/vendor/autoload.php";
+      $app = require "/var/www/html/bootstrap/app.php";
+      $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+      $u = \FireflyIII\User::orderBy("id")->first();
+      if (!$u) { fwrite(STDERR, "no user\n"); exit(1); }
+      $u->email = getenv("FF_EMAIL"); $u->save();
+      echo "\n<<TOKEN>>".$u->createToken("homelab")->accessToken."<<END>>\n";
+      PHP
+      podman cp "$script" firefly:/tmp/mktoken.php
+      rm -f "$script"
+      # the personal access client must exist once; harmless if it already does
+      podman exec firefly php artisan passport:client --personal --no-interaction >/dev/null 2>&1 || true
+
+      raw=$(podman exec -e FF_EMAIL=${config.homelab.acmeEmail} firefly php /tmp/mktoken.php 2>&1) || true
+      podman exec firefly rm -f /tmp/mktoken.php
+      token=$(printf '%s' "$raw" | sed -n 's/.*<<TOKEN>>\(ey[^<]*\)<<END>>.*/\1/p')
+      [ "''${token:0:2}" = ey ] || { echo "no Firefly user yet, or token creation failed"; exit 0; }
+      printf '%s' "$token" > "$out"
     '';
   };
   systemd.timers.firefly-hermes-token = {
