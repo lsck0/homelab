@@ -208,11 +208,13 @@ in {
 
       # created once, rclone caches session tokens in it
       if [ ! -s "$conf" ]; then
+        # no app_version override: rclone's own default is external-drive-rclone@<its version>,
+        # which proton whitelists server-side (rclone/rclone#9189). a fake version like
+        # @100.0.0 is not a real rclone release, so proton rejects it with 2028 "no longer supported".
         rclone --config "$conf" config create proton protondrive \
           username="$user" \
           password="$(rclone obscure "$(cat ${config.sops.secrets.proton-password.path})")" \
           otp_secret_key="$(rclone obscure "$(cat ${config.sops.secrets.proton-totp-secret.path})")" \
-          app_version="external-drive-rclone@100.0.0" \
           --non-interactive >/dev/null
       fi
 
@@ -220,8 +222,6 @@ in {
       # sync mirrors, --backup-dir keeps 30 days of changes and deletions
       stamp=$(date +%Y-%m-%d)
       remote=proton:homelab-offsite
-      # web-drive app version: proton fingerprints the client and CAPTCHA-blocks the default macos one
-      export RCLONE_PROTONDRIVE_APP_VERSION="external-drive-rclone@100.0.0"
       for tree in BACKUPS data documents syncthing; do
         echo ">>> $tree -> $remote/$tree"
         rclone --config "$conf" sync "${source}/$tree" "$remote/$tree" \

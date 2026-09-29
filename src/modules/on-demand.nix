@@ -73,7 +73,8 @@ let
     pve -X POST "$API/status/shutdown" >/dev/null
   '';
 
-  # powers off vms the proxy never served
+  # powers off vms the proxy never served, and re-arms proxies orphaned by an
+  # external stop (terraform apply, a crash, a manual stop)
   reaperScript = pkgs.writeShellScript "ondemand-reaper" ''
     set -uo pipefail
     export PATH="${lib.makeBinPath [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ]}"
@@ -82,9 +83,20 @@ let
       (
         ${apiEnv svc}
         cooldown=${toString (toSeconds (vmOf svc).cooldown)}
-        ${siblingsBusy svc}
         cur=$(pve "$API/status/current")
-        [ "$(echo "$cur" | jq -r '.data.status // ""')" = running ] || exit 0
+        status=$(echo "$cur" | jq -r '.data.status // ""')
+        # orphaned proxy: proxyd still runs but its vm was stopped out from under it.
+        # a live proxy means the socket never re-activates, so a new connection cannot
+        # re-run the wake and just hits "no route to host". stop it so the socket re-arms
+        # and the next connection boots the vm again. must run before siblingsBusy, which
+        # would exit here on this service's own active proxy.
+        if systemctl is-active --quiet ondemand-${name}.service && [ "$status" != running ]; then
+          echo "vm-${toString svc.vmid} (${name}) stopped while its proxy runs, re-arming the socket"
+          systemctl stop ondemand-${name}.service || true
+          exit 0
+        fi
+        ${siblingsBusy svc}
+        [ "$status" = running ] || exit 0
         uptime=$(echo "$cur" | jq -r '.data.uptime // 0')
         last=$(systemctl show -p InactiveEnterTimestamp --value ondemand-${name}.service)
         last=$([ -n "$last" ] && date -d "$last" +%s 2>/dev/null || echo 0)
