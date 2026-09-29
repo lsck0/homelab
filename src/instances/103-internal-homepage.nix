@@ -54,7 +54,6 @@ let
       { route = "privatebin"; name = "PrivateBin"; icon = "privatebin"; }
       { route = "share"; name = "Share"; icon = "pingvin-share"; }
       { route = "hello"; name = "Hello"; icon = "mdi-hand-wave"; }
-      { route = "hello-gh"; name = "Hello GH"; icon = "github"; }
     ]; }
   ];
 

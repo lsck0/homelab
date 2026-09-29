@@ -11,7 +11,7 @@ let
 
   # anubis pow filter on browser-facing routes
   anubisEnable = true;
-  anubisRoutes = [ "searxng" "privatebin" "share" "hello" "hello-gh" ];
+  anubisRoutes = [ "searxng" "privatebin" "share" "hello" ];
   anubisPort = name: 27000 + lib.lists.findFirstIndex (n: n == name) 0 anubisRoutes;
   upstream = name: "http://${address.${name}}";
 in {
@@ -80,7 +80,7 @@ in {
 
     # cap bodies on small-post routes
     bodyLimit = 32 * 1024 * 1024;
-    bodyLimitRouters = [ "searxng-tls" "hello-tls" "hello-gh-tls" ];
+    bodyLimitRouters = [ "searxng-tls" "hello-tls" ];
 
     entryPoints.minecraft.address = ":25565";
 

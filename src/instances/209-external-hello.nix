@@ -46,15 +46,10 @@ in {
           web:
             ${indent (webService "registry.lsck0.dev/hello:latest" 80)}
       '';
-      hello-gh = ''
-        services:
-          web:
-            ${indent (webService "ghcr.io/lsck0/hello:latest" 8080)}
-      '';
     };
 
     # private images: add a registries."ghcr.io" entry
   };
 
-  networking.firewall.allowedTCPPorts = [ 80 8080 ];
+  networking.firewall.allowedTCPPorts = [ 80 ];
 }

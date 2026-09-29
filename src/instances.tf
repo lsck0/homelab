@@ -92,7 +92,8 @@ locals {
     }
     "117" = { # ci runners for github repos (ephemeral)
       # token is the gh cli's gho_ token
-      enabled = true,
+      # ci off for now
+      enabled = false,
       name    = "117-internal-github-runner",
       type    = "internal",
       # four .net listeners plus docker
@@ -209,7 +210,7 @@ locals {
       type    = "external",
     }
     "204" = { # privacy metasearch
-      enabled = true,
+      enabled = "onDemand",
       kind    = "lxc",
       name    = "204-external-searxng",
       type    = "external",
@@ -217,28 +218,29 @@ locals {
       features = "nesting=1,keyctl=1",
     }
     "206" = { # encrypted pastebin
-      enabled = true,
+      enabled = "onDemand",
       name    = "206-external-privatebin",
       type    = "external",
     }
     "207" = { # public file sharing
-      enabled = true,
+      enabled = "onDemand",
       name    = "207-external-share",
       type    = "external",
       memory  = 1024,
     }
     "208" = { # Minecraft server, boots when a player connects
-      enabled = false,
+      # boots when a player connects, shuts down after idle
+      enabled = "onDemand",
       name    = "208-external-minecraft",
       type    = "external",
-      # vanilla; jvm commits its heap at start, 2048 died
-      memory  = 4096,
-      balloon = 3072,
+      # vanilla; jvm commits its 6g heap at start
+      memory  = 6656,
+      balloon = 6656,
       cores   = 4,
       disk    = 16,
     }
     "209" = { # app host: Docker Swarm stacks deployed by CI (Forgejo + GitHub)
-      enabled = true,
+      enabled = "onDemand",
       kind    = "lxc",
       name    = "209-external-hello",
       type    = "external",

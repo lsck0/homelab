@@ -40,7 +40,7 @@ metadata:
   answers with generated prose and links to more of itself. The agent list is
   `labyrinthUserAgents` in `src/modules/traefik.nix`.
 - **Anubis** proof-of-work sits in front of the browser-facing public routes
-  (searxng, privatebin, share, hello, hello-gh). Instances listen on
+  (searxng, privatebin, share, hello). Instances listen on
   127.0.0.1:270xx and Traefik points at them, so `ss -ltnp` shows Traefik talking
   to loopback rather than to the VM. It reads the client from `X-Real-Ip` and
   issues one clearance cookie for `lsck0.dev`.

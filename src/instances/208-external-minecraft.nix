@@ -75,7 +75,7 @@ in {
     environment = {
       EULA = "TRUE";
       # must fit the balloon floor
-      MEMORY = "2G";
+      MEMORY = "6G";
       DIFFICULTY = "hard";
       ICON = "https://d.furaffinity.net/art/skullfugg/1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png";
       OVERRIDE_ICON = "TRUE";

@@ -9,6 +9,36 @@ let
     hash = "sha256-BJD5E5nG9CosPdbsSqP5t2bDKXYWD0HLcVWNgCVcFH4=";
   };
 
+  energieDashboard = pkgs.writeText "energie.yaml" ''
+    title: Energie
+    views:
+      - title: Energie
+        path: energie
+        cards:
+          - type: markdown
+            content: >-
+              Strom und Solar (PV, Netzbezug, Batterie) laufen live auf Grafana
+              (grafana.lsck0.dev) und dem TRMNL. Hier nur die Werte, die von Hand
+              kommen: Vertragspreise und die Zaehlerstaende.
+          - type: entities
+            title: Preise (aus dem Vertrag)
+            state_color: false
+            entities:
+              - entity: input_number.price_electricity
+              - entity: input_number.fee_electricity
+              - entity: input_number.price_feed_in
+              - entity: input_number.price_gas
+              - entity: input_number.fee_gas
+              - entity: input_number.gas_kwh_per_m3
+              - entity: input_number.price_water
+              - entity: input_number.fee_water
+          - type: entities
+            title: Zaehlerstaende (taeglich ablesen und eintragen)
+            entities:
+              - entity: input_number.gas_meter
+              - entity: input_number.water_meter
+  '';
+
   hassConfig = pkgs.writeText "configuration.yaml" ''
     homeassistant:
       # energy dashboard needs these for cost and units, else it prompts on first open
@@ -139,6 +169,16 @@ let
             state: "{{ states('input_number.water_meter') | float(0) }}"
             availability: "{{ states('input_number.water_meter') | float(0) > 0 }}"
 
+    # a dashboard just for the manual energy inputs (solar/pv live on grafana + trmnl)
+    lovelace:
+      dashboards:
+        energie-dashboard:
+          mode: yaml
+          title: Energie
+          icon: mdi:transmission-tower
+          show_in_sidebar: true
+          filename: energie.yaml
+
     # scraped by prometheus on vm-105
     prometheus:
       namespace: hass
@@ -175,6 +215,7 @@ in {
     volumes = [
       "/var/lib/homeassistant:/config"
       "${hassConfig}:/config/configuration.yaml:ro"
+      "${energieDashboard}:/config/energie.yaml:ro"
       "${oidcAuth}:/config/custom_components/auth_oidc:ro"
     ];
   };

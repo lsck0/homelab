@@ -121,7 +121,7 @@
   },
   "117": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "false",
     "features": "nesting=1",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.117",
@@ -277,7 +277,7 @@
   },
   "204": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "onDemand",
     "features": "nesting=1,keyctl=1",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.204",
@@ -289,7 +289,7 @@
   },
   "206": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "onDemand",
     "features": "nesting=1",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.206",
@@ -301,7 +301,7 @@
   },
   "207": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "onDemand",
     "features": "nesting=1",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.207",
@@ -313,7 +313,7 @@
   },
   "208": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "onDemand",
     "features": "nesting=1",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.208",
@@ -325,7 +325,7 @@
   },
   "209": {
     "cooldown": "30m",
-    "enabled": "true",
+    "enabled": "onDemand",
     "features": "nesting=1,keyctl=1",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.209",

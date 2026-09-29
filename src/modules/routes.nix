@@ -49,8 +49,7 @@
     privatebin = { host = "paste";    vmid = 206; port = 80; proxied = false; };
     share      = { host = "share";    vmid = 207; port = 80; proxied = false; };
     ntfy       = { host = "ntfy";     vmid = 203; port = 80; };
-    # ci targets: hello <- forgejo, hello-gh <- github
+    # ci target: hello <- forgejo
     hello      = { host = "hello";    vmid = 209; port = 80; proxied = false; };
-    hello-gh   = { host = "hello-gh"; vmid = 209; port = 8080; proxied = false; };
   };
 }

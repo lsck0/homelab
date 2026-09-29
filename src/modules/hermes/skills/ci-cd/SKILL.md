@@ -22,10 +22,8 @@ digest with start-first updates (no downtime; failed healthcheck = rollback).
 - GitHub -> `ghcr.io/<owner>/<app>:latest`. Template: `example/.github/workflows/hello.yml`.
 - Any registry works; private images need credentials in `homelab.swarm.registries` (Nix).
 
-Note: the `hello-gh` stack has no image yet. `example/.github/workflows/hello.yml`
-is a template, not an active workflow in this repo, so nothing has ever pushed
-`ghcr.io/lsck0/hello` and the swarm task stays `Rejected: No such image`. That
-route stays red on Homepage and in the blackbox probe until an image is pushed.
+Note: the GitHub path is a template only (`example/.github/workflows/hello.yml`); the
+`hello` stack runs the Forgejo demo (`registry.lsck0.dev/hello`).
 
 ## Runners
 
