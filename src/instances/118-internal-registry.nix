@@ -1,4 +1,4 @@
-{ nasMount, ... }: {
+{ pkgs, nasMount, ... }: {
   networking.hostName = "vm-118";
 
   fileSystems = nasMount "/var/lib/registry" "registry";
@@ -24,6 +24,24 @@
       DELETE_IMAGES = "true";
       NGINX_PROXY_PASS_URL = "http://10.100.0.118:5000";
     };
+  };
+
+  # ui deletes only drop the manifest; reclaim blob space by gc-ing offline (registry
+  # stopped so a concurrent push cannot lose blobs). --delete-untagged clears orphaned manifests.
+  systemd.services.registry-gc = {
+    description = "Reclaim deleted registry blobs";
+    path = [ pkgs.podman pkgs.systemd ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      systemctl stop podman-registry
+      podman run --rm -v /var/lib/registry:/var/lib/registry registry:2.8.3 \
+        garbage-collect --delete-untagged /etc/docker/registry/config.yml || true
+      systemctl start podman-registry
+    '';
+  };
+  systemd.timers.registry-gc = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnCalendar = "03:30"; Persistent = true; };
   };
 
   systemd.tmpfiles.rules = [
