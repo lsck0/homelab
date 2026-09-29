@@ -167,7 +167,7 @@ in {
         description_regex_match:"", description_regex_replace:"",
         auto_submit_form_via_js:false, force_mt940:false,
         # the importer has no account picker: bank iban (sops) -> firefly asset account id 5 (Sparkasse)
-        choose_account_automation:{bank_account_iban:$iban, firefly_account_id:"5", from:"now - 7 days", to:"now"}
+        choose_account_automation:{bank_account_iban:$iban, firefly_account_id:"5", from:"now - 2 years", to:"now"}
       }' > "$out"
       chmod 600 "$out"
     '';
