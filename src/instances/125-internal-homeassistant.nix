@@ -11,6 +11,9 @@ let
 
   hassConfig = pkgs.writeText "configuration.yaml" ''
     homeassistant:
+      # energy dashboard needs these for cost and units, else it prompts on first open
+      country: DE
+      currency: EUR
       # authelia oidc only: the route has no forwardauth, a password login would skip its 2fa
       auth_providers: []
     default_config:
