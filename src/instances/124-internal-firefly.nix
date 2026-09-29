@@ -10,8 +10,6 @@ in {
 
   sops.secrets.firefly-app-key = {};
   sops.secrets.firefly-db-password = {};
-  # the sparkasse iban the fints importer matches; kept out of git
-  sops.secrets.firefly-fints-iban = {};
   sops.templates."firefly.env".restartUnits = [ "podman-firefly.service" ];
   systemd.services.podman-firefly.restartTriggers = [ config.sops.templates."firefly.env".content ];
   sops.templates."firefly.env".content = ''
@@ -58,36 +56,35 @@ in {
       # holds the saved config incl. the fints persistence string (bank access): local, 0700
       volumes = [
         "/var/lib/firefly-fints:/app/configurations"
-        # patched TanHandler: upstream catches RuntimeException but the image parse throws
-        # InvalidArgumentException, so a text/flicker chipTAN challenge crashes instead of
-        # rendering the startcode. the mounted copy catches Throwable. re-copy if the image updates.
+        # patched php from firefly-fints-patch (chipTAN render + persistence dump)
         "/var/lib/firefly-fints/TanHandler.php:/app/TanHandler.php:ro"
+        "/var/lib/firefly-fints/RunImportBatched.php:/app/RunImportBatched.php:ro"
       ];
       ports = [ "8090:8080" ];
       environment.TZ = "Europe/Berlin";
     };
   };
 
-  # extract TanHandler.php from the pinned image and patch its catch to Throwable, so a
-  # text/flicker chipTAN challenge renders the startcode instead of crashing (mounted by the
-  # container). re-derives from the image, so a pinned-image bump stays correct.
-  systemd.services.firefly-fints-tanpatch = {
-    description = "Patch the FinTS importer TanHandler for text/flicker chipTAN";
+  # extract the importer php from the pinned image and patch it (see firefly-fints-patch.py):
+  # TanHandler renders text/flicker chipTAN instead of crashing, RunImportBatched writes the
+  # full persistence to a file. both are mounted by the container; re-derives on an image bump.
+  systemd.services.firefly-fints-patch = {
+    description = "Patch the FinTS importer (chipTAN challenge + persistence dump)";
     before = [ "podman-firefly-fints-importer.service" ];
     requiredBy = [ "podman-firefly-fints-importer.service" ];
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
-    path = [ pkgs.podman pkgs.gnused pkgs.coreutils ];
+    path = [ pkgs.podman pkgs.python3 pkgs.coreutils ];
     serviceConfig.Type = "oneshot";
     script = ''
-      out=/var/lib/firefly-fints/TanHandler.php
-      mkdir -p /var/lib/firefly-fints
+      d=/var/lib/firefly-fints; mkdir -p "$d"
       podman image exists ${fintsImage} || podman pull ${fintsImage}
       cid=$(podman create ${fintsImage})
-      podman cp "$cid:/app/TanHandler.php" "$out.orig"
+      podman cp "$cid:/app/TanHandler.php" "$d/TanHandler.php.orig"
+      podman cp "$cid:/app/RunImportBatched.php" "$d/RunImportBatched.php.orig"
       podman rm "$cid" >/dev/null
-      sed 's/[\]RuntimeException/\\Throwable/' "$out.orig" > "$out"
-      rm -f "$out.orig"
+      python3 ${../scripts/firefly-fints-patch.py} "$d"
+      rm -f "$d"/*.orig
     '';
   };
 
@@ -155,9 +152,8 @@ in {
       # firefly token is filled once it exists; the bank fields do not depend on it
       tok=/var/lib/homepage-tokens/firefly-token.token
       t=""; [ -s "$tok" ] && t="$(cat "$tok")"
-      iban=$(cat ${config.sops.secrets.firefly-fints-iban.path})
       # bank_code/bank_url: Kreissparkasse Eichsfeld (hbci4java institute list); 2fa 911 chipTAN manuell
-      jq -n --arg url "http://10.100.0.124:8080" --arg t "$t" --arg iban "$iban" '{
+      jq -n --arg url "http://10.100.0.124:8080" --arg t "$t" '{
         bank_username:"", bank_password:"",
         bank_code:"82057070", bank_url:"https://banking-th5.s-fints-pt-th.de/fints30",
         # 911 = chipTAN manuell (insert card, type the startcode, read the tan) matches the reader.
@@ -166,8 +162,10 @@ in {
         firefly_url:$url, firefly_access_token:$t, skip_transaction_review:"false",
         description_regex_match:"", description_regex_replace:"",
         auto_submit_form_via_js:false, force_mt940:false,
-        # the importer has no account picker: bank iban (sops) -> firefly asset account id 5 (Sparkasse)
-        choose_account_automation:{bank_account_iban:$iban, firefly_account_id:"5", from:"now - 2 years", to:"now"}
+        # importer has no account picker -> firefly asset account id 5 (Sparkasse); the iban,
+        # username, pin and persistence are filled once into this local file (never git), then the
+        # bank_username guard above stops this seed from overwriting them.
+        choose_account_automation:{bank_account_iban:"", firefly_account_id:"5", from:"now - 2 years", to:"now"}
       }' > "$out"
       chmod 600 "$out"
     '';
@@ -176,6 +174,25 @@ in {
   systemd.timers.firefly-fints-seed = {
     wantedBy = [ "timers.target" ];
     timerConfig = { OnBootSec = "6m"; OnUnitActiveSec = "30m"; };
+  };
+
+  # daily headless import: the importer reuses the stored persistence to skip the tan. no-op
+  # until the local config has bank credentials, so it is safe to ship before they are filled.
+  systemd.services.firefly-fints-import = {
+    description = "Headless FinTS import into Firefly III";
+    after = [ "podman-firefly-fints-importer.service" ];
+    path = [ pkgs.curl pkgs.gnugrep ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      grep -qE '"bank_username": *"[^"]' /var/lib/firefly-fints/homelab.json || { echo "no bank credentials yet, skipping"; exit 0; }
+      code=$(curl -s -o /tmp/fints-import.out -w '%{http_code}' "http://127.0.0.1:8090/?automate=true&config=homelab.json")
+      echo "automate http=$code"
+      grep -ioE "imported [0-9]+|no transactions|error|exception|fatal|tan" /tmp/fints-import.out | head -5 || true
+    '';
+  };
+  systemd.timers.firefly-fints-import = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnCalendar = "05:00"; Persistent = true; RandomizedDelaySec = "20m"; };
   };
 
   systemd.tmpfiles.rules = [
