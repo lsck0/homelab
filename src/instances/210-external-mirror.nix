@@ -12,6 +12,8 @@ in {
     group = "archrepo";
     home = repoDir;
     createHome = true;
+    # activation resets the home to homeMode (700) on every switch, nginx must read it
+    homeMode = "755";
     shell = pkgs.bashInteractive;
     openssh.authorizedKeys.keys = [ pushKey ];
   };
