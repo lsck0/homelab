@@ -111,9 +111,9 @@ locals {
       enabled = "onDemand",
       name    = "119-internal-archbuild",
       type    = "internal",
-      # parallel rust and c++ builds
+      # the host idles near its 80% balloon line, so a build gets the floor: 3072 left cargo 58 MiB
       memory  = 6144,
-      balloon = 3072,
+      balloon = 5120,
       cores   = 8,
       # container image, pacman cache, sources, cargo and go caches
       disk = 100,
