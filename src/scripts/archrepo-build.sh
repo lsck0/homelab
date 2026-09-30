@@ -107,8 +107,9 @@ srcinfo_get() {
 state_get() { sed -n "s/^$2=//p" "$STATE_DIR/$1" 2>/dev/null || true; }
 
 state_set() {
-  local base=$1 key=$2 build=$3 pkgnames=$4
-  printf 'key=%s\nbuild=%s\nbuilt=%s\nnames=%s\n' "$key" "$build" "$(date +%s)" "$pkgnames" > "$STATE_DIR/.$base.tmp"
+  local base=$1 key=$2 build=$3 pkgnames=$4 files=$5
+  printf 'key=%s\nbuild=%s\nbuilt=%s\nnames=%s\nfiles=%s\n' "$key" "$build" "$(date +%s)" "$pkgnames" "$files" \
+    > "$STATE_DIR/.$base.tmp"
   mv -f "$STATE_DIR/.$base.tmp" "$STATE_DIR/$base"
 }
 
@@ -575,6 +576,19 @@ remove_build_deps() {
   [ -z "$extra" ] || pacman -Rdd --noconfirm $extra >/dev/null 2>&1 || true
 }
 
+# a killed run leaves its signed packages in the served tree, unpublished; the same recipe stages them again
+restage() {
+  local base=$1 key=$2 file files=()
+  [ "$key" = "$(state_get "$base" key)" ] || return 1
+  for file in $(state_get "$base" files); do
+    [ -f "$REPO_DIR/$file" ] && [ -f "$REPO_DIR/$file.sig" ] || return 1
+    files+=("$REPO_DIR/$file")
+  done
+  (( ${#files[@]} > 0 )) || return 1
+  repo-add -q "$CACHE/db/$REPO.db.tar.gz" "${files[@]}" || return 1
+  db_sync_local
+}
+
 build_base() {
   local base=$1 dir=$CACHE/recipes/$1 log=$PUBLIC/logs/$1.log out=$CACHE/out/$1 key build package file files=() pkgnames=()
   : > "$log"
@@ -587,6 +601,10 @@ build_base() {
   fi
   key=$(recipe_key "$dir")
   is_current "$base" "$key" && return 0
+  if restage "$base" "$key" && is_current "$base" "$key"; then
+    log "$base: staged again from an unpublished run"
+    return 0
+  fi
   build=$(( $(state_get "$base" build || true) + 1 ))
   log "$base: building (build $build)"
   srcinfo_get "$dir/.SRCINFO" validpgpkeys | xargs -r timeout 2m sudo -u "$BUILDER" -H \
@@ -607,7 +625,7 @@ build_base() {
   done
   (( ${#files[@]} > 0 )) || { fail "$base" "build produced no package"; return 1; }
   stage_add "${files[@]}" || { fail "$base" "repo-add failed"; return 1; }
-  state_set "$base" "$key" "$build" "${pkgnames[*]}"
+  state_set "$base" "$key" "$build" "${pkgnames[*]}" "$(for file in "${files[@]}"; do basename "$file"; done | xargs)"
   rm -rf "$out"
   built+=("$base")
   log "$base: staged ${pkgnames[*]}"

@@ -23,6 +23,9 @@ in {
 
   virtualisation.podman.enable = true;
 
+  # 5-6 GiB of ram and no swap; a parallel rust build peaked at all of it
+  zramSwap = { enable = true; memoryPercent = 100; };
+
   systemd.services.archbuild = {
     description = "Snapshot and build the packages of arch-dotfiles' install.sh into the lsck0 pacman repo";
     wants = [ "network-online.target" ];
