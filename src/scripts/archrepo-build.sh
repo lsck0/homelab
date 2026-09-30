@@ -46,6 +46,8 @@ RESOLVE_ROUNDS_MAX=16
 # names per aur rpc request
 RPC_BATCH=100
 CACHE_KEEP_DAYS=30
+# part of every rebuild key: bump it when repack changes what a published package contains
+REPACK_VERSION=2
 CHAOTIC_KEY=3056513887B78AEB
 CHAOTIC_URL=https://cdn-mirror.chaotic.cx/chaotic-aur
 AUR_URL=https://aur.archlinux.org
@@ -155,7 +157,8 @@ repack() {
   version=${version%-*}
   sed -i -e "s/^pkgname = .*/pkgname = $PREFIX$name/" -e "s/^pkgbase = .*/pkgbase = $PREFIX${base:-$name}/" \
     -e "s/^pkgver = .*/pkgver = $version-${release%%.*}.$build/" "$dir/.PKGINFO" "$dir/.BUILDINFO"
-  printf 'provides = %s=%s\nconflicts = %s\n' "$name" "$version" "$name" >> "$dir/.PKGINFO"
+  # .PKGINFO spells it conflict, conflicts is silently ignored
+  printf 'provides = %s=%s\nconflict = %s\n' "$name" "$version" "$name" >> "$dir/.PKGINFO"
   file=$CACHE/stage/$PREFIX$name-$version-${release%%.*}.$build-$arch.pkg.tar.zst
   # same file list, order and mtree options as makepkg's create_package
   (
@@ -495,7 +498,8 @@ plan() {
 is_vcs() { grep -Eq '^\s*source(_x86_64)? = ([^ ]*::)?(git|hg|svn|bzr|fossil)\+' "$1/.SRCINFO"; }
 
 recipe_key() {
-  (cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum | sha256sum | cut -d' ' -f1)
+  { echo "repack $REPACK_VERSION"; cd "$1" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum; } \
+    | sha256sum | cut -d' ' -f1
 }
 
 is_current() {
