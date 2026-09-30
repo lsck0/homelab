@@ -58,6 +58,8 @@ REPACK_VERSION=3
 # the arch-dotfiles files the list and the local recipes come from
 INSTALL_SCRIPT=install.sh
 PKGBUILDS=mirror/pkgbuilds
+# dependencies aur recipes forget: <pkgbase> <depends|makedepends> <package>...
+OVERRIDES=mirror/overrides.conf
 # the 2026 naming served lsck0-<name>; replaces lets a pacman -Syu swap the installed ones over
 OLD_PREFIX=lsck0-
 AUR_URL=https://aur.archlinux.org
@@ -74,6 +76,7 @@ official_names=()
 built=()
 # empty while the staged set is publishable, else why the night is held back
 held_back=
+STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # prune only when every base is known, a transient fetch error must not delete packages
 resolve_complete=1
 KEY=
@@ -391,7 +394,24 @@ recipe_local() {
   cp -r "$DOTFILES/$PKGBUILDS/$name/." "$dir/"
 }
 
-# recipe dir with an unprefixed PKGBUILD and its .SRCINFO; records names, provides and deps
+# appends the overrides of one base to its PKGBUILD; succeeds only when it changed something
+recipe_override() {
+  local base=$1 dir=$2 name field packages changed=1
+  [ -f "$DOTFILES/$OVERRIDES" ] || return 1
+  while read -r name field packages; do
+    [ "$name" = "$base" ] || continue
+    case $field in
+      depends | makedepends)
+        printf '\n%s+=(%s)\n' "$field" "$packages" >> "$dir/PKGBUILD"
+        changed=0
+        ;;
+      *) fail "$base" "unknown override field '$field'"; return 1 ;;
+    esac
+  done < <(sed 's/#.*//' "$DOTFILES/$OVERRIDES")
+  return $changed
+}
+
+# recipe dir with a PKGBUILD and its .SRCINFO; records names, provides and deps
 materialize() {
   local base=$1 dir=$CACHE/recipes/$1 name
   rm -rf "$dir"
@@ -403,7 +423,8 @@ materialize() {
     local) recipe_local "$base" "$dir" ;;
   esac || { fail "$base" "fetching the recipe"; resolve_complete=0; return 1; }
   chown -R "$BUILDER:" "$dir"
-  if [ "${kind[$base]}" != aur ]; then
+  # an aur .SRCINFO is shipped, and only stale once an override touched the PKGBUILD
+  if [ "${kind[$base]}" != aur ] || recipe_override "$base" "$dir"; then
     (cd "$dir" && "${AS_BUILDER[@]}" makepkg --printsrcinfo > .SRCINFO) || { fail "$base" "invalid PKGBUILD"; return 1; }
   fi
   names[$base]=$(srcinfo_get "$dir/.SRCINFO" pkgname | xargs)
@@ -694,6 +715,23 @@ prune_files() {
 
 # -----------------------------------------------------------------------------
 # STATUS
+# the running build as status.json's running field; status.txt stays the last finished run, since
+# archbuild-if-stale judges staleness by its age and a killed run must not look fresh
+write_progress() {
+  local phase=$1 current=${2:-} done=${3:-0} base failures=() previous=/repo/status.json
+  for base in "${!failed[@]}"; do failures+=("$base: ${failed[$base]}"); done
+  [ -f "$previous" ] || echo '{}' > "$CACHE/status.json"
+  [ -f "$previous" ] && cp "$previous" "$CACHE/status.json"
+  jq --arg started "$STARTED" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg commit "$COMMIT" --arg phase "$phase" \
+    --arg current "$current" --argjson done "$done" --argjson total "${#order[@]}" --argjson built "${#built[@]}" \
+    --args '. + { running: { started: $started, updated: $updated, commit: $commit, phase: $phase,
+      current: (if $current == "" then null else $current end), done: $done, total: $total, built: $built,
+      failing: ($ARGS.positional | length), failed: $ARGS.positional } }' \
+    "${failures[@]}" < "$CACHE/status.json" > "$CACHE/status.json.new" && mv -f "$CACHE/status.json.new" "$CACHE/status.json"
+  put "$CACHE/status.json" /repo
+  push_status
+}
+
 write_status() {
   local base failures=() now
   now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -713,7 +751,7 @@ write_status() {
   } > "$CACHE/status.txt"
   jq -n --arg last_build "$now" --arg commit "$COMMIT" --argjson packages "${#db_file[@]}" --arg held_back "$held_back" \
     --args '{ packages: $packages, failing: ($ARGS.positional | length), last_build: $last_build, commit: $commit,
-      held_back: (if $held_back == "" then null else $held_back end), failed: $ARGS.positional }' \
+      held_back: (if $held_back == "" then null else $held_back end), failed: $ARGS.positional, running: null }' \
     "${failures[@]}" > "$CACHE/status.json"
   put "$CACHE/status.json" /repo
   put "$CACHE/status.txt" /repo
@@ -725,20 +763,27 @@ clean_caches() {
   find "$CACHE/pacman" "$CACHE/src" -maxdepth 2 -type f -mtime +"$CACHE_KEEP_DAYS" -delete
 }
 
+PUSH_SSH="ssh -i $PUSH_KEY_FILE -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15"
+
 # mirror the served tree to the always-on dmz host; never fatal, the nas copy stands regardless
 push() {
   [ -n "$PUSH_TARGET" ] && [ -f "$PUSH_KEY_FILE" ] || return 0
   [ -f "$REPO_DIR/$REPO.db" ] || return 0
   log "pushing the repo to $PUSH_TARGET"
-  rsync -a --delete --exclude '.state/' \
-    -e "ssh -i $PUSH_KEY_FILE -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15" \
-    /repo/ "$PUSH_TARGET/" || log "push to $PUSH_TARGET failed, the dmz mirror keeps its last copy"
+  rsync -a --delete --exclude '.state/' -e "$PUSH_SSH" /repo/ "$PUSH_TARGET/" \
+    || log "push to $PUSH_TARGET failed, the dmz mirror keeps its last copy"
+}
+
+# only status.json, so the dmz mirror shows a running build; a failed push waits for the next update
+push_status() {
+  [ -n "$PUSH_TARGET" ] && [ -f "$PUSH_KEY_FILE" ] || return 0
+  rsync -a -e "$PUSH_SSH" /repo/status.json "$PUSH_TARGET/status.json" 2>/dev/null || true
 }
 
 # -----------------------------------------------------------------------------
 # MAIN
 main() {
-  local base
+  local base done=0
   log "setting up"
   setup_builder
   setup_key
@@ -746,19 +791,25 @@ main() {
   setup_pacman
   fetch_dotfiles
   log "resolving $DOTFILES/$INSTALL_SCRIPT at $COMMIT"
+  write_progress resolving
   load_repo_index
   read_lists
   resolve
   plan
   log "${#order[@]} bases, ${#official_wanted[@]} official packages listed"
   for base in "${order[@]}"; do
+    write_progress building "$base" "$done"
     [ -n "${failed[$base]:-}" ] || build_base "$base" || true
+    done=$((done + 1))
   done
+  write_progress snapshot "" "$done"
   if snapshot_official; then
     prune_db
+    write_progress verifying "" "$done"
     snapshot_verify || true
   fi
   if [ -z "$held_back" ]; then
+    write_progress publishing "" "$done"
     db_publish
     prune_files
   else
