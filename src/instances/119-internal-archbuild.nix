@@ -24,7 +24,7 @@ in {
   virtualisation.podman.enable = true;
 
   systemd.services.archbuild = {
-    description = "Build mirror/packages.conf of arch-dotfiles into the lsck0 pacman repo";
+    description = "Snapshot and build the packages of arch-dotfiles' install.sh into the lsck0 pacman repo";
     wants = [ "network-online.target" ];
     after = [ "network-online.target" ];
     path = [ pkgs.podman pkgs.coreutils ];

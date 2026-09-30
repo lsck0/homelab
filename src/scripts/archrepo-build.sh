@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build arch-dotfiles' mirror/packages.conf into the signed lsck0 pacman repo
+# snapshot every package arch-dotfiles' install.sh installs into the signed lsck0 pacman repo
 #
 # Runs as root in a fresh archlinux:base-devel container on vm-119 (archbuild.service):
 #   /repo              served tree on the nas: x86_64/ (packages, db), status.txt, status.json, .state/
@@ -7,24 +7,28 @@
 #   /public            the builder's status page: build.log, logs/<base>.log, status.txt
 #   /run/signing.asc   armored secret signing key
 #
-# Every package is served as lsck0-<name> with provides=<name>=<version> and conflicts=<name>.
-# Recipes are built unmodified and the finished package is repacked under the new name: renaming
-# inside the PKGBUILD breaks every recipe that uses $pkgname as a path (cd "$pkgname-$pkgver").
-# The repack also turns pkgrel 1 into 1.<n>, n counting the builds of that base, so a rebuild never
-# reuses a file name a client may have cached with other contents.
+# The list is install.sh itself: PACKAGES, CARGO_PKGS and GO_PKGS across every group. PACKAGES
+# entries in core, extra or multilib are copied, everything else is built: mirror/pkgbuilds/<name>
+# recipes, aur packages with their aur dependencies, crates and go modules. The official closure of
+# the whole set is copied at the versions the builds ran against, and clients list [lsck0] above
+# [core], so a machine only ever sees a set that resolved together here. Packages keep their names.
+#
+# Built packages are repacked to turn pkgrel 1 into 1.<n>, n counting the builds of that base, so a
+# rebuild never reuses a file name a client may have cached with other contents.
 #
 # A base is rebuilt when its recipe hash changes (aur commit, crate or module version, local
-# PKGBUILD, a -git source's upstream head via pkgver()) or its last build is FULL_REBUILD_DAYS old.
-# A new package enters the repo only once built, repacked and signed; old files are deleted only
-# after the db that replaced them is published. Crash-only: all state is per base, a killed run is
-# picked up by the next one.
+# PKGBUILD, a -git source's upstream head via pkgver()), its last build is FULL_REBUILD_DAYS old, or
+# its packages no longer resolve against today's repos (soname bumps). Everything lands in a staging
+# db first; the served db is replaced once, and only when the staged set resolves from [lsck0]
+# alone, otherwise the night is held back and clients keep yesterday's set. Old files are deleted
+# only after the db that replaced them is published. Crash-only: all state is per base, a killed run
+# is picked up by the next one.
 set -euo pipefail
 shopt -s nullglob
 
 # -----------------------------------------------------------------------------
 # CONSTANTS
 REPO=lsck0
-PREFIX=lsck0-
 REPO_DIR=/repo/x86_64
 STATE_DIR=/repo/.state
 CACHE=/cache
@@ -50,9 +54,12 @@ RESOLVE_ROUNDS_MAX=16
 RPC_BATCH=100
 CACHE_KEEP_DAYS=30
 # part of every rebuild key: bump it when repack changes what a published package contains
-REPACK_VERSION=2
-CHAOTIC_KEY=3056513887B78AEB
-CHAOTIC_URL=https://cdn-mirror.chaotic.cx/chaotic-aur
+REPACK_VERSION=3
+# the arch-dotfiles files the list and the local recipes come from
+INSTALL_SCRIPT=install.sh
+PKGBUILDS=mirror/pkgbuilds
+# the 2026 naming served lsck0-<name>; replaces lets a pacman -Syu swap the installed ones over
+OLD_PREFIX=lsck0-
 AUR_URL=https://aur.archlinux.org
 USER_AGENT="lsck0-archbuild (https://github.com/lsck0/arch-dotfiles)"
 
@@ -62,7 +69,11 @@ declare -A kind=() argument=() listed=() names=() deps=() provider=() failed=() 
 bases=()
 order=()
 aur_wanted=()
+official_wanted=()
+official_names=()
 built=()
+# empty while the staged set is publishable, else why the night is held back
+held_back=
 # prune only when every base is known, a transient fetch error must not delete packages
 resolve_complete=1
 KEY=
@@ -108,13 +119,22 @@ sign() { gpg --batch --yes --detach-sign --no-armor -u "$KEY" -o "$1.sig" "$1"; 
 
 # -----------------------------------------------------------------------------
 # REPO
+# db_file from the staging db, or from the db given
 load_db_index() {
   local name file
   db_file=()
   while read -r name file; do
     db_file[$name]=$file
-  done < <(bsdtar -xOf "$CACHE/db/$REPO.db.tar.gz" 2>/dev/null \
+  done < <(bsdtar -xOf "${1:-$CACHE/db/$REPO.db.tar.gz}" 2>/dev/null \
     | awk '/^%FILENAME%$/ { getline f } /^%NAME%$/ { getline n; print n, f }')
+}
+
+# the builder's pacman reads the staging db, so later builds and the resolve checks see what is staged
+db_sync_local() {
+  cp "$CACHE/db/$REPO.db.tar.gz" "/var/lib/pacman/sync/$REPO.db"
+  # the served db's signature would not match the staging copy
+  rm -f "/var/lib/pacman/sync/$REPO.db.sig"
+  load_db_index
 }
 
 db_publish() {
@@ -131,7 +151,7 @@ db_publish() {
   load_db_index
 }
 
-# the served db is the truth, the staging copy is rebuilt from it every run
+# the served db is the truth, the staging copy is rebuilt from it every run; a first run serves an empty one
 db_stage() {
   local f
   mkdir -p "$REPO_DIR" "$STATE_DIR" "$CACHE/db"
@@ -142,27 +162,25 @@ db_stage() {
       bsdtar -czf "$CACHE/db/$f" --files-from /dev/null
     fi
   done
-  db_publish
+  [ -f "$REPO_DIR/$REPO.db" ] || db_publish
+  load_db_index
 }
 
-# rename to lsck0-<name>, rel 1 -> 1.<build>; prints the signed package path
+# rel 1 -> 1.<build>; prints the signed package path
 repack() {
-  local package=$1 build=$2 dir=$CACHE/repack name base version arch release file
+  local package=$1 build=$2 dir=$CACHE/repack name version arch release file
   rm -rf "$dir"
   mkdir -p "$dir" "$CACHE/stage"
   bsdtar -xpf "$package" -C "$dir" || return 1
   name=$(sed -n 's/^pkgname = //p' "$dir/.PKGINFO")
-  base=$(sed -n 's/^pkgbase = //p' "$dir/.PKGINFO")
   version=$(sed -n 's/^pkgver = //p' "$dir/.PKGINFO")
   arch=$(sed -n 's/^arch = //p' "$dir/.PKGINFO")
   [ -n "$name" ] && [ -n "$version" ] && [ -n "$arch" ] || return 1
   release=${version##*-}
   version=${version%-*}
-  sed -i -e "s/^pkgname = .*/pkgname = $PREFIX$name/" -e "s/^pkgbase = .*/pkgbase = $PREFIX${base:-$name}/" \
-    -e "s/^pkgver = .*/pkgver = $version-${release%%.*}.$build/" "$dir/.PKGINFO" "$dir/.BUILDINFO"
-  # .PKGINFO spells it conflict, conflicts is silently ignored
-  printf 'provides = %s=%s\nconflict = %s\n' "$name" "$version" "$name" >> "$dir/.PKGINFO"
-  file=$CACHE/stage/$PREFIX$name-$version-${release%%.*}.$build-$arch.pkg.tar.zst
+  sed -i -e "s/^pkgver = .*/pkgver = $version-${release%%.*}.$build/" "$dir/.PKGINFO" "$dir/.BUILDINFO"
+  printf 'replaces = %s%s\n' "$OLD_PREFIX" "$name" >> "$dir/.PKGINFO"
+  file=$CACHE/stage/$name-$version-${release%%.*}.$build-$arch.pkg.tar.zst
   # same file list, order and mtree options as makepkg's create_package
   (
     cd "$dir"
@@ -178,7 +196,8 @@ repack() {
   echo "$file"
 }
 
-publish() {
+# files go to the served tree, unreferenced until the staging db is published
+stage_add() {
   local file served=()
   for file; do
     put "$file" "$REPO_DIR"
@@ -186,8 +205,7 @@ publish() {
     served+=("$REPO_DIR/$(basename "$file")")
   done
   repo-add -q "$CACHE/db/$REPO.db.tar.gz" "${served[@]}" || return 1
-  db_publish
-  pacman -Sy --noconfirm >/dev/null
+  db_sync_local
 }
 
 # -----------------------------------------------------------------------------
@@ -219,10 +237,6 @@ setup_pacman() {
   gpg --armor --export "$KEY" > "$CACHE/signing.pub"
   pacman-key --add "$CACHE/signing.pub" >/dev/null 2>&1
   pacman-key --lsign-key "$KEY" >/dev/null 2>&1
-  timeout 5m pacman-key --recv-key "$CHAOTIC_KEY" --keyserver keyserver.ubuntu.com >/dev/null 2>&1
-  pacman-key --lsign-key "$CHAOTIC_KEY" >/dev/null 2>&1
-  pacman -Sy >/dev/null
-  pacman -U --noconfirm "$CHAOTIC_URL/chaotic-keyring.pkg.tar.zst" "$CHAOTIC_URL/chaotic-mirrorlist.pkg.tar.zst" >/dev/null
   # the image strips docs and locales, a build dependency must install whole
   sed -i -e '/^NoExtract/d' -e "s|^#\?CacheDir.*|CacheDir = $CACHE/pacman/|" /etc/pacman.conf
   cat >> /etc/pacman.conf <<EOF
@@ -230,14 +244,14 @@ setup_pacman() {
 [multilib]
 Include = /etc/pacman.d/mirrorlist
 
-[chaotic-aur]
-Include = /etc/pacman.d/chaotic-mirrorlist
-
+# after the official repos: the staged copies of official packages must not shadow today's versions
 [$REPO]
-SigLevel = Required
+SigLevel = PackageRequired DatabaseOptional
 Server = file://$REPO_DIR
 EOF
+  # the only sync of the run: builds and the snapshot resolve against one state of the official repos
   pacman -Syu --noconfirm --needed git jq expac rsync openssh >/dev/null
+  db_sync_local
   git config --global --add safe.directory '*'
   BASELINE_PACKAGES=$(pacman -Qq)
 }
@@ -259,16 +273,16 @@ fetch_dotfiles() {
   COMMIT=$(git -C "$DOTFILES" rev-parse --short HEAD)
 }
 
-# names and provides of every official and chaotic package
+# names, provides and groups of every official package
 load_repo_index() {
-  local repo name provides
+  local repo name provides group
   while read -r repo name provides; do
     [ "$repo" = "$REPO" ] && continue
     repo_has[$name]=1
     for provides in $provides; do
       repo_has[${provides%%=*}]=1
     done
-  done < <(expac -S -l ' ' '%r %n %S')
+  done < <(expac -S -l ' ' '%r %n %S %G')
 }
 
 # -----------------------------------------------------------------------------
@@ -373,8 +387,8 @@ EOF
 
 recipe_local() {
   local name=$1 dir=$2
-  [ -f "$DOTFILES/mirror/pkgbuilds/$name/PKGBUILD" ] || return 1
-  cp -r "$DOTFILES/mirror/pkgbuilds/$name/." "$dir/"
+  [ -f "$DOTFILES/$PKGBUILDS/$name/PKGBUILD" ] || return 1
+  cp -r "$DOTFILES/$PKGBUILDS/$name/." "$dir/"
 }
 
 # recipe dir with an unprefixed PKGBUILD and its .SRCINFO; records names, provides and deps
@@ -411,20 +425,36 @@ add_base() {
 
 # -----------------------------------------------------------------------------
 # RESOLVE
-read_conf() {
-  local conf=$DOTFILES/mirror/packages.conf line name source spec
-  [ -f "$conf" ] || { log "no $conf"; exit 1; }
-  while IFS= read -r line; do
-    line=${line%%#*}
-    read -r name source spec _ <<<"$line" || true
-    [ -n "${name:-}" ] || continue
+# the entries of one install.sh array, one per line with an optional trailing comment
+list_entries() {
+  awk -v array="$2" '$0 ~ "^" array "=\\(" { inside = 1; next } inside && /^\)/ { exit }
+    inside { sub(/#.*/, ""); if ($1 != "") print $1 }' "$1"
+}
+
+read_lists() {
+  local script=$DOTFILES/$INSTALL_SCRIPT name spec
+  [ -f "$script" ] || { log "no $script"; exit 1; }
+  while read -r name; do
     listed[$name]=1
-    case $source in
-      aur) aur_wanted+=("$name") ;;
-      cargo | go | local) add_base "$name" "$source" "${spec:-}" ;;
-      *) fail "$name" "unknown source '$source'"; resolve_complete=0 ;;
-    esac
-  done < "$conf"
+    if [ -f "$DOTFILES/$PKGBUILDS/$name/PKGBUILD" ]; then
+      add_base "$name" local
+    elif [ -n "${repo_has[$name]:-}" ]; then
+      official_wanted+=("$name")
+    else
+      aur_wanted+=("$name")
+    fi
+  done < <(list_entries "$script" PACKAGES)
+  while read -r name; do
+    listed[$name]=1
+    add_base "$name" cargo
+  done < <(list_entries "$script" CARGO_PKGS)
+  while read -r spec; do
+    name=${spec%@*}
+    name=${name##*/}
+    listed[$name]=1
+    add_base "$name" go "$spec"
+  done < <(list_entries "$script" GO_PKGS)
+  (( ${#official_wanted[@]} + ${#aur_wanted[@]} + ${#bases[@]} > 0 )) || { log "no packages in $script"; exit 1; }
 }
 
 # prints "name base" for every name the aur has
@@ -506,13 +536,16 @@ recipe_key() {
 }
 
 is_current() {
-  local base=$1 key=$2 name built_at
+  local base=$1 key=$2 name built_at names
   [ "$key" = "$(state_get "$base" key)" ] || return 1
   built_at=$(state_get "$base" built)
   (( $(date +%s) - ${built_at:-0} < FULL_REBUILD_DAYS * 86400 )) || return 1
-  for name in $(state_get "$base" names); do
+  names=$(state_get "$base" names)
+  for name in $names; do
     [ -n "${db_file[$name]:-}" ] || return 1
   done
+  # a soname bump in today's repos leaves the old build uninstallable
+  pacman -Sp --noconfirm $names >/dev/null 2>&1
 }
 
 remove_build_deps() {
@@ -549,37 +582,110 @@ build_base() {
   for package in "$out"/*.pkg.tar.zst; do
     file=$(repack "$package" "$build") || { fail "$base" "repack or signing failed"; return 1; }
     files+=("$file")
-    pkgnames+=("$PREFIX$(bsdtar -xOf "$package" .PKGINFO | sed -n 's/^pkgname = //p')")
+    pkgnames+=("$(bsdtar -xOf "$package" .PKGINFO | sed -n 's/^pkgname = //p')")
   done
   (( ${#files[@]} > 0 )) || { fail "$base" "build produced no package"; return 1; }
-  publish "${files[@]}" || { fail "$base" "repo-add failed"; return 1; }
+  stage_add "${files[@]}" || { fail "$base" "repo-add failed"; return 1; }
   state_set "$base" "$key" "$build" "${pkgnames[*]}"
   rm -rf "$out"
   built+=("$base")
-  log "$base: published ${pkgnames[*]}"
+  log "$base: staged ${pkgnames[*]}"
+}
+
+# -----------------------------------------------------------------------------
+# SNAPSHOT
+# names the staged set is checked and installed by: listed official ones plus everything built
+snapshot_targets() {
+  local base name
+  printf '%s\n' "${official_wanted[@]}"
+  for base in "${bases[@]}"; do
+    state_get "$base" names | tr ' ' '\n'
+  done | while read -r name; do
+    [ -n "$name" ] && [ -n "${db_file[$name]:-}" ] && echo "$name"
+  done
+}
+
+# the official closure of the whole set at today's versions, downloaded into the served tree and staged
+snapshot_official() {
+  local root=$CACHE/resolve targets=() repo name file new=()
+  mapfile -t targets < <(snapshot_targets | sort -u)
+  # an empty local db, so the closure includes what the build container has installed
+  rm -rf "$root"
+  mkdir -p "$root/sync"
+  cp /var/lib/pacman/sync/*.db "$root/sync/"
+  if ! pacman --dbpath "$root" -Sp --noconfirm --print-format '%r %n %f' "${targets[@]}" \
+    > "$CACHE/closure.txt" 2> "$PUBLIC/logs/snapshot.log"; then
+    held_back="the set does not resolve against today's repos, logs/snapshot.log"
+    return 1
+  fi
+  official_names=()
+  new=()
+  while read -r repo name file; do
+    [ "$repo" = "$REPO" ] && continue
+    official_names+=("$name")
+    [ "${db_file[$name]:-}" = "$file" ] || new+=("$repo/$name")
+  done < "$CACHE/closure.txt"
+  log "snapshot: ${#official_names[@]} official packages, ${#new[@]} new"
+  (( ${#new[@]} > 0 )) || return 0
+  # the served tree as cache: files already there are verified, not fetched again
+  if ! pacman --dbpath "$root" -Sw --noconfirm --cachedir "$REPO_DIR" "${new[@]}" >> "$PUBLIC/logs/snapshot.log" 2>&1; then
+    held_back="downloading the official packages failed, logs/snapshot.log"
+    return 1
+  fi
+  new=()
+  while read -r repo name file; do
+    [ "$repo" = "$REPO" ] || [ "${db_file[$name]:-}" = "$file" ] && continue
+    # pacman takes a file its own cache already holds from there instead of downloading it again
+    [ -f "$REPO_DIR/$file" ] || put "$CACHE/pacman/$file" "$REPO_DIR" 2>/dev/null \
+      || { held_back="$file is in no cache after the download"; return 1; }
+    [ -f "$REPO_DIR/$file.sig" ] || sign "$REPO_DIR/$file" || { held_back="signing $file failed"; return 1; }
+    new+=("$REPO_DIR/$file")
+  done < "$CACHE/closure.txt"
+  repo-add -q "$CACHE/db/$REPO.db.tar.gz" "${new[@]}" || { held_back="repo-add of the official packages failed"; return 1; }
+  db_sync_local
+}
+
+# what a client with [lsck0] above everything sees: the staged set must resolve from it alone
+snapshot_verify() {
+  local root=$CACHE/verify targets=()
+  mapfile -t targets < <(snapshot_targets | sort -u)
+  rm -rf "$root"
+  mkdir -p "$root/sync"
+  cp "$CACHE/db/$REPO.db.tar.gz" "$root/sync/$REPO.db"
+  printf '[options]\nArchitecture = auto\nSigLevel = Never\n\n[%s]\nServer = file://%s\n' "$REPO" "$REPO_DIR" > "$root/pacman.conf"
+  pacman --config "$root/pacman.conf" --dbpath "$root" -Sp --noconfirm "${targets[@]}" >/dev/null 2>> "$PUBLIC/logs/snapshot.log" \
+    || { held_back="the staged set does not resolve from $REPO alone, logs/snapshot.log"; return 1; }
 }
 
 # -----------------------------------------------------------------------------
 # PRUNE
-prune() {
+# staging only: drops what neither a base in the closure nor the official snapshot still needs
+prune_db() {
   local base name file stale=()
-  declare -A keep=() in_closure=() referenced=()
+  declare -A keep=() in_closure=()
   (( resolve_complete )) || { log "prune skipped, resolution incomplete"; return 0; }
   for base in "${bases[@]}"; do
     in_closure[$base]=1
     for name in $(state_get "$base" names); do keep[$name]=1; done
   done
+  for name in "${official_names[@]}"; do keep[$name]=1; done
   for name in "${!db_file[@]}"; do
     [ -n "${keep[$name]:-}" ] || stale+=("$name")
   done
   if (( ${#stale[@]} > 0 )); then
     log "removing ${stale[*]}"
-    repo-remove -q "$CACHE/db/$REPO.db.tar.gz" "${stale[@]}" && db_publish
+    repo-remove -q "$CACHE/db/$REPO.db.tar.gz" "${stale[@]}" && db_sync_local
   fi
   for file in "$STATE_DIR"/*; do
     [ -n "${in_closure[$(basename "$file")]:-}" ] || rm -f "$file"
   done
-  # superseded and removed files, only now that no published db references them
+}
+
+# superseded, removed and held back files, only once no served db references them
+prune_files() {
+  local name file
+  declare -A referenced=()
+  load_db_index "$REPO_DIR/$REPO.db.tar.gz"
   for name in "${!db_file[@]}"; do referenced[${db_file[$name]}]=1; done
   for file in "$REPO_DIR"/*.pkg.tar.zst; do
     [ -n "${referenced[$(basename "$file")]:-}" ] || rm -f "$file" "$file.sig"
@@ -599,12 +705,15 @@ write_status() {
     echo "last build: $now"
     echo "source:     $SOURCE $REF $COMMIT"
     echo "packages:   ${#db_file[@]}"
+    echo "official:   ${#official_names[@]}"
+    echo "published:  ${held_back:+no, held back: }${held_back:-yes}"
     echo "built:      ${built[*]:-none}"
     echo "failed:     ${#failures[@]}"
     (( ${#failures[@]} == 0 )) || printf '  %s\n' "${failures[@]}"
   } > "$CACHE/status.txt"
-  jq -n --arg last_build "$now" --arg commit "$COMMIT" --argjson packages "${#db_file[@]}" \
-    --args '{ packages: $packages, failing: ($ARGS.positional | length), last_build: $last_build, commit: $commit, failed: $ARGS.positional }' \
+  jq -n --arg last_build "$now" --arg commit "$COMMIT" --argjson packages "${#db_file[@]}" --arg held_back "$held_back" \
+    --args '{ packages: $packages, failing: ($ARGS.positional | length), last_build: $last_build, commit: $commit,
+      held_back: (if $held_back == "" then null else $held_back end), failed: $ARGS.positional }' \
     "${failures[@]}" > "$CACHE/status.json"
   put "$CACHE/status.json" /repo
   put "$CACHE/status.txt" /repo
@@ -636,16 +745,26 @@ main() {
   db_stage
   setup_pacman
   fetch_dotfiles
-  log "resolving $DOTFILES/mirror/packages.conf at $COMMIT"
+  log "resolving $DOTFILES/$INSTALL_SCRIPT at $COMMIT"
   load_repo_index
-  read_conf
+  read_lists
   resolve
   plan
-  log "${#order[@]} bases"
+  log "${#order[@]} bases, ${#official_wanted[@]} official packages listed"
   for base in "${order[@]}"; do
     [ -n "${failed[$base]:-}" ] || build_base "$base" || true
   done
-  prune
+  if snapshot_official; then
+    prune_db
+    snapshot_verify || true
+  fi
+  if [ -z "$held_back" ]; then
+    db_publish
+    prune_files
+  else
+    log "held back: $held_back"
+    load_db_index "$REPO_DIR/$REPO.db.tar.gz"
+  fi
   write_status
   push
   clean_caches

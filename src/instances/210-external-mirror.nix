@@ -37,6 +37,11 @@ in {
 
   networking.firewall.allowedTCPPorts = [ 80 ];
 
-  # external traefik is the only path to :80; 22 stays open for the builder push
-  homelab.ingressOnly.ports = [ 80 ];
+  # external traefik plus the home networks, whose pacman goes straight to 10.200.0.210 (arch-dotfiles lsck0.conf);
+  # the repo is public and signed, so skipping traefik bypasses nothing. 22 stays open for the builder push
+  homelab.ingressOnly = {
+    ports = [ 80 ];
+    # fritzbox lan, internal lan, wireguard
+    portSources."80" = [ "192.168.178.0/24" "10.100.0.0/24" "10.0.0.0/24" ];
+  };
 }
