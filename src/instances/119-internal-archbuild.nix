@@ -37,11 +37,12 @@ in {
       Type = "oneshot";
       TimeoutStartSec = "20h";
       ExecStartPre = "${pkgs.coreutils}/bin/touch ${busyFlag}";
-      ExecStopPost = "${pkgs.coreutils}/bin/rm -f ${busyFlag}";
+      # conmon lives outside this unit's cgroup, a stop would leave the build running unflagged
+      ExecStopPost = [ "${pkgs.podman}/bin/podman rm -f -t 30 archbuild" "${pkgs.coreutils}/bin/rm -f ${busyFlag}" ];
     };
     script = ''
       set -o pipefail
-      podman run --rm --replace --pull=newer --name archbuild \
+      podman run --rm --init --replace --pull=newer --name archbuild \
         -e ARCHBUILD_SOURCE -e ARCHBUILD_REF \
         -v ${repoDir}:/repo \
         -v ${cacheDir}:/cache \
@@ -65,7 +66,8 @@ in {
   };
   systemd.timers.archbuild-if-stale = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnBootSec = "2min"; OnUnitActiveSec = "1h"; };
+    # after activation, not boot: a deploy starting the timer would build mid-switch, before dns is back
+    timerConfig = { OnActiveSec = "3min"; OnUnitActiveSec = "1h"; };
   };
 
   services.nginx = {

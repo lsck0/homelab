@@ -106,8 +106,9 @@ deploy_nixos() {
      && '${toplevel}/bin/switch-to-configuration' switch" 2>&1 | tee "$out" || rc=$?
   if [ "$rc" -ne 0 ]; then
     # podman healthchecks fire mid-restart; those alone are not a failed deploy
+    # the timer suffix is hex without leading zeros, 15 digits seen on vm-103
     failed=$(sed -n 's/^warning: the following units failed: //p' "$out" | tr ',' '\n' | tr -d ' ' \
-      | grep -v -E '^[0-9a-f]{64}-[0-9a-f]{16}\.service$' || true)
+      | grep -v -E '^[0-9a-f]{64}-[0-9a-f]{1,16}\.service$' || true)
     if grep -q '^warning: the following units failed: ' "$out" && [ -z "$failed" ]; then
       echo ">>> $name: only podman healthchecks failed during the switch, ignoring."
     else

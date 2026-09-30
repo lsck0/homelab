@@ -217,8 +217,12 @@ setup_pacman() {
   pacman-key --lsign-key "$CHAOTIC_KEY" >/dev/null 2>&1
   pacman -Sy >/dev/null
   pacman -U --noconfirm "$CHAOTIC_URL/chaotic-keyring.pkg.tar.zst" "$CHAOTIC_URL/chaotic-mirrorlist.pkg.tar.zst" >/dev/null
-  sed -i -e '/^#\[multilib\]/,/^#Include/ s/^#//' -e "s|^#\?CacheDir.*|CacheDir = $CACHE/pacman/|" /etc/pacman.conf
+  # the image strips docs and locales, a build dependency must install whole
+  sed -i -e '/^NoExtract/d' -e "s|^#\?CacheDir.*|CacheDir = $CACHE/pacman/|" /etc/pacman.conf
   cat >> /etc/pacman.conf <<EOF
+
+[multilib]
+Include = /etc/pacman.d/mirrorlist
 
 [chaotic-aur]
 Include = /etc/pacman.d/chaotic-mirrorlist
@@ -431,7 +435,7 @@ aur_bases() {
 
 aur_base_providing() {
   http "$AUR_URL/rpc/v5/search/$(jq -rn --arg n "$1" '$n | @uri')?by=provides" \
-    | jq -r --arg n "$1" '[.results[] | select(.Name == $n)] + .results | .[0].PackageBase // empty'
+    | jq -r --arg n "$1" '[.results[] | select(.Name == $n)] + (.results | sort_by(-.NumVotes)) | .[0].PackageBase // empty'
 }
 
 unsatisfied_deps() {
