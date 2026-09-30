@@ -30,6 +30,9 @@ STATE_DIR=/repo/.state
 CACHE=/cache
 PUBLIC=/public
 SIGNING_KEY_FILE=/run/signing.asc
+# ssh push to the always-on dmz mirror after each run; empty disables it
+PUSH_TARGET=${ARCHBUILD_PUSH_TARGET:-}
+PUSH_KEY_FILE=/run/push-key
 SOURCE=${ARCHBUILD_SOURCE:?git url or directory of arch-dotfiles}
 REF=${ARCHBUILD_REF:-master}
 BUILDER=builder
@@ -234,7 +237,7 @@ Include = /etc/pacman.d/chaotic-mirrorlist
 SigLevel = Required
 Server = file://$REPO_DIR
 EOF
-  pacman -Syu --noconfirm --needed git jq expac >/dev/null
+  pacman -Syu --noconfirm --needed git jq expac rsync openssh >/dev/null
   git config --global --add safe.directory '*'
   BASELINE_PACKAGES=$(pacman -Qq)
 }
@@ -613,6 +616,16 @@ clean_caches() {
   find "$CACHE/pacman" "$CACHE/src" -maxdepth 2 -type f -mtime +"$CACHE_KEEP_DAYS" -delete
 }
 
+# mirror the served tree to the always-on dmz host; never fatal, the nas copy stands regardless
+push() {
+  [ -n "$PUSH_TARGET" ] && [ -f "$PUSH_KEY_FILE" ] || return 0
+  [ -f "$REPO_DIR/$REPO.db" ] || return 0
+  log "pushing the repo to $PUSH_TARGET"
+  rsync -a --delete --exclude '.state/' \
+    -e "ssh -i $PUSH_KEY_FILE -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15" \
+    /repo/ "$PUSH_TARGET/" || log "push to $PUSH_TARGET failed, the dmz mirror keeps its last copy"
+}
+
 # -----------------------------------------------------------------------------
 # MAIN
 main() {
@@ -634,6 +647,7 @@ main() {
   done
   prune
   write_status
+  push
   clean_caches
 }
 

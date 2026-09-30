@@ -259,6 +259,13 @@ locals {
       # dockerd needs keyctl; dmz, so never privileged
       features = "nesting=1,keyctl=1",
     }
+    "210" = { # public lsck0 pacman mirror; vm (nfs is internal, dmz gets an ssh push instead)
+      enabled = true,
+      name    = "210-external-mirror",
+      type    = "external",
+      # served packages tree, pushed from vm-119
+      disk = 30,
+    }
 
     # router
     "300" = { # gateway: nat, firewall, dhcp, dns, wireguard, ddns

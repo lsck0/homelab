@@ -22,7 +22,7 @@ let
       { route = "forgejo"; name = "Forgejo"; icon = "forgejo";
         widget = arr "gitea" "forgejo" "FORGEJO_KEY"; }
       { route = "registry-ui"; name = "Registry"; icon = "docker-moby"; }
-      # counts come from the nas, so they show while the builder sleeps
+      # the dmz mirror is always on, so counts show while the builder sleeps
       { route = "mirror"; name = "Arch Mirror"; icon = "arch-linux";
         widget = { type = "customapi"; url = "${ipOf "mirror"}/status.json"; mappings = [
           { field = "packages"; label = "Packages"; }

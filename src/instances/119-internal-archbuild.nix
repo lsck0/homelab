@@ -18,6 +18,8 @@ in {
   fileSystems = nasPath repoDir "bulk/archrepo";
 
   sops.secrets.archrepo-signing-key = {};
+  # rsync push to the always-on dmz mirror (vm-210)
+  sops.secrets.archrepo-push-key = {};
 
   virtualisation.podman.enable = true;
 
@@ -32,6 +34,7 @@ in {
     environment = {
       ARCHBUILD_SOURCE = "https://github.com/lsck0/arch-dotfiles";
       ARCHBUILD_REF = "master";
+      ARCHBUILD_PUSH_TARGET = "archrepo@10.200.0.210:/var/lib/archrepo";
     };
     serviceConfig = {
       Type = "oneshot";
@@ -43,11 +46,12 @@ in {
     script = ''
       set -o pipefail
       podman run --rm --init --replace --pull=newer --name archbuild \
-        -e ARCHBUILD_SOURCE -e ARCHBUILD_REF \
+        -e ARCHBUILD_SOURCE -e ARCHBUILD_REF -e ARCHBUILD_PUSH_TARGET \
         -v ${repoDir}:/repo \
         -v ${cacheDir}:/cache \
         -v ${publicDir}:/public \
         -v ${config.sops.secrets.archrepo-signing-key.path}:/run/signing.asc:ro \
+        -v ${config.sops.secrets.archrepo-push-key.path}:/run/push-key:ro \
         -v ${../scripts/archrepo-build.sh}:/build.sh:ro \
         ${image} bash /build.sh 2>&1 | tee ${publicDir}/build.log
     '';
