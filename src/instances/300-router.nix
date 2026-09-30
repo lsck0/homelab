@@ -25,7 +25,7 @@ let
   hostsOf = side: lib.unique (map (r: r.host) (lib.attrValues routes.${side}));
   # internal traefik hosts without a vm route
   internalExtraHosts = [ "traefik" "proxmox" ];
-  # external traefik answers these itself, plain http
+  # external traefik answers these itself
   installHosts = lib.attrNames (import ../modules/install-hosts.nix);
 
   # cloudflare proxying comes from routes.nix `proxied`
@@ -276,7 +276,7 @@ in {
     filterForward = true;
 
     interfaces.ens18 = {
-      allowedTCPPorts = [ 22 53 80 443 9001 10100 10200 25565 ];
+      allowedTCPPorts = [ 22 53 443 9001 10100 10200 25565 ];
       allowedUDPPorts = [ 53 51820 5353 ];
     };
     interfaces.ens19 = {
@@ -350,8 +350,6 @@ in {
     content = ''
       chain prerouting {
         type nat hook prerouting priority dstnat - 1; policy accept;
-        # plain http only for install-hosts.nix, traefik redirects the rest to https
-        ip daddr 192.168.178.29 tcp dport 80 dnat to 10.200.0.200:80
         ip daddr 192.168.178.29 tcp dport 443 dnat to 10.200.0.200:443
         ip daddr 192.168.178.29 tcp dport 10100 dnat to 10.100.0.100:443
         ip daddr 192.168.178.29 tcp dport 10200 dnat to 10.200.0.200:443

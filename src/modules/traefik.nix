@@ -630,8 +630,7 @@ in {
         entryPoints = {
           web = {
             address = ":80";
-            # priority 1: a router placed on web on purpose answers plain http, all else redirects
-            http.redirections.entryPoint = { to = "websecure"; scheme = "https"; permanent = true; priority = 1; };
+            http.redirections.entryPoint = { to = "websecure"; scheme = "https"; permanent = true; };
             # bound slow-dribbling clients
             transport.respondingTimeouts = { readTimeout = "120s"; writeTimeout = "0s"; idleTimeout = "180s"; };
           };

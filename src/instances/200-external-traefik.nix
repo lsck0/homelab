@@ -99,8 +99,6 @@ in {
       # same for the terminal stats feed
       terminal-tls   = { rule = "Host(`terminal.lsck0.dev`)"; service = "calendar"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
 
-      # bare curl speaks http and follows no redirect, so these answer on web too
-      install-http = { rule = installRule; service = "install"; entryPoints = [ "web" ]; middlewares = [ "crowdsec" "rate-limit" ]; };
       install-tls  = { rule = installRule; service = "install"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
 
       # catch-all: unmatched hosts relay to internal traefik
