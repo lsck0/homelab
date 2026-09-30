@@ -14,6 +14,11 @@ let
   anubisRoutes = [ "searxng" "privatebin" "share" "hello" ];
   anubisPort = name: 27000 + lib.lists.findFirstIndex (n: n == name) 0 anubisRoutes;
   upstream = name: "http://${address.${name}}";
+
+  # `curl <host>.lsck0.dev | sh` lines, answered by the local nginx
+  installHosts = import ../modules/install-hosts.nix;
+  installPort = 8084;
+  installRule = lib.concatMapStringsSep " || " (h: "Host(`${h}.lsck0.dev`)") (lib.attrNames installHosts);
 in {
   networking.hostName = "vm-200";
 
@@ -73,7 +78,7 @@ in {
     cloudflareOnly.enable = true;
     cloudflareOnly.exemptRouters =
       map (name: "${name}-tls") (lib.attrNames (lib.filterAttrs (_: r: !(r.proxied or true)) routes))
-      ++ [ "calendar-tls" "terminal-tls" "wellknown-tls" "labyrinth-tls" ]
+      ++ [ "calendar-tls" "terminal-tls" "wellknown-tls" "labyrinth-tls" "install-tls" ]
       # already private-only via internal-only
       ++ map (name: "${name}-block") (lib.attrNames blockedInternal);
 
@@ -93,6 +98,10 @@ in {
       calendar-tls   = { rule = "Host(`cal.lsck0.dev`)"; service = "calendar"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
       # same for the terminal stats feed
       terminal-tls   = { rule = "Host(`terminal.lsck0.dev`)"; service = "calendar"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
+
+      # bare curl speaks http and follows no redirect, so these answer on web too
+      install-http = { rule = installRule; service = "install"; entryPoints = [ "web" ]; middlewares = [ "crowdsec" "rate-limit" ]; };
+      install-tls  = { rule = installRule; service = "install"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
 
       # catch-all: unmatched hosts relay to internal traefik
       internal-relay = {
@@ -133,6 +142,7 @@ in {
     }) routes // {
       calendar.loadBalancer.servers = [{ url = "https://10.100.0.100:443"; }];
       calendar.loadBalancer.serversTransport = "internal-traefik";
+      install.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString installPort}"; }];
       # catch-all relay to internal traefik over https
       internal-relay.loadBalancer.servers = [{ url = "https://10.100.0.100:443"; }];
       internal-relay.loadBalancer.serversTransport = "internal-relay";
@@ -152,6 +162,17 @@ in {
       # straight to lazymc on vm-208, which fronts the game port
       services.minecraft.loadBalancer.servers = [{ address = "10.200.0.208:25565"; }];
     };
+  };
+
+  services.nginx = {
+    enable = true;
+    virtualHosts = lib.mapAttrs' (host: line: lib.nameValuePair "${host}.lsck0.dev" {
+      listen = [{ addr = "127.0.0.1"; port = installPort; }];
+      locations."/".extraConfig = ''
+        default_type text/plain;
+        return 200 "${line}\n";
+      '';
+    }) installHosts;
   };
 
   networking.firewall.allowedTCPPorts = [ 25565 ];

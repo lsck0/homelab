@@ -25,6 +25,8 @@ let
   hostsOf = side: lib.unique (map (r: r.host) (lib.attrValues routes.${side}));
   # internal traefik hosts without a vm route
   internalExtraHosts = [ "traefik" "proxmox" ];
+  # external traefik answers these itself, plain http
+  installHosts = lib.attrNames (import ../modules/install-hosts.nix);
 
   # cloudflare proxying comes from routes.nix `proxied`
   routeHosts = side: lib.mapAttrsToList (_: r: {
@@ -38,7 +40,7 @@ let
   # unproxied (raw wan ip): anubis-fronted routes
   rawHosts = lib.unique (
     map (r: r.host) (lib.filter (r: !r.proxied) allRouteHosts)
-    ++ [ "wg" "mc" "tor" "*" ]
+    ++ installHosts ++ [ "wg" "mc" "tor" "*" ]
   );
   # domain:proxied entries for the ddns loop
   ddnsDomains = lib.concatStringsSep " " (
@@ -274,7 +276,7 @@ in {
     filterForward = true;
 
     interfaces.ens18 = {
-      allowedTCPPorts = [ 22 53 443 9001 10100 10200 25565 ];
+      allowedTCPPorts = [ 22 53 80 443 9001 10100 10200 25565 ];
       allowedUDPPorts = [ 53 51820 5353 ];
     };
     interfaces.ens19 = {
@@ -348,6 +350,8 @@ in {
     content = ''
       chain prerouting {
         type nat hook prerouting priority dstnat - 1; policy accept;
+        # plain http only for install-hosts.nix, traefik redirects the rest to https
+        ip daddr 192.168.178.29 tcp dport 80 dnat to 10.200.0.200:80
         ip daddr 192.168.178.29 tcp dport 443 dnat to 10.200.0.200:443
         ip daddr 192.168.178.29 tcp dport 10100 dnat to 10.100.0.100:443
         ip daddr 192.168.178.29 tcp dport 10200 dnat to 10.200.0.200:443
@@ -433,7 +437,7 @@ in {
           10.100.0.109 smb.lsck0.dev
           10.100.0.110 sccache.lsck0.dev
           # external services -> external traefik
-          ${lib.concatMapStringsSep "\n    " (h: "10.200.0.200 ${h}.lsck0.dev") (hostsOf "external" ++ [ "mc" ])}
+          ${lib.concatMapStringsSep "\n    " (h: "10.200.0.200 ${h}.lsck0.dev") (hostsOf "external" ++ installHosts ++ [ "mc" ])}
           fallthrough
         }
         template IN SRV _minecraft._tcp.mc.lsck0.dev {

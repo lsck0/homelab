@@ -192,8 +192,8 @@ publish() {
 setup_builder() {
   id "$BUILDER" >/dev/null 2>&1 || useradd -m -u "$BUILDER_UID" "$BUILDER"
   echo "$BUILDER ALL=(root) NOPASSWD: /usr/bin/pacman" > /etc/sudoers.d/builder
-  # build dirs are never reused, a killed run must not leave them behind
-  rm -rf "$CACHE/build" "$CACHE/out"
+  # regenerated every run; a stale recipe would linger as a base that is no longer wanted
+  rm -rf "$CACHE/build" "$CACHE/out" "$CACHE/recipes"
   mkdir -p "$CACHE"/{pacman,src,build,aur,recipes,out,stage,cargo,cargo-target,go} "$PUBLIC/logs"
   chown "$BUILDER:" "$CACHE"/{src,build,recipes,out,cargo,cargo-target,go}
 }
