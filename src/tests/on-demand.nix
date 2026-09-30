@@ -72,6 +72,8 @@ pkgs.testers.runNixOSTest {
     services.nginx = {
       enable = true;
       virtualHosts.default.locations."/".return = "200 'hello from the app\\n'";
+      # busy while the test holds the flag
+      virtualHosts.default.locations."= /busy".extraConfig = "if (-f /run/busy) { return 200; } return 404;";
     };
     systemd.services.nginx.wantedBy = lib.mkForce [ ];
     systemd.services.fake-pve = {
@@ -91,7 +93,7 @@ pkgs.testers.runNixOSTest {
       apiUrl = "https://backend:8006/api2/json";
       node = "pve";
       tokenFile = "/etc/pve-token";
-      services.app = { vmid = 150; targetPort = 80; listenPort = 20000; bootTimeout = 60; };
+      services.app = { vmid = 150; targetPort = 80; listenPort = 20000; bootTimeout = 60; busyPath = "/busy"; wakeAt = "03:00"; };
     };
   };
 
@@ -137,6 +139,24 @@ pkgs.testers.runNixOSTest {
         proxy.succeed("(exec 3<>/dev/tcp/127.0.0.1/20000; sleep 40) >/dev/null 2>&1 &")
         proxy.sleep(25)
         proxy.succeed("systemctl start ondemand-reaper.service")
+        backend.succeed("systemctl is-active nginx")
+
+    with subtest("a busy VM outlives its idle proxy and the reaper"):
+        backend.succeed("touch /run/busy")
+        # held connection ends, proxy idles out, then a full cooldown passes
+        proxy.sleep(65)
+        backend.succeed("systemctl is-active nginx")
+        proxy.succeed("systemctl start ondemand-reaper.service")
+        backend.succeed("systemctl is-active nginx")
+
+    with subtest("reaper stops it once the work is done"):
+        backend.succeed("rm /run/busy")
+        proxy.succeed("systemctl start ondemand-reaper.service")
+        backend.wait_until_fails("systemctl is-active nginx", timeout=30)
+
+    with subtest("wakeAt boots the VM without a request"):
+        proxy.succeed("systemctl list-timers --all | grep -q ondemand-wakeat-app.timer")
+        proxy.succeed("systemctl start ondemand-wakeat-app.service")
         backend.succeed("systemctl is-active nginx")
   '';
 }

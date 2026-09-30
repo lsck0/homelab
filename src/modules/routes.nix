@@ -18,6 +18,9 @@
     # docker clients cannot follow a browser login
     registry-api   = { host = "registry";    vmid = 118; port = 5000;  auth = "token"; };
     registry-ui    = { host = "registry-ui"; vmid = 118; port = 80; };
+    # pacman cannot log in; the repo is signed
+    mirror         = { host = "mirror";      vmid = 109; port = 8090;  auth = "token"; };
+    archbuild      = { host = "archbuild";   vmid = 119; port = 80; };
     # the trmnl cloud polls this, cannot log in
     calendar       = { host = "cal";         vmid = 104; port = 8081; auth = "token"; publicRelay = true; proxied = false; };
     # e-ink terminal data feeds

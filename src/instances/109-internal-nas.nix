@@ -172,6 +172,8 @@
     # paperless (uid 315) consumes and deletes what smb drops here as nobody
     "d /srv/nas/documents/inbox 0777 nobody nogroup -"
     "d /srv/nas/bulk/torrents 0775 1000 1000 -"
+    # vm-119 writes as root over nfs, nginx serves it on 8090
+    "d /srv/nas/bulk/archrepo 0755 root root -"
     # per-service persistent data
     "d /srv/nas/data 0777 nobody nogroup -"
     # nightly db dumps, one subdir per vm
@@ -265,7 +267,27 @@
 
 
 
-  networking.firewall.allowedTCPPorts = [ 80 2049 111 8384 22000 ];
+  # lsck0 pacman repo, built by vm-119; plain http, the packages and db are signed
+  services.nginx = {
+    enable = true;
+    virtualHosts.archrepo = {
+      listen = [{ addr = "0.0.0.0"; port = 8090; }];
+      root = "/srv/nas/bulk/archrepo";
+      extraConfig = ''
+        autoindex on;
+        # internal, lan, wireguard, tailnet
+        allow 10.100.0.0/24;
+        allow 192.168.178.0/24;
+        allow 10.0.0.0/24;
+        allow 100.64.0.0/10;
+        deny all;
+      '';
+      # builder state
+      locations."~ /\\.".return = "404";
+    };
+  };
+
+  networking.firewall.allowedTCPPorts = [ 80 2049 111 8090 8384 22000 ];
   networking.firewall.allowedUDPPorts = [ 2049 111 22000 21027 ];
 
   # authelia is the only gate for 80 and 8384

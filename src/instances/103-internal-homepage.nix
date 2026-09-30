@@ -22,6 +22,13 @@ let
       { route = "forgejo"; name = "Forgejo"; icon = "forgejo";
         widget = arr "gitea" "forgejo" "FORGEJO_KEY"; }
       { route = "registry-ui"; name = "Registry"; icon = "docker-moby"; }
+      # counts come from the nas, so they show while the builder sleeps
+      { route = "mirror"; name = "Arch Mirror"; icon = "arch-linux";
+        widget = { type = "customapi"; url = "${ipOf "mirror"}/status.json"; mappings = [
+          { field = "packages"; label = "Packages"; }
+          { field = "failing"; label = "Failing"; }
+        ]; }; }
+      { route = "archbuild"; name = "Arch Build"; icon = "arch-linux"; }
     ]; }
     { name = "Apps"; icon = "mdi-apps"; columns = 4; entries = [
       { route = "homeassistant"; name = "Home Assistant"; icon = "home-assistant";

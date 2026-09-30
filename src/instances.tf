@@ -107,6 +107,17 @@ locals {
       name    = "118-internal-registry",
       type    = "internal",
     }
+    "119" = { # arch package builds for the lsck0 pacman repo on the nas, wakes nightly
+      enabled = "onDemand",
+      name    = "119-internal-archbuild",
+      type    = "internal",
+      # parallel rust and c++ builds
+      memory  = 6144,
+      balloon = 3072,
+      cores   = 8,
+      # container image, pacman cache, sources, cargo and go caches
+      disk = 100,
+    }
 
     "121" = { # document management (paperless-ngx) and paperless-ai auto-tagging
       enabled = true,

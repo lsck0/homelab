@@ -16,11 +16,14 @@ in {
     side = "internal";
     tokenFile = config.sops.secrets.proxmox-wake-token.path;
     # port 20000 + index, routes can share a vm
-    services = lib.listToAttrs (lib.imap0 (i: name: lib.nameValuePair name {
+    services = lib.recursiveUpdate (lib.listToAttrs (lib.imap0 (i: name: lib.nameValuePair name {
       inherit (routes.${name}) vmid;
       targetPort = routes.${name}.port;
       listenPort = 20000 + i;
-    }) (lib.attrNames routes));
+    }) (lib.attrNames routes))) {
+      # nightly package build, kept up while it runs
+      archbuild = { busyPath = "/busy"; wakeAt = "03:00"; };
+    };
   };
 
   fileSystems = (nasMount "/var/lib/crowdsec" "crowdsec-internal")

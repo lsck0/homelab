@@ -5,6 +5,7 @@ let
   vmOf = svc: inventory.${toString svc.vmid};
   isOnDemand = svc: (vmOf svc).enabled == "onDemand";
   active = lib.filterAttrs (_: isOnDemand) cfg.services;
+  scheduled = lib.filterAttrs (_: svc: svc.wakeAt != null) active;
 
   # several routes can share one VM
   siblingsBusy = svc: lib.concatStrings (lib.mapAttrsToList (n: s:
@@ -24,6 +25,12 @@ let
     API="${cfg.apiUrl}/nodes/${cfg.node}/${if (vmOf svc).kind or "vm" == "lxc" then "lxc" else "qemu"}/${toString svc.vmid}"
     pve() { curl -sfk --max-time 20 -H "Authorization: PVEAPIToken=$TOKEN" "$@"; }
     vm_status() { pve "$API/status/current" | jq -r '.data.status // "unknown"'; }
+  '';
+
+  # exits the calling script while the vm reports work that must not be cut off
+  busyCheck = svc: lib.optionalString (svc.busyPath != null) ''
+    busy=$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://${(vmOf svc).ip}:${toString svc.targetPort}${svc.busyPath}" || true)
+    [ "$busy" = 200 ] && { echo "vm-${toString svc.vmid} reports busy, leaving it up"; exit 0; }
   '';
 
   wakeScript = name: svc: pkgs.writeShellScript "ondemand-wake-${name}" ''
@@ -67,6 +74,7 @@ let
     # only after a clean idle exit, never on crash
     [ "''${SERVICE_RESULT:-}" = "success" ] || exit 0
     ${siblingsBusy svc}
+    ${busyCheck svc}
     ${apiEnv svc}
 
     echo "${name} idle for ${(vmOf svc).cooldown}, shutting down vm-${toString svc.vmid}"
@@ -94,6 +102,7 @@ let
         fi
         ${siblingsBusy svc}
         [ "$status" = running ] || exit 0
+        ${busyCheck svc}
         uptime=$(echo "$cur" | jq -r '.data.uptime // 0')
         last=$(systemctl show -p InactiveEnterTimestamp --value ondemand-${name}.service)
         last=$([ -n "$last" ] && date -d "$last" +%s 2>/dev/null || echo 0)
@@ -127,6 +136,20 @@ let
         type = lib.types.int;
         default = 180;
         description = "Seconds to wait for the VM to answer before failing the connection.";
+      };
+
+      busyPath = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "/busy";
+        description = "HTTP path on the VM's targetPort that answers 200 while the VM must stay up (a running build). Idle shutdowns skip the VM while it does.";
+      };
+
+      wakeAt = lib.mkOption {
+        type = lib.types.nullOr lib.types.str;
+        default = null;
+        example = "03:00";
+        description = "systemd OnCalendar expression at which to boot the VM without a request, for work it starts on its own at boot.";
       };
 
       httpCheck = lib.mkOption {
@@ -230,7 +253,18 @@ in {
           Restart = "no";
         };
       }
-    ) active // lib.optionalAttrs (active != {}) {
+    ) active // lib.mapAttrs' (name: svc:
+      lib.nameValuePair "ondemand-wakeat-${name}" {
+        description = "Scheduled wake of vm-${toString svc.vmid} for ${name}";
+        wants = [ "network-online.target" ];
+        after = [ "network-online.target" ];
+        serviceConfig = {
+          Type = "oneshot";
+          TimeoutStartSec = svc.bootTimeout + 60;
+          ExecStart = wakeScript name svc;
+        };
+      }
+    ) scheduled // lib.optionalAttrs (active != {}) {
       ondemand-reaper = {
         description = "Shut down idle on-demand VMs that never got a connection";
         serviceConfig = { Type = "oneshot"; ExecStart = reaperScript; };
@@ -242,6 +276,9 @@ in {
         wantedBy = [ "timers.target" ];
         timerConfig = { OnBootSec = "5m"; OnUnitActiveSec = "2m"; };
       };
-    };
+    } // lib.mapAttrs' (name: svc: lib.nameValuePair "ondemand-wakeat-${name}" {
+      wantedBy = [ "timers.target" ];
+      timerConfig = { OnCalendar = svc.wakeAt; Persistent = true; };
+    }) scheduled;
   };
 }
