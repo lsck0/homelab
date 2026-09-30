@@ -250,12 +250,14 @@
 
     settings.devices.luca-pc.id =
       "CJDJNIO-XF2HJN5-IOUMFGP-JLEPI4Q-IHEWABK-M4AFSV2-25VSZHA-NSBK3A3";
+    settings.devices.luca-notebook.id =
+      "MI7TZZS-PGXBWLU-YIPVZ2T-EX4AR5F-LKCWYF7-CSZWHBD-JDPSKKI-RXRUXAX";
 
     # also the "syncthing" smb share
     settings.folders.sync = {
       id = "sync";
       path = "/srv/nas/syncthing/sync";
-      devices = [ "luca-pc" ];
+      devices = [ "luca-pc" "luca-notebook" ];
       type = "sendreceive";
       ignorePerms = true;
     };
