@@ -509,11 +509,12 @@ in {
                 uid = "offsite_stale";
                 title = "Off-site copy stale";
                 expr = "time() - max(homelab_offsite_last_success_timestamp_seconds)";
-                threshold = 26 * 3600;
+                # one failed night is tolerated: proton's api and a file changing mid-upload fail runs now and then
+                threshold = 50 * 3600;
                 for = "0m";
                 noData = "Alerting";
                 firing = "Backups missing"; resolved = "Backups running again";
-                summary = "Off-site (Proton Drive): no upload in over 26h";
+                summary = "Off-site (Proton Drive): no upload in over 50h";
                 description = "proton-sync on vm-109 has not finished. Check `journalctl -u proton-sync`.";
               }
               {

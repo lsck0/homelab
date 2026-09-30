@@ -252,6 +252,25 @@ in {
       # call grew to 1.9G and was oom-killed on this 3G guest (2026-09-29).
       # skipped in data: incomplete torrents, and the prometheus/loki tsdbs, which rewrite thousands of
       # chunk files a day (a new remote revision each) and are only regenerable monitoring history.
+      # the cli fails the whole call for items it cannot upload: symlinks (crowdsec hub links, grafana/conf
+      # into the nix store) and sockets are expected skips; a file changed mid-upload (a live sqlite db)
+      # gets one more try; anything else fails the run
+      upload() {
+        local out
+        out=$(mktemp)
+        proton-drive filesystem upload -f create-new-revision -d merge -t "$1" "$2" 2>&1 | tee "$out"
+        local rc=''${PIPESTATUS[0]} items real
+        items=$(grep -E '^\s+- .*: [A-Za-z]+Error:' "$out" || true)
+        rm -f "$out"
+        [ "$rc" = 0 ] && return 0
+        # a failure naming no item is the call itself: session expired, network down
+        [ -n "$items" ] || return 1
+        real=$(grep -v 'Not a regular file or directory' <<<"$items" || true)
+        [ -n "$real" ] || return 0
+        grep -qv 'IntegrityError' <<<"$real" && return 1
+        return 2
+      }
+
       ok=1
       for tree in BACKUPS documents syncthing data; do
         proton-drive filesystem create-folder "$root" "$tree" >/dev/null 2>&1 || true
@@ -260,7 +279,12 @@ in {
             case "$(basename "$p")" in qbittorrent-incomplete|prometheus|loki) continue ;; esac
           fi
           echo ">>> $p -> $root/$tree"
-          proton-drive filesystem upload -f create-new-revision -d merge -t "$p" "$root/$tree" || ok=0
+          upload "$p" "$root/$tree"
+          case $? in
+            0) ;;
+            2) echo ">>> $p changed during the upload, once more"; upload "$p" "$root/$tree" || ok=0 ;;
+            *) ok=0 ;;
+          esac
         done
       done
 
