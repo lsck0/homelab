@@ -618,7 +618,8 @@ build_base() {
 # names the staged set is checked and installed by: listed official ones plus everything built
 snapshot_targets() {
   local base name
-  printf '%s\n' "${official_wanted[@]}"
+  # an empty array would print one empty line, which pacman takes as a target
+  (( ${#official_wanted[@]} == 0 )) || printf '%s\n' "${official_wanted[@]}"
   for base in "${bases[@]}"; do
     state_get "$base" names | tr ' ' '\n'
   done | while read -r name; do
