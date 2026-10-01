@@ -187,7 +187,12 @@ repack() {
   [ -n "$name" ] && [ -n "$version" ] && [ -n "$arch" ] || return 1
   release=${version##*-}
   version=${version%-*}
-  sed -i -e "s/^pkgver = .*/pkgver = $version-${release%%.*}.$build/" "$dir/.PKGINFO" "$dir/.BUILDINFO"
+  local old new
+  old=$(printf '%s' "$version-$release" | sed 's/[][\.*^$/+?(){}|]/\\&/g')
+  new=$version-${release%%.*}.$build
+  sed -i -e "s/^pkgver = .*/pkgver = $new/" "$dir/.PKGINFO" "$dir/.BUILDINFO"
+  # a pin on a sibling of this base (python-frida needs frida=17.18.0-2) must follow the new release
+  sed -i -E "s/^((depend|optdepend|provides|conflicts) = [^=<>]+[=<>]+)$old(:|$)/\1$new\3/" "$dir/.PKGINFO"
   printf 'replaces = %s%s\n' "$OLD_PREFIX" "$name" >> "$dir/.PKGINFO"
   file=$CACHE/stage/$name-$version-${release%%.*}.$build-$arch.pkg.tar.zst
   # same file list, order and mtree options as makepkg's create_package
