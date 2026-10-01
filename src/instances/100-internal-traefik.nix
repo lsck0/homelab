@@ -23,6 +23,8 @@ in {
     }) (lib.attrNames routes))) {
       # nightly package build, kept up while it runs
       archbuild = { busyPath = "/busy"; wakeAt = "03:00"; };
+      # daily bank import (124-internal-firefly.nix, 05:00)
+      firefly = { wakeAt = "05:00"; };
     };
   };
 

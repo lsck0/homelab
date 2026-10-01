@@ -2,7 +2,6 @@
 .terraform/
 **/.terraform/
 *.tfvars
-.tf-last-apply
 
 # Nix
 result

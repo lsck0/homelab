@@ -40,7 +40,7 @@ The reply is a task UUID. Poll
 `https://paperless.lsck0.dev/documents/<id>/details`. Optionally set tags /
 correspondent with `PATCH /api/documents/<id>/`.
 
-## 3. Book it in Firefly III (vm-124, always on)
+## 3. Book it in Firefly III (vm-124, on demand: `vm start 124` first)
 
 1. Token: `lab-token firefly-token`. If it does not exist, the owner has not
    registered in Firefly yet (https://firefly.lsck0.dev); tell them and stop here.

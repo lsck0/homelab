@@ -11,7 +11,9 @@ metadata:
     related_skills: [homelab-ops, bills]
 ---
 
-# Firefly III (vm-124, always on, http://10.100.0.124:8080, https://firefly.lsck0.dev)
+# Firefly III (vm-124, on demand, http://10.100.0.124:8080, https://firefly.lsck0.dev)
+
+It sleeps until used: `vm start 124` first, then wait for it to answer.
 
 Headers:
 `Authorization: Bearer $(lab-token firefly-token)`, `Accept: application/json`,

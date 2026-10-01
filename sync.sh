@@ -339,19 +339,13 @@ fi
 
 # terraform
 [ -d "$ROOT_DIR/src/.terraform" ] || terraform -chdir="$ROOT_DIR/src" init
-TF_STAMP="$ROOT_DIR/src/.tf-last-apply"
-if [ ! -f "$TF_STAMP" ] || find "$ROOT_DIR/src" -maxdepth 2 \( -name '*.tf' -o -name '*.tfvars*' \) -newer "$TF_STAMP" | grep -q .; then
-  echo ">>> Terraform: applying..."
-  for i in $(seq 1 5); do
-    terraform -chdir="$ROOT_DIR/src" apply -refresh=false -auto-approve -parallelism=3 \
-      -var-file="$ACTIVE_TFVARS_PATH" && break
-    [ "$i" -eq 5 ] && { echo "ERROR: Terraform failed after 5 attempts."; exit 1; }
-    echo "Retrying ($i/5)..."; sleep 5
-  done
-  touch "$TF_STAMP"
-else
-  echo ">>> Terraform: no changes."
-fi
+# every run, with refresh: proxmox drift (a half-failed apply, a manual edit) is corrected, never trusted
+echo ">>> Terraform: applying..."
+for i in $(seq 1 5); do
+  terraform -chdir="$ROOT_DIR/src" apply -auto-approve -parallelism=3 -var-file="$ACTIVE_TFVARS_PATH" && break
+  [ "$i" -eq 5 ] && { echo "ERROR: Terraform failed after 5 attempts."; exit 1; }
+  echo "Retrying ($i/5)..."; sleep 5
+done
 
 # nix inventory, evaluated from terraform
 INVENTORY="$ROOT_DIR/src/inventory.json"

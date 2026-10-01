@@ -67,13 +67,16 @@ in {
     requires = [ "srv-nas-bulk.mount" ];
     wantedBy = [ "multi-user.target" ];
     startAt = "hourly";
-    path = [ pkgs.e2fsprogs pkgs.quota pkgs.gawk pkgs.gnugrep pkgs.coreutils ];
+    path = [ pkgs.e2fsprogs pkgs.quota pkgs.gawk pkgs.gnugrep pkgs.coreutils pkgs.findutils ];
     serviceConfig.Type = "oneshot";
     script = ''
       tune2fs -l /dev/disk/by-label/bulk | grep -q "^Filesystem features:.*project" || { echo "no project quotas yet"; exit 0; }
       for d in ${lib.escapeShellArgs mediaDirs}; do
-        # tag the tree once; new files inherit the project from their directory
-        [ "$(lsattr -pd "$d" | awk '{print $1}')" = ${toString mediaProject} ] || chattr -R -p ${toString mediaProject} +P "$d"
+        # tag the tree once; new files inherit the project from their directory (+P exists on directories only)
+        if [ "$(lsattr -pd "$d" | awk '{print $1}')" != ${toString mediaProject} ]; then
+          find "$d" -type f -exec chattr -p ${toString mediaProject} {} +
+          find "$d" -type d -exec chattr -p ${toString mediaProject} +P {} +
+        fi
       done
       setquota -P ${toString mediaProject} 0 ${toString (mediaQuotaGiB * 1024 * 1024)} 0 0 /srv/nas/bulk
       quotaon -P /srv/nas/bulk 2>/dev/null || true

@@ -151,7 +151,9 @@ locals {
     }
     "124" = { # Firefly III personal finance
       boot_phase = "apps",
-      enabled    = true,
+      enabled    = "onDemand",
+      # the 05:00 wake runs the bank import (a missed persistent timer) before it sleeps again
+      cooldown   = "1h",
       name       = "124-internal-firefly",
       type       = "internal",
       memory     = 1024,

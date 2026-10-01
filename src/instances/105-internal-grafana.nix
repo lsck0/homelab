@@ -98,7 +98,8 @@ let
     ];
     for = r.for or "5m";
     noDataState = r.noData or "OK";
-    execErrState = "Error";
+    # prometheus and loki restarting (a reboot, a deploy) is not every rule firing at once with empty labels
+    execErrState = "KeepLast";
     labels = { severity = r.severity or "critical"; } // lib.optionalAttrs (r.telegram or true) { notify = "telegram"; };
     annotations = { inherit (r) firing resolved summary description; };
   };
@@ -516,7 +517,8 @@ in {
                 title = "NAS snapshot stale";
                 expr = "time() - max(homelab_backup_last_success_timestamp_seconds{type=\"daily\"})";
                 threshold = 26 * 3600;
-                for = "0m";
+                # missing data alerts too, but only once prometheus had time to scrape after a boot
+                for = "30m";
                 noData = "Alerting";
                 firing = "Backups missing"; resolved = "Backups running again";
                 summary = "NAS snapshot: none in over 26h";
@@ -528,7 +530,7 @@ in {
                 expr = "time() - max(homelab_offsite_last_success_timestamp_seconds)";
                 # a failed night is tolerated (proton's api fails runs now and then), plus start jitter and run length
                 threshold = 60 * 3600;
-                for = "0m";
+                for = "30m";
                 noData = "Alerting";
                 firing = "Backups missing"; resolved = "Backups running again";
                 summary = "Off-site (Proton Drive): no upload in over 60h";
