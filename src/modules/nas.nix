@@ -4,7 +4,8 @@ let
   nasIP = "10.100.0.109";
   # systemd refuses automounts inside a container, so lxc guests mount at boot
   container = config.boot.isContainer;
-  mountOpts = if container then [ "_netdev" ] else [ "x-systemd.automount" "x-systemd.idle-timeout=60" ];
+  # a boot mount retries for 5 minutes, the nas may still be starting after a power loss
+  mountOpts = if container then [ "_netdev" "retry=5" "x-systemd.mount-timeout=6min" ] else [ "x-systemd.automount" "x-systemd.idle-timeout=60" ];
   # soft rw mounts surface i/o errors to apps
   nfsOpts = [ "nfsvers=4" "rw" "hard" "timeo=50" ] ++ mountOpts;
   nfsOptsRo = [ "nfsvers=4" "ro" "soft" "timeo=15" ] ++ mountOpts;

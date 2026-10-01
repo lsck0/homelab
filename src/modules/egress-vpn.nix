@@ -68,8 +68,7 @@ in
       '';
     };
 
-    # endpoint must not route through its own tunnel
-    networking.firewall.trustedInterfaces = [ "wg-egress" ];
+    # not a trusted interface: the router's own services stay closed to the provider side, forwarded peers pass as dnat
 
     # nat onto the provider-assigned address
     networking.nftables.tables.egress-nat = {

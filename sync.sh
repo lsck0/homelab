@@ -17,9 +17,22 @@ fi
 ACTIVE_TFVARS_PATH=""
 ROUTER_WAN_IP="192.168.178.29"
 DEPLOY_FAILURE=0
+# instance name -> built toplevel, filled once the batch build is done
+declare -A TOPLEVELS=()
 CLEANUP_FILES=()
 CLEANUP_AGENT=0
-trap '[ "$CLEANUP_AGENT" = 1 ] && ssh-agent -k >/dev/null 2>&1; rm -f "${CLEANUP_FILES[@]}"' EXIT
+# the traefiks run the on-demand reaper; it must not shut a guest down mid-deploy
+ONDEMAND_HOSTS=(10.100.0.100 10.200.0.200)
+REAPER_PAUSE_FILE=/run/ondemand-reaper-pause-until
+# outlives any sync, expires on its own if the trap never runs
+REAPER_PAUSE_SECONDS=14400
+REAPER_PAUSED=0
+cleanup() {
+  [ "$REAPER_PAUSED" = 1 ] && reaper_resume
+  [ "$CLEANUP_AGENT" = 1 ] && ssh-agent -k >/dev/null 2>&1
+  rm -rf "${CLEANUP_FILES[@]}"
+}
+trap cleanup EXIT
 
 echo ">>> SYNCING HARDWARE + OS..."
 
@@ -59,6 +72,25 @@ wait_for_ssh() {
   echo "ERROR: SSH not reachable at $ip"; return 1
 }
 
+# a deadline, not a stop: switch-to-configuration restarts timers.target and with it a stopped reaper timer
+reaper_pause() {
+  local ip
+  for ip in "${ONDEMAND_HOSTS[@]}"; do
+    ssh -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@$ip" \
+      "echo \$((\$(date +%s) + $REAPER_PAUSE_SECONDS)) > $REAPER_PAUSE_FILE" 2>/dev/null \
+      || echo "WARNING: could not pause the on-demand reaper on $ip"
+  done
+  REAPER_PAUSED=1
+}
+
+reaper_resume() {
+  local ip
+  for ip in "${ONDEMAND_HOSTS[@]}"; do
+    ssh -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@$ip" "rm -f $REAPER_PAUSE_FILE" 2>/dev/null \
+      || echo "WARNING: could not resume the on-demand reaper on $ip, it resumes by itself at the deadline"
+  done
+}
+
 # returns 1 if it had to start the vm
 vm_wake() {
   local st kind
@@ -77,9 +109,12 @@ deploy_nixos() {
   echo ">>> Deploying $name to $ip..."
   wait_for_ssh "$ip" 60 5 || return 1
 
-  local toplevel
-  toplevel=$(nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
-    --extra-experimental-features "nix-command flakes" --no-link --print-out-paths 2>&1 | tail -n1)
+  # the router deploys before the batch build finishes, so it builds its own
+  local toplevel="${TOPLEVELS[$name]:-}"
+  if [ -z "$toplevel" ]; then
+    toplevel=$(nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
+      --extra-experimental-features "nix-command flakes" --no-link --print-out-paths 2>&1 | tail -n1)
+  fi
   [ -n "$toplevel" ] && [ -e "$toplevel" ] || { echo "ERROR: Build failed for $name"; return 1; }
 
   local current
@@ -251,6 +286,11 @@ HOOK
    chmod 755 /var/lib/vz/snippets/homelab-bulk.sh
    qm config 109 | grep -q "^hookscript: local:snippets/homelab-bulk.sh" || qm set 109 --hookscript local:snippets/homelab-bulk.sh >/dev/null
    [ "$(qm status 109 | cut -d" " -f2)" = running ] && pvesm set bulk --disable 1
+   # onboot start checks the storage before the hookscript runs, so host boot enables bulk for the autostart
+   d=/etc/systemd/system/pve-guests.service.d; install -d $d
+   printf "[Service]\nExecStartPre=/usr/sbin/pvesm set bulk --disable 0\n" > $d/homelab-bulk.conf.new
+   if cmp -s $d/homelab-bulk.conf.new $d/homelab-bulk.conf; then rm -f $d/homelab-bulk.conf.new
+   else mv $d/homelab-bulk.conf.new $d/homelab-bulk.conf; systemctl daemon-reload; fi
    # disabled or not, pvestatd'"'"'s lvm scans for local-lvm read every pv label, the hdd too:
    # give it its own lvm config that rejects every name of the bulk pv, rebuilt from the real one each run
    pv=$(pvs --noheadings -o pv_name,vg_name | awk '"'"'$2=="bulk"{print $1}'"'"')
@@ -326,6 +366,8 @@ VM_IPS=$(jq -r 'to_entries[] | "\(.key)=\(.value.ip)"' "$INVENTORY")
 DISABLED_VMS=$(jq -r 'to_entries[] | select(.value.enabled == "false") | .key' "$INVENTORY")
 [ -n "$DISABLED_VMS" ] && echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')" || true
 
+reaper_pause
+
 # enabled vms must run to receive a deploy
 WAKE_VMS=$(jq -r 'to_entries[] | select(.value.enabled != "false") | .key' "$INVENTORY")
 if [ -n "$WAKE_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
@@ -355,29 +397,27 @@ fi
 # flakes only see git-tracked files
 git -C "$ROOT_DIR" add -A src
 
-# build enabled closures in parallel
-echo ">>> Building all VM closures (parallel)..."
+# one nix process for every closure: one per vm ran the workstation out of memory
+echo ">>> Building all VM closures..."
 BUILD_LOG=$(mktemp --suffix=.build.log); CLEANUP_FILES+=("$BUILD_LOG")
-(
-  rc=0; pids=(); names=()
-  for f in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix "$ROOT_DIR"/src/instances/300-router.nix; do
-    [ -f "$f" ] || continue
-    name=$(basename "$f" .nix); vm_id="${name%%-*}"
-    if echo "$DISABLED_VMS" | grep -qx "$vm_id"; then
-      echo ">>> Skipping build for $name (disabled)"; continue
-    fi
-    echo ">>> Building $name..."
-    (nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
-      --extra-experimental-features "nix-command flakes" --no-link 2>&1 \
-      || echo "ERROR: Build failed for $name") &
-    pids+=($!); names+=("$name")
-  done
-  for i in "${!pids[@]}"; do
-    wait "${pids[$i]}" || { echo "ERROR: Build failed for ${names[$i]}"; rc=1; }
-  done
-  exit $rc
-) > "$BUILD_LOG" 2>&1 &
-BUILD_PID=$!
+# out links are gc roots until the deploys are done
+BUILD_DIR=$(mktemp -d --suffix=.build); CLEANUP_FILES+=("$BUILD_DIR")
+BUILD_NAMES=(); BUILD_TARGETS=()
+for f in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix; do
+  [ -f "$f" ] || continue
+  name=$(basename "$f" .nix); vm_id="${name%%-*}"
+  if echo "$DISABLED_VMS" | grep -qx "$vm_id"; then
+    echo ">>> Skipping build for $name (disabled)"; continue
+  fi
+  BUILD_NAMES+=("$name")
+  BUILD_TARGETS+=("$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel")
+done
+BUILD_PID=""
+if [ "${#BUILD_TARGETS[@]}" -gt 0 ]; then
+  nix build "${BUILD_TARGETS[@]}" --extra-experimental-features "nix-command flakes" \
+    --keep-going --out-link "$BUILD_DIR/result" > "$BUILD_LOG" 2>&1 &
+  BUILD_PID=$!
+fi
 
 # router first, it is the ssh bastion
 echo ">>> Deploying 300-router to $ROUTER_WAN_IP..."
@@ -403,10 +443,15 @@ fi
 
 # wait for builds
 echo ">>> Waiting for builds..."
-if ! wait "$BUILD_PID"; then
+if [ -n "$BUILD_PID" ] && ! wait "$BUILD_PID"; then
   cat "$BUILD_LOG"; echo "ERROR: Build failed."; exit 1
 fi
 cat "$BUILD_LOG"
+# nix names the out link of installable i result-i, the first plain result
+for i in "${!BUILD_NAMES[@]}"; do
+  link="$BUILD_DIR/result"; [ "$i" -gt 0 ] && link="$link-$i"
+  TOPLEVELS[${BUILD_NAMES[$i]}]=$(readlink -f "$link")
+done
 echo ">>> All builds complete."
 
 # deploy the rest in parallel
@@ -451,9 +496,9 @@ for i in "${!DEPLOY_PIDS[@]}"; do
   wait "${DEPLOY_PIDS[$i]}" || { echo "WARNING: Failed to deploy ${DEPLOY_NAMES[$i]}"; DEPLOY_FAILURE=1; }
 done
 
-# commit + push, even on partial failure
+# commit + push, even on partial failure: src as staged for the build, plus the generated inventory
 if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git -C "$ROOT_DIR" add -A
+  git -C "$ROOT_DIR" add -- src/inventory.json
   if ! git -C "$ROOT_DIR" diff --cached --quiet; then
     # every commit is Generation: <n>, numbered by position
     next=$(( $(git -C "$ROOT_DIR" rev-list --count HEAD) + 1 ))

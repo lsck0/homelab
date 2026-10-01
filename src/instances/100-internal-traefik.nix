@@ -34,6 +34,8 @@ in {
 
     # sso login runs in a same-origin iframe
     sameOriginFrameRouters = [ "jellyfin-tls" ];
+    # vm-200 relays external hosts here; keep the client address it saw, not the relay
+    trustedProxies = [ "10.200.0.200/32" ];
 
     middlewares = {
       # auth = "token" routes have no own gate

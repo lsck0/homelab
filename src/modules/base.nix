@@ -55,7 +55,7 @@ in {
     environment.systemPackages = with pkgs; [ vim curl htop ];
     services.prometheus.exporters.node = {
       enable = true;
-      openFirewall = true;
+      openFirewall = lib.mkDefault true;
       # services publish their own metrics here
       enabledCollectors = [ "textfile" ];
       extraFlags = [ "--collector.textfile.directory=/var/lib/node-exporter-textfile" ];
@@ -63,7 +63,6 @@ in {
     systemd.tmpfiles.rules = [
       "d /var/lib/node-exporter-textfile 0755 root root -"
     ];
-    networking.firewall.allowedTCPPorts = [ 9100 ];
 
     # journals ship to vm-105's journal-remote; a few MB each instead of a promtail per host
     services.journald.upload = lib.mkIf (!isCollector) {

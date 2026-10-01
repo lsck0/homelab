@@ -6,7 +6,7 @@ let
 in {
   networking.hostName = "vm-210";
 
-  # push target for the builder; owns the served tree, no shell beyond rsync/scp over ssh
+  # push target for the builder; owns the served tree, the key only runs a write-only rsync into it
   users.users.archrepo = {
     isSystemUser = true;
     group = "archrepo";
@@ -14,8 +14,9 @@ in {
     createHome = true;
     # activation resets the home to homeMode (700) on every switch, nginx must read it
     homeMode = "755";
-    shell = pkgs.bashInteractive;
-    openssh.authorizedKeys.keys = [ pushKey ];
+    # sshd runs the forced command through the login shell
+    shell = pkgs.bash;
+    openssh.authorizedKeys.keys = [ ''restrict,command="${pkgs.rrsync}/bin/rrsync -wo ${repoDir}" ${pushKey}'' ];
   };
   users.groups.archrepo = { };
 

@@ -130,10 +130,20 @@ in {
 
   networking.firewall.allowedTCPPorts = [ 80 ];
 
-  # leased port changes, so match on public source
-  networking.firewall.extraInputRules = ''
-    ip saddr != { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 } tcp dport 1024-65535 accept
-    ip saddr != { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8 } udp dport 1024-65535 accept
+  # leased port changes, so match on public source; iptables host, extraInputRules would be nftables-only
+  networking.firewall.extraCommands = ''
+    iptables -N homelab-peers 2>/dev/null || iptables -F homelab-peers
+    ${lib.concatMapStrings (s: ''
+      iptables -A homelab-peers -s ${s} -j RETURN
+    '') [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "127.0.0.0/8" ]}
+    iptables -A homelab-peers -p tcp --dport 1024:65535 -j nixos-fw-accept
+    iptables -A homelab-peers -p udp --dport 1024:65535 -j nixos-fw-accept
+    iptables -A nixos-fw -j homelab-peers
+  '';
+  networking.firewall.extraStopCommands = ''
+    iptables -D nixos-fw -j homelab-peers 2>/dev/null || true
+    iptables -F homelab-peers 2>/dev/null || true
+    iptables -X homelab-peers 2>/dev/null || true
   '';
 
   # uid 1000 in the container binds 80

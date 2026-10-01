@@ -41,17 +41,27 @@ let
   rateLimitBurst = 100;    # spikes above average
   inFlightAmount = 100;    # concurrent requests
 
-  limitMiddlewares = {
-    rate-limit.rateLimit = {
+  # not xff depth: the entrypoint drops an untrusted sender's xff and depth then keys all of them as ""
+  remoteSource.requestHeaderName = "X-Real-Ip";
+  # cloudflare appends the client to xff and passes a forged x-real-ip through
+  cloudflareSource.ipStrategy.excludedIPs = cloudflareRanges ++ cloudflareRangesV6;
+
+  mkLimitMiddlewares = suffix: sourceCriterion: {
+    "rate-limit${suffix}".rateLimit = {
       average = rateLimitAverage;
       burst = rateLimitBurst;
       period = "1s";
-      sourceCriterion.ipStrategy.depth = 1;
+      inherit sourceCriterion;
     };
-    inflight-limit.inFlightReq = {
+    "inflight-limit${suffix}".inFlightReq = {
       amount = inFlightAmount;
-      sourceCriterion.ipStrategy.depth = 1;
+      inherit sourceCriterion;
     };
+  };
+
+  limitMiddlewares = mkLimitMiddlewares "" remoteSource
+    // lib.optionalAttrs cfg.cloudflareOnly.enable (mkLimitMiddlewares "-cloudflare" cloudflareSource)
+    // {
     # retry requests that never reached the backend
     retry-upstream.retry = {
       attempts = 4;
@@ -97,7 +107,8 @@ let
       crowdsecAppsecEnabled = appsec;
       crowdsecAppsecHost = "127.0.0.1:7422";
       # so the plugin bans the real client ip
-      forwardedHeadersTrustedIPs = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
+      forwardedHeadersTrustedIPs = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ]
+        ++ lib.optionals cfg.trustCloudflare (cloudflareRanges ++ cloudflareRangesV6);
     };
   };
 
@@ -224,7 +235,11 @@ let
       sameOriginFrames = builtins.elem name cfg.sameOriginFrameRouters;
       frameSwap = m:
         if sameOriginFrames && m == "secure-headers" then "secure-headers-sameorigin" else m;
-      chain = map frameSwap (
+      cloudflareOnly = cfg.cloudflareOnly.enable && !(builtins.elem name cfg.cloudflareOnly.exemptRouters);
+      # only cloudflare and private sources pass cloudflare-only, so key by the client cloudflare saw
+      limitSwap = m:
+        if cloudflareOnly && (m == "rate-limit" || m == "inflight-limit") then "${m}-cloudflare" else m;
+      chain = map (m: limitSwap (frameSwap m)) (
         (if cfg.crowdsecBouncer.enable
             && cfg.crowdsecBouncer.appsec
             && (builtins.elem name cfg.crowdsecBouncer.noAppsecRouters
@@ -233,8 +248,7 @@ let
          then map (m: if m == "crowdsec" then "crowdsec-noappsec" else m) defaultMiddlewares
          else defaultMiddlewares)
         ++ lib.optional (cfg.bodyLimit > 0 && builtins.elem name cfg.bodyLimitRouters) "body-limit"
-        ++ lib.optional (cfg.cloudflareOnly.enable
-                         && !(builtins.elem name cfg.cloudflareOnly.exemptRouters)) "cloudflare-only");
+        ++ lib.optional cloudflareOnly "cloudflare-only");
     in
     if wantsDefaults then
       withTls // { middlewares = chain ++ (withTls.middlewares or []); }
@@ -453,6 +467,17 @@ in {
       };
     };
 
+    trustedProxies = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      example = [ "10.200.0.200/32" ];
+      description = ''
+        Sources whose X-Forwarded-* and X-Real-Ip headers the websecure entrypoint keeps: another Traefik
+        relaying to this one. Without it every relayed request looks like it came from the relay, and the
+        per-client rate and in-flight limits share one bucket for all of them.
+      '';
+    };
+
     trustCloudflare = lib.mkEnableOption ''
       trusting Cloudflare edge ranges on the websecure entrypoint so the real
       client IP (not the rotating edge IP) reaches the backends: required for
@@ -596,13 +621,18 @@ in {
       '';
     };
 
-    # nfs share is 0777; lego wants acme.json 600
+    # lego wants acme.json 600 on the 0777 share; without it traefik serves its default cert, so wait for the nas
     systemd.services.traefik.preStart = ''
       f=/var/lib/traefik/acme/acme.json
+      for _ in $(${pkgs.coreutils}/bin/seq 1 120); do
+        [ -e "$f" ] && break
+        ${pkgs.coreutils}/bin/sleep 5
+      done
       if [ -e "$f" ]; then
         ${pkgs.coreutils}/bin/chmod 600 "$f"
       fi
     '';
+    systemd.services.traefik.serviceConfig.TimeoutStartSec = "15min";
 
     services.traefik = {
       enable = true;
@@ -637,9 +667,9 @@ in {
           websecure = {
             address = ":443";
             transport.respondingTimeouts = { readTimeout = "120s"; writeTimeout = "0s"; idleTimeout = "180s"; };
-          } // lib.optionalAttrs cfg.trustCloudflare {
-            forwardedHeaders.trustedIPs =
-              cloudflareRanges ++ [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
+          } // lib.optionalAttrs (cfg.trustCloudflare || cfg.trustedProxies != [ ]) {
+            forwardedHeaders.trustedIPs = cfg.trustedProxies
+              ++ lib.optionals cfg.trustCloudflare (cloudflareRanges ++ [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ]);
           };
           metrics.address = ":8082";
         } // cfg.entryPoints;

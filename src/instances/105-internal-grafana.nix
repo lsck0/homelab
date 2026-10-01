@@ -2,11 +2,14 @@
 let
 
 
-  # guests meant to run only: onDemand ones sleep and disabled ones are off on purpose; down now, up within 6h
+  # guests meant to run only: onDemand ones sleep and disabled ones are off on purpose; down now, up within 30d
   notRunningIps = lib.mapAttrsToList (_: v: v.ip) (lib.filterAttrs (_: v: v.enabled != "true") inventory);
   instanceDownExpr = "up{job=\"homelab-node-exporter\""
     + lib.optionalString (notRunningIps != []) ",instance!~\"(${lib.concatMapStringsSep "|" (ip: lib.replaceStrings [ "." ] [ "\\\\." ] ip) notRunningIps}):9100\""
-    + "} == 0 and max_over_time(up{job=\"homelab-node-exporter\"}[6h]) > 0";
+    + "} == 0 and max_over_time(up{job=\"homelab-node-exporter\"}[30d:5m]) > 0";
+
+  # persistent timers catch up within this of a wake; scrape history, since an lxc reports the host's boot time
+  upForCatchUp = "min_over_time(up{job=\"homelab-node-exporter\"}[1h]) == 1";
 
   # readable `vm` label, not ip:port
   shortName = v:
@@ -459,10 +462,12 @@ in {
             group_wait = "1m";
             group_interval = "15m";
             repeat_interval = "24h";
+            # a matching child route stops the fallback to the root receiver, so ntfy needs its own route
             routes = lib.optional enableTelegram {
               receiver = "telegram";
               object_matchers = [ [ "notify" "=" "telegram" ] ];
-            };
+              continue = true;
+            } ++ [ { receiver = "ntfy"; } ];
           }];
         };
         rules.settings = {
@@ -509,23 +514,33 @@ in {
                 uid = "offsite_stale";
                 title = "Off-site copy stale";
                 expr = "time() - max(homelab_offsite_last_success_timestamp_seconds)";
-                # one failed night is tolerated: proton's api and a file changing mid-upload fail runs now and then
-                threshold = 50 * 3600;
+                # a failed night is tolerated (proton's api fails runs now and then), plus start jitter and run length
+                threshold = 60 * 3600;
                 for = "0m";
                 noData = "Alerting";
                 firing = "Backups missing"; resolved = "Backups running again";
-                summary = "Off-site (Proton Drive): no upload in over 50h";
+                summary = "Off-site (Proton Drive): no upload in over 60h";
                 description = "proton-sync on vm-109 has not finished. Check `journalctl -u proton-sync`.";
               }
               {
                 uid = "db_dump_stale";
                 title = "Database dump stale";
-                expr = "time() - max by (vm, db) (homelab_db_dump_last_success_timestamp_seconds)";
+                expr = "(time() - max by (vm, db) (homelab_db_dump_last_success_timestamp_seconds)) and on (vm) ${upForCatchUp}";
                 threshold = 26 * 3600;
                 for = "0m";
                 firing = "Backups missing"; resolved = "Backups running again";
                 summary = "{{ $labels.db }} dump on {{ $labels.vm }}: none in over 26h";
                 description = "The nightly db-backup-<name> unit on that guest failed; the snapshot then holds only a live copy.";
+              }
+              {
+                uid = "state_mirror_stale";
+                title = "Local state mirror stale";
+                expr = "(time() - max by (vm, state) (homelab_local_state_mirror_last_success_timestamp_seconds)) and on (vm) ${upForCatchUp}";
+                threshold = 26 * 3600;
+                for = "0m";
+                firing = "Backups missing"; resolved = "Backups running again";
+                summary = "{{ $labels.state }} mirror on {{ $labels.vm }}: none in over 26h";
+                description = "The nightly <name>-mirror unit on that guest failed; the NAS copy, and with it the snapshot, is behind the guest's disk.";
               }
               # attacks
               {
@@ -648,10 +663,12 @@ in {
   # 3100 loki, 3200 tempo, 4317/4318 otlp, 19532 journal-remote
   networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 19532 ];
 
-  # grafana trusts Remote-User (auth.proxy)
-  homelab.ingressOnly.ports = [ 80 9090 3200 ];
+  # grafana trusts Remote-User (auth.proxy); loki has auth off, promtail on the ingresses pushes
+  homelab.ingressOnly.ports = [ 80 9090 3100 3200 ];
   # desktop status widget scrapes prometheus
   homelab.ingressOnly.portSources."9090" = [ "192.168.178.0/24" "10.100.0.104/32" ];
+  # stats-sync on the terminal queries loki
+  homelab.ingressOnly.portSources."3100" = [ "10.100.0.104/32" ];
 
 
   # hot page cache is the point here (nfs serving, tsdb, streams)

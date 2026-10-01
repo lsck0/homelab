@@ -37,7 +37,8 @@ in {
     environment = {
       ARCHBUILD_SOURCE = "https://github.com/lsck0/arch-dotfiles";
       ARCHBUILD_REF = "master";
-      ARCHBUILD_PUSH_TARGET = "archrepo@10.200.0.210:/var/lib/archrepo";
+      # relative: the key on vm-210 runs rrsync rooted at the repo
+      ARCHBUILD_PUSH_TARGET = "archrepo@10.200.0.210:.";
     };
     serviceConfig = {
       Type = "oneshot";

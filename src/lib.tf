@@ -20,11 +20,18 @@ locals {
     hostpci       = []
     # [{ size, datastore }]
     extra_disks = []
-    boot_order  = 3
   }
 
-  # pause after each vm booting before the default group
-  boot_wait_seconds = 30
+  # host boot starts the lab in phases, each after the one before had time to come up
+  boot_phases = { router = 1, nas = 2, core = 3, dev = 4, apps = 5, media = 6, external = 7 }
+  # seconds the last vm of a phase waits before the next phase starts; nfs on the nas needs the longest
+  boot_phase_wait = { router = 60, nas = 90, core = 60, dev = 30, apps = 30, media = 30, external = 0 }
+  # proxmox starts vms by order, then id, waiting up_delay after each: only a phase's last booting vm waits
+  boot_phase_last = {
+    for phase, order in local.boot_phases : order => max(concat([0], [
+      for id, i in local.instances : tonumber(id) if i.boot_phase == phase && tostring(try(i.enabled, true)) == "true"
+    ])...)
+  }
 
   vms = {
     for id, i in local.instances : id => {
@@ -44,7 +51,8 @@ locals {
       machine     = try(i.machine, local.defaults.machine)
       hostpci     = try(i.hostpci, local.defaults.hostpci)
       extra_disks = try(i.extra_disks, local.defaults.extra_disks)
-      boot_order  = try(i.boot_order, local.defaults.boot_order)
+      boot_order  = local.boot_phases[i.boot_phase]
+      boot_wait   = local.boot_phase_last[local.boot_phases[i.boot_phase]] == tonumber(id) ? local.boot_phase_wait[i.boot_phase] : 0
 
       bridge        = i.type == "router" ? var.wan_bridge : i.type == "external" ? var.external_bridge : var.internal_bridge
       extra_bridges = i.type == "router" ? [var.internal_bridge, var.external_bridge] : []
@@ -121,7 +129,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
 
   startup {
     order    = each.value.boot_order
-    up_delay = each.value.boot_order < local.defaults.boot_order ? local.boot_wait_seconds : 0
+    up_delay = each.value.boot_wait
   }
 
   # one hostpciN per mapping
@@ -217,7 +225,8 @@ resource "proxmox_virtual_environment_container" "ct" {
   start_on_boot = each.value.enabled == "true"
 
   startup {
-    order = each.value.boot_order
+    order    = each.value.boot_order
+    up_delay = each.value.boot_wait
   }
 
   operating_system {

@@ -25,12 +25,26 @@ let
     API="${cfg.apiUrl}/nodes/${cfg.node}/${if (vmOf svc).kind or "vm" == "lxc" then "lxc" else "qemu"}/${toString svc.vmid}"
     pve() { curl -sfk --max-time 20 -H "Authorization: PVEAPIToken=$TOKEN" "$@"; }
     vm_status() { pve "$API/status/current" | jq -r '.data.status // "unknown"'; }
+    vm_status_uptime() { pve "$API/status/current" | jq -r '.data.uptime // 0'; }
   '';
 
-  # exits the calling script while the vm reports work that must not be cut off
+  # silence from a saturated build counts as busy until this uptime; 21h stays clear of the next daily wakeAt
+  silentBusyUptimeMax = 21 * 3600;
+
+  # exits the calling script while the vm reports work that must not be cut off; needs $uptime
   busyCheck = svc: lib.optionalString (svc.busyPath != null) ''
     busy=$(curl -s -o /dev/null -w '%{http_code}' -m 5 "http://${(vmOf svc).ip}:${toString svc.targetPort}${svc.busyPath}" || true)
     [ "$busy" = 200 ] && { echo "vm-${toString svc.vmid} reports busy, leaving it up"; exit 0; }
+    if [ "''${busy:-000}" = 000 ] && [ "$uptime" -lt ${toString silentBusyUptimeMax} ]; then
+      echo "vm-${toString svc.vmid} does not answer its busy check, leaving it up"; exit 0
+    fi
+  '';
+
+  # sync.sh writes a deadline here so no guest is shut down mid-deploy
+  pauseFile = "/run/ondemand-reaper-pause-until";
+  pauseCheck = ''
+    pause=$(cat ${pauseFile} 2>/dev/null || echo 0)
+    [ "$(date +%s)" -lt "$pause" ] 2>/dev/null && { echo "paused by a deploy until $(date -d "@$pause")"; exit 0; }
   '';
 
   wakeScript = name: svc: pkgs.writeShellScript "ondemand-wake-${name}" ''
@@ -73,9 +87,11 @@ let
 
     # only after a clean idle exit, never on crash
     [ "''${SERVICE_RESULT:-}" = "success" ] || exit 0
+    ${pauseCheck}
     ${siblingsBusy svc}
-    ${busyCheck svc}
     ${apiEnv svc}
+    ${lib.optionalString (svc.busyPath != null) "uptime=$(vm_status_uptime || echo 0)"}
+    ${busyCheck svc}
 
     echo "${name} idle for ${(vmOf svc).cooldown}, shutting down vm-${toString svc.vmid}"
     pve -X POST "$API/status/shutdown" >/dev/null
@@ -86,24 +102,25 @@ let
     set -uo pipefail
     export PATH="${lib.makeBinPath [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ]}"
     now=$(date +%s)
+    ${pauseCheck}
     ${lib.concatStrings (lib.mapAttrsToList (name: svc: ''
       (
         ${apiEnv svc}
         cooldown=${toString (toSeconds (vmOf svc).cooldown)}
         cur=$(pve "$API/status/current")
         status=$(echo "$cur" | jq -r '.data.status // ""')
-        # orphaned proxy: proxyd runs but its vm was stopped externally, so the socket never
-        # re-activates and the next connection hits "no route to host". stop it to re-arm the
+        # orphaned proxy: proxyd runs but its vm was stopped externally (a failed api call reads "", not stopped),
+        # so the socket never re-activates and the next connection hits "no route to host". stop it to re-arm the
         # socket; must run before siblingsBusy, which would exit on this service's own active proxy.
-        if systemctl is-active --quiet ondemand-${name}.service && [ "$status" != running ]; then
+        if systemctl is-active --quiet ondemand-${name}.service && [ "$status" = stopped ]; then
           echo "vm-${toString svc.vmid} (${name}) stopped while its proxy runs, re-arming the socket"
           systemctl stop ondemand-${name}.service || true
           exit 0
         fi
         ${siblingsBusy svc}
         [ "$status" = running ] || exit 0
-        ${busyCheck svc}
         uptime=$(echo "$cur" | jq -r '.data.uptime // 0')
+        ${busyCheck svc}
         last=$(systemctl show -p InactiveEnterTimestamp --value ondemand-${name}.service)
         last=$([ -n "$last" ] && date -d "$last" +%s 2>/dev/null || echo 0)
         if [ "$uptime" -ge "$cooldown" ] && [ $((now - last)) -ge "$cooldown" ]; then

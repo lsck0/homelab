@@ -81,8 +81,17 @@ in {
             mkdir -p "${nasDir name}/$(dirname "$db")"
             sqlite3 "$db" ".backup '${nasDir name}/$db'"
           done
+          # grafana's state_mirror_stale alert watches this
+          d=/var/lib/node-exporter-textfile
+          printf '# TYPE homelab_local_state_mirror_last_success_timestamp_seconds gauge\nhomelab_local_state_mirror_last_success_timestamp_seconds{state="%s"} %s\n' ${name} "$(date +%s)" > $d/local_state_${name}.prom.tmp
+          mv $d/local_state_${name}.prom.tmp $d/local_state_${name}.prom
         '';
       };
     }) cfg);
+
+    # an on-demand guest is rarely up at mirrorAt; catch up on the next boot
+    systemd.timers = lib.mapAttrs' (name: _: lib.nameValuePair "${name}-mirror" {
+      timerConfig.Persistent = true;
+    }) cfg;
   };
 }

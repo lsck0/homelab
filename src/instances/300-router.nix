@@ -54,6 +54,8 @@ in {
   services.avahi = {
     enable = true;
     allowInterfaces = [ "ens18" ];
+    # the default opens 5353 on every interface, dmz and wg-egress included
+    openFirewall = false;
     ipv4 = true;
     ipv6 = false;
     publish = {
@@ -258,6 +260,10 @@ in {
     timerConfig = { OnBootSec = "90s"; OnUnitActiveSec = "45s"; AccuracySec = "5s"; };
   };
 
+  # ssh and node-exporter only where the firewall interfaces above open them, never the dmz or wg-egress
+  services.openssh.openFirewall = false;
+  services.prometheus.exporters.node.openFirewall = false;
+
   # NAT + PORT FORWARDING
   networking.nat = {
     enable = true;
@@ -276,7 +282,7 @@ in {
     filterForward = true;
 
     interfaces.ens18 = {
-      allowedTCPPorts = [ 22 53 443 9001 10100 10200 25565 ];
+      allowedTCPPorts = [ 22 53 443 10100 10200 25565 ];
       allowedUDPPorts = [ 53 51820 5353 ];
     };
     interfaces.ens19 = {
@@ -288,19 +294,11 @@ in {
       allowedUDPPorts = [ 53 67 ];
     };
     interfaces.wg0 = {
-      allowedTCPPorts = [ 53 ];
+      allowedTCPPorts = [ 22 53 ];
       allowedUDPPorts = [ 53 ];
     };
 
-    # per-source wan limits before any service
     extraInputRules = ''
-      iifname "ens18" tcp flags & (fin|syn|rst|ack) == syn \
-        meter wan-syn size 65535 { ip saddr limit rate over 50/second burst 100 packets } \
-        counter drop
-      iifname "ens18" ct state new \
-        meter wan-conns size 65535 { ip saddr ct count over 200 } \
-        counter drop
-
       # tor for the lab: socks and egress redirect
       ip saddr { 10.100.0.0/24, 10.200.0.0/24 } tcp dport { ${toString torPorts.socks}, ${toString torPorts.socksIsolated}, ${toString torPorts.trans}, ${toString torPorts.dns} } accept
       ip saddr { 10.100.0.0/24, 10.200.0.0/24 } udp dport ${toString torPorts.dns} accept
@@ -322,25 +320,39 @@ in {
       iifname "ens20" ip daddr { 10.100.0.100, 10.100.0.115 } tcp dport { 80, 443 } accept
       iifname "ens20" ip daddr 10.100.0.118 tcp dport { 80, 443, 5000 } accept
 
-      # dmz -> loki on vm-105
-      iifname "ens20" ip daddr 10.100.0.105 tcp dport 3100 accept
+      # dmz -> loki on vm-105: promtail pushes from the external traefik only, journals from every guest
+      iifname "ens20" ip saddr 10.200.0.200 ip daddr 10.100.0.105 tcp dport 3100 accept
       iifname "ens20" ip daddr 10.100.0.105 tcp dport 19532 accept
 
       # dmz -> nas nfs
       iifname "ens20" ip daddr 10.100.0.109 tcp dport { 111, 2049 } accept
       iifname "ens20" ip daddr 10.100.0.109 udp dport { 111, 2049 } accept
 
-      # dmz -> lan: block
-      iifname "ens20" oifname "ens19" counter drop
-
-      # vm-200 -> proxmox api for wake, before mgmt drop
+      # vm-200 -> proxmox api for wake
       iifname "ens20" ip saddr 10.200.0.200 ip daddr 192.168.178.200 tcp dport 8006 accept
 
-      # dmz -> management net: block
-      iifname "ens20" oifname "ens18" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } counter drop
+      # dmz -> lan, management net, wireguard clients: block, whichever interface routes it
+      iifname "ens20" ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 } counter drop
 
       # dmz -> internet: allow
       iifname "ens20" accept
+    '';
+  };
+
+  # per-source wan limits ahead of every accept, dnat'd ports included; the house lan shares ens18 and is exempt
+  networking.nftables.tables.wan-limits = {
+    family = "ip";
+    content = ''
+      chain prerouting {
+        type filter hook prerouting priority filter - 1; policy accept;
+        ip saddr 192.168.178.0/24 return
+        iifname "ens18" tcp flags & (fin|syn|rst|ack) == syn \
+          meter wan-syn size 65535 { ip saddr limit rate over 50/second burst 100 packets } \
+          counter drop
+        iifname "ens18" ct state new \
+          meter wan-conns size 65535 { ip saddr ct count over 200 } \
+          counter drop
+      }
     '';
   };
 
@@ -386,7 +398,8 @@ in {
         {
           id = 2;
           subnet = "10.200.0.0/24";
-          pools = [{ pool = "10.200.0.210 - 10.200.0.254"; }];
+          # .210 is vm-210's static address
+          pools = [{ pool = "10.200.0.211 - 10.200.0.254"; }];
           option-data = [
             { name = "routers"; data = "10.200.0.1"; }
             { name = "domain-name-servers"; data = "10.200.0.1"; }
@@ -437,6 +450,11 @@ in {
           # external services -> external traefik
           ${lib.concatMapStringsSep "\n    " (h: "10.200.0.200 ${h}.lsck0.dev") (hostsOf "external" ++ installHosts ++ [ "mc" ])}
           fallthrough
+        }
+        # unlisted names (mx, txt, public-only records) resolve like the rest
+        forward . 127.0.0.1:5335 1.1.1.1 8.8.8.8 {
+          policy sequential
+          health_check 5s
         }
         template IN SRV _minecraft._tcp.mc.lsck0.dev {
           answer "{{ .Name }} 3600 IN SRV 0 0 25565 mc.lsck0.dev."

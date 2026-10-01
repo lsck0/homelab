@@ -30,6 +30,9 @@
     description = "Register Forgejo runner";
     before = [ "docker-forgejo-runner.service" ];
     requiredBy = [ "docker-forgejo-runner.service" ];
+    # a stale token on the nas makes a re-registration fail
+    after = [ "forgejo-runner-token.service" ];
+    wants = [ "forgejo-runner-token.service" ];
     path = [ pkgs.curl pkgs.jq pkgs.docker pkgs.gnused ];
     serviceConfig = {
       Type = "oneshot";

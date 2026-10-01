@@ -233,7 +233,8 @@ in {
     script = ''
       # not -e: one tree failing must not skip the rest, and create-folder-exists is non-fatal
       set -uo pipefail
-      shopt -s nullglob
+      # dotglob: the per-child loop below would skip .git, .config and the like
+      shopt -s nullglob dotglob
 
       if [ ! -s ${protonDir}/auth-session.json ]; then
         echo "no proton session; run 'proton-drive-login' on this host once (opens a sign-in url)"

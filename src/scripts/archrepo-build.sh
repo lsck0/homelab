@@ -74,6 +74,8 @@ aur_wanted=()
 official_wanted=()
 official_names=()
 built=()
+# failed bases whose old build no longer resolves, removed from the staged set
+dropped=()
 # empty while the staged set is publishable, else why the night is held back
 held_back=
 STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -120,6 +122,9 @@ put() {
 }
 
 sign() { gpg --batch --yes --detach-sign --no-armor -u "$KEY" -o "$1.sig" "$1"; }
+
+# against today's official repos and the staging db
+names_resolve() { pacman -Sp --noconfirm "$@" >/dev/null 2>&1; }
 
 # -----------------------------------------------------------------------------
 # REPO
@@ -466,15 +471,24 @@ read_lists() {
       aur_wanted+=("$name")
     fi
   done < <(list_entries "$script" PACKAGES)
+  # a crate or module an official package ships is copied like any listed official package
   while read -r name; do
     listed[$name]=1
-    add_base "$name" cargo
+    if [ -n "${repo_has[$name]:-}" ]; then
+      official_wanted+=("$name")
+    else
+      add_base "$name" cargo
+    fi
   done < <(list_entries "$script" CARGO_PKGS)
   while read -r spec; do
     name=${spec%@*}
     name=${name##*/}
     listed[$name]=1
-    add_base "$name" go "$spec"
+    if [ -n "${repo_has[$name]:-}" ]; then
+      official_wanted+=("$name")
+    else
+      add_base "$name" go "$spec"
+    fi
   done < <(list_entries "$script" GO_PKGS)
   (( ${#official_wanted[@]} + ${#aur_wanted[@]} + ${#bases[@]} > 0 )) || { log "no packages in $script"; exit 1; }
 }
@@ -520,9 +534,12 @@ resolve() {
     for name in "${pending[@]}"; do
       looked_up[$name]=1
       base=${found[$name]:-}
-      [ -n "$base" ] || [ -n "${listed[$name]:-}" ] || base=$(aur_base_providing "$name" || true)
+      if [ -z "$base" ] && [ -z "${listed[$name]:-}" ]; then
+        base=$(aur_base_providing "$name") || { log "aur search for $name failed"; resolve_complete=0; continue; }
+      fi
+      # the rpc answered, so a listed name missing from it is gone for good and must not block pruning
       if [ -z "$base" ]; then
-        [ -n "${listed[$name]:-}" ] && { fail "$name" "not in the aur"; resolve_complete=0; }
+        [ -z "${listed[$name]:-}" ] || fail "$name" "not in the aur"
         continue
       fi
       [ -n "${kind[$base]:-}" ] || { add_base "$base" aur; new+=("$base"); }
@@ -558,16 +575,18 @@ recipe_key() {
 }
 
 is_current() {
-  local base=$1 key=$2 name built_at names
+  local base=$1 key=$2 name built_at names files
   [ "$key" = "$(state_get "$base" key)" ] || return 1
   built_at=$(state_get "$base" built)
   (( $(date +%s) - ${built_at:-0} < FULL_REBUILD_DAYS * 86400 )) || return 1
   names=$(state_get "$base" names)
+  files=" $(state_get "$base" files) "
+  # the staged file must be this build's, a held back or killed run leaves the previous one served
   for name in $names; do
-    [ -n "${db_file[$name]:-}" ] || return 1
+    [ -n "${db_file[$name]:-}" ] && [[ $files == *" ${db_file[$name]} "* ]] || return 1
   done
   # a soname bump in today's repos leaves the old build uninstallable
-  pacman -Sp --noconfirm $names >/dev/null 2>&1
+  names_resolve $names
 }
 
 remove_build_deps() {
@@ -645,6 +664,23 @@ snapshot_targets() {
   done
 }
 
+# a failed base keeps its last build staged, unless that no longer resolves and would hold back the night
+drop_unresolvable() {
+  local base name staged
+  for base in "${bases[@]}"; do
+    [ -n "${failed[$base]:-}" ] || continue
+    staged=()
+    for name in $(state_get "$base" names); do
+      [ -z "${db_file[$name]:-}" ] || staged+=("$name")
+    done
+    (( ${#staged[@]} > 0 )) && ! names_resolve "${staged[@]}" || continue
+    log "$base: dropping ${staged[*]}, the last build no longer resolves"
+    repo-remove -q "$CACHE/db/$REPO.db.tar.gz" "${staged[@]}" || continue
+    db_sync_local
+    dropped+=("$base")
+  done
+}
+
 # the official closure of the whole set at today's versions, downloaded into the served tree and staged
 snapshot_official() {
   local root=$CACHE/resolve targets=() repo name file new=()
@@ -699,16 +735,17 @@ snapshot_verify() {
 
 # -----------------------------------------------------------------------------
 # PRUNE
-# staging only: drops what neither a base in the closure nor the official snapshot still needs
+# staging only: drops what neither a base in the closure nor the snapshot still needs
 prune_db() {
-  local base name file stale=()
+  local base name file repo stale=()
   declare -A keep=() in_closure=()
   (( resolve_complete )) || { log "prune skipped, resolution incomplete"; return 0; }
   for base in "${bases[@]}"; do
     in_closure[$base]=1
     for name in $(state_get "$base" names); do keep[$name]=1; done
   done
-  for name in "${official_names[@]}"; do keep[$name]=1; done
+  # lsck0 lines too: an official package arch dropped resolves from the staged copy alone
+  while read -r repo name file; do keep[$name]=1; done < "$CACHE/closure.txt"
   for name in "${!db_file[@]}"; do
     [ -n "${keep[$name]:-}" ] || stale+=("$name")
   done
@@ -765,15 +802,20 @@ write_status() {
     echo "official:   ${#official_names[@]}"
     echo "published:  ${held_back:+no, held back: }${held_back:-yes}"
     echo "built:      ${built[*]:-none}"
+    echo "dropped:    ${dropped[*]:-none}"
     echo "failed:     ${#failures[@]}"
     (( ${#failures[@]} == 0 )) || printf '  %s\n' "${failures[@]}"
   } > "$CACHE/status.txt"
   jq -n --arg last_build "$now" --arg commit "$COMMIT" --argjson packages "${#db_file[@]}" --arg held_back "$held_back" \
+    --argjson dropped "$(jq -n '$ARGS.positional' --args "${dropped[@]}")" \
     --args '{ packages: $packages, failing: ($ARGS.positional | length), last_build: $last_build, commit: $commit,
-      held_back: (if $held_back == "" then null else $held_back end), failed: $ARGS.positional, running: null }' \
+      held_back: (if $held_back == "" then null else $held_back end), failed: $ARGS.positional, dropped: $dropped,
+      running: null }' \
     "${failures[@]}" > "$CACHE/status.json"
   put "$CACHE/status.json" /repo
   put "$CACHE/status.txt" /repo
+  # archbuild-if-stale ages the run from its start, a long night must not skip the next one
+  touch -d "$STARTED" /repo/status.txt
   cp "$CACHE/status.txt" "$PUBLIC/status.txt"
   cat "$CACHE/status.txt"
 }
@@ -784,19 +826,24 @@ clean_caches() {
 
 PUSH_SSH="ssh -i $PUSH_KEY_FILE -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15"
 
-# mirror the served tree to the always-on dmz host; never fatal, the nas copy stands regardless
+push_rsync() { rsync -a -e "$PUSH_SSH" "$@"; }
+
+# mirror to the always-on dmz host: packages, then the db, then deletions; never fatal, the nas copy stands
 push() {
   [ -n "$PUSH_TARGET" ] && [ -f "$PUSH_KEY_FILE" ] || return 0
   [ -f "$REPO_DIR/$REPO.db" ] || return 0
   log "pushing the repo to $PUSH_TARGET"
-  rsync -a --delete --exclude '.state/' -e "$PUSH_SSH" /repo/ "$PUSH_TARGET/" \
+  push_rsync --exclude '/.state/' --exclude "/x86_64/$REPO.*" --exclude '/status.*' /repo/ "$PUSH_TARGET/" \
+    && push_rsync --delay-updates "$REPO_DIR/$REPO".* "$PUSH_TARGET/x86_64/" \
+    && push_rsync /repo/status.txt /repo/status.json "$PUSH_TARGET/" \
+    && push_rsync --delete --exclude '/.state/' /repo/ "$PUSH_TARGET/" \
     || log "push to $PUSH_TARGET failed, the dmz mirror keeps its last copy"
 }
 
 # only status.json, so the dmz mirror shows a running build; a failed push waits for the next update
 push_status() {
   [ -n "$PUSH_TARGET" ] && [ -f "$PUSH_KEY_FILE" ] || return 0
-  rsync -a -e "$PUSH_SSH" /repo/status.json "$PUSH_TARGET/status.json" 2>/dev/null || true
+  push_rsync /repo/status.json "$PUSH_TARGET/status.json" 2>/dev/null || true
 }
 
 # -----------------------------------------------------------------------------
@@ -822,6 +869,7 @@ main() {
     done=$((done + 1))
   done
   write_progress snapshot "" "$done"
+  drop_unresolvable
   if snapshot_official; then
     prune_db
     write_progress verifying "" "$done"
