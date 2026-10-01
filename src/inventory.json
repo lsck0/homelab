@@ -168,8 +168,8 @@
     "type": "internal"
   },
   "124": {
-    "cooldown": "30m",
-    "enabled": "true",
+    "cooldown": "1h",
+    "enabled": "onDemand",
     "features": "nesting=1",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.124",

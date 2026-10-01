@@ -103,6 +103,10 @@ in {
     ) clientsByPath);
   };
 
+  # nfsd sizes its largest rpc from the ram it sees at start; restarted while ballooned down it shrinks below
+  # what clients negotiated at boot, and every hard mount hangs on "RPC fragment too large"
+  systemd.services.nfs-server.serviceConfig.ExecStartPre = [ "${pkgs.bash}/bin/sh -c 'echo 1048576 > /proc/fs/nfsd/max_block_size'" ];
+
   services.samba = {
     enable = true;
     openFirewall = true;
