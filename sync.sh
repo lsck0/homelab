@@ -369,6 +369,15 @@ for vmid in $(jq -r 'to_entries[] | select(.value.kind == "lxc" and .value.enabl
     || echo "WARNING: could not set features on lxc-$vmid"
 done
 
+# bpg 0.70 never reads a container's onboot back, so drift there is invisible to terraform: on-demand
+# containers must stay off at host boot
+for vmid in $(jq -r 'to_entries[] | select(.value.kind == "lxc") | .key' "$INVENTORY"); do
+  want=$(jq -r --arg id "$vmid" 'if .[$id].enabled == "true" then 1 else 0 end' "$INVENTORY")
+  "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+    "o=\$(pct config $vmid | sed -n 's/^onboot: //p'); [ \"\${o:-0}\" = $want ] || { pct set $vmid --onboot $want && echo '>>> lxc-$vmid onboot -> $want'; }" \
+    || echo "WARNING: could not set onboot on lxc-$vmid"
+done
+
 VM_IPS=$(jq -r 'to_entries[] | "\(.key)=\(.value.ip)"' "$INVENTORY")
 DISABLED_VMS=$(jq -r 'to_entries[] | select(.value.enabled == "false") | .key' "$INVENTORY")
 [ -n "$DISABLED_VMS" ] && echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')" || true

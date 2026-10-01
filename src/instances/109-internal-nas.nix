@@ -68,15 +68,17 @@ in {
     wantedBy = [ "multi-user.target" ];
     startAt = "hourly";
     path = [ pkgs.e2fsprogs pkgs.quota pkgs.gawk pkgs.gnugrep pkgs.coreutils pkgs.findutils ];
-    serviceConfig.Type = "oneshot";
+    serviceConfig = { Type = "oneshot"; StateDirectory = "bulk-quota"; };
     script = ''
       tune2fs -l /dev/disk/by-label/bulk | grep -q "^Filesystem features:.*project" || { echo "no project quotas yet"; exit 0; }
       for d in ${lib.escapeShellArgs mediaDirs}; do
-        # tag the tree once; new files inherit the project from their directory (+P exists on directories only)
-        if [ "$(lsattr -pd "$d" | awk '{print $1}')" != ${toString mediaProject} ]; then
-          find "$d" -type f -exec chattr -p ${toString mediaProject} {} +
-          find "$d" -type d -exec chattr -p ${toString mediaProject} +P {} +
-        fi
+        # tag the tree once, marked done only after the whole walk; new files inherit the project from
+        # their directory (+P exists on directories only)
+        done_marker="$STATE_DIRECTORY/$(basename "$d").tagged"
+        [ -e "$done_marker" ] && continue
+        find "$d" -type f -exec chattr -p ${toString mediaProject} {} +
+        find "$d" -type d -exec chattr -p ${toString mediaProject} +P {} +
+        touch "$done_marker"
       done
       setquota -P ${toString mediaProject} 0 ${toString (mediaQuotaGiB * 1024 * 1024)} 0 0 /srv/nas/bulk
       quotaon -P /srv/nas/bulk 2>/dev/null || true
