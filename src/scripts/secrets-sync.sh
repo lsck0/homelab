@@ -43,10 +43,10 @@ MANUAL=(
   proton-username proton-password proton-totp-secret
 )
 
-# ntfy only accepts tk_ + 29 [a-z0-9] as a token, a hex value stops ntfy-sh from starting
+# ntfy needs tk_ + 29 [a-z0-9], a hex token stops it from starting
 NTFY_TOKENS=(ntfy-desktop-token)
 
-# the desktop poller (dotfiles configs/ntfy) reads its token from the dotfiles secrets
+# dotfiles configs/ntfy reads its token from here
 DOTFILES_SECRETS="${DOTFILES:-$HOME/projects/arch-dotfiles}/configs/secrets"
 
 command -v sops >/dev/null || { echo "ERROR: sops not installed."; exit 1; }
@@ -95,7 +95,7 @@ for k in "${added[@]}"; do
   jq --arg k "$k" --arg v "$v" '.[$k] = $v' "$OUT" > "$OUT.t" && mv "$OUT.t" "$OUT"
 done
 
-# keep the dotfiles copy equal to the lab's; a locked worktree holds ciphertext, so leave it alone then
+# mirror to dotfiles; a locked worktree holds ciphertext, skip it then
 mirrored=0
 want=$(jq -r '.["ntfy-desktop-token"] // empty' "$OUT")
 if [ -n "$want" ] && [ "$(cat "$DOTFILES_SECRETS/ntfy-desktop-token" 2>/dev/null)" != "$want" ]; then
@@ -123,7 +123,7 @@ if [ "$APPLY" -eq 0 ]; then
   exit 0
 fi
 
-# only the dotfiles copy changed, secrets.json stays as it is
+# only the dotfiles copy changed
 if [ "${#added[@]}" -eq 0 ] && [ "${#removed[@]}" -eq 0 ]; then
   exit 0
 fi

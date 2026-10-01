@@ -17,10 +17,10 @@ if ! grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY"; then
   grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY" || { echo "ERROR: $AGE_KEY is not an age key, unlock the dotfiles secrets."; exit 1; }
 fi
 export SOPS_AGE_KEY_FILE="$AGE_KEY"
-# deploys log in with this key; src/keys/ authorizes it everywhere. a fresh dotfiles install has no
-# ~/.ssh/id_ed25519, only the key in the dotfiles secrets (ssh-add.service loads it into the agent)
+# deploys log in with this key; src/keys/ authorizes it everywhere
 DEPLOY_KEY="$HOME/.ssh/id_ed25519"
 DEPLOY_PUB="$DEPLOY_KEY.pub"
+# a fresh dotfiles install has the key only in the dotfiles secrets
 if [ ! -f "$DEPLOY_PUB" ]; then
   DEPLOY_KEY="$DOTFILES/configs/secrets/ssh_privatekey.asc"
   DEPLOY_PUB="$DOTFILES/configs/secrets/ssh_publickey.asc"

@@ -6,8 +6,7 @@ let
     grafana = { secret = "ntfy-grafana-password"; role = "user"; access = { "homelab-alerts" = "write-only"; }; };
     hermes = { secret = "ntfy-hermes-password"; role = "user"; access = { "homelab-hermes" = "read-write"; }; };
   };
-  # desktop notifier subscribes with a bearer token; tokens only attach to config-provisioned users
-  # hash of a discarded random password: token-only, no login
+  # token-only user (hash of a discarded password), tokens need config users
   desktopHash = "$2a$10$Qx26z/n53cwnTvVxhoqece0O3Yf8thqbwMhHi1u01e6I7bAkQNacS";
 in {
   networking.hostName = "vm-203";
@@ -15,7 +14,7 @@ in {
   sops.secrets = lib.mapAttrs' (_: u: lib.nameValuePair u.secret { }) users // {
     ntfy-desktop-token = { };
   };
-  # single quotes keep the hash's $ literal; a malformed tk_ token stops ntfy from starting
+  # single quotes keep the hash's $ literal
   sops.templates."ntfy.env" = {
     restartUnits = [ "ntfy-sh.service" ];
     content = ''
