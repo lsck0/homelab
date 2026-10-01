@@ -6,14 +6,29 @@ let
     grafana = { secret = "ntfy-grafana-password"; role = "user"; access = { "homelab-alerts" = "write-only"; }; };
     hermes = { secret = "ntfy-hermes-password"; role = "user"; access = { "homelab-hermes" = "read-write"; }; };
   };
+  # desktop notifier subscribes with a bearer token; tokens only attach to config-provisioned users
+  # hash of a discarded random password: token-only, no login
+  desktopHash = "$2a$10$Qx26z/n53cwnTvVxhoqece0O3Yf8thqbwMhHi1u01e6I7bAkQNacS";
 in {
   networking.hostName = "vm-203";
 
-  sops.secrets = lib.mapAttrs' (_: u: lib.nameValuePair u.secret { }) users;
+  sops.secrets = lib.mapAttrs' (_: u: lib.nameValuePair u.secret { }) users // {
+    ntfy-desktop-token = { };
+  };
+  # single quotes keep the hash's $ literal; a malformed tk_ token stops ntfy from starting
+  sops.templates."ntfy.env" = {
+    restartUnits = [ "ntfy-sh.service" ];
+    content = ''
+      NTFY_AUTH_USERS='desktop:${desktopHash}:user'
+      NTFY_AUTH_ACCESS='desktop:homelab-alerts:read-only'
+      NTFY_AUTH_TOKENS='desktop:${config.sops.placeholder.ntfy-desktop-token}:desktop'
+    '';
+  };
 
   # ntfy push notifications
   services.ntfy-sh = {
     enable = true;
+    environmentFile = config.sops.templates."ntfy.env".path;
     settings = {
       base-url = "https://ntfy.lsck0.dev";
       listen-http = ":80";
