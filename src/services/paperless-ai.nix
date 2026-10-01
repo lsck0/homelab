@@ -67,7 +67,6 @@ in {
       TOKEN_LIMIT=128000
       RESPONSE_TOKENS=1000
       EOF
-      chown 1000:1000 /var/lib/paperless-ai/.env
     '';
   };
 
@@ -86,8 +85,10 @@ in {
     extraOptions = [ "--cap-drop=ALL" "--security-opt=no-new-privileges" "--memory=2g" ];
   };
 
+  # the app runs as the container's root without capabilities (no DAC override), so its state must be root's own
   systemd.tmpfiles.rules = [
-    "d /var/lib/paperless-ai 0750 1000 1000 -"
+    "d /var/lib/paperless-ai 0700 root root -"
+    "Z /var/lib/paperless-ai - root root -"
   ];
 
   networking.firewall.allowedTCPPorts = [ 80 ];
