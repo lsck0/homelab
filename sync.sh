@@ -17,8 +17,14 @@ if ! grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY"; then
   grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY" || { echo "ERROR: $AGE_KEY is not an age key, unlock the dotfiles secrets."; exit 1; }
 fi
 export SOPS_AGE_KEY_FILE="$AGE_KEY"
-# deploys log in with this key; src/keys/ authorizes it everywhere
+# deploys log in with this key; src/keys/ authorizes it everywhere. a fresh dotfiles install has no
+# ~/.ssh/id_ed25519, only the key in the dotfiles secrets (ssh-add.service loads it into the agent)
 DEPLOY_KEY="$HOME/.ssh/id_ed25519"
+DEPLOY_PUB="$DEPLOY_KEY.pub"
+if [ ! -f "$DEPLOY_PUB" ]; then
+  DEPLOY_KEY="$DOTFILES/configs/secrets/ssh_privatekey.asc"
+  DEPLOY_PUB="$DOTFILES/configs/secrets/ssh_publickey.asc"
+fi
 ACTIVE_TFVARS_PATH=""
 # the machine and the house network, written by src/scripts/init.sh
 SITE="$ROOT_DIR/src/site.json"
@@ -200,15 +206,15 @@ if [ -n "$PROXMOX_SSH_PASSWORD" ]; then
   SSH_CMD=(sshpass -e "${SSH_CMD[@]}")
 fi
 
-[ -f "$DEPLOY_KEY.pub" ] && cat "$ROOT_DIR"/src/keys/*.pub | grep -qF "$(cut -d' ' -f2 "$DEPLOY_KEY.pub")" \
-  || { echo "ERROR: $DEPLOY_KEY.pub is not in src/keys/. Add it, then deploy once from a machine whose key is."; exit 1; }
+[ -f "$DEPLOY_PUB" ] && cat "$ROOT_DIR"/src/keys/*.pub | grep -qF "$(cut -d' ' -f2 "$DEPLOY_PUB")" \
+  || { echo "ERROR: $DEPLOY_PUB is not in src/keys/. Add it, then deploy once from a machine whose key is."; exit 1; }
 
 # bpg provider imports vm disks over ssh, through the agent
 if ! ssh-add -l >/dev/null 2>&1; then
   eval "$(ssh-agent -s)" >/dev/null
   CLEANUP_AGENT=1
 fi
-ssh-add -T "$DEPLOY_KEY.pub" 2>/dev/null || ssh-add "$DEPLOY_KEY" </dev/null >/dev/null 2>&1 \
+ssh-add -T "$DEPLOY_PUB" 2>/dev/null || ssh-add "$DEPLOY_KEY" </dev/null >/dev/null 2>&1 \
   || echo "WARNING: could not add the deploy key to the ssh-agent."
 
 mkdir -p "$HOME/.ssh" && touch "$LAB_KNOWN_HOSTS"
