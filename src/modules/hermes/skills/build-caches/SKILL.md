@@ -21,5 +21,6 @@ Every VM uses it as a substituter. On vm-110: `atticd` service, client `attic`.
 
 ## sccache (vm-110, redis://10.100.0.110:6379)
 
-Shared Rust/C/C++ compile cache for CI (`SCCACHE_REDIS=redis://sccache.lsck0.dev`).
-- Stats: `ssh 10.100.0.110 redis-cli -p 6379 info memory`; flush if corrupt: `redis-cli -p 6379 flushall`.
+Shared Rust/C/C++ compile cache for CI (`SCCACHE_REDIS=redis://:<password>@sccache.lsck0.dev`).
+Redis needs the password: on vm-110 run `redis-cli -p 6379 -a "$(cat /run/secrets/sccache-redis-pass)" --no-auth-warning <command>`.
+- Stats: `info memory`; flush if corrupt: `flushall`.

@@ -18,7 +18,7 @@ Everything else with `terminal` on the host: `ssh 192.168.178.200 <cmd>`.
 
 ## Common tasks
 
-- Overview: `ssh 192.168.178.200 'qm list; pct list'` (103, 104, 110 and 209 are LXC containers: `pct` instead of `qm`), host load `pvesh get /nodes/luca-server/status --output-format json`.
+- Overview: `ssh 192.168.178.200 'qm list; pct list'` (the `kind = "lxc"` entries in `src/instances.tf` are containers: `pct` instead of `qm`), host load `pvesh get /nodes/luca-server/status --output-format json`.
 - VM config: `qm config <id>`; live resource use: `pvesh get /nodes/luca-server/qemu/<id>/status/current --output-format json`.
 - Snapshot before a risky change: `qm snapshot <id> pre-<what>-$(date +%F)`;
   list `qm listsnapshot <id>`; roll back `qm rollback <id> <snap>` (VM must be stopped

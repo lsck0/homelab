@@ -1,22 +1,19 @@
 #!/usr/bin/env bash
-# toggle a vm group in src/instances.tf, then ./sync.sh
+# toggle a boot phase's guests in src/instances.tf, then ./sync.sh
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TF="$ROOT_DIR/src/instances.tf"
 
-MEDIA="112 128 130 134 136"
-# 126 huginn stays off until it is needed
-APPS="121 124 125"
+# the toggleable groups are boot phases; the rest of the lab depends on nas, network and dev
+PHASES="apps media public"
 
-usage() { echo "usage: $0 status | {media|apps} {on|off|onDemand} [--apply]"; exit 1; }
+usage() { echo "usage: $0 status | {${PHASES// /|}} {on|off|onDemand} [--apply]" >&2; exit 1; }
 
 group_ids() {
-  case "$1" in
-    media) echo "$MEDIA" ;;
-    apps)  echo "$APPS" ;;
-    *) usage ;;
-  esac
+  awk -v phase="\"$1\"" '
+    match($0, /^ *"[0-9]+" = \{/) { id = substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", id) }
+    index($0, "boot_phase") && index($0, phase) { print id }' "$TF"
 }
 
 state_of() { # id -> current `enabled` value
@@ -37,7 +34,7 @@ name_of() {
 [ $# -ge 1 ] || usage
 
 if [ "$1" = status ]; then
-  for g in media apps; do
+  for g in $PHASES; do
     printf '%s:\n' "$g"
     for id in $(group_ids "$g"); do
       printf '  %-4s %-34s %s\n' "$id" "$(name_of "$id")" "$(state_of "$id")"
@@ -48,6 +45,7 @@ fi
 
 [ $# -ge 2 ] || usage
 GROUP="$1"; WANT="$2"; APPLY=0
+case " $PHASES " in *" $GROUP "*) ;; *) usage ;; esac
 [ "${3:-}" = "--apply" ] && APPLY=1
 case "$WANT" in on) VALUE=true ;; off) VALUE=false ;; onDemand) VALUE='"onDemand"' ;; *) usage ;; esac
 

@@ -1,4 +1,4 @@
-{ config, lib, pkgs, inputs, inventory, nasMount, nasPath, ... }:
+{ config, lib, pkgs, inputs, inventory, nasMount, nasPath, site, ... }:
 let
   T = "/var/lib/homepage-tokens";
   routes = import ../modules/routes.nix;
@@ -11,19 +11,19 @@ let
     m="''${1:?method}"; p="''${2:?path}"; shift 2
     exec ${pkgs.curl}/bin/curl -sk -X "$m" \
       -H "Authorization: PVEAPIToken=$(cat ${config.sops.secrets.proxmox-api-token.path})" \
-      "https://192.168.178.200:8006/api2/json$p" "$@"
+      "https://${site.lan.proxmox}:8006/api2/json$p" "$@"
   '';
 
   vm = pkgs.writeShellScriptBin "vm" ''
     set -euo pipefail
     export PATH="${lib.makeBinPath [ pve pkgs.jq pkgs.openssh pkgs.coreutils ]}:$PATH"
     # guests are qemu vms or lxc containers
-    at() { if pve GET "/nodes/luca-server/lxc/$1/status/current" | jq -e .data >/dev/null; then
-             echo "/nodes/luca-server/lxc/$1"; else echo "/nodes/luca-server/qemu/$1"; fi; }
+    at() { if pve GET "/nodes/${site.node}/lxc/$1/status/current" | jq -e .data >/dev/null; then
+             echo "/nodes/${site.node}/lxc/$1"; else echo "/nodes/${site.node}/qemu/$1"; fi; }
     ip() { if [ "$1" -ge 200 ] && [ "$1" -lt 300 ]; then echo 10.200.0.$1; else echo 10.100.0.$1; fi; }
     case "''${1:-list}" in status|start|stop|reboot) N=$(at "''${2:?id}") ;; esac
     case "''${1:-list}" in
-      list)   { pve GET /nodes/luca-server/qemu; pve GET /nodes/luca-server/lxc; } \
+      list)   { pve GET /nodes/${site.node}/qemu; pve GET /nodes/${site.node}/lxc; } \
                 | jq -rs 'map(.data) | add | sort_by(.vmid)[] | "\(.vmid)\t\(.status)\t\(.name)"' ;;
       status) pve GET $N/status/current | jq -r '.data.status' ;;
       start)  id=''${2:?id}
@@ -118,7 +118,7 @@ let
 
     You are Hermes, the operator of this homelab. The owner talks to you on
     Telegram. You run on vm-114 (10.100.0.114), use only cloud model APIs, and have root
-    SSH on every VM and on the Proxmox host (192.168.178.200). Start with the
+    SSH on every VM and on the Proxmox host (${site.lan.proxmox}). Start with the
     `homelab-ops` skill; there is one skill per subsystem:
     ${lib.concatMapStringsSep ", " (n: "`${n}`") skillNames}.
 
@@ -139,11 +139,11 @@ let
     ## Network
 
     - 10.100.0.0/24 internal (VM id = last octet), 10.200.0.0/24 external DMZ,
-      router 10.100.0.1 / 10.200.0.1 / 192.168.178.29.
+      router 10.100.0.1 / 10.200.0.1 / ${site.lan.router}.
     - Public names *.lsck0.dev go through Traefik (vm-100 internal, vm-200
       external) with Authelia SSO; from here, call VMs by IP instead.
     - NAS vm-109: all persistent service data under /srv/nas/data/<service>,
-      media under /srv/nas/media. Backups: Kopia on vm-109 itself.
+      media under /srv/nas/bulk/media. Backups: Kopia on vm-109 itself.
 
     ## VMs
 
@@ -212,7 +212,7 @@ in {
 
   # root on every vm and the proxmox host
   programs.ssh.extraConfig = ''
-    Host 10.100.0.* 10.200.0.* 192.168.178.200 192.168.178.29
+    Host 10.100.0.* 10.200.0.* ${site.lan.proxmox} ${site.lan.router}
       User root
       IdentityFile ${sshKey}
       IdentitiesOnly yes
@@ -285,8 +285,8 @@ in {
       (name: lib.nameValuePair "skills/luca/${name}/SKILL.md" "${lucaSkillsDir}/${name}/SKILL.md");
   };
 
-  # hardening makes the fs read-only
-  systemd.services.hermes-agent.serviceConfig.ReadWritePaths = [ T "/srv/sync" "/srv/media" ];
+  # hardening makes the fs read-only; the parent, not the automounts, so the agent starts without the nas
+  systemd.services.hermes-agent.serviceConfig.ReadWritePaths = [ "/srv" ];
 
   # sync.sh needs the age key
   systemd.tmpfiles.rules = [

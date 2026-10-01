@@ -22,16 +22,18 @@ metadata:
 
 ## Granting and revoking a service
 
-Authorisation is lldap group membership. `src/modules/routes.nix` gives every
-`auth = "sso"` route a `group`, and `101-internal-authelia.nix` turns that into
-an allow rule plus a deny rule for the same host. So:
+Authorisation is lldap group membership. Routes in `src/modules/routes.nix` carry no
+group field: `101-internal-authelia.nix` derives `app-<route name>` (the attribute name,
+e.g. `app-homepage` for homelab.lsck0.dev) for every sso route (no `auth`, or
+`auth = "sso"`) and turns it into an allow rule for `admins` and that group plus a deny
+rule for the same host. OIDC clients check `app-<client id>` the same way. So:
 
 - **to take a service away from someone**, remove them from that route's group
   in the lldap UI. It takes effect within `refresh_interval` (1 minute).
 - groups: `admins` reach every page and are also put in lldap's built-in
   `lldap_admin`; everyone else gets one `app-<route>` group per page (e.g.
   `app-grafana`). There are no bundle groups. lldap seeds an `app-<route>`
-  group for every sso route in routes.nix.
+  group for every sso and own-login route in routes.nix.
 - a host with no entry in routes.nix falls through to the last rule, which
   requires `admins`.
 

@@ -32,10 +32,6 @@ in {
     };
   };
 
-  systemd.tmpfiles.rules = [
-    "d /var/lib/ntfy-sh 0750 ntfy-sh ntfy-sh -"
-  ];
-
   # seed accounts and per-topic acls
   systemd.services.ntfy-users = {
     description = "Seed ntfy users and per-topic access";
@@ -50,13 +46,12 @@ in {
       RestartSec = 15;
     };
     script = ''
-      set -euo pipefail
       ${retry} 60 2 curl -sf -o /dev/null http://127.0.0.1:80/v1/health
 
       ${lib.concatStrings (lib.mapAttrsToList (name: u: ''
         NTFY_PASSWORD=$(cat ${config.sops.secrets.${u.secret}.path})
         export NTFY_PASSWORD
-        if ntfy user list 2>/dev/null | grep -q '^user ${name} '; then
+        if grep -q '^user ${name} ' <<<"$(ntfy user list 2>/dev/null)"; then
           ntfy user change-pass ${name}
           ntfy user change-role ${name} ${u.role}
         else

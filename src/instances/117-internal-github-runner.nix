@@ -53,8 +53,6 @@ let
       replace = true;
 
       extraLabels = [ "nixos" "homelab" ];
-      # the cache url carries a password, so it comes from sops, not the nix store
-      serviceOverrides.EnvironmentFile = config.sops.templates."sccache-redis.env".path;
       user = "github-runner";
       group = "github-runner";
       # no workDir, the runtime dir default works
@@ -75,6 +73,8 @@ let
       };
 
       serviceOverrides = {
+        # the cache url carries a password, so it comes from sops, not the nix store
+        EnvironmentFile = config.sops.templates."sccache-redis.env".path;
         # shared vm, keep one job from starving it
         CPUWeight = 50;
         IOWeight = 50;

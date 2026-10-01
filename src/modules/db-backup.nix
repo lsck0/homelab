@@ -2,6 +2,10 @@
 let
   cfg = config.homelab.dbBackup;
   dir = "/var/backup/db";
+  # before kopia's 02:00 snapshot
+  onCalendar = "01:30";
+  # per database on the nas, kopia retention covers the longer history
+  keep = 14;
 
   dbType = lib.types.submodule {
     options = {
@@ -20,15 +24,10 @@ let
         type = lib.types.nullOr lib.types.str;
         default = null;
         description = ''
-          Shell command that writes a dump to stdout, for anything that is not
-          SQLite: `pg_dumpall`, `podman exec <ctr> pg_dump ...`, `mysqldump`.
+          Shell command that writes an SQL dump to stdout, for anything that is
+          not SQLite: `pg_dumpall`, `podman exec <ctr> pg_dump ...`, `mysqldump`.
+          It runs as root; wrap it in `runuser` to dump as another user.
         '';
-      };
-
-      suffix = lib.mkOption {
-        type = lib.types.str;
-        default = "sql";
-        description = "Extension of the dump produced by `command` (before .zst).";
       };
 
       path = lib.mkOption {
@@ -60,11 +59,10 @@ let
       trap 'rm -f "$tmp"' EXIT
       ${db.command} > "$tmp"
       [ -s "$tmp" ] || { rm -f "$tmp"; echo "${name}: dump was empty"; exit 1; }
-      zstd -q -19 -o "$out/${name}-$stamp.${db.suffix}.zst" "$tmp"
+      zstd -q -19 -o "$out/${name}-$stamp.sql.zst" "$tmp"
       rm -f "$tmp"
     ''}
-    # kopia retention covers the longer history
-    ls -1t "$out"/${name}-*.zst 2>/dev/null | tail -n +${toString (cfg.keep + 1)} | xargs -r rm -f
+    ls -1t "$out"/${name}-*.zst 2>/dev/null | tail -n +${toString (keep + 1)} | xargs -r rm -f
     echo "${name}: dumped to $out"
     # grafana's backup alert watches this
     d=/var/lib/node-exporter-textfile
@@ -87,18 +85,6 @@ in {
         so the snapshot has something restorable in it.
       '';
     };
-
-    onCalendar = lib.mkOption {
-      type = lib.types.str;
-      default = "01:30";
-      description = "When to dump. Must be before Kopia's 02:00 snapshot.";
-    };
-
-    keep = lib.mkOption {
-      type = lib.types.int;
-      default = 14;
-      description = "Dumps kept per database on the NAS.";
-    };
   };
 
   config = lib.mkIf (cfg.databases != { }) {
@@ -107,7 +93,7 @@ in {
 
     systemd.services = lib.mapAttrs' (name: db: lib.nameValuePair "db-backup-${name}" {
       description = "Dump ${name} to the NAS";
-      after = [ "remote-fs.target" "network-online.target" ];
+      after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       # lxc guests mount the nas at boot, not on access
       unitConfig.RequiresMountsFor = [ dir ];
@@ -119,7 +105,7 @@ in {
     systemd.timers = lib.mapAttrs' (name: _: lib.nameValuePair "db-backup-${name}" {
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = cfg.onCalendar;
+        OnCalendar = onCalendar;
         Persistent = true;
         RandomizedDelaySec = "5m";
       };

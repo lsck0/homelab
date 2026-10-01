@@ -5,18 +5,14 @@ pkgs.testers.runNixOSTest {
 
   nodes.machine = {
     imports = [ ./stubs.nix ../instances/208-external-minecraft.nix ];
-    virtualisation.oci-containers.containers = lib.mkForce { };
-    systemd.services.podman-minecraft = {
-      wantedBy = [ "multi-user.target" ];
-      serviceConfig = {
-        Type = "simple";
-        # env files in the real container's order
-        EnvironmentFile = [ "/var/lib/minecraft/rcon.env" "/var/lib/minecraft/modpack.env" ];
-        ExecStart = pkgs.writeShellScript "fake-minecraft" ''
-          env | grep -E '^(TYPE|MODRINTH_MODPACK|CF_PAGE_URL|VERSION|LEVEL|RCON_PASSWORD)=' | sort > /tmp/server-env
-          exec sleep infinity
-        '';
-      };
+    # lazymc would boot the real server; record the env mc-start would hand it instead
+    systemd.services.lazymc.serviceConfig = {
+      # env files in mc-start's order; optional because ExecStartPre writes them on first boot
+      EnvironmentFile = [ "-/var/lib/minecraft/rcon.env" "-/var/lib/minecraft/modpack.env" ];
+      ExecStart = lib.mkForce (pkgs.writeShellScript "fake-lazymc" ''
+        env | grep -E '^(TYPE|MODRINTH_MODPACK|CF_PAGE_URL|VERSION|LEVEL|RCON_PASSWORD)=' | sort > /tmp/server-env
+        exec sleep infinity
+      '');
     };
   };
 
@@ -27,14 +23,13 @@ pkgs.testers.runNixOSTest {
         machine.succeed("rm /tmp/server-env")
         return dict(l.split("=", 1) for l in out.strip().splitlines())
 
-    machine.wait_for_unit("podman-minecraft.service")
+    machine.wait_for_unit("lazymc.service")
 
-    with subtest("first boot keeps the existing world and default pack"):
+    with subtest("first boot writes the default pack and the lazymc config"):
         e = env()
-        assert e["TYPE"] == "MODRINTH", e
-        assert e["MODRINTH_MODPACK"].endswith("/cobbleverse"), e
-        assert e["LEVEL"] == "world", e
-        assert e["RCON_PASSWORD"] == "test-minecraft-rcon-password", e
+        assert e == {"TYPE": "VANILLA", "VERSION": "LATEST", "LEVEL": "vanilla",
+                     "RCON_PASSWORD": "test-minecraft-rcon-password"}, e
+        machine.succeed("grep -q 'password = \"test-minecraft-rcon-password\"' /var/lib/minecraft/lazymc.toml")
 
     with subtest("switch to another Modrinth pack"):
         machine.succeed("mc-modpack https://modrinth.com/modpack/fabulously-optimized 1.21.4")
@@ -51,7 +46,7 @@ pkgs.testers.runNixOSTest {
         assert e["LEVEL"] == "all-the-mods-10" and e["VERSION"] == "LATEST", e
         assert "MODRINTH_MODPACK" not in e, e
 
-    with subtest("vanilla"):
+    with subtest("back to vanilla"):
         machine.succeed("mc-modpack vanilla")
         e = env()
         assert e["TYPE"] == "VANILLA" and e["LEVEL"] == "vanilla", e
@@ -61,8 +56,8 @@ pkgs.testers.runNixOSTest {
         assert "TYPE=VANILLA" in out, out
         machine.fail("test -e /tmp/server-env")
 
-    with subtest("choice survives a redeploy (env unit re-runs)"):
-        machine.succeed("systemctl restart minecraft-env.service podman-minecraft.service")
+    with subtest("choice survives a redeploy (pre-start re-runs)"):
+        machine.succeed("systemctl restart lazymc.service")
         e = env()
         assert e["TYPE"] == "VANILLA", e
   '';

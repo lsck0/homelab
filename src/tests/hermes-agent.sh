@@ -69,7 +69,7 @@ cat > "$W/shims/vm" <<'EOF'
 #!/bin/sh
 /work/shims/_log vm "$@"
 case "$1" in
-  list|"") printf '109\trunning\t109-internal-nas\n121\trunning\t121-internal-paperless\n124\tstopped\t124-internal-firefly\n208\tstopped\t208-external-minecraft\n' ;;
+  list|"") printf '109\trunning\t109-internal-nas\n121\trunning\t121-internal-paperless\n124\trunning\t124-internal-firefly\n208\trunning\t208-external-minecraft\n' ;;
   status) echo running ;;
   start) echo "vm-$2 up" ;;
   stop) echo "vm-$2 shutting down" ;;
@@ -88,7 +88,7 @@ host=${args[0]#root@}; cmd="${args[*]:1}"
 case "$host:$cmd" in
   10.200.0.208:*mc-modpack\ http*|10.200.0.208:*mc-modpack\ [a-z]*)
     echo ">>> modpack set to ${cmd##*mc-modpack }, restarting server (first start downloads the pack)" ;;
-  10.200.0.208:*mc-modpack*) printf 'current:\nTYPE=MODRINTH\nMODRINTH_MODPACK=https://modrinth.com/modpack/cobbleverse\nVERSION=LATEST\nLEVEL=world\n' ;;
+  10.200.0.208:*mc-modpack*) printf 'current:\nTYPE=VANILLA\nVERSION=LATEST\nLEVEL=vanilla\n' ;;
   10.200.0.208:*podman\ logs*|10.200.0.208:*journalctl*) echo '[Server thread/INFO]: Done (41.237s)! For help, type "help"' ;;
   10.200.0.208:*mc-rcon*list*) echo "There are 0 of a max of 42069 players online:" ;;
   10.100.0.109:*nas-restore\ list*|10.100.0.109:*kopia*snapshot\ list*)
@@ -240,7 +240,6 @@ for s in $SCENARIOS; do
   case "$s" in
   minecraft)
     ask minecraft "Start the minecraft server with the Adrenaserver modpack please"
-    called 'vm start 208|curl .*qemu/208/status/start' && ok "minecraft: VM 208 started" || fail "minecraft: VM 208 not started"
     called 'ssh 10\.200\.0\.208 .*mc-modpack .*adrenaserver' && ok "minecraft: mc-modpack called with the pack" || fail "minecraft: mc-modpack not called with the pack"
     ;;
   backup)
@@ -273,7 +272,6 @@ for s in $SCENARIOS; do
     printf '.ps 14\nStadtwerke Duesseldorf AG\n.sp\nRechnung Nr. SW-2026-0815\n.br\nRechnungsdatum: 01.09.2026\n.br\nFaellig am: 15.09.2026\n.sp\nStrom August 2026 ........ 84,20 EUR\n.sp\nGesamtbetrag: 84,20 EUR\n' \
       | groff -Tpdf > "$W/workspace/rechnung-stadtwerke.pdf"
     ask bill "Here is a bill I got (attached: /work/workspace/rechnung-stadtwerke.pdf). File it in paperless and log it in firefly."
-    called 'vm start 124' && ok "bill: started Firefly VM" || fail "bill: did not start Firefly VM"
     grep -q '"path": "/paperless/api/documents/post_document/' "$W/log/mock.jsonl" && ok "bill: uploaded to Paperless" || fail "bill: no Paperless upload"
     grep -q 'Token fake-paperless-token' "$W/log/mock.jsonl" && ok "bill: Paperless token used" || fail "bill: Paperless token missing"
     tx=$(grep '"path": "/firefly/api/v1/transactions' "$W/log/mock.jsonl" | grep '"POST"' | tail -1 || true)
@@ -288,7 +286,7 @@ for s in $SCENARIOS; do
     fi
     ;;
   repo)
-    ask repo "Make Firefly's on-demand cooldown 1 hour in the homelab repo and open a PR for it."
+    ask repo "Make Navidrome's on-demand cooldown 1 hour in the homelab repo and open a PR for it."
     branch=$(git -C "$W/remote.git" for-each-ref --format='%(refname:short)' 'refs/heads/hermes/*' | head -1)
     [ -n "$branch" ] && ok "repo: pushed $branch" || fail "repo: no hermes/* branch pushed"
     [ "$(git -C "$W/remote.git" rev-parse master)" = "$MASTER" ] && ok "repo: master untouched" || fail "repo: master changed"
@@ -297,8 +295,8 @@ for s in $SCENARIOS; do
       git -C "$W/remote.git" diff "master...$branch" | sed -n '1,30p' | sed 's/^/      /'
       [ "$(git -C "$W/remote.git" diff --name-only "master...$branch")" = src/instances.tf ] \
         && ok "repo: only src/instances.tf changed" || fail "repo: unexpected files changed"
-      git -C "$W/remote.git" show "$branch:src/instances.tf" | grep -A4 '"124" = {' | grep -q 'cooldown = "1h"' \
-        && ok "repo: vm-124 cooldown is 1h" || fail "repo: vm-124 cooldown not 1h"
+      git -C "$W/remote.git" show "$branch:src/instances.tf" | sed -n '/"136" = {/,/^    }/p' | grep -q 'cooldown *= "1h"' \
+        && ok "repo: vm-136 cooldown is 1h" || fail "repo: vm-136 cooldown not 1h"
       git -C "$W/remote.git" log --format=%s "master..$branch" | grep -qE '^[a-z]+(\([a-z0-9-]+\))?!?: ' \
         && ok "repo: conventional commit" || fail "repo: commit message not conventional"
     fi

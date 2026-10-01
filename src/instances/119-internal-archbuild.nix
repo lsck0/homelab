@@ -1,6 +1,6 @@
 { config, pkgs, nasPath, ... }:
 let
-  # served by vm-109 at mirror.lsck0.dev
+  # pushed to vm-210, which serves mirror.lsck0.dev
   repoDir = "/var/lib/archrepo";
   # pacman cache, sources, cargo and go caches: what makes a nightly build incremental
   cacheDir = "/var/lib/archbuild/cache";

@@ -13,7 +13,7 @@ metadata:
 
 # Backups (Kopia on vm-109, the NAS itself)
 
-Kopia snapshots the whole NAS tree `/srv/nas` daily at 02:00 (keeps 3 latest,
+Kopia snapshots the NAS tree `/srv/nas` except `bulk/` (media, torrents) daily at 02:00 (keeps 3 latest,
 7 daily, 8 weekly, 12 monthly, 2 annual). Every service keeps its persistent
 data in `/srv/nas/data/<service>`. Web UI for the owner: https://backup.lsck0.dev
 

@@ -1,4 +1,4 @@
-{ config, lib, nasMount, ... }:
+{ config, lib, nasMount, site, ... }:
 let
   routes = (import ../modules/routes.nix).internal;
   address = config.homelab.onDemand.address;
@@ -43,7 +43,7 @@ in {
         "10.100.0.115/32"   # forgejo runner, pushes
         "10.100.0.117/32"   # github runner, pushes
         "10.200.0.209/32"   # swarm host, pulls
-        "192.168.178.0/24"  # the workstation, for manual inspection
+        "${site.lan.workstation}/32"  # the workstation, for manual inspection
       ];
 
       authelia.forwardAuth = {
@@ -57,10 +57,10 @@ in {
         ];
       };
     }
-    # redirect the app's login page to authelia
+    # redirect the app's login page to authelia, whatever query it carries (?redirect_to= still served the form)
     // lib.mapAttrs' (name: r: lib.nameValuePair "${name}-login" {
       redirectRegex = {
-        regex = "^https://${r.host}\\.lsck0\\.dev${lib.escapeRegex r.loginRedirect.path}$";
+        regex = "^https://${r.host}\\.lsck0\\.dev${lib.escapeRegex r.loginRedirect.path}(\\?.*)?$";
         replacement = "https://${r.host}.lsck0.dev${r.loginRedirect.to}";
       };
     }) (lib.filterAttrs (_: r: r ? loginRedirect) routes);
@@ -80,12 +80,10 @@ in {
     };
 
     services = lib.mapAttrs (name: r: {
-      loadBalancer = {
-        servers = [{ url = "${r.scheme or "http"}://${address.${name}}"; }];
-      } // lib.optionalAttrs ((r.scheme or "http") == "https") { serversTransport = "self-signed"; };
+      loadBalancer.servers = [{ url = "http://${address.${name}}"; }];
     }) routes // {
       proxmox.loadBalancer = {
-        servers = [{ url = "https://192.168.178.200:8006"; }];
+        servers = [{ url = "https://${site.lan.proxmox}:8006"; }];
         serversTransport = "self-signed";
       };
     };

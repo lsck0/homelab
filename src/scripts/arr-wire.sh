@@ -30,7 +30,7 @@ api() { # method url apikey [json]
 }
 later() { echo "$1"; pending=1; }
 
-# existing rows go stale after a renumber; correct them
+# existing rows go stale when an address or setting changes; correct them
 fix_fields() {
   local label=$1 url=$2 k=$3 cur=$4 want
   shift 4
@@ -43,6 +43,17 @@ fix_fields() {
   fi
 }
 
+# prowlarr's sync never rewrites the address of an indexer it already pushed, so a moved prowlarr strands them all
+fix_prowlarr_indexers() {
+  local name=$1 a=$2 k=$3 row
+  while read -r row; do
+    [ -n "$row" ] || continue
+    fix_fields "$name/indexer $(echo "$row" | jq -r .name)" "$a/indexer/$(echo "$row" | jq -r .id)" "$k" "$row" \
+      --arg pu "http://$PROWLARR_HOST:$PROWLARR_PORT/" \
+      '.fields |= map(if .name == "baseUrl" then .value |= sub("^https?://[^/]+/"; $pu) else . end)'
+  done < <(api GET "$a/indexer" "$k" | jq -c '.[] | select(.name | endswith("(Prowlarr)"))')
+}
+
 # -----------------------------------------------------------------------------
 # SERVARR APPS
 wire_servarr() {
@@ -52,6 +63,7 @@ wire_servarr() {
   qpass=$(key qbittorrent-pass) || { later "$name: qBittorrent password not exported yet"; return; }
   a="$url/api/$v"
   api GET "$a/system/status" "$k" >/dev/null || { later "$name: unreachable"; return; }
+  [ "$name" = prowlarr ] || fix_prowlarr_indexers "$name" "$a" "$k"
 
   local clients
   clients=$(api GET "$a/downloadclient" "$k")
@@ -189,6 +201,12 @@ wire_prowlarr() {
     fi
   done
 
+  # apps of removed services fail every sync; the three above are the only ones the lab has
+  local stale
+  for stale in $(echo "$apps" | jq -r '.[] | select(.name | IN("radarr", "sonarr", "lidarr") | not) | .id'); do
+    api DELETE "$P/applications/$stale" "$pk" >/dev/null && echo "prowlarr: removed stale application $stale"
+  done
+
   # tor socks5 in front of the indexers
   local tag proxies ind id
   tag=$(api GET "$P/tag" "$pk" | jq -r '.[] | select(.label == "tor") | .id')
@@ -257,9 +275,9 @@ wire_prowlarr() {
 # -----------------------------------------------------------------------------
 # JELLYSEERR
 wire_jellyseerr() {
-  local S="$JELLYSEERR_URL/api/v1" jar rk sk rp sp ids initialised
-  initialised=$(curl -sf "$S/settings/public" | jq -r '.initialized // empty')
-  [ -n "$(curl -sf "$S/settings/public")" ] || { later "jellyseerr: unreachable"; return; }
+  local S="$JELLYSEERR_URL/api/v1" jar rk sk rp sp ids public initialised
+  public=$(curl -sf "$S/settings/public") || { later "jellyseerr: unreachable"; return; }
+  initialised=$(echo "$public" | jq -r '.initialized // empty')
   if ! { rk=$(key radarr-key) && sk=$(key sonarr-key) && [ -s "$T/jellyfin-key.token" ]; }; then
     later "jellyseerr: waiting for radarr/sonarr/jellyfin"; return
   fi

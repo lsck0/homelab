@@ -1,5 +1,5 @@
 # paperless-ai: llm tagging for paperless; the host mounts /var/lib/homepage-tokens
-{ lib, pkgs, nasMount, retry, hostIp, ... }:
+{ config, lib, pkgs, retry, hostIp, ... }:
 let
   # local ollama beside jellyfin on the rtx 2060; documents stay in the lab
   llmUrl = "http://10.100.0.134:11434";
@@ -13,15 +13,24 @@ let
     "Datum: das Ausstellungsdatum des Dokuments."
   ];
 in {
-  fileSystems = nasMount "/var/lib/paperless-ai" "paperless-ai";
+  # its sqlite runs in wal mode, which nfs breaks; local, the nas keeps a nightly copy
+  homelab.localState.paperless-ai = {
+    path = "/var/lib/paperless-ai";
+    share = "paperless-ai";
+    unit = "podman-paperless-ai";
+    sqlite = [ "documents.db" ];
+    # paperless-ai-config rewrites it, with the api token, on every start
+    exclude = [ ".env" ];
+  };
 
   # settings live in /app/data/.env, normally wizard-written
   # new .env: restart the app with it
-  systemd.services.podman-paperless-ai.restartTriggers = [ llmModel llmUrl "homepage-bot" prompt "restrict-v2" ];
+  systemd.services.podman-paperless-ai.restartTriggers = [ config.systemd.services.paperless-ai-config.script ];
   systemd.services.paperless-ai-config = {
     description = "Seed paperless-ai configuration";
     before = [ "podman-paperless-ai.service" ];
     requiredBy = [ "podman-paperless-ai.service" ];
+    after = [ "paperless-ai-seed.service" ];
     path = [ pkgs.coreutils ];
     serviceConfig = {
       Type = "oneshot";
@@ -73,7 +82,8 @@ in {
       # rag loads a local embedding model and thrashed the vm; classification skips it
       RAG_SERVICE_ENABLED = "false";
     };
-    extraOptions = [ "--cap-drop=ALL" "--security-opt=no-new-privileges" ];
+    # measured 1.3g resident, half again as headroom
+    extraOptions = [ "--cap-drop=ALL" "--security-opt=no-new-privileges" "--memory=2g" ];
   };
 
   systemd.tmpfiles.rules = [

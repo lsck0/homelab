@@ -1,5 +1,7 @@
-{ config, lib, pkgs, nasMount, nasPath, retry, ... }:
+{ config, lib, pkgs, nasMount, nasPath, retry, site, ... }:
 let
+  # the site's passthrough gpu (instances.tf maps it here); without one jellyfin and ollama use the cpu
+  gpu = site.gpu != null;
   T = "/var/lib/homepage-tokens";
 
   # janitorr: delete media unwatched this long
@@ -93,28 +95,59 @@ let
         jdbc:
           url: jdbc:sqlite:/data/janitorr-stats.db
   '';
+
+  # prelude of the setup units: waits for jellyfin, defines login, api and a restart
+  jellyfinApi = ''
+    J=http://127.0.0.1:80
+    ${retry} 90 2 curl -sf $J/health
+    # jellyfin 12 only accepts the Authorization header
+    HDR='Authorization: MediaBrowser Client="homelab", Device="setup", DeviceId="homelab-setup", Version="1.0"'
+    login() { # [password], default the admin's
+      curl -sf -X POST $J/Users/AuthenticateByName -H "Content-Type: application/json" -H "$HDR" \
+        -d "$(jq -cn --arg p "''${1:-$(cat ${T}/jellyfin-admin-pass.token)}" '{Username:"admin", Pw:$p}')" \
+        | jq -r '.AccessToken // empty'
+    }
+    api() { curl -sf -H "Authorization: MediaBrowser Token=\"$TOKEN\"" -H "Content-Type: application/json" "$@"; }
+    # plugin and network changes apply only after a restart
+    jellyfin_restart() {
+      systemctl restart podman-jellyfin.service
+      ${retry} 90 2 curl -sf $J/health
+      TOKEN=$(login)
+    }
+  '';
+
+  # plugin units retry until jellyfin and its plugin repository answer
+  pluginUnit = { description, after, script }: {
+    inherit description after script;
+    # rerun on every jellyfin restart: the db may have been swapped
+    partOf = [ "podman-jellyfin.service" ];
+    wants = [ "jellyfin-setup.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
+    startLimitIntervalSec = 0;
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 120; };
+  };
 in {
   networking.hostName = "vm-134";
 
-  # rtx 2060 passthrough for nvenc/nvdec
   # nvidia driver and cuda are unfree
-  nixpkgs.config.allowUnfree = true;
-  services.xserver.videoDrivers = [ "nvidia" ];
-  boot.blacklistedKernelModules = [ "nouveau" ];
-  hardware.graphics.enable = true;
-  hardware.nvidia = {
+  nixpkgs.config.allowUnfree = gpu;
+  services.xserver.videoDrivers = lib.optional gpu "nvidia";
+  boot.blacklistedKernelModules = lib.optional gpu "nouveau";
+  hardware.graphics.enable = gpu;
+  hardware.nvidia = lib.mkIf gpu {
     open = false;
     nvidiaSettings = false;
     package = config.boot.kernelPackages.nvidiaPackages.stable;
   };
-  hardware.nvidia-container-toolkit.enable = true;
+  hardware.nvidia-container-toolkit.enable = gpu;
 
   # local llm for paperless-ai; ~4.7 GB, nvenc fits in the rest of the 6 GB
   services.ollama = {
     enable = true;
     host = "0.0.0.0";
     port = 11434;
-    acceleration = "cuda";
+    acceleration = if gpu then "cuda" else false;
     loadModels = [ "qwen2.5:7b-instruct" ];
     # drop models no longer listed
     syncModels = true;
@@ -124,6 +157,8 @@ in {
       OLLAMA_NUM_PARALLEL = "1";
     };
   };
+  # 1.7 GiB peak measured, mostly the mmapped model
+  systemd.services.ollama.serviceConfig.MemoryMax = "2560M";
 
   fileSystems = nasMount "/var/lib/janitorr" "janitorr"
     // nasPath "/data" "bulk"
@@ -148,7 +183,8 @@ in {
         "/data/media:/data/media:ro"
       ];
       environment.JELLYFIN_PublishedServerUrl = "https://jellyfin.lsck0.dev";
-      extraOptions = [ "--device=nvidia.com/gpu=all" ];
+      # 425 MiB idle, transcodes run in the same cgroup
+      extraOptions = lib.optional gpu "--device=nvidia.com/gpu=all" ++ [ "--memory=1g" ];
     };
 
     janitorr-stats = {
@@ -157,7 +193,8 @@ in {
         "/var/lib/janitorr/stats.yml:/work/config/application.yml:ro"
         "/var/lib/janitorr/stats:/data"
       ];
-      extraOptions = [ "--network=host" ];
+      # 131 MiB measured
+      extraOptions = [ "--network=host" "--memory=256m" ];
     };
 
     janitorr = {
@@ -191,10 +228,10 @@ in {
     after = [ "podman-jellyfin.service" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.openssl ];
+    startLimitIntervalSec = 0;
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 60; };
     script = ''
-      J=http://127.0.0.1:80
-      ${retry} 90 2 curl -sf $J/health
+      ${jellyfinApi}
 
       [ -s ${T}/jellyfin-admin-pass.token ] || openssl rand -hex 16 | tr -d '\n' > ${T}/jellyfin-admin-pass.token
       ADMIN_PASS=$(cat ${T}/jellyfin-admin-pass.token)
@@ -208,14 +245,7 @@ in {
         curl -sf -X POST $J/Startup/Complete
       fi
 
-      # jellyfin 12 only accepts the Authorization header
-      HDR='Authorization: MediaBrowser Client="homelab", Device="setup", DeviceId="homelab-setup", Version="1.0"'
-      login() {
-        curl -sf -X POST $J/Users/AuthenticateByName -H "Content-Type: application/json" -H "$HDR" \
-          -d "$(jq -cn --arg p "$1" '{Username:"admin", Pw:$p}')" | jq -r '.AccessToken // empty'
-      }
       TOKEN=$(login "$ADMIN_PASS")
-      api() { curl -sf -H "Authorization: MediaBrowser Token=\"$TOKEN\"" -H "Content-Type: application/json" "$@"; }
       # migrate old admin/admin installs
       if [ -z "$TOKEN" ] && TOKEN=$(login admin) && [ -n "$TOKEN" ]; then
         ADMIN_ID=$(api $J/Users/Me | jq -r .Id)
@@ -281,7 +311,7 @@ in {
 
       # turing: no av1 decode
       ENC=$(api $J/System/Configuration/encoding | jq -c '
-        .HardwareAccelerationType = "nvenc"
+        .HardwareAccelerationType = "${if gpu then "nvenc" else "none"}"
         | .EnableHardwareEncoding = true
         | .HardwareDecodingCodecs = ["h264","hevc","mpeg2video","vc1","vp8","vp9"]
         | .EnableDecodingColorDepth10Hevc = true
@@ -294,25 +324,13 @@ in {
 
   # lldap account is the jellyfin account
   sops.secrets.lldap-admin-password = {};
-  systemd.services.jellyfin-ldap = {
-    # rerun on every jellyfin restart: the db may have been swapped
-    partOf = [ "podman-jellyfin.service" ];
+  systemd.services.jellyfin-ldap = pluginUnit {
     description = "Point Jellyfin authentication at lldap (LDAP-Auth plugin)";
     after = [ "jellyfin-setup.service" ];
-    requires = [ "jellyfin-setup.service" ];
-    wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 120; };
     script = ''
-      J=http://127.0.0.1:80
-      ${retry} 90 2 curl -sf $J/health
-
-      HDR='Authorization: MediaBrowser Client="homelab", Device="setup", DeviceId="homelab-setup", Version="1.0"'
-      TOKEN=$(curl -sf -X POST $J/Users/AuthenticateByName -H "Content-Type: application/json" -H "$HDR" \
-        -d "$(jq -cn --arg p "$(cat ${T}/jellyfin-admin-pass.token)" '{Username:"admin", Pw:$p}')" \
-        | jq -r '.AccessToken // empty')
+      ${jellyfinApi}
+      TOKEN=$(login)
       [ -n "$TOKEN" ] || { echo "Jellyfin admin login failed"; exit 1; }
-      api() { curl -sf -H "Authorization: MediaBrowser Token=\"$TOKEN\"" -H "Content-Type: application/json" "$@"; }
 
       plugin_id() { api $J/Plugins | jq -r '[.[] | select(.Name | test("LDAP"; "i"))][0].Id // empty'; }
 
@@ -320,15 +338,11 @@ in {
       if [ -z "$ID" ]; then
         echo "installing the LDAP Authentication plugin"
         api -X POST "$J/Packages/Installed/LDAP%20Authentication" >/dev/null \
-          || { echo "plugin install request failed; leaving Jellyfin on local accounts"; exit 0; }
-        # plugin config endpoint appears only after restart
-        systemctl restart podman-jellyfin.service
-        ${retry} 90 2 curl -sf $J/health
-        TOKEN=$(curl -sf -X POST $J/Users/AuthenticateByName -H "Content-Type: application/json" -H "$HDR" \
-          -d "$(jq -cn --arg p "$(cat ${T}/jellyfin-admin-pass.token)" '{Username:"admin", Pw:$p}')" \
-          | jq -r '.AccessToken // empty')
+          || { echo "plugin install request failed"; exit 1; }
+        jellyfin_restart
         for _ in $(seq 1 30); do ID=$(plugin_id); [ -n "$ID" ] && break; sleep 5; done
-        [ -n "$ID" ] || { echo "plugin did not appear after restart"; exit 0; }
+        # fail so a slow install gets retried
+        [ -n "$ID" ] || { echo "LDAP plugin did not appear after restart"; exit 1; }
       fi
 
       # trust traefik, else redirect_uri is http:// and rejected
@@ -337,9 +351,7 @@ in {
         | .PublishedServerUriBySubnet = ["all=https://jellyfin.lsck0.dev"]')
       if [ "$NET" != "$(api $J/System/Configuration/network | jq -c .)" ]; then
         api -X POST $J/System/Configuration/network -d "$NET" >/dev/null
-        systemctl restart podman-jellyfin.service
-        ${retry} 90 2 curl -sf $J/health
-        TOKEN=$(login)
+        jellyfin_restart
         echo "Jellyfin now trusts the internal Traefik as a proxy"
       fi
 
@@ -364,34 +376,19 @@ in {
         EnabledFolders: []
       }')" >/dev/null \
         && echo "Jellyfin authenticates against lldap" \
-        || echo "writing the LDAP plugin configuration failed; configure it in the Jellyfin UI"
+        || { echo "writing the LDAP plugin configuration failed"; exit 1; }
     '';
   };
 
   # browser sso via jellyfin-plugin-sso and authelia
   sops.secrets.jellyfin-oidc-secret = {};
-  systemd.services.jellyfin-sso = {
-    # rerun on every jellyfin restart: the db may have been swapped
-    partOf = [ "podman-jellyfin.service" ];
+  systemd.services.jellyfin-sso = pluginUnit {
     description = "Install and configure jellyfin-plugin-sso against Authelia";
     after = [ "jellyfin-ldap.service" ];
-    requires = [ "jellyfin-setup.service" ];
-    wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 120; };
     script = ''
-      J=http://127.0.0.1:80
-      ${retry} 90 2 curl -sf $J/health
-
-      HDR='Authorization: MediaBrowser Client="homelab", Device="setup", DeviceId="homelab-setup", Version="1.0"'
-      login() {
-        curl -sf -X POST $J/Users/AuthenticateByName -H "Content-Type: application/json" -H "$HDR" \
-          -d "$(jq -cn --arg p "$(cat ${T}/jellyfin-admin-pass.token)" '{Username:"admin", Pw:$p}')" \
-          | jq -r '.AccessToken // empty'
-      }
+      ${jellyfinApi}
       TOKEN=$(login)
       [ -n "$TOKEN" ] || { echo "Jellyfin admin login failed"; exit 1; }
-      api() { curl -sf -H "Authorization: MediaBrowser Token=\"$TOKEN\"" -H "Content-Type: application/json" "$@"; }
 
       MANIFEST=https://raw.githubusercontent.com/9p4/jellyfin-plugin-sso/manifest-release/manifest.json
       if ! api $J/Repositories | jq -e --arg u "$MANIFEST" 'any(.[]; .Url == $u)' >/dev/null; then
@@ -405,9 +402,7 @@ in {
         echo "installing the SSO Authentication plugin"
         api -X POST "$J/Packages/Installed/SSO%20Authentication" >/dev/null \
           || { echo "plugin install request failed; Jellyfin keeps its own login"; exit 1; }
-        systemctl restart podman-jellyfin.service
-        ${retry} 90 2 curl -sf $J/health
-        TOKEN=$(login)
+        jellyfin_restart
         for _ in $(seq 1 30); do ID=$(plugin_id); [ -n "$ID" ] && break; sleep 5; done
         # fail so a slow install gets retried
         [ -n "$ID" ] || { echo "SSO plugin did not appear after restart"; exit 1; }
@@ -448,10 +443,11 @@ in {
   systemd.services.janitorr-config = {
     description = "Render Janitorr configuration from exported API keys";
     after = [ "jellyfin-setup.service" ];
-    requires = [ "jellyfin-setup.service" ];
+    wants = [ "jellyfin-setup.service" ];
     before = [ "podman-janitorr.service" "podman-janitorr-stats.service" ];
-    requiredBy = [ "podman-janitorr.service" "podman-janitorr-stats.service" ];
+    wantedBy = [ "podman-janitorr.service" "podman-janitorr-stats.service" ];
     path = [ pkgs.coreutils pkgs.gnused ];
+    startLimitIntervalSec = 0;
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 120; };
     script = ''
       for k in radarr-key sonarr-key jellyfin-key jellyseerr-key janitorr-pass; do
@@ -475,6 +471,6 @@ in {
   homelab.ingressOnly.ports = [ 11434 ];
   homelab.ingressOnly.portSources."11434" = [ "10.100.0.121/32" ];
 
-  # hot page cache is the point here (nfs serving, tsdb, streams)
+  # vfio pins all ram, so dropped caches return nothing to the host
   homelab.dropCaches = false;
 }

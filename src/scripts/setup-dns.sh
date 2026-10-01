@@ -35,4 +35,4 @@ systemctl restart NetworkManager
 
 echo "Split DNS configured: *.${DOMAIN} -> ${ROUTER_IP}:${ROUTER_DNS_PORT}"
 echo "Verifying..."
-dig +short homepage.${DOMAIN} @${ROUTER_IP} -p ${ROUTER_DNS_PORT} 2>/dev/null | grep -q "10.100.0.100" && echo "OK" || echo "FAIL - is ${ROUTER_IP}:${ROUTER_DNS_PORT} reachable?"
+dig +short homelab.${DOMAIN} @${ROUTER_IP} -p ${ROUTER_DNS_PORT} 2>/dev/null | grep -q "10.100.0.100" && echo "OK" || echo "FAIL - is ${ROUTER_IP}:${ROUTER_DNS_PORT} reachable?"

@@ -1,11 +1,26 @@
-{ lib, pkgs, dmzShares, ... }: {
+{ lib, pkgs, nasClients, site, ... }:
+let
+  # media and torrents together; the rest of the hdd stays free for the arch repo and whatever comes next
+  mediaQuotaGiB = 750;
+  # ext4 project id of everything under mediaDirs
+  mediaProject = 1;
+  mediaDirs = [ "/srv/nas/bulk/media" "/srv/nas/bulk/torrents" ];
+
+  # every guest's nas mounts as { path, ip, readOnly }, grouped by path
+  clientsByPath = lib.groupBy (c: c.path)
+    (lib.concatLists (lib.mapAttrsToList (ip: map (s: s // { inherit ip; })) nasClients));
+  exportOptions = c: lib.concatStringsSep "," ([
+    (if c.readOnly then "ro" else "rw") "sync" "no_root_squash"
+    (if lib.hasPrefix "10.200." c.ip then "subtree_check" else "no_subtree_check")
+  ]
+  # a missing hdd must not export the empty mountpoint on the nvme
+  ++ lib.optional (lib.hasPrefix "/srv/nas/bulk" c.path) "mp=/srv/nas/bulk");
+in {
   # kopia snapshots this tree in place
   imports = [ ../services/kopia.nix ];
 
   networking.hostName = "vm-109";
 
-  # dmz exports come from dmzShares (modules/nas.nix)
-  # bulk storage
   # hdd; media and torrents share a fs for hardlinks
   fileSystems."/srv/nas/bulk" = {
     device = "/dev/disk/by-label/bulk";
@@ -24,40 +39,65 @@
   };
   system.fsPackages = [ pkgs.bindfs ];
 
-  # formats once, guarded on the label
-  systemd.services.bulk-format = {
-    description = "Create the bulk filesystem on first boot";
+  # formats a blank disk once and turns on project quotas, which ext4 only allows while unmounted:
+  # an existing disk gets them on the nas's next boot, never mid-deploy
+  systemd.services.bulk-disk = {
+    description = "Format the bulk disk when blank, enable its project quotas";
     wantedBy = [ "multi-user.target" ];
     before = [ "srv-nas-bulk.mount" ];
-    path = [ pkgs.util-linux pkgs.e2fsprogs ];
-    unitConfig.ConditionPathExists = "!/dev/disk/by-label/bulk";
+    path = [ pkgs.util-linux pkgs.e2fsprogs pkgs.gnugrep ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
     script = ''
-      set -eu
-      disk=/dev/sdb
-      [ -b "$disk" ] || { echo "no $disk; nothing to format"; exit 0; }
-      if blkid "$disk" >/dev/null 2>&1; then
-        echo "$disk already carries a filesystem; refusing to format"
-        exit 0
-      fi
-      # no partition table; 5% reserve would waste 90 GiB
-      mkfs.ext4 -m 0 -L bulk "$disk"
+      disk=/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+      [ -b "$disk" ] || { echo "no bulk disk attached"; exit 0; }
+      # exit 2 is the only "no signature": a read error on a slow spin-up must never reformat
+      rc=0; blkid -p "$disk" >/dev/null || rc=$?
+      # no partition table, no root reserve: the quota leaves the room
+      [ "$rc" = 2 ] && mkfs.ext4 -m 0 -O quota,project -E quotatype=prjquota -L bulk "$disk"
+      tune2fs -l "$disk" | grep -q "^Filesystem features:.*project" && exit 0
+      findmnt -S "$disk" >/dev/null && { echo "mounted: project quotas come on at the next boot"; exit 0; }
+      tune2fs -O quota,project -Q prjquota "$disk"
     '';
   };
 
+  # caps media plus torrents at mediaQuotaGiB: downloads and imports get EDQUOT, everything else keeps writing
+  systemd.services.bulk-quota = {
+    description = "Cap media and torrents on the bulk disk, export their usage";
+    after = [ "srv-nas-bulk.mount" ];
+    requires = [ "srv-nas-bulk.mount" ];
+    wantedBy = [ "multi-user.target" ];
+    startAt = "hourly";
+    path = [ pkgs.e2fsprogs pkgs.quota pkgs.gawk pkgs.gnugrep pkgs.coreutils ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      tune2fs -l /dev/disk/by-label/bulk | grep -q "^Filesystem features:.*project" || { echo "no project quotas yet"; exit 0; }
+      for d in ${lib.escapeShellArgs mediaDirs}; do
+        # tag the tree once; new files inherit the project from their directory
+        [ "$(lsattr -pd "$d" | awk '{print $1}')" = ${toString mediaProject} ] || chattr -R -p ${toString mediaProject} +P "$d"
+      done
+      setquota -P ${toString mediaProject} 0 ${toString (mediaQuotaGiB * 1024 * 1024)} 0 0 /srv/nas/bulk
+      quotaon -P /srv/nas/bulk 2>/dev/null || true
+      used=$(repquota -Pn /srv/nas/bulk | awk '$1 == "#${toString mediaProject}" { print $3 * 1024 }')
+      d=/var/lib/node-exporter-textfile
+      {
+        echo "# HELP homelab_media_bytes Bytes of media and torrents on the bulk disk."
+        echo "# TYPE homelab_media_bytes gauge"
+        echo "homelab_media_bytes ''${used:-0}"
+        echo "# HELP homelab_media_quota_bytes Their quota."
+        echo "# TYPE homelab_media_quota_bytes gauge"
+        echo "homelab_media_quota_bytes ${toString (mediaQuotaGiB * 1024 * 1024 * 1024)}"
+      } > $d/media_quota.prom.tmp
+      mv $d/media_quota.prom.tmp $d/media_quota.prom
+    '';
+  };
+
+
+  # each guest gets exactly the paths it mounts; the dmz additionally gets subtree checks
   services.nfs.server = {
     enable = true;
-    exports = ''
-      /srv/nas/bulk       10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
-      /srv/nas/bulk/media 10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
-      /srv/nas/documents  10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
-      /srv/nas/public     10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
-      /srv/nas/bulk/torrents 10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
-      /srv/nas/data       10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
-      /srv/nas/syncthing  10.100.0.0/24(rw,sync,no_subtree_check,no_root_squash)
-    '' + lib.concatStrings (lib.mapAttrsToList (id: shares: lib.concatMapStrings (s: ''
-      /srv/nas/data/${s} 10.200.0.${id}(rw,sync,subtree_check,no_root_squash)
-    '') shares) dmzShares);
+    exports = lib.concatStrings (lib.mapAttrsToList (path: clients:
+      "${path} ${lib.concatMapStringsSep " " (c: "${c.ip}(${exportOptions c})") clients}\n"
+    ) clientsByPath);
   };
 
   services.samba = {
@@ -69,7 +109,7 @@
         "server string" = "vm-109-nas";
         "map to guest" = "Bad User";
         # guest shares: owner pc, wireguard and tailnet only
-        "hosts allow" = "192.168.178.138 10.0.0.0/24 100.64.0.0/10 127.0.0.1";
+        "hosts allow" = "${site.lan.workstation} 10.0.0.0/24 100.64.0.0/10 127.0.0.1";
         "hosts deny" = "0.0.0.0/0";
       };
       public = {
@@ -160,11 +200,8 @@
     "d /srv/nas/bulk/media 0775 1000 1000 -"
     "d /srv/nas/bulk/media/tv 0775 1000 1000 -"
     "d /srv/nas/bulk/media/movies 0775 1000 1000 -"
-    "d /srv/nas/bulk/media/audiobooks 0775 1000 1000 -"
     "d /srv/nas/bulk/media/music 0775 1000 1000 -"
-    "d /srv/nas/bulk/media/manga 0775 1000 1000 -"
     "d /srv/nas/bulk/media/anime 0775 1000 1000 -"
-    "d /srv/nas/bulk/media/books 0775 1000 1000 -"
     "d /srv/nas/bulk/media/leaving-soon 0775 1000 1000 -"
     "d /srv/nas/BACKUPS 0700 root root -"
     # read-only root: documents go into inbox/, archive/ is the paperless view
@@ -174,49 +211,16 @@
     "d /srv/nas/bulk/torrents 0775 1000 1000 -"
     # vm-119 writes as root over nfs, nginx serves it on 8090
     "d /srv/nas/bulk/archrepo 0755 root root -"
-    # per-service persistent data
-    "d /srv/nas/data 0777 nobody nogroup -"
-    # nightly db dumps, one subdir per vm
-    "d /srv/nas/data/db-dumps 0777 nobody nogroup -"
-    "d /srv/nas/data/authelia 0777 nobody nogroup -"
-    "d /srv/nas/data/loki 0777 nobody nogroup -"
-    "d /srv/nas/data/attic 0777 nobody nogroup -"
-    "d /srv/nas/data/jellyseerr 0777 nobody nogroup -"
-    "d /srv/nas/data/bazarr 0777 nobody nogroup -"
-    "d /srv/nas/data/firefly 0777 nobody nogroup -"
     "d /srv/nas/data/firefly/db 0750 70 70 -"
     "d /srv/nas/data/firefly/upload 0750 1000 1000 -"
     "d /srv/nas/syncthing 0775 nobody nogroup -"
     "d /srv/nas/syncthing/sync 0775 nobody nogroup -"
     "d /var/lib/syncthing 0700 nobody nogroup -"
-    "d /srv/nas/data/calendar 0777 nobody nogroup -"
-    "d /srv/nas/data/forgejo 0777 nobody nogroup -"
-    "d /srv/nas/data/forgejo-runner 0777 nobody nogroup -"
-    "d /srv/nas/data/registry 0777 nobody nogroup -"
-    "d /srv/nas/data/huginn 0777 nobody nogroup -"
-    "d /srv/nas/data/huginn-db 0777 nobody nogroup -"
-    "d /srv/nas/data/homeassistant 0777 nobody nogroup -"
-    "d /srv/nas/data/grafana 0777 nobody nogroup -"
-    "d /srv/nas/data/prometheus 0777 nobody nogroup -"
-    "d /srv/nas/data/navidrome 0777 nobody nogroup -"
-    "d /srv/nas/data/traefik-acme-internal 0777 nobody nogroup -"
-    "d /srv/nas/data/paperless 0777 nobody nogroup -"
-    "d /srv/nas/data/paperless-ai 0777 nobody nogroup -"
-    "d /srv/nas/data/qbittorrent 0777 nobody nogroup -"
-    # unfinished downloads on nvme; qbittorrent moves them to the hdd once complete
-    "d /srv/nas/data/qbittorrent-incomplete 0777 nobody nogroup -"
-    "d /srv/nas/data/prowlarr 0777 nobody nogroup -"
-    "d /srv/nas/data/sonarr 0777 nobody nogroup -"
-    "d /srv/nas/data/radarr 0777 nobody nogroup -"
-    "d /srv/nas/data/jellyfin 0777 nobody nogroup -"
-    "d /srv/nas/data/homepage 0777 nobody nogroup -"
-    "d /srv/nas/data/homepage-tokens 0777 nobody nogroup -"
-    "d /srv/nas/data/crowdsec-internal 0777 nobody nogroup -"
-    "d /srv/nas/data/lidarr 0777 nobody nogroup -"
-    "d /srv/nas/data/janitorr 0777 nobody nogroup -"
     "d /var/lib/filebrowser 0750 1000 1000 -"
     "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
-  ] ++ map (s: "d /srv/nas/data/${s} 0777 nobody nogroup -") (lib.unique (lib.concatLists (lib.attrValues dmzShares)));
+  ]
+  # per-service state: every share a guest mounts, any uid may write it
+  ++ map (path: "d ${path} 0777 nobody nogroup -") (lib.filter (lib.hasPrefix "/srv/nas/data/") (lib.attrNames clientsByPath));
 
   # filebrowser, authelia gates it via traefik
   virtualisation.oci-containers.containers.filebrowser = {
@@ -249,6 +253,14 @@
       # authelia gates the route, skip own host check
       insecureSkipHostcheck = true;
     };
+    # both devices reach the nas directly (lan or wireguard): no discovery servers, relays or reports
+    settings.options = {
+      urAccepted = -1;
+      crashReportingEnabled = false;
+      globalAnnounceEnabled = false;
+      relaysEnabled = false;
+      natEnabled = false;
+    };
 
     settings.devices.luca-pc.id =
       "CJDJNIO-XF2HJN5-IOUMFGP-JLEPI4Q-IHEWABK-M4AFSV2-25VSZHA-NSBK3A3";
@@ -277,7 +289,7 @@
         autoindex on;
         # internal, lan, wireguard, tailnet
         allow 10.100.0.0/24;
-        allow 192.168.178.0/24;
+        allow ${site.lan.subnet};
         allow 10.0.0.0/24;
         allow 100.64.0.0/10;
         deny all;

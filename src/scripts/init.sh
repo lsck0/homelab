@@ -4,7 +4,6 @@ set -e
 
 TARGET_IP=$1
 SSH_PORT=22
-API_PORT=8006
 
 if [ -z "$TARGET_IP" ]; then
     echo "Usage: ./src/scripts/init.sh <PROXMOX_IP>"
@@ -15,7 +14,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-for tool in sops age-keygen jq sshpass; do
+for tool in sops jq openssl; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "ERROR: '$tool' is required but not installed."
         exit 1
@@ -47,7 +46,9 @@ if [ -n "$ROOT_PASS" ]; then
         echo "ERROR: sshpass is required when using password auth."
         exit 1
     fi
-    SSH_CMD=(sshpass -p "$ROOT_PASS" ssh -p "$SSH_PORT" -o StrictHostKeyChecking=yes)
+    # sshpass -e reads it from the environment, out of argv
+    export SSHPASS="$ROOT_PASS"
+    SSH_CMD=(sshpass -e ssh -p "$SSH_PORT" -o StrictHostKeyChecking=yes)
 else
     SSH_CMD=(ssh -p "$SSH_PORT" -o StrictHostKeyChecking=yes)
 fi
@@ -71,73 +72,87 @@ else
 fi
 
 
-if [ -f "$HOME/.ssh/id_ed25519.pub" ]; then
-    SSH_PUBLIC_KEY="$(cat "$HOME/.ssh/id_ed25519.pub")"
-elif [ -f "$HOME/.ssh/id_rsa.pub" ]; then
-    SSH_PUBLIC_KEY="$(cat "$HOME/.ssh/id_rsa.pub")"
-else
-    ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/id_ed25519" -C "homelab@$(hostname)" >/dev/null
-    SSH_PUBLIC_KEY="$(cat "$HOME/.ssh/id_ed25519.pub")"
+# -----------------------------------------------------------------------------
+# SITE: the machine and the house network, asked once and kept in src/site.json for terraform, nix and sync.sh
+SITE="$ROOT_DIR/src/site.json"
+[ -f "$SITE" ] || echo '{}' > "$SITE"
+pve() { "${SSH_CMD[@]}" root@"$TARGET_IP" "$@"; }
+# ask <question> <default>; enter keeps the default, "-" clears it
+ask() {
+    local answer
+    read -r -p "$1 [${2:--}]: " answer </dev/tty
+    case "$answer" in "") echo "$2" ;; -) echo "" ;; *) echo "$answer" ;; esac
+}
+old() { jq -r "$1 // empty" "$SITE"; }
+
+echo ">>> Site: enter keeps the value in brackets, '-' clears it"
+LAN_SUBNET=$(pve "ip -4 route show dev vmbr0 scope link" | awk '{print $1; exit}')
+LAN_GATEWAY=$(pve "ip -4 route show default" | awk '{print $3; exit}')
+WORKSTATION=$(ip -4 route get "$TARGET_IP" | sed -n 's/.* src \([0-9.]*\).*/\1/p')
+WORKSTATION_MAC=$(ip -o link show "$(ip -4 route get "$TARGET_IP" | sed -n 's/.* dev \([^ ]*\).*/\1/p')" | sed -n 's/.*link\/ether \([0-9a-f:]*\).*/\1/p')
+ROUTER=$(ask "router address on the lan (forward 443 and 25565 to it)" "$(old .lan.router)")
+INVERTER=$(ask "fronius inverter address" "$(old .lan.inverter)")
+
+echo ">>> GPUs on the host:"
+pve "lspci -nn -D | grep -E 'VGA|3D controller'" | nl -w2 -s') '
+GPU_PATH=$(ask "gpu to pass through to jellyfin (pci path)" "$(old .gpu.path)")
+
+echo ">>> Disks on the host (the nvme pool is local-lvm; the bulk disk gets wiped once):"
+pve "lsblk -dno NAME,SIZE,ROTA,MODEL; ls -l /dev/disk/by-id/ | grep -v -- -part | awk '/ata-|nvme-|scsi-/ {print \$9, \$11}'"
+BULK_DISK=$(ask "bulk disk for media (/dev/disk/by-id/...)" "$(old .bulk.disk)")
+
+GPU_JSON=null
+if [ -n "$GPU_PATH" ]; then
+    gpu_id() { pve "lspci -n -s $1" | awk '{print $3}'; }
+    GPU_JSON=$(jq -n \
+      --arg id "$(gpu_id "$GPU_PATH")" \
+      --arg sub "$(pve "lspci -vmmn -s $GPU_PATH" | awk '/^SVendor/ {v=$2} /^SDevice/ {d=$2} END {print v":"d}')" \
+      --arg path "$GPU_PATH" \
+      --argjson group "$(pve "basename \$(readlink /sys/bus/pci/devices/$GPU_PATH/iommu_group)")" \
+      --argjson functions "$(gpu_id "${GPU_PATH%.*}" | jq -R . | jq -s .)" \
+      '{id: $id, subsystemId: $sub, path: $path, iommuGroup: $group, functionIds: $functions}')
 fi
+BULK_JSON=null
+if [ -n "$BULK_DISK" ]; then
+    # 96% fits inside the thin pool and its metadata; a disk already in use keeps its size, terraform cannot shrink
+    BULK_JSON=$(jq -n --arg disk "$BULK_DISK" --argjson bytes "$(pve "lsblk -dbno SIZE $BULK_DISK")" \
+      --argjson old "$(jq --arg d "$BULK_DISK" 'if .bulk.disk == $d then .bulk.sizeGiB else null end' "$SITE")" \
+      '{disk: $disk, sizeGiB: ($old // ($bytes / 1073741824 * 0.96 | floor))}')
+fi
+jq -n --arg node "$(pve hostname)" --arg subnet "$LAN_SUBNET" --arg gateway "$LAN_GATEWAY" --arg router "$ROUTER" \
+  --arg proxmox "$TARGET_IP" --arg workstation "$WORKSTATION" --arg mac "$WORKSTATION_MAC" --arg inverter "$INVERTER" \
+  --argjson gpu "$GPU_JSON" --argjson bulk "$BULK_JSON" '{
+    node: $node,
+    lan: { subnet: $subnet, gateway: $gateway, router: $router, proxmox: $proxmox,
+           workstation: $workstation, inverter: $inverter, workstationMac: $mac },
+    gpu: $gpu,
+    bulk: $bulk
+  }' > "$SITE.new" && mv "$SITE.new" "$SITE"
+echo ">>> Wrote $SITE"
 
-
-# age key's source of truth is the dotfiles repo
+# age key's source of truth is the dotfiles repo; .sops.yaml lists its public key
 AGE_KEY="$ROOT_DIR/secrets/age.txt"
 AGE_KEY_SOURCE="${AGE_KEY_SOURCE:-$HOME/projects/arch-dotfiles/configs/secrets/age.txt}"
-mkdir -p "$ROOT_DIR/secrets"
-if [ ! -r "$AGE_KEY" ]; then
-    if [ -r "$AGE_KEY_SOURCE" ]; then
-        echo ">>> Linking the age key from $AGE_KEY_SOURCE"
-        ln -sfn "$AGE_KEY_SOURCE" "$AGE_KEY"
-    else
-        echo ">>> Generating age key for sops-nix at $AGE_KEY_SOURCE..."
-        mkdir -p "$(dirname "$AGE_KEY_SOURCE")"
-        age-keygen -o "$AGE_KEY_SOURCE" 2>/dev/null
-        chmod 600 "$AGE_KEY_SOURCE"
-        ln -sfn "$AGE_KEY_SOURCE" "$AGE_KEY"
-    fi
-    AGE_PUB=$(age-keygen -y "$AGE_KEY")
-    sed -i "s|AGE_PUBLIC_KEY_PLACEHOLDER|${AGE_PUB}|" "$ROOT_DIR/.sops.yaml"
+[ -e "$AGE_KEY" ] || { mkdir -p "$ROOT_DIR/secrets"; ln -sfn "$AGE_KEY_SOURCE" "$AGE_KEY"; }
+if ! grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY"; then
+    echo "ERROR: $AGE_KEY is not an age key: unlock the dotfiles secrets (~/projects/arch-dotfiles/scripts/yubikey.sh unlock)."
+    exit 1
 fi
-
-
-generate_secret() { openssl rand -base64 32 | tr -d '/+=' | head -c 48; }
+export SOPS_AGE_KEY_FILE="$AGE_KEY"
 
 SECRETS_FILE="$ROOT_DIR/src/secrets.json"
+# the json value goes to sops on stdin, out of argv
+secret_set() { printf '%s' "$2" | jq -Rs . | sops set --value-stdin "$SECRETS_FILE" "[\"$1\"]"; }
 
+# only the formats secrets-sync.sh cannot generate; it adds every other key below
 if [ ! -f "$SECRETS_FILE" ]; then
     echo ">>> Generating secrets..."
-    WG_PRIVKEY=$(wg genkey 2>/dev/null || openssl rand -base64 32)
-
-    # generated where possible; external ones are placeholders
     jq -n \
-      --arg wg "$WG_PRIVKEY" \
-      --arg s1 "$(generate_secret)" --arg s2 "$(generate_secret)" --arg s3 "$(generate_secret)" \
-      --arg s4 "$(generate_secret)" --arg s5 "$(generate_secret)" \
-      --arg s9 "$(generate_secret)" \
-      --arg s10 "$(generate_secret)" --arg s11 "$(generate_secret)" --arg s12 "base64:$(openssl rand -base64 32)" \
-      '{
-        "cloudflare-token": "ENTER_YOUR_CLOUDFLARE_API_TOKEN_HERE",
-        "proxmox-api-token": "ENTER_USER@REALM!TOKENID=SECRET",
-        "proxmox-user": "", "proxmox-pass": "",
-        "lldap-admin-password": $s1, "lldap-jwt-secret": $s2, "authelia-admin-pass": $s3,
-        "forgejo-admin-pass": $s4, "forgejo-oidc-secret": $s5,
-        "restic-password": $s9, "minecraft-rcon-password": $s10,
-        "firefly-db-password": $s11, "firefly-app-key": $s12,
-        "crowdsec-bouncer-key": "", "attic-server-token": "", "attic-pull-token": "",
-        "calendar-sources": "", 
-        "telegram-bot-token": "", "telegram-chat-id": "",
-        "hermes-ssh-key": "", "hermes-llm-api-key": "",
-        "wireguard-private-key": $wg
-      }' > "$SECRETS_FILE"
-
-    echo ">>> Encrypting secrets with sops..."
+      --arg wg "$(wg genkey 2>/dev/null || openssl rand -base64 32)" \
+      --arg firefly "base64:$(openssl rand -base64 32)" \
+      '{"wireguard-private-key": $wg, "firefly-app-key": $firefly}' > "$SECRETS_FILE"
     sops --encrypt --in-place "$SECRETS_FILE"
-    echo ">>> Secrets generated and encrypted."
-    echo ">>> NOTE: fill the external tokens with: sops src/secrets.json"
 fi
-
-# sync keys with what the configs read now
 "$ROOT_DIR/src/scripts/secrets-sync.sh" --apply
 
 
@@ -156,57 +171,48 @@ fi
 
 
 echo ">>> Configuring Proxmox (bridges + API token)..."
-# second arg wires ldap; skipped without the secret
-LLDAP_BIND_PASSWORD=$(sops -d "$ROOT_DIR/src/secrets.json" 2>/dev/null \
+# pve-install skips the ldap realm without it
+LLDAP_BIND_PASSWORD=$(sops -d "$SECRETS_FILE" 2>/dev/null \
   | jq -r '."lldap-admin-password" // empty')
-"${SSH_CMD[@]}" root@"$TARGET_IP" "bash -s" < "$SCRIPT_DIR/pve-install.sh" \
-  "$PVE_TF_PASSWORD" "$LLDAP_BIND_PASSWORD"
+# passwords go ahead of the script on stdin, never onto the ssh command line
+{
+    printf 'PVE_TF_PASSWORD=%q\nLLDAP_BIND_PASSWORD=%q\nGPU_IDS=%q\nBULK_DISK=%q\n' "$PVE_TF_PASSWORD" "$LLDAP_BIND_PASSWORD" \
+      "$(jq -r '.gpu.functionIds // [] | join(",")' "$SITE")" "$(jq -r '.bulk.disk // empty' "$SITE")"
+    cat "$SCRIPT_DIR/pve-install.sh"
+} | "${SSH_CMD[@]}" root@"$TARGET_IP" "bash -s"
 
 
 TOKEN_SECRET=$("${SSH_CMD[@]}" root@"$TARGET_IP" "cat /root/terraform_token.txt")
-HOMEPAGE_TOKEN=$("${SSH_CMD[@]}" root@"$TARGET_IP" "cat /root/homepage_token.txt" 2>/dev/null || echo "")
-TARGET_NODE_NAME=$("${SSH_CMD[@]}" root@"$TARGET_IP" "hostname")
+HOMEPAGE_TOKEN=$("${SSH_CMD[@]}" root@"$TARGET_IP" "cat /root/homepage_token.txt")
+WAKE_TOKEN=$("${SSH_CMD[@]}" root@"$TARGET_IP" "cat /root/wake_token.txt")
 TFVARS_ENC_PATH="$ROOT_DIR/src/terraform.tfvars.sops.json"
 
 jq -n \
     --arg proxmox_api_token_id "terraform-prov@pve!terraform-token" \
     --arg proxmox_api_token_secret "$TOKEN_SECRET" \
-    --arg proxmox_api_url "https://$TARGET_IP:$API_PORT/api2/json" \
     --arg proxmox_datastore "local-lvm" \
-    --arg target_node "$TARGET_NODE_NAME" \
-    --arg proxmox_ssh_host "$TARGET_IP" \
     --argjson proxmox_ssh_port "$SSH_PORT" \
     --arg proxmox_ssh_user "root" \
     --arg proxmox_ssh_password "$ROOT_PASS" \
-    --arg ssh_public_key "$SSH_PUBLIC_KEY" \
     '{
       proxmox_api_token_id: $proxmox_api_token_id,
       proxmox_api_token_secret: $proxmox_api_token_secret,
-      proxmox_api_url: $proxmox_api_url,
       proxmox_datastore: $proxmox_datastore,
-      target_node: $target_node,
-      proxmox_ssh_host: $proxmox_ssh_host,
       proxmox_ssh_port: $proxmox_ssh_port,
       proxmox_ssh_user: $proxmox_ssh_user,
       proxmox_ssh_password: (if $proxmox_ssh_password == "" then null else $proxmox_ssh_password end),
-      proxmox_insecure: true,
-      ssh_public_key: $ssh_public_key
+      proxmox_insecure: true
     }' > "$TFVARS_ENC_PATH"
 
 sops --encrypt --in-place "$TFVARS_ENC_PATH"
 rm -f "$ROOT_DIR/src/terraform.tfvars"
 
-# store Homepage PVE token in secrets.json for sops-nix
-if [ -n "$HOMEPAGE_TOKEN" ]; then
-    echo ">>> Storing Homepage Proxmox API token in secrets..."
-    SOPS_AGE_KEY_FILE="$AGE_KEY" sops set "$ROOT_DIR/src/secrets.json" \
-        '["proxmox-user"]' '"homepage@pve!homepage"'
-    SOPS_AGE_KEY_FILE="$AGE_KEY" sops set "$ROOT_DIR/src/secrets.json" \
-        '["proxmox-pass"]' "\"$HOMEPAGE_TOKEN\""
-fi
+echo ">>> Storing the Homepage and on-demand wake Proxmox API tokens in secrets..."
+secret_set proxmox-user "homepage@pve!homepage"
+secret_set proxmox-pass "$HOMEPAGE_TOKEN"
+secret_set proxmox-wake-token "wake@pve!ondemand=$WAKE_TOKEN"
 
 echo ">>> INIT COMPLETE!"
-echo ">>> WireGuard: keys auto-generated on first deploy. Run 'wg show' on the router to get the public key."
-echo ">>> Cloudflare: edit token with 'sops src/secrets.yaml'"
+echo ">>> External secrets (cloudflare-token, telegram-*, ...): fill the empty keys with 'sops src/secrets.json'"
 echo ">>> Terraform connection vars: encrypted at src/terraform.tfvars.sops.json"
 echo ">>> Next step: ./sync.sh"

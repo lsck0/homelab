@@ -1,4 +1,4 @@
-{ config, pkgs, lib, inventory, nasMount, ... }:
+{ config, pkgs, lib, inventory, nasMount, site, ... }:
 let
 
 
@@ -28,7 +28,7 @@ let
     [{ source_labels = [ "__address__" ]; regex = "([^:]+):.*"; target_label = "vm"; replacement = "$1"; }]
     ++ lib.mapAttrsToList (_: v: vmLabel v.ip (vmName v)) (lib.filterAttrs (_: v: v.type != "router") inventory)
     ++ lib.optional (router != null) (vmLabel "10.100.0.1" "router")
-    ++ [ (vmLabel "192.168.178.200" "proxmox") ];
+    ++ [ (vmLabel site.lan.proxmox "proxmox") ];
 
   # blackbox probes
   # probe backends, public names always 302 via authelia
@@ -40,7 +40,7 @@ let
         && (r.monitor or true);
       ofSide = side: lib.mapAttrsToList (name: r: {
         inherit name;
-        url = "${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}${r.health or ""}";
+        url = "http://${inventory.${toString r.vmid}.ip}:${toString r.port}${r.health or ""}";
       }) (lib.filterAttrs (_: alwaysOn) side);
     in
     lib.concatLists (lib.mapAttrsToList (_: ofSide) routes)
@@ -144,6 +144,8 @@ let
     flakeIgnore = [ "E501" ];
   } (builtins.readFile ../scripts/fronius-exporter.py);
   froniusListen = "127.0.0.1:9118";
+  # a site without a fronius inverter (site.json) has no house power data
+  inverter = site.lan.inverter != "";
   # local copy: a missing nas token must fail one scrape, not prometheus
   hassScrapeToken = "/run/prometheus-hass/token";
 
@@ -170,11 +172,18 @@ in {
     content = builtins.toJSON contactPoints;
   };
 
-  fileSystems = nasMount "/var/lib/grafana" "grafana"
-    // nasMount "/var/lib/prometheus2" "prometheus"
+  fileSystems = nasMount "/var/lib/prometheus2" "prometheus"
     // nasMount "/var/lib/loki" "loki"
     # home assistant's long-lived token, for its prometheus export
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+
+  # sqlite on nfs corrupts; local, the nas keeps a nightly copy
+  homelab.localState.grafana = {
+    path = "/var/lib/grafana";
+    share = "grafana";
+    unit = "grafana";
+    sqlite = [ "data/grafana.db" ];
+  };
 
   # every host uploads its journal here (base.nix); promtail forwards to loki
   # journal-remote ignores MaxUse for the received files, so they outgrew the disk
@@ -247,10 +256,8 @@ in {
   };
 
   systemd.tmpfiles.rules = [
-    "d /var/lib/loki 0750 loki loki -"
     "d /var/lib/tempo 0750 tempo tempo -"
-    # nfs share leaks 0644, grafana warns
-    "z /var/lib/grafana/data/grafana.db 0640 grafana grafana -"
+    "d /var/lib/loki 0750 loki loki -"
   ];
 
   # localhost only, unauthenticated prober
@@ -268,8 +275,6 @@ in {
             valid_status_codes = [ 200 201 204 301 302 303 307 308 401 403 404 ];
             follow_redirects = false;
             preferred_ip_protocol = "ip4";
-            # self-signed backends (scheme = "https")
-            tls_config.insecure_skip_verify = true;
           };
         };
         tcp_up = {
@@ -327,7 +332,7 @@ in {
           targets =
             lib.mapAttrsToList (_: v: "${v.ip}:9100") (lib.filterAttrs (_: v: v.type != "router") inventory)
             ++ lib.optional (router != null) "10.100.0.1:9100"
-            ++ [ "192.168.178.200:9100" ];
+            ++ [ "${site.lan.proxmox}:9100" ];
         }];
       }
       {
@@ -337,12 +342,12 @@ in {
           targets = [ "10.100.0.100:8082" "10.200.0.200:8082" ];
         }];
       }
-      {
-        # house power: pv, grid meter, battery
-        job_name = "fronius";
-        scrape_interval = "10s";
-        static_configs = [{ targets = [ froniusListen ]; }];
-      }
+    ] ++ lib.optional inverter {
+      # house power: pv, grid meter, battery
+      job_name = "fronius";
+      scrape_interval = "10s";
+      static_configs = [{ targets = [ froniusListen ]; }];
+    } ++ [
       {
         # gas and water readings typed in by hand
         job_name = "homeassistant";
@@ -404,6 +409,11 @@ in {
         header_name = "Remote-User";
         header_property = "username";
         auto_sign_up = true;
+      };
+      analytics = {
+        reporting_enabled = false;
+        check_for_updates = false;
+        check_for_plugin_updates = false;
       };
       users = {
         allow_sign_up = false;
@@ -472,6 +482,8 @@ in {
         };
         rules.settings = {
           apiVersion = 1;
+          # a rule dropped from the list below stays in grafana's db until deleted here
+          deleteRules = map (uid: { orgId = 1; inherit uid; }) [ "ossec_alert" "crowdsec_burst" ];
           groups = [{
             orgId = 1;
             name = "homelab";
@@ -572,6 +584,18 @@ in {
               }
               # not urgent, ntfy only
               {
+                uid = "media_quota";
+                title = "Media quota almost full";
+                expr = "100 * max(homelab_media_bytes) / max(homelab_media_quota_bytes)";
+                threshold = 95;
+                for = "1h";
+                severity = "warning";
+                telegram = false;
+                firing = "Media quota almost full"; resolved = "Media quota ok";
+                summary = "media and torrents at {{ printf \"%.0f\" $values.A.Value }}% of their quota";
+                description = "Downloads and imports stop at the quota (109-internal-nas.nix mediaQuotaGiB). Let janitorr clean up, delete media, or raise the quota.";
+              }
+              {
                 uid = "disk_full";
                 title = "Disk almost full";
                 expr = "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"})";
@@ -613,13 +637,13 @@ in {
     timerConfig = { OnCalendar = "*:00/15:05"; Persistent = true; };
   };
 
-  systemd.services.fronius-exporter = {
+  systemd.services.fronius-exporter = lib.mkIf inverter {
     description = "Prometheus exporter for the Fronius inverter";
     wantedBy = [ "multi-user.target" ];
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
     environment = {
-      FRONIUS_HOST = "192.168.178.46";
+      FRONIUS_HOST = site.lan.inverter;
       FRONIUS_LISTEN = froniusListen;
     };
     serviceConfig = {
@@ -664,16 +688,18 @@ in {
   networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 19532 ];
 
   # grafana trusts Remote-User (auth.proxy); loki has auth off, promtail on the ingresses pushes
-  homelab.ingressOnly.ports = [ 80 9090 3100 3200 ];
+  homelab.ingressOnly.ports = [ 80 9090 3100 3200 4317 4318 19532 ];
+  # lab services send traces
+  homelab.ingressOnly.portSources."4317" = [ "10.100.0.0/24" "10.200.0.0/24" ];
+  homelab.ingressOnly.portSources."4318" = [ "10.100.0.0/24" "10.200.0.0/24" ];
   # desktop status widget scrapes prometheus
-  homelab.ingressOnly.portSources."9090" = [ "192.168.178.0/24" "10.100.0.104/32" ];
-  # stats-sync on the terminal queries loki
-  homelab.ingressOnly.portSources."3100" = [ "10.100.0.104/32" ];
+  homelab.ingressOnly.portSources."9090" = [ site.lan.subnet "10.100.0.104/32" ];
+  # stats-sync on the terminal queries loki, the external traefik pushes its access log
+  homelab.ingressOnly.portSources."3100" = [ "10.100.0.104/32" "10.200.0.200/32" ];
+  # every guest uploads its journal
+  homelab.ingressOnly.portSources."19532" = [ "10.100.0.0/24" "10.200.0.0/24" ];
 
 
   # hot page cache is the point here (nfs serving, tsdb, streams)
   homelab.dropCaches = false;
-
-  # consistent copy for the snapshot, the live file may be mid-write
-  homelab.dbBackup.databases.grafana.sqlite = "/var/lib/grafana/data/grafana.db";
 }

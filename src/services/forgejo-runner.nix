@@ -1,5 +1,15 @@
 # forgejo actions runner; the host mounts /var/lib/homepage-tokens
-{ config, pkgs, nasMount, retry, ... }: {
+{ config, pkgs, nasMount, retry, ... }:
+let
+  # the runner and its jobs reach the lab by internal addresses
+  addHosts = [
+    "--add-host=git.lsck0.dev:10.100.0.100"
+    "--add-host=registry.lsck0.dev:10.100.0.118"
+    "--add-host=sccache.lsck0.dev:10.100.0.110"
+  ];
+  # the vm has 2g and 2 cpus; forgejo keeps the rest
+  jobLimits = [ "--memory=1536m" "--cpus=1.5" ];
+in {
   fileSystems = nasMount "/var/lib/forgejo-runner" "forgejo-runner";
 
   # job containers; the host sets virtualisation.oci-containers.backend = "docker"
@@ -15,11 +25,7 @@
       "/var/run/docker.sock:/var/run/docker.sock"
     ];
     user = "root:root";
-    extraOptions = [
-      "--add-host=git.lsck0.dev:10.100.0.100"
-      "--add-host=registry.lsck0.dev:10.100.0.118"
-      "--add-host=sccache.lsck0.dev:10.100.0.110"
-    ];
+    extraOptions = addHosts;
   };
 
   sops.secrets.sccache-redis-pass = { };
@@ -53,8 +59,8 @@
 
       # docker socket in job containers for build/push
       sed -i 's|docker_host: "-"|docker_host: "automount"|' /var/lib/forgejo-runner/config.yaml
-      # internal hostnames in job containers
-      sed -i '/^container:/,/^[^ ]/{s|^  options: .*|  options: "--add-host=git.lsck0.dev:10.100.0.100 --add-host=registry.lsck0.dev:10.100.0.118 --add-host=sccache.lsck0.dev:10.100.0.110"|}' \
+      # internal hostnames and resource caps in job containers
+      sed -i '/^container:/,/^[^ ]/{s|^  options: .*|  options: "${toString (addHosts ++ jobLimits)}"|}' \
         /var/lib/forgejo-runner/config.yaml
 
       # wait for the forgejo api

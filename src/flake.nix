@@ -14,7 +14,7 @@
     dotfiles.flake = false;
   };
 
-  outputs = { nixpkgs, sops-nix, ... }@inputs:
+  outputs = { self, nixpkgs, sops-nix, ... }@inputs:
   let
     system = "x86_64-linux";
     pkgs = nixpkgs.legacyPackages.${system};
@@ -22,7 +22,14 @@
 
     # vm inventory, exported from instances.tf by sync.sh
     inventory = builtins.fromJSON (builtins.readFile ./inventory.json);
-    specialArgs = { inherit inputs inventory; };
+    vmOf = name: inventory.${builtins.substring 0 3 name};
+    # every running guest's nas mounts by address: vm-109 exports exactly these, the router opens nfs to them
+    nasClients = lib.filterAttrs (_: shares: shares != [ ]) (lib.mapAttrs' (name: sys:
+      lib.nameValuePair (vmOf name).ip sys.config.homelab.nasShares
+    ) (lib.filterAttrs (name: _: name != "109-internal-nas" && (vmOf name).enabled != "false") self.nixosConfigurations));
+    # the machine and the house network, written by scripts/init.sh
+    site = builtins.fromJSON (builtins.readFile ./site.json);
+    specialArgs = { inherit inputs inventory nasClients site; };
 
     common = {
       imports = [
@@ -56,7 +63,7 @@
     nixosConfigurations = lib.mapAttrs' (file: _:
       let
         name = lib.removeSuffix ".nix" file;
-        kind = inventory.${builtins.substring 0 3 name}.kind or "vm";
+        kind = (vmOf name).kind or "vm";
       in lib.nameValuePair name (lib.nixosSystem {
         inherit system specialArgs;
         modules = [ common ./modules/platform-${kind}.nix ./instances/${file} ];

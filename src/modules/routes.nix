@@ -25,7 +25,8 @@
     terminal       = { host = "terminal";    vmid = 104; port = 8081; auth = "token"; publicRelay = true; proxied = false; };
     paperless      = { host = "paperless";   vmid = 121; port = 8080; };
     paperless-ai   = { host = "paperless-ai"; vmid = 121; port = 80; };
-    firefly        = { host = "firefly";     vmid = 124; port = 8080; };
+    # / needs authelia's Remote-Email, the prober sends none
+    firefly        = { host = "firefly";     vmid = 124; port = 8080;  health = "/health"; };
     fints          = { host = "fints";       vmid = 124; port = 8090; };
     # the companion app calls /auth/token and /api/websocket natively, it cannot pass a portal
     homeassistant  = { host = "hass";        vmid = 125; port = 80;    auth = "own"; };

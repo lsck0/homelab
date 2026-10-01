@@ -87,12 +87,11 @@ in {
 
   # dump, live data dirs on nfs copy inconsistently
   homelab.dbBackup.databases.huginn = {
-    command = "${config.services.postgresql.package}/bin/pg_dumpall -U postgres --clean --if-exists";
-    path = [ config.services.postgresql.package ];
+    command = "runuser -u postgres -- pg_dumpall --clean --if-exists";
+    path = [ config.services.postgresql.package pkgs.util-linux ];
   };
   systemd.services.db-backup-huginn = {
     after = [ "postgresql.service" ];
     requires = [ "postgresql.service" ];
-    serviceConfig.User = "postgres";
   };
 }

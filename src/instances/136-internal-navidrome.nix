@@ -12,11 +12,12 @@
       "/var/lib/navidrome:/data"
       "/srv/music:/music:ro"
     ];
+    # ~250 MiB: vm 30d peak 498 minus the idle base
+    extraOptions = [ "--memory=384m" ];
     environment = {
       # daily: every scan walks the music tree and spins up the hdd
       ND_SCANSCHEDULE = "24h";
-      ND_LOGLEVEL = "info";
-      ND_BASEURL = "";
+      ND_ENABLEINSIGHTSCOLLECTOR = "false";
       ND_REVERSEPROXYUSERHEADER = "Remote-User";
       ND_REVERSEPROXYWHITELIST = "10.100.0.100/32";
     };
@@ -34,7 +35,8 @@
     unitConfig.RequiresMountsFor = [ "/var/lib/homepage-tokens" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.curl pkgs.coreutils pkgs.jq pkgs.openssl ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    startLimitIntervalSec = 0;
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
     script = ''
       N=http://127.0.0.1:80
       T=/var/lib/homepage-tokens

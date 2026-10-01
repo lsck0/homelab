@@ -8,21 +8,43 @@ let
   # prometheus cannot tell which vms should exist
   terminalInventory = pkgs.writeText "inventory.json" (builtins.toJSON inventory);
 
-  statsSync = pkgs.writers.writePython3Bin "stats-sync" {
-    flakeIgnore = [ "E501" ];
-  } (builtins.readFile ../scripts/stats-sync.py);
+  python = name: libraries: pkgs.writers.writePython3Bin name { inherit libraries; flakeIgnore = [ "E501" ]; };
+  pythonScript = name: libraries: python name libraries (builtins.readFile ../scripts/${name}.py);
 
-  githubSync = pkgs.writers.writePython3Bin "github-sync" {
-    flakeIgnore = [ "E501" ];
-  } (builtins.readFile ../scripts/github-sync.py);
+  # the token-named dir the feeds are served from
+  feedDir = "${terminalPublic}/$(cat ${terminalDir}/token)";
+  prometheus = "http://10.100.0.105:9090";
 
-  energySync = pkgs.writers.writePython3Bin "energy-sync" {
-    flakeIgnore = [ "E501" ];
-  } (builtins.readFile ../scripts/energy-sync.py);
-
-  arxivSync = pkgs.writers.writePython3Bin "arxiv-sync" {
-    flakeIgnore = [ "E501" ];
-  } (builtins.readFile ../scripts/arxiv-sync.py);
+  # feed collectors, ../scripts/<bin>.py run as nginx into feedDir
+  collectors = {
+    terminal-sync = {
+      bin = "stats-sync";
+      description = "Collect homelab stats for the TRMNL terminal";
+      environment = { STATS_PROMETHEUS = prometheus; STATS_INVENTORY = "${terminalInventory}"; };
+      timer = { OnBootSec = "2m"; OnUnitActiveSec = "2m"; };
+    };
+    # house power, gas, water, prices; the panel refreshes every few minutes, power is a snapshot anyway
+    energy-sync = {
+      bin = "energy-sync";
+      description = "Collect house energy for the TRMNL terminal";
+      environment.ENERGY_PROMETHEUS = prometheus;
+      timer = { OnBootSec = "3m"; OnUnitActiveSec = "5m"; };
+    };
+    # arxiv announces daily, hourly catches the batch
+    arxiv-sync = {
+      bin = "arxiv-sync";
+      description = "Fetch today's arXiv mathematics announcements";
+      environment = { };
+      timer = { OnBootSec = "5m"; OnUnitActiveSec = "1h"; Persistent = true; };
+    };
+    # github: commits, repos, ci, open work
+    github-sync = {
+      bin = "github-sync";
+      description = "Collect GitHub activity for the TRMNL terminal";
+      environment.GITHUB_TOKEN_FILE = config.sops.secrets.github-mirror-token.path;
+      timer = { OnBootSec = "7m"; OnUnitActiveSec = "1h"; Persistent = true; };
+    };
+  };
 
   # calendar is one dashboard among several
   calendarState = "/var/lib/calendar";
@@ -33,10 +55,7 @@ let
   # calendars only exported by hand
   uploadNames = [ "work" ];
 
-  promote = pkgs.writers.writePython3Bin "calendar-promote" {
-    libraries = [ pkgs.python3Packages.icalendar ];
-    flakeIgnore = [ "E501" ];
-  } ''
+  promote = python "calendar-promote" [ pkgs.python3Packages.icalendar ] ''
       import os
       import shutil
       import sys
@@ -68,10 +87,7 @@ let
       sys.exit(rc)
   '';
 
-  calendarSync = pkgs.writers.writePython3Bin "calendar-sync" {
-    libraries = with pkgs.python3Packages; [ icalendar recurring-ical-events tzdata ];
-    flakeIgnore = [ "E501" ];
-  } (builtins.readFile ../scripts/calendar-sync.py);
+  calendarSync = pythonScript "calendar-sync" (with pkgs.python3Packages; [ icalendar recurring-ical-events tzdata ]);
 in {
   networking.hostName = "vm-104";
   # footers and "today" in the payloads are local time
@@ -81,16 +97,30 @@ in {
   fileSystems = nasMount calendarState "calendar"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
-  # an lxc mounts nfs at boot, not on access: nothing may run before the shares are up
-  imports = [{
-    systemd.services = lib.genAttrs [
-      "nginx" "terminal-sync" "energy-sync" "arxiv-sync" "trmnl-sync" "github-sync" "calendar-sync" "calendar-upload-dir" "calendar-upload"
-    ] (_: { unitConfig.RequiresMountsFor = [ calendarState "/var/lib/homepage-tokens" ]; });
-  }];
+  imports = [
+    # an lxc mounts nfs at boot, not on access: nothing may run before the shares are up
+    {
+      systemd.services = lib.genAttrs ([
+        "nginx" "trmnl-sync" "calendar-sync" "calendar-upload-dir" "calendar-upload"
+      ] ++ lib.attrNames collectors) (_: { unitConfig.RequiresMountsFor = [ calendarState "/var/lib/homepage-tokens" ]; });
+    }
+    {
+      systemd.services = lib.mapAttrs (_: c: {
+        inherit (c) description environment;
+        after = [ "terminal-token.service" "network-online.target" ];
+        requires = [ "terminal-token.service" ];
+        wants = [ "network-online.target" ];
+        path = [ (pythonScript c.bin [ ]) pkgs.coreutils ];
+        serviceConfig = { Type = "oneshot"; User = "nginx"; Group = "nginx"; };
+        script = "${c.bin} ${feedDir}";
+      }) collectors;
+      systemd.timers = lib.mapAttrs (_: c: { wantedBy = [ "timers.target" ]; timerConfig = c.timer; }) collectors;
+    }
+  ];
 
   sops.secrets = {
     # "NAME|URL" per line
-    calendar-sources = {};
+    calendar-sources = { owner = "nginx"; };
     # leaked feed url must not grant uploads
     calendar-upload-token = {};
     # trmnl write token, can replace panels
@@ -153,70 +183,27 @@ in {
     '';
   };
 
-  systemd.services.terminal-sync = {
-    description = "Collect homelab stats for the TRMNL terminal";
+  systemd.services.calendar-sync = {
+    description = "Merge remote calendars and render the TRMNL payload";
     after = [ "terminal-token.service" "network-online.target" ];
     requires = [ "terminal-token.service" ];
     wants = [ "network-online.target" ];
-    path = [ statsSync pkgs.coreutils ];
+    path = [ calendarSync pkgs.coreutils ];
+    serviceConfig = { Type = "oneshot"; User = "nginx"; Group = "nginx"; };
     environment = {
-      STATS_PROMETHEUS = "http://10.100.0.105:9090";
-      STATS_INVENTORY = "${terminalInventory}";
+      CALENDAR_SOURCES = config.sops.secrets.calendar-sources.path;
+      CALENDAR_UPLOAD_DIR = uploadDir;
     };
-    serviceConfig = {
-      Type = "oneshot";
-      User = "nginx";
-      Group = "nginx";
-    };
-    script = ''
-      stats-sync ${terminalPublic}/$(cat ${terminalDir}/token)
-    '';
+    script = "CALENDAR_OUT=${feedDir} calendar-sync";
   };
 
-  # house power, gas, water, prices
-  systemd.services.energy-sync = {
-    description = "Collect house energy for the TRMNL terminal";
-    after = [ "terminal-token.service" "network-online.target" ];
-    requires = [ "terminal-token.service" ];
-    wants = [ "network-online.target" ];
-    path = [ energySync pkgs.coreutils ];
-    environment.ENERGY_PROMETHEUS = "http://10.100.0.105:9090";
-    serviceConfig = {
-      Type = "oneshot";
-      User = "nginx";
-      Group = "nginx";
-    };
-    script = ''
-      energy-sync ${terminalPublic}/$(cat ${terminalDir}/token)
-    '';
-  };
-
-  # the panel refreshes every few minutes; power is a snapshot anyway
-  systemd.timers.energy-sync = {
-    description = "Refresh the energy feed for the terminal";
+  systemd.timers.calendar-sync = {
     wantedBy = [ "timers.target" ];
     timerConfig = {
-      OnBootSec = "3m";
-      OnUnitActiveSec = "5m";
-      Unit = "energy-sync.service";
+      OnBootSec = "2min";
+      OnUnitActiveSec = "15min";
+      Persistent = true;
     };
-  };
-
-  # arxiv announces daily, hourly catches the batch
-  systemd.services.arxiv-sync = {
-    description = "Fetch today's arXiv mathematics announcements";
-    after = [ "terminal-token.service" "network-online.target" ];
-    requires = [ "terminal-token.service" ];
-    wants = [ "network-online.target" ];
-    path = [ arxivSync pkgs.coreutils ];
-    serviceConfig = {
-      Type = "oneshot";
-      User = "nginx";
-      Group = "nginx";
-    };
-    script = ''
-      arxiv-sync ${terminalPublic}/$(cat ${terminalDir}/token)
-    '';
   };
 
   # this repo's .liquid files are the dashboards
@@ -253,78 +240,6 @@ in {
       OnBootSec = "10m";
       OnUnitActiveSec = "24h";
       Persistent = true;
-      Unit = "trmnl-sync.service";
-    };
-  };
-
-  # github: commits, repos, ci, open work
-  systemd.services.github-sync = {
-    description = "Collect GitHub activity for the TRMNL terminal";
-    after = [ "terminal-token.service" "network-online.target" ];
-    requires = [ "terminal-token.service" ];
-    wants = [ "network-online.target" ];
-    path = [ githubSync pkgs.coreutils ];
-    environment.GITHUB_TOKEN_FILE = config.sops.secrets.github-mirror-token.path;
-    serviceConfig = {
-      Type = "oneshot";
-      User = "nginx";
-      Group = "nginx";
-    };
-    script = ''
-      github-sync ${terminalPublic}/$(cat ${terminalDir}/token)
-    '';
-  };
-
-  systemd.timers.github-sync = {
-    description = "Refresh the GitHub feed for the terminal";
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnBootSec = "7m";
-      OnUnitActiveSec = "1h";
-      Persistent = true;
-      Unit = "github-sync.service";
-    };
-  };
-
-  systemd.timers.arxiv-sync = {
-    description = "Refresh the arXiv feed for the terminal";
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnBootSec = "5m";
-      OnUnitActiveSec = "1h";
-      Persistent = true;
-      Unit = "arxiv-sync.service";
-    };
-  };
-
-  systemd.services.calendar-sync = {
-    description = "Merge remote calendars and render the TRMNL payload";
-    after = [ "terminal-token.service" "network-online.target" ];
-    requires = [ "terminal-token.service" ];
-    wants = [ "network-online.target" ];
-    path = [ calendarSync pkgs.coreutils ];
-    serviceConfig.Type = "oneshot";
-    environment = {
-      CALENDAR_SOURCES = config.sops.secrets.calendar-sources.path;
-      # sparse calendar needs a long window
-      CALENDAR_HORIZON_DAYS = "90";
-      CALENDAR_MAX_EVENTS = "12";
-    };
-    script = ''
-      OUT=${terminalPublic}/$(cat ${terminalDir}/token)
-      mkdir -p "$OUT"
-      CALENDAR_OUT="$OUT" CALENDAR_UPLOAD_DIR=${uploadDir} calendar-sync
-      chown -R nginx:nginx "$OUT"
-      chmod -R a+rX ${terminalPublic}
-    '';
-  };
-
-  systemd.timers.calendar-sync = {
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnBootSec = "2min";
-      OnUnitActiveSec = "15min";
-      Persistent = true;
     };
   };
 
@@ -356,7 +271,7 @@ in {
   };
 
   # nginx unit has ProtectSystem=strict
-  systemd.services.nginx.serviceConfig.ReadWritePaths = [ incomingDir terminalDir ];
+  systemd.services.nginx.serviceConfig.ReadWritePaths = [ incomingDir ];
 
   # promote a pushed file once it parses
   systemd.timers.calendar-upload = {
@@ -381,16 +296,6 @@ in {
       chmod -R a+rX ${uploadDir} 2>/dev/null || true
       systemctl start --no-block calendar-sync.service
     '';
-  };
-
-  systemd.timers.terminal-sync = {
-    description = "Refresh the TRMNL terminal feed";
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnBootSec = "2m";
-      OnUnitActiveSec = "2m";
-      Unit = "terminal-sync.service";
-    };
   };
 
   networking.firewall.allowedTCPPorts = [ terminalPort ];

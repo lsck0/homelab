@@ -31,16 +31,8 @@ in {
 
     # eth0 naming so cloud-init config matches
     networking.usePredictableInterfaceNames = false;
-    users.users.root.openssh.authorizedKeys.keys = [
-      # sync.sh deploy key
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAID3CzR77c6L49KNFZWmMc+SEQCda0+MdGBWTrEkZRly+ homelab@luca-pc"
-      # owner's personal key
-      "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOgxytZXc8MSkvCbwV/NZGnXw+6gklCUFxv+llwIIN6Z luca.sandrock@proton.me"
-      # owner's YubiKey, touch only (arch-dotfiles configs/yubikey)
-      "sk-ssh-ed25519@openssh.com AAAAGnNrLXNzaC1lZDI1NTE5QG9wZW5zc2guY29tAAAAINGYTn/HEsF8u+1vD7gFy24sZ9JtR0qyWq9ash7FnO3GAAAACXNzaDpsc2NrMA== luca@yubikey-39779321"
-    ]
-    # hermes (vm-114), written by hermes-secrets.sh
-    ++ lib.optional (builtins.pathExists ./hermes.pub) (lib.removeSuffix "\n" (builtins.readFile ./hermes.pub));
+    # deployer, owner, owner's YubiKey, hermes: the same files terraform and sync.sh (proxmox) install
+    users.users.root.openssh.authorizedKeys.keyFiles = lib.filesystem.listFilesRecursive ../keys;
 
     services.openssh = {
       enable = true;
@@ -119,8 +111,6 @@ in {
         };
       };
     };
-
-    # no syslog forwarding: promtail ships journals
 
     # internal vms have no ipv6 routing
     networking.enableIPv6 = false;

@@ -28,14 +28,11 @@ let
         default = [ "cache" ];
         description = "Paths, relative to path, that are neither seeded nor mirrored.";
       };
-      mirrorAt = lib.mkOption {
-        type = lib.types.str;
-        default = "01:15";
-        description = "Daily mirror time, before the 01:30 db dumps and the 02:00 snapshot.";
-      };
     };
   };
 
+  # daily, before the 01:30 db dumps and the 02:00 snapshot
+  mirrorAt = "01:15";
   nasDir = name: "/srv/${name}-nas";
   excludes = s: lib.concatMapStringsSep " " (e: "--exclude ${lib.escapeShellArg e}") (s.exclude ++ [ ".seeded" ]);
 in {
@@ -67,7 +64,7 @@ in {
       "${s.unit}".restartTriggers = [ config.systemd.services."${name}-seed".script ];
 
       "${name}-mirror" = {
-        startAt = s.mirrorAt;
+        startAt = mirrorAt;
         unitConfig.RequiresMountsFor = [ (nasDir name) ];
         # never mirror an unseeded install over the nas copy
         unitConfig.ConditionPathExists = "${s.path}/.seeded";

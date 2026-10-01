@@ -34,13 +34,13 @@ dur_seconds() {
 fj() {
   local method=$1 path=$2
   shift 2
-  curl -sS -X "$method" "$FORGEJO_URL/api/v1$path" \
+  curl -fsS -X "$method" "$FORGEJO_URL/api/v1$path" \
     -H "Authorization: token $FORGEJO_TOKEN" \
     -H "Content-Type: application/json" "$@"
 }
 
 gh_api() {
-  curl -sS "https://api.github.com$1" \
+  curl -fsS "https://api.github.com$1" \
     -H "Authorization: Bearer $GITHUB_TOKEN" \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28"

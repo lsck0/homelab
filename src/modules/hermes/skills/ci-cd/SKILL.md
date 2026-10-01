@@ -28,7 +28,8 @@ Note: the GitHub path is a template only (`example/.github/workflows/hello.yml`)
 ## Runners
 
 - **Forgejo** vm-115: one runner beside Forgejo for `git.lsck0.dev`.
-- **GitHub** vm-117 (10.100.0.117): ephemeral runners, one systemd unit per
+- **GitHub** vm-117 (10.100.0.117): disabled (`enabled = false` in `src/instances.tf`), so no
+  GitHub runners exist now; the rest applies once it is enabled. Ephemeral runners, one systemd unit per
   replica, registered straight to a repo. A job gets a fresh runner and a wiped
   state directory, then the runner de-registers itself.
   - which repos: the `repos` set at the top of

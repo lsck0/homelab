@@ -8,6 +8,7 @@ in
   imports = [
     ../modules/network.nix
     ../modules/db-backup.nix
+    ../modules/local-state.nix
   ];
 
   options.sops = {
@@ -37,6 +38,9 @@ in
     placeholder = lib.mkOption { type = lib.types.attrsOf lib.types.str; default = { }; };
   };
 
+  # declared by platform-vm.nix, which a test vm cannot import (grub, disk layout)
+  options.homelab.dropCaches = lib.mkOption { type = lib.types.bool; default = true; };
+
   config = {
     sops.placeholder = lib.mapAttrs (name: _: dummy name) config.sops.secrets;
 
@@ -55,6 +59,8 @@ in
       nasMedia = _: _: { };
       # network.nix reads the inventory
       inventory = lib.mkDefault { };
+      # static host facts, the same file the flake hands every host
+      site = lib.importJSON ../site.json;
     };
   };
 }

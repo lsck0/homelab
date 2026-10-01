@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, site, ... }:
 let
   repoDir = "/var/lib/archrepo";
   # vm-119 rsyncs the built repo here over ssh; this host only serves it
@@ -11,9 +11,6 @@ in {
     isSystemUser = true;
     group = "archrepo";
     home = repoDir;
-    createHome = true;
-    # activation resets the home to homeMode (700) on every switch, nginx must read it
-    homeMode = "755";
     # sshd runs the forced command through the login shell
     shell = pkgs.bash;
     openssh.authorizedKeys.keys = [ ''restrict,command="${pkgs.rrsync}/bin/rrsync -wo ${repoDir}" ${pushKey}'' ];
@@ -44,7 +41,7 @@ in {
   # the repo is public and signed, so skipping traefik bypasses nothing. 22 stays open for the builder push
   homelab.ingressOnly = {
     ports = [ 80 ];
-    # fritzbox lan, internal lan, wireguard
-    portSources."80" = [ "192.168.178.0/24" "10.100.0.0/24" "10.0.0.0/24" ];
+    # external traefik, fritzbox lan, internal lan, wireguard
+    portSources."80" = [ "10.200.0.200/32" site.lan.subnet "10.100.0.0/24" "10.0.0.0/24" ];
   };
 }

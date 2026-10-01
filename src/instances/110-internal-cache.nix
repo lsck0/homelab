@@ -39,9 +39,10 @@
     requirePassFile = config.sops.secrets.sccache-redis-pass.path;
     settings = {
       protected-mode = "no";
-      maxmemory = "768mb";
+      maxmemory = "256mb";
       maxmemory-policy = "allkeys-lru";
-      appendonly = "yes";
+      # a cache: losing it on restart costs one cold build, persisting it costs a write per job
+      appendonly = "no";
     };
   };
   environment.systemPackages = [ pkgs.attic-client pkgs.sccache ];

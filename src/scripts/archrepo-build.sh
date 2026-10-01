@@ -284,7 +284,8 @@ fetch_dotfiles() {
 
 # names, provides and groups of every official package
 load_repo_index() {
-  local repo name provides group
+  local repo name provides
+  # provides takes the rest of the line: the provides and the groups
   while read -r repo name provides; do
     [ "$repo" = "$REPO" ] && continue
     repo_has[$name]=1
@@ -826,7 +827,8 @@ clean_caches() {
 
 PUSH_SSH="ssh -i $PUSH_KEY_FILE -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15"
 
-push_rsync() { rsync -a -e "$PUSH_SSH" "$@"; }
+# pacman -Sw --cachedir leaves download-* dirs in the served tree
+push_rsync() { rsync -a --exclude 'download-*' -e "$PUSH_SSH" "$@"; }
 
 # mirror to the always-on dmz host: packages, then the db, then deletions; never fatal, the nas copy stands
 push() {

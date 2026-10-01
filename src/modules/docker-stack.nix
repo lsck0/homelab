@@ -4,7 +4,7 @@ let
 
   stackFile = name: pkgs.writeText "stack-${name}.yaml" cfg.stacks.${name};
 
-  # log in to registries, then deploy all stacks
+  # deploy all stacks
   deployScript = pkgs.writeShellScript "swarm-deploy" ''
     set -uo pipefail
     export PATH="${lib.makeBinPath [ pkgs.docker pkgs.coreutils pkgs.gnugrep pkgs.gawk ]}"
@@ -33,10 +33,6 @@ let
       done
       return 1
     }
-    ${lib.concatStrings (lib.mapAttrsToList (registry: auth: ''
-      docker login ${registry} --username ${lib.escapeShellArg auth.username} \
-        --password-stdin < ${auth.passwordFile} >/dev/null || { echo "login to ${registry} failed"; rc=1; }
-    '') cfg.registries)}
     for name in "$@"; do
       rolled_back_build "$name" && continue
       docker stack deploy --detach=true --with-registry-auth --resolve-image always --prune \
@@ -45,8 +41,6 @@ let
     exit $rc
   '';
 in {
-  imports = [ ./retry.nix ];
-
   options.homelab.swarm = {
     enable = lib.mkEnableOption "single-node Docker Swarm with CI-driven stacks";
 
@@ -58,23 +52,6 @@ in {
         updates give each service a healthcheck and
         `deploy.update_config.order: start-first`.
       '';
-    };
-
-    registries = lib.mkOption {
-      type = lib.types.attrsOf (lib.types.submodule {
-        options = {
-          username = lib.mkOption { type = lib.types.str; };
-          passwordFile = lib.mkOption {
-            type = lib.types.str;
-            description = "Runtime path to the password/token (e.g. a sops secret).";
-          };
-        };
-      });
-      default = {};
-      example = lib.literalExpression ''
-        { "ghcr.io" = { username = "lsck0"; passwordFile = config.sops.secrets.ghcr-token.path; }; }
-      '';
-      description = "Credentials for private registries, keyed by registry host. Public images need none.";
     };
 
     updateInterval = lib.mkOption {

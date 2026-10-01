@@ -4,14 +4,14 @@ locals {
   instances = {
     # internal: 10.100.0.0/24 behind internal traefik (authelia)
     "100" = { # internal reverse proxy: tls, forwardauth, on-demand wake
-      boot_phase = "core",
+      boot_phase = "network",
       enabled    = true,
       name       = "100-internal-traefik",
       type       = "internal",
       memory     = 1024,
     }
     "101" = { # SSO: authelia (OIDC + ForwardAuth) and lldap, its identity store
-      boot_phase = "core",
+      boot_phase = "network",
       enabled    = true,
       name       = "101-internal-authelia",
       type       = "internal",
@@ -38,14 +38,16 @@ locals {
       features   = "nesting=1,mount=nfs",
     }
     "105" = { # observability: prometheus, loki, tempo, grafana
-      boot_phase = "core",
+      boot_phase = "network",
       enabled    = true,
       name       = "105-internal-grafana",
       type       = "internal",
-      # four services, prometheus keeps 30d
-      memory = 3072,
+      # prometheus, loki, grafana: 1122 MiB peak over 7d
+      memory = 2560,
       # explicit floor: tsdb head and loki chunks are working memory
-      balloon = 2048,
+      balloon = 1536,
+      # remote journal buffer (1G) plus local grafana state
+      disk = 16,
     }
 
     "109" = { # storage: NFS + SMB + Syncthing + FileBrowser, Kopia backups of it
@@ -58,8 +60,8 @@ locals {
       balloon = 2048,
       # nvme root: state, backups, documents
       disk = 750,
-      # bulk storage on the 2 tb hdd
-      extra_disks = var.bulk_datastore == "" ? [] : [{ size = 1800, datastore = var.bulk_datastore }],
+      # media and torrents on the bulk hdd (site.json)
+      extra_disks = local.site.bulk == null ? [] : [{ size = local.site.bulk.sizeGiB, datastore = local.bulk_datastore }],
     }
     "110" = { # build caches: attic (nix) + sccache redis
       boot_phase = "dev",
@@ -67,17 +69,19 @@ locals {
       kind       = "lxc",
       name       = "110-internal-cache",
       type       = "internal",
-      # redis caps itself at 768mb
-      memory = 1024,
+      # 63 MiB peak over 7d; redis caps itself at 256mb
+      memory = 512,
       disk   = 40,
     }
 
-    "112" = { # torrent client (egress via tor-router)
+    "112" = { # torrent client, egress through the router's vpn exit
       boot_phase = "media",
       enabled    = true,
       name       = "112-internal-qbittorrent",
       type       = "internal",
       memory     = 1024,
+      # unfinished downloads: the size caps what torrents can take of the nvme pool
+      extra_disks = [{ size = 150, datastore = var.proxmox_datastore }],
     }
 
     "114" = { # Hermes: Telegram agent, cloud models only, root on the lab
@@ -127,6 +131,8 @@ locals {
       memory  = 6144,
       balloon = 5120,
       cores   = 8,
+      # nightly builds yield the cpu to every interactive guest (proxmox default weight is 100)
+      cpu_units = 25,
       # container image, pacman cache, sources, cargo and go caches
       disk = 100,
     }
@@ -156,15 +162,16 @@ locals {
       enabled    = true,
       name       = "125-internal-homeassistant",
       type       = "internal",
-      # large python process, squeezed it stalls
-      memory  = 2048,
-      balloon = 1536,
+      # large python process, squeezed it stalls: 739 MiB peak over 7d, so the floor stays above it
+      memory  = 1536,
+      balloon = 1024,
       # image alone does not fit in 8 GiB
       disk = 16,
     }
+
     "126" = { # automation agents / scraping
       boot_phase = "apps",
-      # not in use yet
+      # off until there is a use for it
       enabled = false,
       name    = "126-internal-huginn",
       type    = "internal",
@@ -182,6 +189,8 @@ locals {
       name       = "128-internal-jellyseerr",
       type       = "internal",
       memory     = 1024,
+      # image plus local state filled 8 GiB to 80%
+      disk       = 12,
       privileged = true,
       features   = "nesting=1,mount=nfs",
     }
@@ -190,9 +199,9 @@ locals {
       enabled    = true,
       name       = "130-internal-arr",
       type       = "internal",
-      # four .net apps thrashed at a 512 floor each, flaresolverr's chromium at 1024
-      memory  = 4096,
-      balloon = 3072,
+      # five .net apps plus flaresolverr's chromium: 1510 MiB peak over 7d; they thrashed below a 512 floor each
+      memory  = 3072,
+      balloon = 2048,
       disk    = 16,
     }
     "134" = { # media streaming + Janitorr (deletes media unwatched for months)
@@ -207,7 +216,7 @@ locals {
       # ollama model 4.4G beside jellyfin
       disk    = 24,
       machine = "q35",
-      hostpci = ["gpu"],
+      hostpci = local.site.gpu == null ? [] : ["gpu"],
     }
     "136" = { # music streaming (Subsonic API)
       boot_phase = "media",
@@ -219,7 +228,7 @@ locals {
       features   = "nesting=1,mount=nfs",
     }
     "138" = { # Tailscale control server (VPN mesh) + Headplane UI
-      boot_phase = "core",
+      boot_phase = "network",
       # internal, not dmz: it controls mesh membership
       enabled = true,
       name    = "138-internal-headscale",
@@ -228,23 +237,23 @@ locals {
 
     # external: 10.200.0.0/24 dmz behind external traefik (crowdsec/waf)
     "200" = { # public reverse proxy: tls, crowdsec, anubis, waf
-      boot_phase = "external",
+      boot_phase = "network",
       enabled    = true,
       name       = "200-external-traefik",
       type       = "external",
-      # crowdsec oom-killed at 1024
-      memory  = 2048,
-      balloon = 1536,
+      # crowdsec oom-killed at 1024; 631 MiB peak over 7d
+      memory  = 1536,
+      balloon = 1024,
     }
     "203" = { # push notifications (alert delivery)
-      boot_phase = "external",
+      boot_phase = "public",
       enabled    = true,
       kind       = "lxc",
       name       = "203-external-ntfy",
       type       = "external",
     }
     "204" = { # privacy metasearch
-      boot_phase = "external",
+      boot_phase = "public",
       enabled    = "onDemand",
       kind       = "lxc",
       name       = "204-external-searxng",
@@ -253,24 +262,24 @@ locals {
       features = "nesting=1,keyctl=1",
     }
     "206" = { # encrypted pastebin
-      boot_phase = "external",
+      boot_phase = "public",
       enabled    = "onDemand",
       name       = "206-external-privatebin",
       type       = "external",
     }
     "207" = { # public file sharing
-      boot_phase = "external",
+      boot_phase = "public",
       enabled    = "onDemand",
       name       = "207-external-share",
       type       = "external",
       memory     = 1024,
     }
     "208" = { # Minecraft server; lazymc sleeps/wakes the server per real player logins
-      boot_phase = "external",
-      # always on; lazymc stops the jvm after 30m of no players. no ballooning: a growing
+      boot_phase = "public",
+      # off until needed. when on, lazymc stops the jvm after 30m of no players. no ballooning: a growing
       # 6g heap in a ballooned-down guest gets oom-killed, so give it a fixed 8g and let
       # the jvm's 6g heap sit resident (2g headroom for the os and jvm off-heap).
-      enabled = true,
+      enabled = false,
       name    = "208-external-minecraft",
       type    = "external",
       memory  = 8192,
@@ -279,7 +288,7 @@ locals {
       disk    = 16,
     }
     "209" = { # app host: Docker Swarm stacks deployed by CI (Forgejo + GitHub)
-      boot_phase = "external",
+      boot_phase = "public",
       enabled    = "onDemand",
       kind       = "lxc",
       name       = "209-external-hello",
@@ -288,17 +297,17 @@ locals {
       features = "nesting=1,keyctl=1",
     }
     "210" = { # public lsck0 pacman mirror; vm (nfs is internal, dmz gets an ssh push instead)
-      boot_phase = "external",
+      boot_phase = "dev",
       enabled    = true,
       name       = "210-external-mirror",
       type       = "external",
-      # served packages tree, pushed from vm-119
-      disk = 30,
+      # served packages tree (30G and growing), pushed from vm-119: the push adds before it deletes, so twice that
+      disk = 64,
     }
 
     # router
     "300" = { # gateway: nat, firewall, dhcp, dns, wireguard, ddns
-      boot_phase = "router",
+      boot_phase = "network",
       enabled    = true,
       name       = "luca-router",
       type       = "router",

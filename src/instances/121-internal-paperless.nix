@@ -45,12 +45,25 @@ in {
 
   networking.hostName = "vm-121";
 
-  fileSystems = nasMount "/var/lib/paperless" "paperless"
-    // nasPath "/var/lib/paperless/consume" "documents/inbox"
+  # documents stay plain files on the nas, the inbox is the smb documents share
+  fileSystems = nasMount "/srv/paperless-media" "paperless/media"
+    // nasPath "/srv/paperless-consume" "documents/inbox"
     // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+
+  # db and index local, the nas keeps a nightly copy
+  homelab.localState.paperless = {
+    path = "/var/lib/paperless";
+    share = "paperless";
+    unit = "paperless-scheduler";
+    sqlite = [ "db.sqlite3" ];
+    # the beat schedule and logs regenerate
+    exclude = [ "media" "consume" "log" "celerybeat-schedule.db*" ];
+  };
 
   services.paperless = {
     enable = true;
+    mediaDir = "/srv/paperless-media";
+    consumptionDir = "/srv/paperless-consume";
     address = "0.0.0.0";
     port = 8080;
     settings = {
@@ -104,9 +117,6 @@ in {
       echo -n "$TOKEN" > /var/lib/homepage-tokens/paperless-key.token
     '';
   };
-
-  # documents are plain files, snapshots cover them
-  homelab.dbBackup.databases.paperless.sqlite = "/var/lib/paperless/db.sqlite3";
 
   networking.firewall.allowedTCPPorts = [ 8080 ];
 

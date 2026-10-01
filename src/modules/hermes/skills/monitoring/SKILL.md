@@ -24,7 +24,7 @@ metadata:
 - Alerting is Grafana unified alerting only; there is no Alertmanager. It used
   to run alongside Grafana with the same rule and the same receivers, which
   delivered every alert twice. Rules, contact points and the notification
-  policy are provisioned in `src/instances/104-internal-grafana.nix`.
+  policy are provisioned in `src/instances/105-internal-grafana.nix`.
   Firing alerts: `curl -s -H 'Remote-User: hermes' http://10.100.0.105/api/alertmanager/grafana/api/v2/alerts`.
   Silence: `POST /api/alertmanager/grafana/api/v2/silences` with matchers, startsAt, endsAt, createdBy, comment.
 - Grafana https://grafana.lsck0.dev (dashboard "Homelab"); API from the VM on port 80 needs the auth proxy header:

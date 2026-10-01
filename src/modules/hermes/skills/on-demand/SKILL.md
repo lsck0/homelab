@@ -18,7 +18,7 @@ VMs with `enabled = "onDemand"` in `src/instances.tf` sleep until used:
 - Traefik (vm-100 internal, vm-200 external) holds a socket proxy per route
   (`systemctl status ondemand-<route>` there). The first connection boots the VM
   through the Proxmox API and is held until the app answers.
-- After `cooldown` (instances.tf, e.g. `30m`, Minecraft `15m`) without
+- After `cooldown` (instances.tf, default `30m`) without
   connections the proxy exits and the VM is shut down.
 - `ondemand-reaper.timer` (every 2 min) also shuts down VMs that were started
   another way (deploy, `vm start`) and never got a connection within the cooldown.

@@ -21,7 +21,8 @@ Header `Authorization: MediaBrowser Token="$(lab-token jellyfin-key)"` (Jellyfin
 - Who is watching: `GET /Sessions?activeWithinSeconds=600`.
 - Users: `GET /Users`; create `POST /Users/New {"Name":..,"Password":..}`;
   password `POST /Users/<id>/Password {"NewPw":..}` (admin reset: `{"ResetPassword":true}` first).
-- Play history (used for cleanup): janitorr-stats on the same VM, `http://10.100.0.134:8081`.
+- Play history (used for cleanup): janitorr-stats on the same VM, localhost only:
+  `ssh 10.100.0.134 'curl -s http://127.0.0.1:8081/<path>'`.
 - Admin password (for UI login): `lab-token jellyfin-admin-pass`.
 
 ## Janitorr (automatic cleanup)

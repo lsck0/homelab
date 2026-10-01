@@ -15,9 +15,10 @@ pkgs.testers.runNixOSTest {
       "d /srv/nas/data/minecraft/world 0777 root root -"
       "f /srv/nas/data/minecraft/world/level.dat 0644 root root - world-v1"
       "d /srv/nas/BACKUPS 0700 root root -"
+      # kopia-init snapshots the nas's local state too
+      "d /var/lib/syncthing 0700 root root -"
+      "d /var/lib/filebrowser 0700 root root -"
     ];
-    # no concurrent nas-wide snapshot
-    systemd.services.kopia-metrics.wantedBy = pkgs.lib.mkForce [ ];
   };
 
   testScript = ''

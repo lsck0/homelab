@@ -1,30 +1,25 @@
 ---
 name: home-automation
-description: Home Assistant and MQTT (Mosquitto).
+description: Home Assistant, its energy meters and tariffs.
 version: 1.0.0
 author: homelab
 license: MIT
 platforms: [linux]
 metadata:
   hermes:
-    tags: [Homelab, HomeAssistant, MQTT, IoT]
+    tags: [Homelab, HomeAssistant, IoT]
     related_skills: [homelab-ops]
 ---
 
 # Home automation
-
-## MQTT (vm-125 (with Home Assistant), 10.100.0.125:1883, anonymous on the LAN)
-
-- Publish: `mosquitto_pub -h 10.100.0.125 -t <topic> -m '<payload>'` (install on demand: `nix shell nixpkgs#mosquitto`, or run it on vm-125 via ssh).
-- Watch: `ssh 10.100.0.125 "mosquitto_sub -t '#' -v -W 10"`.
 
 ## Home Assistant (vm-125, http://10.100.0.125)
 
 Token `lab-token hass-key`, header `Authorization: Bearer <token>`.
 - States: `GET /api/states`, one entity `GET /api/states/<entity_id>`.
 - Call a service: `POST /api/services/<domain>/<service> {"entity_id":"light.kitchen"}`.
-- Automations live in `/var/lib/homeassistant/automations.yaml` (NAS); reload `POST /api/services/automation/reload`.
-If it is disabled, say so; enabling it is `enabled = true` for 124 in `src/instances.tf`.
+- Automations live in `/var/lib/homeassistant/automations.yaml` (local disk, mirrored to the NAS nightly); reload `POST /api/services/automation/reload`.
+If it is disabled, say so; enabling it is `enabled = true` for 125 in `src/instances.tf`.
 
 ## Energy meters and tariffs (the Energie dashboard)
 
@@ -40,17 +35,17 @@ this call. Meter readings are the absolute counter shown on the physical meter,
 in the unit below; the dashboard derives usage from the change over time.
 
 Meters (m³, absolute reading):
-- `input_number.gas_meter` — Gaszähler.
-- `input_number.water_meter` — Wasserzähler.
+- `input_number.gas_meter`: Gaszähler.
+- `input_number.water_meter`: Wasserzähler.
 
 Tariffs (set when a contract changes):
-- `input_number.price_electricity` — Strompreis, EUR/kWh.
-- `input_number.price_feed_in` — Einspeisevergütung, EUR/kWh.
-- `input_number.price_gas` — Gaspreis, EUR/kWh.
-- `input_number.price_water` — Wasserpreis, EUR/m³.
-- `input_number.gas_kwh_per_m3` — gas m³→kWh conversion factor (on the gas bill).
-- `input_number.fee_electricity` / `input_number.fee_gas` / `input_number.fee_water` — monthly base fee (Grundpreis), EUR/Monat.
+- `input_number.price_electricity`: Strompreis, EUR/kWh.
+- `input_number.price_feed_in`: Einspeisevergütung, EUR/kWh.
+- `input_number.price_gas`: Gaspreis, EUR/kWh.
+- `input_number.price_water`: Wasserpreis, EUR/m³.
+- `input_number.gas_kwh_per_m3`: gas m³ to kWh conversion factor (on the gas bill).
+- `input_number.fee_electricity` / `input_number.fee_gas` / `input_number.fee_water`: monthly base fee (Grundpreis), EUR/Monat.
 
-The gas/water readings flow to `sensor.gas_meter_reading` / `sensor.water_meter_reading`,
-which Prometheus scrapes and `energy-sync.py` renders on the TRMNL panel, so a new
-reading shows up there after the next scrape.
+The gas/water readings also feed `sensor.gas_meter_reading` / `sensor.water_meter_reading`
+for the Energie dashboard. Prometheus scrapes the `input_number` helpers themselves and
+`energy-sync.py` renders those on the TRMNL panel, so a new value shows up there after the next scrape.

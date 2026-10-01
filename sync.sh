@@ -6,16 +6,23 @@ export SHELL=/bin/bash
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TFVARS_PATH="$ROOT_DIR/src/terraform.tfvars"
 TFVARS_ENC_PATH="$ROOT_DIR/src/terraform.tfvars.sops.json"
-# age key lives in the dotfiles repo
+# the age key lives in the dotfiles' git-crypt secrets, which the YubiKey unlocks
+DOTFILES="${DOTFILES:-$HOME/projects/arch-dotfiles}"
 AGE_KEY="$ROOT_DIR/secrets/age.txt"
-AGE_KEY_SOURCE="${AGE_KEY_SOURCE:-$HOME/projects/arch-dotfiles/configs/secrets/age.txt}"
-if [ ! -r "$AGE_KEY" ] && [ -r "$AGE_KEY_SOURCE" ]; then
-  mkdir -p "$ROOT_DIR/secrets"
-  ln -sfn "$AGE_KEY_SOURCE" "$AGE_KEY"
-  echo ">>> age key linked from $AGE_KEY_SOURCE"
+[ -e "$AGE_KEY" ] || { mkdir -p "$ROOT_DIR/secrets"; ln -sfn "$DOTFILES/configs/secrets/age.txt" "$AGE_KEY"; }
+# locked, the file is ciphertext, and every vm would be handed it as its sops key
+if ! grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY"; then
+  echo ">>> dotfiles secrets locked: touch the YubiKey"
+  "$DOTFILES/scripts/yubikey.sh" unlock || true
+  grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY" || { echo "ERROR: $AGE_KEY is not an age key, unlock the dotfiles secrets."; exit 1; }
 fi
+export SOPS_AGE_KEY_FILE="$AGE_KEY"
+# deploys log in with this key; src/keys/ authorizes it everywhere
+DEPLOY_KEY="$HOME/.ssh/id_ed25519"
 ACTIVE_TFVARS_PATH=""
-ROUTER_WAN_IP="192.168.178.29"
+# the machine and the house network, written by src/scripts/init.sh
+SITE="$ROOT_DIR/src/site.json"
+ROUTER_WAN_IP=$(jq -r .lan.router "$SITE")
 DEPLOY_FAILURE=0
 # instance name -> built toplevel, filled once the batch build is done
 declare -A TOPLEVELS=()
@@ -58,8 +65,7 @@ load_tfvars() {
   command -v sops >/dev/null || { echo "ERROR: sops not installed."; exit 1; }
   ACTIVE_TFVARS_PATH="$(mktemp --suffix=.tfvars.json)"
   CLEANUP_FILES+=("$ACTIVE_TFVARS_PATH")
-  SOPS_AGE_KEY_FILE="$AGE_KEY" sops --decrypt "$TFVARS_ENC_PATH" > "$ACTIVE_TFVARS_PATH" \
-    || sops --decrypt "$TFVARS_ENC_PATH" > "$ACTIVE_TFVARS_PATH"
+  sops --decrypt "$TFVARS_ENC_PATH" > "$ACTIVE_TFVARS_PATH"
   jq empty "$ACTIVE_TFVARS_PATH" >/dev/null || { echo "ERROR: Decrypted tfvars is not valid JSON."; exit 1; }
 }
 
@@ -122,12 +128,9 @@ deploy_nixos() {
     "readlink -f /run/current-system" 2>/dev/null || true)
   [ "$current" = "$toplevel" ] && { echo ">>> $name already up-to-date. Skipping."; return 0; }
 
-  if [ -f "$AGE_KEY" ]; then
-    ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-      "mkdir -p /var/lib/sops-nix && chmod 700 /var/lib/sops-nix" || return 1
-    cat "$AGE_KEY" | ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-      "cat > /var/lib/sops-nix/key.txt && chmod 600 /var/lib/sops-nix/key.txt" || return 1
-  fi
+  ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
+    "install -d -m 700 /var/lib/sops-nix && cat > /var/lib/sops-nix/key.txt && chmod 600 /var/lib/sops-nix/key.txt" \
+    < "$AGE_KEY" || return 1
 
   # closures are local builds, no sigs
   nix copy --extra-experimental-features "nix-command flakes" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
@@ -173,36 +176,43 @@ deploy_nixos() {
 load_tfvars
 
 # ssh transport
-PROXMOX_SSH_HOST="$(read_tfvar proxmox_ssh_host)"; : "${PROXMOX_SSH_HOST:=127.0.0.1}"
+PROXMOX_SSH_HOST=$(jq -r .lan.proxmox "$SITE")
 PROXMOX_SSH_PORT="$(read_tfvar proxmox_ssh_port)"; : "${PROXMOX_SSH_PORT:=22}"
 PROXMOX_SSH_USER="$(read_tfvar proxmox_ssh_user)"; : "${PROXMOX_SSH_USER:=root}"
 PROXMOX_SSH_PASSWORD="$(read_tfvar proxmox_ssh_password)"
 
+# the lab's host keys, also pinned by the owner's ssh config (arch-dotfiles configs/ssh/config)
+LAB_KNOWN_HOSTS="$HOME/.ssh/known_hosts.homelab"
+# refreshes one host's entry; a guest recreated by terraform comes back with a new key
+lab_known_host() {
+  local key
+  # keyscan prints a banner comment; grep fails when no key came back
+  key=$(ssh-keyscan -T 3 -t ed25519 -p "${2:-22}" "$1" 2>/dev/null | grep -v "^#") || return 1
+  ssh-keygen -R "$1" -f "$LAB_KNOWN_HOSTS" >/dev/null 2>&1 || true
+  echo "$key" >> "$LAB_KNOWN_HOSTS"
+  rm -f "$LAB_KNOWN_HOSTS.old"
+}
+
+SSH_CMD=(ssh -p "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS")
 if [ -n "$PROXMOX_SSH_PASSWORD" ]; then
   # -e reads SSHPASS: -p would show the password in ps
   export SSHPASS="$PROXMOX_SSH_PASSWORD"
-  SSH_CMD=(sshpass -e ssh -p "$PROXMOX_SSH_PORT" -o StrictHostKeyChecking=accept-new)
-else
-  SSH_CMD=(ssh -p "$PROXMOX_SSH_PORT" -o StrictHostKeyChecking=accept-new)
+  SSH_CMD=(sshpass -e "${SSH_CMD[@]}")
 fi
 
-# ssh key: generate if missing
-[ -f "$HOME/.ssh/id_ed25519" ] || ssh-keygen -t ed25519 -N "" -f "$HOME/.ssh/id_ed25519" -C "homelab@$(hostname)" >/dev/null
+[ -f "$DEPLOY_KEY.pub" ] && cat "$ROOT_DIR"/src/keys/*.pub | grep -qF "$(cut -d' ' -f2 "$DEPLOY_KEY.pub")" \
+  || { echo "ERROR: $DEPLOY_KEY.pub is not in src/keys/. Add it, then deploy once from a machine whose key is."; exit 1; }
 
-# bpg provider imports vm disks over ssh
-if [ -f "$HOME/.ssh/id_ed25519" ]; then
-  if ! ssh-add -l >/dev/null 2>&1; then
-    eval "$(ssh-agent -s)" >/dev/null
-    CLEANUP_AGENT=1
-  fi
-  ssh-add -l 2>/dev/null | grep -q id_ed25519 \
-    || ssh-add "$HOME/.ssh/id_ed25519" </dev/null >/dev/null 2>&1 \
-    || echo "WARNING: could not add the deploy key to the ssh-agent."
+# bpg provider imports vm disks over ssh, through the agent
+if ! ssh-add -l >/dev/null 2>&1; then
+  eval "$(ssh-agent -s)" >/dev/null
+  CLEANUP_AGENT=1
 fi
+ssh-add -T "$DEPLOY_KEY.pub" 2>/dev/null || ssh-add "$DEPLOY_KEY" </dev/null >/dev/null 2>&1 \
+  || echo "WARNING: could not add the deploy key to the ssh-agent."
 
-mkdir -p "$HOME/.ssh" && touch "$HOME/.ssh/known_hosts"
-ssh-keygen -R "[$PROXMOX_SSH_HOST]:$PROXMOX_SSH_PORT" >/dev/null 2>&1 || true
-ssh-keyscan -p "$PROXMOX_SSH_PORT" -H "$PROXMOX_SSH_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null \
+mkdir -p "$HOME/.ssh" && touch "$LAB_KNOWN_HOSTS"
+lab_known_host "$PROXMOX_SSH_HOST" "$PROXMOX_SSH_PORT" \
   || { echo "ERROR: Cannot reach Proxmox at $PROXMOX_SSH_HOST:$PROXMOX_SSH_PORT"; exit 1; }
 
 SSH_CONFIG="$(mktemp --suffix=.ssh_config)"; CLEANUP_FILES+=("$SSH_CONFIG")
@@ -227,24 +237,21 @@ fi
 BASTION_SSHOPTS=(-F "$SSH_CONFIG")
 export NIX_SSHOPTS="-F $SSH_CONFIG"
 
-PUBKEY=$(cat "$HOME/.ssh/id_ed25519.pub")
 PROXMOX_API_TOKEN_ID="$(read_tfvar proxmox_api_token_id)"
 PROXMOX_API_TOKEN_SECRET="$(read_tfvar proxmox_api_token_secret)"
-PROXMOX_NODE="$(read_tfvar target_node)"
+PROXMOX_NODE=$(jq -r .node "$SITE")
 PVE_API="https://$PROXMOX_SSH_HOST:8006/api2/json"
 PVE_AUTH="Authorization: PVEAPIToken=$PROXMOX_API_TOKEN_ID=$PROXMOX_API_TOKEN_SECRET"
 
-# hermes and the deployer get proxmox root
-for pub in "$ROOT_DIR/src/modules/hermes.pub" "$HOME/.ssh/id_ed25519.pub"; do
-  [ -f "$pub" ] || continue
-  "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
-    "mkdir -p /root/.ssh && chmod 700 /root/.ssh && touch /root/.ssh/authorized_keys
-     grep -qxF '$(cat "$pub")' /root/.ssh/authorized_keys || echo '$(cat "$pub")' >> /root/.ssh/authorized_keys" \
-    2>/dev/null || echo "WARNING: Could not install $(basename "$pub") on Proxmox."
-done
+# proxmox root takes exactly src/keys plus the node's own key, which pve uses to reach itself
+cat "$ROOT_DIR"/src/keys/*.pub | "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+  'keys=$(cat); [ -n "$keys" ] || exit 1
+   f=$(readlink -f /root/.ssh/authorized_keys)
+   { grep " root@$(hostname)\$" "$f"; echo "$keys"; } > "$f.new" && cat "$f.new" > "$f" && rm "$f.new"' \
+  || echo "WARNING: could not set the Proxmox authorized keys."
 
 # proxmox root password = authelia password
-if PVE_ROOT_PASS=$(SOPS_AGE_KEY_FILE="$AGE_KEY" sops --decrypt \
+if PVE_ROOT_PASS=$(sops --decrypt \
      --extract '["authelia-admin-pass"]' "$ROOT_DIR/src/secrets.json" 2>/dev/null) \
    && [ -n "$PVE_ROOT_PASS" ]; then
   if printf 'root:%s\n' "$PVE_ROOT_PASS" \
@@ -256,12 +263,18 @@ if PVE_ROOT_PASS=$(SOPS_AGE_KEY_FILE="$AGE_KEY" sops --decrypt \
   unset PVE_ROOT_PASS
 fi
 
-# proxmox power savings, best-effort
+# proxmox power and noise, applied now and on every host boot: cpu biased to efficiency, hdds sleep after 10 min idle
 "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
-  'for f in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo powersave > "$f" 2>/dev/null; done
-   hdparm -S 120 /dev/sda 2>/dev/null || true   # spin down after 10min
-   echo ">>> Proxmox: CPU powersave, HDD spin-down 10min"' \
-  2>/dev/null || true
+  'printf "%s\n" \
+     "w /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor - - - - powersave" \
+     "w /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference - - - - balance_power" \
+     > /etc/tmpfiles.d/homelab-power.conf
+   echo "ACTION==\"add\", SUBSYSTEM==\"block\", KERNEL==\"sd[a-z]\", ATTR{queue/rotational}==\"1\", RUN+=\"/usr/sbin/hdparm -S 120 /dev/%k\"" \
+     > /etc/udev/rules.d/69-homelab-hdd-spindown.rules
+   systemd-tmpfiles --create /etc/tmpfiles.d/homelab-power.conf
+   for d in /sys/block/sd*; do [ "$(cat $d/queue/rotational)" = 1 ] && hdparm -q -S 120 /dev/${d##*/}; done
+   echo ">>> Proxmox: cpu powersave/balance_power, hdd spin-down 10min"' \
+  || echo "WARNING: could not set the Proxmox power settings."
 
 # containers cannot load kernel modules: nfs for the privileged ones, the rest for docker swarm
 "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
@@ -310,7 +323,7 @@ HOOK
 if ! "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
   [ -f "$ROOT_DIR/images/nixos.img" ] || { echo "ERROR: Golden image missing. Run: sudo nix build ./src#cloud-image"; exit 1; }
   echo ">>> Uploading golden image..."
-  scp -o StrictHostKeyChecking=accept-new "$ROOT_DIR/images/nixos.img" \
+  scp -P "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS" "$ROOT_DIR/images/nixos.img" \
     "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:/var/lib/vz/template/iso/nixos.img"
 fi
 
@@ -320,7 +333,7 @@ if ! "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f $LXC_TEMPLAT
   echo ">>> Building and uploading the LXC template..."
   tarball=$(nix build "$ROOT_DIR/src#lxc-template" --extra-experimental-features "nix-command flakes" \
     --no-link --print-out-paths)
-  scp -o StrictHostKeyChecking=accept-new "$tarball"/tarball/*.tar.xz \
+  scp -P "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS" "$tarball"/tarball/*.tar.xz \
     "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:$LXC_TEMPLATE"
 fi
 
@@ -375,23 +388,6 @@ if [ -n "$WAKE_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
   for vmid in $WAKE_VMS; do vm_wake "$vmid" || WOKE=1; done
   # boot wait only if one started
   [ "$WOKE" = 1 ] && sleep 45 || true
-fi
-
-# push ssh key via the guest agent
-if [ -n "$PROXMOX_API_TOKEN_ID" ] && [ -n "$PROXMOX_API_TOKEN_SECRET" ]; then
-  echo ">>> Pushing SSH key to all running VMs..."
-  payload=$(jq -cn --arg k "$PUBKEY" \
-    '{"command":["/bin/sh","-c","mkdir -p /root/.ssh && chmod 700 /root/.ssh && echo \($k) > /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys && systemctl disable --now cloud-init 2>/dev/null; true"]}')
-  VMIDS=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/qemu" -H "$PVE_AUTH" \
-    | jq -r '.data[] | select(.status=="running") | .vmid' 2>/dev/null || true)
-  for vmid in $VMIDS; do
-    for _ in $(seq 1 20); do   # fresh agents answer slowly
-      code=$(curl -sk -o /dev/null -w '%{http_code}' -X POST "$PVE_API/nodes/$PROXMOX_NODE/qemu/$vmid/agent/exec" \
-        -H "$PVE_AUTH" -H "Content-Type: application/json" -d "$payload" 2>/dev/null)
-      [ "$code" = "200" ] && break
-      sleep 3
-    done
-  done
 fi
 
 # flakes only see git-tracked files
@@ -495,6 +491,8 @@ done
 for i in "${!DEPLOY_PIDS[@]}"; do
   wait "${DEPLOY_PIDS[$i]}" || { echo "WARNING: Failed to deploy ${DEPLOY_NAMES[$i]}"; DEPLOY_FAILURE=1; }
 done
+
+for ip in $(jq -r '.[].ip' "$INVENTORY"); do lab_known_host "$ip" || true; done
 
 # commit + push, even on partial failure: src as staged for the build, plus the generated inventory
 if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then

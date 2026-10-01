@@ -121,8 +121,7 @@ EOF
     esac
   '';
 in {
-  # old restic secret, renamed
-  sops.secrets.kopia-password.key = "restic-password";
+  sops.secrets.kopia-password = {};
 
   # protonDriveCli + protonLogin front the off-site backup (see proton-sync below)
   environment.systemPackages = [ kopiaWrapper restoreScript protonDriveCli protonLogin ];
@@ -153,7 +152,7 @@ in {
         --compression=zstd \
         --keep-latest=3 --keep-hourly=0 --keep-daily=7 --keep-weekly=8 --keep-monthly=12 --keep-annual=2 \
         --add-ignore=/BACKUPS --add-ignore=lost+found --add-ignore='*.tmp' \
-        --add-ignore=/bulk --add-ignore=/data/qbittorrent-incomplete \
+        --add-ignore=/bulk \
         --add-ignore=/documents/archive \
         --one-file-system=false
       # the nas's own local state: syncthing identity and filebrowser users live off /srv/nas
@@ -172,7 +171,8 @@ in {
     after = [ "kopia-init.service" ];
     requires = [ "kopia-init.service" ];
     wantedBy = [ "multi-user.target" ];
-    serviceConfig = { Restart = "always"; RestartSec = 10; };
+    # snapshots yield to nfs and smb, the guest's actual job
+    serviceConfig = { Restart = "always"; RestartSec = 10; CPUWeight = "idle"; IOSchedulingClass = "idle"; MemoryMax = "1G"; };
     script = ''
       ${kopiaEnv}
       exec kopia server start --ui --insecure --without-password \
@@ -223,6 +223,10 @@ in {
       Type = "oneshot";
       # first run uploads everything; unchanged files are content-skipped on later runs
       TimeoutStartSec = "12h";
+      # 1.8G peak on 2026-10-01; above that it is a leak, and nfs and smb keep the rest of the 3G guest
+      MemoryMax = "2G";
+      CPUWeight = "idle";
+      IOSchedulingClass = "idle";
     };
     environment = {
       HOME = protonDir;
@@ -231,8 +235,8 @@ in {
     };
     path = [ protonDriveCli pkgs.coreutils ];
     script = ''
-      # not -e: one tree failing must not skip the rest, and create-folder-exists is non-fatal
-      set -uo pipefail
+      # nixos starts scripts with set -e; one tree failing must not skip the rest, and create-folder-exists is non-fatal
+      set +e -uo pipefail
       # dotglob: the per-child loop below would skip .git, .config and the like
       shopt -s nullglob dotglob
 
@@ -251,7 +255,7 @@ in {
       # recurse across a mount point, so a bind mount like documents/archive must be its own upload root.
       # one process per child: the cli holds per-file state for its whole call, and all of data in one
       # call grew to 1.9G and was oom-killed on this 3G guest (2026-09-29).
-      # skipped in data: incomplete torrents, and the prometheus/loki tsdbs, which rewrite thousands of
+      # skipped in data: the prometheus/loki tsdbs, which rewrite thousands of
       # chunk files a day (a new remote revision each) and are only regenerable monitoring history.
       # the cli fails the whole call for items it cannot upload: symlinks (crowdsec hub links, grafana/conf
       # into the nix store) and sockets are expected skips; a file changed mid-upload (a live sqlite db)
@@ -277,7 +281,7 @@ in {
         proton-drive filesystem create-folder "$root" "$tree" >/dev/null 2>&1 || true
         for p in ${source}/$tree/*; do
           if [ "$tree" = data ]; then
-            case "$(basename "$p")" in qbittorrent-incomplete|prometheus|loki) continue ;; esac
+            case "$(basename "$p")" in prometheus|loki) continue ;; esac
           fi
           echo ">>> $p -> $root/$tree"
           upload "$p" "$root/$tree"

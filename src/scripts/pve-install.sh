@@ -2,13 +2,12 @@
 # Configure an existing Proxmox VE host for Terraform management.
 set -e
 
-PVE_TF_PASSWORD="${1:-}"
-if [ -z "$PVE_TF_PASSWORD" ]; then
+# init.sh prepends PVE_TF_PASSWORD, the optional LLDAP_BIND_PASSWORD and the site's GPU_IDS and BULK_DISK
+# (src/site.json) on stdin, keeping them out of argv; an empty GPU_IDS or BULK_DISK skips that part
+if [ -z "${PVE_TF_PASSWORD:-}" ]; then
     echo "ERROR: Terraform Proxmox user password is required."
     exit 1
 fi
-# optional second arg: lldap bind password
-LLDAP_BIND_PASSWORD="${2:-}"
 LLDAP_HOST="${LLDAP_HOST:-10.100.0.101}"
 LLDAP_PORT="${LLDAP_PORT:-3890}"
 LLDAP_BASE_DN="${LLDAP_BASE_DN:-dc=lsck0,dc=dev}"
@@ -71,67 +70,46 @@ fi
 
 ifreload -a || true
 
-# low-power tuning: server lives in a bedroom
-for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-    echo powersave > "$g" 2>/dev/null || true
-done
-# disable amd boost; pstate knob as fallback
-echo 0 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true
-echo 1 > /sys/devices/system/cpu/amd_pstate/cpb_boost 2>/dev/null || true
-# spin down idle disks after ~10 min
-for d in /dev/sd?; do hdparm -S 120 "$d" 2>/dev/null || true; done
-
-cat > /etc/systemd/system/lab-lowpower.service <<'EOF'
-[Unit]
-Description=Low-power/quiet tuning (governor + no boost)
-After=multi-user.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/bin/sh -c 'for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do echo powersave > "$g" 2>/dev/null || true; done; echo 0 > /sys/devices/system/cpu/cpufreq/boost 2>/dev/null || true'
-
-[Install]
-WantedBy=multi-user.target
-EOF
-systemctl daemon-reload
-systemctl enable --now lab-lowpower.service >/dev/null 2>&1 || true
-
-# gpu passthrough (rtx 2060 / tu106)
-GPU_IDS="10de:1f08,10de:10f9,10de:1ada,10de:1adb"
-
-# amd iommu in passthrough mode
-if ! grep -q "amd_iommu=on" /etc/default/grub; then
-    echo ">>> Enabling IOMMU on kernel cmdline..."
-    sed -i 's/\(GRUB_CMDLINE_LINUX_DEFAULT="[^"]*\)"/\1 amd_iommu=on iommu=pt"/' /etc/default/grub
-    UPDATE_BOOT=1
-fi
-
-# load vfio at boot
-if [ ! -f /etc/modules-load.d/vfio.conf ]; then
-    printf 'vfio\nvfio_iommu_type1\nvfio_pci\n' > /etc/modules-load.d/vfio.conf
-    UPDATE_BOOT=1
-fi
-
-# hand the gpu to vfio-pci, not nouveau
-if [ ! -f /etc/modprobe.d/vfio.conf ]; then
-    echo "options vfio-pci ids=${GPU_IDS}" > /etc/modprobe.d/vfio.conf
-    printf 'blacklist nouveau\nblacklist nvidia\nblacklist nvidiafb\nblacklist snd_hda_intel\n' > /etc/modprobe.d/blacklist-gpu.conf
-    UPDATE_BOOT=1
-fi
-
-if [ "${UPDATE_BOOT:-0}" = "1" ]; then
-    echo ">>> Updating GRUB + initramfs for GPU passthrough (reboot required)..."
-    update-initramfs -u -k all >/dev/null 2>&1 || true
-    update-grub >/dev/null 2>&1 || true
-    echo ">>> GPU passthrough staged. REBOOT the Proxmox host to bind vfio-pci."
+# gpu passthrough: iommu on, the gpu's functions bound to vfio-pci instead of their drivers
+if [ -n "${GPU_IDS:-}" ]; then
+    iommu=$(grep -q GenuineIntel /proc/cpuinfo && echo intel_iommu || echo amd_iommu)
+    if ! grep -q "${iommu}=on" /etc/default/grub; then
+        echo ">>> Enabling IOMMU on kernel cmdline..."
+        sed -i "s/\\(GRUB_CMDLINE_LINUX_DEFAULT=\"[^\"]*\\)\"/\\1 ${iommu}=on iommu=pt\"/" /etc/default/grub
+        UPDATE_BOOT=1
+    fi
+    if [ ! -f /etc/modules-load.d/vfio.conf ]; then
+        printf 'vfio\nvfio_iommu_type1\nvfio_pci\n' > /etc/modules-load.d/vfio.conf
+        UPDATE_BOOT=1
+    fi
+    if [ "$(cat /etc/modprobe.d/vfio.conf 2>/dev/null)" != "options vfio-pci ids=${GPU_IDS}" ]; then
+        echo "options vfio-pci ids=${GPU_IDS}" > /etc/modprobe.d/vfio.conf
+        printf 'blacklist nouveau\nblacklist nvidia\nblacklist nvidiafb\nblacklist snd_hda_intel\n' > /etc/modprobe.d/blacklist-gpu.conf
+        UPDATE_BOOT=1
+    fi
+    if [ "${UPDATE_BOOT:-0}" = "1" ]; then
+        echo ">>> Updating GRUB + initramfs for GPU passthrough (reboot required)..."
+        update-initramfs -u -k all >/dev/null 2>&1 || true
+        update-grub >/dev/null 2>&1 || true
+        echo ">>> GPU passthrough staged. REBOOT the Proxmox host to bind vfio-pci."
+    fi
 fi
 
 # host metrics exporter for prometheus
 export DEBIAN_FRONTEND=noninteractive
 apt-get update >/dev/null
-apt-get install -y prometheus-node-exporter >/dev/null
+apt-get install -y prometheus-node-exporter jq >/dev/null
 systemctl enable --now prometheus-node-exporter >/dev/null 2>&1 || true
+
+# recreate an api token (pve shows its secret only once) and keep the secret for init.sh
+token_save() {
+    local file=$1 secret
+    shift
+    pveum user token delete "$1" "$2" >/dev/null 2>&1 || true
+    secret=$(pveum user token add "$@" --output-format json | jq -r '.value // empty')
+    [ -n "$secret" ] || { echo "ERROR: Failed to create API token $1!$2."; exit 1; }
+    (umask 077; printf '%s\n' "$secret" > "$file")
+}
 
 if ! pveum user list 2>/dev/null | grep -q "terraform-prov@pve"; then
     pveum user add terraform-prov@pve --password "$PVE_TF_PASSWORD" >/dev/null 2>&1 || true
@@ -140,45 +118,19 @@ else
 fi
 
 pveum acl modify / -user terraform-prov@pve -role Administrator
+token_save /root/terraform_token.txt terraform-prov@pve terraform-token --privsep 0
 
-# fresh token each run for init.sh
-pveum user token delete terraform-prov@pve terraform-token >/dev/null 2>&1 || true
-TOKEN_SECRET="$(
-    pveum user token add terraform-prov@pve terraform-token --privsep 0 \
-      | awk -F'│' '/^[[:space:]]*│[[:space:]]*value[[:space:]]*│/ {gsub(/[[:space:]]/, "", $3); print $3; exit}'
-)"
-
-if [ -z "$TOKEN_SECRET" ]; then
-    echo "ERROR: Failed to extract terraform API token secret."
-    exit 1
-fi
-
-printf '%s\n' "$TOKEN_SECRET" > /root/terraform_token.txt
-chmod 600 /root/terraform_token.txt
-
-# on-demand wake from the traefiks: status, start, shutdown and nothing else; its token goes into
-# src/secrets.json as proxmox-wake-token ("wake@pve!ondemand=<secret>")
+# on-demand wake from the traefiks: status, start, shutdown and nothing else
 pveum role list 2>/dev/null | grep -q HomelabWake || pveum role add HomelabWake --privs "VM.Audit,VM.PowerMgmt"
 pveum user list 2>/dev/null | grep -q "wake@pve" || pveum user add wake@pve --comment "on-demand wake"
 pveum acl modify /vms --users wake@pve --roles HomelabWake
-pveum user token list wake@pve 2>/dev/null | grep -q ondemand \
-  || pveum user token add wake@pve ondemand --privsep 1 --comment "traefik on-demand" > /root/wake_token.txt
+token_save /root/wake_token.txt wake@pve ondemand --privsep 1 --comment "traefik on-demand"
 pveum acl modify /vms --tokens 'wake@pve!ondemand' --roles HomelabWake
 
-# read-only user for the homepage widget
-if ! pveum user list 2>/dev/null | grep -q "homepage@pve"; then
-    pveum user add homepage@pve --password "homepage-readonly" >/dev/null 2>&1 || true
-fi
+# read-only user for the homepage widget: api token only, no password
+pveum user list 2>/dev/null | grep -q "homepage@pve" || pveum user add homepage@pve
 pveum acl modify / -user homepage@pve -role PVEAuditor
-
-# recreate homepage api token
-pveum user token delete homepage@pve homepage >/dev/null 2>&1 || true
-HOMEPAGE_TOKEN="$(
-    pveum user token add homepage@pve homepage --privsep 0 \
-      | awk -F'│' '/^[[:space:]]*│[[:space:]]*value[[:space:]]*│/ {gsub(/[[:space:]]/, "", $3); print $3; exit}'
-)"
-printf '%s\n' "$HOMEPAGE_TOKEN" > /root/homepage_token.txt
-chmod 600 /root/homepage_token.txt
+token_save /root/homepage_token.txt homepage@pve homepage --privsep 0
 
 
 # -----------------------------------------------------------------------------
@@ -217,8 +169,7 @@ fi
 
 # -----------------------------------------------------------------------------
 # BULK STORAGE (the spinning disk)
-BULK_DISK=${BULK_DISK:-/dev/disk/by-id/ata-WDC_WD20EZRZ-00Z5HB0_WD-WCC4N3KNZ2KS}
-if ! vgs bulk >/dev/null 2>&1; then
+if [ -n "${BULK_DISK:-}" ] && ! vgs bulk >/dev/null 2>&1; then
     if [ ! -b "$BULK_DISK" ]; then
         echo ">>> bulk disk $BULK_DISK not present; skipping bulk storage"
     elif lsblk -no FSTYPE "$BULK_DISK" 2>/dev/null | grep -q .; then
@@ -309,8 +260,9 @@ log=/var/ossec/logs/alerts/alerts.log
 d=/var/lib/node-exporter-textfile
 total=0; high=0
 if [ -r "$log" ]; then
-  total=$(grep -c "^\*\* Alert" "$log" 2>/dev/null || echo 0)
-  high=$(grep -cE "Level: (1[0-9]|[7-9])" "$log" 2>/dev/null || echo 0)
+  # grep -c prints the 0 itself, it only exits 1
+  total=$(grep -c "^\*\* Alert" "$log" || true)
+  high=$(grep -cE "Level: (1[0-9]|[7-9])" "$log" || true)
 fi
 {
   echo "# HELP homelab_ossec_alerts_total OSSEC alerts on the hypervisor."

@@ -1,4 +1,52 @@
-{ config, pkgs, nasMount, retry, ... }: {
+{ config, pkgs, lib, nasMount, retry, ... }:
+let
+  # at boot the nas may still be starting: keep retrying instead of staying failed
+  oneshot = {
+    startLimitIntervalSec = 0;
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
+  };
+
+  # a bot user and its api token, reissued only when forgejo rejects it
+  botToken = { name, file, scopes, admin ? false }: oneshot // {
+    description = "Generate a Forgejo API token for ${name}";
+    after = [ "docker-forgejo.service" "forgejo-oauth2-setup.service" ];
+    wantedBy = [ "multi-user.target" ];
+    path = [ pkgs.curl pkgs.docker pkgs.coreutils pkgs.gawk ];
+    script = ''
+      TOKEN_FILE=/var/lib/homepage-tokens/${file}
+
+      # clear only on 401, not on network errors
+      if [ -s "$TOKEN_FILE" ]; then
+        HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: token $(cat "$TOKEN_FILE")" \
+          http://127.0.0.1:80/api/v1/user || true)
+        case "$HTTP" in
+          200) echo "${name} token valid"; exit 0 ;;
+          401) echo "${name} token stale, regenerating..."; rm -f "$TOKEN_FILE" ;;
+          *)   echo "${name} token check inconclusive (HTTP $HTTP), keeping it"; exit 0 ;;
+        esac
+      fi
+
+      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
+
+      docker exec -u git forgejo forgejo admin user create \
+        --username ${name}-bot \
+        --password "${name}-bot-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
+        --email ${name}@lsck0.dev \
+        ${lib.optionalString admin "--admin "}--must-change-password=false 2>/dev/null || true
+
+      # token is the last field; timestamped name allows retry
+      TOKEN=$(docker exec -u git forgejo forgejo admin user generate-access-token \
+        --username ${name}-bot \
+        --token-name "${name}-$(date +%s)" \
+        --scopes ${scopes} \
+        | tr -d '\r' | awk 'END {print $NF}' || true)
+      [ -n "$TOKEN" ] || { echo "${name} token creation failed"; exit 1; }
+      echo -n "$TOKEN" > "$TOKEN_FILE"
+      echo "Forgejo ${name} token created"
+    '';
+  };
+in {
   imports = [ ../services/forgejo-runner.nix ];
 
   networking.hostName = "vm-115";
@@ -35,20 +83,16 @@
   };
 
   # create the first admin once, idempotent
-  systemd.services.forgejo-init = {
+  systemd.services.forgejo-init = oneshot // {
     description = "Initialise Forgejo admin user";
     after = [ "docker-forgejo.service" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.curl pkgs.docker ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
     script = ''
       ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
 
       # skip if users already exist
-      COUNT=$(docker exec -u git forgejo forgejo admin user list 2>/dev/null | grep -c '^[0-9]' || echo 0)
+      COUNT=$(docker exec -u git forgejo forgejo admin user list 2>/dev/null | grep -c '^[0-9]' || true)
       [ "$COUNT" -gt 0 ] && { echo "Users exist ($COUNT), skipping init"; exit 0; }
 
       PASS=$(cat ${config.sops.secrets.forgejo-admin-pass.path})
@@ -63,15 +107,11 @@
   };
 
   # configure the oauth2 source once forgejo is up
-  systemd.services.forgejo-oauth2-setup = {
+  systemd.services.forgejo-oauth2-setup = oneshot // {
     description = "Configure Forgejo OAuth2 with Authelia";
     after = [ "docker-forgejo.service" "forgejo-init.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq pkgs.docker pkgs.gawk pkgs.gnugrep ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
+    path = [ pkgs.curl pkgs.docker pkgs.gawk pkgs.gnugrep ];
     script = ''
       ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
 
@@ -80,15 +120,7 @@
 
       # name is the button label; authelia registers both callbacks
       sources=$(docker exec -u git forgejo forgejo admin auth list 2>/dev/null || true)
-      AUTH_ID=$(echo "$sources" | grep -w authelia  | awk '{print $1}')
-      OLD_ID=$(echo "$sources"  | grep -w authentik | awk '{print $1}')
-
-      if [ -z "$AUTH_ID" ] && [ -n "$OLD_ID" ]; then
-        echo "renaming the authentik OAuth2 source to authelia (id=$OLD_ID)"
-        AUTH_ID="$OLD_ID"
-        docker exec -u git forgejo forgejo admin auth update-oauth \
-          --id "$AUTH_ID" --name authelia || true
-      fi
+      AUTH_ID=$(echo "$sources" | grep -w authelia | awk '{print $1}')
 
       # explicit scopes, "openid" alone breaks signup; errors shown
       if [ -n "$AUTH_ID" ]; then
@@ -116,112 +148,26 @@
     '';
   };
 
-  # api token for the homepage widget
-  systemd.services.forgejo-homepage-token = {
-    description = "Generate Forgejo API token for Homepage";
-    after = [ "docker-forgejo.service" "forgejo-oauth2-setup.service" ];
-    wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.curl pkgs.jq pkgs.docker pkgs.gawk pkgs.coreutils ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
-    script = ''
-      TOKEN_FILE="/var/lib/homepage-tokens/forgejo-key.token"
-
-      # clear only on 401, not on network errors
-      if [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ]; then
-        HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-          -H "Authorization: token $(cat "$TOKEN_FILE")" \
-          http://127.0.0.1:80/api/v1/user 2>/dev/null)
-        case "$HTTP" in
-          200) echo "Homepage token valid"; exit 0 ;;
-          401) echo "Homepage token stale, regenerating..."; rm -f "$TOKEN_FILE" ;;
-          *)   echo "Homepage token check inconclusive (HTTP $HTTP), keeping token"; exit 0 ;;
-        esac
-      fi
-
-      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
-
-      # local bot user for api access
-      docker exec -u git forgejo forgejo admin user create \
-        --username homepage-bot \
-        --password "homepage-bot-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
-        --email homepage@lsck0.dev \
-        --must-change-password=false 2>/dev/null || true
-
-      # token is the last field; timestamped name allows retry
-      TOKEN=$(docker exec -u git forgejo forgejo admin user generate-access-token \
-        --username homepage-bot \
-        --token-name "homepage-$(date +%s)" \
-        --scopes read:activitypub,read:issue,read:misc,read:notification,read:organization,read:package,read:repository,read:user \
-        | tr -d '\r' | awk 'END {print $NF}' || true)
-
-      if [ -n "$TOKEN" ]; then
-        echo -n "$TOKEN" > "$TOKEN_FILE"
-        echo "Forgejo Homepage token created"
-      else
-        echo "Token may already exist or creation failed"
-      fi
-    '';
+  # api tokens for consumers outside the vm, shared via nas
+  systemd.services.forgejo-homepage-token = botToken {
+    name = "homepage";
+    file = "forgejo-key.token";
+    scopes = "read:activitypub,read:issue,read:misc,read:notification,read:organization,read:package,read:repository,read:user";
   };
-
-  # hermes needs an admin token, homepage-bot is read-only
-  systemd.services.forgejo-hermes-token = {
-    description = "Generate a Forgejo admin token for Hermes";
-    after = [ "docker-forgejo.service" ];
-    wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.docker pkgs.curl pkgs.coreutils pkgs.gawk ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
-    script = ''
-      TOKEN_FILE="/var/lib/homepage-tokens/forgejo-hermes.token"
-
-      if [ -s "$TOKEN_FILE" ]; then
-        HTTP=$(curl -s -o /dev/null -w "%{http_code}" \
-          -H "Authorization: token $(cat $TOKEN_FILE)" \
-          http://127.0.0.1:80/api/v1/user || echo 000)
-        case "$HTTP" in
-          200) echo "Hermes token valid"; exit 0 ;;
-          401) echo "Hermes token stale, regenerating..."; rm -f "$TOKEN_FILE" ;;
-          *)   echo "Hermes token check inconclusive (HTTP $HTTP), keeping it"; exit 0 ;;
-        esac
-      fi
-
-      ${retry} 60 2 curl -sf http://127.0.0.1:80/api/healthz
-
-      docker exec -u git forgejo forgejo admin user create \
-        --username hermes-bot \
-        --password "hermes-bot-$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
-        --email hermes@lsck0.dev \
-        --admin \
-        --must-change-password=false 2>/dev/null || true
-
-      # "all": hermes operates the forge
-      TOKEN=$(docker exec -u git forgejo forgejo admin user generate-access-token \
-        --username hermes-bot \
-        --token-name "hermes-$(date +%s)" \
-        --scopes all \
-        | tr -d '\r' | awk 'END {print $NF}' || true)
-
-      if [ -n "$TOKEN" ]; then
-        echo -n "$TOKEN" > "$TOKEN_FILE"
-        echo "Forgejo Hermes admin token created"
-      else
-        echo "Hermes token creation failed"
-      fi
-    '';
+  # hermes operates the forge
+  systemd.services.forgejo-hermes-token = botToken {
+    name = "hermes";
+    file = "forgejo-hermes.token";
+    scopes = "all";
+    admin = true;
   };
 
   # runner registration token, shared via nas
-  systemd.services.forgejo-runner-token = {
+  systemd.services.forgejo-runner-token = oneshot // {
     description = "Generate Forgejo runner registration token";
     after = [ "docker-forgejo.service" "forgejo-oauth2-setup.service" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.docker ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
     script = ''
       ${retry} 60 2 docker exec -u git forgejo forgejo admin user list
 
@@ -289,6 +235,8 @@
   ];
 
   networking.firewall.allowedTCPPorts = [ 80 2222 ];
+  # the web login is behind authelia; git ssh stays open
+  homelab.ingressOnly.ports = [ 80 ];
 
   # consistent copy for the snapshot, the live file may be mid-write
   homelab.dbBackup.databases.forgejo.sqlite = "/var/lib/forgejo/gitea/gitea.db";

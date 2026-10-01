@@ -1,6 +1,8 @@
-{ config, pkgs, lib, nasMount, nasPath, retry, ... }:
+{ pkgs, lib, nasMount, nasPath, retry, ... }:
 let
   # webui api without login for these hosts
+  incompleteDir = "/var/lib/qbittorrent-incomplete";
+
   apiClients = map (id: "10.100.0.${toString id}/32") [ 1 100 104 114 130 ];
 
   # router routes peer traffic, no proxy here
@@ -13,7 +15,8 @@ let
     # anonymous_mode hides fingerprint and ip; off
     anonymous_mode = false;
     save_path = "/data/torrents";
-    # download to nvme, move to the hdd once: the hdd sleeps between finished downloads
+    # download to the vm's own nvme disk, move to the hdd once: the hdd sleeps between finished downloads,
+    # and the disk's size caps what unfinished torrents can take
     temp_path_enabled = true;
     temp_path = "/data/incomplete";
     bypass_auth_subnet_whitelist_enabled = true;
@@ -44,12 +47,21 @@ let
 in {
   networking.hostName = "vm-112";
 
-  # egress: router holds the tunnel and killswitch
+  # egress: router holds the tunnel and killswitch; dns asks the provider through it, never from the home ip
+  networking.nameservers = lib.mkForce [ "10.2.0.1" ];
 
   fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
     // nasPath "/data" "bulk"
-    // nasMount "/var/lib/qbittorrent-incomplete" "qbittorrent-incomplete"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+    // nasMount "/var/lib/homepage-tokens" "homepage-tokens"
+    // {
+      # instances.tf extra disk; nofail plus RequiresMountsFor: a missing disk stops qbittorrent, not the boot
+      "${incompleteDir}" = {
+        device = "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1";
+        fsType = "ext4";
+        autoFormat = true;
+        options = [ "noatime" "nofail" ];
+      };
+    };
 
   # host networking, not a published port
   virtualisation.oci-containers.containers.qbittorrent = {
@@ -58,7 +70,7 @@ in {
     volumes = [
       "/var/lib/qbittorrent:/config"
       "/data/torrents:/data/torrents"
-      "/var/lib/qbittorrent-incomplete:/data/incomplete"
+      "${incompleteDir}:/data/incomplete"
     ];
     environment = {
       PUID = "1000";
@@ -74,9 +86,12 @@ in {
     after = [ "podman-qbittorrent.service" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.gnused pkgs.gnugrep pkgs.systemd pkgs.coreutils ];
+    startLimitIntervalSec = 0;
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
+      Restart = "on-failure";
+      RestartSec = 30;
     };
     script = ''
       conf="/var/lib/qbittorrent/qBittorrent/qBittorrent.conf"
@@ -124,8 +139,11 @@ in {
     '';
   };
 
+  systemd.services.podman-qbittorrent.unitConfig.RequiresMountsFor = [ incompleteDir ];
+
   systemd.tmpfiles.rules = [
     "d /var/lib/qbittorrent 0750 1000 1000 -"
+    "d ${incompleteDir} 0750 1000 1000 -"
   ];
 
   networking.firewall.allowedTCPPorts = [ 80 ];

@@ -60,7 +60,7 @@ for a in $APPS; do docker rm -f "$P$a" >/dev/null 2>&1 || true; done
 docker network rm "$NET" >/dev/null 2>&1 || true
 docker network create --subnet "$SUBNET" "$NET" >/dev/null
 
-mkdir -p "$W"/media/{movies,tv,anime,music,books,manga,audiobooks,leaving-soon} "$W/torrents"
+mkdir -p "$W"/media/{movies,tv,anime,music,leaving-soon} "$W/torrents"
 chmod -R 777 "$W/media" "$W/torrents" "$W/tokens"
 
 # run_app <name> <image> <published host:container port> [docker args...]
@@ -86,8 +86,6 @@ run_app jellyfin  "$(image 134-internal-jellyfin jellyfin)"      18096:8096 \
   -v "$W/jellyfin/config:/config" -v "$W/jellyfin/cache:/cache" -v "$W/media:/data/media:ro"
 run_app jellyseerr "$(image 128-internal-jellyseerr jellyseerr)" 15055:5055 --init -e PORT=5055 -v "$W/jellyseerr:/app/config"
 run_app bazarr    "$(image 130-internal-arr bazarr)"             16767:6767 -v "$W/bazarr:/config" -v "$W/media:/data/media"
-mkdir -p "$W/manga" "$W/books"
-  -v "$W/media/manga:/manga:ro" -v "$W/media/books:/books:ro"
 
 # -----------------------------------------------------------------------------
 # PER-VM SETUP UNITS
@@ -103,22 +101,13 @@ run_unit 112-internal-qbittorrent qbittorrent-settings "$TOK" \
   "s#$QPREFS#$W/qbittorrent-prefs.json#" \
   "s#podman exec qbittorrent#podman exec ${P}qbittorrent#"
 
-for name in prowlarr radarr sonarr lidarr; do
+for name in prowlarr radarr sonarr lidarr bazarr; do
   run_unit 130-internal-arr "$name-setup" "$TOK" "s#/var/lib/$name#$W/$name#g" \
     "s#systemctl stop podman-$name.service#docker stop $P$name#" "s#systemctl start podman-$name.service#docker start $P$name#"
 done
 
 run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:18096#g"
 run_unit 128-internal-jellyseerr jellyseerr-token "$TOK" "s#/var/lib/jellyseerr#$W/jellyseerr#g"
-run_unit 130-internal-arr bazarr-token "$TOK" "s#/var/lib/bazarr#$W/bazarr#g"
-# simulate a pre-generated-password install
-for i in $(seq 1 60); do
-  curl -s -X POST http://127.0.0.1:15000/api/Account/register -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"Admin123!","email":"admin@internal"}' >/dev/null || true
-  curl -sf -X POST http://127.0.0.1:15000/api/Account/login -H "Content-Type: application/json" \
-    -d '{"username":"admin","password":"Admin123!"}' >/dev/null && break
-  sleep 5
-done
 
 echo ">>> Exported tokens: $(cd "$W/tokens" && echo *)"
 

@@ -1,7 +1,6 @@
 # Terraform
 .terraform/
 **/.terraform/
-*terraform.tfvars
 *.tfvars
 .tf-last-apply
 
@@ -17,10 +16,6 @@ secrets/
 .env
 .direnv/
 
-# Stack Secrets
-letsencrypt/
-auth/htpasswd
-
 # Test/build artifacts
 images/
 *.iso
@@ -29,15 +24,10 @@ images/
 *.sock
 *.tfvars.json
 
-# rollback copy written by src/scripts/renumber.sh
-*.tfstate.pre-renumber*
-# terraform's own state copies: the previous state on every apply, plus one
-# per `state mv` during a renumber. Regenerated locally, never worth a commit.
+# terraform's state and its backups (one per apply and per `state mv`): regenerated locally, never worth a commit
 terraform.tfstate
 terraform.tfstate.backup
 *.tfstate.*.backup
 
-# the pasted task list; scratch, not part of the repo
-errors.txt
 __pycache__/
 *.pyc

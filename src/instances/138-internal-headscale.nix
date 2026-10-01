@@ -47,40 +47,27 @@ in
     extraOptions = [ "--network=host" ];
     volumes = [
       "/var/lib/headplane:/var/lib/headplane"
-      # headplane 0.6.0 needs this file to start
+      # the only config source: HEADPLANE_* env is ignored without HEADPLANE_LOAD_ENV_OVERRIDES
       "/var/lib/headplane/config.yaml:/etc/headplane/config.yaml:ro"
     ];
-    environment = {
-      HEADPLANE_SERVER__HOST = "0.0.0.0";
-      HEADPLANE_SERVER__PORT = "3000";
-      HEADPLANE_SERVER__COOKIE_SECURE = "true";
-      HEADPLANE_HEADSCALE__URL = headscaleLocal;
-      HEADPLANE_HEADSCALE__PUBLIC_URL = "https://hs.lsck0.dev";
-      # no headscale config file is mounted
-      HEADPLANE_HEADSCALE__CONFIG_STRICT = "false";
-    };
-    environmentFiles = [ "/var/lib/headplane/cookie.env" ];
   };
 
-  # headplane needs a 32-char cookie secret
   sops.secrets.headplane-oidc-secret = {};
   systemd.services.headplane-secret = {
-    description = "Generate the Headplane cookie secret";
+    description = "Generate the Headplane cookie secret and config";
     before = [ "podman-headplane.service" ];
-    requiredBy = [ "podman-headplane.service" ];
+    wantedBy = [ "podman-headplane.service" ];
     # oidc sessions act through this key
     after = [ "headplane-apikey.service" ];
-    requires = [ "headplane-apikey.service" ];
+    wants = [ "headplane-apikey.service" ];
     path = [ pkgs.openssl pkgs.coreutils ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    startLimitIntervalSec = 0;
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
     script = ''
       mkdir -p /var/lib/headplane
-      if [ ! -s /var/lib/headplane/cookie.env ]; then
-        printf 'HEADPLANE_SERVER__COOKIE_SECRET=%s\n' \
-          "$(openssl rand -hex 16)" > /var/lib/headplane/cookie.env
-        chmod 600 /var/lib/headplane/cookie.env
-      fi
-      secret=$(cut -d= -f2 /var/lib/headplane/cookie.env)
+      # headplane needs a 32-char cookie secret
+      [ -s /var/lib/headplane/cookie-secret ] || (umask 077; openssl rand -hex 16 > /var/lib/headplane/cookie-secret)
+      secret=$(cat /var/lib/headplane/cookie-secret)
       install -m 600 ${config.sops.secrets.headplane-oidc-secret.path} /var/lib/headplane/oidc-secret
       apikey=$(cat /var/lib/homepage-tokens/headplane-key.token)
 
@@ -107,32 +94,37 @@ in
         disable_api_key_login: true
         headscale_api_key: "$apikey"
       EOF
-      # strip the heredoc indentation
-      sed -i 's/^      //' /var/lib/headplane/config.yaml
       chmod 600 /var/lib/headplane/config.yaml
     '';
   };
 
-  # headplane sign-in takes a headscale api key
+  # headplane sign-in takes a headscale api key; daily, so a long uptime cannot outlive it
   systemd.services.headplane-apikey = {
     description = "Generate a Headscale API key for Headplane";
     after = [ "headscale.service" ];
-    requires = [ "headscale.service" ];
+    wants = [ "headscale.service" ];
     wantedBy = [ "multi-user.target" ];
-    path = [ pkgs.headscale pkgs.curl pkgs.coreutils ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 60; };
+    startAt = "daily";
+    path = [ pkgs.headscale pkgs.curl pkgs.coreutils pkgs.jq pkgs.systemd ];
+    startLimitIntervalSec = 0;
+    serviceConfig = { Type = "oneshot"; Restart = "on-failure"; RestartSec = 60; };
     script = ''
       ${retry} 60 2 curl -sf ${headscaleLocal}/health
 
       T=/var/lib/homepage-tokens/headplane-key.token
-      if [ -s "$T" ]; then
-        echo "Headplane API key already present"
+      prefix=$(cut -d. -f1 "$T" 2>/dev/null || true)
+      expires=$(headscale apikeys list -o json | jq -r --arg p "$prefix" '.[] | select(.prefix == $p) | .expiration.seconds')
+      if [ -n "$prefix" ] && [ -n "$expires" ] && [ "$expires" -gt "$(( $(date +%s) + 7 * 86400 ))" ]; then
+        echo "Headplane API key valid until $(date -d "@$expires")"
         exit 0
       fi
-      # 90d is headscale's max; reminted after expiry
-      headscale apikeys create --expiration 90d | tail -1 | tr -d '\n' > "$T"
-      chmod 600 "$T"
+      # 90d is headscale's max
+      headscale apikeys create --expiration 90d | tail -1 | tr -d '\n' > "$T.tmp"
+      chmod 600 "$T.tmp"
+      mv "$T.tmp" "$T"
       echo "Headplane API key written to $T"
+      # no-block: at boot headplane-secret waits on this unit
+      systemctl --no-block try-restart headplane-secret.service podman-headplane.service
     '';
   };
 

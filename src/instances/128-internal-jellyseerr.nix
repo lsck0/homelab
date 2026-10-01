@@ -16,7 +16,8 @@
   virtualisation.oci-containers.containers.jellyseerr = {
     # old jellyseerr image cannot log in to jellyfin 12
     image = "ghcr.io/seerr-team/seerr:v3.4.1";
-    extraOptions = [ "--init" ];
+    # ~250 MiB: vm 30d peak 495 minus the idle base
+    extraOptions = [ "--init" "--memory=384m" ];
     ports = [ "80:5055" ];
     volumes = [ "/var/lib/jellyseerr:/app/config" ];
     environment = {
@@ -27,8 +28,6 @@
 
   systemd.tmpfiles.rules = [
     "d /var/lib/jellyseerr 0750 1000 1000 -"
-    # seerr runs as uid 1000, the old image as root
-    "Z /var/lib/jellyseerr - 1000 1000 -"
   ];
 
   systemd.services.jellyseerr-token = {

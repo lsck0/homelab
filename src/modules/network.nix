@@ -11,8 +11,8 @@ let
     "127.0.0.0/8"
     "10.88.0.0/16"     # podman default bridge
     "172.16.0.0/12"    # docker bridges
+    # the internal ingress; the dmz one gets per-port sources, it must not reach every guarded port
     "10.100.0.100/32"
-    "10.200.0.200/32"
     "10.100.0.103/32"
     # the prober
     "10.100.0.105/32"
@@ -21,6 +21,32 @@ let
   # containers calling siblings via the vm ip
   ++ lib.optional (vm != null) "${vm.ip}/32"
   ++ cfg.extraSources;
+
+  # the same guard twice: in INPUT, and again pre-dnat since podman-published ports skip INPUT
+  guards = [
+    { table = "filter"; parent = "nixos-fw"; chain = "homelab-ingress"; deny = "nixos-fw-refuse"; }
+    { table = "mangle"; parent = "PREROUTING"; chain = "homelab-ingress-pre"; deny = "DROP"; }
+  ];
+  guardStart = { table, parent, chain, deny }: let ipt = "iptables -t ${table}"; in ''
+    ${ipt} -N ${chain} 2>/dev/null || ${ipt} -F ${chain}
+    ${lib.concatMapStrings (s: ''
+      ${ipt} -A ${chain} -s ${s} -j RETURN
+    '') trustedSources}
+    ${lib.concatMapStrings (p: ''
+      ${lib.concatMapStrings (s: ''
+        ${ipt} -A ${chain} -p tcp --dport ${toString p} -s ${s} -j RETURN
+      '') (cfg.portSources.${toString p} or [])}
+      ${ipt} -A ${chain} -p tcp --dport ${toString p} -j ${deny}
+    '') cfg.ports}
+    ${ipt} -A ${chain} -j RETURN
+    ${ipt} -D ${parent} -j ${chain} 2>/dev/null || true
+    ${ipt} -I ${parent} 1 -j ${chain}
+  '';
+  guardStop = { table, parent, chain, ... }: let ipt = "iptables -t ${table}"; in ''
+    ${ipt} -D ${parent} -j ${chain} 2>/dev/null || true
+    ${ipt} -F ${chain} 2>/dev/null || true
+    ${ipt} -X ${chain} 2>/dev/null || true
+  '';
 in {
   options.homelab.ingressOnly = {
     ports = lib.mkOption {
@@ -101,46 +127,9 @@ in {
         }
       ];
 
-      # own chain at the top of nixos-fw
-      networking.firewall.extraCommands = ''
-        iptables -N homelab-ingress 2>/dev/null || iptables -F homelab-ingress
-        ${lib.concatMapStrings (s: ''
-          iptables -A homelab-ingress -s ${s} -j RETURN
-        '') trustedSources}
-        ${lib.concatMapStrings (p: ''
-          ${lib.concatMapStrings (s: ''
-            iptables -A homelab-ingress -p tcp --dport ${toString p} -s ${s} -j RETURN
-          '') (cfg.portSources.${toString p} or [])}
-          iptables -A homelab-ingress -p tcp --dport ${toString p} -j nixos-fw-refuse
-        '') cfg.ports}
-        iptables -A homelab-ingress -j RETURN
-        iptables -D nixos-fw -j homelab-ingress 2>/dev/null || true
-        iptables -I nixos-fw 1 -j homelab-ingress
-
-        # again pre-dnat: podman-published ports skip INPUT
-        iptables -t mangle -N homelab-ingress-pre 2>/dev/null || iptables -t mangle -F homelab-ingress-pre
-        ${lib.concatMapStrings (s: ''
-          iptables -t mangle -A homelab-ingress-pre -s ${s} -j RETURN
-        '') trustedSources}
-        ${lib.concatMapStrings (p: ''
-          ${lib.concatMapStrings (s: ''
-            iptables -t mangle -A homelab-ingress-pre -p tcp --dport ${toString p} -s ${s} -j RETURN
-          '') (cfg.portSources.${toString p} or [])}
-          iptables -t mangle -A homelab-ingress-pre -p tcp --dport ${toString p} -j DROP
-        '') cfg.ports}
-        iptables -t mangle -A homelab-ingress-pre -j RETURN
-        iptables -t mangle -D PREROUTING -j homelab-ingress-pre 2>/dev/null || true
-        iptables -t mangle -I PREROUTING 1 -j homelab-ingress-pre
-      '';
-
-      networking.firewall.extraStopCommands = ''
-        iptables -D nixos-fw -j homelab-ingress 2>/dev/null || true
-        iptables -F homelab-ingress 2>/dev/null || true
-        iptables -X homelab-ingress 2>/dev/null || true
-        iptables -t mangle -D PREROUTING -j homelab-ingress-pre 2>/dev/null || true
-        iptables -t mangle -F homelab-ingress-pre 2>/dev/null || true
-        iptables -t mangle -X homelab-ingress-pre 2>/dev/null || true
-      '';
+      # own chain at the top of nixos-fw and of mangle PREROUTING
+      networking.firewall.extraCommands = lib.concatMapStrings guardStart guards;
+      networking.firewall.extraStopCommands = lib.concatMapStrings guardStop guards;
     })
   ];
 }

@@ -206,8 +206,16 @@ let
 in {
   networking.hostName = "vm-125";
 
-  fileSystems = nasMount "/var/lib/homeassistant" "homeassistant"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+  fileSystems = nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+
+  # the recorder's sqlite wal dies of SIGBUS on nfs; local, the nas keeps a nightly copy
+  homelab.localState.homeassistant = {
+    path = "/var/lib/homeassistant";
+    share = "homeassistant";
+    unit = "podman-homeassistant";
+    sqlite = [ "home-assistant_v2.db" ];
+    exclude = [ ".cache" "home-assistant.log*" ];
+  };
 
   virtualisation.oci-containers.containers.homeassistant = {
     image = "ghcr.io/home-assistant/home-assistant:2026.9.2";
@@ -225,7 +233,7 @@ in {
   systemd.services.hass-http = {
     before = [ "podman-homeassistant.service" ];
     requiredBy = [ "podman-homeassistant.service" ];
-    unitConfig.RequiresMountsFor = [ "/var/lib/homeassistant" ];
+    after = [ "homeassistant-seed.service" ];
     path = [ pkgs.jq pkgs.coreutils ];
     serviceConfig.Type = "oneshot";
     script = ''
@@ -254,10 +262,12 @@ in {
     description = "Generate Home Assistant token for Homepage";
     after = [ "podman-homeassistant.service" ];
     wantedBy = [ "multi-user.target" ];
+    unitConfig.RequiresMountsFor = [ "/var/lib/homepage-tokens" ];
+    startLimitIntervalSec = 0;
     path = [ pkgs.curl pkgs.coreutils pkgs.gnugrep pkgs.jq pkgs.openssl
       (pkgs.python3.withPackages (ps: [ ps.websockets ]))
     ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
     script = ''
       TOKEN_FILE="/var/lib/homepage-tokens/hass-key.token"
       [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
@@ -322,7 +332,8 @@ in {
     '';
   };
 
-  # mqtt bus for home assistant, zigbee2mqtt, esphome; lan only, never forwarded
+  # mqtt bus for home assistant, zigbee2mqtt, esphome; anonymous, so only the guest itself reaches it:
+  # a lan device needs a password user here and 1883 in allowedTCPPorts
   services.mosquitto = {
     enable = true;
     listeners = [{
@@ -334,9 +345,6 @@ in {
     }];
   };
 
-  networking.firewall.allowedTCPPorts = [ 80 1883 ];
+  networking.firewall.allowedTCPPorts = [ 80 ];
   homelab.ingressOnly.ports = [ 80 ];
-
-  # consistent copy for the snapshot, the live file may be mid-write
-  homelab.dbBackup.databases.homeassistant.sqlite = "/var/lib/homeassistant/home-assistant_v2.db";
 }

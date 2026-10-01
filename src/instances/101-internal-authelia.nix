@@ -87,8 +87,7 @@ let
     "        redirect_uris:"
   ] ++ map (u: "          - ${u}") c.redirectUris ++ [
     "        scopes:"
-  ] ++ map (sc: "          - ${sc}") (c.scopes or [ "openid" "profile" "email" "groups" ]) ++ [
-  ]) + "\n";
+  ] ++ map (sc: "          - ${sc}") [ "openid" "profile" "email" "groups" ]) + "\n";
 in {
   imports = [ ../services/lldap.nix ];
 

@@ -1,4 +1,4 @@
-{ config, lib, pkgs, inventory, ... }:
+{ config, lib, pkgs, inventory, site, ... }:
 let
   cfg = config.homelab.onDemand;
 
@@ -187,13 +187,13 @@ in {
 
     apiUrl = lib.mkOption {
       type = lib.types.str;
-      default = "https://192.168.178.200:8006/api2/json";
+      default = "https://${site.lan.proxmox}:8006/api2/json";
       description = "Proxmox API base URL.";
     };
 
     node = lib.mkOption {
       type = lib.types.str;
-      default = "luca-server";
+      default = site.node;
       description = "Proxmox node name.";
     };
 

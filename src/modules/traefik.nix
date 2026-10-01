@@ -10,14 +10,28 @@ let
     "104.24.0.0/14" "172.64.0.0/13" "131.0.72.0/22"
   ];
 
-  # v6 half of the cloudflare list
-  cloudflareRangesV6 = [
-    "2400:cb00::/32" "2606:4700::/32" "2803:f800::/32" "2405:b500::/32"
-    "2405:8100::/32" "2a06:98c0::/29" "2c0f:f248::/32"
+  # lan, dmz and wireguard mesh
+  privateNetworks = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
+  privateRanges = privateNetworks ++ [ "127.0.0.1/32" ];
+
+  # loopback ports of the bot defence: iocaine's labyrinth and the nginx serving robots.txt and llms.txt
+  iocainePort = 42069;
+  wellKnownPort = 8083;
+
+  # exact paths nothing legitimate requests, never prefixes: /.git/ would catch a forgejo repo named for it
+  honeypotPaths = [
+    # disclosed only in robots.txt
+    "/internal/export"
+    # never disclosed
+    "/wp-login.php"
+    "/wp-admin/setup-config.php"
+    "/.env"
+    "/.git/config"
+    "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php"
   ];
 
-  # lan, dmz and wireguard mesh
-  privateRanges = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" "127.0.0.1/32" ];
+  # proof-of-work leading zero bits, higher costs every client more cpu
+  anubisDifficulty = 4;
 
   # header hardening on every websecure route
   baseSecureHeaders = {
@@ -44,7 +58,7 @@ let
   # not xff depth: the entrypoint drops an untrusted sender's xff and depth then keys all of them as ""
   remoteSource.requestHeaderName = "X-Real-Ip";
   # cloudflare appends the client to xff and passes a forged x-real-ip through
-  cloudflareSource.ipStrategy.excludedIPs = cloudflareRanges ++ cloudflareRangesV6;
+  cloudflareSource.ipStrategy.excludedIPs = cloudflareRanges;
 
   mkLimitMiddlewares = suffix: sourceCriterion: {
     "rate-limit${suffix}".rateLimit = {
@@ -69,8 +83,7 @@ let
     };
   } // lib.optionalAttrs cfg.cloudflareOnly.enable {
     # proxying only protects if the origin refuses others
-    cloudflare-only.ipAllowList.sourceRange =
-      cloudflareRanges ++ cloudflareRangesV6 ++ privateRanges;
+    cloudflare-only.ipAllowList.sourceRange = cloudflareRanges ++ privateRanges;
   } // lib.optionalAttrs (cfg.bodyLimit > 0) {
     body-limit.buffering = {
       maxRequestBodyBytes = cfg.bodyLimit;
@@ -107,8 +120,7 @@ let
       crowdsecAppsecEnabled = appsec;
       crowdsecAppsecHost = "127.0.0.1:7422";
       # so the plugin bans the real client ip
-      forwardedHeadersTrustedIPs = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ]
-        ++ lib.optionals cfg.trustCloudflare (cloudflareRanges ++ cloudflareRangesV6);
+      forwardedHeadersTrustedIPs = privateNetworks ++ lib.optionals cfg.trustCloudflare cloudflareRanges;
     };
   };
 
@@ -130,13 +142,12 @@ let
 
     User-agent: *
     Disallow: /
-  '' + lib.optionalString (cfg.botDefense.honeypotPaths != [ ]) ''
 
     # Disclosed so that ignoring it is a decision rather than an accident.
     # Anything that fetches these is served the labyrinth.
   '' + lib.concatMapStrings (p: ''
     Disallow: ${p}
-  '') cfg.botDefense.honeypotPaths);
+  '') honeypotPaths);
 
   llmsTxt = pkgs.writeText "llms.txt" ''
     # llms.txt
@@ -173,7 +184,7 @@ let
   '';
 
   iocaineConfig = pkgs.writeText "iocaine.toml" ''
-    bind = ["127.0.0.1:${toString cfg.botDefense.listenPort}"]
+    bind = ["127.0.0.1:${toString iocainePort}"]
 
     [sources]
     markov = ["${corpus}"]
@@ -182,8 +193,7 @@ let
 
   labyrinthRule = "HeaderRegexp(`User-Agent`, `(?i).*(${lib.concatStringsSep "|" labyrinthUserAgents}).*`)";
 
-  honeypotRule = lib.concatMapStringsSep " || " (p: "Path(`${p}`)")
-    cfg.botDefense.honeypotPaths;
+  honeypotRule = lib.concatMapStringsSep " || " (p: "Path(`${p}`)") honeypotPaths;
 
   botDefenseRouters = lib.optionalAttrs cfg.botDefense.enable {
     # every host, above all routes, no auth in front
@@ -199,7 +209,6 @@ let
       entryPoints = [ "websecure" ];
       priority = 9000;
     };
-  } // lib.optionalAttrs (cfg.botDefense.enable && cfg.botDefense.honeypotPaths != [ ]) {
     # above real routes, below robots.txt
     honeypot-tls = {
       rule = honeypotRule;
@@ -210,8 +219,8 @@ let
   };
 
   botDefenseServices = lib.optionalAttrs cfg.botDefense.enable {
-    wellknown.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString cfg.botDefense.wellKnownPort}"; }];
-    labyrinth.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString cfg.botDefense.listenPort}"; }];
+    wellknown.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString wellKnownPort}"; }];
+    labyrinth.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString iocainePort}"; }];
   };
 
   # prepended to every websecure router
@@ -230,7 +239,6 @@ let
           router // { tls = (router.tls or {}) // { certResolver = "cloudflare"; }; }
         else
           router;
-      wantsDefaults = needsTls && !(builtins.elem name cfg.noSecureHeaders);
       # noappsec routes swap in the waf-free bouncer
       sameOriginFrames = builtins.elem name cfg.sameOriginFrameRouters;
       frameSwap = m:
@@ -250,7 +258,7 @@ let
         ++ lib.optional (cfg.bodyLimit > 0 && builtins.elem name cfg.bodyLimitRouters) "body-limit"
         ++ lib.optional cloudflareOnly "cloudflare-only");
     in
-    if wantsDefaults then
+    if needsTls then
       withTls // { middlewares = chain ++ (withTls.middlewares or []); }
     else
       withTls
@@ -304,12 +312,6 @@ in {
       description = "Traefik servers transports.";
     };
 
-    noSecureHeaders = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [];
-      description = "Router names that should NOT get the secure-headers middleware.";
-    };
-
     cloudflareOnly = {
       enable = lib.mkEnableOption ''
         refusing requests that did not arrive through Cloudflare on every
@@ -352,47 +354,13 @@ in {
         robots.txt and llms.txt on every host, plus the iocaine labyrinth for
         crawlers that ignore them: a matching user agent is served endless
         generated prose instead of the real backend'';
-
-      listenPort = lib.mkOption {
-        type = lib.types.port;
-        default = 42069;
-        description = "Loopback port iocaine binds.";
-      };
-
-      honeypotPaths = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [
-          # disclosed only in robots.txt
-          "/internal/export"
-          # never disclosed
-          "/wp-login.php"
-          "/wp-admin/setup-config.php"
-          "/.env"
-          "/.git/config"
-          "/vendor/phpunit/phpunit/src/Util/PHP/eval-stdin.php"
-        ];
-        description = ''
-          Paths nothing legitimate requests. They answer from the labyrinth.
-          The labyrinth matches User-Agent, which a crawler can lie about;
-          these match behaviour, which it cannot.
-
-          Exact paths, never prefixes: /.git/ as a prefix could catch a
-          Forgejo repository named for it.
-        '';
-      };
-
-      wellKnownPort = lib.mkOption {
-        type = lib.types.port;
-        default = 8083;
-        description = "Loopback port of the nginx that serves robots.txt and llms.txt.";
-      };
     };
 
     crowdsecBouncer = {
       enable = lib.mkEnableOption ''
-        the CrowdSec bouncer as a Traefik plugin middleware on every route.
-        CrowdSec already parses the access logs; this turns its decisions into
-        actual blocks (community blocklist + local bans) instead of only logging'';
+        CrowdSec parsing the access logs, plus its bouncer as a Traefik plugin
+        middleware on every route that turns its decisions into actual blocks
+        (community blocklist + local bans)'';
 
       appsec = lib.mkEnableOption ''
         the CrowdSec AppSec (WAF) component: inline request inspection with
@@ -438,32 +406,10 @@ in {
               type = lib.types.port;
               description = "127.0.0.1 port Anubis binds. Point the Traefik service here.";
             };
-            difficulty = lib.mkOption {
-              type = lib.types.int;
-              default = 4;
-              description = "Proof-of-work difficulty in leading zero bits. Higher = more client CPU.";
-            };
           };
         });
         default = {};
         description = "Anubis bot-filter instances keyed by name.";
-      };
-
-      cookieDomain = lib.mkOption {
-        type = lib.types.str;
-        default = "";
-        description = ''
-          Domain for the Anubis cookies, or "" to leave them scoped to the host
-          that set them, which is the default and what you want.
-
-          Setting the apex here looks like it saves a challenge per subdomain,
-          but every instance is a separate process with its own cookie names on
-          that one domain, including the short-lived
-          techaro.lol-anubis-cookie-verification probe. They overwrite each
-          other, the probe never comes back intact, and Anubis answers by
-          issuing another challenge: hello.lsck0.dev and share.lsck0.dev
-          reloaded dozens of times a second and never let anyone in.
-        '';
       };
     };
 
@@ -482,11 +428,6 @@ in {
       trusting Cloudflare edge ranges on the websecure entrypoint so the real
       client IP (not the rotating edge IP) reaches the backends: required for
       Anubis and CrowdSec to work correctly behind proxied Cloudflare DNS'';
-
-    logLevel = lib.mkOption {
-      type = lib.types.str;
-      default = "WARN";
-    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -525,13 +466,8 @@ in {
       requires = [ "podman-crowdsec.service" ];
       wantedBy = [ "multi-user.target" ];
       path = [ pkgs.podman pkgs.curl pkgs.coreutils pkgs.gawk ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        # no aggressive retry; it used to restart crowdsec
-        Restart = "on-failure";
-        RestartSec = 600;
-      };
+      # no restart: the timer retries, faster retries used to restart crowdsec
+      serviceConfig.Type = "oneshot";
       script = "exec ${pkgs.bash}/bin/bash ${../scripts/crowdsec-home-whitelist.sh}";
     };
 
@@ -638,7 +574,7 @@ in {
       enable = true;
       environmentFiles = [ config.sops.templates."traefik.env".path ];
       staticConfigOptions = {
-        log.level = cfg.logLevel;
+        log.level = "WARN";
         # read by crowdsec and promtail
         accessLog = {
           filePath = "/var/log/traefik/access.log";
@@ -669,7 +605,7 @@ in {
             transport.respondingTimeouts = { readTimeout = "120s"; writeTimeout = "0s"; idleTimeout = "180s"; };
           } // lib.optionalAttrs (cfg.trustCloudflare || cfg.trustedProxies != [ ]) {
             forwardedHeaders.trustedIPs = cfg.trustedProxies
-              ++ lib.optionals cfg.trustCloudflare (cloudflareRanges ++ [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ]);
+              ++ lib.optionals cfg.trustCloudflare (cloudflareRanges ++ privateNetworks);
           };
           metrics.address = ":8082";
         } // cfg.entryPoints;
@@ -704,7 +640,7 @@ in {
       enable = true;
       recommendedGzipSettings = true;
       virtualHosts."wellknown" = {
-        listen = [{ addr = "127.0.0.1"; port = cfg.botDefense.wellKnownPort; }];
+        listen = [{ addr = "127.0.0.1"; port = wellKnownPort; }];
         locations."/".root = wellKnownRoot;
       };
     };
@@ -735,7 +671,7 @@ in {
         BIND = "127.0.0.1:${toString a.listenPort}";
         BIND_NETWORK = "tcp";
         TARGET = a.upstream;
-        DIFFICULTY = a.difficulty;
+        DIFFICULTY = anubisDifficulty;
         # unique loopback metrics port per instance
         METRICS_BIND = "127.0.0.1:${toString (a.listenPort + 1000)}";
         METRICS_BIND_NETWORK = "tcp";
@@ -745,12 +681,11 @@ in {
         # socket peer is always loopback
         USE_REMOTE_ADDRESS = false;
 
+        # no COOKIE_DOMAIN: instances on one apex overwrite each other's cookies and challenge forever
         COOKIE_SECURE = true;
 
         # shared key so clearance spans instances
         ED25519_PRIVATE_KEY_HEX_FILE = config.sops.secrets.anubis-ed25519-key.path;
-      } // lib.optionalAttrs (cfg.anubis.cookieDomain != "") {
-        COOKIE_DOMAIN = cfg.anubis.cookieDomain;
       };
     }) cfg.anubis.instances);
 
@@ -760,7 +695,8 @@ in {
       mode = "0440";
     };
 
-    # 8082: prometheus metrics
+    # 8082: prometheus metrics, for the scraper only
     networking.firewall.allowedTCPPorts = [ 80 443 8082 ];
+    homelab.ingressOnly.ports = [ 8082 ];
   };
 }

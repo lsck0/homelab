@@ -1,6 +1,12 @@
 # vm plumbing: local.instances -> proxmox vms
 
 locals {
+  # scripts/pve-install.sh names the lvm-thin storage on the bulk disk
+  bulk_datastore = "bulk"
+
+  # first-boot root keys; nixos (modules/base.nix) reads the same files from then on
+  authorized_keys = [for f in sort(fileset("${path.module}/keys", "*.pub")) : trimspace(file("${path.module}/keys/${f}"))]
+
   defaults = {
     enabled = true
     # "vm" or "lxc"; lxc has no balloon, gpu or extra disks
@@ -15,20 +21,22 @@ locals {
     # balloon floor as a fraction of memory
     balloon_ratio = 0.5
     cores         = 2
-    disk          = 8
-    machine       = null
-    hostpci       = []
+    # proxmox cpu weight, 100 is its default
+    cpu_units = 100
+    disk      = 8
+    machine   = null
+    hostpci   = []
     # [{ size, datastore }]
     extra_disks = []
   }
 
-  # host boot starts the lab in phases, each after the one before had time to come up
-  boot_phases = { router = 1, nas = 2, core = 3, dev = 4, apps = 5, media = 6, external = 7 }
-  # seconds the last vm of a phase waits before the next phase starts; nfs on the nas needs the longest
-  boot_phase_wait = { router = 60, nas = 90, core = 60, dev = 30, apps = 30, media = 30, external = 0 }
-  # proxmox starts vms by order, then id, waiting up_delay after each: only a phase's last booting vm waits
+  # host boot starts the lab phase by phase: storage first, the public side last
+  boot_phases = ["nas", "network", "dev", "apps", "media", "public"]
+  # a phase starts all its guests at once; the next one waits so their boots do not stack up in ram
+  boot_phase_wait = 60
+  # proxmox starts guests by order, then id, waiting up_delay after each: only a phase's last autostarted guest waits
   boot_phase_last = {
-    for phase, order in local.boot_phases : order => max(concat([0], [
+    for phase in local.boot_phases : phase => max(concat([0], [
       for id, i in local.instances : tonumber(id) if i.boot_phase == phase && tostring(try(i.enabled, true)) == "true"
     ])...)
   }
@@ -47,28 +55,29 @@ locals {
       # floor 512: at 384 a vm drops ssh
       balloon     = try(i.balloon, max(512, floor(try(i.memory, local.defaults.memory) * try(i.balloon_ratio, local.defaults.balloon_ratio))))
       cores       = try(i.cores, local.defaults.cores)
+      cpu_units   = try(i.cpu_units, local.defaults.cpu_units)
       disk        = try(i.disk, local.defaults.disk)
       machine     = try(i.machine, local.defaults.machine)
       hostpci     = try(i.hostpci, local.defaults.hostpci)
       extra_disks = try(i.extra_disks, local.defaults.extra_disks)
-      boot_order  = local.boot_phases[i.boot_phase]
-      boot_wait   = local.boot_phase_last[local.boot_phases[i.boot_phase]] == tonumber(id) ? local.boot_phase_wait[i.boot_phase] : 0
+      boot_order  = index(local.boot_phases, i.boot_phase) + 1
+      boot_wait   = local.boot_phase_last[i.boot_phase] == tonumber(id) ? local.boot_phase_wait : 0
 
       bridge        = i.type == "router" ? var.wan_bridge : i.type == "external" ? var.external_bridge : var.internal_bridge
       extra_bridges = i.type == "router" ? [var.internal_bridge, var.external_bridge] : []
 
       ip = (
-        i.type == "router" ? "192.168.178.29" :
+        i.type == "router" ? local.site.lan.router :
         i.type == "external" ? cidrhost(var.external_subnet, tonumber(id)) :
         cidrhost(var.internal_subnet, tonumber(id))
       )
       prefix = (
-        i.type == "router" ? "24" :
+        i.type == "router" ? split("/", local.site.lan.subnet)[1] :
         i.type == "external" ? split("/", var.external_subnet)[1] :
         split("/", var.internal_subnet)[1]
       )
       gateway = (
-        i.type == "router" ? "192.168.178.1" :
+        i.type == "router" ? local.site.lan.gateway :
         i.type == "external" ? var.router_external_ip :
         var.router_internal_ip
       )
@@ -99,17 +108,24 @@ check "instance_fields" {
   }
 }
 
-# pci mapping for the rtx 2060
+# the passthrough gpu from site.json, if the machine has one
 resource "proxmox_virtual_environment_hardware_mapping_pci" "gpu" {
-  name = "gpu"
+  count = local.site.gpu == null ? 0 : 1
+  name  = "gpu"
   map = [{
-    node = var.target_node
-    id   = "10de:1f08"
-    path = "0000:2b:00.0"
+    node = local.site.node
+    id   = local.site.gpu.id
+    path = local.site.gpu.path
     # vm start fails without these two
-    iommu_group  = 3
-    subsystem_id = "10de:12fd"
+    iommu_group  = local.site.gpu.iommuGroup
+    subsystem_id = local.site.gpu.subsystemId
   }]
+}
+
+# the mapping became optional; keeps the existing one instead of recreating it under vm-134
+moved {
+  from = proxmox_virtual_environment_hardware_mapping_pci.gpu
+  to   = proxmox_virtual_environment_hardware_mapping_pci.gpu[0]
 }
 
 resource "proxmox_virtual_environment_vm" "vm" {
@@ -119,7 +135,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   depends_on = [proxmox_virtual_environment_hardware_mapping_pci.gpu]
 
   name      = each.value.name
-  node_name = var.target_node
+  node_name = local.site.node
   vm_id     = tonumber(each.key)
   # ondemand vms start once so the first deploy reaches them
   started = each.value.enabled != "false"
@@ -159,6 +175,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   cpu {
     cores = each.value.cores
     type  = "host"
+    units = each.value.cpu_units
   }
   memory {
     dedicated = each.value.memory
@@ -184,8 +201,8 @@ resource "proxmox_virtual_environment_vm" "vm" {
       file_format  = "raw"
       interface    = "scsi${disk.key + 1}"
       size         = disk.value.size
-      # 5400 rpm hdd, guest schedules for rotation
-      ssd     = false
+      # the bulk pool is a 5400 rpm hdd, the guest schedules for rotation there
+      ssd     = disk.value.datastore != local.bulk_datastore
       discard = "on"
     }
   }
@@ -209,7 +226,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
       }
     }
     user_account {
-      keys     = [var.ssh_public_key]
+      keys     = local.authorized_keys
       username = "root"
     }
   }
@@ -218,7 +235,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
 resource "proxmox_virtual_environment_container" "ct" {
   for_each = { for id, v in local.vms : id => v if v.kind == "lxc" }
 
-  node_name     = var.target_node
+  node_name     = local.site.node
   vm_id         = tonumber(each.key)
   unprivileged  = !each.value.privileged
   started       = each.value.enabled != "false"
@@ -241,6 +258,7 @@ resource "proxmox_virtual_environment_container" "ct" {
 
   cpu {
     cores = each.value.cores
+    units = each.value.cpu_units
   }
   # no balloon in a container: the limit is only a ceiling, unused ram stays with the host
   memory {
@@ -267,7 +285,7 @@ resource "proxmox_virtual_environment_container" "ct" {
       }
     }
     user_account {
-      keys = [var.ssh_public_key]
+      keys = local.authorized_keys
     }
   }
 }

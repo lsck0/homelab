@@ -1,5 +1,6 @@
 """Merge ICS feeds into one calendar and a TRMNL payload."""
 
+import copy
 import json
 import os
 import sys
@@ -11,9 +12,6 @@ import recurring_ical_events
 from icalendar import Calendar
 
 TIMEOUT = 30
-# lookahead and event cap
-HORIZON_DAYS = int(os.environ.get("CALENDAR_HORIZON_DAYS", "90"))
-MAX_EVENTS = int(os.environ.get("CALENDAR_MAX_EVENTS", "12"))
 # day columns start at local midnight
 LOCAL_TZ = ZoneInfo(os.environ.get("CALENDAR_TZ", "Europe/Berlin"))
 # weeks to publish, offsets from the current one
@@ -130,6 +128,8 @@ def merge(calendars):
                 seen_timezones.add(tzid)
                 merged.add_component(component)
             elif kind in ("VEVENT", "VTODO"):
+                # copy: the views expand the unprefixed sources afterwards
+                component = copy.deepcopy(component)
                 # prefix UIDs: sources may reuse them
                 uid = str(component.get("uid", ""))
                 component["UID"] = f"{name}-{uid}"
@@ -144,26 +144,6 @@ def to_iso(value):
     if isinstance(value, date):
         return value.isoformat()
     return str(value)
-
-
-def upcoming(calendars, horizon_days):
-    """Expand recurrences and return the events in the next horizon_days."""
-    now = datetime.now(timezone.utc)
-    end = now + timedelta(days=horizon_days)
-    events = []
-
-    for name, calendar in calendars:
-        try:
-            occurrences = recurring_ical_events.of(calendar).between(now, end)
-        except Exception as err:  # noqa: BLE001 - keep the other sources
-            log(f"expanding {name}: {err}")
-            continue
-
-        for event in occurrences:
-            events.append(event_row(name, event))
-
-    events.sort(key=lambda e: (e["start"] is None, e["start"] or ""))
-    return events[:MAX_EVENTS]
 
 
 def minutes_into(day, value):
@@ -493,19 +473,15 @@ def main():
 
     write_atomic(os.path.join(out_dir, "merged.ics"), merge(calendars).to_ical())
 
-    # `payload` is rebound below; keep a stable handle
-    out_payload = payload = {
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-        "sources": [name for name, _ in sources],
-        "events": upcoming(calendars, HORIZON_DAYS),
-    }
+    generated_at = datetime.now(timezone.utc).isoformat()
+    source_names = [name for name, _ in sources]
 
     # one file per week: the device can't pick a week
     weeks = []
     for offset in WEEK_OFFSETS:
         grid = week(calendars, offset)
-        grid["generated_at"] = payload["generated_at"]
-        grid["sources"] = payload["sources"]
+        grid["generated_at"] = generated_at
+        grid["sources"] = source_names
         # no "+" in filenames: some clients and proxies mangle it
         if offset == 0:
             name = "week.json"
@@ -522,12 +498,12 @@ def main():
                           ("day-next.json", day_view(calendars, 1)),
                           ("month.json", month_view(calendars, 0)),
                           ("month-next.json", month_view(calendars, 1))]:
-        payload["generated_at"] = out_payload["generated_at"]
-        payload["sources"] = out_payload["sources"]
+        payload["generated_at"] = generated_at
+        payload["sources"] = source_names
         write_atomic(os.path.join(out_dir, name), json.dumps(payload, indent=2))
         weeks.append(f"{name}:{payload['total_events']}")
 
-    log(f"wrote {len(out_payload['events'])} events from {len(calendars)} sources; views {' '.join(weeks)}")
+    log(f"wrote {len(calendars)} sources; views {' '.join(weeks)}")
     return 0
 
 

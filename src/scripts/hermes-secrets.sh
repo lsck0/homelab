@@ -5,7 +5,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 SECRETS="$ROOT_DIR/src/secrets.json"
-PUB="$ROOT_DIR/src/modules/hermes.pub"
+PUB="$ROOT_DIR/src/keys/hermes.pub"
 REPO="lsck0/homelab"
 export SOPS_AGE_KEY_FILE="$ROOT_DIR/secrets/age.txt"
 FORCE="${1:-}"
@@ -15,7 +15,8 @@ for tool in sops jq ssh-keygen gh python3 openssl curl; do
 done
 
 current() { sops -d --extract "[\"$1\"]" "$SECRETS" 2>/dev/null || true; }
-put() { sops set "$SECRETS" "[\"$1\"]" "$(jq -Rs . <<< "$2" | sed 's/\\n"$/"/')"; }
+# the json value goes to sops on stdin, out of argv
+put() { printf '%s' "$2" | jq -Rs . | sops set --value-stdin "$SECRETS" "[\"$1\"]"; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 
 # -----------------------------------------------------------------------------
@@ -23,9 +24,10 @@ tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 if [ -z "$(current hermes-ssh-key)" ] || [ "$FORCE" = --force ] || [ ! -f "$PUB" ]; then
   ssh-keygen -q -t ed25519 -N "" -C "hermes@vm-114" -f "$tmp/lab"
   put hermes-ssh-key "$(cat "$tmp/lab")"
-  cp "$tmp/lab.pub" "$PUB"
+  # hermes may log in from its own vm and through the router only
+  printf 'from="10.100.0.114,%s" %s\n' "$(jq -r .lan.router "$ROOT_DIR/src/site.json")" "$(cat "$tmp/lab.pub")" > "$PUB"
   git -C "$ROOT_DIR" add "$PUB"
-  echo ">>> hermes-ssh-key generated, public key in src/modules/hermes.pub"
+  echo ">>> hermes-ssh-key generated, public key in src/keys/hermes.pub"
 else
   echo ">>> hermes-ssh-key already set"
 fi

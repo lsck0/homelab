@@ -7,6 +7,8 @@
     image = "privatebin/nginx-fpm-alpine:2.0.4";
     ports = [ "80:8080" ];
     volumes = [ "/var/lib/privatebin:/srv/data" ];
+    # ~70 MiB: vm 30d peak 323 minus the idle base; php-fpm workers take up to 128M each
+    extraOptions = [ "--memory=256m" ];
   };
 
   systemd.tmpfiles.rules = [

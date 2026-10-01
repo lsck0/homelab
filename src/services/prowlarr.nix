@@ -3,20 +3,23 @@
   homelab.servarr.prowlarr = {
     image = "lscr.io/linuxserver/prowlarr:2.6.5.5623-ls161";
     port = 9696;
-    hostPort = 9696;
   };
 
   # indexer traffic leaves through tor
   systemd.services.prowlarr-tor-proxy = {
     description = "Send Prowlarr's indexer traffic through Tor";
-    after = [ "podman-prowlarr.service" ];
+    # setup exports the key read below
+    after = [ "podman-prowlarr.service" "prowlarr-setup.service" ];
+    wants = [ "prowlarr-setup.service" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
+    startLimitIntervalSec = 0;
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
       Restart = "on-failure";
       RestartSec = 30;
+      PrivateTmp = true;
     };
     script = ''
       API=http://127.0.0.1:9696/api/v1
@@ -60,5 +63,12 @@
       LOG_LEVEL = "warning";
       TZ = "Europe/Berlin";
     };
+    # one chromium per solve
+    extraOptions = [ "--memory=1g" ];
+  };
+  # 10.88.0.1 exists once podman has created its bridge for prowlarr
+  systemd.services.podman-flaresolverr = {
+    after = [ "podman-prowlarr.service" ];
+    wants = [ "podman-prowlarr.service" ];
   };
 }

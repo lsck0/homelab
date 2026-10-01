@@ -28,6 +28,6 @@ Admin CLI inside the container: `ssh 10.100.0.115 docker exec -u git forgejo for
 
 - `ssh 10.100.0.115 'docker ps; journalctl -u docker-forgejo-runner -n 50'`
   (runner runs under docker: `docker logs forgejo-runner`).
-- Labels: `docker` (node:20), `ubuntu-latest` (catthehacker act image), `rust`.
+- Labels: `docker` and `ubuntu-latest` (both `catthehacker/ubuntu:act-22.04`), `rust` (`rust:1.80-bookworm`).
 - Re-register after a Forgejo reset: `systemctl restart forgejo-runner-register`.
 - Build cache: sccache on vm-110 (`redis://sccache.lsck0.dev`).

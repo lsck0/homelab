@@ -15,14 +15,16 @@ metadata:
 
 Layout under `/srv/nas`:
 - `data/<service>` persistent data of every service (NFS-mounted by the VMs)
-- `media/{movies,tv,anime,music,leaving-soon}`
-- `torrents` downloads, `documents` (`inbox/` is the Paperless consume dir, `archive/` a read-only view of all Paperless documents), `public`, `syncthing`
+- `bulk/` the 2 TB hdd, not backed up: `bulk/media/{movies,tv,anime,music,leaving-soon}`, `bulk/torrents` finished downloads;
+  media and torrents share a 750 GiB ext4 project quota (`mediaQuotaGiB` in `109-internal-nas.nix`).
+  Incomplete torrents live on vm-112's own 150 GiB disk, not on the NAS.
+- `documents` (`inbox/` is the Paperless consume dir, `archive/` a read-only view of all Paperless documents), `public`, `syncthing`
 - `BACKUPS/kopia` Kopia repository (see `backups`)
 
 ## Tasks
 
 - Space: `ssh 10.100.0.109 'df -h /srv/nas; du -sh /srv/nas/* /srv/nas/data/* 2>/dev/null | sort -h | tail -20'`
-- Find big files: `ssh 10.100.0.109 'find /srv/nas/media -size +10G -printf "%s %p\n" | sort -n | tail'`
+- Find big files: `ssh 10.100.0.109 'find /srv/nas/bulk/media -size +10G -printf "%s %p\n" | sort -n | tail'`
 - NFS: `exportfs -v`, clients `ss -tn sport = :2049`. A client VM hangs on I/O
   if the NAS is down (hard mounts) and recovers when it is back.
 - SMB shares (guest): public, media, documents, BACKUPS (read-only), homelab.

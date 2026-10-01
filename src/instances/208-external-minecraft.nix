@@ -1,4 +1,4 @@
-{ config, pkgs, nasMount, ... }:
+{ config, lib, pkgs, nasMount, ... }:
 let
   data = "/var/lib/minecraft";
   # runtime server type/modpack
@@ -44,6 +44,43 @@ let
       -e REMOVE_OLD_MODS=TRUE \
       -e MAX_TICK_TIME=-1 \
       ${image}
+  '';
+
+  # lazymc's pre-start: the toml embeds mcStart, so a new start command restarts lazymc
+  mcEnv = pkgs.writeShellScript "minecraft-env" ''
+    set -euo pipefail
+    pw=$(cat ${config.sops.secrets.minecraft-rcon-password.path})
+    echo "RCON_PASSWORD=$pw" > ${data}/rcon.env
+    chmod 600 ${data}/rcon.env
+    [ -s ${modpackEnv} ] || printf '%s' ${lib.escapeShellArg defaultModpack} > ${modpackEnv}
+
+    # lazymc: public port fronts the game, connects to the container's game+rcon on localhost
+    umask 077
+    cat > ${lazymcToml} <<EOF
+    [public]
+    address = "0.0.0.0:25565"
+
+    [server]
+    address = "127.0.0.1:25566"
+    command = "${mcStart}"
+    # stop (free the heap), do not freeze (which keeps ram)
+    freeze_process = false
+    wake_on_start = false
+
+    [rcon]
+    enabled = true
+    port = 25575
+    password = "$pw"
+    # use itzg's env-set password, do not randomize or rewrite server.properties
+    randomize_password = false
+
+    [time]
+    sleep_after = ${toString sleepAfter}
+    minimum_online_time = 60
+
+    [advanced]
+    rewrite_server_properties = false
+    EOF
   '';
 
   # mc-modpack <modrinth url|slug|curseforge url|vanilla> [version]
@@ -92,59 +129,16 @@ in {
 
   environment.systemPackages = [ mcModpack mcRcon ];
 
-  systemd.services.minecraft-env = {
-    description = "Generate Minecraft env + lazymc config";
-    before = [ "lazymc.service" ];
-    requiredBy = [ "lazymc.service" ];
-    # regenerate the toml (and re-run) whenever the start command changes, else a deploy
-    # leaves lazymc pointing at a stale mc-start (old memory/env)
-    restartTriggers = [ mcStart ];
-    serviceConfig.Type = "oneshot";
-    script = ''
-      pw=$(cat ${config.sops.secrets.minecraft-rcon-password.path})
-      echo "RCON_PASSWORD=$pw" > ${data}/rcon.env
-      chmod 600 ${data}/rcon.env
-      [ -s ${modpackEnv} ] || printf '%s' ${pkgs.lib.escapeShellArg defaultModpack} > ${modpackEnv}
-
-      # lazymc: public port fronts the game, connects to the container's game+rcon on localhost
-      umask 077
-      cat > ${lazymcToml} <<EOF
-      [public]
-      address = "0.0.0.0:25565"
-
-      [server]
-      address = "127.0.0.1:25566"
-      command = "${mcStart}"
-      # stop (free the heap), do not freeze (which keeps ram)
-      freeze_process = false
-      wake_on_start = false
-
-      [rcon]
-      enabled = true
-      port = 25575
-      password = "$pw"
-      # use itzg's env-set password, do not randomize or rewrite server.properties
-      randomize_password = false
-
-      [time]
-      sleep_after = ${toString sleepAfter}
-      minimum_online_time = 60
-
-      [advanced]
-      rewrite_server_properties = false
-      EOF
-    '';
-  };
-
   systemd.services.lazymc = {
     description = "lazymc: sleep/wake the Minecraft server on real player logins";
-    after = [ "network-online.target" "minecraft-env.service" ];
+    after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
     wantedBy = [ "multi-user.target" ];
-    # restart with a new start command so the deployed memory/env actually takes effect
-    restartTriggers = [ mcStart ];
+    # the nfs data dir may lag the boot, retry forever
+    startLimitIntervalSec = 0;
     path = [ pkgs.podman ];
     serviceConfig = {
+      ExecStartPre = mcEnv;
       ExecStart = "${pkgs.lazymc}/bin/lazymc start --config ${lazymcToml}";
       Restart = "on-failure";
       RestartSec = 5;

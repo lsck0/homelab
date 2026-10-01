@@ -1,4 +1,4 @@
-{ config, lib, pkgs, inventory, nasMount, retry, ... }:
+{ config, lib, pkgs, inventory, nasMount, retry, site, ... }:
 let
   routes = let r = import ../modules/routes.nix; in r.internal // r.external;
 
@@ -33,10 +33,10 @@ let
     { name = "Apps"; icon = "mdi-apps"; columns = 4; entries = [
       { route = "homeassistant"; name = "Home Assistant"; icon = "home-assistant";
         widget = arr "homeassistant" "homeassistant" "HASS_KEY"; }
-      { route = "huginn"; name = "Huginn"; icon = "huginn"; }
       { route = "paperless"; name = "Paperless"; icon = "paperless-ngx";
         widget = arr "paperlessngx" "paperless" "PAPERLESS_KEY"; }
       { route = "paperless-ai"; name = "Paperless AI"; icon = "paperless-ngx"; }
+      { route = "huginn"; name = "Huginn"; icon = "huginn"; }
       { route = "firefly"; name = "Firefly III"; icon = "firefly-iii"; }
       { route = "fints"; name = "FinTS Import"; icon = "mdi-bank-transfer"; }
     ]; }
@@ -80,7 +80,7 @@ let
     "        icon: ${e.icon}"
     "        href: https://${r.host}.lsck0.dev"
   ] + lib.optionalString (stateOf e != "false")
-      "        siteMonitor: ${r.scheme or "http"}://${inventory.${toString r.vmid}.ip}:${toString r.port}${r.health or ""}\n"
+      "        siteMonitor: http://${inventory.${toString r.vmid}.ip}:${toString r.port}${r.health or ""}\n"
     + lib.optionalString (desc != "") "        description: ${desc}\n"
     + lib.optionalString (e ? widget) "        widget: ${builtins.toJSON e.widget}\n";
   groupYaml = g: "- ${g.name}:\n" + lib.concatMapStrings entryYaml g.entries;
@@ -92,21 +92,21 @@ let
             href: https://dash.cloudflare.com
         - FritzBox:
             icon: mdi-router-wireless
-            href: http://192.168.178.1
-            ping: http://192.168.178.1
+            href: http://${site.lan.gateway}
+            ping: http://${site.lan.gateway}
             widget:
               type: fritzbox
-              url: http://192.168.178.1
+              url: http://${site.lan.gateway}
         - Proxmox:
             icon: proxmox
             href: https://proxmox.lsck0.dev
-            ping: http://192.168.178.200:8006
+            ping: http://${site.lan.proxmox}:8006
             widget:
               type: proxmox
-              url: https://192.168.178.200:8006
+              url: https://${site.lan.proxmox}:8006
               username: "{{HOMEPAGE_VAR_PROXMOX_USER}}"
               password: "{{HOMEPAGE_VAR_PROXMOX_PASS}}"
-              node: luca-server
+              node: ${site.node}
         - Router:
             icon: nixos
             ping: http://10.100.0.1
@@ -189,6 +189,8 @@ let
     #inner_wrapper > div { justify-content: safe center; }
     #footer { position: absolute; bottom: 0; }
   '';
+
+  envFile = "/run/homepage.env";
 in {
   networking.hostName = "vm-103";
 
@@ -217,19 +219,18 @@ in {
       put ${widgetsYaml}   /var/lib/homepage/widgets.yaml
       put ${customCss}     /var/lib/homepage/custom.css
 
-      ENV_FILE="/var/lib/homepage/homepage.env"
-      : > "$ENV_FILE"
+      # podman reads it on the host, so the keys stay off the share
+      umask 077
+      : > ${envFile}
       for f in /var/lib/homepage-tokens/*.token /var/lib/homepage-tokens/external/*.token; do
         [ -f "$f" ] || continue
         name="$(basename "$f" .token)"
         varname="HOMEPAGE_VAR_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"
-        echo "''${varname}=$(cat "$f")" >> "$ENV_FILE"
+        echo "''${varname}=$(cat "$f")" >> ${envFile}
       done
 
-      echo "HOMEPAGE_VAR_PROXMOX_USER=$(cat ${config.sops.secrets."proxmox-user".path})" >> "$ENV_FILE"
-      echo "HOMEPAGE_VAR_PROXMOX_PASS=$(cat ${config.sops.secrets."proxmox-pass".path})" >> "$ENV_FILE"
-
-      chmod 600 "$ENV_FILE"
+      echo "HOMEPAGE_VAR_PROXMOX_USER=$(cat ${config.sops.secrets."proxmox-user".path})" >> ${envFile}
+      echo "HOMEPAGE_VAR_PROXMOX_PASS=$(cat ${config.sops.secrets."proxmox-pass".path})" >> ${envFile}
     '';
   };
 
@@ -253,7 +254,7 @@ in {
       HOMEPAGE_ALLOWED_HOSTS = "homelab.lsck0.dev";
       NODE_TLS_REJECT_UNAUTHORIZED = "0";
     };
-    environmentFiles = [ "/var/lib/homepage/homepage.env" ];
+    environmentFiles = [ envFile ];
     extraOptions = [ "--cap-add=NET_RAW" ];
   };
 

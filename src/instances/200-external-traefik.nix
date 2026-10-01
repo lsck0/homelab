@@ -6,11 +6,13 @@ let
 
   # headless token-only hosts stay off the internet
   blockedInternal = lib.filterAttrs
-    (_: r: !(r.publicRelay or ((r.auth or "sso") != "token")))
+    (_: r: (r.auth or "sso") == "token" && !(r.publicRelay or false))
     allRoutes.internal;
+  # internal hosts relayed to the internet past cloudflare
+  publicRelays = lib.filterAttrs (_: r: r.publicRelay or false) allRoutes.internal;
+  internalTraefik = "https://10.100.0.100:443";
 
   # anubis pow filter on browser-facing routes
-  anubisEnable = true;
   anubisRoutes = [ "searxng" "privatebin" "share" "hello" ];
   anubisPort = name: 27000 + lib.lists.findFirstIndex (n: n == name) 0 anubisRoutes;
   upstream = name: "http://${address.${name}}";
@@ -34,8 +36,6 @@ in {
       targetPort = routes.${name}.port;
       listenPort = 20000 + i;
     }) (lib.attrNames routes));
-    # minecraft (208) is no longer onDemand: lazymc on the vm handles sleep/wake itself
-    # (a public port is scanned constantly, which defeats a blind tcp wake proxy).
   };
 
   fileSystems = (nasMount "/var/lib/crowdsec" "crowdsec-external")
@@ -64,7 +64,7 @@ in {
     ];
 
     anubis = {
-      enable = anubisEnable;
+      enable = true;
       instances = lib.genAttrs anubisRoutes (name: {
         upstream = upstream name;
         listenPort = anubisPort name;
@@ -78,7 +78,8 @@ in {
     cloudflareOnly.enable = true;
     cloudflareOnly.exemptRouters =
       map (name: "${name}-tls") (lib.attrNames (lib.filterAttrs (_: r: !(r.proxied or true)) routes))
-      ++ [ "calendar-tls" "terminal-tls" "wellknown-tls" "labyrinth-tls" "install-tls" ]
+      ++ map (name: "${name}-tls") (lib.attrNames publicRelays)
+      ++ [ "wellknown-tls" "labyrinth-tls" "install-tls" ]
       # already private-only via internal-only
       ++ map (name: "${name}-block") (lib.attrNames blockedInternal);
 
@@ -93,12 +94,7 @@ in {
       service = name;
       entryPoints = [ "websecure" ];
       tls.certResolver = "cloudflare";
-    }) routes // {
-      # calendar is internal, only this host is relayed
-      calendar-tls   = { rule = "Host(`cal.lsck0.dev`)"; service = "calendar"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-      # same for the terminal stats feed
-      terminal-tls   = { rule = "Host(`terminal.lsck0.dev`)"; service = "calendar"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
-
+    }) (routes // publicRelays) // {
       install-tls  = { rule = installRule; service = "install"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
 
       # catch-all: unmatched hosts relay to internal traefik
@@ -133,23 +129,26 @@ in {
 
     services = lib.mapAttrs (name: _: {
       loadBalancer.servers = [{
-        url = if anubisEnable && builtins.elem name anubisRoutes
+        url = if builtins.elem name anubisRoutes
           then "http://127.0.0.1:${toString (anubisPort name)}"
           else upstream name;
       }];
-    }) routes // {
-      calendar.loadBalancer.servers = [{ url = "https://10.100.0.100:443"; }];
-      calendar.loadBalancer.serversTransport = "internal-traefik";
+    }) routes // lib.mapAttrs (name: _: {
+      loadBalancer.servers = [{ url = internalTraefik; }];
+      loadBalancer.serversTransport = name;
+    }) publicRelays // {
       install.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString installPort}"; }];
       # catch-all relay to internal traefik over https
-      internal-relay.loadBalancer.servers = [{ url = "https://10.100.0.100:443"; }];
+      internal-relay.loadBalancer.servers = [{ url = internalTraefik; }];
       internal-relay.loadBalancer.serversTransport = "internal-relay";
       internal-relay.loadBalancer.passHostHeader = true;
     };
 
-    # sni comes from the url, an ip here
-    serversTransports.internal-traefik.serverName = "cal.lsck0.dev";
-    serversTransports.internal-relay.insecureSkipVerify = true;
+    # sni comes from the url, an ip here; internal traefik has one cert per host, no wildcard
+    serversTransports = lib.mapAttrs (_: r: { serverName = "${r.host}.lsck0.dev"; }) publicRelays // {
+      # any host, so no single name to verify against
+      internal-relay.insecureSkipVerify = true;
+    };
 
     tcp = {
       routers.minecraft = {

@@ -9,16 +9,10 @@ ACTIVE_TFVARS_PATH=""
 HAS_TFVARS=0
 
 usage() {
-  echo "Usage: ./scripts/deinit.sh [--yes] [PROXMOX_IP]"
+  echo "Usage: ./src/scripts/deinit.sh [--yes] [PROXMOX_IP]"
 }
 
-read_tfvar_string() {
-  local key="$1"
-  [ "$HAS_TFVARS" -eq 1 ] || return 0
-  jq -r --arg key "$key" 'if has($key) and .[$key] != null then .[$key] else empty end' "$ACTIVE_TFVARS_PATH"
-}
-
-read_tfvar_int() {
+read_tfvar() {
   local key="$1"
   [ "$HAS_TFVARS" -eq 1 ] || return 0
   jq -r --arg key "$key" 'if has($key) and .[$key] != null then .[$key] else empty end' "$ACTIVE_TFVARS_PATH"
@@ -76,7 +70,7 @@ if [ -z "$TARGET_IP" ]; then
     echo "ERROR: Missing tfvars and no host provided."
     exit 1
   fi
-  TARGET_IP="$(read_tfvar_string proxmox_ssh_host)"
+  TARGET_IP="$(read_tfvar proxmox_ssh_host)"
 fi
 
 if [ -z "$TARGET_IP" ]; then
@@ -89,16 +83,18 @@ SSH_USER="root"
 SSH_PASSWORD=""
 
 if [ "$HAS_TFVARS" -eq 1 ]; then
-  SSH_PORT="$(read_tfvar_int proxmox_ssh_port)"
-  SSH_USER="$(read_tfvar_string proxmox_ssh_user)"
-  SSH_PASSWORD="$(read_tfvar_string proxmox_ssh_password)"
+  SSH_PORT="$(read_tfvar proxmox_ssh_port)"
+  SSH_USER="$(read_tfvar proxmox_ssh_user)"
+  SSH_PASSWORD="$(read_tfvar proxmox_ssh_password)"
 fi
 
 [ -n "$SSH_PORT" ] || SSH_PORT="22"
 [ -n "$SSH_USER" ] || SSH_USER="root"
 
 if [ "$ASSUME_YES" -ne 1 ]; then
-  echo "This destroys all VMs and LXCs on $TARGET_IP and removes homelab Proxmox bootstrap artifacts."
+  echo "This destroys all VMs and LXCs on $TARGET_IP and removes what pve-install.sh set up: bridges, api users,"
+  echo "tokens and roles, the lldap realm, node-exporter, the golden image and lxc template."
+  echo "Kept: OSSEC, the bulk storage, gpu passthrough, apt repos and sync.sh's power and module settings."
   read -r -p "Type 'yes' to continue: " confirm
   [ "$confirm" = "yes" ] || { echo "Aborted."; exit 1; }
 fi
@@ -116,7 +112,9 @@ if [ -n "$SSH_PASSWORD" ]; then
     echo "ERROR: proxmox_ssh_password set but sshpass not installed."
     exit 1
   fi
-  SSH_CMD=(sshpass -p "$SSH_PASSWORD" ssh -o StrictHostKeyChecking=yes -p "$SSH_PORT")
+  # sshpass -e reads it from the environment, out of argv
+  export SSHPASS="$SSH_PASSWORD"
+  SSH_CMD=(sshpass -e ssh -o StrictHostKeyChecking=yes -p "$SSH_PORT")
 else
   SSH_CMD=(ssh -o StrictHostKeyChecking=yes -p "$SSH_PORT")
 fi
@@ -135,11 +133,16 @@ for id in $(pct list | awk 'NR>1 {print $1}'); do
   pct destroy "$id" --purge 1 --destroy-unreferenced-disks 1 >/dev/null
 done
 
-rm -f /var/lib/vz/template/iso/nixos.img
-rm -f /root/terraform_token.txt
+rm -f /var/lib/vz/template/iso/nixos.img /var/lib/vz/template/cache/nixos-homelab.tar.xz
+rm -f /root/terraform_token.txt /root/wake_token.txt /root/homepage_token.txt
 
-pveum user token delete terraform-prov@pve terraform-token >/dev/null 2>&1 || true
-pveum user delete terraform-prov@pve >/dev/null 2>&1 || true
+# deleting a user deletes its tokens and acl entries
+for user in terraform-prov@pve wake@pve homepage@pve; do
+  pveum user delete "$user" >/dev/null 2>&1 || true
+done
+pveum role delete HomelabWake >/dev/null 2>&1 || true
+pveum realm delete lldap >/dev/null 2>&1 || true
+rm -f /etc/pve/priv/realm/lldap.pw
 
 systemctl disable --now prometheus-node-exporter >/dev/null 2>&1 || true
 apt-get purge -y prometheus-node-exporter >/dev/null 2>&1 || true

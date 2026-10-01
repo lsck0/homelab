@@ -81,7 +81,7 @@ in
       '';
     };
 
-    # the router blackhole is the killswitch
+    # the router blackhole route and forward guard are the killswitch
     systemd.services.wireguard-wg-egress.unitConfig.StartLimitIntervalSec = 0;
     systemd.services.wireguard-wg-egress.serviceConfig = {
       Restart = "on-failure";

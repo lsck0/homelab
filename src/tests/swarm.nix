@@ -15,7 +15,7 @@ let
     mkdir $out && cd $out
     openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -subj /CN=test-ca -keyout ca.key -out ca.crt
     openssl req -newkey rsa:2048 -nodes -subj /CN=registry.lsck0.dev -keyout tls.key -out tls.csr
-    printf 'subjectAltName=DNS:registry.lsck0.dev,DNS:ghcr.io\n' > san.ext
+    printf 'subjectAltName=DNS:registry.lsck0.dev\n' > san.ext
     openssl x509 -req -in tls.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 3650 -extfile san.ext -out tls.crt
   '';
 in
@@ -23,14 +23,13 @@ pkgs.testers.runNixOSTest {
   name = "swarm";
 
   nodes.machine = {
-    imports = [ ../modules/docker-stack.nix ../instances/209-external-hello.nix ];
+    imports = [ ../modules/retry.nix ../modules/docker-stack.nix ../instances/209-external-hello.nix ];
     virtualisation.memorySize = 3072;
     virtualisation.diskSize = 6144;
     environment.systemPackages = [ pkgs.curl ];
 
-    networking.hosts."127.0.0.1" = [ "registry.lsck0.dev" "ghcr.io" ];
+    networking.hosts."127.0.0.1" = [ "registry.lsck0.dev" ];
     environment.etc."docker/certs.d/registry.lsck0.dev/ca.crt".source = "${certs}/ca.crt";
-    environment.etc."docker/certs.d/ghcr.io/ca.crt".source = "${certs}/ca.crt";
     services.dockerRegistry = {
       enable = true;
       listenAddress = "0.0.0.0";
@@ -54,12 +53,10 @@ pkgs.testers.runNixOSTest {
     machine.wait_for_unit("docker-swarm-init.service")
     machine.wait_for_open_port(443)
 
-    with subtest("both CI pipelines' images deploy"):
+    with subtest("image deploys"):
         push("${app "v1" true}", "v1", "registry.lsck0.dev/hello:latest")
-        push("${app "v1" true}", "v1", "ghcr.io/lsck0/hello:latest")
         machine.succeed("systemctl restart swarm-deploy.service")
         machine.wait_until_succeeds("curl -sf http://127.0.0.1:80/ | grep -q 'hello v1'", timeout=180)
-        machine.wait_until_succeeds("curl -sf http://127.0.0.1:8080/ | grep -q 'hello v1'", timeout=180)
 
     with subtest("new push rolls out with zero failed requests"):
         machine.succeed(
@@ -77,9 +74,6 @@ pkgs.testers.runNixOSTest {
         total = machine.succeed("wc -l < /tmp/codes").strip()
         assert int(total) > 50, f"too few probes ({total})"
         assert bad == "0", f"{bad} failed requests during rollout"
-
-    with subtest("GitHub stack untouched by the Forgejo push"):
-        machine.succeed("curl -sf http://127.0.0.1:8080/ | grep -q 'hello v1'")
 
     with subtest("unhealthy image is rolled back, service keeps serving"):
         push("${app "v3" false}", "v3", "registry.lsck0.dev/hello:latest")

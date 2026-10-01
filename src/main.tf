@@ -8,8 +8,13 @@ terraform {
 }
 
 # -----------------------------------------------------------------------------
+# SITE: the machine and the house network, written by scripts/init.sh
+locals {
+  site = jsondecode(file("${path.module}/site.json"))
+}
+
+# -----------------------------------------------------------------------------
 # PROXMOX CONNECTION
-variable "proxmox_api_url" { type = string }
 variable "proxmox_api_token_id" { type = string }
 variable "proxmox_api_token_secret" {
   type      = string
@@ -23,11 +28,6 @@ variable "proxmox_datastore" {
   type    = string
   default = "local-lvm"
 }
-variable "target_node" {
-  type    = string
-  default = "pve"
-}
-variable "proxmox_ssh_host" { type = string }
 variable "proxmox_ssh_port" {
   type    = number
   default = 22
@@ -44,7 +44,6 @@ variable "proxmox_ssh_password" {
 
 # -----------------------------------------------------------------------------
 # VM DEFAULTS
-variable "ssh_public_key" { type = string }
 variable "nixos_lxc_template" {
   description = "NixOS container template (sync.sh uploads packages.lxc-template)."
   type        = string
@@ -94,7 +93,7 @@ variable "router_external_ip" {
 }
 
 provider "proxmox" {
-  endpoint  = var.proxmox_api_url
+  endpoint  = "https://${local.site.lan.proxmox}:8006/api2/json"
   api_token = "${var.proxmox_api_token_id}=${var.proxmox_api_token_secret}"
   insecure  = var.proxmox_insecure
 
@@ -104,15 +103,9 @@ provider "proxmox" {
     username = var.proxmox_ssh_user
     password = var.proxmox_ssh_password == "" ? null : var.proxmox_ssh_password
     node {
-      name    = var.target_node
-      address = var.proxmox_ssh_host
+      name    = local.site.node
+      address = local.site.lan.proxmox
       port    = var.proxmox_ssh_port
     }
   }
-}
-
-# bulk media storage on the 2 tb hdd
-variable "bulk_datastore" {
-  type    = string
-  default = ""
 }

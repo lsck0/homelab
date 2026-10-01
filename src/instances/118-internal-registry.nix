@@ -53,11 +53,10 @@
   # no auth anywhere, ingress allowlist is the gate
   homelab.ingressOnly = {
     ports = [ 80 5000 ];
-    extraSources = [
+    # push/pull clients reach the api only, never the ui with its delete button
+    portSources."5000" = [
       "10.100.0.115/32"   # Forgejo CI runner
       "10.100.0.117/32"   # GitHub CI runners
-      "10.100.0.118/32"   # registry-ui -> registry
-      "10.200.0.209/32"   # Docker Swarm host that pulls the images
     ];
   };
 }

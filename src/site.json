@@ -1,0 +1,28 @@
+{
+  "node": "luca-server",
+  "lan": {
+    "subnet": "192.168.178.0/24",
+    "gateway": "192.168.178.1",
+    "router": "192.168.178.29",
+    "proxmox": "192.168.178.200",
+    "workstation": "192.168.178.138",
+    "inverter": "192.168.178.46",
+    "workstationMac": "10:ff:e0:e4:04:4a"
+  },
+  "gpu": {
+    "id": "10de:1f08",
+    "subsystemId": "10de:12fd",
+    "path": "0000:2b:00.0",
+    "iommuGroup": 3,
+    "functionIds": [
+      "10de:1f08",
+      "10de:10f9",
+      "10de:1ada",
+      "10de:1adb"
+    ]
+  },
+  "bulk": {
+    "disk": "/dev/disk/by-id/ata-WDC_WD20EZRZ-00Z5HB0_WD-WCC4N3KNZ2KS",
+    "sizeGiB": 1800
+  }
+}

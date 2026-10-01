@@ -21,6 +21,10 @@ let
       start_period: 5s
     deploy:
       replicas: 1
+      resources:
+        limits:
+          # ~200 MiB: vm 30d peak 445 minus the idle base
+          memory: 320M
       endpoint_mode: ${if meshless then "dnsrr" else "vip"}
       update_config:
         parallelism: 1
@@ -38,7 +42,6 @@ in {
   # ci/cd target
   homelab.swarm = {
     enable = true;
-    updateInterval = "1m";
 
     stacks = {
       hello = ''
@@ -47,8 +50,6 @@ in {
             ${indent (webService "registry.lsck0.dev/hello:latest" 80)}
       '';
     };
-
-    # private images: add a registries."ghcr.io" entry
   };
 
   networking.firewall.allowedTCPPorts = [ 80 ];

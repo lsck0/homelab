@@ -1,6 +1,11 @@
 { config, pkgs, nasMount, ... }:
 let
   fintsImage = "docker.io/benkl/firefly-iii-fints-importer@sha256:9912f29e7c56587fbee2fceb146efe8f9f6ec924d5569f72aa7336b5c26e2a8e";
+  # host network: php-fpm would listen on every address; a later [www] section overrides the image's pool
+  fpmLoopback = pkgs.writeText "zzzz-listen.conf" ''
+    [www]
+    listen = 127.0.0.1:9000
+  '';
 in {
   networking.hostName = "vm-124";
 
@@ -11,7 +16,6 @@ in {
   sops.secrets.firefly-app-key = {};
   sops.secrets.firefly-db-password = {};
   sops.templates."firefly.env".restartUnits = [ "podman-firefly.service" ];
-  systemd.services.podman-firefly.restartTriggers = [ config.sops.templates."firefly.env".content ];
   sops.templates."firefly.env".content = ''
     APP_KEY=${config.sops.placeholder.firefly-app-key}
     DB_CONNECTION=pgsql
@@ -36,6 +40,8 @@ in {
   virtualisation.oci-containers.containers = {
     firefly-db = {
       image = "docker.io/library/postgres:16.15-alpine";
+      # host network: only firefly beside it connects
+      cmd = [ "postgres" "-c" "listen_addresses=127.0.0.1" ];
       volumes = [ "/var/lib/firefly/db:/var/lib/postgresql/data" ];
       environmentFiles = [ config.sops.templates."firefly-db.env".path ];
       extraOptions = [ "--network=host" ];
@@ -44,7 +50,10 @@ in {
       image = "docker.io/fireflyiii/core:version-6.7.2";
       dependsOn = [ "firefly-db" ];
       # host network: :8080, postgres on 127.0.0.1:5432
-      volumes = [ "/var/lib/firefly/upload:/var/www/html/storage/upload" ];
+      volumes = [
+        "/var/lib/firefly/upload:/var/www/html/storage/upload"
+        "${fpmLoopback}:/usr/local/etc/php-fpm.d/zzzz-listen.conf:ro"
+      ];
       environmentFiles = [ config.sops.templates."firefly.env".path ];
       extraOptions = [ "--network=host" ];
     };
@@ -137,10 +146,11 @@ in {
   };
 
   # seed the fints importer config so the web ui only needs username + PIN + TAN.
-  # runs at boot and after every token refresh; rewrites until the owner saves a
-  # config with real bank credentials, then leaves it alone (persistence string).
+  # pulls in the token export first; rewrites until the owner saves a config with
+  # real bank credentials, then leaves it alone (persistence string).
   systemd.services.firefly-fints-seed = {
     description = "Pre-fill the FinTS importer config (bank + Firefly)";
+    wants = [ "firefly-hermes-token.service" ];
     after = [ "firefly-hermes-token.service" ];
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.coreutils pkgs.jq ];
@@ -170,7 +180,7 @@ in {
       chmod 600 "$out"
     '';
   };
-  # refill (esp. the firefly token) shortly after boot and periodically, like the token export
+  # refill the firefly token once it exists
   systemd.timers.firefly-fints-seed = {
     wantedBy = [ "timers.target" ];
     timerConfig = { OnBootSec = "6m"; OnUnitActiveSec = "30m"; };

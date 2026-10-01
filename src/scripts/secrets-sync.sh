@@ -20,7 +20,7 @@ export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$ROOT_DIR/secrets/age.txt}"
 GENERATED=(
   lldap-admin-password lldap-jwt-secret authelia-admin-pass lldap-guest-password
   forgejo-admin-pass forgejo-oidc-secret headplane-oidc-secret homeassistant-oidc-secret headscale-oidc-secret
-  restic-password minecraft-rcon-password
+  kopia-password minecraft-rcon-password
   firefly-db-password
   crowdsec-bouncer-key
   ntfy-admin-password ntfy-grafana-password ntfy-hermes-password
@@ -38,7 +38,7 @@ MANUAL=(
   hermes-gemini-api-key hermes-glm-api-key
   github-runner-token
   wireguard-private-key firefly-app-key
-  # off-site backup (kopia on vm-109); totp seed from proton 2fa
+  # the proton account itself: proton-drive on the nas signs in with it (proton-drive-login), protonvpn-private-key is the vpn
   proton-username proton-password proton-totp-secret
 )
 
@@ -57,13 +57,6 @@ sops --decrypt "$SECRETS" > "$PLAIN"
 referenced=$(grep -rhoE 'sops\.(secrets|placeholder)\.[a-zA-Z0-9_-]+' \
     "$ROOT_DIR/src" --include='*.nix' 2>/dev/null \
   | sed -E 's/.*\.//' | sort -u)
-
-# `sops.secrets.<alias>.key` stores the real name
-aliases=$(grep -rhoE 'sops\.secrets\.[a-zA-Z0-9_-]+\.key' "$ROOT_DIR/src" --include='*.nix' 2>/dev/null \
-  | sed -E 's/^sops\.secrets\.//; s/\.key$//' | sort -u)
-if [ -n "$aliases" ]; then
-  referenced=$(comm -23 <(printf '%s\n' $referenced | sort -u) <(printf '%s\n' $aliases | sort -u))
-fi
 
 wanted=$(printf '%s\n' "${GENERATED[@]}" "${MANUAL[@]}" $referenced | sort -u)
 have=$(jq -r 'keys[] | select(. != "sops")' "$PLAIN" | sort)
