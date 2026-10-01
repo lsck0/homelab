@@ -30,10 +30,13 @@
     };
   };
 
+  sops.secrets.sccache-redis-pass = { };
+
   services.redis.servers.sccache = {
     enable = true;
     port = 6379;
     bind = "0.0.0.0";
+    requirePassFile = config.sops.secrets.sccache-redis-pass.path;
     settings = {
       protected-mode = "no";
       maxmemory = "768mb";
@@ -44,7 +47,7 @@
   environment.systemPackages = [ pkgs.attic-client pkgs.sccache ];
 
   networking.firewall.allowedTCPPorts = [ 8080 6379 ];
-  # redis has no auth: only the ci hosts that set SCCACHE_REDIS (forgejo 115, github 117) reach it
+  # password plus firewall: only the ci hosts that set SCCACHE_REDIS (forgejo 115, github 117) reach it
   homelab.ingressOnly.ports = [ 6379 ];
   homelab.ingressOnly.portSources."6379" = [ "10.100.0.115/32" "10.100.0.117/32" ];
 }

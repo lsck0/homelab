@@ -16,7 +16,7 @@ jobs:
               run: |
                   docker build \
                     --network=host \
-                    --build-arg SCCACHE_REDIS=redis://sccache.lsck0.dev \
+                    --secret id=sccache_redis,env=SCCACHE_REDIS \
                     -t registry.lsck0.dev/hello:latest \
                     -t registry.lsck0.dev/hello:${{ github.sha }} \
                     .

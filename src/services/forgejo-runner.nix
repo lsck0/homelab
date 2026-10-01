@@ -20,10 +20,9 @@
       "--add-host=registry.lsck0.dev:10.100.0.118"
       "--add-host=sccache.lsck0.dev:10.100.0.110"
     ];
-    environment = {
-      SCCACHE_REDIS = "redis://sccache.lsck0.dev";
-    };
   };
+
+  sops.secrets.sccache-redis-pass = { };
 
   # register with the token forgejo exports to the nas
   systemd.services.forgejo-runner-register = {
@@ -45,6 +44,12 @@
           code.forgejo.org/forgejo/runner:6.2.1 \
           forgejo-runner generate-config > /var/lib/forgejo-runner/config.yaml
       fi
+
+      # jobs get the cache url with its password from the runner's env_file, never from a workflow
+      sed -i 's|^  env_file: .*|  env_file: /data/.env|' /var/lib/forgejo-runner/config.yaml
+      install -m 600 /dev/null /var/lib/forgejo-runner/.env
+      printf 'SCCACHE_REDIS=redis://:%s@sccache.lsck0.dev\n' "$(cat ${config.sops.secrets.sccache-redis-pass.path})" \
+        > /var/lib/forgejo-runner/.env
 
       # docker socket in job containers for build/push
       sed -i 's|docker_host: "-"|docker_host: "automount"|' /var/lib/forgejo-runner/config.yaml

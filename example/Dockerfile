@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.10
 FROM alpine:3.21 AS builder
 
 RUN apk add --no-cache gcc musl-dev make sccache
@@ -5,11 +6,11 @@ RUN apk add --no-cache gcc musl-dev make sccache
 WORKDIR /build
 COPY main.c httpserver.h Makefile ./
 
-ARG SCCACHE_REDIS
-ENV SCCACHE_REDIS=${SCCACHE_REDIS}
 ENV SCCACHE_DIR=/tmp/sccache
 
-RUN if [ -n "$SCCACHE_REDIS" ]; then \
+# the cache url carries a password: a build secret, never an ARG or ENV baked into the image
+RUN --mount=type=secret,id=sccache_redis,env=SCCACHE_REDIS \
+    if [ -n "$SCCACHE_REDIS" ]; then \
     CC="sccache gcc" make; \
     else \
     make; \

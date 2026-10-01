@@ -53,6 +53,8 @@ let
       replace = true;
 
       extraLabels = [ "nixos" "homelab" ];
+      # the cache url carries a password, so it comes from sops, not the nix store
+      serviceOverrides.EnvironmentFile = config.sops.templates."sccache-redis.env".path;
       user = "github-runner";
       group = "github-runner";
       # no workDir, the runtime dir default works
@@ -124,6 +126,12 @@ in {
   };
 
   services.github-runners = runners;
+
+  sops.secrets.sccache-redis-pass = { };
+  sops.templates."sccache-redis.env" = {
+    owner = "github-runner";
+    content = "SCCACHE_REDIS=redis://:${config.sops.placeholder.sccache-redis-pass}@sccache.lsck0.dev\n";
+  };
 
   systemd.tmpfiles.rules = [
     "d /var/lib/github-runner 0750 github-runner github-runner -"
