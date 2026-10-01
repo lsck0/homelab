@@ -24,6 +24,7 @@ GENERATED=(
   firefly-db-password
   crowdsec-bouncer-key
   ntfy-admin-password ntfy-grafana-password ntfy-hermes-password
+  ntfy-desktop-token
   # unguessable url segments for feed and push
   calendar-upload-token
 )
@@ -41,6 +42,12 @@ MANUAL=(
   # the proton account itself: proton-drive on the nas signs in with it (proton-drive-login), protonvpn-private-key is the vpn
   proton-username proton-password proton-totp-secret
 )
+
+# ntfy only accepts tk_ + 29 [a-z0-9] as a token, a hex value stops ntfy-sh from starting
+NTFY_TOKENS=(ntfy-desktop-token)
+
+# the desktop poller (dotfiles configs/ntfy) reads its token from the dotfiles secrets
+DOTFILES_SECRETS="${DOTFILES:-$HOME/projects/arch-dotfiles}/configs/secrets"
 
 command -v sops >/dev/null || { echo "ERROR: sops not installed."; exit 1; }
 [ -f "$SECRETS" ] || { echo "ERROR: $SECRETS missing. Run src/scripts/init.sh first."; exit 1; }
@@ -78,7 +85,9 @@ else
   removed=()
 fi
 for k in "${added[@]}"; do
-  if printf '%s\n' "${GENERATED[@]}" | grep -qx "$k"; then
+  if printf '%s\n' "${NTFY_TOKENS[@]}" | grep -qx "$k"; then
+    v="tk_$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c29)"; echo "add     $k (generated)"
+  elif printf '%s\n' "${GENERATED[@]}" | grep -qx "$k"; then
     v=$(openssl rand -hex 24); echo "add     $k (generated)"
   else
     v=""; echo "add     $k (empty, fill with: sops src/secrets.json)"
@@ -86,7 +95,24 @@ for k in "${added[@]}"; do
   jq --arg k "$k" --arg v "$v" '.[$k] = $v' "$OUT" > "$OUT.t" && mv "$OUT.t" "$OUT"
 done
 
-if [ "${#added[@]}" -eq 0 ] && [ "${#removed[@]}" -eq 0 ]; then
+# keep the dotfiles copy equal to the lab's; a locked worktree holds ciphertext, so leave it alone then
+mirrored=0
+want=$(jq -r '.["ntfy-desktop-token"] // empty' "$OUT")
+if [ -n "$want" ] && [ "$(cat "$DOTFILES_SECRETS/ntfy-desktop-token" 2>/dev/null)" != "$want" ]; then
+  if ! grep -qs '^AGE-SECRET-KEY-' "$DOTFILES_SECRETS/age.txt"; then
+    echo "skip    dotfiles ntfy-desktop-token (dotfiles secrets locked)"
+  elif [ "$APPLY" -eq 1 ]; then
+    (umask 077; printf '%s\n' "$want" > "$DOTFILES_SECRETS/ntfy-desktop-token")
+    echo "mirror  ntfy-desktop-token -> dotfiles secrets (commit it with the dotfiles sync.sh)"
+    mirrored=1
+  else
+    echo "mirror  ntfy-desktop-token -> dotfiles secrets"
+    mirrored=1
+  fi
+fi
+unset want
+
+if [ "${#added[@]}" -eq 0 ] && [ "${#removed[@]}" -eq 0 ] && [ "$mirrored" -eq 0 ]; then
   echo "secrets.json already matches the configs."
   exit 0
 fi
@@ -94,6 +120,11 @@ fi
 if [ "$APPLY" -eq 0 ]; then
   echo
   echo "dry run. Re-run with --apply to write and re-encrypt (add --prune to delete unused keys)."
+  exit 0
+fi
+
+# only the dotfiles copy changed, secrets.json stays as it is
+if [ "${#added[@]}" -eq 0 ] && [ "${#removed[@]}" -eq 0 ]; then
   exit 0
 fi
 
