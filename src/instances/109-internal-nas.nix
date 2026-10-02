@@ -213,6 +213,8 @@ in {
     "d /srv/nas/bulk/media/anime 0775 1000 1000 -"
     "d /srv/nas/bulk/media/leaving-soon 0775 1000 1000 -"
     "d /srv/nas/BACKUPS 0700 root root -"
+    # terraform state, pushed by sync.sh; it holds secrets, so neither smb nor filebrowser may read it
+    "d /srv/nas/terraform 0700 root root -"
     # read-only root: documents go into inbox/, archive/ is the paperless view
     "d /srv/nas/documents 0755 nobody nogroup -"
     # paperless (uid 315) consumes and deletes what smb drops here as nobody
