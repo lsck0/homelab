@@ -117,8 +117,8 @@ in {
         workgroup = "WORKGROUP";
         "server string" = "vm-109-nas";
         "map to guest" = "Bad User";
-        # guest shares: owner pc, wireguard and tailnet only
-        "hosts allow" = "${site.lan.workstation} 10.0.0.0/24 100.64.0.0/10 127.0.0.1";
+        # guest shares: owner pc and notebook (dhcp-reserved in the fritzbox), wireguard and tailnet only
+        "hosts allow" = "${site.lan.workstation} ${site.lan.notebook} 10.0.0.0/24 100.64.0.0/10 127.0.0.1";
         "hosts deny" = "0.0.0.0/0";
       };
       public = {

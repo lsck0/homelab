@@ -7,7 +7,9 @@
     "proxmox": "192.168.178.200",
     "workstation": "192.168.178.138",
     "inverter": "192.168.178.46",
-    "workstationMac": "10:ff:e0:e4:04:4a"
+    "workstationMac": "10:ff:e0:e4:04:4a",
+    "notebook": "192.168.178.73",
+    "notebookMac": "38:ba:f8:5a:51:40"
   },
   "gpu": {
     "id": "10de:1f08",
