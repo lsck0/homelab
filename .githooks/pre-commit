@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# sync.sh points core.hooksPath here; a manual commit gets the same check as an automatic one
+exec "$(git rev-parse --show-toplevel)/src/scripts/secrets-check.sh"

@@ -33,6 +33,29 @@ let
   # proof-of-work leading zero bits, higher costs every client more cpu
   anubisDifficulty = 4;
 
+  # authelia's answer to forwardauth; a client sending its own must never reach an app that trusts them
+  identityHeaders = [ "Remote-User" "Remote-Groups" "Remote-Email" "Remote-Name" ];
+  # what forwardauth and apps read as the request's target; dropped on every traefik, whoever sent them. A trusted
+  # X-Forwarded-Host once let a client name auth.lsck0.dev, hit its bypass rule and reach any gated app.
+  # X-Forwarded-For/-Proto and X-Real-Ip stay: the entrypoint keeps them only from trustedProxies and cloudflare.
+  forwardedTargetHeaders = [
+    "X-Forwarded-Host" "X-Forwarded-Uri" "X-Forwarded-Method" "X-Forwarded-Port" "X-Forwarded-Prefix" "X-Forwarded-Server"
+  ];
+
+  stripClientHeadersMiddleware = {
+    strip-client-headers.headers.customRequestHeaders = lib.genAttrs (identityHeaders ++ forwardedTargetHeaders) (_: "");
+  };
+
+  autheliaMiddleware = lib.optionalAttrs (cfg.authelia.address != null) {
+    authelia.forwardAuth = {
+      inherit (cfg.authelia) address;
+      # safe since the strip above: with no target header left, traefik sends the host and uri it routed, and
+      # trusting the rest passes authelia the real client ip from the X-Forwarded-For chain, for its logs and bans
+      trustForwardHeader = true;
+      authResponseHeaders = identityHeaders;
+    };
+  };
+
   # header hardening on every websecure route
   baseSecureHeaders = {
     stsSeconds = 31536000;
@@ -48,6 +71,8 @@ let
     # for apps that frame themselves
     secure-headers-sameorigin.headers =
       baseSecureHeaders // { customFrameOptionsValue = "SAMEORIGIN"; };
+    # the url is the content: a search engine's query must not ride along to the next page
+    secure-headers-noreferrer.headers = baseSecureHeaders // { frameDeny = true; referrerPolicy = "no-referrer"; };
   };
 
   # per-source-ip dos limits
@@ -81,17 +106,19 @@ let
       attempts = 4;
       initialInterval = "500ms";
     };
+    # answers 403 to everyone: paths a route must never serve, like an app's own metrics
+    deny-all.ipAllowList.sourceRange = [ "255.255.255.255/32" ];
   } // lib.optionalAttrs cfg.cloudflareOnly.enable {
     # proxying only protects if the origin refuses others
     cloudflare-only.ipAllowList.sourceRange = cloudflareRanges ++ privateRanges;
-  } // lib.optionalAttrs (cfg.bodyLimit > 0) {
-    body-limit.buffering = {
-      maxRequestBodyBytes = cfg.bodyLimit;
+  } // lib.listToAttrs (map (bytes: lib.nameValuePair "body-limit-${toString bytes}" {
+    buffering = {
+      maxRequestBodyBytes = bytes;
       # spill to disk past 1 mib
       memRequestBodyBytes = 1048576;
       maxResponseBodyBytes = 0;
     };
-  };
+  }) (lib.unique (lib.attrValues cfg.bodyLimits)));
 
   # user agents served the labyrinth
   labyrinthUserAgents = [
@@ -110,7 +137,25 @@ let
     "PetalBot" "Barkrowler" "SeekportBot" "Awario" "peer39_crawler"
   ];
 
-  mkBouncer = appsec: {
+  appsecPort = 7422;
+  # a second appsec listener that adds the owasp core rule set, for the routers in crsRouters
+  appsecCrsPort = 7423;
+  crs = cfg.crowdsecBouncer.appsec && cfg.crowdsecBouncer.crsRouters != [ ];
+
+  # the hub's blocking crs, minus its anomaly verdict (949110) on anubis' own challenge endpoints, which
+  # trip it with their proof-of-work payload; webapp-template's modsecurity carried the same exclusion
+  crsConfig = pkgs.writeText "homelab-crs.yaml" ''
+    name: homelab/crs-inband
+    default_remediation: ban
+    inband_rules:
+     - crowdsecurity/crs
+    pre_eval:
+     - filter: IsInBand == true && req.URL.Path startsWith "/.within.website/"
+       apply:
+        - RemoveInBandRuleByID(949110)
+  '';
+
+  mkBouncer = appsec: appsecHostPort: {
     plugin.crowdsec-bouncer = {
       enabled = true;
       crowdsecMode = "live";
@@ -118,7 +163,7 @@ let
       crowdsecLapiHost = "127.0.0.1:8180";
       crowdsecLapiKeyFile = config.sops.secrets.crowdsec-bouncer-key.path;
       crowdsecAppsecEnabled = appsec;
-      crowdsecAppsecHost = "127.0.0.1:7422";
+      crowdsecAppsecHost = "127.0.0.1:${toString appsecHostPort}";
       # so the plugin bans the real client ip
       forwardedHeadersTrustedIPs = privateNetworks ++ lib.optionals cfg.trustCloudflare cloudflareRanges;
     };
@@ -126,9 +171,11 @@ let
 
   # default bouncer plus an ip-rep-only noappsec variant
   bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable ({
-    crowdsec = mkBouncer cfg.crowdsecBouncer.appsec;
+    crowdsec = mkBouncer cfg.crowdsecBouncer.appsec appsecPort;
   } // lib.optionalAttrs cfg.crowdsecBouncer.appsec {
-    crowdsec-noappsec = mkBouncer false;
+    crowdsec-noappsec = mkBouncer false appsecPort;
+  } // lib.optionalAttrs crs {
+    crowdsec-crs = mkBouncer true appsecCrsPort;
   });
 
   # -- bot defence: robots.txt / llms.txt and the labyrinth --------------------
@@ -191,7 +238,9 @@ let
     words = "${wordList}"
   '';
 
-  labyrinthRule = "HeaderRegexp(`User-Agent`, `(?i).*(${lib.concatStringsSep "|" labyrinthUserAgents}).*`)";
+  labyrinthRule = "HeaderRegexp(`User-Agent`, `(?i).*(${lib.concatStringsSep "|" labyrinthUserAgents}).*`)"
+    # cloudflare workers fetch on someone else's behalf; no visitor arrives through one
+    + " || HeaderRegexp(`Cf-Worker`, `.+`)";
 
   honeypotRule = lib.concatMapStringsSep " || " (p: "Path(`${p}`)") honeypotPaths;
 
@@ -223,9 +272,10 @@ let
     labyrinth.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString iocainePort}"; }];
   };
 
-  # prepended to every websecure router
+  # prepended to every websecure router; the strip runs before a router's own authelia sets the identity
   defaultMiddlewares =
-    lib.optional cfg.crowdsecBouncer.enable "crowdsec"
+    [ "strip-client-headers" ]
+    ++ lib.optional cfg.crowdsecBouncer.enable "crowdsec"
     ++ [ "rate-limit" "inflight-limit" "retry-upstream" "secure-headers" ];
 
   # default websecure certResolver to cloudflare
@@ -239,15 +289,19 @@ let
           router // { tls = (router.tls or {}) // { certResolver = "cloudflare"; }; }
         else
           router;
-      # noappsec routes swap in the waf-free bouncer
       sameOriginFrames = builtins.elem name cfg.sameOriginFrameRouters;
+      crsSwap = m: if crs && m == "crowdsec" && builtins.elem name cfg.crowdsecBouncer.crsRouters then "crowdsec-crs" else m;
+      noReferrer = builtins.elem name cfg.noReferrerRouters;
       frameSwap = m:
-        if sameOriginFrames && m == "secure-headers" then "secure-headers-sameorigin" else m;
+        if sameOriginFrames && m == "secure-headers" then "secure-headers-sameorigin"
+        else if noReferrer && m == "secure-headers" then "secure-headers-noreferrer"
+        else m;
       cloudflareOnly = cfg.cloudflareOnly.enable && !(builtins.elem name cfg.cloudflareOnly.exemptRouters);
       # only cloudflare and private sources pass cloudflare-only, so key by the client cloudflare saw
       limitSwap = m:
         if cloudflareOnly && (m == "rate-limit" || m == "inflight-limit") then "${m}-cloudflare" else m;
-      chain = map (m: limitSwap (frameSwap m)) (
+      # noappsec routes swap in the waf-free bouncer, crs routers the one with the core rule set
+      chain = map (m: crsSwap (limitSwap (frameSwap m))) (
         (if cfg.crowdsecBouncer.enable
             && cfg.crowdsecBouncer.appsec
             && (builtins.elem name cfg.crowdsecBouncer.noAppsecRouters
@@ -255,7 +309,7 @@ let
                 || name == "honeypot-tls")
          then map (m: if m == "crowdsec" then "crowdsec-noappsec" else m) defaultMiddlewares
          else defaultMiddlewares)
-        ++ lib.optional (cfg.bodyLimit > 0 && builtins.elem name cfg.bodyLimitRouters) "body-limit"
+        ++ lib.optional (cfg.bodyLimits ? ${name}) "body-limit-${toString cfg.bodyLimits.${name}}"
         ++ lib.optional cloudflareOnly "cloudflare-only");
     in
     if needsTls then
@@ -300,6 +354,12 @@ in {
       '';
     };
 
+    noReferrerRouters = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "Routers whose pages send no Referer at all, for apps whose urls carry private input.";
+    };
+
     middlewares = lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
       default = {};
@@ -330,23 +390,17 @@ in {
       };
     };
 
-    bodyLimit = lib.mkOption {
-      type = lib.types.int;
-      default = 0;
+    bodyLimits = lib.mkOption {
+      type = lib.types.attrsOf lib.types.ints.positive;
+      default = { };
+      example = { searxng-tls = 33554432; };
       description = ''
-        Maximum request body in bytes for the routers listed in
-        bodyLimitRouters. 0 disables the middleware entirely.
+        Router name to its maximum request body in bytes.
 
         Traefik can only enforce a body cap by buffering the request, which
         would stall large uploads, so this is never in the default chain: name
         the routes that should carry it.
       '';
-    };
-
-    bodyLimitRouters = lib.mkOption {
-      type = lib.types.listOf lib.types.str;
-      default = [];
-      description = "Router names that get the body-limit middleware.";
     };
 
     botDefense = {
@@ -365,6 +419,15 @@ in {
       appsec = lib.mkEnableOption ''
         the CrowdSec AppSec (WAF) component: inline request inspection with
         OWASP-CRS-compatible rules, in addition to IP reputation blocking'';
+
+      crsRouters = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [ ];
+        description = ''
+          Router names whose AppSec inspection adds the OWASP Core Rule Set in blocking mode, on a listener of its
+          own: the CRS misreads plenty of ordinary app traffic, so it applies only where an app was built for it.
+        '';
+      };
 
       noAppsecRouters = lib.mkOption {
         type = lib.types.listOf lib.types.str;
@@ -413,6 +476,16 @@ in {
       };
     };
 
+    authelia.address = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "http://10.100.0.101:9091/api/authz/forward-auth";
+      description = ''
+        Authelia's forward-auth endpoint. Set, it defines the `authelia` middleware for routers to list. It
+        never trusts a client's X-Forwarded-* and hands only Authelia's own Remote-* headers to the app.
+      '';
+    };
+
     trustedProxies = lib.mkOption {
       type = lib.types.listOf lib.types.str;
       default = [ ];
@@ -451,11 +524,13 @@ in {
       ++ lib.optional cfg.crowdsecBouncer.appsec
         "/var/lib/crowdsec/acquis-appsec.yaml:/etc/crowdsec/acquis.d/appsec.yaml:ro";
       ports = [ "127.0.0.1:8180:8080" ]
-        ++ lib.optional cfg.crowdsecBouncer.appsec "127.0.0.1:7422:7422";
+        ++ lib.optional cfg.crowdsecBouncer.appsec "127.0.0.1:${toString appsecPort}:${toString appsecPort}"
+        ++ lib.optional crs "127.0.0.1:${toString appsecCrsPort}:${toString appsecCrsPort}";
       environment = {
         COLLECTIONS = "crowdsecurity/traefik crowdsecurity/http-cve"
           + lib.optionalString cfg.crowdsecBouncer.appsec
-            " crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules";
+            " crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules"
+          + lib.optionalString crs " crowdsecurity/appsec-crs-inband";
       };
     };
 
@@ -519,8 +594,12 @@ in {
       requiredBy = [ "podman-crowdsec.service" ];
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script = ''
-        ${pkgs.coreutils}/bin/printf 'source: appsec\nlisten_addr: 0.0.0.0:7422\nappsec_config: crowdsecurity/appsec-default\nlabels:\n  type: appsec\n' \
+        ${pkgs.coreutils}/bin/printf 'source: appsec\nlisten_addr: 0.0.0.0:${toString appsecPort}\nappsec_config: crowdsecurity/appsec-default\nlabels:\n  type: appsec\n' \
           > /var/lib/crowdsec/acquis-appsec.yaml
+        ${lib.optionalString crs ''
+          ${pkgs.coreutils}/bin/printf -- '---\nsource: appsec\nname: appsec-crs\nlisten_addr: 0.0.0.0:${toString appsecCrsPort}\nappsec_configs:\n  - crowdsecurity/appsec-default\n  - homelab/crs-inband\nlabels:\n  type: appsec\n' \
+            >> /var/lib/crowdsec/acquis-appsec.yaml
+        ''}
       '';
     };
 
@@ -539,6 +618,10 @@ in {
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
       script = ''
         ${pkgs.coreutils}/bin/mkdir -p /var/lib/crowdsec/config/acquis.d /var/lib/crowdsec/data
+        ${lib.optionalString crs ''
+          ${pkgs.coreutils}/bin/mkdir -p /var/lib/crowdsec/config/appsec-configs
+          ${pkgs.coreutils}/bin/install -m 0644 ${crsConfig} /var/lib/crowdsec/config/appsec-configs/homelab-crs.yaml
+        ''}
         # printf, not heredoc: nix de-indent breaks yaml
         ${pkgs.coreutils}/bin/printf 'source: file\nfilenames:\n  - /var/log/traefik/access.log\nlabels:\n  type: traefik\n' \
           > /var/lib/crowdsec/config/acquis.d/traefik.yaml
@@ -629,7 +712,8 @@ in {
         http = {
           routers = routersWithTls;
           services = cfg.services // botDefenseServices;
-          middlewares = cfg.middlewares // secureHeadersMiddleware // limitMiddlewares // bouncerMiddleware;
+          middlewares = cfg.middlewares // secureHeadersMiddleware // limitMiddlewares // bouncerMiddleware
+            // stripClientHeadersMiddleware // autheliaMiddleware;
         }
           // lib.optionalAttrs (cfg.serversTransports != {}) { serversTransports = cfg.serversTransports; };
       } // lib.optionalAttrs (cfg.tcp != {}) { tcp = cfg.tcp; };

@@ -112,6 +112,9 @@ RESOLVE_ROUNDS_MAX=16
 # names per aur rpc request
 RPC_BATCH=100
 CACHE_KEEP_DAYS=30
+# idle days before a crate's cargo target or a go build cache entry goes: these only speed up the next build of
+# the same package, an expired one costs one cold compile, and kept forever they grow without bound on the 98 GiB disk
+BUILD_CACHE_KEEP_DAYS=14
 # part of every rebuild key: bump it when repack changes what a published package contains
 REPACK_VERSION=3
 # the arch-dotfiles files the list, the local recipes and the packager name come from
@@ -902,7 +905,18 @@ outbox_write() {
 }
 
 clean_caches() {
+  local target recent
   find "$CACHE/pacman" "$CACHE/src" -maxdepth 2 -type f -mtime +"$CACHE_KEEP_DAYS" -delete
+  # one target dir per crate, never trimmed by cargo: drop it whole once nothing in it was written for a while.
+  # a find that fails prints nothing too, so only its success with no output means idle
+  for target in "$CACHE/cargo-target"/*/; do
+    if recent=$(find "$target" -mtime -"$BUILD_CACHE_KEEP_DAYS" -print -quit) && [ -z "$recent" ]; then
+      rm -rf "$target"
+    fi
+  done
+  # go trims its build cache by mtime itself, but only while some go build runs; go/mod and cargo/ are fetched
+  # sources, kept so a rebuild does not download them again
+  [ ! -d "$CACHE/go/build" ] || find "$CACHE/go/build" -type f -mtime +"$BUILD_CACHE_KEEP_DAYS" -delete
 }
 
 # -----------------------------------------------------------------------------

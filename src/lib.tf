@@ -63,29 +63,21 @@ locals {
       boot_order  = index(local.boot_phases, i.boot_phase) + 1
       boot_wait   = local.boot_phase_last[i.boot_phase] == tonumber(id) ? local.boot_phase_wait : 0
 
-      bridge        = i.type == "router" ? var.wan_bridge : i.type == "external" ? var.external_bridge : var.internal_bridge
-      extra_bridges = i.type == "router" ? [var.internal_bridge, var.external_bridge] : []
+      bridge        = i.type == "router" ? var.wan_bridge : var.zones[i.type].bridge
+      extra_bridges = i.type == "router" ? [for z in var.router_zones : var.zones[z].bridge] : []
 
-      ip = (
-        i.type == "router" ? local.site.lan.router :
-        i.type == "external" ? cidrhost(var.external_subnet, tonumber(id)) :
-        cidrhost(var.internal_subnet, tonumber(id))
-      )
-      prefix = (
-        i.type == "router" ? split("/", local.site.lan.subnet)[1] :
-        i.type == "external" ? split("/", var.external_subnet)[1] :
-        split("/", var.internal_subnet)[1]
-      )
-      gateway = (
-        i.type == "router" ? local.site.lan.gateway :
-        i.type == "external" ? var.router_external_ip :
-        var.router_internal_ip
-      )
+      ip      = i.type == "router" ? local.site.lan.router : cidrhost(var.zones[i.type].subnet, tonumber(id))
+      prefix  = i.type == "router" ? split("/", local.site.lan.subnet)[1] : split("/", var.zones[i.type].subnet)[1]
+      gateway = i.type == "router" ? local.site.lan.gateway : var.zones[i.type].router_ip
     }
   }
 }
 
 check "instance_fields" {
+  assert {
+    condition     = alltrue([for id, i in local.instances : i.type == "router" || contains(keys(var.zones), i.type)])
+    error_message = "type must be \"router\" or a zone: ${join(", ", keys(var.zones))}."
+  }
   assert {
     condition     = alltrue([for id, v in local.vms : contains(["true", "false", "onDemand"], v.enabled)])
     error_message = "enabled must be true, false or \"onDemand\"."

@@ -94,23 +94,22 @@ locals {
       machine    = "q35",
     }
 
-    "115" = { # git forge (OIDC + SSH) and its CI runner
+    "115" = { # git forge (OIDC + SSH); its ci runner lives on 117
       boot_phase = "dev",
       enabled    = true,
       name       = "115-internal-forgejo",
       type       = "internal",
       memory     = 2048,
-      # runner job images
+      # sized when the runner's job images lived here too; terraform cannot shrink a disk
       disk = 24,
     }
-    "117" = { # ci runners for github repos (ephemeral)
+    "117" = { # ci runners for github and forgejo, rootless: a job owns the ci user, never the vm
       boot_phase = "dev",
-      # token is the gh cli's gho_ token
-      # ci off for now
-      enabled = false,
+      # always on: the app stacks build and push from here
+      enabled = true,
       name    = "117-internal-github-runner",
       type    = "internal",
-      # four .net listeners plus docker
+      # five .net listeners, the forgejo runner and the ci user's docker; jobs are capped below this
       memory  = 4096,
       balloon = 2048,
       cores   = 4,
@@ -153,10 +152,10 @@ locals {
       boot_phase = "apps",
       enabled    = "onDemand",
       # the 05:00 wake runs the bank import (a missed persistent timer) before it sleeps again
-      cooldown   = "1h",
-      name       = "124-internal-firefly",
-      type       = "internal",
-      memory     = 1024,
+      cooldown = "1h",
+      name     = "124-internal-firefly",
+      type     = "internal",
+      memory   = 1024,
     }
 
     "125" = { # home automation hub
@@ -257,6 +256,7 @@ locals {
     "204" = { # privacy metasearch
       boot_phase = "public",
       enabled    = "onDemand",
+      cooldown   = "1h",
       kind       = "lxc",
       name       = "204-external-searxng",
       type       = "external",
@@ -289,14 +289,50 @@ locals {
       cores   = 4,
       disk    = 16,
     }
-    "209" = { # app host: Docker Swarm stacks deployed by CI (Forgejo + GitHub)
+    "209" = { # retired: hello runs on the apps swarm (150+) now; delete once the cluster serves it
       boot_phase = "public",
-      enabled    = "onDemand",
+      enabled    = false,
       kind       = "lxc",
       name       = "209-external-hello",
       type       = "external",
       # dockerd needs keyctl; dmz, so never privileged
       features = "nesting=1,keyctl=1",
+    }
+    # the apps zone: the workers of the swarm vm-140 manages, apps given as a github repo and a branch
+    # (modules/apps.nix); add a vm here to grow the cluster
+    "140" = { # docker swarm manager for the apps zone: control plane only, its workers are 150+
+      boot_phase = "dev",
+      name       = "140-internal-swarm",
+      type       = "internal",
+      # raft, the scheduler and the deploys; it runs no app containers
+      memory = 1024,
+      disk   = 16,
+    }
+    "150" = {
+      boot_phase = "public",
+      name       = "150-apps-swarm",
+      type       = "apps",
+      # dockerd, the swarm and a share of the stacks; the host has ~7 GiB free, ballooning shares the rest
+      memory = 2560,
+      cores  = 2,
+      # images of every stack plus the volumes placed here
+      disk = 64,
+    }
+    "151" = {
+      boot_phase = "public",
+      name       = "151-apps-swarm",
+      type       = "apps",
+      memory     = 2560,
+      cores      = 2,
+      disk       = 64,
+    }
+    "152" = {
+      boot_phase = "public",
+      name       = "152-apps-swarm",
+      type       = "apps",
+      memory     = 2560,
+      cores      = 2,
+      disk       = 64,
     }
     "210" = { # public lsck0 pacman mirror; vm (nfs is internal, dmz gets an ssh push instead)
       boot_phase = "dev",

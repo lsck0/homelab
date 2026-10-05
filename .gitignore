@@ -23,8 +23,9 @@ images/
 *.sock
 *.tfvars.json
 
-# terraform's state and its backups (one per apply and per `state mv`): regenerated locally, never worth a commit
+# terraform's state: the nas holds it (/srv/nas/terraform), sync.sh pulls this working copy; it holds secrets
 terraform.tfstate
+# terraform's own backups, one per apply and per `state mv`
 terraform.tfstate.backup
 *.tfstate.*.backup
 

@@ -1,6 +1,6 @@
 { config, lib, pkgs, inventory, nasMount, retry, site, ... }:
 let
-  routes = let r = import ../modules/routes.nix; in r.internal // r.external;
+  routes = let c = import ../modules/catalog.nix { inherit inventory lib; }; in c.internal // c.external;
 
   ipOf = route: let r = routes.${route}; in "http://${inventory.${toString r.vmid}.ip}:${toString r.port}";
   key = name: "{{HOMEPAGE_VAR_${name}}}";
@@ -65,7 +65,8 @@ let
     ]; }
   ];
 
-  stateOf = e: inventory.${toString routes.${e.route}.vmid}.enabled or "false";
+  # a swarm app is up while the cluster is; its route names no vm
+  stateOf = e: let r = routes.${e.route}; in if r ? vmid then inventory.${toString r.vmid}.enabled or "false" else "true";
 
   # every service listed, whatever its vm state
   stateSuffix = state:
@@ -80,7 +81,7 @@ let
     "        icon: ${e.icon}"
     "        href: https://${r.host}.lsck0.dev"
   ] + lib.optionalString (stateOf e != "false")
-      "        siteMonitor: http://${inventory.${toString r.vmid}.ip}:${toString r.port}${r.health or ""}\n"
+      "        siteMonitor: http://${if r ? vmid then inventory.${toString r.vmid}.ip else lib.head r.nodes}:${toString r.port}${if (r.health or null) == null then "" else r.health}\n"
     + lib.optionalString (desc != "") "        description: ${desc}\n"
     + lib.optionalString (e ? widget) "        widget: ${builtins.toJSON e.widget}\n";
   groupYaml = g: "- ${g.name}:\n" + lib.concatMapStrings entryYaml g.entries;
@@ -194,17 +195,22 @@ let
 in {
   networking.hostName = "vm-103";
 
+  # the widgets' api keys, read as HOMEPAGE_VAR_<NAME>
+  homelab.tokens.reads = [
+    "qbittorrent-user" "qbittorrent-pass" "forgejo-key" "hass-key" "paperless-key" "jellyfin-key" "jellyseerr-key"
+    "radarr-key" "sonarr-key" "bazarr-key" "lidarr-key" "prowlarr-key"
+  ];
+
   sops.secrets."proxmox-user" = {};
   sops.secrets."proxmox-pass" = {};
 
-  fileSystems = nasMount "/var/lib/homepage" "homepage"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+  fileSystems = nasMount "/var/lib/homepage" "homepage";
 
   # env file from nas tokens before start
   systemd.services.homepage-config = {
     description = "Sync Homepage config and collect API tokens";
     # an lxc mounts nfs at boot, not on access: never write under the mountpoint
-    unitConfig.RequiresMountsFor = [ "/var/lib/homepage" "/var/lib/homepage-tokens" ];
+    unitConfig.RequiresMountsFor = [ "/var/lib/homepage" ] ++ config.homelab.tokens.mountPoints;
     before = [ "podman-homepage.service" ];
     requiredBy = [ "podman-homepage.service" ];
     serviceConfig.Type = "oneshot";
@@ -222,7 +228,7 @@ in {
       # podman reads it on the host, so the keys stay off the share
       umask 077
       : > ${envFile}
-      for f in /var/lib/homepage-tokens/*.token /var/lib/homepage-tokens/external/*.token; do
+      for f in ${config.homelab.tokens.dir}/*.token; do
         [ -f "$f" ] || continue
         name="$(basename "$f" .token)"
         varname="HOMEPAGE_VAR_$(echo "$name" | tr '[:lower:]-' '[:upper:]_')"

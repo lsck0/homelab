@@ -47,8 +47,7 @@ in {
 
   # documents stay plain files on the nas, the inbox is the smb documents share
   fileSystems = nasMount "/srv/paperless-media" "paperless/media"
-    // nasPath "/srv/paperless-consume" "documents/inbox"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+    // nasPath "/srv/paperless-consume" "documents/inbox";
 
   # db and index local, the nas keeps a nightly copy
   homelab.localState.paperless = {
@@ -114,7 +113,7 @@ in {
       print(Token.objects.get_or_create(user=bot)[0].key)
       " | tail -1)
       [ -n "$TOKEN" ] || { echo "no API token from paperless-manage"; exit 1; }
-      echo -n "$TOKEN" > /var/lib/homepage-tokens/paperless-key.token
+      echo -n "$TOKEN" > ${config.homelab.tokens.dir}/paperless-key.token
     '';
   };
 

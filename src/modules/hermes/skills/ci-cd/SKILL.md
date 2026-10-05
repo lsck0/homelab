@@ -1,67 +1,68 @@
 ---
 name: ci-cd
-description: Deploy apps: registry, Swarm stacks, rollouts, rollback.
-version: 1.0.0
+description: Deploy apps to the apps swarm: the app catalog, the builder, the swarm, the registry, rollouts and rollback.
+version: 2.0.0
 author: homelab
 license: MIT
 platforms: [linux]
 metadata:
   hermes:
     tags: [Homelab, CI, CD, Docker, Swarm]
-    related_skills: [homelab-ops, git-forgejo]
+    related_skills: [homelab-ops, git-forgejo, traefik-ingress]
 ---
 
-# CI/CD
+# CI/CD: the apps swarm
 
-Flow: push to Forgejo or GitHub -> CI builds an image -> pushes to a registry ->
-vm-209 (10.200.0.209, Docker Swarm) polls every minute and rolls out a new
-digest with start-first updates (no downtime; failed healthcheck = rollback).
+An app is a GitHub repo and a branch, listed in `src/modules/apps.nix`. Everything else is derived.
 
-- Forgejo -> `registry.lsck0.dev/<app>:latest` (internal registry vm-118).
-  Template: `example/.forgejo/workflows/hello.yml` in the homelab repo.
-- GitHub -> `ghcr.io/<owner>/<app>:latest`. Template: `example/.github/workflows/hello.yml`.
-- Any registry works; private images need credentials in `homelab.swarm.registries` (Nix).
+Flow on every push to that branch:
 
-Note: the GitHub path is a template only (`example/.github/workflows/hello.yml`); the
-`hello` stack runs the Forgejo demo (`registry.lsck0.dev/hello`).
+1. **Builder.** `app-builder` on vm-117 notices within a minute (`git ls-remote`, run as user `appbuild`).
+   It builds the images in the lab and pushes them to `registry.lsck0.dev/<app>/<service>:<commit>`.
+2. **Hand-off.** It sends the stack, pinned by digest, to the swarm manager vm-140 over ssh. The key is
+   restricted to one forced command, `swarm-apply <app>`.
+3. **Manager.** vm-140 adds the homelab:
+   - published ports
+   - secrets from sops
+   - encrypted overlay networks
+   - stateful services pinned to the state worker
+   - a policy check that refuses privileged settings, host paths, the docker socket and unpinned images
 
-## Runners
+   Then it deploys. New tasks start before old ones stop, and a failed healthcheck rolls back.
+4. **Serving.** The workers vm-150, 151 and 152 (apps zone, 10.150.0.0/24) serve the app. Public paths go
+   through the edge (vm-200: crowdsec, waf, anubis, rate limits, `<host>.lsck0.dev`). `internal` hosts go
+   through vm-100 behind authelia.
 
-- **Forgejo** vm-115: one runner beside Forgejo for `git.lsck0.dev`.
-- **GitHub** vm-117 (10.100.0.117): disabled (`enabled = false` in `src/instances.tf`), so no
-  GitHub runners exist now; the rest applies once it is enabled. Ephemeral runners, one systemd unit per
-  replica, registered straight to a repo. A job gets a fresh runner and a wiped
-  state directory, then the runner de-registers itself.
-  - which repos: the `repos` set at the top of
-    `src/instances/117-internal-github-runner.nix`, `<owner>/<repo> = <parallel
-    jobs>`. Adding or removing one is that line plus `./sync.sh` - draft the
-    snippet for the owner, this needs a deploy.
-  - target them with `runs-on: [self-hosted, nixos]`.
-  - state: `ssh 10.100.0.117 'systemctl list-units "github-runner-*"'`,
-    logs `journalctl -u github-runner-<owner>-<repo>-<n>`.
-  - registration uses the `github-runner-token` PAT; a unit stuck in
-    activating usually means that token lost `Administration: read and write`
-    on the repo.
+## Look
 
-## On vm-209
+- Builder: `ssh 10.100.0.117 'systemctl status app-builder; journalctl -u app-builder -n 100'`.
+  Last good commit per app: `/var/lib/app-builder/<app>.sha`. Metrics: `homelab_app_deploy_ok{app}`.
+- Swarm (manager only, workers hold no control):
+  - `ssh 10.100.0.140 'docker stack ls; docker service ls; docker node ls'`
+  - one app: `ssh 10.100.0.140 docker stack ps <app> --no-trunc`
+- Logs of a service: Loki `{host=~"vm-15.", swarm_service="<app>_<service>"}`, or
+  `ssh 10.100.0.140 docker service logs <app>_<service>`.
 
-- Stacks/services: `ssh 10.200.0.209 'docker stack ls; docker service ls'`
-- Rollout state: `docker service ps <stack>_web --no-trunc | head`
-- Logs: `docker service logs --tail 100 <stack>_web`
-- Force a pull + rollout now: `systemctl start swarm-update` (journal: `journalctl -u swarm-update -n 30`)
-- Roll back to the previous version: `docker service rollback <stack>_web`
-- Pin a specific build: `docker service update --image registry.lsck0.dev/<app>:<sha> <stack>_web`
-  (the next poll moves it back to `latest`; tell the owner to push a revert instead for a lasting pin).
+## Act
 
-## Adding a new app
+- **Redeploy the current commit:** on vm-117, remove `/var/lib/app-builder/<app>.sha`, then
+  `systemctl start app-builder`.
+- **Roll back to an older build:** `ssh 10.100.0.140 docker service update --image registry.lsck0.dev/<app>/<service>@<digest> <app>_<service>`.
+  The next push replaces it; for a lasting rollback, revert the commit on the branch.
+- **Scale a stateless service:** `docker service scale <app>_<service>=<n>` on vm-140. Stateful ones stay at 1.
+- **Never** run `docker stack rm` or `docker volume rm` without the owner: volumes hold app data.
 
-Needs Nix changes the owner deploys: a stack in `src/instances/209-external-hello.nix`
-(image, published port, healthcheck) and a route in `src/modules/routes.nix`
-(`external.<app> = { host; vmid = 209; port; }`). Draft both snippets for the owner.
+## Add an app (Nix change for the owner)
 
-## Registry (vm-118)
+Add an entry to `src/modules/apps.nix` with `repo`, `branch` and `paths` (unique published `port`s from 20100
+up), plus `enable = true`. Repos without a compose file need a root `Dockerfile`; a stack whose services only
+name images needs `build` hints. Secrets go in `env` as `{{name}}` with a `secrets` generator; the owner then
+runs `src/scripts/secrets-sync.sh --apply` and `./sync.sh`. Draft the entry; do not deploy it yourself.
 
-- Catalog: `curl -s http://10.100.0.118:5000/v2/_catalog`, tags `curl -s http://10.100.0.118:5000/v2/<app>/tags/list`.
-- Delete a tag: get digest with `curl -sI -H "Accept: application/vnd.docker.distribution.manifest.v2+json" http://10.100.0.118:5000/v2/<app>/manifests/<tag>`, then `curl -X DELETE http://10.100.0.118:5000/v2/<app>/manifests/<digest>`;
-  reclaim space: `ssh 10.100.0.118 podman exec registry bin/registry garbage-collect /etc/docker/registry/config.yml`.
+## Registry (vm-118, https://registry.lsck0.dev through vm-100)
+
+- Pulls: GET/HEAD from the swarm nodes only. Pushes: from vm-117 and the workstation, with user `ci` and the
+  sops secret `registry-push-password` (a repo secret `REGISTRY_PASSWORD` for CI workflows).
+- Catalog: `curl -s http://10.100.0.118:5000/v2/_catalog` (from vm-100 or the trusted hosts).
+- Retention: `registry-prune` keeps `latest` and the 10 newest tags per repository, nightly.
 - UI: https://registry-ui.lsck0.dev.

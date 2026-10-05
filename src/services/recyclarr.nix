@@ -1,7 +1,7 @@
-# recyclarr and arr-wire: no web ui, they configure and link the media stack; the token share comes from servarr
-{ lib, pkgs, ... }:
+# recyclarr and arr-wire: no web ui, they configure and link the media stack
+{ config, lib, pkgs, ... }:
 let
-  T = "/var/lib/homepage-tokens";
+  T = config.homelab.tokens.dir;
 
   # public indexers seeded into prowlarr on first run
   indexers = [
@@ -12,6 +12,7 @@ let
   arrWire = pkgs.writeShellScript "arr-wire" ''
     set -uo pipefail
     export PATH="${lib.makeBinPath [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.gnugrep ]}"
+    export TOKEN_DIR=${T}
     export INDEXERS=${lib.escapeShellArg (lib.concatStringsSep " " indexers)}
     ${builtins.readFile ../scripts/arr-wire.sh}
   '';
@@ -31,6 +32,9 @@ let
           type: series
   '';
 in {
+  # arr-wire links the arrs to jellyfin and the download client
+  homelab.tokens.reads = [ "jellyfin-key" "jellyfin-admin-pass" "qbittorrent-pass" ];
+
   systemd.services.arr-wire = {
     description = "Wire the media stack (*arr, qBittorrent, Prowlarr, Jellyseerr, Bazarr)";
     after = [ "network-online.target" "remote-fs.target" ];

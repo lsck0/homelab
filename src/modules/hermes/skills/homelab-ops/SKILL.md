@@ -23,8 +23,8 @@ working directory first: it has the VM inventory, IPs, hostnames and rules.
   talking to an on-demand VM (enabled = onDemand); it powers off again by
   itself after its cooldown.
 - `vm stop <id>` / `vm reboot <id>`.
-- `ssh <ip> <command>`: root on any VM (10.100.0.<id> internal,
-  10.200.0.<id> external). `ssh 192.168.178.200` is the Proxmox host (`qm`, `pvesh`).
+- `ssh <ip> <command>`: root on any VM (10.100.0.<id> internal, 10.200.0.<id> external,
+  10.150.0.<id> apps zone; `vm` resolves ids through the inventory). `ssh 192.168.178.200` is the Proxmox host (`qm`, `pvesh`).
 - `pve <METHOD> <path> [curl args]`, Proxmox API, e.g.
   `pve GET /nodes/luca-server/qemu/208/status/current` (containers: `/lxc/<id>`, see `vm list`).
 - `lab-token <name>`, API keys the VMs export: `radarr-key`, `sonarr-key`,

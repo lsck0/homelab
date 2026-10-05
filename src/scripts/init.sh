@@ -150,8 +150,7 @@ if [ ! -f "$SECRETS_FILE" ]; then
     jq -n \
       --arg wg "$(wg genkey 2>/dev/null || openssl rand -base64 32)" \
       --arg firefly "base64:$(openssl rand -base64 32)" \
-      '{"wireguard-private-key": $wg, "firefly-app-key": $firefly}' > "$SECRETS_FILE"
-    sops --encrypt --in-place "$SECRETS_FILE"
+      '{"wireguard-private-key": $wg, "firefly-app-key": $firefly}' | "$SCRIPT_DIR/sops-encrypt.sh" "$SECRETS_FILE"
 fi
 "$ROOT_DIR/src/scripts/secrets-sync.sh" --apply
 
@@ -202,9 +201,7 @@ jq -n \
       proxmox_ssh_user: $proxmox_ssh_user,
       proxmox_ssh_password: (if $proxmox_ssh_password == "" then null else $proxmox_ssh_password end),
       proxmox_insecure: true
-    }' > "$TFVARS_ENC_PATH"
-
-sops --encrypt --in-place "$TFVARS_ENC_PATH"
+    }' | "$SCRIPT_DIR/sops-encrypt.sh" "$TFVARS_ENC_PATH"
 rm -f "$ROOT_DIR/src/terraform.tfvars"
 
 echo ">>> Storing the Homepage and on-demand wake Proxmox API tokens in secrets..."

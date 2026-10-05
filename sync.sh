@@ -10,7 +10,7 @@ TFVARS_ENC_PATH="$ROOT_DIR/src/terraform.tfvars.sops.json"
 DOTFILES="${DOTFILES:-$HOME/projects/arch-dotfiles}"
 AGE_KEY="$ROOT_DIR/secrets/age.txt"
 [ -e "$AGE_KEY" ] || { mkdir -p "$ROOT_DIR/secrets"; ln -sfn "$DOTFILES/configs/secrets/age.txt" "$AGE_KEY"; }
-# locked, the file is ciphertext, and every vm would be handed it as its sops key
+# locked, the file is ciphertext and no secret decrypts
 if ! grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY"; then
   echo ">>> dotfiles secrets locked: touch the YubiKey"
   "$DOTFILES/scripts/yubikey.sh" unlock || true
@@ -40,6 +40,16 @@ REAPER_PAUSE_FILE=/run/ondemand-reaper-pause-until
 # outlives any sync, expires on its own if the trap never runs
 REAPER_PAUSE_SECONDS=14400
 REAPER_PAUSED=0
+# {"<instance>": "<its age key>"}, from secrets-hosts.sh: each host gets its own key, never the admin key
+HOST_KEYS_FILE=""
+# hermes runs this script itself (lab-deploy), so it holds the admin key: the owner gave it root everywhere
+DEPLOYER_HOSTS=(114-internal-hermes)
+DEPLOYER_KEY_PATH=/var/lib/hermes/age.txt
+DEPLOYER_KEY_OWNER=hermes
+# terraform's state lives on the nas, which kopia snapshots; src/terraform.tfstate is only the working copy
+NAS_IP=10.100.0.109
+STATE_LOCAL="$ROOT_DIR/src/terraform.tfstate"
+STATE_REMOTE=/srv/nas/terraform/terraform.tfstate
 cleanup() {
   [ "$REAPER_PAUSED" = 1 ] && reaper_resume
   [ "$CLEANUP_AGENT" = 1 ] && ssh-agent -k >/dev/null 2>&1
@@ -103,6 +113,80 @@ reaper_resume() {
   done
 }
 
+# "<lineage> <serial>" of a state file
+state_meta() { jq -r '"\(.lineage) \(.serial)"' "$1"; }
+
+# copies the nas state to $1; 1: nas unreachable, 2: no state on the nas yet
+state_fetch() {
+  local out
+  out=$(ssh -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@$NAS_IP" \
+    "if [ -f $STATE_REMOTE ]; then cat $STATE_REMOTE; else echo NO_STATE; fi") || return 1
+  [ "$out" = NO_STATE ] && return 2
+  printf '%s\n' "$out" > "$1"
+  jq empty "$1" 2>/dev/null || { echo "ERROR: $NAS_IP:$STATE_REMOTE is not valid JSON."; exit 1; }
+}
+
+# makes the local working copy current. A different lineage is never resolved automatically: a lost or
+# reset local file starts an empty state, and applying that recreates every guest
+state_pull() {
+  local remote rc=0 l_lin l_ser r_lin r_ser
+  remote=$(mktemp --suffix=.tfstate); CLEANUP_FILES+=("$remote")
+  state_fetch "$remote" || rc=$?
+  if [ "$rc" != 0 ]; then
+    [ "$rc" = 1 ] && echo "WARNING: nas $NAS_IP unreachable, terraform state not pulled."
+    [ -f "$STATE_LOCAL" ] && { echo ">>> Terraform state: using the local copy."; return 0; }
+    # first deploy: no nas, no state
+    [ "${TF_STATE_FRESH:-0}" = 1 ] && { echo ">>> Terraform state: starting empty (TF_STATE_FRESH=1)."; return 0; }
+    echo "ERROR: no terraform state, neither on the nas nor in $STATE_LOCAL."
+    echo "       First deploy of an empty lab: rerun with TF_STATE_FRESH=1."
+    exit 1
+  fi
+  read -r r_lin r_ser < <(state_meta "$remote")
+  if [ ! -f "$STATE_LOCAL" ]; then
+    cp "$remote" "$STATE_LOCAL"
+  else
+    read -r l_lin l_ser < <(state_meta "$STATE_LOCAL")
+    if [ "$l_lin" != "$r_lin" ]; then
+      echo "ERROR: terraform state lineage differs: nas $r_lin (serial $r_ser), local $l_lin (serial $l_ser)."
+      echo "       Keep the right one, delete the other, and rerun."
+      exit 1
+    fi
+    # a newer local copy is a push that failed last run
+    if [ "$l_ser" -gt "$r_ser" ]; then
+      echo ">>> Terraform state: local serial $l_ser is ahead of the nas ($r_ser), keeping it."
+      return 0
+    fi
+    cp "$remote" "$STATE_LOCAL"
+  fi
+  chmod 600 "$STATE_LOCAL"
+  echo ">>> Terraform state: pulled from the nas (serial $(state_meta "$STATE_LOCAL" | cut -d' ' -f2))."
+}
+
+# never fatal: the local copy stays ahead and the next run pushes it
+state_push() {
+  local remote rc=0 l_lin l_ser r_lin r_ser
+  [ -f "$STATE_LOCAL" ] || return 0
+  read -r l_lin l_ser < <(state_meta "$STATE_LOCAL")
+  remote=$(mktemp --suffix=.tfstate); CLEANUP_FILES+=("$remote")
+  state_fetch "$remote" || rc=$?
+  [ "$rc" = 1 ] && { echo "WARNING: nas $NAS_IP unreachable, terraform state not pushed; the next sync pushes it."; return 0; }
+  if [ "$rc" = 0 ]; then
+    read -r r_lin r_ser < <(state_meta "$remote")
+    if [ "$l_lin" != "$r_lin" ] || [ "$l_ser" -lt "$r_ser" ]; then
+      echo "WARNING: nas state ($r_lin, serial $r_ser) does not precede the local one ($l_lin, serial $l_ser): not pushed."
+      return 0
+    fi
+    [ "$l_ser" = "$r_ser" ] && return 0
+  fi
+  # the previous state stays next to it; kopia keeps the history
+  ssh -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@$NAS_IP" \
+    "umask 077 && mkdir -p ${STATE_REMOTE%/*} && cat > $STATE_REMOTE.new && sync $STATE_REMOTE.new \
+     && { [ ! -f $STATE_REMOTE ] || cp -p $STATE_REMOTE $STATE_REMOTE.prev; } && mv $STATE_REMOTE.new $STATE_REMOTE" \
+    < "$STATE_LOCAL" \
+    && echo ">>> Terraform state: pushed to the nas (serial $l_ser)." \
+    || echo "WARNING: terraform state push failed; the next sync pushes it."
+}
+
 # returns 1 if it had to start the vm
 vm_wake() {
   local st kind
@@ -134,9 +218,12 @@ deploy_nixos() {
     "readlink -f /run/current-system" 2>/dev/null || true)
   [ "$current" = "$toplevel" ] && { echo ">>> $name already up-to-date. Skipping."; return 0; }
 
-  ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-    "install -d -m 700 /var/lib/sops-nix && cat > /var/lib/sops-nix/key.txt && chmod 600 /var/lib/sops-nix/key.txt" \
-    < "$AGE_KEY" || return 1
+  local host_key
+  host_key=$(jq -r --arg n "$name" '.[$n] // empty' "$HOST_KEYS_FILE")
+  [ -n "$host_key" ] || { echo "ERROR: no age key for $name in src/host-keys.json"; return 1; }
+  printf '%s\n' "$host_key" | ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
+    "install -d -m 700 /var/lib/sops-nix && umask 077 && cat > /var/lib/sops-nix/key.txt.new \
+     && mv /var/lib/sops-nix/key.txt.new /var/lib/sops-nix/key.txt" || return 1
 
   # closures are local builds, no sigs
   nix copy --extra-experimental-features "nix-command flakes" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
@@ -160,6 +247,12 @@ deploy_nixos() {
     fi
   fi
   rm -f "$out"
+  # after the switch: the switch creates the user the key belongs to
+  if printf '%s\n' "${DEPLOYER_HOSTS[@]}" | grep -qx "$name"; then
+    ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
+      "umask 077 && cat > $DEPLOYER_KEY_PATH.new && chown $DEPLOYER_KEY_OWNER: $DEPLOYER_KEY_PATH.new \
+       && chmod 400 $DEPLOYER_KEY_PATH.new && mv $DEPLOYER_KEY_PATH.new $DEPLOYER_KEY_PATH" < "$AGE_KEY" || return 1
+  fi
   echo ">>> $name deployed."
 
   # a terraform disk bump grows the qcow live but not the guest partition; reboot so
@@ -345,13 +438,16 @@ fi
 
 # terraform
 [ -d "$ROOT_DIR/src/.terraform" ] || terraform -chdir="$ROOT_DIR/src" init
+state_pull
 # every run, with refresh: proxmox drift (a half-failed apply, a manual edit) is corrected, never trusted
 echo ">>> Terraform: applying..."
 for i in $(seq 1 5); do
   terraform -chdir="$ROOT_DIR/src" apply -auto-approve -parallelism=3 -var-file="$ACTIVE_TFVARS_PATH" && break
-  [ "$i" -eq 5 ] && { echo "ERROR: Terraform failed after 5 attempts."; exit 1; }
+  # a failed apply still writes the state
+  [ "$i" -eq 5 ] && { state_push; echo "ERROR: Terraform failed after 5 attempts."; exit 1; }
   echo "Retrying ($i/5)..."; sleep 5
 done
+state_push
 
 # nix inventory, evaluated from terraform
 INVENTORY="$ROOT_DIR/src/inventory.json"
@@ -401,6 +497,13 @@ fi
 
 # flakes only see git-tracked files
 git -C "$ROOT_DIR" add -A src
+# per-host secret files and keys, from the configs just staged; staged again so the build sees them
+HOST_KEYS_FILE=$(umask 077; mktemp --suffix=.host-keys.json); CLEANUP_FILES+=("$HOST_KEYS_FILE")
+"$ROOT_DIR/src/scripts/secrets-hosts.sh" --host-keys-out "$HOST_KEYS_FILE"
+git -C "$ROOT_DIR" add -A src .sops.yaml
+# the repo is public: stop before anything is built from, or committed with, a plaintext secret
+git -C "$ROOT_DIR" config core.hooksPath .githooks
+"$ROOT_DIR/src/scripts/secrets-check.sh"
 
 # one nix process for every closure: one per vm ran the workstation out of memory
 echo ">>> Building all VM closures..."
@@ -503,10 +606,11 @@ done
 
 for ip in $(jq -r '.[].ip' "$INVENTORY"); do lab_known_host "$ip" || true; done
 
-# commit + push, even on partial failure: src as staged for the build, plus the generated inventory
+# commit + push, even on partial failure: the whole tree, so a generation never pairs new configs with an old sync.sh
+# or hook; secrets-check refuses it if anything staged would publish a secret
 if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git -C "$ROOT_DIR" add -- src/inventory.json
-  if ! git -C "$ROOT_DIR" diff --cached --quiet; then
+  git -C "$ROOT_DIR" add -A
+  if ! git -C "$ROOT_DIR" diff --cached --quiet && "$ROOT_DIR/src/scripts/secrets-check.sh"; then
     # every commit is Generation: <n>, numbered by position
     next=$(( $(git -C "$ROOT_DIR" rev-list --count HEAD) + 1 ))
     echo ">>> Git: committing generation $next"

@@ -2,7 +2,7 @@
 let
   # the site's passthrough gpu (instances.tf maps it here); without one jellyfin and ollama use the cpu
   gpu = site.gpu != null;
-  T = "/var/lib/homepage-tokens";
+  T = config.homelab.tokens.dir;
 
   # janitorr: delete media unwatched this long
   unwatchedFor = "120d";
@@ -130,6 +130,9 @@ let
 in {
   networking.hostName = "vm-134";
 
+  # janitorr cleans up through the arrs and jellyseerr
+  homelab.tokens.reads = [ "radarr-key" "sonarr-key" "jellyseerr-key" ];
+
   # nvidia driver and cuda are unfree
   nixpkgs.config.allowUnfree = gpu;
   services.xserver.videoDrivers = lib.optional gpu "nvidia";
@@ -161,8 +164,7 @@ in {
   systemd.services.ollama.serviceConfig.MemoryMax = "2560M";
 
   fileSystems = nasMount "/var/lib/janitorr" "janitorr"
-    // nasPath "/data" "bulk"
-    // nasMount T "homepage-tokens";
+    // nasPath "/data" "bulk";
 
   # jellyfin db local, the nas keeps a nightly copy
   homelab.localState.jellyfin = {

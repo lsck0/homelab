@@ -27,6 +27,12 @@
         avg-size = 65536;
         max-size = 262144;
       };
+      # atticd keeps everything by default; a path unused for 30 days is a stale generation, and a miss costs one
+      # rebuild. caches with their own `attic cache configure --retention-period` keep theirs.
+      garbage-collection = {
+        interval = "12 hours";
+        default-retention-period = "30 days";
+      };
     };
   };
 

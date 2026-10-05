@@ -44,13 +44,25 @@ cat > /etc/apt/sources.list.d/pve-no-subscription.list <<EOF
 deb http://download.proxmox.com/debian/pve ${CODENAME} pve-no-subscription
 EOF
 
-# vmbr0 comes from the installer; vmbr100/200 are virtual
+# vmbr0 comes from the installer; vmbr100/150/200 are virtual
 
 if ! grep -q "auto vmbr100" /etc/network/interfaces; then
     cat <<EOF >> /etc/network/interfaces
 
 auto vmbr100
 iface vmbr100 inet manual
+    bridge-ports none
+    bridge-stp off
+    bridge-fd 0
+EOF
+fi
+
+# vmbr150 carries the apps zone (10.150.0.0/24, swarm app hosts), firewalled apart from internal and dmz by the router
+if ! grep -q "auto vmbr150" /etc/network/interfaces; then
+    cat <<EOF >> /etc/network/interfaces
+
+auto vmbr150
+iface vmbr150 inet manual
     bridge-ports none
     bridge-stp off
     bridge-fd 0
@@ -99,6 +111,13 @@ fi
 export DEBIAN_FRONTEND=noninteractive
 apt-get update >/dev/null
 apt-get install -y prometheus-node-exporter jq >/dev/null
+# textfile gauges (thin pools, ossec) land here; created up front, every collector writing it needs it
+TEXTFILE_DIR=/var/lib/node-exporter-textfile
+install -d -m 0755 "$TEXTFILE_DIR"
+if ! grep -q "$TEXTFILE_DIR" /etc/default/prometheus-node-exporter 2>/dev/null; then
+    echo "ARGS=\"--collector.textfile.directory=$TEXTFILE_DIR\"" > /etc/default/prometheus-node-exporter
+    systemctl restart prometheus-node-exporter
+fi
 systemctl enable --now prometheus-node-exporter >/dev/null 2>&1 || true
 
 # recreate an api token (pve shows its secret only once) and keep the secret for init.sh
@@ -190,6 +209,59 @@ if vgs bulk >/dev/null 2>&1 && ! pvesm status --storage bulk >/dev/null 2>&1; th
 fi
 
 # -----------------------------------------------------------------------------
+# THIN POOL METRICS
+# guests overprovision local-lvm (pve/data) and bulk/data; a full thin pool pauses every guest on it,
+# and node_exporter has no lvm collector, so lvs feeds textfile gauges that vm-105 alerts on
+cat > /usr/local/bin/thinpool-metrics <<'METRICS'
+#!/usr/bin/env bash
+# fill of every thin pool on this host, for node_exporter's textfile collector
+set -euo pipefail
+d=/var/lib/node-exporter-textfile
+# lvm localizes the decimal separator; prometheus wants a dot
+export LC_ALL=C
+pools=$(lvs --noheadings --nosuffix --units b --separator '|' --select 'segtype=thin-pool' \
+    -o vg_name,lv_name,lv_size,data_percent,metadata_percent)
+{
+  echo "# HELP homelab_thinpool_size_bytes Size of an LVM thin pool."
+  echo "# TYPE homelab_thinpool_size_bytes gauge"
+  echo "# HELP homelab_thinpool_data_percent Data space used in an LVM thin pool."
+  echo "# TYPE homelab_thinpool_data_percent gauge"
+  echo "# HELP homelab_thinpool_metadata_percent Metadata space used in an LVM thin pool."
+  echo "# TYPE homelab_thinpool_metadata_percent gauge"
+  while IFS='|' read -r vg lv size data meta; do
+    vg=${vg//[[:space:]]/}
+    [ -n "$vg" ] || continue
+    labels="vg=\"$vg\",lv=\"${lv//[[:space:]]/}\""
+    echo "homelab_thinpool_size_bytes{$labels} ${size//[[:space:]]/}"
+    echo "homelab_thinpool_data_percent{$labels} ${data//[[:space:]]/}"
+    echo "homelab_thinpool_metadata_percent{$labels} ${meta//[[:space:]]/}"
+  done <<<"$pools"
+} > "$d/thinpool.prom.tmp"
+mv "$d/thinpool.prom.tmp" "$d/thinpool.prom"
+METRICS
+chmod +x /usr/local/bin/thinpool-metrics
+cat > /etc/systemd/system/thinpool-metrics.service <<'UNIT'
+[Unit]
+Description=Publish LVM thin pool fill for node_exporter
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/thinpool-metrics
+UNIT
+cat > /etc/systemd/system/thinpool-metrics.timer <<'UNIT'
+[Unit]
+Description=Publish LVM thin pool fill every 5 minutes
+[Timer]
+OnBootSec=1m
+OnUnitActiveSec=5m
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now thinpool-metrics.timer
+# first sample now, not 5 minutes after a fresh install
+systemctl start thinpool-metrics.service
+
+# -----------------------------------------------------------------------------
 # OSSEC (host intrusion detection)
 OSSEC_VERSION=${OSSEC_VERSION:-3.8.0}
 if [ ! -d /var/ossec ]; then
@@ -246,12 +318,6 @@ fi
 
 # alerts reach grafana as a textfile gauge
 if [ -d /var/ossec ]; then
-    install -d -m 0755 /var/lib/node-exporter-textfile
-    if ! grep -q "node-exporter-textfile" /etc/default/prometheus-node-exporter 2>/dev/null; then
-        echo 'ARGS="--collector.textfile.directory=/var/lib/node-exporter-textfile"' \
-            > /etc/default/prometheus-node-exporter
-        systemctl restart prometheus-node-exporter
-    fi
     cat > /usr/local/bin/ossec-metrics <<'METRICS'
 #!/usr/bin/env bash
 # today's ossec alerts by severity (7+ notable, 10+ urgent)

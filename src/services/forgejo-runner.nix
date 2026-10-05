@@ -1,108 +1,94 @@
-# forgejo actions runner; the host mounts /var/lib/homepage-tokens
-{ config, pkgs, nasMount, retry, ... }:
+# forgejo actions runner, as the ci user: job containers run on ci's rootless docker (modules/rootless-docker.nix)
+{ config, lib, pkgs, retry, ... }:
 let
-  # the runner and its jobs reach the lab by internal addresses
-  addHosts = [
-    "--add-host=git.lsck0.dev:10.100.0.100"
-    "--add-host=registry.lsck0.dev:10.100.0.118"
-    "--add-host=sccache.lsck0.dev:10.100.0.110"
+  ci = config.homelab.rootlessDocker.ci;
+  ciUser = "ci";
+  package = pkgs.forgejo-runner;
+  stateDir = "/var/lib/forgejo-runner";
+  instance = "https://git.lsck0.dev";
+  name = "${config.networking.hostName}-runner";
+
+  # the job container image per label; changing them forces a re-registration
+  labels = [
+    "docker:docker://catthehacker/ubuntu:act-22.04"
+    "ubuntu-latest:docker://catthehacker/ubuntu:act-22.04"
+    "rust:docker://rust:1.80-bookworm"
   ];
-  # the vm has 2g and 2 cpus; forgejo keeps the rest
+  # job containers resolve the lab like the vm does
+  addHosts = lib.concatLists (lib.mapAttrsToList (ip: names:
+    map (h: "--add-host=${h}:${ip}") (lib.filter (lib.hasSuffix ".lsck0.dev") names)) config.networking.hosts);
+  # one job at a time on a shared vm
   jobLimits = [ "--memory=1536m" "--cpus=1.5" ];
-in {
-  fileSystems = nasMount "/var/lib/forgejo-runner" "forgejo-runner";
 
-  # job containers; the host sets virtualisation.oci-containers.backend = "docker"
-  virtualisation.docker.enable = true;
-  # job images pile up with every ci run
-  virtualisation.docker.autoPrune = { enable = true; dates = "weekly"; flags = [ "--all" "--filter" "until=168h" ]; };
-
-  virtualisation.oci-containers.containers.forgejo-runner = {
-    image = "code.forgejo.org/forgejo/runner:6.2.1";
-    cmd = [ "forgejo-runner" "daemon" "--config" "/data/config.yaml" ];
-    volumes = [
-      "/var/lib/forgejo-runner:/data"
-      "/var/run/docker.sock:/var/run/docker.sock"
-    ];
-    user = "root:root";
-    extraOptions = addHosts;
+  configFile = (pkgs.formats.yaml { }).generate "forgejo-runner.yaml" {
+    log.level = "info";
+    runner = {
+      file = "${stateDir}/.runner";
+      capacity = 1;
+      # jobs get the cache url with its password from here, never from a workflow
+      env_file = config.sops.templates."forgejo-runner.env".path;
+      timeout = "3h";
+      inherit labels;
+    };
+    cache = { enabled = true; dir = "${stateDir}/cache"; };
+    container = {
+      privileged = false;
+      options = lib.concatStringsSep " " (addHosts ++ jobLimits);
+      # mounts DOCKER_HOST, ci's rootless socket, into jobs that build images: root over ci's containers only
+      docker_host = "automount";
+      valid_volumes = [ ];
+    };
+    host.workdir_parent = "${stateDir}/work";
   };
+
+  register = pkgs.writeShellScript "forgejo-runner-register" ''
+    set -euo pipefail
+    labels_file=${stateDir}/.labels
+    wanted=${lib.escapeShellArg (lib.concatStringsSep "," labels)}
+    # a registration outlives restarts; changed labels or a forgotten runner re-register
+    if [ -s ${stateDir}/.runner ] && [ "$(cat "$labels_file" 2>/dev/null)" = "$wanted" ] \
+       && ${package}/bin/forgejo-runner ping --config ${configFile} --instance ${instance} >/dev/null 2>&1; then
+      exit 0
+    fi
+    rm -f ${stateDir}/.runner
+    token=${config.homelab.tokens.dir}/forgejo-runner.token
+    ${retry} 30 5 test -s "$token" || { echo "no registration token at $token: did vm-115's forgejo-runner-token run?"; exit 1; }
+    ${package}/bin/forgejo-runner register --no-interactive --config ${configFile} \
+      --instance ${instance} --token "$(cat "$token")" --name ${name} --labels "$wanted"
+    printf '%s' "$wanted" > "$labels_file"
+  '';
+in {
+  # forgejo (vm-115) mints the one-use registration token
+  homelab.tokens.reads = [ "forgejo-runner" ];
 
   sops.secrets.sccache-redis-pass = { };
-
-  # register with the token forgejo exports to the nas
-  systemd.services.forgejo-runner-register = {
-    description = "Register Forgejo runner";
-    before = [ "docker-forgejo-runner.service" ];
-    requiredBy = [ "docker-forgejo-runner.service" ];
-    # a stale token on the nas makes a re-registration fail
-    after = [ "forgejo-runner-token.service" ];
-    wants = [ "forgejo-runner-token.service" ];
-    path = [ pkgs.curl pkgs.jq pkgs.docker pkgs.gnused ];
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-    };
-    script = ''
-      # default config if missing
-      if [ ! -f /var/lib/forgejo-runner/config.yaml ]; then
-        docker run --rm -v /var/lib/forgejo-runner:/data \
-          code.forgejo.org/forgejo/runner:6.2.1 \
-          forgejo-runner generate-config > /var/lib/forgejo-runner/config.yaml
-      fi
-
-      # jobs get the cache url with its password from the runner's env_file, never from a workflow
-      sed -i 's|^  env_file: .*|  env_file: /data/.env|' /var/lib/forgejo-runner/config.yaml
-      install -m 600 /dev/null /var/lib/forgejo-runner/.env
-      printf 'SCCACHE_REDIS=redis://:%s@sccache.lsck0.dev\n' "$(cat ${config.sops.secrets.sccache-redis-pass.path})" \
-        > /var/lib/forgejo-runner/.env
-
-      # docker socket in job containers for build/push
-      sed -i 's|docker_host: "-"|docker_host: "automount"|' /var/lib/forgejo-runner/config.yaml
-      # internal hostnames and resource caps in job containers
-      sed -i '/^container:/,/^[^ ]/{s|^  options: .*|  options: "${toString (addHosts ++ jobLimits)}"|}' \
-        /var/lib/forgejo-runner/config.yaml
-
-      # wait for the forgejo api
-      ${retry} 90 2 curl -sf https://git.lsck0.dev/api/healthz
-
-      # failed ping means a stale token, re-register
-      if [ -f /var/lib/forgejo-runner/.runner ]; then
-        if docker run --rm \
-          -v /var/lib/forgejo-runner:/data \
-          --add-host=git.lsck0.dev:10.100.0.100 \
-          code.forgejo.org/forgejo/runner:6.2.1 \
-          forgejo-runner ping --instance https://git.lsck0.dev >/dev/null 2>&1; then
-          echo "Runner already registered and valid"
-          exit 0
-        fi
-        echo "Runner ping failed: token likely stale, re-registering..."
-        rm -f /var/lib/forgejo-runner/.runner
-      fi
-
-      # registration token from the nas
-      TOKEN_FILE="/var/lib/homepage-tokens/forgejo-runner.token"
-      ${retry} 30 5 test -s "$TOKEN_FILE" || { echo "runner token missing at $TOKEN_FILE: did forgejo-runner-token run?"; exit 1; }
-
-      REG_TOKEN=$(cat "$TOKEN_FILE")
-
-      # `docker` label image needs docker cli and node
-      docker run --rm -v /var/lib/forgejo-runner:/data \
-        --add-host=git.lsck0.dev:10.100.0.100 \
-        code.forgejo.org/forgejo/runner:6.2.1 \
-        forgejo-runner register \
-          --instance https://git.lsck0.dev \
-          --token "$REG_TOKEN" \
-          --name ${config.networking.hostName}-runner \
-          --labels "docker:docker://catthehacker/ubuntu:act-22.04,ubuntu-latest:docker://catthehacker/ubuntu:act-22.04,rust:docker://rust:1.80-bookworm" \
-          --no-interactive
-
-      echo "Runner registered successfully"
-    '';
+  sops.templates."forgejo-runner.env" = {
+    owner = ciUser;
+    content = "SCCACHE_REDIS=redis://:${config.sops.placeholder.sccache-redis-pass}@sccache.lsck0.dev\n";
   };
 
-  systemd.tmpfiles.rules = [
-    "d /var/lib/forgejo-runner 0750 1000 1000 -"
-  ];
-
+  systemd.services.forgejo-runner = {
+    description = "Forgejo Actions runner";
+    wantedBy = [ "multi-user.target" ];
+    wants = [ "network-online.target" ci.userUnit ];
+    after = [ "network-online.target" ci.userUnit ];
+    unitConfig.RequiresMountsFor = config.homelab.tokens.mountPoints;
+    environment.DOCKER_HOST = ci.dockerHost;
+    serviceConfig = {
+      User = ciUser;
+      Group = ciUser;
+      Slice = ci.slice;
+      StateDirectory = "forgejo-runner";
+      WorkingDirectory = stateDir;
+      ExecStartPre = register;
+      ExecStart = "${package}/bin/forgejo-runner daemon --config ${configFile}";
+      Restart = "always";
+      RestartSec = 10;
+      NoNewPrivileges = true;
+      ProtectSystem = "strict";
+      PrivateTmp = true;
+      # the rootless socket lives under /run/user
+      ProtectHome = "read-only";
+    };
+  };
 }

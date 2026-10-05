@@ -10,8 +10,7 @@ in {
   networking.hostName = "vm-124";
 
   # firefly iii with its own postgres
-  fileSystems = nasMount "/var/lib/firefly" "firefly"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+  fileSystems = nasMount "/var/lib/firefly" "firefly";
 
   sops.secrets.firefly-app-key = {};
   sops.secrets.firefly-db-password = {};
@@ -111,7 +110,7 @@ in {
     path = [ pkgs.podman pkgs.coreutils pkgs.gnused ];
     serviceConfig.Type = "oneshot";
     script = ''
-      out=/var/lib/homepage-tokens/firefly-token.token
+      out=${config.homelab.tokens.dir}/firefly-token.token
       [ -s "$out" ] && exit 0
 
       # runs inside the firefly container: sets the owner's email to match the
@@ -160,7 +159,7 @@ in {
       # once the owner has saved bank credentials in the ui, never touch it again
       if [ -s "$out" ] && [ -n "$(jq -r '.bank_username // ""' "$out")" ]; then exit 0; fi
       # firefly token is filled once it exists; the bank fields do not depend on it
-      tok=/var/lib/homepage-tokens/firefly-token.token
+      tok=${config.homelab.tokens.dir}/firefly-token.token
       t=""; [ -s "$tok" ] && t="$(cat "$tok")"
       # bank_code/bank_url: Kreissparkasse Eichsfeld (hbci4java institute list); 2fa 911 chipTAN manuell
       jq -n --arg url "http://10.100.0.124:8080" --arg t "$t" '{

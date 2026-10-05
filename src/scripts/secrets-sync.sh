@@ -27,6 +27,10 @@ GENERATED=(
   ntfy-desktop-token
   # unguessable url segments for feed and push
   calendar-upload-token
+  # registry pushes as user ci; set it as REGISTRY_PASSWORD on the repos that push images
+  registry-push-password
+  # registry pushes as user builder: the app builder on vm-117 only
+  registry-builder-password
 )
 
 # external secrets that cannot be invented
@@ -41,6 +45,8 @@ MANUAL=(
   wireguard-private-key firefly-app-key
   # the proton account itself: proton-drive on the nas signs in with it (proton-drive-login), protonvpn-private-key is the vpn
   proton-username proton-password proton-totp-secret
+  # the app builder's ssh key to the swarm manager: ssh-keygen -t ed25519, public half in modules/swarm.nix
+  app-deploy-key
 )
 
 # ntfy needs tk_ + 29 [a-z0-9], a hex token stops it from starting
@@ -65,7 +71,12 @@ referenced=$(grep -rhoE 'sops\.(secrets|placeholder)\.[a-zA-Z0-9_-]+' \
     "$ROOT_DIR/src" --include='*.nix' 2>/dev/null \
   | sed -E 's/.*\.//' | sort -u)
 
-wanted=$(printf '%s\n' "${GENERATED[@]}" "${MANUAL[@]}" $referenced | sort -u)
+# the app catalog's secrets and how to make each: {"<name>": "hex:<bytes>" | "garage-key-id"}
+APP_SECRETS=$(nix-instantiate --eval --strict --json -E "
+  let c = import $ROOT_DIR/src/modules/apps.nix;
+  in builtins.foldl' (acc: name: acc // (c.apps.\${name}.secrets or { })) { } (builtins.attrNames c.apps)")
+
+wanted=$(printf '%s\n' "${GENERATED[@]}" "${MANUAL[@]}" $referenced $(jq -r 'keys[]' <<<"$APP_SECRETS") | sort -u)
 have=$(jq -r 'keys[] | select(. != "sops")' "$PLAIN" | sort)
 
 added=(); removed=()
@@ -86,7 +97,18 @@ else
 fi
 for k in "${added[@]}"; do
   if printf '%s\n' "${NTFY_TOKENS[@]}" | grep -qx "$k"; then
-    v="tk_$(LC_ALL=C tr -dc a-z0-9 </dev/urandom | head -c29)"; echo "add     $k (generated)"
+    # bounded input: tr reading /dev/urandom dies of SIGPIPE when head closes, and pipefail aborts the script
+    v="tk_$(head -c 512 /dev/urandom | LC_ALL=C tr -dc a-z0-9 | cut -c1-29)"
+    [ "${#v}" -eq 32 ] || { echo "ERROR: could not generate $k"; exit 1; }
+    echo "add     $k (generated)"
+  elif generator=$(jq -er --arg k "$k" '.[$k] // empty' <<<"$APP_SECRETS"); then
+    case "$generator" in
+      hex:*) v=$(openssl rand -hex "${generator#hex:}") ;;
+      # garage access keys are GK plus 12 random bytes in hex
+      garage-key-id) v="GK$(openssl rand -hex 12)" ;;
+      *) echo "ERROR: $k: unknown generator $generator in modules/apps.nix"; exit 1 ;;
+    esac
+    echo "add     $k (generated, $generator)"
   elif printf '%s\n' "${GENERATED[@]}" | grep -qx "$k"; then
     v=$(openssl rand -hex 24); echo "add     $k (generated)"
   else
@@ -128,9 +150,6 @@ if [ "${#added[@]}" -eq 0 ] && [ "${#removed[@]}" -eq 0 ]; then
   exit 0
 fi
 
-# keep sops metadata out of the re-encrypted plaintext
-jq 'del(.sops)' "$OUT" > "$OUT.t" && mv "$OUT.t" "$OUT"
-cp "$OUT" "$SECRETS"
-sops --encrypt --in-place "$SECRETS"
-sops --decrypt "$SECRETS" > /dev/null || { echo "ERROR: re-encrypted file does not decrypt."; exit 1; }
+# keep sops metadata out of the re-encrypted plaintext; the plaintext never lands in the repo
+jq 'del(.sops)' "$OUT" | "$ROOT_DIR/src/scripts/sops-encrypt.sh" "$SECRETS"
 echo "src/secrets.json updated and re-encrypted."

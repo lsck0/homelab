@@ -1,7 +1,7 @@
 { config, lib, pkgs, nasMount, nasPath, retry, ... }:
 let
   cfg = config.homelab.servarr;
-  tokens = "/var/lib/homepage-tokens";
+  tokens = config.homelab.tokens.dir;
 
   appType = lib.types.submodule {
     options = {
@@ -67,7 +67,7 @@ in {
     # a host's own mount of the same path wins
     fileSystems = lib.mkMerge ([
       (lib.mapAttrs (_: lib.mkDefault) (
-        nasPath "/data" "bulk" // nasMount tokens "homepage-tokens"
+        nasPath "/data" "bulk"
       ))
     ] ++ lib.mapAttrsToList (name: _: nasMount "/var/lib/${name}" name) cfg);
 

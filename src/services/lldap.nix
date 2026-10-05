@@ -1,8 +1,8 @@
 # lldap: the lab's single account store, authelia binds to it
-{ config, lib, pkgs, retry, site, ... }:
+{ config, lib, pkgs, inventory, retry, site, ... }:
 let
   # admins reach everything; everyone else gets one app-<service> group per service
-  routes = (import ../modules/routes.nix).internal;
+  routes = (import ../modules/catalog.nix { inherit inventory lib; }).internal;
   ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
   # own-login routes (forgejo, jellyfin, hass, headscale) check the same groups through oidc or ldap
   ownRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "own") routes;

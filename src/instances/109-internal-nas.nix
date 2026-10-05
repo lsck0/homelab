@@ -1,4 +1,4 @@
-{ lib, pkgs, nasClients, site, ... }:
+{ config, lib, pkgs, inventory, nasClients, site, ... }:
 let
   # media and torrents together; the rest of the hdd stays free for the arch repo and whatever comes next
   mediaQuotaGiB = 750;
@@ -6,12 +6,15 @@ let
   mediaProject = 1;
   mediaDirs = [ "/srv/nas/bulk/media" "/srv/nas/bulk/torrents" ];
 
+  # dmz and apps zone clients get subtree checks
+  internalIps = map (v: v.ip) (lib.filter (v: v.type == "internal") (lib.attrValues inventory));
+
   # every guest's nas mounts as { path, ip, readOnly }, grouped by path
   clientsByPath = lib.groupBy (c: c.path)
     (lib.concatLists (lib.mapAttrsToList (ip: map (s: s // { inherit ip; })) nasClients));
   exportOptions = c: lib.concatStringsSep "," ([
     (if c.readOnly then "ro" else "rw") "sync" "no_root_squash"
-    (if lib.hasPrefix "10.200." c.ip then "subtree_check" else "no_subtree_check")
+    (if lib.elem c.ip internalIps then "no_subtree_check" else "subtree_check")
   ]
   # a missing hdd must not export the empty mountpoint on the nvme
   ++ lib.optional (lib.hasPrefix "/srv/nas/bulk" c.path) "mp=/srv/nas/bulk");
@@ -40,14 +43,14 @@ let
     tmp_lastupdate=$(${pkgs.coreutils}/bin/mktemp)
     trap '${pkgs.coreutils}/bin/rm -f "$tmp_lastupdate"' EXIT
     if ${pkgs.rsync}/bin/rsync -q --no-motd "''${upstream}lastupdate" "$tmp_lastupdate" \
-       && ${pkgs.coreutils}/bin/cmp -s "$tmp_lastupdate" "$target/lastupdate"; then
+       && ${pkgs.diffutils}/bin/cmp -s "$tmp_lastupdate" "$target/lastupdate"; then
       echo "archmirror: upstream unchanged, nothing to sync"
       exit 0
     fi
 
     # -rtlH -p preserves times, symlinks, hardlinks and perms; --safe-links drops any symlink escaping the
     # tree (core/extra/multilib link package files into the shared pool/ with relative links, which stay).
-    # /iso and /sources are the only excludes, keeping the tree to the ~60 GiB full-repo budget.
+    # /iso and /sources are the only excludes; the tree measured 122 GiB after the first full sync (2026-10).
     ${pkgs.rsync}/bin/rsync \
       -rtlH -p --safe-links --no-motd \
       --delay-updates --delete-after --delete-excluded \
@@ -367,6 +370,27 @@ in {
         '';
       };
     };
+  };
+
+  # tokens moved from the one shared homepage-tokens dir into one dir per producer (modules/tokens.nix);
+  # a token an app minted once (an admin password it was set up with) must move, a fresh one would not log in.
+  # rename keeps mode and owner; what is left behind afterwards belongs to no registered producer.
+  systemd.services.lab-tokens-migrate = {
+    description = "Move tokens from the shared homepage-tokens dir into their producers' dirs";
+    wantedBy = [ "multi-user.target" ];
+    before = [ "nfs-server.service" ];
+    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    script = ''
+      old=/srv/nas/data/homepage-tokens
+      [ -d "$old" ] || exit 0
+      ${lib.concatStrings (lib.mapAttrsToList (name: id: ''
+        if [ -e "$old/${name}.token" ] && [ ! -e /srv/nas/data/tokens/vm-${toString id}/${name}.token ]; then
+          ${pkgs.coreutils}/bin/install -d -m 0777 /srv/nas/data/tokens/vm-${toString id}
+          ${pkgs.coreutils}/bin/mv -n "$old/${name}.token" /srv/nas/data/tokens/vm-${toString id}/
+          echo "moved ${name} to vm-${toString id}"
+        fi
+      '') config.homelab.tokens.producers)}
+    '';
   };
 
   # hourly: official repos update a few times a day, so an hour caps the lag. idle i/o and lowest cpu

@@ -61,35 +61,27 @@ variable "wan_bridge" {
   type    = string
   default = "vmbr0"
 }
-variable "internal_bridge" {
-  type    = string
-  default = "vmbr100"
-}
-variable "external_bridge" {
-  type    = string
-  default = "vmbr200"
+# -----------------------------------------------------------------------------
+# ZONES: an instance's type picks its bridge, subnet and gateway; its id is the host part of its address
+# internal: sso apps behind authelia (vm-100). external: public apps behind the edge (vm-200).
+# apps: the swarm cluster, a dmz of its own: reached only through the two ingresses, never reaching inward.
+variable "zones" {
+  type = map(object({
+    bridge    = string
+    subnet    = string
+    router_ip = string
+  }))
+  default = {
+    internal = { bridge = "vmbr100", subnet = "10.100.0.0/24", router_ip = "10.100.0.1" }
+    external = { bridge = "vmbr200", subnet = "10.200.0.0/24", router_ip = "10.200.0.1" }
+    apps     = { bridge = "vmbr150", subnet = "10.150.0.0/24", router_ip = "10.150.0.1" }
+  }
 }
 
-# -----------------------------------------------------------------------------
-# SUBNETS
-variable "internal_subnet" {
-  type    = string
-  default = "10.100.0.0/24"
-}
-variable "external_subnet" {
-  type    = string
-  default = "10.200.0.0/24"
-}
-
-# -----------------------------------------------------------------------------
-# ROUTER VM (VM-300)
-variable "router_internal_ip" {
-  type    = string
-  default = "10.100.0.1"
-}
-variable "router_external_ip" {
-  type    = string
-  default = "10.200.0.1"
+# the router's nics after wan, in order: they appear as ens19, ens20, ens21 in 300-router.nix
+variable "router_zones" {
+  type    = list(string)
+  default = ["internal", "external", "apps"]
 }
 
 provider "proxmox" {

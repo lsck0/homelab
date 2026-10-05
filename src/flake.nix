@@ -41,11 +41,11 @@
 
     # one config per src/instances/*.nix plus the router
     hostFiles = lib.filterAttrs (name: kind:
-      kind == "regular" && builtins.match "([12][0-9]{2}-(internal|external)-.*|300-router)\\.nix" name != null
+      kind == "regular" && builtins.match "([12][0-9]{2}-(internal|external|apps)-.*|300-router)\\.nix" name != null
     ) (builtins.readDir ./instances);
   in {
     # usage: nix build .#checks.x86_64-linux.<name>
-    checks.${system} = lib.genAttrs [ "on-demand" "kopia" "swarm" "minecraft" "monitoring" ]
+    checks.${system} = lib.genAttrs [ "on-demand" "kopia" "swarm" "minecraft" "monitoring" "auth-chain" "swarm-render" "app-builder" ]
       (name: import ./tests/${name}.nix { inherit pkgs lib inputs; });
 
     packages.${system} = {

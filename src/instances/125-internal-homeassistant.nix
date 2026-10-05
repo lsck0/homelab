@@ -206,7 +206,6 @@ let
 in {
   networking.hostName = "vm-125";
 
-  fileSystems = nasMount "/var/lib/homepage-tokens" "homepage-tokens";
 
   # the recorder's sqlite wal dies of SIGBUS on nfs; local, the nas keeps a nightly copy
   homelab.localState.homeassistant = {
@@ -262,14 +261,14 @@ in {
     description = "Generate Home Assistant token for Homepage";
     after = [ "podman-homeassistant.service" ];
     wantedBy = [ "multi-user.target" ];
-    unitConfig.RequiresMountsFor = [ "/var/lib/homepage-tokens" ];
+    unitConfig.RequiresMountsFor = config.homelab.tokens.mountPoints;
     startLimitIntervalSec = 0;
     path = [ pkgs.curl pkgs.coreutils pkgs.gnugrep pkgs.jq pkgs.openssl
       (pkgs.python3.withPackages (ps: [ ps.websockets ]))
     ];
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
     script = ''
-      TOKEN_FILE="/var/lib/homepage-tokens/hass-key.token"
+      TOKEN_FILE="${config.homelab.tokens.dir}/hass-key.token"
       [ -f "$TOKEN_FILE" ] && [ -s "$TOKEN_FILE" ] && exit 0
       # wait for ha
       for i in $(seq 1 120); do
@@ -283,10 +282,10 @@ in {
       # onboarding is the only unattended token path
       ONBOARD=$(curl -sf http://127.0.0.1:80/api/onboarding 2>/dev/null || true)
       if echo "$ONBOARD" | grep -q '"done":false'; then
-        [ -s /var/lib/homepage-tokens/hass-pass.token ] || openssl rand -hex 16 | tr -d '\n' > /var/lib/homepage-tokens/hass-pass.token
+        [ -s ${config.homelab.tokens.dir}/hass-pass.token ] || openssl rand -hex 16 | tr -d '\n' > ${config.homelab.tokens.dir}/hass-pass.token
         AUTH_CODE=$(curl -sf -X POST "http://127.0.0.1:80/api/onboarding/users" \
           -H "Content-Type: application/json" \
-          -d "$(jq -cn --rawfile p /var/lib/homepage-tokens/hass-pass.token '{client_id:"http://127.0.0.1:80/", name:"Admin", username:"admin", password:$p, language:"en"}')" 2>/dev/null \
+          -d "$(jq -cn --rawfile p ${config.homelab.tokens.dir}/hass-pass.token '{client_id:"http://127.0.0.1:80/", name:"Admin", username:"admin", password:$p, language:"en"}')" 2>/dev/null \
           | grep -oP '"auth_code"\s*:\s*"\K[^"]+' || true)
         [ -z "$AUTH_CODE" ] && exit 1
 

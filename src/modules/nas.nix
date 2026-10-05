@@ -1,4 +1,4 @@
-{ config, lib, utils, ... }:
+{ config, lib, utils, inventory, ... }:
 
 let
   nasIP = "10.100.0.109";
@@ -11,7 +11,9 @@ let
   nfsOpts = [ "nfsvers=4" "rw" "hard" "timeo=50" ] ++ mountOpts;
   nfsOptsRo = [ "nfsvers=4" "ro" "soft" "timeo=15" ] ++ mountOpts;
 
-  external = lib.hasPrefix "vm-2" config.networking.hostName;
+  match = builtins.match "vm-([0-9]+)" config.networking.hostName;
+  # the dmz and the apps zone: anything not internal gets per-service state only
+  external = match != null && (inventory.${builtins.head match}.type or "internal") != "internal";
 
   nasFileSystems = lib.filterAttrs (_: fs: lib.hasPrefix "${nasIP}:" (fs.device or "")) config.fileSystems;
   nasMountpoints = lib.attrNames nasFileSystems;
@@ -41,6 +43,8 @@ in {
   config = {
     _module.args = {
       nasMount = mountpoint: name: mount nfsOpts mountpoint "data/${name}";
+      # vm-109 exports it read-only to this host
+      nasMountRo = mountpoint: name: mount nfsOptsRo mountpoint "data/${name}";
       nasMedia = mountpoint: subpath: mount nfsOptsRo mountpoint "bulk/media/${subpath}";
       nasPath = mount nfsOpts;
     };

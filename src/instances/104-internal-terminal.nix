@@ -20,7 +20,7 @@ let
     terminal-sync = {
       bin = "stats-sync";
       description = "Collect homelab stats for the TRMNL terminal";
-      environment = { STATS_PROMETHEUS = prometheus; STATS_INVENTORY = "${terminalInventory}"; };
+      environment = { STATS_PROMETHEUS = prometheus; STATS_INVENTORY = "${terminalInventory}"; STATS_TOKENS = config.homelab.tokens.dir; };
       timer = { OnBootSec = "2m"; OnUnitActiveSec = "2m"; };
     };
     # house power, gas, water, prices; the panel refreshes every few minutes, power is a snapshot anyway
@@ -90,19 +90,21 @@ let
   calendarSync = pythonScript "calendar-sync" (with pkgs.python3Packages; [ icalendar recurring-ical-events tzdata ]);
 in {
   networking.hostName = "vm-104";
+
+  # stats-sync reads the torrent client's queue
+  homelab.tokens.reads = [ "qbittorrent-user" "qbittorrent-pass" ];
   # footers and "today" in the payloads are local time
   time.timeZone = "Europe/Berlin";
 
   # feed state on the nas, vm is disposable
-  fileSystems = nasMount calendarState "calendar"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+  fileSystems = nasMount calendarState "calendar";
 
   imports = [
     # an lxc mounts nfs at boot, not on access: nothing may run before the shares are up
     {
       systemd.services = lib.genAttrs ([
         "nginx" "trmnl-sync" "calendar-sync" "calendar-upload-dir" "calendar-upload"
-      ] ++ lib.attrNames collectors) (_: { unitConfig.RequiresMountsFor = [ calendarState "/var/lib/homepage-tokens" ]; });
+      ] ++ lib.attrNames collectors) (_: { unitConfig.RequiresMountsFor = [ calendarState ] ++ config.homelab.tokens.mountPoints; });
     }
     {
       systemd.services = lib.mapAttrs (_: c: {

@@ -11,14 +11,17 @@ metadata:
     related_skills: [homelab-ops]
 ---
 
-# Router (`luca-router`, 192.168.178.29 / 10.100.0.1 / 10.200.0.1)
+# Router (`luca-router`, 192.168.178.29 / 10.100.0.1 / 10.200.0.1 / 10.150.0.1)
 
 `ssh 192.168.178.29 <cmd>`. NixOS config: `src/instances/300-router.nix`.
 
 - Interfaces: ens18 WAN (FritzBox LAN), ens19 internal 10.100.0.0/24,
-  ens20 DMZ 10.200.0.0/24, wg0 WireGuard 10.0.0.0/24.
-- Firewall/NAT: nftables. `nft list ruleset`; forward rules: DMZ may only reach
-  internal Traefik/registry/git, Loki (3100) and NFS.
+  ens20 DMZ 10.200.0.0/24, ens21 apps zone 10.150.0.0/24 (swarm workers), wg0 WireGuard 10.0.0.0/24.
+- Firewall/NAT: nftables. `nft list ruleset`. Forward rules:
+  - DMZ: only internal Traefik/registry/git, Loki (3100) and NFS; vm-200 also reaches the apps' published ports.
+  - Apps zone: only registry pulls (10.100.0.100:443), vm-105 (journals, traces, profiles), NFS, and the swarm
+    manager vm-140 (2377, 7946, 4789, esp). Never the LAN, the DMZ or other internal hosts.
+  - The house LAN reaches the apps zone only through the ingresses.
   Port forwards (WAN IP): 443 -> vm-200, 25565 -> vm-200 (Minecraft).
 - DNS: CoreDNS (split horizon: *.lsck0.dev -> Traefik IPs) -> blocky (ad block, DoT).
   Test: `dig +short grafana.lsck0.dev @10.100.0.1`. Blocky: `journalctl -u blocky -n 50`;

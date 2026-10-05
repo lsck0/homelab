@@ -1,7 +1,10 @@
-{ config, lib, nasMount, ... }:
+{ config, lib, nasMount, inventory, ... }:
 let
-  allRoutes = import ../modules/routes.nix;
-  routes = allRoutes.external;
+  catalog = import ../modules/catalog.nix { inherit inventory lib; };
+  allRoutes = catalog;
+  # nixos services on a vm (routes.nix), woken on demand, and swarm apps on every apps node (apps.nix)
+  routes = lib.filterAttrs (_: r: r ? vmid) catalog.external;
+  appRoutes = lib.filterAttrs (_: r: r ? app) catalog.external;
   address = config.homelab.onDemand.address;
 
   # headless token-only hosts stay off the internet
@@ -12,10 +15,23 @@ let
   publicRelays = lib.filterAttrs (_: r: r.publicRelay or false) allRoutes.internal;
   internalTraefik = "https://10.100.0.100:443";
 
-  # anubis pow filter on browser-facing routes
-  anubisRoutes = [ "searxng" "privatebin" "share" "hello" ];
-  anubisPort = name: 27000 + lib.lists.findFirstIndex (n: n == name) 0 anubisRoutes;
+  # anubis pow filter on browser-facing routes; one more instance fronts every app route that asks for it
+  anubisRoutes = [ "searxng" "privatebin" "share" ];
+  anubisPort = name: 27000 + lib.lists.findFirstIndex (n: n == name) 0 (anubisRoutes ++ [ appsAnubis ]);
   upstream = name: "http://${address.${name}}";
+
+  # anubis knows one upstream, so it hands app requests back to traefik on loopback, which picks a live node
+  appsAnubis = "apps";
+  appsBalancerPort = 28080;
+  appsBalancer = "http://127.0.0.1:${toString appsBalancerPort}";
+  # the template's limits: request bodies 1 MiB unless a path says otherwise, the methods a browser app uses
+  appBodyLimitDefault = 1024 * 1024;
+  appMethods = [ "GET" "HEAD" "POST" "PUT" "PATCH" "DELETE" "OPTIONS" ];
+  appRule = r: "Host(`${r.host}.lsck0.dev`)" + lib.optionalString (r.prefix != "/") " && PathPrefix(`${r.prefix}`)";
+  # an app's own metrics stay off the internet whatever prefix serves them
+  metricsBlocks = lib.concatLists (lib.mapAttrsToList (name: a: lib.concatMap (m:
+    lib.optional (lib.any (p: p.port == m.port) (lib.attrValues a.paths)) { inherit name; host = a.host or name; inherit (m) path; }
+  ) (lib.attrValues (a.metrics or { }))) catalog.apps);
 
   # `curl <host>.lsck0.dev | sh` lines, answered by the local nginx
   installHosts = import ../modules/install-hosts.nix;
@@ -46,18 +62,18 @@ in {
 
     # relay re-applies headers over internal traefik's
     sameOriginFrameRouters = [ "jellyfin-relay" ];
+    # the search query is in the url
+    noReferrerRouters = [ "searxng-tls" ];
     # real client ip from cloudflare's x-forwarded-for
     trustCloudflare = true;
-
-    # headless internal-only services: private ranges only
-    middlewares.internal-only.ipAllowList.sourceRange = [
-      "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16"
-    ];
 
     # crowdsec bouncer plus appsec waf everywhere
     crowdsecBouncer.enable = true;
     crowdsecBouncer.appsec = true;
-    crowdsecBouncer.noAppsecRouters = [ "headscale-tls" "ntfy-tls" ];
+    crowdsecBouncer.noAppsecRouters = [ "headscale-tls" "ntfy-tls" ]
+      ++ map (name: "${name}-tls") (lib.attrNames (lib.filterAttrs (_: r: !r.waf) appRoutes));
+    # the apps get the owasp core rule set on top, as webapp-template's modsecurity gave them
+    crowdsecBouncer.crsRouters = map (name: "${name}-tls") (lib.attrNames (lib.filterAttrs (_: r: r.waf) appRoutes));
     # bouncer whitelist only skips decisions
     crowdsecBouncer.whitelistCidrs = [
       "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16"
@@ -68,7 +84,9 @@ in {
       instances = lib.genAttrs anubisRoutes (name: {
         upstream = upstream name;
         listenPort = anubisPort name;
-      });
+      }) // {
+        ${appsAnubis} = { upstream = appsBalancer; listenPort = anubisPort appsAnubis; };
+      };
     };
 
     # robots.txt, llms.txt, iocaine for ignorers
@@ -84,17 +102,57 @@ in {
       ++ map (name: "${name}-block") (lib.attrNames blockedInternal);
 
     # cap bodies on small-post routes
-    bodyLimit = 32 * 1024 * 1024;
-    bodyLimitRouters = [ "searxng-tls" "hello-tls" ];
+    bodyLimits = { searxng-tls = 32 * 1024 * 1024; }
+      // lib.mapAttrs' (name: r: lib.nameValuePair "${name}-tls" (if r.bodyLimit == null then appBodyLimitDefault else r.bodyLimit)) appRoutes;
 
     entryPoints.minecraft.address = ":25565";
+    # anubis' X-Forwarded-For, X-Real-Ip and -Proto carry the client; loopback is the only sender here
+    entryPoints.apps-balancer = {
+      address = "127.0.0.1:${toString appsBalancerPort}";
+      forwardedHeaders.trustedIPs = [ "127.0.0.1/32" ];
+    };
 
-    routers = lib.mapAttrs' (name: r: lib.nameValuePair "${name}-tls" {
+    middlewares = {
+      # headless internal-only services: private ranges only
+      internal-only.ipAllowList.sourceRange = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
+      # browsers get the response compressed, as the template's nginx did
+      apps-compress.compress = { };
+    } // lib.mapAttrs' (name: a: lib.nameValuePair "${name}-headers" { headers = a.headers; })
+      (lib.filterAttrs (_: a: a ? headers) catalog.apps);
+
+    routers = lib.mapAttrs' (name: r: lib.nameValuePair "${name}-tls" ({
       rule = "Host(`${r.host}.lsck0.dev`)";
       service = name;
       entryPoints = [ "websecure" ];
       tls.certResolver = "cloudflare";
-    }) (routes // publicRelays) // {
+    }
+    # the access log keeps the path, and so every query, for 14 days in loki
+    // lib.optionalAttrs (name == "searxng") { observability.accessLogs = false; }
+    )) (routes // publicRelays)
+    # swarm apps: the full chain, then anubis where the path asks for it
+    // lib.mapAttrs' (name: r: lib.nameValuePair "${name}-tls" {
+      rule = "(${appRule r}) && (${lib.concatMapStringsSep " || " (m: "Method(`${m}`)") appMethods})";
+      service = if r.anubis then "apps-anubis" else name;
+      entryPoints = [ "websecure" ];
+      tls.certResolver = "cloudflare";
+      middlewares = [ "apps-compress" ] ++ lib.optional (catalog.apps.${r.app} ? headers) "${r.app}-headers";
+    }) appRoutes
+    # what anubis lets through comes back here and goes to a node
+    // lib.mapAttrs' (name: r: lib.nameValuePair "${name}-balancer" {
+      rule = appRule r;
+      service = name;
+      entryPoints = [ "apps-balancer" ];
+    }) appRoutes
+    // lib.listToAttrs (map (b: lib.nameValuePair "${b.name}-metrics-block" {
+      # with anything after it: /api/metrics/ and friends reach the same handler
+      rule = "Host(`${b.host}.lsck0.dev`) && PathRegexp(`^${lib.escapeRegex b.path}(/|$)`)";
+      service = "noop@internal";
+      entryPoints = [ "websecure" ];
+      priority = 10000;
+      middlewares = [ "deny-all" ];
+      tls.certResolver = "cloudflare";
+    }) metricsBlocks)
+    // {
       install-tls  = { rule = installRule; service = "install"; entryPoints = [ "websecure" ]; tls.certResolver = "cloudflare"; };
 
       # catch-all: unmatched hosts relay to internal traefik
@@ -136,7 +194,16 @@ in {
     }) routes // lib.mapAttrs (name: _: {
       loadBalancer.servers = [{ url = internalTraefik; }];
       loadBalancer.serversTransport = name;
-    }) publicRelays // {
+    }) publicRelays
+    // lib.mapAttrs (name: r: {
+      loadBalancer = {
+        servers = map (ip: { url = "http://${ip}:${toString r.port}"; }) r.nodes;
+      } // lib.optionalAttrs (r.health != null) {
+        # a node down or draining drops out of the rotation
+        healthCheck = { path = r.health; interval = "10s"; timeout = "3s"; };
+      };
+    }) appRoutes // {
+      apps-anubis.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString (anubisPort appsAnubis)}"; }];
       install.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString installPort}"; }];
       # catch-all relay to internal traefik over https
       internal-relay.loadBalancer.servers = [{ url = internalTraefik; }];

@@ -13,10 +13,17 @@ let
 
   # readable `vm` label, not ip:port
   shortName = v:
-    let m = builtins.match "[0-9]+-(internal|external)-(.*)" v.name;
+    let m = builtins.match "[0-9]+-(internal|external|apps)-(.*)" v.name;
     in if m == null then v.name else builtins.elemAt m 1;
-  nameCounts = lib.foldl' (acc: v: acc // { ${shortName v} = (acc.${shortName v} or 0) + 1; }) { } (lib.attrValues inventory);
-  vmName = v: if nameCounts.${shortName v} > 1 then "${shortName v}-${v.type}" else shortName v;
+  countBy = key: lib.foldl' (acc: v: acc // { ${key v} = (acc.${key v} or 0) + 1; }) { } (lib.attrValues inventory);
+  nameCounts = countBy shortName;
+  zonedName = v: "${shortName v}-${v.type}";
+  zonedCounts = countBy zonedName;
+  # the zone tells traefik-internal from traefik-external; the swarm nodes share name and zone, so the id
+  vmName = v:
+    if nameCounts.${shortName v} == 1 then shortName v
+    else if zonedCounts.${zonedName v} == 1 then zonedName v
+    else "${shortName v}-${lib.head (lib.splitString "-" v.name)}";
   vmLabel = address: name: {
     source_labels = [ "__address__" ];
     regex = "${lib.replaceStrings [ "." ] [ "\\." ] address}:9100";
@@ -49,6 +56,118 @@ let
       { name = "traefik-internal"; url = "http://10.100.0.100:80"; }
       { name = "traefik-external"; url = "http://10.200.0.200:80"; }
     ];
+
+  # app stacks (apps.nix): scraped, traced, profiled and alerted on here; a disabled app leaves none of it
+  appsConfig = import ../modules/apps.nix;
+  # the same view of the apps the ingresses and the router route by
+  appsEnabled = (import ../modules/catalog.nix { inherit inventory lib; }).apps;
+  appsTelemetry = lib.filterAttrs (_: a: a.telemetry or false) appsEnabled;
+  appMetrics = a: a.metrics or { };
+  appsWithMetric = name: lib.filterAttrs (_: a: appMetrics a ? ${name}) appsEnabled;
+  # the swarm workers, any zone that types its guests "apps"; any of them may run any task, the manager none
+  appNodes = lib.sort (a: b: lib.toInt (vmId a) < lib.toInt (vmId b))
+    (lib.attrValues (lib.filterAttrs (_: v: v.type == "apps" && v.enabled == "true") inventory));
+  vmId = v: lib.head (lib.splitString "-" v.name);
+  # the routing mesh publishes every app port on every node: one node, or each sample counts once per node
+  appScrapeNode =
+    if appNodes == [ ] then throw "apps.nix enables an app, but inventory.json has no enabled guest of type apps"
+    else lib.head appNodes;
+  appNodeSources = map (v: "${v.ip}/32") appNodes;
+  # the template's dashboards rate over [1m], four samples at 15s; the lab default of 1m leaves one
+  appScrapeInterval = "15s";
+  appTargetLabels = node: app: { inherit app; vm = vmName node; };
+  # swarm names a task's container <stack>_<service>.<slot>.<task id>; same patterns as promtail in base.nix
+  swarmServicePattern = "([^.]+)\\.[^.]+\\.[^.]+";
+  swarmStackPattern = "([^_.]+)_[^.]+\\.[^.]+\\.[^.]+";
+  appScrapeConfigs = lib.concatLists (lib.mapAttrsToList (app: a: lib.mapAttrsToList (name: m: {
+    job_name = "app-${app}-${name}";
+    scrape_interval = appScrapeInterval;
+    metrics_path = m.path;
+    static_configs = [{
+      targets = [ "${appScrapeNode.ip}:${toString m.port}" ];
+      labels = appTargetLabels appScrapeNode app;
+    }];
+  }) (appMetrics a)) appsEnabled)
+  ++ lib.optional (appsEnabled != { }) {
+    # per node: each cadvisor sees only its own node's containers
+    job_name = "app-cadvisor";
+    scrape_interval = appScrapeInterval;
+    static_configs = map (node: {
+      targets = [ "${node.ip}:${toString appsConfig.cadvisorPort}" ];
+      labels.vm = vmName node;
+    }) appNodes;
+    metric_relabel_configs = [
+      # every systemd slice is a cgroup too; only containers carry a name, the rest is cardinality
+      { source_labels = [ "__name__" "name" ]; regex = "container_.*;"; action = "drop"; }
+      { source_labels = [ "name" ]; regex = swarmServicePattern; target_label = "swarm_service"; }
+      { source_labels = [ "name" ]; regex = swarmStackPattern; target_label = "swarm_stack"; }
+    ];
+  };
+
+  # the public ingress's metrics; vm-100 names its internal app routes the same way
+  edgeTraefikTarget = "10.200.0.200:8082";
+  # catalog.nix names an app's routes, and so the edge's services, <app> or <app>-<path slug>
+  appTraefikServices = app: "${app}(-[a-z0-9-]+)?@file";
+  appTraefikSelector = apps:
+    "instance=\"${edgeTraefikTarget}\",service=~\"(${lib.concatMapStringsSep "|" appTraefikServices (lib.attrNames apps)})\"";
+  # a client bug's steady trickle stays under 5%, a broken backend does not
+  app5xxPercent = 5;
+  # below this the share is noise: one failed request out of three is not an outage
+  app5xxMinRequestsPerSecond = "0.1";
+  # the traefik job scrapes every 1m: four samples
+  traefikRateWindow = "5m";
+  # start-first replaces a task once per deploy: a deploy is two tasks in the window, two quick ones three
+  restartLoopWindow = "15m";
+  restartLoopTasks = 3;
+  # the template's wal-g loop (services/storage/postgres/wal-g-backup-loop.sh) logs this once a day and
+  # exports no metric; its postgres service is named postgres in the stack
+  walgSuccessLine = "Backup completed successfully";
+  walgService = "postgres";
+  # the loop sleeps a day between pushes; the extra 2h covers the push itself
+  walgStaleSeconds = 26 * 3600;
+
+  # pyroscope: profiles pushed by the app servers (the template's rust agent)
+  pyroscopePort = 4040;
+  # tempo holds grpc 9095, loki 9096
+  pyroscopeGrpcPort = 9097;
+  # tempo's memberlist default is 7946; nothing joins this ring, it only must not collide
+  pyroscopeMemberlistPort = 7947;
+  # the single binary dials its own components at the address its rings advertise, eth0 by default, where the
+  # ingress guard on 4040 trusts only listed sources (the vm test lists none); loopback also keeps gossip local
+  pyroscopeRingAddr = "127.0.0.1";
+  pyroscopeRings = [
+    "compactor.ring.instance-addr" "distributor.ring.instance-addr" "overrides-exporter.ring.instance-addr"
+    "query-frontend.instance-addr" "query-scheduler.ring.instance-addr" "store-gateway.sharding-ring.instance-addr"
+    "ingester.lifecycler.addr" "memberlist.advertise-addr" "memberlist.bind-addr"
+  ];
+  pyroscopeDir = "/var/lib/pyroscope";
+  # the same horizon as loki's 336h, so a profile never outlives the logs around it
+  pyroscopeRetention = "336h";
+
+  # loki's default 5000 cut the template's log panels short
+  lokiMaxLines = 10000;
+  # the template's datasource timeout: 7d and 30d unique-visitor queries parse every access log line
+  lokiQueryTimeoutSeconds = 60;
+
+  # disks: ext4 data filesystems; /nix/store is a bind of / and would double every alert
+  diskSelector = "fstype=\"ext4\",mountpoint!=\"/nix/store\"";
+  diskUsedPercent = selector:
+    "100 * (1 - node_filesystem_avail_bytes{${selector}} / node_filesystem_size_bytes{${selector}})";
+  # a 3d trend smooths nightly dumps and gc; two weeks is time to order a disk or clean up
+  diskForecastWindow = "3d";
+  diskForecastHorizonSeconds = 14 * 86400;
+  # vm-109's root sits on the proxmox thin pool, overcommitted until the pool is measured
+  nasVmid = "109";
+  nasRootPercent = 60;
+  thinpoolDataWarnPercent = 80;
+  thinpoolDataCriticalPercent = 90;
+  # metadata exhaustion corrupts every thin volume at once, so it warns earlier than data
+  thinpoolMetadataPercent = 70;
+
+  prometheusPort = 9090;
+  # energy history is the long-lived data, ~1GB a month; the nas data pool is shared with every guest's
+  # state, so this cap, not the 10y, ends the history once it is reached
+  prometheusRetentionSize = "50GB";
 
   # alerts also go to hermes telegram
   enableTelegram = true;
@@ -155,11 +274,32 @@ let
     ${pkgs.python3}/bin/python3 ${../modules/dashboards/energy.py} $out
   '';
 
+  domain = "lsck0.dev";
+  # the public ingress; its promtail labels the access log with this host
+  edgeHost = "vm-200";
+  # one board per enabled webapp-template stack, the ones exporting the template's server metrics
+  webappDashboards = lib.mapAttrs (app: a: pkgs.runCommand "${app}.json" {
+    config = builtins.toJSON {
+      inherit app;
+      requestHost = "${a.host}.${domain}";
+      inherit edgeHost;
+      traefikServices = appTraefikServices app;
+      inherit edgeTraefikTarget;
+      inherit traefikRateWindow;
+    };
+    passAsFile = [ "config" ];
+  } ''
+    ${pkgs.python3}/bin/python3 ${../modules/dashboards/webapp.py} "$configPath" $out
+  '') (appsWithMetric "server");
+
   spotPrice = pkgs.writers.writePython3Bin "spot-price" {
     flakeIgnore = [ "E501" ];
   } (builtins.readFile ../scripts/spot-price.py);
 in {
   networking.hostName = "vm-105";
+
+  # the home assistant scrape
+  homelab.tokens.reads = [ "hass-key" ];
 
   # bot token, chat id, ntfy password from sops
   sops.secrets = {
@@ -175,8 +315,7 @@ in {
 
   fileSystems = nasMount "/var/lib/prometheus2" "prometheus"
     // nasMount "/var/lib/loki" "loki"
-    # home assistant's long-lived token, for its prometheus export
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+    // nasMount pyroscopeDir "pyroscope";
 
   # sqlite on nfs corrupts; local, the nas keeps a nightly copy
   homelab.localState.grafana = {
@@ -234,6 +373,7 @@ in {
         retention_period = "336h"; # 14 days
         volume_enabled = true;
         reject_old_samples = false;
+        max_entries_limit_per_query = lokiMaxLines;
       };
     };
   };
@@ -253,12 +393,63 @@ in {
         local.path = "/var/lib/tempo/traces";
         wal.path = "/var/lib/tempo/wal";
       };
+      # rate, errors and duration per span plus the service graph, as prometheus series with trace exemplars
+      metrics_generator = {
+        registry.external_labels.source = "tempo";
+        storage = {
+          path = "/var/lib/tempo/generator/wal";
+          remote_write = [{ url = "http://127.0.0.1:${toString prometheusPort}/api/v1/write"; send_exemplars = true; }];
+        };
+        # local-blocks backs traceql metrics queries in grafana
+        traces_storage.path = "/var/lib/tempo/generator/traces";
+        # the template's setting: client and internal spans count too, not only server spans
+        processor.local_blocks.filter_server_spans = false;
+      };
+      overrides.defaults.metrics_generator.processors = [ "service-graphs" "span-metrics" "local-blocks" ];
+    };
+  };
+
+  # pyroscope: continuous profiles, the nas holds them like loki's chunks
+  users.users.pyroscope = { isSystemUser = true; group = "pyroscope"; };
+  users.groups.pyroscope = { };
+  systemd.services.pyroscope = {
+    description = "Grafana Pyroscope continuous profiling";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    unitConfig.RequiresMountsFor = [ pyroscopeDir ];
+    serviceConfig = {
+      ExecStart = lib.concatStringsSep " " ([
+        "${pkgs.pyroscope}/bin/pyroscope"
+        "-server.http-listen-port=${toString pyroscopePort}"
+        "-server.grpc-listen-port=${toString pyroscopeGrpcPort}"
+        "-memberlist.bind-port=${toString pyroscopeMemberlistPort}"
+      ] ++ map (flag: "-${flag}=${pyroscopeRingAddr}") pyroscopeRings ++ [
+        "-pyroscopedb.data-path=${pyroscopeDir}/data"
+        # single binary: the compactor needs a bucket to apply the retention to
+        "-storage.backend=filesystem"
+        "-storage.filesystem.dir=${pyroscopeDir}/shared"
+        "-compactor.data-dir=${pyroscopeDir}/compactor"
+        "-blocks-storage.bucket-store.sync-dir=${pyroscopeDir}/sync"
+        "-compactor.blocks-retention-period=${pyroscopeRetention}"
+        "-usage-stats.enabled=false"
+        # profiling itself would be most of what is stored
+        "-self-profiling.disable-push=true"
+      ]);
+      User = "pyroscope";
+      Group = "pyroscope";
+      WorkingDirectory = pyroscopeDir;
+      Restart = "on-failure";
+      RestartSec = 10;
     };
   };
 
   systemd.tmpfiles.rules = [
     "d /var/lib/tempo 0750 tempo tempo -"
     "d /var/lib/loki 0750 loki loki -"
+    "d ${pyroscopeDir} 0750 pyroscope pyroscope -"
+    # its disk retention check fails on a missing data dir until the first profile arrives
+    "d ${pyroscopeDir}/data 0750 pyroscope pyroscope -"
   ];
 
   # localhost only, unauthenticated prober
@@ -289,10 +480,20 @@ in {
 
   services.prometheus = {
     enable = true;
-    # energy history is the long-lived data; ~1GB a month on the nas
     retentionTime = "10y";
-    extraFlags = [ "--storage.tsdb.retention.size=200GB" ];
+    extraFlags = [
+      "--storage.tsdb.retention.size=${prometheusRetentionSize}"
+      # tempo's metrics generator pushes span metrics here
+      "--web.enable-remote-write-receiver"
+      # the trace ids on those span metrics, for grafana's exemplar links
+      "--enable-feature=exemplar-storage"
+    ];
     scrapeConfigs = [
+      {
+        # tsdb size and block bytes, for the retention size cap
+        job_name = "prometheus";
+        static_configs = [{ targets = [ "127.0.0.1:${toString prometheusPort}" ]; }];
+      }
       {
         # standard blackbox relabel
         job_name = "blackbox-http";
@@ -340,7 +541,7 @@ in {
         # traefik metrics (:8082) on both ingresses
         job_name = "traefik";
         static_configs = [{
-          targets = [ "10.100.0.100:8082" "10.200.0.200:8082" ];
+          targets = [ "10.100.0.100:8082" edgeTraefikTarget ];
         }];
       }
     ] ++ lib.optional inverter {
@@ -357,7 +558,7 @@ in {
         authorization.credentials_file = hassScrapeToken;
         static_configs = [{ targets = [ "10.100.0.125:80" ]; }];
       }
-    ];
+    ] ++ appScrapeConfigs;
     # the hass token file only exists at runtime
     checkConfig = "syntax-only";
     # grafana unified alerting owns every rule
@@ -374,7 +575,7 @@ in {
       install -d -m 750 -o prometheus -g prometheus ${builtins.dirOf hassScrapeToken}
       # empty token: the scrape answers 401 until the file shows up
       install -m 400 -o prometheus -g prometheus \
-        "$(test -s /var/lib/homepage-tokens/hass-key.token && echo /var/lib/homepage-tokens/hass-key.token || echo /dev/null)" \
+        "$(test -s ${config.homelab.tokens.dir}/hass-key.token && echo ${config.homelab.tokens.dir}/hass-key.token || echo /dev/null)" \
         ${hassScrapeToken}
     '';
   };
@@ -441,6 +642,7 @@ in {
             access = "proxy";
             url = "http://127.0.0.1:3100";
             uid = "loki";
+            jsonData = { maxLines = lokiMaxLines; timeout = lokiQueryTimeoutSeconds; };
           }
           {
             name = "Tempo";
@@ -448,6 +650,30 @@ in {
             access = "proxy";
             url = "http://127.0.0.1:3200";
             uid = "tempo";
+            jsonData = {
+              # span attributes onto the journal labels base.nix promtail sets; a span carries only some of them
+              tracesToLogsV2 = {
+                datasourceUid = "loki";
+                tags = [
+                  { key = "host.name"; value = "host"; }
+                  { key = "container.name"; value = "container_name"; }
+                  # no semconv names a unit: a lab service that wants the link sets this attribute
+                  { key = "systemd.unit"; value = "unit"; }
+                ];
+                # batch exporters send a span seconds after its log lines
+                spanStartTimeShift = "-5m";
+                spanEndTimeShift = "5m";
+              };
+              serviceMap.datasourceUid = "prometheus";
+              nodeGraph.enabled = true;
+            };
+          }
+          {
+            name = "Pyroscope";
+            type = "grafana-pyroscope-datasource";
+            access = "proxy";
+            url = "http://127.0.0.1:${toString pyroscopePort}";
+            uid = "pyroscope";
           }
         ];
       };
@@ -490,7 +716,7 @@ in {
             name = "homelab";
             folder = "Homelab";
             interval = "1m";
-            rules = map mkRule [
+            rules = map mkRule ([
               # offline
               {
                 uid = "instance_down";
@@ -600,29 +826,162 @@ in {
               {
                 uid = "disk_full";
                 title = "Disk almost full";
-                expr = "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\"} / node_filesystem_size_bytes{mountpoint=\"/\"})";
+                expr = diskUsedPercent diskSelector;
                 threshold = 90;
                 for = "30m";
                 severity = "warning";
                 telegram = false;
                 firing = "Disk almost full"; resolved = "Disk space ok";
-                summary = "{{ $labels.vm }}: {{ printf \"%.0f\" $values.A.Value }}% used";
-                description = "The guest's root filesystem is over 90%. Old generations, journal or images usually.";
+                summary = "{{ $labels.vm }} {{ $labels.mountpoint }}: {{ printf \"%.0f\" $values.A.Value }}% used";
+                description = "A guest filesystem is over 90%. Old generations, journal or images usually; on the nas bulk disk or the download disk, media.";
               }
-            ];
+              {
+                uid = "disk_critical";
+                title = "Disk full";
+                expr = diskUsedPercent diskSelector;
+                threshold = 95;
+                for = "10m";
+                firing = "Disk full"; resolved = "Disk space ok";
+                summary = "{{ $labels.vm }} {{ $labels.mountpoint }}: {{ printf \"%.0f\" $values.A.Value }}% used";
+                description = "Writes on this filesystem fail soon: databases stop, journals and downloads break. Free space now.";
+              }
+              {
+                uid = "disk_fill_predicted";
+                title = "Disk fills within two weeks";
+                expr = "predict_linear(node_filesystem_avail_bytes{${diskSelector}}[${diskForecastWindow}], ${toString diskForecastHorizonSeconds})";
+                op = "lt"; threshold = 0;
+                # a trend, not a spike: nightly dumps and downloads come and go within hours
+                for = "2h";
+                severity = "warning";
+                telegram = false;
+                firing = "Disk filling up"; resolved = "Disk trend ok";
+                summary = "{{ $labels.vm }} {{ $labels.mountpoint }}: full within 14 days at the 3-day trend";
+                description = "The free space trend of the last 3 days reaches zero within two weeks. Find what grows before it is full.";
+              }
+            ] ++ lib.optional (inventory ? ${nasVmid}) {
+                uid = "nas_root_thinpool";
+                title = "NAS root over its thin pool share";
+                expr = diskUsedPercent "vm=\"${vmName inventory.${nasVmid}}\",mountpoint=\"/\"";
+                threshold = nasRootPercent;
+                for = "30m";
+                severity = "warning";
+                telegram = false;
+                firing = "NAS root filling the thin pool"; resolved = "NAS root ok";
+                summary = "vm-${nasVmid} /: {{ printf \"%.0f\" $values.A.Value }}% used";
+                description = "vm-${nasVmid}'s root is a thin volume in an overcommitted pool; past ${toString nasRootPercent}% the pool, not the guest, may run out first. Lift this once homelab_thinpool_data_percent has history.";
+            } ++ [
+              # the proxmox host's textfile collector; no data until it exists
+              {
+                uid = "thinpool_data_warn";
+                title = "Thin pool filling";
+                expr = "homelab_thinpool_data_percent";
+                threshold = thinpoolDataWarnPercent;
+                for = "30m";
+                severity = "warning";
+                telegram = false;
+                firing = "Thin pool filling"; resolved = "Thin pool ok";
+                summary = "{{ $labels.vm }} thin pool data at {{ printf \"%.0f\" $values.A.Value }}%";
+                description = "Every guest disk lives in this pool; a full pool stops all their writes at once. Trim guests or grow the pool.";
+              }
+              {
+                uid = "thinpool_data_critical";
+                title = "Thin pool almost full";
+                expr = "homelab_thinpool_data_percent";
+                threshold = thinpoolDataCriticalPercent;
+                for = "10m";
+                firing = "Thin pool almost full"; resolved = "Thin pool ok";
+                summary = "{{ $labels.vm }} thin pool data at {{ printf \"%.0f\" $values.A.Value }}%";
+                description = "Every guest disk lives in this pool; a full pool stops all their writes at once. Free space now: fstrim the guests, drop snapshots.";
+              }
+              {
+                uid = "thinpool_metadata";
+                title = "Thin pool metadata filling";
+                expr = "homelab_thinpool_metadata_percent";
+                threshold = thinpoolMetadataPercent;
+                for = "10m";
+                firing = "Thin pool metadata filling"; resolved = "Thin pool metadata ok";
+                summary = "{{ $labels.vm }} thin pool metadata at {{ printf \"%.0f\" $values.A.Value }}%";
+                description = "Full thin pool metadata corrupts the pool. Grow it with lvextend --poolmetadatasize.";
+              }
+              {
+                uid = "app_target_down";
+                title = "App metrics unreachable";
+                expr = "up{job=~\"app-.*\"}";
+                op = "lt"; threshold = 1;
+                firing = "App down"; resolved = "App back";
+                summary = "{{ $labels.job }} on {{ $labels.vm }}";
+                description = "Prometheus has not reached this app exporter for 5 minutes: the stack service is down, crash looping or not published.";
+              }
+            ] ++ lib.optional (appsWithMetric "postgres" != { }) {
+                uid = "app_postgres_down";
+                title = "App database down";
+                expr = "min by (app) (pg_up)";
+                op = "lt"; threshold = 1;
+                firing = "App database down"; resolved = "App database back";
+                summary = "{{ $labels.app }} postgres";
+                description = "postgres_exporter answers but cannot reach postgres. Check the stack's postgres service on the apps nodes.";
+            } ++ lib.optional (appsWithMetric "redis" != { }) {
+                uid = "app_redis_down";
+                title = "App cache down";
+                expr = "min by (app) (redis_up)";
+                op = "lt"; threshold = 1;
+                firing = "App cache down"; resolved = "App cache back";
+                summary = "{{ $labels.app }} redis";
+                description = "redis_exporter answers but cannot reach redis. Check the stack's redis service on the apps nodes.";
+            } ++ lib.optional (appsEnabled != { }) (
+              let
+                requests = filter: "sum by (service) (rate(traefik_service_requests_total{${appTraefikSelector appsEnabled}${filter}}[${traefikRateWindow}]))";
+              in {
+                uid = "app_5xx";
+                title = "App answering 5xx";
+                expr = "100 * (${requests ",code=~\"5..\""} / ${requests ""}) and on (service) (${requests ""} > ${app5xxMinRequestsPerSecond})";
+                threshold = app5xxPercent;
+                for = "10m";
+                severity = "warning";
+                firing = "App failing requests"; resolved = "App answering again";
+                summary = "{{ $labels.service }}: {{ printf \"%.0f\" $values.A.Value }}% 5xx";
+                description = "Over ${toString app5xxPercent}% of the requests traefik sends this app fail with 5xx. Check its server logs: {swarm_stack=\"<app>\"} in Loki.";
+              }) ++ lib.optional (appsEnabled != { }) {
+                uid = "app_restart_loop";
+                title = "App container restart loop";
+                # each restart is a new task container, so the distinct names seen in the window
+                expr = "count by (swarm_service) (count_over_time(container_start_time_seconds{swarm_service!=\"\"}[${restartLoopWindow}]))";
+                threshold = restartLoopTasks;
+                for = "0m";
+                severity = "warning";
+                firing = "Container restart loop"; resolved = "Container stable";
+                summary = "{{ $labels.swarm_service }}: {{ $values.A.Value }} tasks in ${restartLoopWindow}";
+                description = "Swarm keeps replacing this service's task. `docker service ps --no-trunc <service>` on an apps node shows why.";
+            } ++ lib.mapAttrsToList (app: _: {
+                uid = "app_${app}_walg_stale";
+                title = "${app} WAL-G backup stale";
+                datasource = "loki";
+                range = walgStaleSeconds;
+                expr = "sum(count_over_time({swarm_service=\"${app}_${walgService}\"} |= \"${walgSuccessLine}\" [${toString walgStaleSeconds}s]))";
+                op = "lt"; threshold = 1;
+                for = "30m";
+                # no success line in the window is no series at all
+                noData = "Alerting";
+                firing = "Backups missing"; resolved = "Backups running again";
+                summary = "${app} postgres: no WAL-G base backup in over ${toString (walgStaleSeconds / 3600)}h";
+                description = "The stack's wal-g loop has not logged a successful backup-push. Its log: {swarm_service=\"${app}_${walgService}\"} in Loki.";
+            }) (appsWithMetric "postgres"));
           }];
         };
       };
     };
   };
 
-  # one board: map, http, system, logs
-  environment.etc."grafana-dashboards/homelab.json".source = ../modules/dashboards/homelab.json;
-  # house power, gas and water
-  environment.etc."grafana-dashboards/energy.json".source = energyDashboard;
+  environment.etc = {
+    # one board: map, http, system, logs
+    "grafana-dashboards/homelab.json".source = ../modules/dashboards/homelab.json;
+    # house power, gas and water
+    "grafana-dashboards/energy.json".source = energyDashboard;
+  } // lib.mapAttrs' (app: d: lib.nameValuePair "grafana-dashboards/${app}.json" { source = d; }) webappDashboards;
 
   # file provider rescans only at startup
-  systemd.services.grafana.restartTriggers = [ ../modules/dashboards/homelab.json energyDashboard ];
+  systemd.services.grafana.restartTriggers = [ ../modules/dashboards/homelab.json energyDashboard ]
+    ++ lib.attrValues webappDashboards;
 
   # wholesale price beside the contract price, for the cost panels
   systemd.services.spot-price = {
@@ -686,20 +1045,23 @@ in {
     timerConfig = { OnBootSec = "2m"; OnUnitActiveSec = "30s"; };
   };
 
-  # 3100 loki, 3200 tempo, 4317/4318 otlp, 19532 journal-remote
-  networking.firewall.allowedTCPPorts = [ 80 9090 3100 3200 4317 4318 19532 ];
+  # 3100 loki, 3200 tempo, 4317/4318 otlp, 4040 pyroscope, 19532 journal-remote
+  networking.firewall.allowedTCPPorts = [ 80 prometheusPort 3100 3200 4317 4318 pyroscopePort 19532 ];
 
   # grafana trusts Remote-User (auth.proxy); loki has auth off, promtail on the ingresses pushes
-  homelab.ingressOnly.ports = [ 80 9090 3100 3200 4317 4318 19532 ];
-  # lab services send traces
-  homelab.ingressOnly.portSources."4317" = [ "10.100.0.0/24" "10.200.0.0/24" ];
+  homelab.ingressOnly.ports = [ 80 prometheusPort 3100 3200 4317 4318 pyroscopePort 19532 ];
+  # lab services send traces, the app servers too (grpc only, the template's exporter is tonic)
+  homelab.ingressOnly.portSources."4317" = [ "10.100.0.0/24" "10.200.0.0/24" ]
+    ++ lib.optionals (appsTelemetry != { }) appNodeSources;
   homelab.ingressOnly.portSources."4318" = [ "10.100.0.0/24" "10.200.0.0/24" ];
+  # the app servers push profiles; any node may run the server task
+  homelab.ingressOnly.portSources.${toString pyroscopePort} = lib.optionals (appsTelemetry != { }) appNodeSources;
   # desktop status widget scrapes prometheus
   homelab.ingressOnly.portSources."9090" = [ site.lan.subnet "10.100.0.104/32" ];
   # stats-sync on the terminal queries loki, the external traefik pushes its access log
   homelab.ingressOnly.portSources."3100" = [ "10.100.0.104/32" "10.200.0.200/32" ];
-  # every guest uploads its journal
-  homelab.ingressOnly.portSources."19532" = [ "10.100.0.0/24" "10.200.0.0/24" ];
+  # every guest uploads its journal, the swarm nodes whether or not an app is enabled
+  homelab.ingressOnly.portSources."19532" = [ "10.100.0.0/24" "10.200.0.0/24" ] ++ appNodeSources;
 
 
   # hot page cache is the point here (nfs serving, tsdb, streams)

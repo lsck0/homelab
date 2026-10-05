@@ -12,7 +12,7 @@ PROMETHEUS = os.environ.get("STATS_PROMETHEUS", "http://10.100.0.105:9090")
 LOKI = os.environ.get("STATS_LOKI", "http://10.100.0.105:3100")
 QBITTORRENT = os.environ.get("STATS_QBITTORRENT", "http://10.100.0.112")
 INVENTORY = os.environ.get("STATS_INVENTORY", "/var/lib/homelab-stats/inventory.json")
-TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/homepage-tokens")
+TOKENS = os.environ.get("STATS_TOKENS", "/var/lib/lab-tokens")
 # six columns of seven
 SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "42"))
 TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "4"))

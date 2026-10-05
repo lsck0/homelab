@@ -121,7 +121,7 @@
   },
   "117": {
     "cooldown": "30m",
-    "enabled": "false",
+    "enabled": "true",
     "features": "nesting=1",
     "gateway": "10.100.0.1",
     "ip": "10.100.0.117",
@@ -263,6 +263,54 @@
     "privileged": false,
     "type": "internal"
   },
+  "140": {
+    "cooldown": "30m",
+    "enabled": "true",
+    "features": "nesting=1",
+    "gateway": "10.100.0.1",
+    "ip": "10.100.0.140",
+    "kind": "vm",
+    "name": "140-internal-swarm",
+    "prefix": 24,
+    "privileged": false,
+    "type": "internal"
+  },
+  "150": {
+    "cooldown": "30m",
+    "enabled": "true",
+    "features": "nesting=1",
+    "gateway": "10.150.0.1",
+    "ip": "10.150.0.150",
+    "kind": "vm",
+    "name": "150-apps-swarm",
+    "prefix": 24,
+    "privileged": false,
+    "type": "apps"
+  },
+  "151": {
+    "cooldown": "30m",
+    "enabled": "true",
+    "features": "nesting=1",
+    "gateway": "10.150.0.1",
+    "ip": "10.150.0.151",
+    "kind": "vm",
+    "name": "151-apps-swarm",
+    "prefix": 24,
+    "privileged": false,
+    "type": "apps"
+  },
+  "152": {
+    "cooldown": "30m",
+    "enabled": "true",
+    "features": "nesting=1",
+    "gateway": "10.150.0.1",
+    "ip": "10.150.0.152",
+    "kind": "vm",
+    "name": "152-apps-swarm",
+    "prefix": 24,
+    "privileged": false,
+    "type": "apps"
+  },
   "200": {
     "cooldown": "30m",
     "enabled": "true",
@@ -288,7 +336,7 @@
     "type": "external"
   },
   "204": {
-    "cooldown": "30m",
+    "cooldown": "1h",
     "enabled": "onDemand",
     "features": "nesting=1,keyctl=1",
     "gateway": "10.200.0.1",
@@ -337,7 +385,7 @@
   },
   "209": {
     "cooldown": "30m",
-    "enabled": "onDemand",
+    "enabled": "false",
     "features": "nesting=1,keyctl=1",
     "gateway": "10.200.0.1",
     "ip": "10.200.0.209",

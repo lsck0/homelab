@@ -1,7 +1,20 @@
 { config, pkgs, lib, inventory, nasClients, site, ... }:
 let
-  routes = import ../modules/routes.nix;
-  dmzNasClients = lib.concatStringsSep ", " (lib.filter (lib.hasPrefix "10.200.") (lib.attrNames nasClients));
+  routes = import ../modules/catalog.nix { inherit inventory lib; };
+  appsCatalog = import ../modules/apps.nix;
+
+  # running guests of one zone, by address
+  zoneHosts = type: lib.sort (a: b: a < b) (map (v: v.ip)
+    (lib.filter (v: v.type == type && v.enabled != "false") (lib.attrValues inventory)));
+  nasClientsIn = type: lib.concatStringsSep ", " (lib.filter (ip: lib.elem ip (zoneHosts type)) (lib.attrNames nasClients));
+  dmzNasClients = nasClientsIn "external";
+
+  # the apps zone: the swarm nodes and the ports their routing mesh publishes for the edge
+  appsNodes = lib.concatStringsSep ", " (zoneHosts "apps");
+  appsNasClients = nasClientsIn "apps";
+  swarmManager = inventory.${toString appsCatalog.swarm.manager}.ip;
+  appsPorts = lib.unique (lib.concatMap (a: map (p: toString p.port) (lib.attrValues a.paths))
+    (lib.filter (a: a.enable) (lib.attrValues appsCatalog.apps)));
 
   # egress classes (modules/egress.nix)
   # policy routing keyed on source address
@@ -69,7 +82,7 @@ in {
     };
   };
 
-  # NETWORK INTERFACES (ens18 wan, ens19 lan, ens20 dmz)
+  # NETWORK INTERFACES (ens18 wan, ens19 internal, ens20 dmz, ens21 apps), in terraform's router_zones order
 
   networking.usePredictableInterfaceNames = lib.mkForce true;
   networking.useDHCP = false;
@@ -77,6 +90,7 @@ in {
   networking.defaultGateway = { address = site.lan.gateway; interface = "ens18"; };
   networking.interfaces.ens19.ipv4.addresses = [{ address = "10.100.0.1"; prefixLength = 24; }];
   networking.interfaces.ens20.ipv4.addresses = [{ address = "10.200.0.1"; prefixLength = 24; }];
+  networking.interfaces.ens21.ipv4.addresses = [{ address = "10.150.0.1"; prefixLength = 24; }];
 
   boot.kernel.sysctl = {
     "net.ipv4.ip_forward" = 1;
@@ -164,6 +178,7 @@ in {
       # rpfilter checks source against the marked table
       ip route replace 10.100.0.0/24 dev ens19 table ${toString egressMarks.vpn.table}
       ip route replace 10.200.0.0/24 dev ens20 table ${toString egressMarks.vpn.table}
+      ip route replace 10.150.0.0/24 dev ens21 table ${toString egressMarks.vpn.table}
       ip route replace ${site.lan.subnet} dev ens18 table ${toString egressMarks.vpn.table}
     '';
   };
@@ -275,7 +290,7 @@ in {
   networking.nat = {
     enable = true;
     externalInterface = "ens18";
-    internalInterfaces = [ "ens19" "ens20" "wg0" ];
+    internalInterfaces = [ "ens19" "ens20" "ens21" "wg0" ];
     # nixos forwardPorts would match all wan traffic
     forwardPorts = [];
   };
@@ -301,6 +316,11 @@ in {
       allowedTCPPorts = [ 53 ];
       allowedUDPPorts = [ 53 67 ];
     };
+    # static addresses from terraform, so dns only
+    interfaces.ens21 = {
+      allowedTCPPorts = [ 53 ];
+      allowedUDPPorts = [ 53 ];
+    };
     interfaces.wg0 = {
       allowedTCPPorts = [ 22 53 ];
       allowedUDPPorts = [ 53 ];
@@ -316,8 +336,11 @@ in {
 
     # nixos-fw accepts established flows before these, they only see new ones
     extraForwardRules = ''
-      # wan: port forwards only; the house lan routes the lab through here
+      # wan: port forwards only; the house lan routes the lab through here, but reaches the apps only through the ingresses
       iifname "ens18" ct status dnat accept
+      # the workstation deploys the apps nodes over ssh like every guest
+      iifname "ens18" ip saddr ${site.lan.workstation} oifname "ens21" tcp dport 22 accept
+      iifname "ens18" oifname "ens21" counter drop
       iifname "ens18" ip saddr ${site.lan.subnet} accept
 
       # lan -> anywhere: allow
@@ -339,11 +362,34 @@ in {
       # vm-200 -> proxmox api for wake
       iifname "ens20" ip saddr 10.200.0.200 ip daddr ${site.lan.proxmox} tcp dport 8006 accept
 
-      # dmz -> lan, management net, wireguard clients: block, whichever interface routes it
+    '' + lib.optionalString (appsPorts != [ ]) ''
+      # edge -> the apps' published ports; the swarm's routing mesh answers on every node
+      iifname "ens20" ip saddr 10.200.0.200 ip daddr { ${appsNodes} } tcp dport { ${lib.concatStringsSep ", " appsPorts} } accept
+    '' + ''
+
+      # dmz -> lan, management net, wireguard clients, apps: block, whichever interface routes it
       iifname "ens20" ip daddr { ${privateRanges} } counter drop
 
       # dmz -> internet: allow
       iifname "ens20" accept
+
+      # apps -> internal traefik: registry pulls
+      iifname "ens21" ip daddr 10.100.0.100 tcp dport 443 accept
+      # apps -> vm-105: journals, otlp traces, pyroscope profiles
+      iifname "ens21" ip daddr 10.100.0.105 tcp dport { 19532, 4317, 4040 } accept
+      # workers -> their manager: control (2377), gossip (7946), overlay (4789) and its ipsec (esp)
+      iifname "ens21" ip daddr ${swarmManager} tcp dport { 2377, 7946 } accept
+      iifname "ens21" ip daddr ${swarmManager} udp dport { 7946, 4789 } accept
+      iifname "ens21" ip daddr ${swarmManager} meta l4proto esp accept
+    '' + lib.optionalString (appsNasClients != "") ''
+      # apps -> nas nfs, only the nodes vm-109 exports to
+      iifname "ens21" ip saddr { ${appsNasClients} } ip daddr 10.100.0.109 meta l4proto { tcp, udp } th dport { 111, 2049 } accept
+    '' + ''
+      # apps -> lab, house, dmz, wireguard clients: block
+      iifname "ens21" ip daddr { ${privateRanges} } counter drop
+
+      # apps -> internet: allow
+      iifname "ens21" accept
     '';
   };
 

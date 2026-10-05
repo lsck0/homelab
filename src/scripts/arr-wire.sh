@@ -2,7 +2,7 @@
 # wires the media stack via app apis; idempotent, runs on a timer
 # env: INDEXERS; addresses overridden by src/tests/media-stack.sh
 
-T=${TOKEN_DIR:-/var/lib/homepage-tokens}
+T=${TOKEN_DIR:-/var/lib/lab-tokens}
 QBIT_HOST=${QBIT_HOST:-10.100.0.112};       QBIT_PORT=${QBIT_PORT:-80}
 PROWLARR_HOST=${PROWLARR_HOST:-10.100.0.130}; PROWLARR_PORT=${PROWLARR_PORT:-9696}
 RADARR_HOST=${RADARR_HOST:-10.100.0.130};     RADARR_PORT=${RADARR_PORT:-7878}

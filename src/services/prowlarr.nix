@@ -1,5 +1,5 @@
 # prowlarr: indexer manager, indexer traffic through tor, flaresolverr beside it
-{ pkgs, hostIp, ... }: {
+{ config, pkgs, hostIp, ... }: {
   homelab.servarr.prowlarr = {
     image = "lscr.io/linuxserver/prowlarr:2.6.5.5623-ls161";
     port = 9696;
@@ -23,7 +23,7 @@
     };
     script = ''
       API=http://127.0.0.1:9696/api/v1
-      KEY=$(cat /var/lib/homepage-tokens/prowlarr-key.token)
+      KEY=$(cat ${config.homelab.tokens.dir}/prowlarr-key.token)
       for _ in $(seq 1 60); do
         curl -fsS -H "X-Api-Key: $KEY" "$API/config/host" -o /tmp/host.json && break
         sleep 2

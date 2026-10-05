@@ -1,4 +1,4 @@
-{ pkgs, lib, nasMount, nasPath, retry, ... }:
+{ config, pkgs, lib, nasMount, nasPath, retry, ... }:
 let
   # webui api without login for these hosts
   incompleteDir = "/var/lib/qbittorrent-incomplete";
@@ -52,7 +52,6 @@ in {
 
   fileSystems = nasMount "/var/lib/qbittorrent" "qbittorrent"
     // nasPath "/data" "bulk"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens"
     // {
       # instances.tf extra disk; nofail plus RequiresMountsFor: a missing disk stops qbittorrent, not the boot
       "${incompleteDir}" = {
@@ -129,7 +128,7 @@ in {
       ${retry} 60 2 podman exec qbittorrent curl -fsS "$API/app/version"
 
       # webui login for non-whitelisted clients
-      T=/var/lib/homepage-tokens
+      T=${config.homelab.tokens.dir}
       [ -s $T/qbittorrent-pass.token ] || openssl rand -hex 16 | tr -d '\n' > $T/qbittorrent-pass.token
       echo -n admin > $T/qbittorrent-user.token
 

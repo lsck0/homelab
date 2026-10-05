@@ -33,6 +33,8 @@ let
     exec ${protonDriveCli}/bin/proton-drive auth login "$@"
   '';
   source = "/srv/nas";
+  # vm-105's tsdb, exported from the nas; ignored in source, snapshotted as a source of its own
+  prometheusDir = "${source}/data/prometheus";
   repo = "/srv/nas/BACKUPS/kopia";
   configFile = "/var/lib/kopia/repository.config";
 
@@ -146,7 +148,10 @@ in {
         kopia repository connect filesystem --path=${repo} --override-hostname=nas --override-username=root \
           || kopia repository create filesystem --path=${repo} --override-hostname=nas --override-username=root
       fi
-      # 02:00 daily, keep 7d / 8w / 12m
+      # 02:00 daily, keep 7d / 8w / 12m / 2y. --add-ignore merges into a set, so every boot's rerun adds nothing twice.
+      # prometheus and loki compact, rewriting their blocks, so each snapshot pins fresh copies for up to 2 years:
+      # loki keeps only 14 days of logs, so its tree is not kept at all; prometheus keeps 10 years of history,
+      # so it is its own source below with a short retention. registry images are rebuilt from git by ci.
       kopia policy set ${source} \
         --snapshot-time=02:00 \
         --compression=zstd \
@@ -154,6 +159,7 @@ in {
         --add-ignore=/BACKUPS --add-ignore=lost+found --add-ignore='*.tmp' \
         --add-ignore=/bulk \
         --add-ignore=/documents/archive \
+        --add-ignore=/data/prometheus --add-ignore=/data/loki --add-ignore=/data/registry \
         --one-file-system=false
       # the nas's own local state: syncthing identity and filebrowser users live off /srv/nas
       for extra in /var/lib/syncthing /var/lib/filebrowser; do
@@ -162,6 +168,14 @@ in {
         # the server only schedules sources that already have a snapshot
         kopia snapshot list "$extra" --json | jq -e 'length > 0' >/dev/null || kopia snapshot create "$extra"
       done
+      # a lost disk costs at most a day of metrics; older snapshots would only pin compacted-away blocks
+      if [ -d ${prometheusDir} ]; then
+        kopia policy set ${prometheusDir} --snapshot-time=02:00 --compression=zstd \
+          --keep-latest=2 --keep-hourly=0 --keep-daily=3 --keep-weekly=2 --keep-monthly=0 --keep-annual=0
+        # the list of a nested path also holds the /srv/nas snapshots that contain it, so match the source itself
+        kopia snapshot list ${prometheusDir} --json | jq -e --arg p ${prometheusDir} 'any(.[]; .source.path == $p)' \
+          >/dev/null || kopia snapshot create ${prometheusDir}
+      fi
     '';
   };
 
@@ -212,9 +226,11 @@ in {
   networking.firewall.allowedTCPPorts = [ 51515 ];
   homelab.ingressOnly.ports = [ 51515 ];
 
-  # off-site proton drive mirror (local repo shares the data's disk); cli, login and session dir defined with kopia's above
+  # off-site proton drive mirror of the kopia repository (it shares the data's disk); cli, login and session dir
+  # defined with kopia's above. only the repo goes up: it is encrypted, deduplicated and holds every snapshot, so
+  # uploading the raw trees beside it doubled the remote, and merge uploads never dropped what they deleted.
   systemd.services.proton-sync = {
-    description = "Mirror the NAS, all but bulk, to Proton Drive";
+    description = "Mirror the Kopia repository to Proton Drive";
     after = [ "network-online.target" "remote-fs.target" ];
     wants = [ "network-online.target" ];
     # never restart on a nixos switch: this multi-hour upload would block the whole deploy; the timer picks up changes
@@ -233,33 +249,53 @@ in {
       PROTON_DRIVE_CREDENTIALS_STORE = "unsafe_file";
       PROTON_DRIVE_CACHE_DIR = protonDir;
     };
-    path = [ protonDriveCli pkgs.coreutils ];
+    path = [ protonDriveCli pkgs.coreutils pkgs.findutils pkgs.gnugrep pkgs.jq ];
+    # the cli (0.8.0) has no mirror mode: upload's folder strategies are merge, rename, replace and skip, and
+    # replace re-uploads the whole repo. so deletions are diffed against the file list of the previous run and
+    # trashed by path, then deleted from the trash (proton never empties it, and trash counts against the quota).
+    # the previous list is the only memory of what is remote: lose it and the remote keeps what was deleted before
+    # (bounded by the repo's size then); trash /my-files/homelab-offsite/BACKUPS/kopia and the list to start over.
     script = ''
-      # nixos starts scripts with set -e; one tree failing must not skip the rest, and create-folder-exists is non-fatal
+      # nixos starts scripts with set -e; a failed batch must not skip the rest, and create-folder-exists is non-fatal
       set +e -uo pipefail
-      # dotglob: the per-child loop below would skip .git, .config and the like
-      shopt -s nullglob dotglob
+      shopt -s nullglob
+
+      # paths per trash or delete call: the cli resolves each path by listing its folder, so a bounded batch keeps
+      # one call's runtime and argv small while a night's prune (tens of blobs) stays a handful of process starts
+      PRUNE_BATCH_COUNT=100
+      # a night's maintenance drops a few percent of the blobs; more than this share vanishing is a local loss
+      # (wiped disk, stray rm) that the off-site copy exists to survive, so it is not mirrored without a human
+      PRUNE_SHARE_MAX_PERCENT=50
+      # touch to let the next run prune past PRUNE_SHARE_MAX_PERCENT once, after checking the loss is intended
+      prune_allow_large=${protonDir}/prune-allow-large
+      # repo files (relative paths) earlier runs uploaded, or failed to trash
+      manifest=${protonDir}/offsite-manifest.txt
+      # remote names trashed but not yet deleted from the trash
+      purge_queue=${protonDir}/offsite-purge.txt
 
       if [ ! -s ${protonDir}/auth-session.json ]; then
         echo "no proton session; run 'proton-drive-login' on this host once (opens a sign-in url)"
         exit 0
       fi
+      # an unmounted or wiped repo must not read as a repo whose every blob was deleted
+      if [ ! -f ${repo}/kopia.repository.f ]; then
+        echo "no kopia repository at ${repo}; refusing to sync"
+        exit 1
+      fi
 
       # posix paths; the top-level section is /my-files (see `filesystem list /`)
       root=/my-files/homelab-offsite
+      # same remote layout as when all of BACKUPS went up, so the repo uploaded before is reused
+      remote=$root/BACKUPS/${baseNameOf repo}
       # remote parents must exist before an upload; create-folder errors if present, so ignore it
       proton-drive filesystem create-folder /my-files homelab-offsite >/dev/null 2>&1 || true
+      proton-drive filesystem create-folder "$root" BACKUPS >/dev/null 2>&1 || true
 
       # upload skips unchanged files by content hash; changed files keep a new revision, folders merge.
-      # each tree is uploaded child by child, not whole: the cli has no exclude flag, and it refuses to
-      # recurse across a mount point, so a bind mount like documents/archive must be its own upload root.
-      # one process per child: the cli holds per-file state for its whole call, and all of data in one
-      # call grew to 1.9G and was oom-killed on this 3G guest (2026-09-29).
-      # skipped in data: the prometheus/loki tsdbs, which rewrite thousands of
-      # chunk files a day (a new remote revision each) and are only regenerable monitoring history.
-      # the cli fails the whole call for items it cannot upload: symlinks (crowdsec hub links, grafana/conf
-      # into the nix store) and sockets are expected skips; a file changed mid-upload (a live sqlite db)
-      # gets one more try; anything else fails the run
+      # the repo goes up in one call, as it did as a child of BACKUPS (the oom-killed single call of 2026-09-29
+      # was all of data/, which the per-child loop of the time split up).
+      # the cli fails the whole call for items it cannot upload; sockets and symlinks are expected skips,
+      # a file changed mid-upload (kopia.maintenance rewritten) gets one more try, anything else fails the run
       upload() {
         local out
         out=$(mktemp)
@@ -276,24 +312,99 @@ in {
         return 2
       }
 
-      ok=1
-      for tree in BACKUPS documents syncthing data; do
-        proton-drive filesystem create-folder "$root" "$tree" >/dev/null 2>&1 || true
-        for p in ${source}/$tree/*; do
-          if [ "$tree" = data ]; then
-            case "$(basename "$p")" in prometheus|loki) continue ;; esac
-          fi
-          echo ">>> $p -> $root/$tree"
-          upload "$p" "$root/$tree"
-          case $? in
-            0) ;;
-            2) echo ">>> $p changed during the upload, once more"; upload "$p" "$root/$tree" || ok=0 ;;
-            *) ok=0 ;;
-          esac
+      # runs `filesystem <verb>` on the paths; prints those still there afterwards. a path matching gone_pattern
+      # in the error is already gone: a blob deleted locally before it was ever uploaded, or a retried batch
+      remote_apply() {
+        local verb=$1 gone_pattern=$2 out err item
+        shift 2
+        err=$(mktemp)
+        out=$(proton-drive filesystem "$verb" -j "$@" 2>"$err")
+        if [ $? = 0 ] && jq -e 'all(.[]; .ok == true)' <<<"$out" >/dev/null 2>&1; then
+          rm -f "$err"
+          return 0
+        fi
+        # one unresolvable path fails the whole call before anything moves: retry one by one
+        for item in "$@"; do
+          out=$(proton-drive filesystem "$verb" -j "$item" 2>"$err")
+          if [ $? = 0 ] && jq -e 'all(.[]; .ok == true)' <<<"$out" >/dev/null 2>&1; then continue; fi
+          grep -q "$gone_pattern" "$err" && continue
+          echo ">>> $verb $item failed: $(head -c 300 "$err") $(head -c 300 <<<"$out")" >&2
+          echo "$item"
         done
-      done
+        rm -f "$err"
+      }
 
-      [ "$ok" = 1 ] || { echo "one or more uploads failed"; exit 1; }
+      # remote_apply over stdin's lines in batches of PRUNE_BATCH_COUNT
+      remote_apply_batched() {
+        local verb=$1 gone_pattern=$2 items i
+        mapfile -t items
+        for ((i = 0; i < ''${#items[@]}; i += PRUNE_BATCH_COUNT)); do
+          remote_apply "$verb" "$gone_pattern" "''${items[@]:i:PRUNE_BATCH_COUNT}"
+        done
+      }
+
+      ok=1
+      touch "$manifest" "$purge_queue"
+      current=$(mktemp)
+      gone=$(mktemp)
+      kept=$(mktemp)
+      # listed before the upload: a blob written during it is in the next run's list and upload
+      find ${repo} -type f -printf '%P\n' | LC_ALL=C sort > "$current"
+
+      echo ">>> ${repo} -> $remote"
+      upload ${repo} "$root/BACKUPS"
+      case $? in
+        0) ;;
+        2) echo ">>> ${repo} changed during the upload, once more"; upload ${repo} "$root/BACKUPS" || ok=0 ;;
+        *) ok=0 ;;
+      esac
+
+      LC_ALL=C sort -u "$manifest" | LC_ALL=C comm -23 - "$current" > "$gone"
+      gone_count=$(wc -l < "$gone")
+      known_count=$(wc -l < "$manifest")
+      if [ "$ok" != 1 ]; then
+        # a failed upload says nothing good about the session or the source; prune next time
+        cp "$gone" "$kept"
+      elif [ "$gone_count" -gt 0 ] && [ $((gone_count * 100)) -gt $((known_count * PRUNE_SHARE_MAX_PERCENT)) ] \
+          && [ ! -e "$prune_allow_large" ]; then
+        echo ">>> $gone_count of $known_count uploaded repo files are gone locally, over $PRUNE_SHARE_MAX_PERCENT%;"
+        echo ">>> not pruning the off-site copy. if intended: touch $prune_allow_large and rerun"
+        cp "$gone" "$kept"
+        ok=0
+      else
+        rm -f "$prune_allow_large"
+        echo ">>> trashing $gone_count remote files the repo dropped"
+        sed "s|^|$remote/|" "$gone" | remote_apply_batched trash 'Node not found' | sed "s|^$remote/||" > "$kept"
+        # blob names are content hashes, unique in the trash, so deleting by name cannot hit another item
+        LC_ALL=C comm -23 "$gone" <(LC_ALL=C sort "$kept") | sed 's|.*/||' >> "$purge_queue"
+        [ -s "$kept" ] && ok=0
+      fi
+      # the next run retries what could not be trashed
+      LC_ALL=C sort -u "$current" "$kept" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
+
+      # the remote root holds only the repo; the raw trees earlier versions uploaded beside it go. each is renamed
+      # first, so deleting it from the trash by name cannot hit a same-named item of the account's own
+      proton-drive filesystem list -j "$root" 2>/dev/null \
+        | jq -r '.[] | .name.value // empty | select(. != "BACKUPS")' 2>/dev/null \
+        | while IFS= read -r name; do
+            unique="homelab-offsite-stray-$name-$(date +%s)"
+            echo ">>> trashing $root/$name, uploaded by an earlier version"
+            proton-drive filesystem rename "$root/$name" "$unique" </dev/null >/dev/null || exit 1
+            [ -z "$(echo "$root/$unique" | remote_apply_batched trash 'Node not found')" ] || exit 1
+            echo "$unique" >> "$purge_queue"
+          done
+      [ "''${PIPESTATUS[2]}" = 0 ] || ok=0
+
+      if [ -s "$purge_queue" ]; then
+        echo ">>> deleting $(wc -l < "$purge_queue") trashed files for good"
+        sed 's|^|/trash/|' "$purge_queue" | remote_apply_batched delete 'Trashed node not found' \
+          | sed 's|^/trash/||' > "$purge_queue.tmp"
+        mv "$purge_queue.tmp" "$purge_queue"
+        [ -s "$purge_queue" ] && ok=0
+      fi
+      rm -f "$current" "$gone" "$kept"
+
+      [ "$ok" = 1 ] || { echo "one or more uploads or prunes failed"; exit 1; }
 
       # freshness metric only on a fully successful run
       d=/var/lib/node-exporter-textfile; mkdir -p $d

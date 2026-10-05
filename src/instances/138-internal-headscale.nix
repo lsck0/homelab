@@ -7,8 +7,7 @@ in
   # internal, not the dmz
   networking.hostName = "vm-138";
 
-  fileSystems = nasMount "/var/lib/headscale" "headscale"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+  fileSystems = nasMount "/var/lib/headscale" "headscale";
 
   services.headscale = {
     enable = true;
@@ -69,7 +68,7 @@ in
       [ -s /var/lib/headplane/cookie-secret ] || (umask 077; openssl rand -hex 16 > /var/lib/headplane/cookie-secret)
       secret=$(cat /var/lib/headplane/cookie-secret)
       install -m 600 ${config.sops.secrets.headplane-oidc-secret.path} /var/lib/headplane/oidc-secret
-      apikey=$(cat /var/lib/homepage-tokens/headplane-key.token)
+      apikey=$(cat ${config.homelab.tokens.dir}/headplane-key.token)
 
       # settings rewritten every run, secret generated once
       cat > /var/lib/headplane/config.yaml <<EOF
@@ -111,7 +110,7 @@ in
     script = ''
       ${retry} 60 2 curl -sf ${headscaleLocal}/health
 
-      T=/var/lib/homepage-tokens/headplane-key.token
+      T=${config.homelab.tokens.ownDir}/headplane-key.token
       prefix=$(cut -d. -f1 "$T" 2>/dev/null || true)
       expires=$(headscale apikeys list -o json | jq -r --arg p "$prefix" '.[] | select(.prefix == $p) | .expiration.seconds')
       if [ -n "$prefix" ] && [ -n "$expires" ] && [ "$expires" -gt "$(( $(date +%s) + 7 * 86400 ))" ]; then

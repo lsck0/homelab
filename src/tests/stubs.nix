@@ -9,6 +9,7 @@ in
     ../modules/network.nix
     ../modules/db-backup.nix
     ../modules/local-state.nix
+    ../modules/tokens.nix
   ];
 
   options.sops = {
@@ -55,6 +56,7 @@ in
 
     _module.args = {
       nasMount = _: _: { };
+      nasMountRo = _: _: { };
       nasPath = _: _: { };
       nasMedia = _: _: { };
       # network.nix reads the inventory

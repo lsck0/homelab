@@ -9,8 +9,13 @@ let
   # who may reach a guarded port
   trustedSources = [
     "127.0.0.0/8"
+  ]
+  # containers calling their host's other services; a swarm node runs strangers' containers and trusts none
+  ++ lib.optionals cfg.trustContainers [
     "10.88.0.0/16"     # podman default bridge
     "172.16.0.0/12"    # docker bridges
+  ]
+  ++ [
     # the internal ingress; the dmz one gets per-port sources, it must not reach every guarded port
     "10.100.0.100/32"
     "10.100.0.103/32"
@@ -61,6 +66,12 @@ in {
         SSH (22) and node-exporter (9100) are deliberately never guarded, so a
         mistake here can always be undone over SSH.
       '';
+    };
+
+    trustContainers = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Let this host's container bridges reach every guarded port.";
     };
 
     extraSources = lib.mkOption {

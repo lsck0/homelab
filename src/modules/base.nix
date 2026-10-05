@@ -3,10 +3,15 @@ let
   # vm-105 collects every journal and feeds loki
   isCollector = config.networking.hostName == "vm-105";
   promtailOn = isCollector || (config.homelab.traefik.enable or false);
+
+  # only the secrets this host reads, encrypted to its own key (scripts/secrets-hosts.sh)
+  hostSecrets = ../host-secrets + "/${config.networking.hostName}.json";
+  # the golden image and lxc template boot as "nixos"; they have no key, the first deploy brings host and secrets
+  isInstallImage = config.networking.hostName == "nixos";
 in {
   imports = [
     ./db-backup.nix
-    ./docker-stack.nix
+    ./swarm.nix
     ./local-state.nix
     ./nas.nix
     ./network.nix
@@ -14,6 +19,7 @@ in {
     ./on-demand.nix
     ./retry.nix
     ./servarr.nix
+    ./tokens.nix
   ];
 
   options.homelab.acmeEmail = lib.mkOption {
@@ -23,8 +29,14 @@ in {
   };
 
   config = {
+    assertions = [{
+      assertion = isInstallImage || builtins.pathExists hostSecrets;
+      message = "${toString hostSecrets} missing: run src/scripts/secrets-hosts.sh (sync.sh does)";
+    }];
+
     sops = {
-      defaultSopsFile = ../secrets.json;
+      defaultSopsFile = lib.mkIf (!isInstallImage) hostSecrets;
+      # the host's own key, pushed by sync.sh; it opens host-secrets/<host>.json and nothing else
       age.keyFile = "/var/lib/sops-nix/key.txt";
       gnupg.sshKeyPaths = [];
     };
@@ -85,6 +97,13 @@ in {
             { source_labels = [ "__journal__systemd_unit" ]; target_label = "unit"; }
             { source_labels = [ "__journal__hostname" ]; target_label = "host"; }
             { source_labels = [ "__journal_priority_keyword" ]; target_label = "level"; }
+            # docker and podman log to journald: every container is unit docker.service without these
+            { source_labels = [ "__journal_container_name" ]; target_label = "container_name"; }
+            # swarm task containers are <stack>_<service>.<slot>.<task id>: without the task id, a new stream per
+            # deploy and restart. same patterns as the cadvisor scrape in 105-internal-grafana.nix
+            { source_labels = [ "__journal_container_name" ]; regex = "([^.]+\\.[^.]+)\\.[^.]+"; target_label = "container_name"; }
+            { source_labels = [ "__journal_container_name" ]; regex = "([^.]+)\\.[^.]+\\.[^.]+"; target_label = "swarm_service"; }
+            { source_labels = [ "__journal_container_name" ]; regex = "([^_.]+)_[^.]+\\.[^.]+\\.[^.]+"; target_label = "swarm_stack"; }
           ];
         }) [ { name = "journal"; path = null; } { name = "journal-remote"; path = "/var/log/journal/remote"; } ])
         # access log feeds the world map
@@ -120,19 +139,22 @@ in {
     services.journald.extraConfig = "SystemMaxUse=200M";
     nix.optimise.automatic = true;
 
-    nix.settings.experimental-features = [ "nix-command" "flakes" ];
-
     # attic (vm-110) substituter, read-only netrc token
-    sops.secrets.attic-pull-token = {};
-    sops.templates."nix-netrc".content = ''
-      machine 10.100.0.110
-        password ${config.sops.placeholder.attic-pull-token}
-    '';
-    nix.settings = {
-      netrc-file = config.sops.templates."nix-netrc".path;
-      extra-substituters = [ "http://10.100.0.110:8080/homelab" ];
-      extra-trusted-public-keys = [ "homelab:OtKSPQnvWs0hIa5D2RxbBwENbAo9qkX3yAr5PoWvtyc=" ];
+    sops.secrets.attic-pull-token = lib.mkIf (!isInstallImage) {};
+    sops.templates."nix-netrc" = lib.mkIf (!isInstallImage) {
+      content = ''
+        machine 10.100.0.110
+          password ${config.sops.placeholder.attic-pull-token}
+      '';
     };
+    nix.settings = lib.mkMerge [
+      { experimental-features = [ "nix-command" "flakes" ]; }
+      (lib.mkIf (!isInstallImage) {
+        netrc-file = config.sops.templates."nix-netrc".path;
+        extra-substituters = [ "http://10.100.0.110:8080/homelab" ];
+        extra-trusted-public-keys = [ "homelab:OtKSPQnvWs0hIa5D2RxbBwENbAo9qkX3yAr5PoWvtyc=" ];
+      })
+    ];
     system.stateVersion = "25.11";
   };
 }

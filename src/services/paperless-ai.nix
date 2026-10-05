@@ -1,4 +1,4 @@
-# paperless-ai: llm tagging for paperless; the host mounts /var/lib/homepage-tokens
+# paperless-ai: llm tagging for paperless
 { config, lib, pkgs, retry, hostIp, ... }:
 let
   # local ollama beside jellyfin on the rtx 2060; documents stay in the lab
@@ -39,7 +39,7 @@ in {
       RestartSec = 30;
     };
     script = ''
-      TOKEN_FILE="/var/lib/homepage-tokens/paperless-key.token"
+      TOKEN_FILE="${config.homelab.tokens.dir}/paperless-key.token"
       # wait for paperless-setup's token, never write a dead config
       ${retry} 60 5 test -s "$TOKEN_FILE" || { echo "Paperless API token not available"; exit 1; }
 

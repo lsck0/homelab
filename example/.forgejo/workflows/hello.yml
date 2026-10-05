@@ -1,6 +1,6 @@
 name: hello
 
-# build on vm-115, vm-209 polls the registry
+# build on vm-117 (rootless), vm-209 polls the registry
 on:
     push:
         branches: [master]
@@ -20,6 +20,12 @@ jobs:
                     -t registry.lsck0.dev/hello:latest \
                     -t registry.lsck0.dev/hello:${{ github.sha }} \
                     .
+
+            # the push credential is a repo secret (sops: registry-push-password); the runner holds none
+            - name: Log in to the registry
+              env:
+                  REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+              run: printf '%s' "$REGISTRY_PASSWORD" | docker login registry.lsck0.dev -u ci --password-stdin
 
             - name: Push to registry
               run: |

@@ -1,7 +1,7 @@
 { config, lib, pkgs, inputs, inventory, nasMount, nasPath, site, ... }:
 let
-  T = "/var/lib/homepage-tokens";
-  routes = import ../modules/routes.nix;
+  T = config.homelab.tokens.dir;
+  routes = let c = import ../modules/catalog.nix { inherit inventory lib; }; in { inherit (c) internal external; };
   # template adds the trailing newline openssh needs
   sshKey = config.sops.templates."hermes-ssh-key".path;
 
@@ -20,7 +20,8 @@ let
     # guests are qemu vms or lxc containers
     at() { if pve GET "/nodes/${site.node}/lxc/$1/status/current" | jq -e .data >/dev/null; then
              echo "/nodes/${site.node}/lxc/$1"; else echo "/nodes/${site.node}/qemu/$1"; fi; }
-    ip() { if [ "$1" -ge 200 ] && [ "$1" -lt 300 ]; then echo 10.200.0.$1; else echo 10.100.0.$1; fi; }
+    # the inventory knows each guest's zone and address
+    ip() { jq -er --arg id "$1" '.[$id].ip' ${pkgs.writeText "inventory.json" (builtins.toJSON inventory)}; }
     case "''${1:-list}" in status|start|stop|reboot) N=$(at "''${2:?id}") ;; esac
     case "''${1:-list}" in
       list)   { pve GET /nodes/${site.node}/qemu; pve GET /nodes/${site.node}/lxc; } \
@@ -41,10 +42,8 @@ let
   '';
 
   labToken = pkgs.writeShellScriptBin "lab-token" ''
-    # dmz vms write to external/
-    if [ -z "''${1:-}" ]; then cd ${T} && ls *.token external/*.token | sed 's|^external/||; s/\.token$//'; exit 0; fi
-    [ -f "${T}/$1.token" ] && exec cat "${T}/$1.token"
-    exec cat "${T}/external/$1.token"
+    if [ -z "''${1:-}" ]; then cd ${T} && ls *.token | sed 's/\.token$//'; exit 0; fi
+    exec cat "${T}/$1.token"
   '';
 
   # mc <command...>: rcon through vm-208
@@ -107,7 +106,7 @@ let
 
   # WORKSPACE CONTEXT (inventory as the agent sees it)
   urlOf = id: lib.concatStringsSep ", " (lib.concatLists (lib.mapAttrsToList (_: side:
-    lib.mapAttrsToList (_: r: "https://${r.host}.lsck0.dev") (lib.filterAttrs (_: r: toString r.vmid == id) side)
+    lib.mapAttrsToList (_: r: "https://${r.host}.lsck0.dev") (lib.filterAttrs (_: r: toString (r.vmid or "") == id) side)
   ) routes));
   inventoryTable = lib.concatStringsSep "\n" (lib.mapAttrsToList (id: v:
     "| ${id} | ${v.name} | ${v.ip} | ${v.enabled}${lib.optionalString (v.enabled == "onDemand") " (${v.cooldown})"} | ${urlOf id} |"
@@ -205,9 +204,11 @@ in {
     '';
   };
 
-  fileSystems = nasMount T "homepage-tokens"
-    # /srv/sync is the owner's ~/Sync
-    // nasPath "/srv/sync" "syncthing/sync"
+  # root everywhere by the owner's choice, so every token too
+  homelab.tokens.reads = config.homelab.tokens.all;
+
+  # /srv/sync is the owner's ~/Sync
+  fileSystems = nasPath "/srv/sync" "syncthing/sync"
     // nasPath "/srv/media" "bulk/media";
 
   # root on every vm and the proxmox host
@@ -288,10 +289,8 @@ in {
   # hardening makes the fs read-only; the parent, not the automounts, so the agent starts without the nas
   systemd.services.hermes-agent.serviceConfig.ReadWritePaths = [ "/srv" ];
 
-  # sync.sh needs the age key
-  systemd.tmpfiles.rules = [
-    "C+ /var/lib/hermes/age.txt 0400 hermes hermes - /var/lib/sops-nix/key.txt"
-  ];
+  # lab-deploy runs sync.sh, which needs the admin age key: sync.sh puts it at /var/lib/hermes/age.txt itself,
+  # /var/lib/sops-nix/key.txt only opens this host's own secrets
 
   # hermes keeps its memory and schedule on local disk, nothing else copies it
   homelab.dbBackup.databases = lib.mapAttrs (_: f: { sqlite = "/var/lib/hermes/.hermes/${f}"; }) {

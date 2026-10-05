@@ -1,9 +1,9 @@
-{ config, pkgs, lib, ... }:
+{ config, pkgs, lib, inventory, ... }:
 let
   stateDir = "/var/lib/authelia-main";
 
-  # access rules come from modules/routes.nix
-  routes = (import ../modules/routes.nix).internal;
+  # access rules come from every internal route: nixos services and swarm apps (modules/catalog.nix)
+  routes = (import ../modules/catalog.nix { inherit inventory lib; }).internal;
   ssoRoutes = lib.filterAttrs (_: r: (r.auth or "sso") == "sso") routes;
   # admins reach everything, anyone else needs the page's own app-<route> group
   routeSubjects = name: _: [ [ "group:admins" ] [ "group:app-${name}" ] ];

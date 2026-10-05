@@ -28,7 +28,7 @@ and the owner merges and syncs.
   - `src/instances/<id>-<type>-<service>.nix` NixOS config per guest; it imports service fragments from `src/services/`.
   - `src/services/*.nix` one service each (lldap, kopia, forgejo-runner, paperless-ai, the *arr apps), so a service moves between guests by changing an import.
   - `src/modules/routes.nix` hostname -> VM/port table (Traefik + DNS).
-  - `src/modules/*.nix` shared modules (base, traefik, on-demand, servarr, docker-stack/swarm, nas mounts).
+  - `src/modules/*.nix` shared modules (base, traefik, on-demand, servarr, swarm, tokens, nas mounts); `apps.nix` is the app catalog, `catalog.nix` every route.
   - `src/modules/hermes/skills/` these skills.
   - `src/secrets.json` sops-encrypted secrets (never try to decrypt, never add plaintext secrets: the repo is public).
 - Adding a service = a `src/services/<name>.nix` imported by an existing guest, or a new guest in instances.tf + `src/instances/<id>-<type>-<name>.nix`; plus a route in routes.nix.

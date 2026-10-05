@@ -1,4 +1,4 @@
-# <host>.lsck0.dev -> backend
+# <host>.lsck0.dev -> a nixos service on a vm; swarm apps are in apps.nix, both meet in catalog.nix
 {
   internal = {
     authelia       = { host = "auth";        vmid = 101; port = 9091;  auth = "portal"; };
@@ -54,7 +54,5 @@
     # grey-cloud: pacman pulls large binaries, not through the cloudflare proxy
     mirror     = { host = "mirror";   vmid = 210; port = 80; proxied = false; };
     ntfy       = { host = "ntfy";     vmid = 203; port = 80; };
-    # ci target: hello <- forgejo
-    hello      = { host = "hello";    vmid = 209; port = 80; proxied = false; };
   };
 }

@@ -15,8 +15,8 @@ metadata:
 
 ## SearXNG (vm-204, on demand, https://search.lsck0.dev)
 
-`vm start 204`, then `curl -s 'http://10.200.0.204/search?q=<q>&format=json'` (if JSON format is enabled
-in settings; otherwise use your own `web_search`).
+`vm start 204`, then `curl -s 'http://10.200.0.204/search?q=<q>&format=json'`. The limiter lets
+vm-114 through; engine traffic leaves via the VPN.
 
 ## PrivateBin (vm-206, on demand, https://paste.lsck0.dev)
 

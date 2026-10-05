@@ -53,7 +53,7 @@ mkdir -p "$W/bin" "$W/tokens"
 printf '#!/bin/sh\nexec docker "$@"\n' > "$W/bin/podman"; chmod +x "$W/bin/podman"
 export PATH="$W/bin:$PATH"
 
-TOK="s#/var/lib/homepage-tokens#$W/tokens#g"
+TOK="s#/var/lib/lab-tokens#$W/tokens#g"
 
 echo ">>> workdir $W"
 for a in $APPS; do docker rm -f "$P$a" >/dev/null 2>&1 || true; done

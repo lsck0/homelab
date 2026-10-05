@@ -1,9 +1,8 @@
-{ pkgs, nasMount, nasMedia, retry, ... }: {
+{ config, pkgs, nasMount, nasMedia, retry, ... }: {
   networking.hostName = "vm-136";
 
   fileSystems = nasMount "/var/lib/navidrome" "navidrome"
-    // nasMedia "/srv/music" "music"
-    // nasMount "/var/lib/homepage-tokens" "homepage-tokens";
+    // nasMedia "/srv/music" "music";
 
   virtualisation.oci-containers.containers.navidrome = {
     image = "deluan/navidrome:0.64.0";
@@ -32,14 +31,14 @@
     description = "Initialise Navidrome admin and export Subsonic credentials for Homepage";
     after = [ "podman-navidrome.service" ];
     # an lxc mounts nfs at boot, not on access: never write under an empty mountpoint
-    unitConfig.RequiresMountsFor = [ "/var/lib/homepage-tokens" ];
+    unitConfig.RequiresMountsFor = config.homelab.tokens.mountPoints;
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.curl pkgs.coreutils pkgs.jq pkgs.openssl ];
     startLimitIntervalSec = 0;
     serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
     script = ''
       N=http://127.0.0.1:80
-      T=/var/lib/homepage-tokens
+      T=${config.homelab.tokens.dir}
       ${retry} 90 2 curl -sf $N/ping
 
       [ -s $T/navidrome-pass.token ] || openssl rand -hex 16 | tr -d '\n' > $T/navidrome-pass.token

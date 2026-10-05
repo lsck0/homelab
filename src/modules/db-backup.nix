@@ -88,8 +88,8 @@ in {
   };
 
   config = lib.mkIf (cfg.databases != { }) {
-    # kopia only snapshots the nas
-    fileSystems = nasPath dir "data/db-dumps";
+    # kopia only snapshots the nas; each host mounts its own dir, so a dmz or apps host never sees another's dumps
+    fileSystems = nasPath dir "data/db-dumps/${config.networking.hostName}";
 
     systemd.services = lib.mapAttrs' (name: db: lib.nameValuePair "db-backup-${name}" {
       description = "Dump ${name} to the NAS";
