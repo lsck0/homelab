@@ -1,44 +1,103 @@
 #!/usr/bin/env bash
 # snapshot every package arch-dotfiles' install.sh installs into the signed lsck0 pacman repo
 #
-# Runs as root in a fresh archlinux:base-devel container on vm-119 (archbuild.service):
-#   /repo              served tree on the nas: x86_64/ (packages, db), status.txt, status.json, .state/
-#   /cache             persistent build state on the vm disk: pacman cache, sources, cargo and go caches
-#   /public            the builder's status page: build.log, logs/<base>.log, status.txt
-#   /run/signing.asc   armored secret signing key
+# usage: archrepo-build.sh build|publish
 #
-# The list is install.sh itself: PACKAGES, CARGO_PKGS and GO_PKGS across every group. PACKAGES
-# entries in core, extra or multilib are copied, everything else is built: mirror/pkgbuilds/<name>
-# recipes, aur packages with their aur dependencies, crates and go modules. The official closure of
-# the whole set is copied at the versions the builds ran against, and clients list [lsck0] above
-# [core], so a machine only ever sees a set that resolved together here. Packages keep their names.
+# archbuild.service on vm-119 runs it twice per night, each time in a fresh archlinux:base-devel
+# container, after archrepo-fetch.sh has checked out a dotfiles commit signed by the pinned key:
+#
+#   build    untrusted: runs aur, crate and module recipes. Holds no secret and cannot write the served
+#            tree; its result is a proposal in /outbox: unsigned packages, the staged db, the official
+#            dbs the builds ran against, per base state and a report.
+#   publish  trusted: holds the repo key and the push key, and never runs or installs anything a recipe
+#            produced. It signs only proposed packages it can vouch for, builds the served db itself
+#            with repo-add and publishes it as a dated snapshot.
+#
+# A malicious recipe can still ship bad contents under its own package names, which installing it
+# grants anyway, but can no longer take the key, sign another base's name, take or replace an
+# official package, or write the served tree. The publisher holds the builder to this:
+#   - a rebuilt base advances its build number; its files are new, named after their .PKGINFO, and
+#     carry only names the base owns already or nobody owns
+#   - only a local recipe (signed dotfiles) may take or replace the name of an official package
+#   - every served name maps to a file of a base's signed state, to the file it serves already, or to
+#     the file arch's dbs name for it, which pacman checks against arch's keyring here
+#   - a base that fails these checks keeps its served build; the rest of the night publishes
+# The builder can still withhold or roll back: drop names, hold a night back, or point an official
+# name at an older arch-signed build of it. All of that shows in the status and none of it forges.
+#
+# Mounts:
+#   /repo        served tree on the nas: <date>/x86_64 dated snapshots, current -> the newest one,
+#                x86_64/ the pool of signed files plus the newest db, status.{txt,json}, .state/;
+#                read-only for build
+#   /dotfiles    the verified arch-dotfiles checkout, read-only
+#   /outbox      build writes it, publish reads it read-only
+#   /cache       build only: pacman cache, sources, cargo and go caches, the staging db
+#   /public      build only: the builder's status page, logs/<base>.log, status.json
+#   /run/signing.asc, /run/push-key   publish only
+#
+# The list is install.sh itself: PACKAGES, CARGO_PKGS and GO_PKGS across every group, plus the
+# EXTRA_PACKAGES of every platforms/*.sh. PACKAGES entries in core, extra or multilib are copied,
+# everything else is built: mirror/pkgbuilds/<name> recipes, aur packages with their aur
+# dependencies, crates and go modules. The official closure of the whole set is copied at the
+# versions the builds ran against, and clients list [lsck0] above [core], so a machine only ever sees
+# a set that resolved together here. Packages keep their names.
 #
 # Built packages are repacked to turn pkgrel 1 into 1.<n>, n counting the builds of that base, so a
 # rebuild never reuses a file name a client may have cached with other contents.
 #
 # A base is rebuilt when its recipe hash changes (aur commit, crate or module version, local
 # PKGBUILD, a -git source's upstream head via pkgver()), its last build is FULL_REBUILD_DAYS old, or
-# its packages no longer resolve against today's repos (soname bumps). Everything lands in a staging
-# db first; the served db is replaced once, and only when the staged set resolves from [lsck0]
-# alone, otherwise the night is held back and clients keep yesterday's set. Old files are deleted
-# only after the db that replaced them is published. Crash-only: all state is per base, a killed run
-# is picked up by the next one.
+# its packages no longer resolve against today's repos (soname bumps). The served db is replaced
+# once, and only when the set resolves from [lsck0] alone, otherwise the night is held back and
+# clients keep yesterday's set; its signed packages wait in the pool for the next night. Old files
+# leave the pool only after the db that replaced them is published, and live on as hardlinks in every
+# dated snapshot that names them. Crash-only: all state is per base, a killed run is picked up by the
+# next one.
 set -euo pipefail
 shopt -s nullglob
 
 # -----------------------------------------------------------------------------
 # CONSTANTS
 REPO=lsck0
-REPO_DIR=/repo/x86_64
-STATE_DIR=/repo/.state
+ARCH=x86_64
+SERVED=/repo
+REPO_DIR=$SERVED/$ARCH
+SERVED_STATE_DIR=$SERVED/.state
+SNAPSHOT_CURRENT=$SERVED/current
+SNAPSHOT_MANIFEST=manifest.json
+SNAPSHOT_GLOB='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
+# Dated snapshots stay this many days, so a dotfiles generation can pin <date>/x86_64. A snapshot
+# hardlinks the pool, so a kept day costs only the files no other kept snapshot has. Measured on the
+# served db of 2026-10-05: 30.2 GiB in 3307 files, 7.6 GiB of them built (each base rebuilt at least
+# every FULL_REBUILD_DAYS, ~0.55 GiB/day) and ~0.46 GiB/day of official updates (build dates of the
+# last 7 days), so ~1 GiB of new files per kept day, on the nas (1.1 TiB free) and on vm-210 (63 GiB
+# disk, 33 GiB used); a full rebuild adds 7.6 GiB in one night. 7 days keep vm-210 near 40 GiB and
+# under 50 GiB after a full rebuild; each further day needs ~1 GiB more of its disk (instances.tf "210").
+SNAPSHOT_KEEP_DAYS=7
 CACHE=/cache
 PUBLIC=/public
+DOTFILES=/dotfiles
+OUTBOX=/outbox
+OUTBOX_POOL=$OUTBOX/pool
+OUTBOX_SYNC=$OUTBOX/sync
+OUTBOX_STATE=$OUTBOX/state
+OUTBOX_DB=$OUTBOX/$REPO.db.tar.gz
+OUTBOX_REPORT=$OUTBOX/report.json
+# written last by build: publish takes only the outbox of its own run
+OUTBOX_RUN=$OUTBOX/run
+# publish's scratch space, inside its container
+WORK=/var/tmp/archbuild
 SIGNING_KEY_FILE=/run/signing.asc
 # ssh push to the always-on dmz mirror after each run; empty disables it
 PUSH_TARGET=${ARCHBUILD_PUSH_TARGET:-}
 PUSH_KEY_FILE=/run/push-key
-SOURCE=${ARCHBUILD_SOURCE:?git url or directory of arch-dotfiles}
-REF=${ARCHBUILD_REF:-master}
+# where the commit came from, for the status only; archrepo-fetch.sh verified COMMIT
+SOURCE=${ARCHBUILD_SOURCE:-}
+REF=${ARCHBUILD_REF:-}
+COMMIT=${ARCHBUILD_COMMIT:?the verified arch-dotfiles commit}
+# epoch seconds the unit started at: the run id, the snapshot date and the age archbuild-if-stale reads
+RUN_STARTED=${ARCHBUILD_RUN_STARTED:?epoch seconds of the run start}
+OFFICIAL_REPOS=(core extra multilib)
 BUILDER=builder
 # the uid every writing container on the nas uses
 BUILDER_UID=1000
@@ -55,15 +114,29 @@ RPC_BATCH=100
 CACHE_KEEP_DAYS=30
 # part of every rebuild key: bump it when repack changes what a published package contains
 REPACK_VERSION=3
-# the arch-dotfiles files the list and the local recipes come from
+# the arch-dotfiles files the list, the local recipes and the packager name come from
 INSTALL_SCRIPT=install.sh
 PKGBUILDS=mirror/pkgbuilds
+# per machine files; their EXTRA_PACKAGES join PACKAGES
+PLATFORMS=platforms
 # dependencies aur recipes forget: <pkgbase> <depends|makedepends> <package>...
 OVERRIDES=mirror/overrides.conf
+# the public half of the repo key, which clients trust
+REPO_PUBLIC_KEY=configs/pacman/archrepo.asc
 # the 2026 naming served lsck0-<name>; replaces lets a pacman -Syu swap the installed ones over
 OLD_PREFIX=lsck0-
 AUR_URL=https://aur.archlinux.org
 USER_AGENT="lsck0-archbuild (https://github.com/lsck0/arch-dotfiles)"
+# makepkg's pkgname rule: alphanumerics and @._+-, not starting with a hyphen or a dot
+NAME_PATTERN='^[a-z0-9@_+][a-z0-9@._+-]*$'
+# <name>-<epoch:version>-<release>-<arch>.pkg.tar.zst, nothing a path could hide in
+FILE_PATTERN='^[a-z0-9@_+][a-z0-9@._+-]*-[A-Za-z0-9.:_+~]+-[0-9.]+-(x86_64|any)\.pkg\.tar\.zst$'
+# what crates.io and the go proxy may answer as a version; it lands unquoted in a generated PKGBUILD
+VERSION_PATTERN='^v?[0-9A-Za-z.+_-]+$'
+# a recipe key is a sha256
+KEY_PATTERN='^[0-9a-f]{64}$'
+# bytes of the held back reason that quotes rejected names
+HELD_BACK_QUOTE_MAX=300
 
 # -----------------------------------------------------------------------------
 # STATE
@@ -78,13 +151,18 @@ built=()
 dropped=()
 # empty while the staged set is publishable, else why the night is held back
 held_back=
-STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+STARTED=$(date -u -d "@$RUN_STARTED" +%Y-%m-%dT%H:%M:%SZ)
+SNAPSHOT=$(date -u -d "@$RUN_STARTED" +%Y-%m-%d)
 # prune only when every base is known, a transient fetch error must not delete packages
 resolve_complete=1
+# build: the working copy of the served state; publish: the served state
+STATE_DIR=
 KEY=
-DOTFILES=
-COMMIT=
 BASELINE_PACKAGES=
+# publish: the served db (name -> file), the signed state (file -> name, name -> base), arch's names
+# today, and the db it serves next (name -> file)
+declare -A served=() state_file=() owner_of=() official_name=() final=()
+push_failed=0
 
 # -----------------------------------------------------------------------------
 # HELPERS
@@ -106,64 +184,83 @@ srcinfo_get() {
   awk -v k="$2" '{ sub(/^[ \t]+/, "") } ($1 == k || $1 == k "_x86_64") && $2 == "=" { print $3 }' "$1"
 }
 
-state_get() { sed -n "s/^$2=//p" "$STATE_DIR/$1" 2>/dev/null || true; }
+state_get_from() { sed -n "s/^$3=//p" "$1/$2" 2>/dev/null || true; }
+
+state_get() { state_get_from "$STATE_DIR" "$1" "$2"; }
 
 state_set() {
   local base=$1 key=$2 build=$3 pkgnames=$4 files=$5
   printf 'key=%s\nbuild=%s\nbuilt=%s\nnames=%s\nfiles=%s\n' "$key" "$build" "$(date +%s)" "$pkgnames" "$files" \
-    > "$STATE_DIR/.$base.tmp"
+    > "$STATE_DIR/.$base.tmp" || return 1
   mv -f "$STATE_DIR/.$base.tmp" "$STATE_DIR/$base"
 }
 
 # copy then rename, a reader never sees half a file
 put() {
-  cp "$1" "$2/.${3:-$(basename "$1")}.tmp"
-  mv -f "$2/.${3:-$(basename "$1")}.tmp" "$2/${3:-$(basename "$1")}"
+  local name=${3:-$(basename "$1")}
+  cp "$1" "$2/.$name.tmp" || return 1
+  mv -f "$2/.$name.tmp" "$2/$name"
 }
 
-sign() { gpg --batch --yes --detach-sign --no-armor -u "$KEY" -o "$1.sig" "$1"; }
+# hardlink then rename: the same file under a second name, swapped in whole
+link_into() {
+  local name=${3:-$(basename "$1")}
+  ln -f "$1" "$2/.$name.tmp" || return 1
+  mv -f "$2/.$name.tmp" "$2/$name"
+}
+
+# symlink then rename, so the old link is never missing for a moment
+symlink_set() {
+  local tmp
+  tmp="$(dirname "$2")/.$(basename "$2").tmp"
+  ln -sfn "$1" "$tmp" || return 1
+  mv -fT "$tmp" "$2"
+}
+
+# a detached signature next to the file, renamed into place only once it verifies
+sign() {
+  local tmp
+  tmp="$(dirname "$1")/.$(basename "$1").sig.tmp"
+  gpg --batch --yes --detach-sign --no-armor -u "$KEY" -o "$tmp" "$1" || return 1
+  gpg --batch --verify "$tmp" "$1" 2>/dev/null || return 1
+  mv -f "$tmp" "$1.sig"
+}
 
 # against today's official repos and the staging db
 names_resolve() { pacman -Sp --noconfirm "$@" >/dev/null 2>&1; }
 
+# the package name of a <name>-<version>-<release>-<arch>.pkg.tar.zst file name
+file_package_name() { printf '%s' "${1%-*-*-*}"; }
+
+# a regular file in the outbox, never a link into something the reader's mounts hold
+outbox_file_check() { [ -f "$1" ] && [ ! -L "$1" ]; }
+
 # -----------------------------------------------------------------------------
 # REPO
-# db_file from the staging db, or from the db given
+# db_file from the staging db, or from the db given; a db that cannot be read stops the caller, an
+# empty index would look like a repo without packages
 load_db_index() {
-  local name file
+  local db=${1:-$CACHE/db/$REPO.db.tar.gz} index name file
+  index=$(bsdtar -xOf "$db" | awk '/^%FILENAME%$/ { getline f } /^%NAME%$/ { getline n; print n, f }') \
+    || { log "cannot read $db"; return 1; }
   db_file=()
   while read -r name file; do
-    db_file[$name]=$file
-  done < <(bsdtar -xOf "${1:-$CACHE/db/$REPO.db.tar.gz}" 2>/dev/null \
-    | awk '/^%FILENAME%$/ { getline f } /^%NAME%$/ { getline n; print n, f }')
+    [ -z "$name" ] || db_file[$name]=$file
+  done <<<"$index"
 }
 
+# -----------------------------------------------------------------------------
+# BUILD: SETUP
 # the builder's pacman reads the staging db, so later builds and the resolve checks see what is staged
 db_sync_local() {
-  cp "$CACHE/db/$REPO.db.tar.gz" "/var/lib/pacman/sync/$REPO.db"
-  # the served db's signature would not match the staging copy
-  rm -f "/var/lib/pacman/sync/$REPO.db.sig"
+  cp "$CACHE/db/$REPO.db.tar.gz" "/var/lib/pacman/sync/$REPO.db" || return 1
   load_db_index
 }
 
-db_publish() {
-  local f
-  for f in "$REPO.db.tar.gz" "$REPO.files.tar.gz"; do
-    sign "$CACHE/db/$f"
-    put "$CACHE/db/$f" "$REPO_DIR"
-    put "$CACHE/db/$f.sig" "$REPO_DIR"
-  done
-  ln -sfn "$REPO.db.tar.gz" "$REPO_DIR/$REPO.db"
-  ln -sfn "$REPO.db.tar.gz.sig" "$REPO_DIR/$REPO.db.sig"
-  ln -sfn "$REPO.files.tar.gz" "$REPO_DIR/$REPO.files"
-  ln -sfn "$REPO.files.tar.gz.sig" "$REPO_DIR/$REPO.files.sig"
-  load_db_index
-}
-
-# the served db is the truth, the staging copy is rebuilt from it every run; a first run serves an empty one
+# the served db is the truth, the staging copy is rebuilt from it every run; a first run starts empty
 db_stage() {
   local f
-  mkdir -p "$REPO_DIR" "$STATE_DIR" "$CACHE/db"
+  mkdir -p "$CACHE/db"
   for f in "$REPO.db.tar.gz" "$REPO.files.tar.gz"; do
     if [ -f "$REPO_DIR/$f" ]; then
       cp "$REPO_DIR/$f" "$CACHE/db/$f"
@@ -171,120 +268,54 @@ db_stage() {
       bsdtar -czf "$CACHE/db/$f" --files-from /dev/null
     fi
   done
-  [ -f "$REPO_DIR/$REPO.db" ] || db_publish
   load_db_index
 }
 
-# rel 1 -> 1.<build>; prints the signed package path
-repack() {
-  local package=$1 build=$2 dir=$CACHE/repack name version arch release file
-  rm -rf "$dir"
-  mkdir -p "$dir" "$CACHE/stage"
-  bsdtar -xpf "$package" -C "$dir" || return 1
-  name=$(sed -n 's/^pkgname = //p' "$dir/.PKGINFO")
-  version=$(sed -n 's/^pkgver = //p' "$dir/.PKGINFO")
-  arch=$(sed -n 's/^arch = //p' "$dir/.PKGINFO")
-  [ -n "$name" ] && [ -n "$version" ] && [ -n "$arch" ] || return 1
-  release=${version##*-}
-  version=${version%-*}
-  local old new
-  old=$(printf '%s' "$version-$release" | sed 's/[][\.*^$/+?(){}|]/\\&/g')
-  new=$version-${release%%.*}.$build
-  sed -i -e "s/^pkgver = .*/pkgver = $new/" "$dir/.PKGINFO" "$dir/.BUILDINFO"
-  # a pin on a sibling of this base (python-frida needs frida=17.18.0-2) must follow the new release
-  sed -i -E "s/^((depend|optdepend|provides|conflicts) = [^=<>]+[=<>]+)$old(:|$)/\1$new\3/" "$dir/.PKGINFO"
-  printf 'replaces = %s%s\n' "$OLD_PREFIX" "$name" >> "$dir/.PKGINFO"
-  file=$CACHE/stage/$name-$version-${release%%.*}.$build-$arch.pkg.tar.zst
-  # same file list, order and mtree options as makepkg's create_package
-  (
-    cd "$dir"
-    shopt -s dotglob globstar
-    export LC_COLLATE=C
-    printf '%s\0' **/* | bsdtar -cnf - --format=mtree \
-      --options='!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link' \
-      --null --files-from - --exclude .MTREE | gzip -c -f -n > .MTREE
-    printf '%s\0' **/* | bsdtar --no-fflags -cnf - --null --files-from - | zstd -c -T0 -q > "$file"
-  ) || return 1
-  sign "$file" || return 1
-  gpg --batch --verify "$file.sig" "$file" 2>/dev/null || return 1
-  echo "$file"
-}
-
-# files go to the served tree, unreferenced until the staging db is published
-stage_add() {
-  local file served=()
-  for file; do
-    put "$file" "$REPO_DIR"
-    put "$file.sig" "$REPO_DIR"
-    served+=("$REPO_DIR/$(basename "$file")")
-  done
-  repo-add -q "$CACHE/db/$REPO.db.tar.gz" "${served[@]}" || return 1
-  db_sync_local
-}
-
-# -----------------------------------------------------------------------------
-# SETUP
-setup_builder() {
+setup_build() {
+  local packager
   id "$BUILDER" >/dev/null 2>&1 || useradd -m -u "$BUILDER_UID" "$BUILDER"
-  echo "$BUILDER ALL=(root) NOPASSWD: /usr/bin/pacman" > /etc/sudoers.d/builder
   # regenerated every run; a stale recipe would linger as a base that is no longer wanted
   rm -rf "$CACHE/build" "$CACHE/out" "$CACHE/recipes"
   mkdir -p "$CACHE"/{pacman,src,build,aur,recipes,out,stage,cargo,cargo-target,go} "$PUBLIC/logs"
   chown "$BUILDER:" "$CACHE"/{src,build,recipes,out,cargo,cargo-target,go}
-}
-
-setup_key() {
-  gpg --batch --import "$SIGNING_KEY_FILE" 2>/dev/null
-  KEY=$(gpg --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')
-  [ -n "$KEY" ] || { log "no signing key in $SIGNING_KEY_FILE"; exit 1; }
+  # a killed run's proposal must never be read as this run's
+  find "$OUTBOX" -mindepth 1 -delete
+  mkdir -p "$OUTBOX_POOL" "$OUTBOX_SYNC"
+  STATE_DIR=$CACHE/state
+  rm -rf "$STATE_DIR"
+  mkdir -p "$STATE_DIR"
+  [ ! -d "$SERVED_STATE_DIR" ] || cp -a "$SERVED_STATE_DIR/." "$STATE_DIR/"
+  packager=$(gpg --show-keys --with-colons "$DOTFILES/$REPO_PUBLIC_KEY" | awk -F: '$1 == "uid" { print $10; exit }')
+  [ -n "$packager" ] || { log "no key uid in $DOTFILES/$REPO_PUBLIC_KEY"; exit 1; }
   cat > /etc/makepkg.conf.d/archbuild.conf <<EOF
 MAKEFLAGS="-j$(nproc)"
 BUILDDIR=$CACHE/build
 OPTIONS=(strip docs !libtool !staticlibs emptydirs zipman purge !debug lto)
-PACKAGER="$(gpg --with-colons --list-keys "$KEY" | awk -F: '$1 == "uid" { print $10; exit }')"
+PACKAGER="$packager"
 EOF
 }
 
-setup_pacman() {
-  pacman-key --init >/dev/null 2>&1
-  pacman-key --populate archlinux >/dev/null 2>&1
-  gpg --armor --export "$KEY" > "$CACHE/signing.pub"
-  pacman-key --add "$CACHE/signing.pub" >/dev/null 2>&1
-  pacman-key --lsign-key "$KEY" >/dev/null 2>&1
+setup_build_pacman() {
+  pacman-key --init >/dev/null
+  pacman-key --populate archlinux >/dev/null
   # the image strips docs and locales, a build dependency must install whole
   sed -i -e '/^NoExtract/d' -e "s|^#\?CacheDir.*|CacheDir = $CACHE/pacman/|" /etc/pacman.conf
+  printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
+  # the only sync of the run: builds and the snapshot resolve against one state of the official repos
+  pacman -Syu --noconfirm --needed git jq expac >/dev/null
+  # added after the sync, which would look for a served db: db_sync_local installs the staging one.
+  # After the official repos, so the staged copies of official packages never shadow today's versions;
+  # SigLevel Never, since the staged packages are this container's own unsigned builds, publish checks them
   cat >> /etc/pacman.conf <<EOF
 
-[multilib]
-Include = /etc/pacman.d/mirrorlist
-
-# after the official repos: the staged copies of official packages must not shadow today's versions
 [$REPO]
-SigLevel = PackageRequired DatabaseOptional
+SigLevel = Never
+Server = file://$OUTBOX_POOL
 Server = file://$REPO_DIR
 EOF
-  # the only sync of the run: builds and the snapshot resolve against one state of the official repos
-  pacman -Syu --noconfirm --needed git jq expac rsync openssh >/dev/null
   db_sync_local
   git config --global --add safe.directory '*'
   BASELINE_PACKAGES=$(pacman -Qq)
-}
-
-fetch_dotfiles() {
-  if [ -d "$SOURCE" ]; then
-    DOTFILES=$SOURCE
-    COMMIT=$(git -C "$SOURCE" rev-parse --short HEAD 2>/dev/null || echo "working tree")
-    return 0
-  fi
-  DOTFILES=$CACHE/dotfiles
-  if [ -d "$DOTFILES/.git" ]; then
-    timeout "$FETCH_TIMEOUT" git -C "$DOTFILES" fetch -q --depth 1 origin "$REF"
-    git -C "$DOTFILES" reset -q --hard FETCH_HEAD
-  else
-    rm -rf "$DOTFILES"
-    timeout "$FETCH_TIMEOUT" git clone -q --depth 1 --branch "$REF" "$SOURCE" "$DOTFILES"
-  fi
-  COMMIT=$(git -C "$DOTFILES" rev-parse --short HEAD)
 }
 
 # names, provides and groups of every official package
@@ -301,7 +332,7 @@ load_repo_index() {
 }
 
 # -----------------------------------------------------------------------------
-# RECIPES
+# BUILD: RECIPES
 depends_helper() {
   cat <<'EOF'
 
@@ -328,6 +359,7 @@ recipe_aur() {
 recipe_cargo() {
   local name=$1 dir=$2 version description
   version=$(http "https://crates.io/api/v1/crates/$name" | jq -er '.crate.max_stable_version // .crate.max_version') || return 1
+  [[ $version =~ $VERSION_PATTERN ]] || return 1
   description=$(http "https://crates.io/api/v1/crates/$name/$version" \
     | jq -r '.version | "pkgdesc=\(.description // "" | gsub("\\s+"; " ") | @sh)\nlicense=(\(.license // "custom" | @sh))"') || return 1
   {
@@ -374,6 +406,7 @@ recipe_go() {
       prefix=${prefix%/*}
     done
   fi
+  [[ $version =~ $VERSION_PATTERN ]] || return 1
   {
     printf 'pkgname=%s\n_path=%s\n_version=%s\npkgver=%s\n' "$name" "$path" "$version" "$(sed 's/^v//; s/-/_/g' <<<"$version")"
     cat <<'EOF'
@@ -426,6 +459,7 @@ recipe_override() {
 # recipe dir with a PKGBUILD and its .SRCINFO; records names, provides and deps
 materialize() {
   local base=$1 dir=$CACHE/recipes/$1 name
+  [[ $base =~ $NAME_PATTERN ]] || { fail "$base" "not a package base name"; return 1; }
   rm -rf "$dir"
   mkdir -p "$dir"
   case ${kind[$base]} in
@@ -457,16 +491,31 @@ add_base() {
 }
 
 # -----------------------------------------------------------------------------
-# RESOLVE
+# BUILD: RESOLVE
 # the entries of one install.sh array, one per line with an optional trailing comment
 list_entries() {
   awk -v array="$2" '$0 ~ "^" array "=\\(" { inside = 1; next } inside && /^\)/ { exit }
     inside { sub(/#.*/, ""); if ($1 != "") print $1 }' "$1"
 }
 
+# EXTRA_PACKAGES of every platform file, which install.sh appends to PACKAGES on the matching machine
+platform_extra_packages() {
+  local file
+  for file in "$DOTFILES/$PLATFORMS"/*.sh; do
+    # sourced like install.sh does, in a clean shell of its own; the checkout is the verified commit
+    env -i bash -c 'source "$1" >/dev/null && printf "%s\n" "${EXTRA_PACKAGES[@]}"' platform "$file" \
+      || { log "reading EXTRA_PACKAGES from $file failed"; return 1; }
+  done
+}
+
 read_lists() {
-  local script=$DOTFILES/$INSTALL_SCRIPT name spec
+  local script=$DOTFILES/$INSTALL_SCRIPT name spec extra
   [ -f "$script" ] || { log "no $script"; exit 1; }
+  extra=$(platform_extra_packages | sed '/^$/d' | sort -u)
+  for name in $extra; do
+    [[ $name =~ $NAME_PATTERN ]] || { log "EXTRA_PACKAGES entry '$name' is not a package name"; exit 1; }
+  done
+  # every group: the snapshot serves all machines, each installs its own groups from it
   while read -r name; do
     listed[$name]=1
     if [ -f "$DOTFILES/$PKGBUILDS/$name/PKGBUILD" ]; then
@@ -476,7 +525,7 @@ read_lists() {
     else
       aur_wanted+=("$name")
     fi
-  done < <(list_entries "$script" PACKAGES)
+  done < <(list_entries "$script" PACKAGES; [ -z "$extra" ] || printf '%s\n' "$extra")
   # a crate or module an official package ships is copied like any listed official package
   while read -r name; do
     listed[$name]=1
@@ -572,7 +621,7 @@ plan() {
 }
 
 # -----------------------------------------------------------------------------
-# BUILD
+# BUILD: BUILD
 is_vcs() { grep -Eq '^\s*source(_x86_64)? = ([^ ]*::)?(git|hg|svn|bzr|fossil)\+' "$1/.SRCINFO"; }
 
 recipe_key() {
@@ -595,13 +644,67 @@ is_current() {
   names_resolve $names
 }
 
+# what makepkg -s would install, installed by root: the build user gets no pacman of its own
+build_deps_install() {
+  local dir=$1 wanted=() missing=()
+  mapfile -t wanted < <({ srcinfo_get "$dir/.SRCINFO" depends; srcinfo_get "$dir/.SRCINFO" makedepends; } | sort -u)
+  (( ${#wanted[@]} > 0 )) || return 0
+  # -T prints the unsatisfied ones and exits 127 when there are any
+  mapfile -t missing < <(pacman -T "${wanted[@]}")
+  (( ${#missing[@]} > 0 )) || return 0
+  pacman -S --noconfirm --needed --asdeps "${missing[@]}"
+}
+
 remove_build_deps() {
   local extra
   extra=$(comm -13 <(sort <<<"$BASELINE_PACKAGES") <(pacman -Qq | sort))
-  [ -z "$extra" ] || pacman -Rdd --noconfirm $extra >/dev/null 2>&1 || true
+  [ -z "$extra" ] || pacman -Rdd --noconfirm $extra >/dev/null || log "removing the build dependencies failed, later builds see them"
 }
 
-# a killed run leaves its signed packages in the served tree, unpublished; the same recipe stages them again
+# rel 1 -> 1.<build>; prints the unsigned package path
+repack() {
+  local package=$1 build=$2 dir=$CACHE/repack name version arch release file old new
+  rm -rf "$dir"
+  mkdir -p "$dir" "$CACHE/stage" || return 1
+  bsdtar -xpf "$package" -C "$dir" || return 1
+  name=$(sed -n 's/^pkgname = //p' "$dir/.PKGINFO")
+  version=$(sed -n 's/^pkgver = //p' "$dir/.PKGINFO")
+  arch=$(sed -n 's/^arch = //p' "$dir/.PKGINFO")
+  [ -n "$name" ] && [ -n "$version" ] && [ -n "$arch" ] || return 1
+  release=${version##*-}
+  version=${version%-*}
+  old=$(printf '%s' "$version-$release" | sed 's/[][\.*^$/+?(){}|]/\\&/g')
+  new=$version-${release%%.*}.$build
+  sed -i -e "s/^pkgver = .*/pkgver = $new/" "$dir/.PKGINFO" "$dir/.BUILDINFO" || return 1
+  # a pin on a sibling of this base (python-frida needs frida=17.18.0-2) must follow the new release
+  sed -i -E "s/^((depend|optdepend|provides|conflicts) = [^=<>]+[=<>]+)$old(:|$)/\1$new\3/" "$dir/.PKGINFO" || return 1
+  printf 'replaces = %s%s\n' "$OLD_PREFIX" "$name" >> "$dir/.PKGINFO" || return 1
+  file=$CACHE/stage/$name-$version-${release%%.*}.$build-$arch.pkg.tar.zst
+  # same file list, order and mtree options as makepkg's create_package
+  (
+    cd "$dir"
+    shopt -s dotglob globstar
+    export LC_COLLATE=C
+    printf '%s\0' **/* | bsdtar -cnf - --format=mtree \
+      --options='!all,use-set,type,uid,gid,mode,time,size,md5,sha256,link' \
+      --null --files-from - --exclude .MTREE | gzip -c -f -n > .MTREE
+    printf '%s\0' **/* | bsdtar --no-fflags -cnf - --null --files-from - | zstd -c -T0 -q > "$file"
+  ) || return 1
+  echo "$file"
+}
+
+# files go to the outbox; the staging db and this container's pacman see them right away
+stage_add() {
+  local file staged=()
+  for file; do
+    put "$file" "$OUTBOX_POOL" || return 1
+    staged+=("$OUTBOX_POOL/$(basename "$file")")
+  done
+  repo-add -q "$CACHE/db/$REPO.db.tar.gz" "${staged[@]}" || return 1
+  db_sync_local
+}
+
+# a held back or killed night leaves its signed packages in the pool, unpublished; the same recipe stages them again
 restage() {
   local base=$1 key=$2 file files=()
   [ "$key" = "$(state_get "$base" key)" ] || return 1
@@ -624,7 +727,7 @@ build_base() {
     (cd "$dir" && timeout -k 1m "$FETCH_TIMEOUT" "${AS_BUILDER[@]}" SRCDEST="$CACHE/src/$base" makepkg -od --noprepare --skipinteg --noconfirm) >> "$log" 2>&1 \
       || log "$base: upstream version check failed, building from the recipe as is"
   fi
-  key=$(recipe_key "$dir")
+  key=$(recipe_key "$dir") || { fail "$base" "hashing the recipe failed"; return 1; }
   is_current "$base" "$key" && return 0
   if restage "$base" "$key" && is_current "$base" "$key"; then
     log "$base: staged again from an unpublished run"
@@ -635,8 +738,13 @@ build_base() {
   srcinfo_get "$dir/.SRCINFO" validpgpkeys | xargs -r timeout 2m sudo -u "$BUILDER" -H \
     gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys >> "$log" 2>&1 || true
   rm -rf "$out"
-  install -d -o "$BUILDER" "$out"
-  if ! (cd "$dir" && timeout -k 5m "$BUILD_TIMEOUT" "${AS_BUILDER[@]}" SRCDEST="$CACHE/src/$base" PKGDEST="$out" makepkg -srfc --noconfirm --nocheck) >> "$log" 2>&1; then
+  install -d -o "$BUILDER" "$out" || { fail "$base" "creating $out failed"; return 1; }
+  if ! build_deps_install "$dir" >> "$log" 2>&1; then
+    remove_build_deps
+    fail "$base" "installing the build dependencies failed, logs/$base.log"
+    return 1
+  fi
+  if ! (cd "$dir" && timeout -k 5m "$BUILD_TIMEOUT" "${AS_BUILDER[@]}" SRCDEST="$CACHE/src/$base" PKGDEST="$out" makepkg -fc --noconfirm --nocheck) >> "$log" 2>&1; then
     remove_build_deps
     fail "$base" "build failed, logs/$base.log"
     return 1
@@ -644,20 +752,21 @@ build_base() {
   remove_build_deps
   rm -f "$CACHE"/stage/*
   for package in "$out"/*.pkg.tar.zst; do
-    file=$(repack "$package" "$build") || { fail "$base" "repack or signing failed"; return 1; }
+    file=$(repack "$package" "$build") || { fail "$base" "repack failed"; return 1; }
     files+=("$file")
     pkgnames+=("$(bsdtar -xOf "$package" .PKGINFO | sed -n 's/^pkgname = //p')")
   done
   (( ${#files[@]} > 0 )) || { fail "$base" "build produced no package"; return 1; }
   stage_add "${files[@]}" || { fail "$base" "repo-add failed"; return 1; }
-  state_set "$base" "$key" "$build" "${pkgnames[*]}" "$(for file in "${files[@]}"; do basename "$file"; done | xargs)"
+  state_set "$base" "$key" "$build" "${pkgnames[*]}" "$(for file in "${files[@]}"; do basename "$file"; done | xargs)" \
+    || { fail "$base" "writing its state failed"; return 1; }
   rm -rf "$out"
   built+=("$base")
   log "$base: staged ${pkgnames[*]}"
 }
 
 # -----------------------------------------------------------------------------
-# SNAPSHOT
+# BUILD: SNAPSHOT
 # names the staged set is checked and installed by: listed official ones plus everything built
 snapshot_targets() {
   local base name
@@ -687,14 +796,18 @@ drop_unresolvable() {
   done
 }
 
-# the official closure of the whole set at today's versions, downloaded into the served tree and staged
+# the official closure of the whole set at today's versions, into the outbox and staged
 snapshot_official() {
-  local root=$CACHE/resolve targets=() repo name file new=()
+  local root=$CACHE/resolve targets=() repo name file path new=() cachedirs=()
   mapfile -t targets < <(snapshot_targets | sort -u)
   # an empty local db, so the closure includes what the build container has installed
   rm -rf "$root"
   mkdir -p "$root/sync"
-  cp /var/lib/pacman/sync/*.db "$root/sync/"
+  cp /var/lib/pacman/sync/*.db "$root/sync/" || { held_back="copying the sync dbs failed"; return 1; }
+  # publish downloads and checks the official files against the dbs this closure came from
+  for repo in "${OFFICIAL_REPOS[@]}"; do
+    cp "/var/lib/pacman/sync/$repo.db" "$OUTBOX_SYNC/" || { held_back="copying the $repo db failed"; return 1; }
+  done
   if ! pacman --dbpath "$root" -Sp --noconfirm --print-format '%r %n %f' "${targets[@]}" \
     > "$CACHE/closure.txt" 2> "$PUBLIC/logs/snapshot.log"; then
     held_back="the set does not resolve against today's repos, logs/snapshot.log"
@@ -709,38 +822,29 @@ snapshot_official() {
   done < "$CACHE/closure.txt"
   log "snapshot: ${#official_names[@]} official packages, ${#new[@]} new"
   (( ${#new[@]} > 0 )) || return 0
-  # the served tree as cache: files already there are verified, not fetched again
-  if ! pacman --dbpath "$root" -Sw --noconfirm --cachedir "$REPO_DIR" "${new[@]}" >> "$PUBLIC/logs/snapshot.log" 2>&1; then
+  # downloads land in the outbox; a file the pacman cache or the pool holds already is used in place
+  cachedirs=(--cachedir "$OUTBOX_POOL" --cachedir "$CACHE/pacman")
+  # a first run has no pool yet, and this container cannot create it
+  [ ! -d "$REPO_DIR" ] || cachedirs+=(--cachedir "$REPO_DIR")
+  if ! pacman --dbpath "$root" -Swdd --noconfirm "${cachedirs[@]}" "${new[@]}" >> "$PUBLIC/logs/snapshot.log" 2>&1; then
     held_back="downloading the official packages failed, logs/snapshot.log"
     return 1
   fi
   new=()
   while read -r repo name file; do
     [ "$repo" = "$REPO" ] || [ "${db_file[$name]:-}" = "$file" ] && continue
-    # pacman takes a file its own cache already holds from there instead of downloading it again
-    [ -f "$REPO_DIR/$file" ] || put "$CACHE/pacman/$file" "$REPO_DIR" 2>/dev/null \
-      || { held_back="$file is in no cache after the download"; return 1; }
-    [ -f "$REPO_DIR/$file.sig" ] || sign "$REPO_DIR/$file" || { held_back="signing $file failed"; return 1; }
-    new+=("$REPO_DIR/$file")
+    path=$REPO_DIR/$file
+    if [ ! -f "$path" ]; then
+      [ -f "$OUTBOX_POOL/$file" ] || put "$CACHE/pacman/$file" "$OUTBOX_POOL" 2>/dev/null \
+        || { held_back="$file is in no cache after the download"; return 1; }
+      path=$OUTBOX_POOL/$file
+    fi
+    new+=("$path")
   done < "$CACHE/closure.txt"
   repo-add -q "$CACHE/db/$REPO.db.tar.gz" "${new[@]}" || { held_back="repo-add of the official packages failed"; return 1; }
   db_sync_local
 }
 
-# what a client with [lsck0] above everything sees: the staged set must resolve from it alone
-snapshot_verify() {
-  local root=$CACHE/verify targets=()
-  mapfile -t targets < <(snapshot_targets | sort -u)
-  rm -rf "$root"
-  mkdir -p "$root/sync"
-  cp "$CACHE/db/$REPO.db.tar.gz" "$root/sync/$REPO.db"
-  printf '[options]\nArchitecture = auto\nSigLevel = Never\n\n[%s]\nServer = file://%s\n' "$REPO" "$REPO_DIR" > "$root/pacman.conf"
-  pacman --config "$root/pacman.conf" --dbpath "$root" -Sp --noconfirm "${targets[@]}" >/dev/null 2>> "$PUBLIC/logs/snapshot.log" \
-    || { held_back="the staged set does not resolve from $REPO alone, logs/snapshot.log"; return 1; }
-}
-
-# -----------------------------------------------------------------------------
-# PRUNE
 # staging only: drops what neither a base in the closure nor the snapshot still needs
 prune_db() {
   local base name file repo stale=()
@@ -764,105 +868,412 @@ prune_db() {
   done
 }
 
-# superseded, removed and held back files, only once no served db references them
-prune_files() {
-  local name file
-  declare -A referenced=()
-  load_db_index "$REPO_DIR/$REPO.db.tar.gz"
-  for name in "${!db_file[@]}"; do referenced[${db_file[$name]}]=1; done
-  for file in "$REPO_DIR"/*.pkg.tar.zst; do
-    [ -n "${referenced[$(basename "$file")]:-}" ] || rm -f "$file" "$file.sig"
-  done
-}
-
 # -----------------------------------------------------------------------------
-# STATUS
-# the running build as status.json's running field; status.txt stays the last finished run, since
-# archbuild-if-stale judges staleness by its age and a killed run must not look fresh
+# BUILD: OUTBOX
+# the running build on the builder's status page; the served status.json is publish's
 write_progress() {
-  local phase=$1 current=${2:-} done=${3:-0} base failures=() previous=/repo/status.json
+  local phase=$1 current=${2:-} done=${3:-0} base failures=() previous=$SERVED/status.json
   for base in "${!failed[@]}"; do failures+=("$base: ${failed[$base]}"); done
-  [ -f "$previous" ] || echo '{}' > "$CACHE/status.json"
-  [ -f "$previous" ] && cp "$previous" "$CACHE/status.json"
+  if [ -f "$previous" ]; then cp "$previous" "$CACHE/status.json"; else echo '{}' > "$CACHE/status.json"; fi
   jq --arg started "$STARTED" --arg updated "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg commit "$COMMIT" --arg phase "$phase" \
-    --arg current "$current" --argjson done "$done" --argjson total "${#order[@]}" --argjson built "${#built[@]}" \
+    --arg current "$current" --argjson "done" "$done" --argjson total "${#order[@]}" --argjson built "${#built[@]}" \
     --args '. + { running: { started: $started, updated: $updated, commit: $commit, phase: $phase,
       current: (if $current == "" then null else $current end), done: $done, total: $total, built: $built,
       failing: ($ARGS.positional | length), failed: $ARGS.positional } }' \
     "${failures[@]}" < "$CACHE/status.json" > "$CACHE/status.json.new" && mv -f "$CACHE/status.json.new" "$CACHE/status.json"
-  put "$CACHE/status.json" /repo
-  push_status
+  put "$CACHE/status.json" "$PUBLIC"
 }
 
-write_status() {
-  local base failures=() now
-  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-  for base in "${bases[@]}" "${!failed[@]}"; do
-    [ -n "${failed[$base]:-}" ] && failures+=("$base: ${failed[$base]}")
-  done
-  mapfile -t failures < <(printf '%s\n' "${failures[@]}" | sort -u | sed '/^$/d')
-  {
-    echo "last build: $now"
-    echo "source:     $SOURCE $REF $COMMIT"
-    echo "packages:   ${#db_file[@]}"
-    echo "official:   ${#official_names[@]}"
-    echo "published:  ${held_back:+no, held back: }${held_back:-yes}"
-    echo "built:      ${built[*]:-none}"
-    echo "dropped:    ${dropped[*]:-none}"
-    echo "failed:     ${#failures[@]}"
-    (( ${#failures[@]} == 0 )) || printf '  %s\n' "${failures[@]}"
-  } > "$CACHE/status.txt"
-  jq -n --arg last_build "$now" --arg commit "$COMMIT" --argjson packages "${#db_file[@]}" --arg held_back "$held_back" \
+# the proposal: staged db, working state and report; the run id last, it marks the outbox complete
+outbox_write() {
+  local base failures=() targets=()
+  for base in "${!failed[@]}"; do failures+=("$base: ${failed[$base]}"); done
+  mapfile -t targets < <(snapshot_targets | sort -u)
+  cp "$CACHE/db/$REPO.db.tar.gz" "$OUTBOX_DB"
+  cp -a "$STATE_DIR" "$OUTBOX_STATE"
+  jq -n --arg held_back "$held_back" --argjson official "${#official_names[@]}" \
+    --argjson built "$(jq -n '$ARGS.positional' --args "${built[@]}")" \
     --argjson dropped "$(jq -n '$ARGS.positional' --args "${dropped[@]}")" \
-    --args '{ packages: $packages, failing: ($ARGS.positional | length), last_build: $last_build, commit: $commit,
-      held_back: (if $held_back == "" then null else $held_back end), failed: $ARGS.positional, dropped: $dropped,
-      running: null }' \
-    "${failures[@]}" > "$CACHE/status.json"
-  put "$CACHE/status.json" /repo
-  put "$CACHE/status.txt" /repo
-  # archbuild-if-stale ages the run from its start, a long night must not skip the next one
-  touch -d "$STARTED" /repo/status.txt
-  cp "$CACHE/status.txt" "$PUBLIC/status.txt"
-  cat "$CACHE/status.txt"
+    --argjson targets "$(jq -n '$ARGS.positional' --args "${targets[@]}")" \
+    --args '{ held_back: (if $held_back == "" then null else $held_back end), official: $official,
+      built: $built, dropped: $dropped, targets: $targets, failed: $ARGS.positional }' \
+    "${failures[@]}" > "$OUTBOX_REPORT"
+  echo "$RUN_STARTED" > "$OUTBOX_RUN"
 }
 
 clean_caches() {
   find "$CACHE/pacman" "$CACHE/src" -maxdepth 2 -type f -mtime +"$CACHE_KEEP_DAYS" -delete
 }
 
+# -----------------------------------------------------------------------------
+# PUBLISH: SETUP
+setup_key() {
+  gpg --batch --import "$SIGNING_KEY_FILE" 2>/dev/null
+  KEY=$(gpg --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')
+  [ -n "$KEY" ] || { log "no signing key in $SIGNING_KEY_FILE"; exit 1; }
+}
+
+# official repos only: nothing the builder produced is ever installed here
+setup_publish_pacman() {
+  local name
+  pacman-key --init >/dev/null
+  pacman-key --populate archlinux >/dev/null
+  printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
+  pacman -Syu --noconfirm --needed jq rsync openssh >/dev/null
+  while read -r name; do official_name[$name]=1; done < <(pacman -Slq "${OFFICIAL_REPOS[@]}")
+  (( ${#official_name[@]} > 0 )) || { log "no official package names"; exit 1; }
+}
+
+# the outbox of this run, complete, with no link where publish reads
+outbox_check() {
+  local dir
+  for dir in "$OUTBOX" "$OUTBOX_POOL" "$OUTBOX_SYNC" "$OUTBOX_STATE"; do
+    [ -d "$dir" ] && [ ! -L "$dir" ] || { log "$dir is not a directory"; exit 1; }
+  done
+  outbox_file_check "$OUTBOX_RUN" && [ "$(cat "$OUTBOX_RUN")" = "$RUN_STARTED" ] \
+    || { log "the outbox is not from this run ($RUN_STARTED), the build did not finish"; exit 1; }
+  outbox_file_check "$OUTBOX_DB" && outbox_file_check "$OUTBOX_REPORT" || { log "the outbox has no db or report"; exit 1; }
+}
+
+# served from the served db, state_file and owner_of from the signed state
+served_load() {
+  local path base name file
+  if [ -f "$REPO_DIR/$REPO.db.tar.gz" ]; then
+    load_db_index "$REPO_DIR/$REPO.db.tar.gz"
+    for name in "${!db_file[@]}"; do served[$name]=${db_file[$name]}; done
+  fi
+  for path in "$STATE_DIR"/*; do
+    base=$(basename "$path")
+    for name in $(state_get "$base" names); do owner_of[$name]=$base; done
+    for file in $(state_get "$base" files); do state_file[$file]=$(file_package_name "$file"); done
+  done
+}
+
+# -----------------------------------------------------------------------------
+# PUBLISH: ACCEPT
+base_reject() { fail "$1" "rejected: $2"; }
+
+# one rebuilt base of the proposal, signed into the pool only when it may publish what it built;
+# a rejection keeps its served build, only an unexpected error stops the publish
+base_accept() {
+  local base=$1 key build previous names files name file path pkginfo package version arch replaced is_local=
+  declare -A declared=()
+  [[ $base =~ $NAME_PATTERN ]] || { base_reject "$base" "not a package base name"; return 0; }
+  outbox_file_check "$OUTBOX_STATE/$base" || { base_reject "$base" "no state in the outbox"; return 0; }
+  [ ! -f "$DOTFILES/$PKGBUILDS/$base/PKGBUILD" ] || is_local=1
+  key=$(state_get_from "$OUTBOX_STATE" "$base" key)
+  build=$(state_get_from "$OUTBOX_STATE" "$base" build)
+  names=$(state_get_from "$OUTBOX_STATE" "$base" names)
+  files=$(state_get_from "$OUTBOX_STATE" "$base" files)
+  previous=$(state_get "$base" build)
+  [[ $key =~ $KEY_PATTERN ]] || { base_reject "$base" "recipe key '$key'"; return 0; }
+  # a reused build number would reuse a file name a client may have cached with other contents
+  [[ $build =~ ^[0-9]+$ ]] && (( build > ${previous:-0} )) || { base_reject "$base" "build $build does not follow ${previous:-0}"; return 0; }
+  [ -n "$names" ] && [ -n "$files" ] || { base_reject "$base" "no names or files"; return 0; }
+  for name in $names; do
+    [[ $name =~ $NAME_PATTERN ]] || { base_reject "$base" "package name '$name'"; return 0; }
+    [ -z "${owner_of[$name]:-}" ] || [ "${owner_of[$name]}" = "$base" ] || { base_reject "$base" "$name belongs to ${owner_of[$name]}"; return 0; }
+    [ -n "$is_local" ] || [ -z "${official_name[$name]:-}" ] || { base_reject "$base" "$name is an official package"; return 0; }
+    declared[$name]=0
+  done
+  rm -rf "$WORK/accept"
+  mkdir -p "$WORK/accept"
+  for file in $files; do
+    [[ $file =~ $FILE_PATTERN ]] || { base_reject "$base" "file name '$file'"; return 0; }
+    # a file in the pool that nothing signed references is a killed publish's, never seen by a client
+    if [ -e "$REPO_DIR/$file" ] && { [ -n "${state_file[$file]:-}" ] || [ "${served[$(file_package_name "$file")]:-}" = "$file" ]; }; then
+      base_reject "$base" "$file exists in the pool already"
+      return 0
+    fi
+    outbox_file_check "$OUTBOX_POOL/$file" || { base_reject "$base" "$file is not in the outbox"; return 0; }
+    # checked and signed as a copy of its own: what was checked is what gets signed
+    path=$WORK/accept/$file
+    cp "$OUTBOX_POOL/$file" "$path"
+    pkginfo=$(bsdtar -xOf "$path" .PKGINFO 2>/dev/null) || { base_reject "$base" "$file has no readable .PKGINFO"; return 0; }
+    package=$(sed -n 's/^pkgname = //p' <<<"$pkginfo")
+    version=$(sed -n 's/^pkgver = //p' <<<"$pkginfo")
+    arch=$(sed -n 's/^arch = //p' <<<"$pkginfo")
+    [ "$file" = "$package-$version-$arch.pkg.tar.zst" ] || { base_reject "$base" "$file is $package-$version-$arch inside"; return 0; }
+    [ "${declared[$package]:-}" = 0 ] || { base_reject "$base" "$file is $package, which is not an open name of $names"; return 0; }
+    declared[$package]=1
+    # replaces makes a pacman -Syu swap the replaced package out on every machine, listed there or not
+    for replaced in $(sed -n 's/^replaces = //p' <<<"$pkginfo"); do
+      replaced=${replaced%%[<>=]*}
+      [ -n "$is_local" ] || [ -z "${official_name[$replaced]:-}" ] || { base_reject "$base" "$file replaces the official $replaced"; return 0; }
+    done
+  done
+  for name in $names; do
+    [ "${declared[$name]}" = 1 ] || { base_reject "$base" "no file for $name"; return 0; }
+  done
+  # files first, state last: a killed publish leaves files nothing references, which the next one may overwrite
+  for file in $files; do
+    sign "$WORK/accept/$file"
+    put "$WORK/accept/$file.sig" "$REPO_DIR"
+    put "$WORK/accept/$file" "$REPO_DIR"
+  done
+  state_set "$base" "$key" "$build" "$names" "$files"
+  rm -rf "$WORK/accept"
+  for name in $names; do owner_of[$name]=$base; done
+  for file in $files; do state_file[$file]=$(file_package_name "$file"); done
+  built+=("$base")
+  log "$base: signed $files"
+}
+
+# bases the builder pruned leave the signed state once the published db names none of their files
+state_prune() {
+  local path base file
+  for path in "$STATE_DIR"/*; do
+    base=$(basename "$path")
+    [ ! -e "$OUTBOX_STATE/$base" ] || continue
+    for file in $(state_get "$base" files); do
+      [ "${final[$(file_package_name "$file")]:-}" != "$file" ] || continue 2
+    done
+    rm -f "$path"
+  done
+}
+
+# -----------------------------------------------------------------------------
+# PUBLISH: ASSEMBLE
+# final from the proposed names. Each one's file must be a signed build of it or the file served for it
+# already; a base's name that is neither keeps its served file; any other name is official and maps to
+# the file arch's dbs name for it, which pacman checks against arch's keyring on the way into the pool
+assemble() {
+  local path base name file repo list root=$WORK/official pending=() download=()
+  declare -A proposed=() proposed_owner=()
+  load_db_index "$OUTBOX_DB" || { held_back="the proposed db cannot be read"; return 0; }
+  for name in "${!db_file[@]}"; do proposed[$name]=${db_file[$name]}; done
+  for path in "$OUTBOX_STATE"/*; do
+    base=$(basename "$path")
+    [[ $base =~ $NAME_PATTERN ]] && outbox_file_check "$path" || continue
+    for name in $(state_get_from "$OUTBOX_STATE" "$base" names); do proposed_owner[$name]=$base; done
+  done
+  final=()
+  for name in "${!proposed[@]}"; do
+    file=${proposed[$name]}
+    if [ "${state_file[$file]:-}" = "$name" ] || [ "${served[$name]:-}" = "$file" ]; then
+      final[$name]=$file
+    elif [ -n "${owner_of[$name]:-}${proposed_owner[$name]:-}" ]; then
+      if [ -n "${served[$name]:-}" ]; then
+        log "$name: $file is not signed, keeping ${served[$name]}"
+        final[$name]=${served[$name]}
+      else
+        log "$name: $file is not signed, left out"
+      fi
+    else
+      pending+=("$name")
+    fi
+  done
+  log "assemble: ${#proposed[@]} names proposed, ${#pending[@]} official files new"
+  (( ${#pending[@]} > 0 )) || return 0
+  rm -rf "$root"
+  mkdir -p "$root/sync"
+  for repo in "${OFFICIAL_REPOS[@]}"; do
+    outbox_file_check "$OUTBOX_SYNC/$repo.db" || { held_back="the outbox has no $repo db"; return 0; }
+    cp "$OUTBOX_SYNC/$repo.db" "$root/sync/"
+  done
+  if ! pacman --dbpath "$root" -Spdd --noconfirm --print-format '%r %n %f' "${pending[@]}" > "$WORK/official.txt"; then
+    list="${pending[*]}"
+    held_back="proposed names that are neither built nor official: ${list:0:HELD_BACK_QUOTE_MAX}"
+    return 0
+  fi
+  while read -r repo name file; do
+    [ "${proposed[$name]:-}" = "$file" ] || { held_back="$name: proposed ${proposed[$name]:-nothing}, $repo has $file"; return 0; }
+    final[$name]=$file
+    download+=("$repo/$name")
+  done < "$WORK/official.txt"
+  # pacman checks every file against its db entry and arch's keyring, the pool's and the outbox's copies
+  # included, and fetches what neither holds; a .sig next to a file says nothing, pacman may have put arch's there
+  if ! pacman --dbpath "$root" -Swdd --noconfirm --cachedir "$REPO_DIR" --cachedir "$OUTBOX_POOL" "${download[@]}" \
+    > "$WORK/download.log" 2>&1; then
+    cat "$WORK/download.log"
+    held_back="downloading or checking the official packages failed"
+    return 0
+  fi
+  while read -r repo name file; do
+    if [ ! -f "$REPO_DIR/$file" ]; then
+      outbox_file_check "$OUTBOX_POOL/$file" || { held_back="$file is in no cache after the download"; return 0; }
+      put "$OUTBOX_POOL/$file" "$REPO_DIR"
+    fi
+    sign "$REPO_DIR/$file"
+  done < "$WORK/official.txt"
+}
+
+# the served db plus what changed, every added file carrying a signature of the repo key
+db_assemble() {
+  local f name remove=() add=()
+  mkdir -p "$WORK/db"
+  for f in "$REPO.db.tar.gz" "$REPO.files.tar.gz"; do
+    if [ -f "$REPO_DIR/$f" ]; then cp "$REPO_DIR/$f" "$WORK/db/$f"; else bsdtar -czf "$WORK/db/$f" --files-from /dev/null; fi
+  done
+  load_db_index "$WORK/db/$REPO.db.tar.gz"
+  for name in "${!db_file[@]}"; do
+    [ -n "${final[$name]:-}" ] || remove+=("$name")
+  done
+  for name in "${!final[@]}"; do
+    [ "${db_file[$name]:-}" != "${final[$name]}" ] || continue
+    gpg --batch --verify "$REPO_DIR/${final[$name]}.sig" "$REPO_DIR/${final[$name]}" 2>/dev/null \
+      || { held_back="${final[$name]} has no valid signature"; return 0; }
+    add+=("$REPO_DIR/${final[$name]}")
+  done
+  log "db: ${#add[@]} added, ${#remove[@]} removed"
+  (( ${#remove[@]} == 0 )) || repo-remove -q "$WORK/db/$REPO.db.tar.gz" "${remove[@]}"
+  (( ${#add[@]} == 0 )) || repo-add -q "$WORK/db/$REPO.db.tar.gz" "${add[@]}"
+}
+
+# what a client with [lsck0] above everything sees: the listed and built names resolve from it alone
+snapshot_verify() {
+  local root=$WORK/verify targets=()
+  mapfile -t targets < <(jq -r '.targets[]' "$OUTBOX_REPORT")
+  (( ${#targets[@]} > 0 )) || { held_back="the proposal names no targets"; return 0; }
+  rm -rf "$root"
+  mkdir -p "$root/sync"
+  cp "$WORK/db/$REPO.db.tar.gz" "$root/sync/$REPO.db"
+  printf '[options]\nArchitecture = auto\nSigLevel = Never\n\n[%s]\nServer = file://%s\n' "$REPO" "$REPO_DIR" > "$root/pacman.conf"
+  if ! pacman --config "$root/pacman.conf" --dbpath "$root" -Sp --noconfirm "${targets[@]}" >/dev/null 2> "$WORK/verify.log"; then
+    cat "$WORK/verify.log"
+    held_back="the set does not resolve from $REPO alone"
+  fi
+}
+
+# -----------------------------------------------------------------------------
+# PUBLISH: PUBLISH
+# db, signature and pacman's names for both into a directory, by put (copy) or link_into (hardlink)
+db_put() {
+  local op=$1 from=$2 dir=$3 f
+  for f in "$REPO.db.tar.gz" "$REPO.files.tar.gz"; do
+    "$op" "$from/$f.sig" "$dir"
+    "$op" "$from/$f" "$dir"
+  done
+  symlink_set "$REPO.db.tar.gz" "$dir/$REPO.db"
+  symlink_set "$REPO.db.tar.gz.sig" "$dir/$REPO.db.sig"
+  symlink_set "$REPO.files.tar.gz" "$dir/$REPO.files"
+  symlink_set "$REPO.files.tar.gz.sig" "$dir/$REPO.files.sig"
+}
+
+# <date>/x86_64 hardlinks every file of the db, and current moves to it only once it is whole; a second
+# publish the same day updates that day's snapshot in place, file by file like x86_64/
+snapshot_publish() {
+  local dir=$SERVED/$SNAPSHOT/$ARCH file manifest=$WORK/$SNAPSHOT_MANIFEST
+  declare -A keep=()
+  mkdir -p "$dir"
+  for file in "${final[@]}"; do
+    keep[$file]=1
+    [ -e "$dir/$file" ] || ln "$REPO_DIR/$file" "$dir/$file"
+    [ -e "$dir/$file.sig" ] || ln "$REPO_DIR/$file.sig" "$dir/$file.sig"
+  done
+  db_put put "$WORK/db" "$dir"
+  jq -n --arg date "$SNAPSHOT" --arg started "$STARTED" --arg published "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg source "$SOURCE" --arg ref "$REF" --arg commit "$COMMIT" --arg key "$KEY" --argjson packages "${#final[@]}" \
+    '{ date: $date, started: $started, published: $published, source: $source, ref: $ref, commit: $commit,
+       signing_key: $key, packages: $packages }' > "$manifest"
+  sign "$manifest"
+  put "$manifest.sig" "$SERVED/$SNAPSHOT"
+  put "$manifest" "$SERVED/$SNAPSHOT"
+  symlink_set "$SNAPSHOT" "$SNAPSHOT_CURRENT"
+  for file in "$dir"/*.pkg.tar.zst; do
+    [ -n "${keep[$(basename "$file")]:-}" ] || rm -f "$file" "$file.sig"
+  done
+}
+
+db_publish() {
+  local f
+  for f in "$REPO.db.tar.gz" "$REPO.files.tar.gz"; do
+    sign "$WORK/db/$f"
+  done
+  snapshot_publish
+  # x86_64/ is the pool and the newest db at once, what every client without a pin reads
+  db_put link_into "$SERVED/$SNAPSHOT/$ARCH" "$REPO_DIR"
+}
+
+# superseded, removed and held back files leave the pool once no served db references them; the
+# dated snapshots keep their hardlinks
+prune_files() {
+  local file
+  declare -A referenced=()
+  for file in "${final[@]}"; do referenced[$file]=1; done
+  for file in "$REPO_DIR"/*.pkg.tar.zst; do
+    [ -n "${referenced[$(basename "$file")]:-}" ] || rm -f "$file" "$file.sig"
+  done
+}
+
+snapshot_prune() {
+  local dir cutoff current
+  cutoff=$(date -u -d "@$(( RUN_STARTED - SNAPSHOT_KEEP_DAYS * 86400 ))" +%Y-%m-%d)
+  current=$(readlink "$SNAPSHOT_CURRENT")
+  for dir in "$SERVED"/$SNAPSHOT_GLOB; do
+    [[ $(basename "$dir") < $cutoff ]] && [ "$(basename "$dir")" != "$current" ] || continue
+    log "removing snapshot $(basename "$dir")"
+    rm -rf "$dir"
+  done
+}
+
+# -----------------------------------------------------------------------------
+# PUBLISH: STATUS
+write_status() {
+  local base failures=() now packages official dropped snapshot
+  now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+  packages=${#served[@]}
+  snapshot=
+  if [ -z "$held_back" ]; then
+    packages=${#final[@]}
+    snapshot=$SNAPSHOT
+  fi
+  official=$(jq -r '.official' "$OUTBOX_REPORT")
+  dropped=$(jq -r '.dropped | join(" ")' "$OUTBOX_REPORT")
+  mapfile -t failures < <({ jq -r '.failed[]' "$OUTBOX_REPORT"; for base in "${!failed[@]}"; do echo "$base: ${failed[$base]}"; done; } \
+    | sort -u | sed '/^$/d')
+  {
+    echo "last build: $now"
+    echo "source:     $SOURCE $REF $COMMIT"
+    echo "snapshot:   ${snapshot:-none, held back}"
+    echo "packages:   $packages"
+    echo "official:   $official"
+    echo "published:  ${held_back:+no, held back: }${held_back:-yes}"
+    echo "built:      ${built[*]:-none}"
+    echo "dropped:    ${dropped:-none}"
+    echo "failed:     ${#failures[@]}"
+    (( ${#failures[@]} == 0 )) || printf '  %s\n' "${failures[@]}"
+  } > "$WORK/status.txt"
+  jq -n --arg last_build "$now" --arg commit "$COMMIT" --argjson packages "$packages" --arg held_back "$held_back" \
+    --arg snapshot "$snapshot" --argjson dropped "$(jq '.dropped' "$OUTBOX_REPORT")" \
+    --args '{ packages: $packages, failing: ($ARGS.positional | length), last_build: $last_build, commit: $commit,
+      snapshot: (if $snapshot == "" then null else $snapshot end),
+      held_back: (if $held_back == "" then null else $held_back end), failed: $ARGS.positional, dropped: $dropped,
+      running: null }' \
+    "${failures[@]}" > "$WORK/status.json"
+  put "$WORK/status.json" "$SERVED"
+  put "$WORK/status.txt" "$SERVED"
+  # archbuild-if-stale ages the run from its start, a long night must not skip the next one
+  touch -d "@$RUN_STARTED" "$SERVED/status.txt"
+  cat "$WORK/status.txt"
+}
+
 PUSH_SSH="ssh -i $PUSH_KEY_FILE -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=15"
 
-# pacman -Sw --cachedir leaves download-* dirs in the served tree
-push_rsync() { rsync -a --exclude 'download-*' -e "$PUSH_SSH" "$@"; }
+# -H: the dated snapshots are hardlinks of the pool there too; pacman -Sw --cachedir leaves download-* dirs
+push_rsync() { rsync -aH --exclude 'download-*' --exclude '/.state/' -e "$PUSH_SSH" "$@"; }
 
-# mirror to the always-on dmz host: packages, then the db, then deletions; never fatal, the nas copy stands
+# mirror to the always-on dmz host: packages and snapshot dirs, then the dbs and current, then the
+# status, then deletions; a failure fails the unit, the mirror keeps its last whole copy
 push() {
   [ -n "$PUSH_TARGET" ] && [ -f "$PUSH_KEY_FILE" ] || return 0
   [ -f "$REPO_DIR/$REPO.db" ] || return 0
   log "pushing the repo to $PUSH_TARGET"
-  push_rsync --exclude '/.state/' --exclude "/x86_64/$REPO.*" --exclude '/status.*' /repo/ "$PUSH_TARGET/" \
-    && push_rsync --delay-updates "$REPO_DIR/$REPO".* "$PUSH_TARGET/x86_64/" \
-    && push_rsync /repo/status.txt /repo/status.json "$PUSH_TARGET/" \
-    && push_rsync --delete --exclude '/.state/' /repo/ "$PUSH_TARGET/" \
-    || log "push to $PUSH_TARGET failed, the dmz mirror keeps its last copy"
-}
-
-# only status.json, so the dmz mirror shows a running build; a failed push waits for the next update
-push_status() {
-  [ -n "$PUSH_TARGET" ] && [ -f "$PUSH_KEY_FILE" ] || return 0
-  push_rsync /repo/status.json "$PUSH_TARGET/status.json" 2>/dev/null || true
+  push_rsync --exclude "$REPO.db*" --exclude "$REPO.files*" --exclude '/current' --exclude '/status.*' "$SERVED/" "$PUSH_TARGET/" \
+    && push_rsync --delay-updates --exclude '/status.*' "$SERVED/" "$PUSH_TARGET/" \
+    && push_rsync "$SERVED/status.txt" "$SERVED/status.json" "$PUSH_TARGET/" \
+    && push_rsync --delete "$SERVED/" "$PUSH_TARGET/" \
+    || { log "push to $PUSH_TARGET failed, the dmz mirror keeps its last copy"; push_failed=1; }
 }
 
 # -----------------------------------------------------------------------------
 # MAIN
-main() {
+build_main() {
   local base done=0
-  log "setting up"
-  setup_builder
-  setup_key
+  log "setting up the build"
+  setup_build
   db_stage
-  setup_pacman
-  fetch_dotfiles
+  setup_build_pacman
   log "resolving $DOTFILES/$INSTALL_SCRIPT at $COMMIT"
   write_progress resolving
   load_repo_index
@@ -875,24 +1286,50 @@ main() {
     [ -n "${failed[$base]:-}" ] || build_base "$base" || true
     done=$((done + 1))
   done
-  write_progress snapshot "" "$done"
+  write_progress proposing "" "$done"
   drop_unresolvable
   if snapshot_official; then
     prune_db
-    write_progress verifying "" "$done"
-    snapshot_verify || true
   fi
+  [ -z "$held_back" ] || log "held back: $held_back"
+  outbox_write
+  clean_caches
+  log "proposed ${#db_file[@]} packages, ${#built[@]} built"
+}
+
+publish_main() {
+  local base
+  log "setting up the publish"
+  STATE_DIR=$SERVED_STATE_DIR
+  outbox_check
+  rm -rf "$WORK"
+  mkdir -p "$WORK" "$REPO_DIR" "$STATE_DIR"
+  setup_key
+  setup_publish_pacman
+  served_load
+  held_back=$(jq -r '.held_back // empty' "$OUTBOX_REPORT")
+  while read -r base; do
+    base_accept "$base"
+  done < <(jq -r '.built[]' "$OUTBOX_REPORT")
+  [ -n "$held_back" ] || assemble
+  [ -n "$held_back" ] || db_assemble
+  [ -n "$held_back" ] || snapshot_verify
   if [ -z "$held_back" ]; then
-    write_progress publishing "" "$done"
+    log "publishing snapshot $SNAPSHOT"
     db_publish
     prune_files
+    snapshot_prune
+    state_prune
   else
     log "held back: $held_back"
-    load_db_index "$REPO_DIR/$REPO.db.tar.gz"
   fi
   write_status
   push
-  clean_caches
+  (( ! push_failed ))
 }
 
-main "$@"
+case ${1:-} in
+  build) build_main ;;
+  publish) publish_main ;;
+  *) echo "usage: $0 build|publish" >&2; exit 1 ;;
+esac

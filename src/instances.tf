@@ -303,7 +303,8 @@ locals {
       enabled    = true,
       name       = "210-external-mirror",
       type       = "external",
-      # served packages tree (30G and growing), pushed from vm-119: the push adds before it deletes, so twice that
+      # served packages tree (30G and growing) plus the dated snapshots archrepo-build.sh keeps (SNAPSHOT_KEEP_DAYS,
+      # hardlinked, ~1G per day), pushed from vm-119; the push adds before it deletes
       disk = 64,
     }
 

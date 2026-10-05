@@ -15,6 +15,47 @@ let
   ]
   # a missing hdd must not export the empty mountpoint on the nvme
   ++ lib.optional (lib.hasPrefix "/srv/nas/bulk" c.path) "mp=/srv/nas/bulk");
+
+  # full official arch mirror (core/extra/multilib, x86_64), served beside the lsck0 repo so a -Syu or a
+  # pacstrap whose exact version is not in last night's lsck0 snapshot pulls from the lan, not a 1.3 MB/s
+  # public mirror. lives on the bulk hdd next to archrepo: the nvme root has no room, the hdd keeps ~1 TiB free.
+  mirrorDir = "/srv/nas/bulk/archmirror";
+  # tier-1 upstream that allows rsync and carries the full tree. rwth aachen: german, tier 1, rsync-enabled.
+  # the trailing slash is the rsync module root, whose layout is already $repo/os/$arch.
+  mirrorUpstream = "rsync://ftp.halifax.rwth-aachen.de/archlinux/";
+  # 1 GbE nas; cap the pull so a sync never starves live nfs serving or the nightly archbuild writes
+  mirrorBwlimitKBps = 60 * 1024;
+  mirrorLock = "/run/archmirror-sync.lock";
+
+  # official two-stage method: --delay-updates stages every changed file in a .~tmp~ dir and renames the
+  # whole batch into place only after a clean transfer, so nginx never serves a half-synced tree;
+  # --delete-after removes stale files last. the module's lastupdate file arrives with the tree and, once
+  # it matches upstream, gates the next run so an unchanged upstream costs one tiny transfer, not a full pass.
+  mirrorSync = pkgs.writeShellScript "archmirror-sync" ''
+    set -euo pipefail
+    upstream=${lib.escapeShellArg mirrorUpstream}
+    target=${lib.escapeShellArg mirrorDir}
+    ${pkgs.coreutils}/bin/mkdir -p "$target"
+
+    tmp_lastupdate=$(${pkgs.coreutils}/bin/mktemp)
+    trap '${pkgs.coreutils}/bin/rm -f "$tmp_lastupdate"' EXIT
+    if ${pkgs.rsync}/bin/rsync -q --no-motd "''${upstream}lastupdate" "$tmp_lastupdate" \
+       && ${pkgs.coreutils}/bin/cmp -s "$tmp_lastupdate" "$target/lastupdate"; then
+      echo "archmirror: upstream unchanged, nothing to sync"
+      exit 0
+    fi
+
+    # -rtlH -p preserves times, symlinks, hardlinks and perms; --safe-links drops any symlink escaping the
+    # tree (core/extra/multilib link package files into the shared pool/ with relative links, which stay).
+    # /iso and /sources are the only excludes, keeping the tree to the ~60 GiB full-repo budget.
+    ${pkgs.rsync}/bin/rsync \
+      -rtlH -p --safe-links --no-motd \
+      --delay-updates --delete-after --delete-excluded \
+      --timeout=600 --contimeout=60 \
+      --bwlimit=${toString mirrorBwlimitKBps} \
+      --exclude='/iso' --exclude='/sources' --exclude='*.links.tar.gz*' \
+      "$upstream" "$target/"
+  '';
 in {
   # kopia snapshots this tree in place
   imports = [ ../services/kopia.nix ];
@@ -222,6 +263,8 @@ in {
     "d /srv/nas/bulk/torrents 0775 1000 1000 -"
     # vm-119 writes as root over nfs, nginx serves it on 8090
     "d /srv/nas/bulk/archrepo 0755 root root -"
+    # full official mirror, rsynced in place by archmirror-sync, nginx serves it at /archlinux
+    "d /srv/nas/bulk/archmirror 0755 root root -"
     "d /srv/nas/data/firefly/db 0750 70 70 -"
     "d /srv/nas/data/firefly/upload 0750 1000 1000 -"
     "d /srv/nas/syncthing 0775 nobody nogroup -"
@@ -305,8 +348,41 @@ in {
         allow 100.64.0.0/10;
         deny all;
       '';
-      # builder state
+      # builder state, and the mirror's .~tmp~ staging dirs mid-sync
       locations."~ /\\.".return = "404";
+      # full official mirror, same vhost, a distinct path: lsck0 stays at /x86_64 and keeps authority for
+      # overridden/aur packages (clients list it first); official core/extra/multilib come from /archlinux.
+      # symlinks stay enabled (the default): the package files are relative links into the shared pool/ and
+      # --safe-links already bars any escape, so disable_symlinks on would 404 every package.
+      locations."/archlinux/" = {
+        alias = "${mirrorDir}/";
+        extraConfig = ''
+          autoindex on;
+          default_type application/octet-stream;
+          types {
+            application/octet-stream db sig zst;
+            text/plain txt;
+          }
+          add_header X-Content-Type-Options nosniff;
+        '';
+      };
+    };
+  };
+
+  # hourly: official repos update a few times a day, so an hour caps the lag. idle i/o and lowest cpu
+  # priority keep the sync behind live nfs serving and the nightly archbuild; flock drops an hourly tick
+  # that lands while the slow first full sync is still running.
+  systemd.services.archmirror-sync = {
+    description = "Sync the full official Arch mirror (core/extra/multilib, x86_64) from a tier-1 upstream";
+    after = [ "network-online.target" "srv-nas-bulk.mount" ];
+    wants = [ "network-online.target" ];
+    requires = [ "srv-nas-bulk.mount" ];
+    startAt = "hourly";
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.util-linux}/bin/flock -n ${mirrorLock} ${mirrorSync}";
+      IOSchedulingClass = "idle";
+      Nice = 19;
     };
   };
 
