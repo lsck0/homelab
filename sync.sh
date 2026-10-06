@@ -316,23 +316,20 @@ lab_known_host "$PROXMOX_SSH_HOST" "$PROXMOX_SSH_PORT" \
 
 SSH_CONFIG="$(mktemp --suffix=.ssh_config)"; CLEANUP_FILES+=("$SSH_CONFIG")
 
-# skip the router bastion when 10.x routes directly
-if timeout 4 bash -c "echo > /dev/tcp/10.100.0.100/22" 2>/dev/null; then
-  echo ">>> Internal subnet directly routable: deploying without the router bastion."
-  cat > "$SSH_CONFIG" <<EOF
-Host 10.*
-  StrictHostKeyChecking accept-new
-  UserKnownHostsFile /dev/null
-EOF
-else
-  echo ">>> Internal subnet not directly routable: deploying through the router bastion."
-  cat > "$SSH_CONFIG" <<EOF
-Host 10.*
-  ProxyCommand $(command -v ssh) -F $SSH_CONFIG -o StrictHostKeyChecking=accept-new -W %h:%p root@$ROUTER_WAN_IP
-  StrictHostKeyChecking accept-new
-  UserKnownHostsFile /dev/null
-EOF
-fi
+# per zone: direct where the house lan routes it (a fritzbox static route), else through the router bastion.
+# the zone's gateway answers ssh on the router's wan side whenever the zone is routed here
+: > "$SSH_CONFIG"
+for gateway in $(jq -r '[.[] | select(.type != "router") | .gateway] | unique | .[]' "$ROOT_DIR/src/inventory.json"); do
+  zone="${gateway%.*}.*"
+  if timeout 4 bash -c "echo > /dev/tcp/$gateway/22" 2>/dev/null; then
+    echo ">>> $zone directly routable: no bastion."
+    printf 'Host %s\n  StrictHostKeyChecking accept-new\n  UserKnownHostsFile /dev/null\n' "$zone" >> "$SSH_CONFIG"
+  else
+    echo ">>> $zone not routed from here: through the router bastion."
+    printf 'Host %s\n  ProxyCommand %s -F %s -o StrictHostKeyChecking=accept-new -W %%h:%%p root@%s\n  StrictHostKeyChecking accept-new\n  UserKnownHostsFile /dev/null\n' \
+      "$zone" "$(command -v ssh)" "$SSH_CONFIG" "$ROUTER_WAN_IP" >> "$SSH_CONFIG"
+  fi
+done
 BASTION_SSHOPTS=(-F "$SSH_CONFIG")
 export NIX_SSHOPTS="-F $SSH_CONFIG"
 
