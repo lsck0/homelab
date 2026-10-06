@@ -6,6 +6,12 @@ let
   mediaProject = 1;
   mediaDirs = [ "/srv/nas/bulk/media" "/srv/nas/bulk/torrents" ];
 
+  dataRoot = "/srv/nas/data";
+  dataShares = lib.filter (lib.hasPrefix "${dataRoot}/") (lib.attrNames clientsByPath);
+  # "/srv/nas/data/a/b/c" -> [ "/srv/nas/data/a" "/srv/nas/data/a/b" ]
+  parentsOf = path: let parts = lib.splitString "/" (lib.removePrefix "${dataRoot}/" path); in
+    map (n: "${dataRoot}/${lib.concatStringsSep "/" (lib.take n parts)}") (lib.range 1 (lib.length parts - 1));
+
   # dmz and apps zone clients get subtree checks
   internalIps = map (v: v.ip) (lib.filter (v: v.type == "internal") (lib.attrValues inventory));
 
@@ -153,6 +159,21 @@ in {
   # what clients negotiated at boot, and every hard mount hangs on "RPC fragment too large"
   systemd.services.nfs-server.serviceConfig.ExecStartPre = [ "${pkgs.bash}/bin/sh -c 'echo 1048576 > /proc/fs/nfsd/max_block_size'" ];
 
+  # nixpkgs' nfsd module restarts only mountd when /etc/exports changes, and only nfs-server's start runs exportfs:
+  # a share added by a deploy stays unexported, and its clients get "No such file or directory", until a reboot
+  systemd.services.nfs-exports-reload = {
+    description = "Re-export the NAS shares after /etc/exports changes";
+    after = [ "nfs-server.service" ];
+    requires = [ "nfs-server.service" ];
+    wantedBy = [ "multi-user.target" ];
+    restartTriggers = [ config.environment.etc.exports.source ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      ExecStart = "${pkgs.nfs-utils}/bin/exportfs -ra";
+    };
+  };
+
   services.samba = {
     enable = true;
     openFirewall = true;
@@ -277,7 +298,9 @@ in {
     "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
   ]
   # per-service state: every share a guest mounts, any uid may write it
-  ++ map (path: "d ${path} 0777 nobody nogroup -") (lib.filter (lib.hasPrefix "/srv/nas/data/") (lib.attrNames clientsByPath));
+  ++ map (path: "d ${path} 0777 nobody nogroup -") dataShares
+  # tmpfiles' d makes no missing parents: a nested share (tokens/vm-140) needs its parents spelled out
+  ++ map (path: "d ${path} 0755 root root -") (lib.subtractLists dataShares (lib.unique (lib.concatMap parentsOf dataShares)));
 
   # filebrowser, authelia gates it via traefik
   virtualisation.oci-containers.containers.filebrowser = {
