@@ -10,7 +10,9 @@
   telegram.url = "https://api.telegram.org";
   anthropic.url = "https://api.anthropic.com";
   proton.url = "https://drive-api.proton.me";
-  dockerhub.url = "https://registry-1.docker.io/v2/";
-  ghcr.url = "https://ghcr.io/v2/";
+  # image registries also name the host an image reference starts with (modules/upstream registries)
+  dockerhub = { url = "https://registry-1.docker.io/v2/"; registry = "docker.io"; };
+  ghcr = { url = "https://ghcr.io/v2/"; registry = "ghcr.io"; };
+  quay = { url = "https://quay.io/v2/"; registry = "quay.io"; };
   crowdsec.url = "https://hub-data.crowdsec.net";
 }
