@@ -109,6 +109,8 @@ in
     interface = "ens${toString nicPciSlotFirst}";
     inherit (site.lan) subnet gateway workstation proxmox;
     address = site.lan.router;
+    # the house's public address by name, the wireguard endpoint; the router serves it to the lab as it learns it
+    publicHost = "wg";
   };
 
   # a guest's address, and the same as a one-host source for a firewall or an allow list
