@@ -111,7 +111,7 @@ let
       label = "Healthy"; query = "sum(traefik_service_server_up{service=\"${r.name}@file\"})"; format.suffix = "/${toString nodeCount}";
     } ++ [
       { label = "Memory"; query = "sum(container_memory_working_set_bytes${own})"; format.type = "bytes"; }
-      # the builder's textfile metric on vm-117 (instances/140-internal-swarm/lib/app-builder.nix)
+      # the builder's textfile metric on vm-140 (instances/140-internal-swarm/lib/app-builder.nix)
       { label = "Deployed"; query = "time() - homelab_app_deploy_last_success_timestamp_seconds{app=\"${app}\"}"; format.type = "duration"; }
     ]);
   };

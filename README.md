@@ -41,7 +41,7 @@ src/
   modules/                  the platform: what two or more guests use
     <name>.nix              a module of one file
     <name>/                 a module of more: default.nix, lib/ (its scripts and templates), tests/
-  apps/swarm.nix            the swarm: manager, builder, worker count and shape
+  apps/swarm.nix            the shared swarm: state worker, ports, worker shape (manager and builder: vm-140)
   apps/<name>/app.nix       an app: repo, branch and the same service properties; secrets.sops.json its secrets
   lab/keys/                 the ssh public keys authorized everywhere (hand-written)
   secrets/                  admins.txt (the admins' age recipients), shared.nix and shared.sops.json (the
