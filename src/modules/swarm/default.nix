@@ -196,7 +196,6 @@ let
           "$app" "$1" "$app" "$(date +%s)" > "$metrics.tmp"
         mv "$metrics.tmp" "$metrics"
       }
-      # a deploy that failed while a registry of the stack's public images is down: no failure, the running version stays
       unavailable=${toString upstream.unavailable}
       outage_exit() {
         for upstream in $(jq -r --arg app "$app" '.apps[$app].upstreams[]' "$catalog"); do
