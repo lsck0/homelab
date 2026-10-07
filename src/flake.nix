@@ -57,7 +57,10 @@
     testFiles = assert lib.assertMsg (testNamesTwice == [ ]) "two tests share a name, which names their check: ${toString testNamesTwice}";
       lib.mergeAttrsList testSets;
     testNames = lib.attrNames testFiles;
-    testOf = name: args: import testFiles.${name} ({ inherit pkgs lib inputs specialArgs; } // args);
+    testDefaults = (import ./tests/lib/lab.nix { inherit pkgs lib specialArgs; }).testDefaults;
+    # a vm test (one with `extend`) gets the lab's bounds; an eval-only check is a plain derivation
+    testOf = name: args: let test = import testFiles.${name} ({ inherit pkgs lib inputs specialArgs; } // args); in
+      if test ? extend then test.extend { modules = [ testDefaults ]; } else test;
     testIsSeeded = name: (builtins.functionArgs (import testFiles.${name})) ? seed;
     # seeds are 16 bit: enough schedules to sample from, few enough to list as attribute names
     seedMax = 65535;
