@@ -45,6 +45,7 @@ let
     generator-without-reference = { lab = withDemo { secrets.demo-password = "hex:24"; }; expect = "is named by no env value"; };
     unknown-placeholder = { lab = withDemo { env.web.A = "{{DEMO_PASSWORD}}"; }; expect = "is neither a secret"; };
     unknown-lab-endpoint = { lab = withDemo { env.web.A = "{{homelab.loki}}"; }; expect = "is no lab endpoint"; };
+    unknown-origin = { lab = withDemo { env.web.A = "{{homelab.origin-nowhere}}"; }; expect = "is no lab endpoint"; };
     telemetry-endpoint-without-telemetry = {
       lab = withDemo { off = { traces = "none"; profiles = "none"; }; env.web.A = "{{homelab.otlp-grpc}}"; };
       expect = "with traces and profiles off";

@@ -92,6 +92,8 @@ let
 in
 {
   inherit domain privateRanges tailnet cloudflareRanges ports zones ingressPages;
+  # never the internet: what a stranger's process (ci jobs, swarm tasks) is refused, named exceptions in front
+  localRanges = privateRanges ++ [ tailnet ];
   cidrContains = cidr.contains;
   # the domain as an ldap base dn (authelia and its lldap, the proxmox realm)
   domainDn = lib.concatMapStringsSep "," (part: "dc=${part}") (lib.splitString "." domain);
