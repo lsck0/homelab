@@ -80,11 +80,13 @@ pkgs.testers.runNixOSTest {
         post("/auth/signUp", account)
 
     with subtest("the fork starts on the same data dir and the account signs in"):
-        # podman runs the image's healthcheck as transient units, which fail while the app starts; sync.sh ignores
-        # those, so does this switch, and nothing else
+        # podman runs the image's healthcheck as transient units, which fail while the app starts; sync.sh
+        # (switch_failures_real) ignores a failed unit that is transient or already collected, so does this switch
         status, out = vm_207.execute("/run/booted-system/specialisation/upgraded/bin/switch-to-configuration test 2>&1")
         failed = [u.strip() for line in re.findall(r"the following units failed: (.*)", out) for u in line.split(",")]
-        assert status == 0 or all(re.fullmatch(r"[0-9a-f]{64}-[0-9a-f]{1,16}\.service", u) for u in failed), out
+        show = lambda u, p: vm_207.succeed(f"systemctl show -P {p} {u}").strip()
+        declared = lambda u: show(u, "Transient") == "no" and show(u, "LoadState") != "not-found"
+        assert status == 0 or (failed and not any(map(declared, failed))), out
         # the state podman's own probe keeps; `podman healthcheck run` here stops on the driver's tty (SIGTTOU) for good
         vm_207.wait_until_succeeds("podman inspect share --format '{{.State.Health.Status}}' | grep -qx healthy", timeout=300)
         vm_207.succeed("podman inspect share --format '{{.ImageName}}' | grep -q pingvin-share-x")

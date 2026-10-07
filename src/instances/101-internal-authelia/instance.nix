@@ -1,5 +1,5 @@
 # SSO: authelia (OIDC + ForwardAuth) and lldap, its identity store
-{ id, ... }: {
+{ id, net, ... }: {
   vm = {
     bootPhase = "network";
     needs = [ "nfs" ];
@@ -30,7 +30,7 @@
     description = "Authelia rejected these passwords; it bans the client address after 3 tries in 2 minutes.";
   };
 
-  grants = [ { from = [ "proxmox" ]; tcp = [ 3890 ]; why = "the proxmox realm's sync (scripts/pve-install.sh)"; } ];
+  grants = [ { from = [ "proxmox" ]; tcp = [ net.ports.ldaps ]; why = "the proxmox realm's logins and sync, over ldaps (scripts/pve-install.sh)"; } ];
 
   secrets = {
     authelia-admin-pass = "hex:24";
@@ -43,7 +43,7 @@
     lldap-authelia-bind-password = "hex:24"; # lldap user authelia-bind, read-only (lldap_strict_readonly)
     lldap-guest-password = "hex:24";
     lldap-jwt-secret = "hex:24";
-    lldap-proxmox-bind-password = "hex:24"; # lldap user proxmox-bind, read-only: the proxmox realm sync (init.sh)
+    lldap-proxmox-bind-password = "hex:24"; # lldap user proxmox-bind, read-only: the proxmox realm (scripts/pve-install.sh)
     lldap-server-key = "manual"; # base64 of lldap's server key
   };
 

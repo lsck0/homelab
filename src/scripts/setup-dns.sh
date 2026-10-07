@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # split dns on the workstation: NetworkManager's dnsmasq sends *.<domain> to the router's coredns
 #
-# The lab's facts come from src/generated/lab.json (the desktop clients' interface, written by sync.sh) and the
-# router's lan address from src/generated/site.json.
+# The lab's facts come from src/generated/lab.json, the desktop clients' interface sync.sh writes.
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -11,7 +10,7 @@ SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 tools_require jq
 
 LAB_EXPORT="$SRC/generated/lab.json"
-ROUTER_IP=$(jq -r .lan.router "$SRC/generated/site.json")
+ROUTER_IP=$(jq -r .router "$LAB_EXPORT")
 # coredns; 5353 on the router is avahi
 ROUTER_DNS_PORT=53
 DOMAIN=$(jq -r .domain "$LAB_EXPORT")

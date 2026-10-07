@@ -57,6 +57,8 @@ let
     mdns = 5353;
     swarmGossip = 7946;
     proxmoxApi = 8006;
+    # lldap's ldaps listener (instances/101-internal-authelia), which the proxmox realm binds to
+    ldaps = 6360;
     nodeExporter = 9100;
     redis = 6379;
     traefikMetrics = 8082;

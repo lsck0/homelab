@@ -26,7 +26,7 @@ SRC="$ROOT_DIR/src"
 . "$SRC/scripts/lib/secrets.sh"
 # shellcheck source=src/scripts/lib/proxmox.sh
 . "$SRC/scripts/lib/proxmox.sh"
-tools_require git jq sops ssh ssh-keygen ssh-agent ssh-add terraform nix curl openssl
+tools_require git jq sops ssh ssh-keygen ssh-agent ssh-add terraform nix curl openssl ip
 
 # the age key lives in the dotfiles' git-crypt secrets, which the YubiKey unlocks; the link follows them when they move
 AGE_KEY="$ROOT_DIR/secrets/age.txt"
@@ -83,6 +83,8 @@ DNS_PROBE_NAME=ghcr.io
 # a zone gateway answers ssh within this when the house lan routes the zone here
 ROUTE_PROBE_TIMEOUT_S=4
 PVE_API_PORT=8006
+# a fetch or push github does not answer within this gives up; the next run catches up
+GIT_TIMEOUT_S=60
 NIX_FEATURES=(--extra-experimental-features "nix-command flakes")
 
 REAPER_PAUSE_FILE=/run/ondemand-reaper-pause-until
@@ -136,8 +138,9 @@ NAS_ID=$(jq -r .routes.nas.vmid "$LAB_EXPORT")
 
 echo ">>> SYNCING HARDWARE + OS..."
 
-# abort if behind upstream; offline, or without an upstream, there is nothing to be behind
-git -C "$ROOT_DIR" fetch origin --quiet 2>/dev/null || true
+# abort if behind upstream; github unavailable, the last fetched upstream is the one compared
+timeout "$GIT_TIMEOUT_S" git -C "$ROOT_DIR" fetch origin --quiet \
+  || echo "WARNING: github unavailable: checked against the upstream as last fetched."
 BEHIND=$(git -C "$ROOT_DIR" rev-list "HEAD..@{u}" --count 2>/dev/null || echo "0")
 if [ "$BEHIND" -gt 0 ]; then
   echo "ERROR: Branch is $BEHIND commit(s) behind upstream. Run 'git pull' first."
@@ -304,14 +307,19 @@ host_age_key_settle() {
 }
 
 # switch_failures_real <ip> <switch output>: the units the switch named as failed that the configuration declares;
-# a transient unit (podman's healthcheck runs, systemd-run) is no configuration's and fails mid-restart by design
+# a transient unit (podman's healthcheck runs, systemd-run) is no configuration's and fails mid-restart by design;
+# one systemd already collected is not found any more, which no declared unit ever is
 switch_failures_real() {
   local units
   units=$(sed -n 's/^warning: the following units failed: //p' "$2" | tr ',' ' ')
   [ -n "$units" ] || { echo "the switch itself"; return 0; }
   # shellcheck disable=SC2086 # one word per unit
   lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@$1" \
-    "for u in $units; do [ \"\$(systemctl show -P Transient \"\$u\")\" = yes ] || echo \"\$u\"; done"
+    "for u in $units; do
+       if [ \"\$(systemctl show -P Transient \"\$u\")\" = no ] && [ \"\$(systemctl show -P LoadState \"\$u\")\" != not-found ]; then
+         echo \"\$u\"
+       fi
+     done"
 }
 
 deploy_nixos() {
@@ -321,9 +329,9 @@ deploy_nixos() {
     || { echo "ERROR: no host key for $name ($ip) in src/generated/known_hosts: the hypervisor could not read it"; return 1; }
   wait_for_ssh "$ip" || return 1
 
-  # the router deploys before the batch build finishes, so it builds its own
+  # the router deploys before the batch build finishes, so it builds its own; a host the batch failed has ""
   local toplevel="${TOPLEVELS[$name]:-}"
-  if [ -z "$toplevel" ]; then
+  if [ -z "${TOPLEVELS[$name]+batch}" ]; then
     toplevel=$(nix build "$SRC#nixosConfigurations.${name}.config.system.build.toplevel" \
       "${NIX_FEATURES[@]}" --no-link --print-out-paths 2>&1 | tail -n1)
   fi
@@ -418,6 +426,15 @@ proxmox_converge "$LAB_EXPORT" ""
 # terraform and curl verify the api against the cluster CA; the node certificate names the host's address
 PVE_CA_FILE=$(mktemp --suffix=.pve-ca.pem); CLEANUP_FILES+=("$PVE_CA_FILE")
 proxmox_ca_write "$PVE_CA_FILE"
+# terraform runs nix (lib.tf's guests), which keeps the trust it has: nix's own lookup order
+NIX_TRUST="${NIX_SSL_CERT_FILE:-${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}}"
+# the proxmox firewall admits the api from the owner's machines only (terraform/lib.tf, operators)
+OPERATOR_IP=$(ip -4 route get "$PROXMOX_SSH_HOST" | sed -n 's/.* src \([0-9.]*\).*/\1/p')
+jq -e --arg ip "$OPERATOR_IP" '[.lan.workstation, .lan.notebook] | index($ip)' "$LAB_SITE" >/dev/null || {
+  echo "ERROR: this machine reaches Proxmox from $OPERATOR_IP, which is neither site.json's lan.workstation nor lan.notebook:"
+  echo "       the Proxmox firewall drops its api calls. Deploy from one of them, or rerun src/scripts/init.sh here."
+  exit 1
+}
 PROXMOX_API_TOKEN_ID="$(proxmox_tfvar_read proxmox_api_token_id)"
 PROXMOX_API_TOKEN_SECRET="$(proxmox_tfvar_read proxmox_api_token_secret)"
 PROXMOX_NODE=$(jq -r .node "$LAB_SITE")
@@ -497,7 +514,7 @@ fi
 # every run, with refresh: proxmox drift (a half-failed apply, a manual edit) is corrected, never trusted
 echo ">>> Terraform: applying..."
 for i in $(seq 1 "$TF_ATTEMPTS"); do
-  SSL_CERT_FILE="$PVE_CA_FILE" terraform -chdir="$TF_DIR" apply -auto-approve -parallelism="$TF_PARALLELISM" \
+  SSL_CERT_FILE="$PVE_CA_FILE" NIX_SSL_CERT_FILE="$NIX_TRUST" terraform -chdir="$TF_DIR" apply -auto-approve -parallelism="$TF_PARALLELISM" \
     -var-file="$PROXMOX_TFVARS" && break
   # a failed apply still writes the state; the apply's failure is the error reported, not the push's
   if [ "$i" -eq "$TF_ATTEMPTS" ]; then
@@ -621,16 +638,29 @@ fi
 
 # wait for builds
 echo ">>> Waiting for builds..."
-if [ -n "$BUILD_PID" ] && ! wait "$BUILD_PID"; then
-  cat "$BUILD_LOG"; echo "ERROR: Build failed."; exit 1
-fi
+BUILD_RC=0
+if [ -n "$BUILD_PID" ]; then wait "$BUILD_PID" || BUILD_RC=$?; fi
 cat "$BUILD_LOG"
-# nix names the out link of installable i result-i, the first plain result
-for i in "${!BUILD_NAMES[@]}"; do
-  link="$BUILD_DIR/result"; [ "$i" -gt 0 ] && link="$link-$i"
-  TOPLEVELS[${BUILD_NAMES[$i]}]=$(readlink -f "$link")
-done
-echo ">>> All builds complete."
+if [ "$BUILD_RC" = 0 ]; then
+  # nix names the out link of installable i result-i, the first plain result
+  for i in "${!BUILD_NAMES[@]}"; do
+    link="$BUILD_DIR/result"; [ "$i" -gt 0 ] && link="$link-$i"
+    TOPLEVELS[${BUILD_NAMES[$i]}]=$(readlink -f "$link")
+  done
+  echo ">>> All builds complete."
+else
+  # a fetch that failed (a registry or github unavailable) fails only the hosts needing it; nix links no result once
+  # any build failed, so the toplevels that did build are looked up in the store
+  echo "ERROR: not every closure built (above): the hosts whose closure did are deployed, the others fail."
+  DEPLOY_FAILURE=1
+  names_json=$(printf '%s\n' "${BUILD_NAMES[@]}" | jq -R . | jq -sc .)
+  mapfile -t BUILT < <(nix eval "${NIX_FEATURES[@]}" --json --no-warn-dirty "$SRC#nixosConfigurations" \
+    --apply "cs: map (n: cs.\${n}.config.system.build.toplevel.outPath) (builtins.fromJSON ''$names_json'')" | jq -r '.[]')
+  for i in "${!BUILD_NAMES[@]}"; do
+    TOPLEVELS[${BUILD_NAMES[$i]}]=""
+    if [ -e "${BUILT[$i]:-}" ]; then TOPLEVELS[${BUILD_NAMES[$i]}]=${BUILT[$i]}; fi
+  done
+fi
 
 # the nas next, alone: its clients hard-mount it, and a switch of theirs blocks on a nas that restarts under it
 deploy_nixos "$(name_of "$NAS_ID")" "$(ip_of "$NAS_ID")" || { echo "WARNING: Failed to deploy $(name_of "$NAS_ID")"; DEPLOY_FAILURE=1; }
@@ -675,7 +705,8 @@ if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     next=$(( $(git -C "$ROOT_DIR" rev-list --count HEAD) + 1 ))
     echo ">>> Git: committing generation $next"
     git -C "$ROOT_DIR" commit -m "Generation: $next"
-    git -C "$ROOT_DIR" push || echo "WARNING: git push failed."
+    # the next run pushes what this one could not
+    timeout "$GIT_TIMEOUT_S" git -C "$ROOT_DIR" push || echo "WARNING: github unavailable: the generation is not pushed yet."
   else
     echo "ERROR: not committed: the staged tree would publish a secret (above). Unstage or encrypt it, then commit."
     DEPLOY_FAILURE=1

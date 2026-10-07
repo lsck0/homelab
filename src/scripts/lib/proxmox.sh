@@ -91,7 +91,7 @@ proxmox_token_store() {
 proxmox_converge() {
   local export=$1 bulk_disk=$2 host ldap bind_password root_password stored=() role value
   host="$PROXMOX_SSH_USER@$(jq -r .lan.proxmox "$LAB_SITE")"
-  ldap=$(jq -ce '.ldap | select(.host and .port and .baseDn and .ca)' "$export") \
+  ldap=$(jq -ce '.ldap | select(.vmid and .host and .port and .baseDn and .adminGroup)' "$export") \
     || { echo "ERROR: the lab export names no ldaps listener for the realm (modules/lab-export.nix, ldap)." >&2; exit 1; }
   bind_password=$(secrets_get lldap-proxmox-bind-password)
   root_password=$(secrets_get proxmox-root-pass)
@@ -105,10 +105,11 @@ proxmox_converge() {
       GPU_IDS "$(jq -r '.gpu.functionIds // [] | join(",")' "$LAB_SITE")" \
       BULK_DISK "$bulk_disk" \
       NAS_ID "$(jq -r .routes.nas.vmid "$export")" \
+      LLDAP_VMID "$(jq -r .vmid <<<"$ldap")" \
       LLDAP_HOST "$(jq -r .host <<<"$ldap")" \
       LLDAP_PORT "$(jq -r .port <<<"$ldap")" \
       LLDAP_BASE_DN "$(jq -r .baseDn <<<"$ldap")" \
-      LLDAP_CA "$(jq -r .ca <<<"$ldap")" \
+      LLDAP_ADMIN_GROUP "$(jq -r .adminGroup <<<"$ldap")" \
       LLDAP_BIND_PASSWORD "$bind_password" \
       ROOT_PASSWORD "$root_password" \
       ROOT_KEYS "$(cat "$SRC"/lab/keys/*.pub)"

@@ -9,7 +9,8 @@
 #   GPU_IDS               the passthrough gpu's functions (site.json), empty for none
 #   BULK_DISK             the disk the bulk pool is created on; init.sh asks it once, empty keeps the pool as it is
 #   NAS_ID                the nas guest, whose hookscript wakes the bulk pool around its start and stop
-#   LLDAP_HOST LLDAP_PORT LLDAP_BASE_DN LLDAP_CA   lldap's ldaps listener and the CA its certificate chains to
+#   LLDAP_VMID LLDAP_HOST LLDAP_PORT   the guest running lldap and its ldaps listener
+#   LLDAP_BASE_DN LLDAP_ADMIN_GROUP    the directory, and its group that administers the datacentre
 #   LLDAP_BIND_PASSWORD   lldap's read-only proxmox-bind user
 #   ROOT_PASSWORD         root@pam's own password (proxmox-root-pass)
 #   ROOT_KEYS             the ssh keys root takes, one per line
@@ -17,12 +18,14 @@
 # for lib/proxmox.sh to store and delete; an existing token is never rotated.
 #
 # The lab owns the host: the pve realm's users, the pools, the bridges past vmbr0 and the roles are exactly the
-# declared ones, so leftovers of earlier layouts go on the next run. The body is one function, parsed whole before
-# it runs: the script arrives on stdin, and a command reading stdin must not eat the rest of it.
+# declared ones, so leftovers of earlier layouts go on the next run. The package mirrors and github are outside the
+# lab: while one is unavailable, what needs it is left for the next run and the rest converges. The body is one
+# function, parsed whole before it runs: the script arrives on stdin, and a command reading stdin must not eat the
+# rest of it.
 set -euo pipefail
 
 : "${PROXMOX_IP:?}" "${ZONE_BRIDGES:?}" "${WAKE_ZONES:?}" "${NAS_ID:?}" "${ROOT_PASSWORD:?}" "${ROOT_KEYS:?}"
-: "${LLDAP_HOST:?}" "${LLDAP_PORT:?}" "${LLDAP_BASE_DN:?}" "${LLDAP_CA:?}" "${LLDAP_BIND_PASSWORD:?}"
+: "${LLDAP_VMID:?}" "${LLDAP_HOST:?}" "${LLDAP_PORT:?}" "${LLDAP_BASE_DN:?}" "${LLDAP_ADMIN_GROUP:?}" "${LLDAP_BIND_PASSWORD:?}"
 GPU_IDS="${GPU_IDS:-}"
 BULK_DISK="${BULK_DISK:-}"
 
@@ -32,6 +35,10 @@ BULK_DISK="${BULK_DISK:-}"
 TOKEN_DIR=/root/homelab-tokens
 PACKAGES=(prometheus-node-exporter prometheus-node-exporter-collectors smartmontools nvme-cli jq)
 OSSEC_BUILD_PACKAGES=(build-essential libevent-dev libpcre2-dev libz-dev libssl-dev libsystemd-dev wget ca-certificates)
+# a mirror or github that does not answer costs a run at most this, per try
+APT_OPTIONS=(-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3)
+DOWNLOAD_TIMEOUT_S=30
+DOWNLOAD_TRIES=3
 # debian's textfile directory: its collector timers write there, and so do the gauges below
 TEXTFILE_DIR=/var/lib/prometheus/node-exporter
 TEXTFILE_INTERVAL_MIN=5
@@ -46,12 +53,15 @@ REALM_PASSWORD_FILE=/etc/pve/priv/realm/$REALM.pw
 REALM_CA_FILE=/etc/pve/priv/realm/$REALM-ca.pem
 # read-only (lldap_strict_readonly): the realm sync reads users and groups and never writes
 REALM_BIND_USER=proxmox-bind
-# the lldap group granted datacentre admin; the realm sync names it <group>-<realm>
-REALM_ADMIN_GROUP=admins
 REALM_SYNC_SCHEDULE=hourly
 # a realm login asks for a totp code too; root@pam sets each user's key (README, "Proxmox login")
 REALM_TFA=type=oath
+# lldap's self-signed ldaps certificate, as instances/101-internal-authelia/lib/lldap.nix writes it in the guest
+LLDAP_CERT=/var/lib/lldap/ldaps-cert.pem
+GUEST_EXEC_TIMEOUT_S=10
 API_CERT=/etc/pve/local/pve-ssl.pem
+# an uploaded certificate (pvenode cert set, acme) that pveproxy serves instead of the cluster-signed one
+API_CUSTOM_CERT=/etc/pve/local/pveproxy-ssl.pem
 # bulk (hdd) stays disabled in proxmox: pvestatd polls enabled storages every 10s, which keeps the disk spinning;
 # the nas guest's hookscript enables it only around its own start and stop
 BULK_HOOK_NAME=homelab-bulk.sh
@@ -78,6 +88,31 @@ file_converge() {
   if cmp -s "$new" "$path"; then rm -f "$new"; return 0; fi
   mv "$new" "$path"
   [ "$#" = 0 ] || "$@"
+}
+
+# packages_install <package>...: the missing ones; non-zero when the mirrors do not answer (callers test it, so
+# errexit is off in here)
+packages_install() {
+  local p missing=()
+  for p in "$@"; do dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q '^install ok installed$' || missing+=("$p"); done
+  [ "${#missing[@]}" = 0 ] && return 0
+  echo ">>> Proxmox: installing ${missing[*]}"
+  DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTIONS[@]}" update >/dev/null \
+    && DEBIAN_FRONTEND=noninteractive apt-get "${APT_OPTIONS[@]}" install -y "${missing[@]}" </dev/null >/dev/null
+}
+
+# guest_file_read <vmid> <path>: the file as the guest holds it, read through the hypervisor (qemu agent, pct pull)
+# like every guest's ssh host key, never over the network; empty when the guest does not answer
+guest_file_read() {
+  local tmp out
+  if qm status "$1" >/dev/null 2>&1; then
+    out=$(qm guest exec "$1" --timeout "$GUEST_EXEC_TIMEOUT_S" -- cat "$2" 2>/dev/null) || return 0
+    jq -r 'select(.exitcode == 0) | ."out-data" // empty' <<<"$out"
+  else
+    tmp=$(mktemp)
+    if pct pull "$1" "$2" "$tmp" 2>/dev/null; then cat "$tmp"; fi
+    rm -f "$tmp"
+  fi
 }
 
 # pveum and pvesh print json lists; jq reads them whole (grep -q closing the pipe early would fail under pipefail)
@@ -136,8 +171,8 @@ textfile_job_start() {
 # HOST
 # -----------------------------------------------------------------------------
 
-apt_converge() {
-  local codename missing=()
+apt_sources_converge() {
+  local codename
   # shellcheck source=/dev/null
   codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
   # enterprise repos need a paid subscription; grep fails once no file names them
@@ -147,11 +182,6 @@ apt_converge() {
   done
   echo "deb http://download.proxmox.com/debian/pve $codename pve-no-subscription" \
     | file_converge /etc/apt/sources.list.d/pve-no-subscription.list 644
-  for p in "${PACKAGES[@]}"; do dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q '^install ok installed$' || missing+=("$p"); done
-  [ "${#missing[@]}" = 0 ] && return 0
-  echo ">>> Proxmox: installing ${missing[*]}"
-  DEBIAN_FRONTEND=noninteractive apt-get update >/dev/null
-  DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}" </dev/null >/dev/null
 }
 
 bridges_converge() {
@@ -224,7 +254,7 @@ root_converge() {
   local keys_file
   printf 'root:%s\n' "$ROOT_PASSWORD" | chpasswd
   keys_file=$(readlink -f /root/.ssh/authorized_keys)
-  { grep " root@$(hostname)\$" "$keys_file"; printf '%s\n' "$ROOT_KEYS"; } > "$keys_file.new"
+  { sed -n "/ root@$(hostname)\$/p" "$keys_file"; printf '%s\n' "$ROOT_KEYS"; } > "$keys_file.new"
   # in place: the file is pmxcfs' (/etc/pve/priv), a rename across its link would break the link
   cmp -s "$keys_file.new" "$keys_file" || cat "$keys_file.new" > "$keys_file"
   rm -f "$keys_file.new"
@@ -268,13 +298,22 @@ users_converge() {
   done
 }
 
-# lldap over ldaps verified against its CA, a totp code on top of the password, and a sync job proxmox runs itself,
-# so the realm needs no lldap at deploy time
+# lldap over ldaps verified against its own certificate, a totp code on top of the password, and a sync job proxmox
+# runs itself. Fails closed: until the guest holds a certificate (its first deploy, the run after this one), the
+# realm's group administers nothing.
 realm_converge() {
-  local mode=(add "$REALM" --type ldap) group="$REALM_ADMIN_GROUP-$REALM" job=()
-  install -d -m 700 /etc/pve/priv/realm
+  local mode=(add "$REALM" --type ldap) group="$LLDAP_ADMIN_GROUP-$REALM" job=() ca
+  ca=$(guest_file_read "$LLDAP_VMID" "$LLDAP_CERT")
+  if ! grep -q '^-----BEGIN CERTIFICATE-----$' <<<"$ca"; then
+    if pveum acl list --output-format json | jq -e --arg g "$group" '.[] | select(.ugid == $g and .path == "/")' >/dev/null; then
+      pveum acl delete / --groups "$group" --roles Administrator
+    fi
+    echo "WARNING: vm-$LLDAP_VMID holds no ldaps certificate yet ($LLDAP_CERT): $group administers nothing until a sync reads it" >&2
+    return 0
+  fi
+  install -d -m 700 "${REALM_CA_FILE%/*}"
   printf '%s' "$LLDAP_BIND_PASSWORD" | file_converge "$REALM_PASSWORD_FILE" 600
-  printf '%s\n' "$LLDAP_CA" | file_converge "$REALM_CA_FILE" 600
+  printf '%s\n' "$ca" | file_converge "$REALM_CA_FILE" 600
   # the type is fixed at creation, modify refuses it
   pveum realm list --output-format json | json_has realm "$REALM" && mode=(modify "$REALM")
   pveum realm "${mode[@]}" \
@@ -293,6 +332,18 @@ realm_converge() {
   fi
 }
 
+# the node's name resolves to its lan address: the installer wrote the address of its day, and pvecm updatecerts
+# signs whatever the name resolves to
+node_address() { getent ahostsv4 "$(hostname)" | awk 'NR == 1 { print $1 }'; }
+
+hosts_converge() {
+  [ "$(node_address)" != "$PROXMOX_IP" ] || return 0
+  sed -i -E "/[[:space:]]$(hostname)([[:space:]]|\$)/ s/^[0-9.]+/$PROXMOX_IP/" /etc/hosts
+  [ "$(node_address)" = "$PROXMOX_IP" ] \
+    || { echo "ERROR: $(hostname) does not resolve to $PROXMOX_IP: give it a line in /etc/hosts." >&2; exit 1; }
+  echo ">>> Proxmox: /etc/hosts names $(hostname) at $PROXMOX_IP"
+}
+
 # clients verify the api against the cluster CA (site.json proxmoxCa) and by address: the node certificate must name
 # the host's address, which the installer's certificate misses once the address changed. Re-signing keeps the CA.
 api_cert_names_ip() {
@@ -300,11 +351,15 @@ api_cert_names_ip() {
 }
 
 api_cert_converge() {
+  [ ! -e "$API_CUSTOM_CERT" ] || {
+    echo "ERROR: pveproxy serves $API_CUSTOM_CERT, which does not chain to proxmoxCa: remove it (pvenode cert delete)." >&2
+    exit 1
+  }
   api_cert_names_ip && return 0
   echo ">>> Proxmox: the api certificate does not name $PROXMOX_IP, re-signing it"
   pvecm updatecerts --force >/dev/null
-  systemctl reload pveproxy
-  api_cert_names_ip || { echo "ERROR: the re-signed $API_CERT still does not name $PROXMOX_IP: fix /etc/hosts." >&2; exit 1; }
+  systemctl restart pveproxy
+  api_cert_names_ip || { echo "ERROR: the re-signed $API_CERT still does not name $PROXMOX_IP." >&2; exit 1; }
 }
 
 # -----------------------------------------------------------------------------
@@ -419,6 +474,16 @@ SMARTD
     | file_converge /etc/smartd.conf 644 systemctl restart smartd
 }
 
+# the source archive, checked against the pinned hash before anything of it runs as root; non-zero when github or the
+# mirrors do not answer (the caller tests it, so errexit is off in here)
+ossec_fetch() {
+  packages_install "${OSSEC_BUILD_PACKAGES[@]}" || return 1
+  wget -q --timeout="$DOWNLOAD_TIMEOUT_S" --tries="$DOWNLOAD_TRIES" -O "$1/ossec.tar.gz" \
+    "https://github.com/ossec/ossec-hids/archive/refs/tags/$OSSEC_VERSION.tar.gz" || return 1
+  echo "$OSSEC_SHA256  $1/ossec.tar.gz" | sha256sum --check --quiet \
+    || { echo "ERROR: the OSSEC $OSSEC_VERSION archive does not match its pinned sha256." >&2; exit 1; }
+}
+
 # host intrusion detection, built from the pinned source; the binary marks a finished install, so a half one from an
 # interrupted run is removed and built again. The install prefix is compiled in, so it cannot be staged elsewhere.
 ossec_converge() {
@@ -426,10 +491,12 @@ ossec_converge() {
   if [ ! -x "$OSSEC_CONTROL" ]; then
     echo ">>> Proxmox: building OSSEC $OSSEC_VERSION"
     rm -rf "$OSSEC_DIR"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${OSSEC_BUILD_PACKAGES[@]}" </dev/null >/dev/null
     tmp=$(mktemp -d)
-    wget -qO "$tmp/ossec.tar.gz" "https://github.com/ossec/ossec-hids/archive/refs/tags/$OSSEC_VERSION.tar.gz"
-    echo "$OSSEC_SHA256  $tmp/ossec.tar.gz" | sha256sum --check --quiet
+    if ! ossec_fetch "$tmp"; then
+      rm -rf "$tmp"
+      echo "WARNING: github or the package mirrors are unavailable: OSSEC is not installed, the next run retries." >&2
+      return 0
+    fi
     tar -xzf "$tmp/ossec.tar.gz" -C "$tmp"
     # install.sh is interactive; USER_* answers it
     (
@@ -518,18 +585,24 @@ METRICS
 
 main() {
   command -v pveversion >/dev/null || { echo "ERROR: install Proxmox VE first, then rerun init.sh." >&2; exit 1; }
-  apt_converge
+  apt_sources_converge
   bridges_converge
   gpu_converge
   power_converge
   root_converge
   users_converge
   realm_converge
+  hosts_converge
   api_cert_converge
   bulk_converge
-  exporter_converge
+  if packages_install "${PACKAGES[@]}"; then
+    exporter_converge
+  else
+    echo "WARNING: the package mirrors are unavailable: the host exporter waits for the next run." >&2
+  fi
   ossec_converge
   echo ">>> Proxmox $(pveversion) converged."
 }
 
-main
+# piped in or run; tests/pve_install_test.sh sources it for its functions
+[ "${BASH_SOURCE[0]:-$0}" != "$0" ] || main

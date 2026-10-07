@@ -52,7 +52,9 @@ let
       tampered = facts // { appsCatalog = facts.appsCatalog // { apps = facts.appsCatalog.apps // { twin = hello // { enable = true; }; }; }; }; };
     sso-groups = { file = "sso"; marker = "which lldap's bootstrap never creates";
       tampered = tamper "101-internal-authelia" [ "systemd" "services" "lldap-bootstrap" "environment" "BOOTSTRAP_GROUPS" ] "admins"; };
-    secret-readable = { file = "secrets"; marker = "is readable by others";
+    realm-ldaps = { file = "sso"; marker = "proxmox realm: ";
+      tampered = tamper "101-internal-authelia" [ "networking" "firewall" "allowedTCPPorts" ] [ 3890 ]; };
+    secret-readable ={ file = "secrets"; marker = "is readable by others";
       tampered = tamper "101-internal-authelia" [ "sops" "secrets" "authelia-jwt-secret" "mode" ] "0444"; };
     instance-folder = { file = "placement"; marker = "src/instances/101-internal-authelia has no main.nix";
       tampered = facts // { src = builtins.path {

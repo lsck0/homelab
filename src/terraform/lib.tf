@@ -286,6 +286,8 @@ resource "proxmox_virtual_environment_container" "ct" {
 locals {
   # the router forwards every source it routes, no address filter fits it (its nics carry firewall = false)
   firewalled = { for id, v in local.vms : id => v if v.type != "router" }
+  # the owner's machines, dhcp-reserved in the fritzbox; sync.sh refuses to run from any other address
+  operators = [local.site.lan.workstation, local.site.lan.notebook]
 }
 
 resource "proxmox_virtual_environment_firewall_ipset" "ipfilter" {
@@ -346,8 +348,8 @@ resource "proxmox_virtual_environment_firewall_rules" "host" {
     action  = "ACCEPT"
     proto   = "tcp"
     dport   = tostring(local.proxmox_api_port)
-    source  = "${local.site.lan.workstation},${local.site.lan.router}"
-    comment = "api and web ui: the workstation (terraform, sync.sh) and the router (the ingresses, homepage)"
+    source  = join(",", concat(local.operators, [local.site.lan.router]))
+    comment = "api and web ui: the owner's machines (terraform, sync.sh) and the router (the ingresses, homepage)"
   }
   rule {
     type    = "in"

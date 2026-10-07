@@ -1,17 +1,32 @@
 # lldap: the lab's single account store; authelia and the proxmox realm read it through read-only bind users
 #
+# Authelia binds over loopback. The proxmox realm binds over ldaps only: its certificate is self-signed for this
+# guest's address, and the hypervisor reads it from inside the guest (scripts/pve-install.sh), the same channel that
+# vouches for every guest's ssh host key, so no password crosses the network in clear and no CA is needed.
+#
 # Passwords reach lldap_set_password through its environment (LLDAP_USER_PASSWORD), never its command line, and the
 # admin session the helpers open is logged out (its tokens blacklisted) when the script exits, so the token that
 # does sit on a command line for a moment is dead afterwards.
-{ config, lib, pkgs, retry, inventory, site, catalog, ... }:
+{ config, lib, pkgs, retry, inventory, site, catalog, instance, ... }:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   routes = catalog.internal;
   ldapPort = 3890;
+  ldaps = {
+    inherit (net.ports) ldaps;
+    # the path scripts/pve-install.sh reads (LLDAP_CERT)
+    cert = "${stateDir}/ldaps-cert.pem";
+    key = "${stateDir}/ldaps-key.pem";
+    address = inventory.${instance.id}.ip;
+    validDays = 3650;
+    # renewed this long before it expires, or when the address changed; the next sync hands it to the realm
+    renewSeconds = 30 * 24 * 3600;
+  };
   httpPort = routes.lldap.port;
   stateDir = "/var/lib/lldap";
   adminUser = "luca";
   guestUser = "guest";
+  openssl = lib.getExe pkgs.openssl;
   apiInputs = [ pkgs.curl pkgs.jq pkgs.lldap pkgs.coreutils pkgs.gnugrep ];
 
   # every group authelia admits, forwardauth and oidc (modules/catalog.nix access)
@@ -147,6 +162,12 @@ in {
       ldap_base_dn = net.domainDn;
       ldap_host = "0.0.0.0";
       ldap_port = ldapPort;
+      ldaps_options = {
+        enabled = true;
+        port = ldaps.ldaps;
+        cert_file = ldaps.cert;
+        key_file = ldaps.key;
+      };
       http_host = "0.0.0.0";
       http_port = httpPort;
       http_url = "https://${net.fqdn routes.lldap.host}";
@@ -161,6 +182,11 @@ in {
 
   systemd.services.lldap.preStart = lib.mkBefore ''
     [ -s ${stateDir}/server_key ] || ${pkgs.coreutils}/bin/base64 -d ${config.sops.secrets.lldap-server-key.path} > ${stateDir}/server_key
+    if ! ${openssl} x509 -in ${ldaps.cert} -noout -checkend ${toString ldaps.renewSeconds} >/dev/null 2>&1 \
+       || ! ${openssl} x509 -in ${ldaps.cert} -noout -checkip ${ldaps.address} | ${pkgs.gnugrep}/bin/grep -q 'does match'; then
+      (umask 077; ${openssl} req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days ${toString ldaps.validDays} \
+        -subj /CN=${ldaps.address} -addext subjectAltName=IP:${ldaps.address} -keyout ${ldaps.key} -out ${ldaps.cert})
+    fi
   '';
 
   systemd.services.lldap-bootstrap = {
@@ -220,7 +246,7 @@ in {
   # every account lives in this sqlite file
   homelab.dbBackup.databases.lldap.sqlite = "${stateDir}/users.db";
 
-  # ldap for authelia on this host and the proxmox realm, the web ui through the ingress
-  networking.firewall.allowedTCPPorts = [ ldapPort httpPort ];
-  homelab.ingressOnly.ports = [ ldapPort httpPort ];
+  # ldaps for the proxmox realm, the web ui through the ingress; plain ldap is authelia's, over loopback only
+  networking.firewall.allowedTCPPorts = [ ldaps.ldaps httpPort ];
+  homelab.ingressOnly.ports = [ ldaps.ldaps httpPort ];
 }

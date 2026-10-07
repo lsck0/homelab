@@ -19,7 +19,8 @@
 #   monitoring   { prometheus; loki; grafana; dashboard; accessLog; }  the query apis, grafana's url, the overview
 #                board's path on it, the promtail `host` of the public ingress's access log
 #   ntfy         { url; topics; desktop; }  the server, its topics by role, the topics the desktop token reads
-#   ldap         { baseDn; adminGroup; }  the directory the proxmox realm syncs (its address and port: routes.ldap)
+#   ldap         { baseDn; adminGroup; vmid; host; port; }  the directory the proxmox realm binds to over ldaps, and
+#                the guest serving it
 { lib, lab }:
 let
   inherit (lab) inventory site catalog;
@@ -75,5 +76,8 @@ in
   ldap = {
     baseDn = net.domainDn;
     adminGroup = catalog.access.admins;
+    vmid = catalog.internal.lldap.vmid;
+    host = inventory.${toString catalog.internal.lldap.vmid}.ip;
+    port = net.ports.ldaps;
   };
 }

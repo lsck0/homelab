@@ -87,7 +87,7 @@
       packages = (with pkgs; [
         # sops encrypts to the admin YubiKey recipient only through its plugin
         sops age age-plugin-yubikey jq openssl
-        openssh sshpass git curl gh python3 wireguard-tools shellcheck
+        openssh sshpass git curl gh python3 wireguard-tools shellcheck iproute2
       ]) ++ [ pkgsUnfree.terraform ];
     };
 
