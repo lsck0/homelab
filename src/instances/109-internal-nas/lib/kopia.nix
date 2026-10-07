@@ -177,6 +177,8 @@ EOF
     esac
   '';
 in {
+  homelab.textfiles = [ "nas_backup" "proton_sync" "backup_verify_repository" "backup_verify_offsite" ];
+
   sops.secrets.kopia-password = {};
   # the web ui's basic auth (user kopia) behind authelia: the port stays closed to whoever else reaches it
   sops.secrets.kopia-server-password = {};

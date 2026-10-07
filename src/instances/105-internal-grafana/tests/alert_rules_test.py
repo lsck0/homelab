@@ -221,15 +221,42 @@ tests += [
         "name": "idle: a wake that never answered and an api the ingress cannot reach page",
         "interval": "1m",
         "input_series": [
-            {"series": 'homelab_ondemand_wake_ok{vm="traefik-internal",deployment="vm-119"}', "values": "1 0x5"},
-            {"series": 'homelab_ondemand_wake_ok{vm="traefik-internal",deployment="vm-121"}', "values": "1x6"},
+            {"series": 'homelab_ondemand_wake_ok{vm="traefik-internal",service="archbuild",target="vm-119"}', "values": "1 0x5"},
+            {"series": 'homelab_ondemand_wake_ok{vm="traefik-internal",service="paperless",target="vm-121"}', "values": "1x6"},
             {"series": 'homelab_ondemand_api_ok{vm="traefik-external"}', "values": "0x20"},
         ],
         "alert_rule_test": [
             {"eval_time": "2m", "alertname": "ondemand_wake_failed",
-             "exp_alerts": [expect("ondemand_wake_failed", vm="traefik-internal", deployment="vm-119")]},
+             "exp_alerts": [expect("ondemand_wake_failed", vm="traefik-internal", target="vm-119")]},
             {"eval_time": "10m", "alertname": "ondemand_api_failing", "exp_alerts": []},
             {"eval_time": "16m", "alertname": "ondemand_api_failing", "exp_alerts": [expect("ondemand_api_failing", vm="traefik-external")]},
+        ],
+    },
+    {
+        "name": "alert path: a channel that keeps failing is named once, a single retried failure is not",
+        "interval": "1m",
+        "input_series": [
+            {"series": 'grafana_alerting_notifications_failed_total{integration="webhook",component="grafana"}', "values": "0+1x40"},
+            {"series": 'grafana_alerting_notifications_failed_total{integration="telegram",component="grafana"}', "values": "0 1x40"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "10m", "alertname": "notifications_failing", "exp_alerts": []},
+            {"eval_time": "20m", "alertname": "notifications_failing",
+             "exp_alerts": [expect("notifications_failing", integration="ntfy")]},
+            {"eval_time": "40m", "alertname": "notifications_failing",
+             "exp_alerts": [expect("notifications_failing", integration="ntfy")]},
+        ],
+    },
+    {
+        "name": "disks: a smartd warning pages while smartd repeats it, and ends a day after the last one",
+        "interval": "1h",
+        "input_series": [
+            {"series": 'homelab_smartd_warning_timestamp_seconds{vm="proxmox",device="/dev/nvme1",type="Temperature"}', "values": "0x40"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "1h", "alertname": "smartd_warning",
+             "exp_alerts": [expect("smartd_warning", vm="proxmox", device="/dev/nvme1", type="Temperature")]},
+            {"eval_time": "27h", "alertname": "smartd_warning", "exp_alerts": []},
         ],
     },
 ]

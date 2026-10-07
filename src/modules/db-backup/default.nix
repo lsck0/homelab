@@ -96,6 +96,8 @@ in {
   };
 
   config = lib.mkIf (cfg.databases != { }) {
+    homelab.textfiles = map (name: "db_dump_${name}") (lib.attrNames cfg.databases);
+
     # each host mounts only its own dump dir, root-only (the units run as root): no guest sees another's dumps
     homelab.nasMounts = lib.mapAttrs (_: m: m // { shareMode = "0700"; })
       (nasPath dir "data/db-dumps/${config.networking.hostName}");

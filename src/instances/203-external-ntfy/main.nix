@@ -29,9 +29,19 @@ let
   heartbeatMissedMax = 3;
   heartbeatWindowMin = heartbeatIntervalMin * heartbeatMissedMax;
   local = "http://127.0.0.1:${toString route.port}";
+
+  # the off-site dead man's switch (a healthchecks-style ping url): pinged while the beat arrives, it pages the owner
+  # when the whole site, this guest included, falls silent
+  deadmanCurl = "deadman-curl";
+  deadmanTextfile = "deadman";
+  deadmanTimeoutS = 10;
+  deadmanRetries = 2;
 in {
   sops.secrets = lib.mapAttrs' (_: u: lib.nameValuePair u.password { restartUnits = [ "ntfy-sh.service" ]; }) secretUsers
-    // { ntfy-desktop-token.restartUnits = [ "ntfy-sh.service" ]; };
+    // { ntfy-desktop-token.restartUnits = [ "ntfy-sh.service" ]; deadman-ping-url = { }; };
+  # a curl config: the url carries the switch's key and stays off the command line
+  sops.templates.${deadmanCurl}.content = ''url = "${config.sops.placeholder.deadman-ping-url}"'';
+  homelab.textfiles = [ deadmanTextfile ];
 
   # NTFY_AUTH_* from the sops passwords; partOf: a restart of ntfy (a changed secret) renders them first
   systemd.services.${authUnit} = {
@@ -139,7 +149,15 @@ in {
       alerted=/var/lib/heartbeat-check/alerted
       if auth | curl -sSf -H @- "${local}/${topics.heartbeat}/json?poll=1&since=${toString heartbeatWindowMin}m" \
         | grep -q '"event":"message"'; then
-        rm -f "$alerted"; exit 0
+        rm -f "$alerted"
+        # the switch being down costs its gauge (vm-105's deadman_unavailable), never this check
+        ok=1
+        curl -fsS -m ${toString deadmanTimeoutS} --retry ${toString deadmanRetries} --retry-all-errors -o /dev/null \
+          -K ${config.sops.templates.${deadmanCurl}.path} || ok=0
+        metrics=${config.homelab.textfileDir}/${deadmanTextfile}.prom
+        printf '# TYPE homelab_deadman_ping_ok gauge\nhomelab_deadman_ping_ok %s\n' "$ok" > "$metrics.tmp"
+        mv "$metrics.tmp" "$metrics"
+        exit 0
       fi
       [ -e "$alerted" ] && exit 0
       auth | curl -sSf -H @- -H "Title: FIRING: Monitoring silent" -H "Tags: rotating_light" -o /dev/null \

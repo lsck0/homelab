@@ -471,7 +471,8 @@ name=\$(printf '%s-%s' "\$SMARTD_DEVICE" "\$SMARTD_FAILTYPE" | tr -c 'A-Za-z0-9\
 } > "$TEXTFILE_DIR/smartd-\$name.prom.tmp"
 mv "$TEXTFILE_DIR/smartd-\$name.prom.tmp" "$TEXTFILE_DIR/smartd-\$name.prom"
 SMARTD
-  echo "DEVICESCAN -d removable -n standby -m root -M exec /usr/local/bin/smartd-textfile" \
+  # repeated daily while it lasts, which keeps the gauge fresh for vm-105's smartd_warning rule
+  echo "DEVICESCAN -d removable -n standby -m root -M daily -M exec /usr/local/bin/smartd-textfile" \
     | file_converge /etc/smartd.conf 644 systemctl restart smartd
 }
 

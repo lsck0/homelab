@@ -31,7 +31,7 @@ in {
     ../on-demand
     ../retry.nix
     ../tokens
-    ../textfile.nix
+    ../textfile
     ../upstream
   ];
 

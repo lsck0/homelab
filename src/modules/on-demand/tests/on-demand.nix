@@ -173,7 +173,7 @@ pkgs.testers.runNixOSTest {
   };
 
   nodes.proxy = { config, nodes, ... }: {
-    imports = [ ../default.nix ../../textfile.nix ../../../tests/stubs/sops.nix ];
+    imports = [ ../default.nix ../../textfile ../../../tests/stubs/sops.nix ];
     _module.args = { inventory = inventoryFor nodes.backend.networking.primaryIPAddress; site = { }; };
     environment.systemPackages = [ pkgs.curl pkgs.netcat-gnu pkgs.jq ];
     networking.hosts.${nodes.backend.networking.primaryIPAddress} = [ apiName ];
@@ -198,6 +198,7 @@ pkgs.testers.runNixOSTest {
     port = name: toString nodes.proxy.homelab.onDemand.services.${name}.listenPort;
     pauseFile = nodes.proxy.homelab.onDemand.pauseFile;
     metrics = "${nodes.proxy.homelab.textfileDir}/ondemand.prom";
+    wakeMetrics = name: "${nodes.proxy.homelab.textfileDir}/ondemand_wake_${name}.prom";
   in ''
     API = "https://${apiName}:${toString apiPort}/api2/json/nodes/pve"
 
@@ -248,12 +249,15 @@ pkgs.testers.runNixOSTest {
         backend.fail("systemctl is-active nginx")
         proxy.fail("systemctl start ondemand-reaper.service")
         proxy.succeed("grep -qx 'homelab_ondemand_api_ok{service=\"app2\",target=\"vm-150\"} 0' ${metrics}")
+        # the held request's wake gives up at its boot timeout and says so
+        proxy.wait_until_succeeds("grep -qx 'homelab_ondemand_wake_ok{service=\"app2\",target=\"vm-150\"} 0' ${wakeMetrics "app2"}", timeout=120)
         # positive control: with the proxmox ca back, the reaper's calls answer and the same request wakes it
         proxy.succeed("cp ${pki}/ca.pem ${caFile}")
         reap()
         proxy.succeed("grep -qx 'homelab_ondemand_api_ok{service=\"app2\",target=\"vm-150\"} 1' ${metrics}")
         out = proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app2"}/")
         assert "hello from the second route" in out, out
+        proxy.succeed("grep -qx 'homelab_ondemand_wake_ok{service=\"app2\",target=\"vm-150\"} 1' ${wakeMetrics "app2"}")
         backend.wait_until_fails("systemctl is-active nginx", timeout=120)
 
     with subtest("a sibling route keeps the shared guest up while it serves"):

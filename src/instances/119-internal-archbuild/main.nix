@@ -45,7 +45,8 @@ let
   # what both containers get of the run: the verified commit and the run id
   runEnv = "-e ARCHBUILD_SOURCE -e ARCHBUILD_REF -e ARCHBUILD_COMMIT -e ARCHBUILD_RUN_STARTED";
   # node-exporter's textfile collector (modules/base)
-  metricsFile = "${config.homelab.textfileDir}/archrepo.prom";
+  metricsName = "archrepo";
+  metricsFile = "${config.homelab.textfileDir}/${metricsName}.prom";
   # the served status after every run, a failed one included: what a client installing now lacks
   metricsWrite = pkgs.writeShellScript "archbuild-metrics" ''
     set -euo pipefail
@@ -56,6 +57,7 @@ let
     ${pkgs.coreutils}/bin/mv -f ${metricsFile}.tmp ${metricsFile}
   '';
 in {
+  homelab.textfiles = [ metricsName ];
   homelab.nasMounts = nasPath repoDir "bulk/archrepo";
 
   sops.secrets.archrepo-signing-key = {};

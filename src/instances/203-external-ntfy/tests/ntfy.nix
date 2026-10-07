@@ -1,6 +1,7 @@
 # vm-203's ntfy as it ships (instances/203-external-ntfy/main.nix): the declared accounts and their topic grants, an
 # account made by hand removed on the next start, the heartbeat check alerting once per outage and clearing when
-# the beat is back, and the ingress guard admitting the edge alone. The expected grants are stated here.
+# the beat is back whether or not the off-site dead man's switch answers, and the ingress guard admitting the edge
+# alone. The expected grants are stated here.
 { pkgs, lib, specialArgs, ... }:
 let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
@@ -14,6 +15,8 @@ let
   desktopToken = "tk_${lib.fixedWidthString 29 "0" "desktop"}";
   # the sops stub's value of a secret (tests/stubs/sops.nix)
   password = name: "test-${name}";
+  deadmanPort = 8000;
+  deadmanUrl = "http://${edge}:${toString deadmanPort}/ping";
 in
 pkgs.testers.runNixOSTest {
   name = "ntfy";
@@ -22,13 +25,18 @@ pkgs.testers.runNixOSTest {
   nodes.vm-203 = {
     imports = [ (lab.guest "203" { instance = ../main.nix; }) ];
     testing.secretValues.ntfy-desktop-token = desktopToken;
+    testing.secretValues.deadman-ping-url = deadmanUrl;
   };
+  # the edge node doubles as the off-site dead man's switch
   nodes.edge = { imports = [ (lab.multi { addresses = [ "${edge}/24" ]; vlan = lab.vlans.external; }) ];
-                 environment.systemPackages = [ pkgs.curl ]; };
+                 environment.systemPackages = [ pkgs.curl pkgs.python3 ];
+                 networking.firewall.allowedTCPPorts = [ deadmanPort ]; };
   nodes.peer = { imports = [ (lab.multi { addresses = [ "${peer}/24" ]; vlan = lab.vlans.external; }) ];
                  environment.systemPackages = [ pkgs.curl ]; };
 
-  testScript = ''
+  testScript = { nodes, ... }: let
+    deadmanGauge = value: "grep -qx 'homelab_deadman_ping_ok ${toString value}' ${nodes.vm-203.homelab.textfileDir}/deadman.prom";
+  in ''
     import json
 
     passwords = {"luca": "${password "ntfy-admin-password"}", "grafana": "${password "ntfy-grafana-password"}",
@@ -73,9 +81,17 @@ pkgs.testers.runNixOSTest {
         # the desktop subscribes with its token
         vm_203.succeed("curl -sf -H 'Authorization: Bearer ${desktopToken}' 'http://127.0.0.1/${topics.alerts}/json?poll=1'")
 
-    with subtest("the beat is back (grafana published one above): the outage is over"):
+    with subtest("the beat is back (grafana published one above): the outage is over, whatever the off-site switch does"):
+        # the switch is down: the check still clears the outage and says so in its gauge
         vm_203.succeed("systemctl start heartbeat-check.service")
         vm_203.fail("test -e /var/lib/heartbeat-check/alerted")
+        vm_203.succeed("${deadmanGauge 0}")
+        # positive control: the switch is back and takes the next ping
+        edge.succeed("mkdir -p /srv/deadman && touch /srv/deadman/ping")
+        edge.succeed("systemd-run --unit=deadman python3 -m http.server ${toString deadmanPort} --directory /srv/deadman")
+        edge.wait_for_open_port(${toString deadmanPort})
+        vm_203.succeed("systemctl start heartbeat-check.service")
+        vm_203.succeed("${deadmanGauge 1}")
 
     with subtest("every account is provisioned; one made by hand is gone after the next start"):
         vm_203.succeed("NTFY_PASSWORD=x ntfy user add stale")

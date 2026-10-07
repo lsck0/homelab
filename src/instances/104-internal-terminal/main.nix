@@ -224,6 +224,8 @@ in {
   # feed state on the nas, vm is disposable
   homelab.nasMounts = nasMount calendarState "calendar";
 
+  homelab.textfiles = map (lib.removeSuffix ".prom") (lib.concatMap (f: f.exports or [ ]) (lib.attrValues collectors));
+
   imports = [
     # an lxc mounts nfs at boot, not on access: nothing may run before the shares are up
     {

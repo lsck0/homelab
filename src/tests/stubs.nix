@@ -15,7 +15,7 @@ in {
     ../modules/db-backup
     ../modules/local-state
     ../modules/tokens
-    ../modules/textfile.nix
+    ../modules/textfile
   ];
 
   _module.args = {

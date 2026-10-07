@@ -142,12 +142,13 @@ let
     ondemand_wake_failed = {
       title = "Idle guest did not wake";
       category = "offline";
-      expr = "min by (vm, deployment) (homelab_ondemand_wake_ok)";
+      # the last wake of each route (modules/on-demand); a wake that succeeds later resolves it
+      expr = "min by (vm, target) (homelab_ondemand_wake_ok)";
       op = "lt"; threshold = 1;
       for = "0m";
       severity = "critical"; telegram = true;
-      summary = "{{ $labels.deployment }} did not answer after its wake";
-      description = "The ingress woke it and held the request, but the backend never answered: its route is down. `journalctl -u 'ondemand-*'` on {{ $labels.vm }}.";
+      summary = "{{ $labels.target }} did not answer after its wake";
+      description = "The ingress woke it and held the request, but the backend never answered: its route is down until a wake succeeds. `journalctl -u 'ondemand-*'` on {{ $labels.vm }}.";
     };
     db_dump_stale = {
       title = "Database dump stale";
@@ -241,6 +242,17 @@ let
       summary = "{{ $labels.disk }} on {{ $labels.vm }}: SMART health check failed";
       description = "The drive reports itself as failing. Check that the backups are current, then replace it.";
     };
+    smartd_warning = {
+      title = "Disk warning";
+      category = "storage";
+      # smartd repeats a warning daily while it lasts (pve-install.sh), so a day without one ends it
+      expr = "time() - max by (vm, device, type) (homelab_smartd_warning_timestamp_seconds)";
+      op = "lt"; threshold = nightlyStaleSeconds;
+      for = "0m";
+      telegram = true;
+      summary = "{{ $labels.device }} on {{ $labels.vm }}: smartd warns ({{ $labels.type }})";
+      description = "smartd found a failed self-test, a prefail attribute or a temperature limit. `smartctl -a {{ $labels.device }}` on the host, then check that the backups are current.";
+    };
     nvme_wear = {
       title = "NVMe worn";
       category = "storage";
@@ -305,6 +317,18 @@ let
       severity = "critical"; telegram = true;
       summary = "Loki has received no log lines for 15 minutes";
       description = "journal-remote, promtail or loki on vm-105 stopped forwarding; the log alerts see nothing. `journalctl -u promtail -u systemd-journal-remote` on vm-105.";
+    };
+    # telegram and ntfy (the only webhook) are outside this guest: one alert per channel that keeps failing, through
+    # every 10 minutes for a quarter hour (one retried failure is no outage); it reaches the owner over the other one
+    notifications_failing = {
+      title = "Notification channel unavailable";
+      category = "monitoring";
+      expr = "label_replace(sum by (integration) (increase(grafana_alerting_notifications_failed_total[10m])), \"integration\", \"ntfy\", \"integration\", \"webhook\")";
+      threshold = 0;
+      for = "15m";
+      telegram = true;
+      summary = "{{ $labels.integration }} unavailable: {{ printf \"%.0f\" $values.A.Value }} notifications failed in 10 minutes";
+      description = "Grafana cannot deliver to this channel and retries each notification; alerts reach the owner over the other one meanwhile. `journalctl -u grafana | grep -i notify` on vm-105.";
     };
     promtail_dropping = {
       title = "Log lines dropped";

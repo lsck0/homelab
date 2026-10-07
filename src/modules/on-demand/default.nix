@@ -4,7 +4,8 @@
 # One mechanism, two backends: a vm (an instance with idle set) is powered through the proxmox api, a swarm app
 # through its manager's controller (POST /wake/<app>, POST /sleep/<app>, GET /state/<app>, modules/swarm). Every
 # script below speaks to either through the same power_* shell functions, and a failed call is an error: the reaper
-# fails and exports homelab_ondemand_api_ok 0 for the service, a wake says why it gave up.
+# fails and exports homelab_ondemand_api_ok 0 for the service, a wake says why it gave up and exports
+# homelab_ondemand_wake_ok 0 until a wake of the service succeeds.
 #
 # The proxmox api is called with the side's own token (scripts/pve-install.sh: wake-<side>@pve, VM.Audit and
 # VM.PowerMgmt on each of the side's idle guests, granted per guest by terraform/lib.tf), read by curl from a header
@@ -28,7 +29,10 @@ let
   portBase = 20000;
   # the most routes one guest serves (the arr guest has five)
   portsPerGuest = 10;
-  metricsFile = "${config.homelab.textfileDir}/ondemand.prom";
+  metricsName = "ondemand";
+  metricsFile = "${config.homelab.textfileDir}/${metricsName}.prom";
+  # each wake's outcome, its own file: a wake runs beside the reaper and the other wakes
+  wakeMetricsName = name: "ondemand_wake_${name}";
 
   # silence from a saturated build counts as busy until this uptime; 21h stays clear of the next daily wakeAt
   silentBusyUptimeMax = 21 * 3600;
@@ -133,6 +137,12 @@ let
     runtimeInputs = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.netcat-gnu ];
     text = ''
       ${powerEnv svc [ "status" "start" ]}
+      # the last wake's outcome until the next one: a deployment that did not come up stays down for its users
+      wake_ok() {
+        metrics=${config.homelab.textfileDir}/${wakeMetricsName name}.prom
+        printf '# TYPE homelab_ondemand_wake_ok gauge\nhomelab_ondemand_wake_ok{service="${name}",target="${target.key}"} %s\n' "$1" > "$metrics.tmp"
+        mv "$metrics.tmp" "$metrics"
+      }
       api_error=""
       # two good checks: a shutting-down vm still accepts briefly (502)
       good=0
@@ -156,10 +166,11 @@ let
         else
           good=0
         fi
-        [ "$good" -lt 2 ] || exit 0
+        if [ "$good" -ge 2 ]; then wake_ok 1; exit 0; fi
         sleep 1
       done
       echo "${target.key} not ready at ${target.ip}:${toString svc.targetPort} in ${toString svc.bootTimeout}s''${api_error:+; $api_error}" >&2
+      wake_ok 0
       exit 1
     '';
   };
@@ -309,6 +320,8 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    homelab.textfiles = [ metricsName ] ++ map wakeMetricsName (lib.attrNames active);
+
     homelab.onDemand.address = lib.mapAttrs (_: svc:
       if (targetOf svc).sleeps then "${loopback}:${toString svc.listenPort}"
       else "${(targetOf svc).ip}:${toString svc.targetPort}"

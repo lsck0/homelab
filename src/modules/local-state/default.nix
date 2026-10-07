@@ -86,6 +86,7 @@ in {
   };
 
   config = lib.mkIf (cfg != { }) {
+    homelab.textfiles = map (name: "local_state_${name}") (lib.attrNames cfg);
     homelab.nasMounts = lib.mkMerge (lib.mapAttrsToList (name: _: nasMount (nasDir name) name) cfg);
 
     systemd.services = lib.mkMerge (lib.mapAttrsToList (name: s: {
