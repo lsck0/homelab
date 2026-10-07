@@ -8,7 +8,8 @@ nix develop ./src
 
 Nix with flakes is the one thing to install: every tool comes from the flake's dev shell, pinned by `src/flake.lock`
 (docker only for the e2e scripts). The sops age key is owned by the dotfiles repo at
-`~/projects/arch-dotfiles/secrets/age.txt` (`$DOTFILES` moves the checkout); `secrets/age.txt` is a symlink to it that
+`~/projects/arch-dotfiles/secrets/age.txt` (`$DOTFILES` moves the checkout, `$DOTFILES_SECRETS` points at a secrets
+directory of another layout, e.g. `~/projects/arch-dotfiles/configs/secrets`); `secrets/age.txt` is a symlink to it that
 `init.sh` and `sync.sh` keep pointing there, and `sync.sh` unlocks it with the YubiKey
 (`~/projects/arch-dotfiles/scripts/yubikey.sh unlock`) when it is locked. Every key in `src/lab/keys/` is authorized on
 every guest, the router and Proxmox root, so the deploying machine's `~/.ssh/id_ed25519.pub` must be one of them.
@@ -21,7 +22,10 @@ Three planes:
    secrets, the swarm), and the platform's own instances (router, ingresses, authelia, grafana, nas, registry, the
    deploy controller).
 2. Instances: `src/instances/<vmid>-<zone>-<service>/`, one folder per guest, in the internal zone (1xx, staff only,
-   behind authelia) or the external zone (200-249, public, behind the edge).
+   behind authelia) or the external zone (200-249, public, behind the edge); `src/instances/300-router/` is the
+   router, on the house lan and a leg in every zone. A guest is a vm, or an unprivileged lxc where nothing it
+   `needs` asks for a vm (`src/modules/instance-schema.nix`); `vm.kind.<kind> = "<why>"` overrides that, and
+   `vm.privileged` (internal zone only) makes an lxc privileged for its nfs mounts.
 3. Apps: `src/apps/<name>/`, one folder per app built from its own repo, run on the apps swarm (workers 250 and up)
    or on a guest of its own. Each app has its own overlay network, secrets, resource reservation, telemetry tenant
    and lldap group `app-<route>`. The registry's htpasswd auth has no per-repository rule, so every cluster can pull
@@ -49,8 +53,9 @@ src/
   terraform/                main.tf, lib.tf: the guests from `nix eval .#lab.terraform`; its connection vars
   generated/                what the scripts write: site.json and known_hosts (init.sh, sync.sh), zones.json (the
                             zones, edited by hand too), lab.json (sync.sh, for desktop clients), nodes/<vmid>-apps-swarm/
-                            (the workers' keys), terraform/ (the state's working copy; the nas holds the original)
-  scripts/                  the workstation's tools: init, deinit, pve-install, secrets-*, sops-encrypt, stack
+                            (the workers' keys)
+  scripts/                  the workstation's tools: init, deinit, pve-install (the Proxmox host), secrets-*,
+                            sops-encrypt, setup-dns, stack
   tests/                    the harness (lib/, stubs/, policy/ the lab's laws) and the tests of the whole lab
 ```
 
@@ -101,7 +106,7 @@ registerInstrumentations({ instrumentations: [new FetchInstrumentation({ propaga
 ## Deploy
 
 ```sh
-src/scripts/init.sh <proxmox-ip>      # once: pin proxmox's host key, site, api tokens, tfvars, secrets, golden image
+src/scripts/init.sh <proxmox-ip>      # once: pin proxmox's host key, site, secrets, golden image, converge the host
 src/instances/114-internal-hermes/lib/hermes-secrets.sh   # once: hermes' ssh key, github app, api key, telegram bot
 TF_STATE_FRESH=1 ./sync.sh            # the first deploy: no terraform state on the nas yet
 ./sync.sh                             # every deploy after
@@ -118,6 +123,49 @@ Desktop clients (the bar's homelab widget and the ntfy notifier in the owner's d
 endpoints and the ntfy server with its topics. `src/modules/lab-export.nix` defines it and documents its schema;
 sync.sh rewrites it on every run (`nix eval --json ./src#lab.export`). It is public like the rest of the repo and holds
 no secret; `schema` changes only when a key changes meaning or goes away.
+
+## Proxmox host
+
+`src/scripts/pve-install.sh` converges the host on every `init.sh` and `sync.sh` run: apt sources, the zone
+bridges, gpu passthrough, power settings, root's password (`proxmox-root-pass`) and ssh keys (`src/lab/keys/`), the
+lab's api users and tokens (created once, never rotated; undeclared `@pve` users and every pool are removed), the
+lldap realm, the api certificate, the bulk storage and its hookscript, the host exporter and OSSEC. While the package
+mirrors or github are unavailable, what needs them waits for the next run; everything else still converges.
+
+### Proxmox firewall
+
+Terraform (`src/terraform/lib.tf`, FIREWALL) keeps the datacenter firewall on: every guest's nic may send only from
+its own address and mac (the router's nics are exempt), and the host drops input its rules do not name. It admits
+ssh from the house lan, the api and web ui (8006) from `lan.workstation`, `lan.notebook` and the router (the
+ingresses, the homepage, hermes and grafana reach it masqueraded as the router), node exporter from the router and
+ping from the lan. `sync.sh` refuses to run from any other address and fails while `pve-firewall status` is not
+`enabled/running`.
+
+Turning it on the first time (the generation that brings it):
+
+1. Check `site.json`: `lan.workstation` and `lan.notebook` are the fritzbox's reserved addresses of the two machines.
+2. `./sync.sh`. Its terraform output creates or updates an ipset `ipfilter-net0` and firewall options for every
+   guest but the router, the cluster rules, and last `cluster_firewall.datacenter` with `enabled = true` and
+   `input_policy = "DROP"`; no guest is replaced.
+3. Afterwards, from the workstation: `ssh root@<proxmox> pve-firewall status` says `enabled/running`;
+   `https://<proxmox>:8006` answers; `ssh root@10.100.0.140 docker node ls` and the on-demand wake still work.
+   From the router (`ssh root@<router> ping -c1 10.100.0.100`) the internal zone answers.
+4. A guest that cannot talk any more: `pve-firewall stop` on the host, then compare the guest's address with its
+   ipset (`pvesh get /nodes/<node>/qemu/<vmid>/firewall/ipset/ipfilter-net0`); see Recovery.
+
+### Proxmox login
+
+The `lldap` realm binds to lldap over ldaps (vm-101, port 6360), verified against the certificate the guest made for
+itself, which the host reads from inside the guest the way sync.sh reads host keys; it grants Administrator to the
+lldap group `admins` and asks for a TOTP code after the password. Until the guest has a certificate (the sync after
+the one that first deploys it), the group administers nothing. Each realm user needs a key, set by root@pam:
+
+```sh
+head -c 20 /dev/urandom | base32                     # the key; add it to an authenticator app
+pveum user modify <user>@lldap --keys <base32 key>   # on the Proxmox host, as root
+```
+
+A realm user without a key cannot log in. root@pam keeps its own password (`proxmox-root-pass`).
 
 ## Secrets
 
@@ -137,10 +185,6 @@ Adding a secret: read it in a config (`sops.secrets.<name>`), declare it with it
 lists the kinds) in the reading guest's `instance.nix`, or in `src/secrets/shared.nix` when several read it, then
 `./sync.sh`. A generated one appears by itself, a `manual` one is added empty: fill it with `sops <its file>`.
 Moving a declaration moves the value. `src/scripts/secrets-sync.sh [--apply [--prune]]` runs the same step by hand.
-
-Moving from `src/secrets.json`, `src/host-keys.json` and `src/host-secrets/` (the layout before folders), once, with
-the dotfiles unlocked: `src/scripts/secrets-migrate.sh`, then `./sync.sh`. Host keys carry over, so the guests keep
-decrypting.
 
 Every ssh host key is pinned in `src/generated/known_hosts`: Proxmox's by `init.sh` after a console check, each
 guest's by `sync.sh`, which reads it through Proxmox from inside the guest. Any other key stops the run.
@@ -179,9 +223,14 @@ the old key still opens all of them in the public history. Inside `nix develop .
   /my-files/homelab-offsite/BACKUPS/kopia <dir>`, then `kopia repository connect filesystem --path <dir>` with
   `kopia-password` from `src/instances/109-internal-nas/secrets.sops.json`, and `kopia snapshot list` /
   `kopia restore <snapshot> <target>`.
-- Terraform state: the nas holds it (`/srv/nas/terraform`), sync.sh works on `src/generated/terraform/`;
-  `TF_STATE_OFFLINE=1 ./sync.sh` applies from that copy while the nas is down, `TF_STATE_FRESH=1 ./sync.sh` starts
-  an empty lab.
+- Terraform state: the nas holds it (`/srv/nas/terraform`), sync.sh works on a copy outside the repo,
+  `~/.local/state/homelab/terraform/` (`$XDG_STATE_HOME`), where terraform's providers live too: a `path:` evaluation
+  copies the whole flake tree into the world-readable store. `TF_STATE_OFFLINE=1 ./sync.sh` applies from that copy
+  while the nas is down. `TF_STATE_FRESH=1 ./sync.sh` starts an empty lab: it sets any local copy aside
+  (`terraform.tfstate.<time>.backup`), as `deinit.sh` does, and never pulls from or locks a nas.
+- Proxmox firewall locks out a machine: ssh stays open to the house lan, so `ssh root@<proxmox> pve-firewall stop`
+  from any machine with a key of `src/lab/keys/`; fix `lan.workstation`/`lan.notebook` (`src/scripts/init.sh`), then
+  `./sync.sh` turns it on again.
 
 ## Test
 
