@@ -15,9 +15,9 @@
 
   grants = [
     {
-      from = [ "103" "104" "114" ];
+      from = [ "103" "104" "114" "workstation" ];
       tcp = [ telemetry.ports.prometheus ];
-      why = "the dashboard's widgets, the terminal's feeds and hermes read the query api";
+      why = "the dashboard's widgets, the terminal's feeds, hermes and the desktop's alert bar read the query api";
     }
     { from = [ "104" "114" ]; tcp = [ telemetry.ports.loki ]; why = "stats-sync and hermes read logs"; }
     { from = [ "200" ]; tcp = [ telemetry.ports.otlpFrontend ]; why = "the edge relays the browsers' frontend telemetry"; }
