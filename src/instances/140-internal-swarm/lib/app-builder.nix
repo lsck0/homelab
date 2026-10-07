@@ -31,8 +31,9 @@ let
   baseRefreshS = 24 * 60 * 60;
   textfileName = "app_builder";
   textfile = "${config.homelab.textfileDir}/${textfileName}.prom";
-  # rust nightly and node builds; the ci users cap their own share
-  memoryMaxMiB = 3 * 1024;
+  vm = lab.instances.${builderId}.config.vm;
+  # the balloon floor holds the manager (instance.nix); builds get the rest when the host has it free
+  memoryMaxMiB = vm.memoryMiB - vm.balloonMiB;
   # the peak of one cold rust or node build: builds run side by side only as far as both cores and memory hold
   buildMemoryMiB = 1024;
   github = "https://github.com";
@@ -86,7 +87,7 @@ let
     deployKeyFile = config.sops.secrets.app-deploy-key.path;
     inherit inbox;
     deployUnit = config.homelab.swarm.deployUnit;
-    buildParallelism = lib.max 1 (lib.min lab.instances.${builderId}.config.vm.cores (memoryMaxMiB / buildMemoryMiB));
+    buildParallelism = lib.min vm.cores (memoryMaxMiB / buildMemoryMiB);
     dashboardsImport = "${dashboardsImport}";
     dashboardsDir = config.homelab.swarm.appDashboardsDir;
     apps = lib.mapAttrs (_: a: buildInputsOf a // {
@@ -166,10 +167,16 @@ in {
   config = {
     homelab.textfiles = [ textfileName ];
 
-    assertions = [{
-      assertion = config.homelab.vmid == builderId;
-      message = "the app builder runs on vm-${builderId} (the role app-builder), the address the managers' forced command accepts";
-    }];
+    assertions = [
+      {
+        assertion = config.homelab.vmid == builderId;
+        message = "the app builder runs on vm-${builderId} (the role app-builder), the address the managers' forced command accepts";
+      }
+      {
+        assertion = vm.balloonMiB > 0 && memoryMaxMiB >= buildMemoryMiB;
+        message = "vm-${builderId}: memoryMiB ${toString vm.memoryMiB} above its balloon floor ${toString vm.balloonMiB} must hold one build (${toString buildMemoryMiB} MiB)";
+      }
+    ];
 
     homelab.rootlessDocker.${user} = {
       inherit uid;
