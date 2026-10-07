@@ -17,9 +17,10 @@ in {
   vm = {
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
-    # five .net apps plus flaresolverr's chromium: 1510 MiB peak over 7d; they thrashed below a 512 floor each
+    # five .net apps plus flaresolverr's chromium: 1510 MiB peak over 7d, which the floor holds; they thrashed
+    # below a 512 floor each
     memoryMiB = 3072;
-    balloonMiB = 2048;
+    balloonMiB = 1536;
     diskGiB = 16;
   };
 

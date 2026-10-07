@@ -20,8 +20,8 @@
     vm = {
       bootPhase = "public";
       needs = [ "containers" "nfs" ];
-      # dockerd, the swarm and a share of the stacks
-      memoryMiB = 2560;
+      # dockerd, the swarm and a share of the stacks; more apps add workers (modules/limits workerCountOf)
+      memoryMiB = 1280;
       # memory is the swarm's admission capacity (modules/limits): never reclaimed, never overcommitted
       balloonMiB = 0;
       cores = 2;

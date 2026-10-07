@@ -167,7 +167,12 @@ let
         description = "Service -> its tasks' limits, at most `swarm.taskMax`; unlisted services get `swarm.taskDefaults`. The stack's own limits are replaced.";
       };
       reservation = {
-        memoryMiB = mkOption { type = types.ints.positive; default = 1024; description = "Memory the app's tasks hold together, replicas counted."; };
+        memoryMiB = mkOption {
+          type = types.ints.positive;
+          default = cfg.swarm.taskDefaults.memoryMiB;
+          defaultText = "swarm.taskDefaults.memoryMiB: one task";
+          description = "Memory the app's tasks hold together, replicas counted.";
+        };
         cpus = mkOption { type = types.number; default = 0.5; description = "Cores the app's tasks reserve together, 0.1 per task."; };
       };
       override = mkOption { type = types.attrs; default = { }; description = "A compose overlay merged last, as nix attrs; the policy still applies to the result."; };

@@ -3,7 +3,6 @@
   vm = {
     bootPhase = "network";
     needs = [ "nfs" ];
-    memoryMiB = 1024;
   };
 
   services = {

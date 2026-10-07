@@ -4,6 +4,8 @@
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
     memoryMiB = 2048;
+    # forgejo idles in a few hundred MiB; the rest is page cache the balloon may take
+    balloonMiB = 768;
     # sized when the runner's job images lived here too; terraform cannot shrink a disk
     diskGiB = 24;
   };

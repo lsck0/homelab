@@ -5,9 +5,10 @@
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
-    # raft and the deploys beside appbuild's rootless docker and buildkit, the builds 117 used to run
-    memoryMiB = 4096;
-    balloonMiB = 2048;
+    # raft and the deploys beside appbuild's rootless docker and buildkit; the floor holds the manager, a build
+    # takes what the host has free (lib/app-builder.nix bounds it)
+    memoryMiB = 3072;
+    balloonMiB = 1024;
     cores = 4;
     # images, the buildkit cache and the raft
     diskGiB = 40;

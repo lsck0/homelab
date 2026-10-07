@@ -13,5 +13,8 @@ in
   # main.c's port
   routes.hello = { service = "web"; targetPort = 8000; port = 20100; off.sso = "the public demo"; };
   homepage = { name = "Hello"; icon = "mdi-hand-wave"; };
+  # one static c server
+  resources.web.memoryMiB = 128;
+  reservation.memoryMiB = 128;
   off = { traces = silent; profiles = silent; };
 }

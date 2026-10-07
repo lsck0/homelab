@@ -3,9 +3,10 @@
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
-    # the host idles near its 80% balloon line, so a build gets the floor: 3072 left cargo 58 MiB
+    # the host idles near its 80% balloon line, so a build is sure of the floor only: one compile job plus the guest's
+    # own services (main.nix buildJobs), the ceiling is headroom
     memoryMiB = 6144;
-    balloonMiB = 5120;
+    balloonMiB = 2816;
     cores = 8;
     # nightly builds yield the cpu to every interactive guest (proxmox default weight is 100)
     cpuUnits = 25;

@@ -5,8 +5,8 @@
     needs = [ "containers" "nfs" ];
     # ocr plus the paperless-ai node process
     memoryMiB = 3072;
-    # ran at 98% of a 2048 floor
-    balloonMiB = 2560;
+    # ran at 98% of a 2048 floor, page cache included
+    balloonMiB = 2048;
     # paperless-ai image alone is 8.3 GiB
     diskGiB = 24;
   };

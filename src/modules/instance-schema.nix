@@ -29,11 +29,13 @@ let
 
   # host boot starts the lab phase by phase: storage first, the public side last (proxmox startup order)
   bootPhases = [ "nas" "network" "dev" "apps" "media" "public" ];
-  # plain vm working set measured 445-600 MiB
-  memoryDefaultMiB = 768;
+  # plain vm working set measured 445-600 MiB; an lxc runs no kernel of its own, and its whole limit counts in the
+  # host budget (tests/policy/guests.nix)
+  memoryDefaultMiB = { vm = 768; lxc = 512; };
   # at 384 MiB a vm drops ssh
   balloonFloorMiB = 512;
-  # the lab's own path (router, ingresses, sso) and the public side: squeezed, every route stalls with them
+  # the lab's own path (router, ingresses, sso) and the public side: squeezed, every route stalls with them. An idle
+  # guest is ballooned in any phase: it is down most of the time, yet its floor counts in the host budget
   unballoonedPhases = [ "network" "public" ];
   # proxmox's own cpu weight
   cpuUnitsDefault = 100;
@@ -166,12 +168,12 @@ in {
         default = lib.lists.findFirstIndex (phase: phase == config.vm.bootPhase) null bootPhases + 1;
         description = "The proxmox startup order of bootPhase.";
       };
-      memoryMiB = mkOption { type = types.ints.positive; default = memoryDefaultMiB; description = "Memory ceiling."; };
+      memoryMiB = mkOption { type = types.ints.positive; default = memoryDefaultMiB.${config.vm.guestKind}; description = "Memory ceiling (an lxc's limit)."; };
       balloonMiB = mkOption {
         type = types.ints.unsigned;
-        default = if lib.elem config.vm.bootPhase unballoonedPhases then config.vm.memoryMiB
+        default = if lib.elem config.vm.bootPhase unballoonedPhases && config.idle.stopAfter == null then config.vm.memoryMiB
           else lib.max balloonFloorMiB (config.vm.memoryMiB / 2);
-        defaultText = lib.literalExpression "memoryMiB in boot phases ${toString unballoonedPhases}, else max ${toString balloonFloorMiB} (memoryMiB / 2)";
+        defaultText = lib.literalExpression "memoryMiB in boot phases ${toString unballoonedPhases} unless idle, else max ${toString balloonFloorMiB} (memoryMiB / 2)";
         description = "Balloon floor (vm), 0: no balloon; tests/policy/guests.nix holds the floors to the node's memory.";
       };
       cores = mkOption { type = types.ints.positive; default = 2; description = "CPU cores."; };

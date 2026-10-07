@@ -4,7 +4,8 @@
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
     kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";
-    memoryMiB = 1024;
+    # a node process; the limit is all the host budget counts of an lxc
+    memoryMiB = 768;
     # image plus local state filled 8 GiB to 80%
     diskGiB = 12;
     privileged = true;

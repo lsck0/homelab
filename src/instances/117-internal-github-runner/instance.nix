@@ -3,9 +3,10 @@
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
-    # always on: the github listener, the forgejo runner and their rootless dockers, one job each at a time
+    # always on: the github listener, the forgejo runner and their rootless dockers, one job each at a time; the
+    # floor holds the idle listeners, a job takes what the host has free
     memoryMiB = 4096;
-    balloonMiB = 2048;
+    balloonMiB = 768;
     cores = 4;
     diskGiB = 40;
   };

@@ -7,7 +7,7 @@
     needs = [ "containers" "nfs" ];
     # kopia snapshots the whole nas, measured 624 MiB
     memoryMiB = 3072;
-    balloonMiB = 2048;
+    balloonMiB = 1536;
     # nvme root: state, backups, documents
     diskGiB = 750;
     # media and torrents on the bulk hdd (site.json)

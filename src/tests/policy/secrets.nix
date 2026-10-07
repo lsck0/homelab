@@ -41,7 +41,7 @@ let
 
   wiringLaws = name: config: let host = layout.hostOf config.networking.hostName; in
     lib.optionals (host != null && migrated) (map (s: "${name}: secret ${s.key} comes from ${toString s.sopsFile}, not ${layout.fileOf host s.key}")
-      (lib.filter (s: !(lib.hasSuffix "-source/${layout.fileOf host s.key}" (toString s.sopsFile))) (lib.attrValues config.sops.secrets)))
+      (lib.filter (s: toString s.sopsFile != "${toString src}/${layout.fileOf host s.key}") (lib.attrValues config.sops.secrets)))
     ++ lib.optional (config.sops.age.keyFile != keyFile) "${name}: sops reads its key from ${toString config.sops.age.keyFile}, not ${keyFile}"
     ++ lib.optional (config.sops.age.sshKeyPaths != [ ] || config.sops.gnupg.sshKeyPaths != [ ])
       "${name}: an ssh host key doubles as a sops key"
