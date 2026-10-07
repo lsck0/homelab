@@ -1,8 +1,7 @@
 # lldap: the lab's single account store; authelia and the proxmox realm read it through read-only bind users
 #
-# Passwords reach lldap_set_password through its environment (LLDAP_USER_PASSWORD), never its command line, and the
-# admin session the helpers open is logged out (its tokens blacklisted) when the script exits, so the token that
-# does sit on a command line for a moment is dead afterwards.
+# No secret reaches a command line: passwords go to ldappasswd in files, the session token to curl in a header file,
+# both in a private directory removed with the session, whose tokens are blacklisted when the script exits.
 { config, lib, pkgs, retry, inventory, site, catalog, ... }:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
@@ -12,7 +11,8 @@ let
   stateDir = "/var/lib/lldap";
   adminUser = "luca";
   guestUser = "guest";
-  apiInputs = [ pkgs.curl pkgs.jq pkgs.lldap pkgs.coreutils pkgs.gnugrep ];
+  adminPassword = config.sops.secrets.lldap-admin-password.path;
+  apiInputs = [ pkgs.curl pkgs.jq pkgs.openldap pkgs.coreutils pkgs.gnugrep ];
 
   # every group authelia admits, forwardauth and oidc (modules/catalog.nix access)
   inherit (catalog.access) admins;
@@ -34,27 +34,33 @@ let
     URL=http://127.0.0.1:${toString httpPort}
     # the login body from a file on stdin: the admin password never reaches an argv
     lldap_login() {
-      JAR=$(mktemp)
+      SESSION=$(mktemp -d)
       trap lldap_logout EXIT
-      TOKEN=$(jq -cn --rawfile p ${config.sops.secrets.lldap-admin-password.path} '{username:"admin", password:($p|rtrimstr("\n"))}' \
-        | curl -sf -c "$JAR" -X POST "$URL/auth/simple/login" -H 'Content-Type: application/json' --data-binary @- \
+      local token
+      token=$(jq -cn --rawfile p ${adminPassword} '{username:"admin", password:($p|rtrimstr("\n"))}' \
+        | curl -sf -c "$SESSION/jar" -X POST "$URL/auth/simple/login" -H 'Content-Type: application/json' --data-binary @- \
         | jq -r .token)
-      [ -n "$TOKEN" ] && [ "$TOKEN" != null ] || { echo "lldap admin login failed" >&2; return 1; }
+      [ -n "$token" ] && [ "$token" != null ] || { echo "lldap admin login failed" >&2; return 1; }
+      printf 'Authorization: Bearer %s\n' "$token" > "$SESSION/auth"
+      printf '%s' "$(cat ${adminPassword})" > "$SESSION/bind"
     }
-    # blacklists every token of the session, the one lldap_set_password saw on its command line included
+    # blacklists every token of the session
     lldap_logout() {
-      [ -n "''${JAR:-}" ] || return 0
-      curl -sf -b "$JAR" -o /dev/null "$URL/auth/logout" || echo "lldap logout failed" >&2
-      rm -f "$JAR"
+      [ -n "''${SESSION:-}" ] || return 0
+      curl -sf -b "$SESSION/jar" -o /dev/null "$URL/auth/logout" || echo "lldap logout failed" >&2
+      rm -rf "$SESSION"
     }
-    # user, password file
+    # user, password
     password_set() {
-      LLDAP_USER_PASSWORD=$(cat "$2") lldap_set_password --base-url "$URL" --token "$TOKEN" --username "$1" >/dev/null
+      printf '%s' "$2" > "$SESSION/new"
+      ldappasswd -H ldap://127.0.0.1:${toString ldapPort} -x -D "$(user_dn admin)" -y "$SESSION/bind" -T "$SESSION/new" "$(user_dn "$1")" >/dev/null
+      rm -f "$SESSION/new"
     }
+    user_dn() { echo "uid=$1,ou=people,${net.domainDn}"; }
     # graphql answers 200 with an errors array, so check it
     gql() {
       local out
-      out=$(curl -sf -X POST "$URL/api/graphql" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$1")
+      out=$(curl -sf -X POST "$URL/api/graphql" -H @"$SESSION/auth" -H 'Content-Type: application/json' -d "$1")
       if echo "$out" | jq -e .errors >/dev/null; then echo "$out" | jq -r '.errors[].message' >&2; return 1; fi
       echo "$out"
     }
@@ -93,13 +99,12 @@ let
       # shellcheck disable=SC1091
       source ${lldapApi}
       lldap_login
-      # the password into the environment of lldap_set_password alone
       ask_and_set() {
         local a b
         read -rsp "password for $1: " a; echo >&2
         read -rsp "again: " b; echo >&2
         [ -n "$a" ] && [ "$a" = "$b" ] || { echo "passwords empty or different" >&2; exit 1; }
-        LLDAP_USER_PASSWORD=$a lldap_set_password --base-url "$URL" --token "$TOKEN" --username "$1" >/dev/null
+        password_set "$1" "$a"
       }
       [ $# -gt 0 ] || usage
       cmd=$1; shift
@@ -198,10 +203,10 @@ in {
       '') (lib.attrNames bindUsers)}
 
       # passwords via opaque, from the secret files
-      password_set ${adminUser} ${config.sops.secrets.authelia-admin-pass.path}
-      password_set ${guestUser} ${config.sops.secrets.lldap-guest-password.path}
+      password_set ${adminUser} "$(cat ${config.sops.secrets.authelia-admin-pass.path})"
+      password_set ${guestUser} "$(cat ${config.sops.secrets.lldap-guest-password.path})"
       ${lib.concatStrings (lib.mapAttrsToList (user: secret: ''
-        password_set ${user} ${config.sops.secrets.${secret}.path}
+        password_set ${user} "$(cat ${config.sops.secrets.${secret}.path})"
         join ${user} ${readonlyGroup}
       '') bindUsers)}
 
