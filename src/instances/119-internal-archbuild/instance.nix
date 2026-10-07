@@ -3,8 +3,7 @@
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
-    # the host idles near its 80% balloon line, so a build is sure of the floor only: one compile job plus the guest's
-    # own services (main.nix buildJobs), the ceiling is headroom
+    # a build is sure of the floor only: one compile job plus the guest's services (main.nix buildJobs)
     memoryMiB = 6144;
     balloonMiB = 2816;
     cores = 8;
