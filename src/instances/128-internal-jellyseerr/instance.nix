@@ -32,4 +32,8 @@
       };
     };
   };
+
+  shares = {
+    "data/jellyseerr" = { };
+  };
 }

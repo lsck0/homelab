@@ -17,4 +17,11 @@
     proxmox-user = "public"; # init.sh: homepage@pve!homepage
     proxmox-pass = "manual"; # init.sh: the homepage api token
   };
+
+  # reads every widget's token (modules/lab)
+  roles = [ "dashboard" ];
+
+  shares = {
+    "data/homepage" = { };
+  };
 }

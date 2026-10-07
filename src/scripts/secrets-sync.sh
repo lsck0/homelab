@@ -159,6 +159,9 @@ jq -n --slurpfile old "$WORK/old.json" --slurpfile plan "$PLAN" '
 while IFS=$'\t' read -r k from to; do
   echo "move    $k: $from -> $to"
 done < <(jq -r --slurpfile plan "$PLAN" 'to_entries[] | select(.value.from) | [.key, .value.from, $plan[0].secrets[.key].file] | @tsv' "$WORK/found.json")
+# an empty guarded value is a missing one: a deploy must never hand it to what it guards
+jq --slurpfile plan "$PLAN" --arg g "$GUARDED_PREFIX" 'with_entries(if .value.value == "" and ($plan[0].secrets[.key].kind | startswith($g))
+  then .value = null else . end)' "$WORK/found.json" > "$WORK/t" && mv "$WORK/t" "$WORK/found.json"
 # a fresh value for a guarded secret would lock out whatever the lost one protected
 mapfile -t GUARDED_MISSING < <(jq -r --slurpfile plan "$PLAN" --arg g "$GUARDED_PREFIX" 'to_entries[]
   | select(.value == null and ($plan[0].secrets[.key].kind | startswith($g))) | "\(.key) in src/\($plan[0].secrets[.key].file)"' "$WORK/found.json")

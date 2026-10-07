@@ -1,5 +1,5 @@
 # git forge (OIDC + SSH); its ci runner lives on 117
-{ ... }: {
+{ id, ... }: {
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
@@ -33,5 +33,10 @@
         bodyLimit = "git pushes and attachments";
       };
     };
+  };
+
+  shares = {
+    "data/db-dumps/vm-${id}" = { mode = "0700"; };
+    "data/forgejo" = { };
   };
 }

@@ -61,7 +61,6 @@ let
         STATS_LOKI = telemetry.urls.loki;
         STATS_QBITTORRENT = "http://${net.ipOf (toString qbittorrent.vmid)}:${toString qbittorrent.port}";
         STATS_INVENTORY = "${terminalInventory}";
-        STATS_TOKENS = config.homelab.tokens.dir;
         STATS_CLIENT_INGRESS = "vm-${edge}";
         STATS_EDGE_ADDRESS = net.ipOf edge;
         STATS_CLIENT_DOMAIN = ".${net.domain}";
@@ -219,10 +218,6 @@ let
     sys.exit(rc)
   '';
 in {
-  networking.hostName = "vm-104";
-
-  # stats-sync reads the torrent client's queue
-  homelab.tokens.reads = [ "qbittorrent-user" "qbittorrent-pass" ];
   # footers and "today" in the payloads are the house's local time
   time.timeZone = site.timeZone;
 

@@ -16,7 +16,7 @@
 # tests/lib/zones.py states the router's part independently and tests/router-zones.nix holds the running router to it.
 #
 # An endpoint is { network; addresses; }: a network of `networks`, and the addresses in it (null: all of it).
-{ lib, net, inventory, catalog, appsCatalog, nasClients, lab }:
+{ lib, net, inventory, catalog, nasClients, lab }:
 let
   inherit (net) ports zones;
   telemetry = import ./telemetry.nix { inherit lib inventory; };
@@ -38,7 +38,7 @@ let
   house = addresses: { network = "lan"; inherit addresses; };
   # any source the wan carries: the house and, through the fritzbox's forwards, the internet
   anywhere = { network = "lan"; addresses = [ "0.0.0.0/0" ]; };
-  # the guests of a zone vm-109 exports to (modules/nas-clients.nix), none when it exports to none there
+  # the guests of a zone vm-109 exports to (lab.nasClients), none when it exports to none there
   nasClientsIn = name: {
     network = name;
     addresses = lib.filter (ip: lib.elem ip zones.${name}.hosts) (lib.attrNames nasClients);
@@ -64,7 +64,7 @@ let
   # ROUTE BACKENDS
   # -------------------------------------------------------------------------------------------------------------
 
-  running = id: inventory.${id}.enabled != "false";
+  running = id: inventory.${id}.powered;
   # the swarm an app runs on: the shared one or its own guest (catalog.clusters)
   clusterOf = app: lib.findFirst (c: c.apps ? ${app}) (throw "flows.nix: app ${app} is in no cluster") (lib.attrValues catalog.clusters);
   # the running guests a route's backend answers on: an instance's own, or every node of its app's cluster
@@ -106,23 +106,40 @@ let
   }) (lib.filter (z: z.ingress != null) (lib.attrValues zones));
 
   metricsGrants = map (id: {
-    from = [ collector ]; to = id; tcp = catalog.ports.metrics ++ [ appsCatalog.cadvisorPort telemetry.ports.promtail ];
+    from = [ collector ]; to = id; tcp = catalog.ports.metrics ++ [ catalog.swarm.cadvisorPort telemetry.ports.promtail ];
     why = "vm-105 scrapes the apps' metrics, and each app node's cadvisor and log shipper";
   }) appNodeIds
   ++ lib.mapAttrsToList (key: s: {
     from = [ collector ]; to = toString s.vmid; tcp = lib.unique (map (m: m.port) (lib.attrValues s.metrics));
     why = "vm-105 scrapes ${key}'s exporters";
-  }) (lib.filterAttrs (_: s: s.kind == "vm" && s.on.metrics && s.metrics != { }) catalog.services);
+  }) (lib.filterAttrs (_: s: s.vmid != null && s.on.metrics && s.metrics != { }) catalog.services);
 
-  guards = routeGrants ++ widgetGrants ++ wakerGrants ++ ingressMetricsGrants ++ metricsGrants
+  # the prober's checks of a guest's own ports: what an instance probes (instance.nix `probes`), a lab-only tcp route
+  probeGrants = lib.mapAttrsToList (name: p: {
+    from = [ collector ]; to = toString p.vmid; tcp = [ p.port ];
+    why = "vm-105 probes ${name}";
+  }) lab.probes
+  ++ map (r: {
+    from = [ collector ]; to = toString r.vmid; tcp = [ r.port ];
+    why = "vm-105 probes the lab-only tcp route ${r.host}";
+  }) (lib.filter (r: r.vmid != null && r.protocol == "tcp" && r.publicPort == null && r.off.probe == null) (lib.attrValues catalog.l4));
+
+  guards = routeGrants ++ widgetGrants ++ wakerGrants ++ ingressMetricsGrants ++ metricsGrants ++ probeGrants
     # an instance's own `grants`: who may reach which of its guarded ports
     ++ lab.grants;
 
-  # the router's part of a grant: each source network the router keeps out of the guest's zone
-  grantForwards = g: let target = net.zoneOf g.to; in lib.concatLists (lib.mapAttrsToList (network: ids:
-    lib.optional (network != target.name && networks.${network}.reaches != "everything") {
-      from = hosts ids; to = host g.to; inherit (g) tcp why;
-    }) (lib.groupBy (id: (net.zoneOf id).name) g.from));
+  # a grant's source as the router sees it (modules/lab `sourceOf` names them): the router itself crosses nothing
+  endpointOf = from:
+    if builtins.match "[0-9]+" from != null then host from
+    else if from == "proxmox" then house [ net.wan.proxmox ]
+    else all from;
+  reachesByDefault = network: zone: let r = networks.${network}.reaches; in r == "everything" || (lib.isList r && lib.elem zone r);
+  # the router's part of a grant: each source network that does not reach the guest's zone by default
+  grantForwards = g: let target = (net.zoneOf g.to).name; in lib.concatLists (lib.mapAttrsToList (network: es:
+    lib.optional (network != target && !(reachesByDefault network target)) {
+      from = { inherit network; addresses = if lib.any (e: e.addresses == null) es then null else lib.concatMap (e: e.addresses) es; };
+      to = host g.to; inherit (g) tcp why;
+    }) (lib.groupBy (e: e.network) (map endpointOf (lib.remove "router" g.from))));
   # one rule for the guests of one zone that the same sources reach on the same ports for the same reason
   forwardsMerged = fs: lib.mapAttrsToList (_: group: lib.head group // {
     to = (lib.head group).to // { addresses = lib.unique (lib.concatMap (f: f.to.addresses) group); };

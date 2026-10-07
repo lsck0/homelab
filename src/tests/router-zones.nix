@@ -27,7 +27,7 @@ let
   zoneAddresses = {
     internal = map ip [ "100" "101" "105" "109" "112" "117" "130" "140" ];
     external = map ip [ "200" "203" "204" "206" "207" "210" ];
-    apps = map ip [ "250" "251" "252" ];
+    apps = map (id: ip (toString id)) lab.appsCatalog.swarm.workers;
   };
 
   facts = {

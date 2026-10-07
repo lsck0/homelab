@@ -35,4 +35,9 @@
   secrets = {
     app-deploy-key = "manual"; # ssh-keygen -t ed25519; the public half is app-deploy-key.pub here
   };
+
+  shares = {
+    "data/app-dashboards" = { };
+    "data/swarm-manager" = { };
+  };
 }

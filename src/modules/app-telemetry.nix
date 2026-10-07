@@ -20,7 +20,7 @@
 let
   cfg = config.homelab.appTelemetry;
   telemetry = import ./telemetry.nix { inherit lib inventory; };
-  inherit (config.homelab.appsCatalog) cadvisorPort;
+  inherit (catalog.swarm) cadvisorPort;
 
   # -----------------------------------------------------------------------------
   # CONSTANTS

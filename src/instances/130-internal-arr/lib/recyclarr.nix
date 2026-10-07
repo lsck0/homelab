@@ -1,5 +1,5 @@
 # recyclarr and arr-wire: no web ui, they configure and link the media stack
-{ config, lib, pkgs, inventory, catalog, site, ... }:
+{ config, lib, pkgs, inventory, catalog, site, instance, ... }:
 let
   # the router's tor socks port isolated per destination
   torSocksIsolatedPort = (import ../../../modules/tor-ports.nix).socksIsolated;
@@ -17,6 +17,7 @@ let
   # arr-wire.sh's inputs; src/tests/media-stack.sh runs the same script with its own
   arrWireEnvironment = {
     TOKEN_DIR = config.homelab.tokens.dir;
+    SECRET_DIR = dirOf config.sops.secrets.radarr-key.path;
     INDEXERS = lib.concatStringsSep " " indexers;
     QBIT_HOST = ipOf "qbittorrent";         QBIT_PORT = portOf "qbittorrent";
     PROWLARR_HOST = ipOf "prowlarr";        PROWLARR_PORT = portOf "prowlarr";
@@ -29,7 +30,7 @@ let
     RADARR_PUBLIC_URL = publicUrlOf "radarr";
     SONARR_PUBLIC_URL = publicUrlOf "sonarr";
     # the router's address in this guest's zone
-    TOR_HOST = inventory."130".gateway;
+    TOR_HOST = inventory.${instance.id}.gateway;
     TOR_PORT = toString torSocksIsolatedPort;
     JELLYSEERR_ADMIN_EMAIL = "admin@${site.domain}";
   };
@@ -40,23 +41,25 @@ let
     ${builtins.readFile ./arr-wire.sh}
   '';
 
-  recyclarrTemplate = pkgs.writeText "recyclarr.yml.tmpl" ''
+  # the keys go in by sops, never through a store path or an argv
+  recyclarrConfig = ''
     radarr:
       main:
         base_url: http://127.0.0.1:${portOf "radarr"}
-        api_key: @RADARR@
+        api_key: ${config.sops.placeholder.radarr-key}
         quality_definition:
           type: movie
     sonarr:
       main:
         base_url: http://127.0.0.1:${portOf "sonarr"}
-        api_key: @SONARR@
+        api_key: ${config.sops.placeholder.sonarr-key}
         quality_definition:
           type: series
   '';
 in {
   # arr-wire links the arrs to jellyfin and the download client
-  homelab.tokens.reads = [ "jellyfin-key-arr" "jellyfin-admin-pass" "qbittorrent-pass" ];
+  sops.secrets = lib.genAttrs [ "jellyfin-admin-pass" "qbittorrent-pass" ] (_: { });
+  sops.templates."recyclarr.yml".content = recyclarrConfig;
 
   systemd.services.arr-wire = {
     description = "Wire the media stack (*arr, qBittorrent, Prowlarr, Jellyseerr, Bazarr)";
@@ -74,21 +77,10 @@ in {
     description = "Recyclarr sync to Sonarr/Radarr";
     after = [ "network-online.target" "remote-fs.target" ];
     wants = [ "network-online.target" ];
-    path = [ pkgs.recyclarr pkgs.coreutils ];
-    serviceConfig = { Type = "oneshot"; RuntimeDirectory = "recyclarr-sync"; RuntimeDirectoryMode = "0700"; };
-    script = ''
-      set -euo pipefail
-      T=${config.homelab.tokens.dir}
-      for k in radarr sonarr; do
-        [ -s "$T/$k-key.token" ] || { echo "recyclarr: $k API key not exported yet, skipping"; exit 0; }
-      done
-      # substituted in the shell: the keys never pass through argv
-      conf=$(cat ${recyclarrTemplate})
-      conf=''${conf//@RADARR@/$(cat "$T/radarr-key.token")}
-      conf=''${conf//@SONARR@/$(cat "$T/sonarr-key.token")}
-      printf '%s\n' "$conf" > "$RUNTIME_DIRECTORY/recyclarr.yml"
-      recyclarr sync --config "$RUNTIME_DIRECTORY/recyclarr.yml"
-    '';
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${pkgs.recyclarr}/bin/recyclarr sync --config ${config.sops.templates."recyclarr.yml".path}";
+    };
   };
   systemd.timers.recyclarr-sync = {
     wantedBy = [ "timers.target" ];

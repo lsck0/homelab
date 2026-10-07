@@ -23,9 +23,9 @@ pkgs.testers.runNixOSTest {
     imports = [ (lab.guest "203" { instance = ../main.nix; }) ];
     testing.secretValues.ntfy-desktop-token = desktopToken;
   };
-  nodes.edge = { imports = [ (lab.multi { addresses = [ "${edge}/24" ]; vlan = lab.vlans.dmz; }) ];
+  nodes.edge = { imports = [ (lab.multi { addresses = [ "${edge}/24" ]; vlan = lab.vlans.external; }) ];
                  environment.systemPackages = [ pkgs.curl ]; };
-  nodes.peer = { imports = [ (lab.multi { addresses = [ "${peer}/24" ]; vlan = lab.vlans.dmz; }) ];
+  nodes.peer = { imports = [ (lab.multi { addresses = [ "${peer}/24" ]; vlan = lab.vlans.external; }) ];
                  environment.systemPackages = [ pkgs.curl ]; };
 
   testScript = ''

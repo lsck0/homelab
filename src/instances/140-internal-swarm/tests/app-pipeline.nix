@@ -4,10 +4,10 @@
 # Every lab node with its real instance: vm-100 (internal ingress: the registry's push and pull routes), vm-118 (the
 # registry), vm-140 (the deploy controller: the shared swarm's manager and the builder, as appbuild on its rootless
 # docker), vm-250 and vm-251 (workers), vm-200 (the edge: the apps' public routes and the controller's redeploy
-# route), vm-109 (the nas exports their shares). The facts are a fixture tree collected by modules/lab (as in
-# modules/swarm/tests/app-placement.nix): the real src, whose `hello` (lsck0/homelab, watching its own folder) runs on the shared
-# swarm, plus `own` (lsck0/own) placed on its own guest vm-220, a swarm of one the builder deploys to over its forced
-# command. `world` is everything outside: the gateways, github.com and api.github.com (git over smart http and the
+# route), vm-109 (the nas exports their shares). The facts are the real lab's plus one app (tests/lib/lab.nix `apps`,
+# as in modules/swarm/tests/app-placement.nix): `hello` (lsck0/homelab, watching its own folder) runs on the shared
+# swarm, reserving here what two workers hold, plus `own` (lsck0/own) placed on its own guest vm-220, a swarm of one
+# the builder deploys to over its forced command. `world` is everything outside: the gateways, github.com and api.github.com (git over smart http and the
 # commits api, from bare repos, with the test ca's certificate), cloudflare, the dashboard's and the workstation's
 # addresses. Nothing in app-builder.py changes for the test; the test only shortens the builder's backoff (a module
 # input) and pins the guest's host key.
@@ -55,16 +55,12 @@ let
   # INTERNAL
   # -----------------------------------------------------------------------------
 
-  tree = pkgs.runCommand "lab-pipeline" { } ''
-    cp -r ${../../..} $out
-    chmod -R u+w $out/apps
-    mkdir -p $out/apps/own
-    cp ${pkgs.writeText "app.nix" (lib.generators.toPretty { } ownApp)} $out/apps/own/app.nix
-  '';
-  collected = import ../../../modules/lab { inherit lib; root = tree; };
-  facts = specialArgs // { inherit (collected) inventory site; lab = collected; };
-  lab = assert lib.assertMsg (collected.problems == [ ]) (lib.concatLines collected.problems);
-    import ../../../tests/lib/lab.nix { inherit pkgs lib; specialArgs = facts; };
+  lab = import ../../../tests/lib/lab.nix {
+    inherit pkgs lib specialArgs;
+    # more than one worker holds beside a deploy's surge: the shared swarm gets two (modules/limits workerCountOf)
+    apps = folders: lib.recursiveUpdate folders { hello.reservation.memoryMiB = 1536; } // { own = ownApp; };
+  };
+  collected = lab.specialArgs.lab;
   net = import ../../../modules/net.nix { inherit lib; inherit (collected) inventory site; };
   ip = id: collected.inventory.${id}.ip;
 

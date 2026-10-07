@@ -19,15 +19,20 @@
 #   lab.routes.jellyfin           # an instance service's route with every field (modules/service.nix), plus vmid
 #   lab.appsCatalog               # src/apps/ typed by modules/apps-catalog: { apps; builder; swarm; cadvisorPort; controllerPort; }
 #   lab.catalog                   # modules/catalog.nix over it: every route and app, what every host gets as `catalog`
-#   lab.catalogOf c               # the same over another catalog (a test's fixture apps)
-#   lab.nasClients."10.100.0.140" # [{ path; readOnly; mode; }] the nas paths a powered guest declares (instance.nix `shares`)
+#   lab.withApps f                # the lab collected again with its app folders passed through f (a test's fixture
+#                                 # apps): workers, inventory and catalog follow them
+#   lab.shares."140"              # [{ path; readOnly; mode; }] the nas paths a guest mounts: its instance.nix `shares`,
+#                                 # its own token dir and those of the tokens it reads (lab.tokenReads."140")
+#   lab.nasClients."10.100.0.140" # the same of every powered guest, by address: what vm-109 exports
 #   lab.roles.collector           # "105": the vmid of the one instance declaring a role (instance.nix `roles`)
+#   lab.alerts.backup_stale       # an instance's own alert rule (instance.nix `alerts`) plus its vmid; lab.probes alike
 #
 # problems: every broken lab-wide rule (zones.json against the instances, vmid ranges, vm shapes, duplicate names),
 # one line each; the flake refuses to evaluate past one, so no host and no terraform plan proceeds.
 #
-# root: the tree to collect, src/ by default; tests/lab.nix collects broken fixture trees.
-{ lib, root ? ../.. }:
+# root: the tree to collect, src/ by default; tests/lab.nix collects broken fixture trees. apps: the app folders'
+# app.nix values -> the ones collected (lab.withApps).
+{ lib, root ? ../.., apps ? (folders: folders) }:
 let
   # -------------------------------------------------------------------------------------------------------------
   # CONSTANTS
@@ -40,6 +45,7 @@ let
   swarm = import (appsDir + "/swarm.nix");
 
   cidr = import ../cidr.nix { inherit lib; };
+  limits = import ../limits { inherit lib; };
   schema = ../instance-schema.nix;
 
   # the router's role is its zone name in the folder and its type in the inventory
@@ -101,8 +107,10 @@ let
       config = instanceEval { inherit (parsed) id zone; module = dir + "/instance.nix"; };
     };
 
-  # one entry generates every worker of the shared swarm: consecutive vmids, every field but those its instance.nix
-  workerIds = lib.genList (n: toString (swarm.nodes.first + n)) swarm.nodes.count;
+  # one entry generates every worker of the shared swarm: consecutive vmids, as many as its apps' reservations need
+  sharedApps = lib.filterAttrs (_: a: a.enable && a.placement == null) appsCatalog.apps;
+  workerCount = limits.workerCountOf { apps = sharedApps; inherit (swarm.nodes) vm; };
+  workerIds = lib.genList (n: toString (swarm.nodes.first + n)) workerCount;
   nodeOf = id: {
     inherit id;
     zone = nodeZone;
@@ -110,12 +118,12 @@ let
     dir = null;
     main = null;
     source = "apps/swarm.nix";
-    config = instanceEval { inherit id; zone = nodeZone; module = removeAttrs swarm.nodes [ "first" "count" ]; };
+    config = instanceEval { inherit id; zone = nodeZone; module = removeAttrs swarm.nodes [ "first" ]; };
   };
 
   # every enabled swarm's manager: the shared one and each enabled guest-placed app's own guest (a swarm of one)
   placedApps = lib.filterAttrs (_: a: a.placement != null) appsCatalog.apps;
-  swarmManagers = [ (toString swarm.manager) ]
+  swarmManagers = [ roles.swarm-manager ]
     ++ lib.mapAttrsToList (_: a: toString a.placement.vmid) (lib.filterAttrs (_: a: a.enable) placedApps);
 
   # an app placed on its own guest: a single-node swarm in its zone, powered while the app is enabled
@@ -215,11 +223,32 @@ let
   secrets = lib.listToAttrs (map (e: lib.nameValuePair e.name { inherit (e) kind; vmid = idOf e.i; }) secretEntries);
   roleEntries = lib.concatMap (i: map (name: { inherit name i; }) i.config.roles) ordered;
   roles = lib.listToAttrs (map (e: lib.nameValuePair e.name e.i.id) roleEntries);
+  # an instance's own rules and probes, by grafana uid and probe name, each with the instance's vmid
+  ownedOf = field: lib.concatMap (i: lib.mapAttrsToList (name: v: { inherit name i v; }) i.config.${field}) ordered;
+  alertEntries = ownedOf "alerts";
+  probeEntries = ownedOf "probes";
+  withVmid = entries: lib.listToAttrs (map (e: lib.nameValuePair e.name (e.v // { vmid = idOf e.i; })) entries);
 
-  # what vm-109 exports and the router opens nfs to: every powered guest's declared shares, by address
-  nasClients = lib.listToAttrs (map (i: lib.nameValuePair inventory.${i.id}.ip
-    (lib.mapAttrsToList (path: s: { path = "${nasRoot}/${path}"; inherit (s) readOnly mode; }) i.config.shares))
-    (lib.filter (i: inventory.${i.id}.powered && i.config.shares != { }) ordered));
+  # the tokens each guest reads: those its instance.nix names, and by role the dashboard every widget's token and
+  # the operator every one
+  widgetTokens = lib.unique (lib.concatMap (c: lib.optionals (c.widget != null) (lib.attrValues c.widget.tokens)) homepage);
+  tokenReads = lib.mapAttrs (_: i: lib.unique (i.config.tokenReads
+    ++ lib.optionals (lib.elem "dashboard" i.config.roles) widgetTokens
+    ++ lib.optionals (lib.elem "operator" i.config.roles) (lib.attrNames tokens))) instances;
+
+  # the nas dir of a guest's tokens: read-write to it, read-only to its readers; only its root writes there
+  tokenShare = { pathOf = id: "data/tokens/vm-${toString id}"; mode = "0755"; };
+  shareOf = path: { readOnly ? false, mode ? null }: { path = "${nasRoot}/${path}"; inherit readOnly mode; };
+  sharesOf = i: let
+    minted = lib.any (e: e.i.id == i.id) tokenEntries;
+    readFrom = lib.remove (idOf i) (lib.unique (map (t: tokens.${t}) (lib.filter (t: tokens ? ${t}) tokenReads.${i.id})));
+  in lib.mapAttrsToList shareOf i.config.shares
+    ++ lib.optional minted (shareOf (tokenShare.pathOf i.id) { inherit (tokenShare) mode; })
+    ++ map (id: shareOf (tokenShare.pathOf id) { readOnly = true; }) readFrom;
+  shares = lib.mapAttrs (_: sharesOf) instances;
+  # what vm-109 exports and the router opens nfs to: every powered guest's shares, by address
+  nasClients = lib.listToAttrs (lib.filter (e: e.value != [ ]) (map (i: lib.nameValuePair inventory.${i.id}.ip shares.${i.id})
+    (lib.filter (i: inventory.${i.id}.powered) ordered)));
 
   # -------------------------------------------------------------------------------------------------------------
   # APPS
@@ -232,14 +261,18 @@ let
     import (dir + "/app.nix");
 
   # the app folders and src/apps/swarm.nix over modules/apps-catalog: every field typed and defaulted, once
-  appsCatalogOf = raw: removeAttrs (lib.evalModules { modules = [ ../apps-catalog { config = raw; } ]; }).config [ "_module" ];
-  appsCatalog = appsCatalogOf {
-    apps = lib.genAttrs appFolders appOf;
-    inherit (swarm) builder cadvisorPort controllerPort;
-    swarm = { inherit (swarm) manager state; workers = map lib.toInt workerIds; };
-  };
-  catalogOver = typed: import ../catalog.nix { inherit lib site inventory; appsCatalog = typed; lab = result; };
-  catalog = catalogOver appsCatalog;
+  appsCatalog = removeAttrs (lib.evalModules {
+    modules = [ ../apps-catalog {
+      config = {
+        apps = apps (lib.genAttrs appFolders appOf);
+        inherit (swarm) cadvisorPort controllerPort;
+        builder = lib.toInt roles.app-builder;
+        swarm = { manager = lib.toInt roles.swarm-manager; inherit (swarm) state; workers = map lib.toInt workerIds; };
+      };
+    } ];
+    specialArgs = { inherit telemetry; };
+  }).config [ "_module" ];
+  catalog = import ../catalog.nix { inherit lib site inventory appsCatalog; lab = result; };
 
   # -------------------------------------------------------------------------------------------------------------
   # TERRAFORM: what lib.tf turns into proxmox guests, one json string (the external data source's protocol)
@@ -309,11 +342,18 @@ let
     ++ duplicates "token" tokenEntries
     ++ duplicates "secret" secretEntries
     ++ duplicates "role" roleEntries
+    ++ lib.concatMap (i: map (t: "src/${i.source}: tokenReads names ${t}, which no instance mints")
+      (lib.filter (t: !(tokens ? ${t})) i.config.tokenReads)) instanceList
+    ++ duplicates "alert" alertEntries
+    ++ duplicates "probe" probeEntries
     ++ map (p: "src/apps: ${p}") catalog.problems;
 
   result = {
-    inherit site instances inventory appsCatalog catalog homepage oidc grants tokens egress secrets roles nasClients problems;
-    catalogOf = c: catalogOver (appsCatalogOf c);
+    inherit site instances inventory appsCatalog catalog homepage oidc grants tokens tokenReads tokenShare egress secrets roles
+      shares nasClients problems;
+    alerts = withVmid alertEntries;
+    probes = withVmid probeEntries;
+    withApps = f: import ./. { inherit lib root; apps = folders: f (apps folders); };
     # zone: from: the address a grant's source stands for in a guard of that zone
     inherit sourceOf;
 

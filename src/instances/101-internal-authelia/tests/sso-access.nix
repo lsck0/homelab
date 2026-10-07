@@ -7,17 +7,19 @@
 # says, own-login routes without forwardauth and without any identity header reaching them.
 { pkgs, lib, specialArgs, ... }:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
+  lab = import ../../../tests/lib/lab.nix {
+    inherit pkgs lib specialArgs;
+    apps = apps: lib.recursiveUpdate apps { wat.enable = true; };
+  };
   net = import ../../../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
   ip = id: lab.inventory.${id}.ip;
-  appsCatalog = lib.recursiveUpdate lab.appsCatalog { apps.wat.enable = true; };
   # the internal routes under test: the instances' nixos services and wat's internal page (src/apps/wat)
   routes = lab.routes.internal // {
-    wat-db = { host = "wat-db"; inherit (appsCatalog.apps.wat.routes.wat-db) port; };
+    wat-db = { host = "wat-db"; inherit (lab.appsCatalog.apps.wat.routes.wat-db) port; };
   };
   echoBackend = pkgs.writers.writePython3Bin "echo-backend" { flakeIgnore = [ "E501" ]; } (builtins.readFile ../../../tests/lib/echo_backend.py);
 
-  # a proxmox certificate for its address, from a ca the internal ingress pins (secret proxmox-ca)
+  # a proxmox certificate for its address, from a ca the internal ingress pins (site.json proxmoxCa in the lab)
   proxmoxPki = pkgs.runCommand "fake-proxmox-pki" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out && cd $out
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 -subj /CN=pve-ca -keyout ca.key -out ca.pem
@@ -28,7 +30,7 @@ let
   proxmoxCa = pkgs.runCommand "fake-proxmox-ca.pem" { } "cp ${proxmoxPki}/ca.pem $out";
 
   # the backends of the routes under test, each at its guest's address and route port; all always-on guests
-  backendAddresses = map ip [ "103" "105" "109" "115" "125" "138" "250" "251" "252" ];
+  backendAddresses = map ip ([ "103" "105" "109" "115" "125" "138" ] ++ map toString lab.appsCatalog.swarm.workers);
   backendPorts = lib.unique (map (r: r.port) (with routes; [ homepage grafana kopia forgejo homeassistant headscale headplane wat-db ]));
 
   # client addresses on the house lan, one per actor, so the login limit (per client) counts each alone
@@ -58,12 +60,10 @@ pkgs.testers.runNixOSTest {
 
   nodes.vm-100 = guest "100" ../../100-internal-traefik/main.nix {
     imports = [ ../../../tests/lib/offline-traefik.nix ];
-    homelab.appsCatalog = appsCatalog;
-    testing.secretValues.proxmox-ca = proxmoxCa;
+    homelab.onDemand.caFile = "${proxmoxCa}";
     virtualisation.memorySize = 1024;
   };
   nodes.vm-101 = guest "101" ../main.nix {
-    homelab.appsCatalog = appsCatalog;
     environment.systemPackages = [ pkgs.authelia pkgs.curl pkgs.jq ];
     virtualisation.memorySize = 1024;
   };

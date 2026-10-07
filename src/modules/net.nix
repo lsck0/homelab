@@ -85,7 +85,7 @@ let
     };
     # guests meant to run in the zone, by address
     hosts = lib.sort (a: b: cidr.ipToInt a < cidr.ipToInt b) (map (v: v.ip)
-      (lib.filter (v: v.type == name && v.enabled != "false") (lib.attrValues inventory)));
+      (lib.filter (v: v.type == name && v.powered) (lib.attrValues inventory)));
   };
 
   zones = lib.mapAttrs zoneOfRaw (lib.importJSON ../generated/zones.json);

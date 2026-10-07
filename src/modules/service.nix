@@ -73,6 +73,7 @@ let
       };
       path = mkOption { type = types.str; default = ""; description = "Appended to the service's own address when `url` is null."; };
       tokens = mkOption { type = types.attrsOf types.str; default = { }; description = "Widget field -> lab token (modules/tokens)."; };
+      secrets = mkOption { type = types.attrsOf types.str; default = { }; description = "Widget field -> sops secret, which the dashboard host reads."; };
       settings = mkOption { type = types.attrs; default = { }; description = "Any other widget field, verbatim."; };
     };
   };
@@ -119,7 +120,7 @@ in rec {
     health = mkOption {
       type = types.nullOr urlPath;
       default = null;
-      description = "Path that answers 2xx without a login: the prober, the status dot, the ingress's health check; null: none (instances: /).";
+      description = "Path the prober, the status dot and the ingress's health check call past sso, below 500 when up; null: none (an instance service: its path).";
     };
     methods = mkOption { type = types.listOf (types.enum webMethods); default = webMethods; description = "Methods routed; others 404."; };
     sources = mkOption {

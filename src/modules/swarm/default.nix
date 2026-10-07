@@ -303,7 +303,8 @@ let
     runtimeInputs = [ docker pkgs.coreutils pkgs.util-linux ];
     text = ''
       app=$1
-      case " ${lib.concatStringsSep " " idleApps} " in *" $app "*) ;; *) echo "$app never idles" >&2; exit 2 ;; esac
+      idle=" ${lib.concatStringsSep " " idleApps} "
+      case "$idle" in *" $app "*) ;; *) echo "$app never idles" >&2; exit 2 ;; esac
       ${appLock}
       ${if state == 1 then ''touch ${stoppedDir}/"$app"'' else ''rm -f ${stoppedDir}/"$app"''}
       for service in $(docker stack services -q "$app"); do
@@ -367,7 +368,8 @@ let
     bashOptions = [ "nounset" "pipefail" ];
     text = ''
       # hostname -> its inventory address; a node is the inventory's only from there
-      declare -A address=( ${lib.concatMapStringsSep " " (id: "[${nodeName id}]=${inventory.${id}.ip}") workerIds} )
+      declare -A address
+      ${lib.concatMapStrings (id: "address[${nodeName id}]=${inventory.${id}.ip}\n") workerIds}
       reconcile() {
         docker node ls --format '{{.ID}}|{{.Hostname}}|{{.Status}}|{{.ManagerStatus}}' | while IFS='|' read -r id host status role; do
           # a node still joining has no hostname yet: never mistake it for one that left
@@ -737,8 +739,6 @@ in {
     })
 
     (lib.mkIf isWorker {
-      homelab.tokens.reads = lib.mkIf (!single) [ "swarm-worker-token" ];
-
       # gossip and overlay traffic from the other workers and the manager; esp carries the encrypted overlays
       networking.firewall.extraCommands = lib.optionalString (!single) ''
         for src in ${catalog.appsZone} ${manager.ip}; do

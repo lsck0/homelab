@@ -1,5 +1,5 @@
 # document management (paperless-ngx) and paperless-ai auto-tagging
-{ config, ... }: {
+{ id, config, ... }: {
   vm = {
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
@@ -20,5 +20,13 @@
   services = {
     paperless = { port = 8080; homepage = { icon = "paperless-ngx"; }; off = { bodyLimit = "document uploads"; }; };
     paperless-ai = { port = 80; homepage = { icon = "paperless-ngx"; name = "Paperless AI"; }; };
+  };
+
+  shares = {
+    "data/db-dumps/vm-${id}" = { mode = "0700"; };
+    "data/paperless" = { };
+    "data/paperless-ai" = { };
+    "data/paperless/media" = { };
+    "documents/inbox" = { };
   };
 }

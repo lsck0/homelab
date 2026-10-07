@@ -37,15 +37,16 @@ in {
   systemd.tmpfiles.rules = [ "d ${stateDir} 0750 ${uid} ${uid} -" ];
 
   # the admin account on a fresh library, and its subsonic credentials for hermes (navidrome skill)
+  sops.secrets.navidrome-pass = { };
+
   systemd.services.navidrome-setup = setupUnit {
     description = "Create the Navidrome admin and export its Subsonic credentials";
     after = [ "podman-navidrome.service" ];
-    path = [ pkgs.curl pkgs.coreutils pkgs.jq pkgs.openssl ];
+    path = [ pkgs.curl pkgs.coreutils pkgs.jq ];
     script = ''
       ${retry} 90 2 curl -sf ${local}/ping
-      token_secret_ensure navidrome-pass
       # the password goes on stdin, never on argv
-      credentials() { jq -cn --rawfile p ${config.homelab.tokens.dir}/navidrome-pass.token '{username: "${adminUser}", password: $p}'; }
+      credentials() { jq -cn --rawfile p ${config.sops.secrets.navidrome-pass.path} '{username: "${adminUser}", password: $p}'; }
 
       # first-run endpoint, refused once an admin exists
       credentials | curl -s -o /dev/null -X POST ${local}/auth/createAdmin -H "Content-Type: application/json" -d @-

@@ -18,7 +18,6 @@ let
 
   # an inventory entry's name is its configuration's
   builderHost = catalog.builder.name;
-  managerHost = catalog.manager.name;
   # every node app tasks run on: each cluster's workers (a guest-placed app's own guest is its cluster's one)
   appNodeIds = lib.unique (lib.concatMap (c: c.workerIds) (lib.attrValues catalog.clusters));
   swarmHosts = lib.filterAttrs (name: _: builtins.match "(${lib.concatStringsSep "|" ([ catalog.swarm.managerId ] ++ appNodeIds)})-.*" name != null) configs;
@@ -37,14 +36,18 @@ let
       (lib.subtractLists c.homelab.ingressOnly.ports published)
   ) swarmHosts);
 
-  manager = configs.${managerHost};
+  # the builder deploys to its own host's swarm locally, to a guest swarm over that manager's forced command alone
   builderIp = catalog.builder.ip;
-  deployKeyLines = lib.filter (line: lib.hasInfix manager.homelab.swarm.deployKey line)
-    manager.users.users.root.openssh.authorizedKeys.keys;
-  deployKeyLaws =
-    lib.optional (lib.length deployKeyLines != 1) "${managerHost}: the builder's key is authorised ${toString (lib.length deployKeyLines)} times, not once"
-    ++ map (line: "${managerHost}: the builder's key is not restricted to its forced command from ${builderIp}: ${line}")
-      (lib.filter (line: !(lib.hasPrefix ''restrict,from="${builderIp}",command="'' line)) deployKeyLines);
+  deployKeyLaws = lib.concatMap (id: let
+    host = inventory.${id}.name;
+    lines = lib.filter (line: lib.hasInfix configs.${host}.homelab.swarm.deployKey line)
+      configs.${host}.users.users.root.openssh.authorizedKeys.keys;
+    wanted = if id == catalog.swarm.builderId then 0 else 1;
+  in
+    lib.optional (lib.length lines != wanted) "${host}: the builder's key is authorised ${toString (lib.length lines)} times, not ${toString wanted}"
+    ++ map (line: "${host}: the builder's key is not restricted to its forced command from ${builderIp}: ${line}")
+      (lib.filter (line: !(lib.hasPrefix ''restrict,from="${builderIp}",command="'' line)) lines)
+  ) (lib.unique (map (c: c.managerId) (lib.attrValues catalog.clusters)));
 
   builder = configs.${builderHost};
   # the vm running the github runners

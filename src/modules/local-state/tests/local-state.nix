@@ -7,7 +7,7 @@ let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
   local = "/var/lib/demo";
   nasCopy = "/srv/demo-nas";
-  share = "/srv/nas/data/demo-state";
+  share = "/srv/nas/data/demo";
 in
 pkgs.testers.runNixOSTest {
   name = "local-state";
@@ -16,7 +16,7 @@ pkgs.testers.runNixOSTest {
   nodes.vm-109 = lab.nas { flat = true; };
   nodes.vm-121 = {
     imports = [ (lab.guest "121" { flat = true; nas = true; }) ];
-    homelab.localState.demo = { path = local; share = "demo-state"; unit = "demo"; };
+    homelab.localState.demo = { path = local; unit = "demo"; };
     # the app the seed must precede
     systemd.services.demo = {
       wantedBy = [ "multi-user.target" ];

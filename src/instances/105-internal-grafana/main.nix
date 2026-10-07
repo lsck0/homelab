@@ -53,7 +53,12 @@ let
   # energy history is the long-lived data, ~1GB a month: the size, not the 10y, ends it. The local disk
   # (instance.nix diskGiB) also holds the system, journal-remote's 1G and loki's two weeks
   nonPrometheusGiB = 24;
-  prometheusRetentionSize = "${toString (lab.instances.${telemetry.collectorVmid}.config.vm.diskGiB - nonPrometheusGiB)}GB";
+  # the cap the store had on the nas: a smaller one would delete its oldest months at the first start
+  prometheusRetentionFloorGiB = 50;
+  prometheusRetentionGiB = let gib = lab.instances.${telemetry.collectorVmid}.config.vm.diskGiB - nonPrometheusGiB; in
+    assert lib.assertMsg (gib >= prometheusRetentionFloorGiB)
+      "105: diskGiB leaves prometheus ${toString gib}GB, below the ${toString prometheusRetentionFloorGiB}GB its history needs";
+    gib;
 
   # the template's dashboards rate over [1m], four samples at 15s; the lab default of 1m leaves one
   appScrapeInterval = "15s";
@@ -149,9 +154,9 @@ let
   guestsExpectedUp = "up{job=\"${nodeJob}\",idle=\"\"}";
 
   # a guest that is off on purpose has nothing to scrape, draw or alert on
-  services = lib.filterAttrs (_: s: s.kind == "swarm" || (guest s.vmid).powered) catalog.services;
+  services = lib.filterAttrs (_: s: s.vmid == null || (guest s.vmid).powered) catalog.services;
   servicesOn = feature: lib.filterAttrs (_: s: s.on.${feature}) services;
-  isApp = s: s.kind == "swarm";
+  isApp = s: s.app != null;
   exportersOf = s: if s.on.metrics then s.metrics else { };
   # an app's exporter answers on any node of its cluster's routing mesh (one, or each sample counts once per node)
   exporterNodeOf = s: if isApp s then guestAt (lib.head s.cluster.nodes) else guest s.vmid;
@@ -173,7 +178,7 @@ let
       # per node: each cadvisor sees only its own node's containers
       job_name = cadvisorJob;
       scrape_interval = appScrapeInterval;
-      static_configs = map (node: { targets = [ "${node.ip}:${toString config.homelab.appsCatalog.cadvisorPort}" ]; labels.vm = vmName node; }) appNodes;
+      static_configs = map (node: { targets = [ "${node.ip}:${toString catalog.swarm.cadvisorPort}" ]; labels.vm = vmName node; }) appNodes;
       metric_relabel_configs = [
         # every systemd slice is a cgroup too; only containers carry a name, the rest is cardinality
         { source_labels = [ "__name__" "name" ]; regex = "container_.*;"; action = "drop"; }
@@ -199,7 +204,7 @@ let
   httpProbes = lib.mapAttrsToList (name: r: {
     inherit name;
     vm = vmName (guest r.vmid);
-    target = "https://${net.fqdn r.host}${if r.health == null then r.path else r.health}";
+    target = catalog.probeUrlOf r;
   }) (lib.filterAttrs (_: r: r.vmid != null && r.off.probe == null && awake (guest r.vmid)) (catalog.internal // catalog.external));
   # a tcp route at the backend the router forwards to; udp has no generic probe
   tcpProbes = lib.mapAttrsToList (name: r: let node = if r.vmid != null then guest r.vmid else guestAt (lib.head r.nodes); in {
@@ -236,8 +241,9 @@ let
     inherit lib telemetry ntfy catalog nodeJob guestsExpectedUp monitoringUnitsRegex services exportersOf exporterJobOf;
     edgeTraefikTarget = traefikTargetOf "external";
   });
-  # the rules instances and apps declare over their own metrics
-  ownRules = lib.mapAttrs (_: a: removeAttrs a [ "vmid" ]) lab.alerts // lib.concatMapAttrs (_: a: a.alerts) catalog.apps;
+  # the rules instances and apps declare over their own metrics; an app's uid carries the app
+  ownRules = lib.mapAttrs (_: a: removeAttrs a [ "vmid" ]) lab.alerts
+    // lib.concatMapAttrs (app: a: lib.mapAttrs' (name: lib.nameValuePair "app_${app}_${name}") a.alerts) catalog.apps;
   rulesTwice = lib.intersectLists (lib.attrNames labRules) (lib.attrNames ownRules);
   rules = assert lib.assertMsg (rulesTwice == [ ]) "105-internal-grafana: alert uids declared twice: ${toString rulesTwice}";
     labRules // ownRules;
@@ -532,7 +538,6 @@ let
     });
   };
 in {
-  homelab.tokens.reads = [ "hass-key" ];
   homelab.textfiles = [ spotPriceFile alertsExportFile ];
 
   sops.secrets = { ntfy-grafana-password = { }; telegram-bot-token = { }; telegram-chat-id = { }; };
@@ -545,10 +550,10 @@ in {
 
   # every store on the guest's own disk, seeded from and mirrored to its nas share: a nas hang never stalls monitoring
   homelab.localState = {
-    grafana = { path = "/var/lib/grafana"; share = "grafana"; unit = "grafana"; sqlite = [ "data/grafana.db" ]; };
-    prometheus = { path = "/var/lib/${config.services.prometheus.stateDir}"; share = "prometheus"; unit = "prometheus"; };
-    loki = { path = lokiDir; share = "loki"; unit = "loki"; };
-    pyroscope = { path = pyroscopeDir; share = "pyroscope"; unit = "pyroscope"; };
+    grafana = { path = "/var/lib/grafana"; unit = "grafana"; sqlite = [ "data/grafana.db" ]; };
+    prometheus = { path = "/var/lib/${config.services.prometheus.stateDir}"; unit = "prometheus"; };
+    loki = { path = lokiDir; unit = "loki"; };
+    pyroscope = { path = pyroscopeDir; unit = "pyroscope"; };
   };
 
   # journal-remote ignores MaxUse for the journals every host uploads here, so they outgrew the disk
@@ -760,7 +765,7 @@ in {
     port = ports.prometheusLocal;
     retentionTime = prometheusRetentionTime;
     extraFlags = [
-      "--storage.tsdb.retention.size=${prometheusRetentionSize}"
+      "--storage.tsdb.retention.size=${toString prometheusRetentionGiB}GB"
       # tempo's metrics generator pushes span metrics here, over loopback
       "--web.enable-remote-write-receiver"
       # the trace ids on those span metrics, for grafana's exemplar links

@@ -30,7 +30,7 @@ Guests whose `instance.nix` sets `idle.stopAfter` (and apps whose `app.nix` does
 ## Tasks
 
 - Which VMs are on demand: `AGENTS.md` (power column, `idle after <time>`).
-- Use one now: the owner starts it (`vm start <id>`); it goes back to sleep after its idle time.
+- Use one now: `vm start <id>`; it goes back to sleep after its idle time.
 - Keep one awake for a while: keep a connection open, or start it again later.
 - Why did it not wake? On the Traefik VM: `journalctl -u ondemand-<route> -n 50`
   (wake script logs the Proxmox status and readiness wait).

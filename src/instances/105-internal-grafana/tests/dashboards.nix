@@ -10,11 +10,9 @@ let
     branch = "master";
     routes.arcade = { protocol = "tcp"; publicPort = 25565; port = 20199; };
   };
-  grafana = (inputs.self.nixosConfigurations."105-internal-grafana".extendModules {
-    modules = [{
-      homelab.appsCatalog = lib.recursiveUpdate specialArgs.lab.appsCatalog { apps = { ${fixtureApp}.enable = true; arcade = tcpApp; }; };
-    }];
-  }).config;
+  hostWith = import ../../../tests/lib/host-with.nix { inherit inputs; };
+  grafana = hostWith (specialArgs.lab.withApps (apps: lib.recursiveUpdate apps { ${fixtureApp}.enable = true; arcade = tcpApp; }))
+    "105-internal-grafana";
   boards = lib.mapAttrsToList (_: entry: entry.source)
     (lib.filterAttrs (path: _: lib.hasPrefix "grafana-dashboards/" path || lib.hasPrefix "grafana-apps/" path) grafana.environment.etc);
   # the inverter exporter's real output, from 104-internal-terminal/tests/feeds.nix

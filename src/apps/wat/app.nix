@@ -132,6 +132,21 @@ in
     image = socat;
     command = [ "TCP-LISTEN:4040,fork,reuseaddr" "TCP:{{homelab.pyroscope}}" ];
   };
+  # the postgres service's wal-g loop pushes a base backup into garage nightly
+  alerts.walg_stale = let staleSeconds = 26 * 3600; in {
+    title = "wat WAL-G backup stale";
+    category = "backups";
+    datasource = "loki";
+    rangeSeconds = staleSeconds;
+    expr = "sum(count_over_time({swarm_service=\"wat_postgres\"} |= \"Backup completed successfully\" [${toString staleSeconds}s]))";
+    op = "lt"; threshold = 1;
+    for = "30m";
+    # no success line in the window is no series at all
+    noData = "Alerting";
+    severity = "critical"; telegram = true;
+    summary = "wat postgres: no WAL-G base backup in over 26h";
+    description = "The stack's wal-g loop has not logged a successful backup-push. Its log: {swarm_service=\"wat_postgres\"} in Loki.";
+  };
   metrics = {
     server = { service = "server"; targetPort = 80; port = serverPort; path = "/api/metrics"; };
     postgres = { service = "postgres-metrics"; targetPort = 9187; port = 20124; path = "/metrics"; };

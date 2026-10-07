@@ -29,13 +29,18 @@
 #
 # nas: a guest's nas mounts bind-mount directories of its own disk by default (lib/nas-local.nix), so the units
 # keyed on them run as in the lab; `nas = true` mounts them for real from a `nas` node, which exports exactly what
-# the test's guests mount (109-internal-nas/lib/nas-exports.nix over modules/nas-clients.nix, lib/nas-mounts.nix).
+# the test's guests mount (109-internal-nas/lib/nas-exports.nix over lib/nas-clients.nix, lib/nas-mounts.nix).
 #
 # testDefaults: what every vm test takes, `imports = [ lab.testDefaults ];` next to its name.
-{ pkgs, lib, specialArgs }:
+#
+# apps: a test's own app folders, the production ones passed through it (modules/lab withApps): every fact follows,
+# the workers its fixture apps need included. withApps does the same again (a specialisation's edited catalog).
+{ pkgs, lib, specialArgs, apps ? null }:
 let
   # the flake's, under another name: the attribute set below exports its own specialArgs
-  facts = specialArgs;
+  facts = if apps == null then specialArgs else let collected = specialArgs.lab.withApps apps; in
+    assert lib.assertMsg (collected.problems == [ ]) "the test's apps break the lab's rules:\n${lib.concatLines collected.problems}";
+    specialArgs // { lab = collected; inherit (collected) inventory site nasClients; };
   inherit (facts) inventory;
 
   pki = import ./pki.nix { inherit pkgs; };
@@ -71,14 +76,11 @@ in rec {
   testDefaults.globalTimeout = globalTimeoutS;
   secretValues = import ./secret-values.nix { inherit pkgs; };
   images = import ./images.nix { inherit pkgs; };
-  # what homelab.appsCatalog defaults to; a test enabling a fixture app sets the option to a variant of it
-  appsCatalog = facts.lab.appsCatalog;
+  # the typed apps and the catalog every node of the test reads (modules/lab, modules/catalog.nix)
+  inherit (facts.lab) appsCatalog catalog withApps;
   # the instances' routes by zone ({ internal; external; }, every field) and vpn egress members (modules/lab)
   routes = lib.genAttrs [ "internal" "external" ] (zone: lib.filterAttrs (_: r: r.zone == zone) facts.lab.routes);
   inherit (facts.lab) egress;
-  # the typed catalog every host reads (modules/catalog.nix), as the router's configuration holds it
-  catalog = facts.inputs.self.nixosConfigurations."300-router"._module.args.catalog;
-
   # runNixOSTest's node.specialArgs: the hosts' facts. nasClients stays out: the router takes the lab's real one
   # (below), a test nas computes its own from the test's nodes, and a special arg could not be overridden
   specialArgs = { inherit (facts) inputs inventory site lab; };
@@ -99,7 +101,8 @@ in rec {
         ++ lib.optional (instance != null) instance;
       # a secret its service parses holds a real-format value (secret-values.nix); a test may set its own
       testing.secretValues = lib.mapAttrs (_: lib.mkDefault) (lib.intersectAttrs config.sops.secrets (removeAttrs secretValues [ "public" ]));
-      networking.hostName = "vm-${vmid}";
+      # its hostname, address and own services, as on the lab host (modules/network.nix)
+      _module.args.instance = facts.lab.instances.${vmid};
       virtualisation.vlans = [ vlan ];
       # network.nix addresses eth0, the driver's own nic
       networking.interfaces.eth0.ipv4.addresses = lib.mkForce [ ];
@@ -136,7 +139,7 @@ in rec {
   nas = { flat ? false, vlan ? (if flat then vlans.lan else vlans.internal) }: { nodes, ... }: {
     imports = [ (guest nasId { inherit flat vlan; }) ../../instances/109-internal-nas/lib/nas-exports.nix ];
     homelab.nasExports.enable = true;
-    _module.args.nasClients = import ../../modules/nas-clients.nix {
+    _module.args.nasClients = import ./nas-clients.nix {
       inherit lib inventory;
       configs = lib.filterAttrs (_: config: config.networking.hostName != "vm-${nasId}") nodes;
     };

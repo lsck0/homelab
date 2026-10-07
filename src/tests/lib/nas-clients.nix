@@ -5,7 +5,7 @@
 # of a powered inventory guest and it mounts at least one share (homelab.nasShares); anything else (the router, a
 # test's stand-in nodes) is skipped:
 #
-#   nasClients = import ./modules/nas-clients.nix { inherit lib inventory; configs = nodes; };
+#   nasClients = import ./nas-clients.nix { inherit lib inventory; configs = nodes; };
 #   # { "10.100.0.140" = [ { path = "/srv/nas/data/swarm-manager"; readOnly = false; mode = null; } ... ]; ... }
 { lib, inventory, configs }:
 let

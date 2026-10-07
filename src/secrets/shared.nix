@@ -21,7 +21,18 @@
   github-mirror-token = "manual";
   ntfy-grafana-password = "hex:24";
   ntfy-hermes-password = "hex:24";
+  # the webui login beyond its whitelist (112's setup sets it on every run): the arrs' download client, the dashboard
+  qbittorrent-pass = "hex:16";
+  # an *arr's api key, set through its environment (130's lib/servarr.nix); the arrs, janitorr, hermes and the
+  # dashboard call the apis with it, so a lost one is restored, never regenerated
+  lidarr-key = "guardsData:hex:16";
+  prowlarr-key = "guardsData:hex:16";
+  radarr-key = "guardsData:hex:16";
+  sonarr-key = "guardsData:hex:16";
+  # jellyfin's local admin, set once by 134's setup; jellyseerr imports jellyfin with it (130's arr-wire)
+  jellyfin-admin-pass = "guardsData:hex:16";
   registry-builder-password = "hex:24"; # registry user builder: the app builder on vm-140
+  registry-push-password = "hex:24"; # registry user ci: REGISTRY_PASSWORD of the repos that push images
   registry-pull-password = "hex:24"; # registry user puller: read-only pulls
   sccache-redis-pass = "hex:24";
   telegram-bot-token = "manual"; # hermes-secrets.sh

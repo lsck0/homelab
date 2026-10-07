@@ -8,9 +8,11 @@
   };
 
   grants = [
-    { from = [ "105" ]; tcp = [ net.ports.redis ]; why = "vm-105's blackbox check of sccache's redis"; }
     { from = [ "117" ]; tcp = [ net.ports.redis ]; why = "the forgejo runner's ci jobs share sccache (SCCACHE_REDIS)"; }
   ];
+
+  # sccache speaks redis, not http, and no route serves it
+  probes.sccache = { port = net.ports.redis; protocol = "tcp"; };
 
   services = {
     attic = {

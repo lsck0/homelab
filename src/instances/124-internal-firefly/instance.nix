@@ -1,5 +1,5 @@
 # Firefly III personal finance
-{ config, ... }: {
+{ id, config, ... }: {
   vm = {
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
@@ -32,5 +32,10 @@
   secrets = {
     firefly-app-key = "manual"; # init.sh: base64: and 32 random bytes
     firefly-db-password = "hex:24";
+  };
+
+  shares = {
+    "data/db-dumps/vm-${id}" = { mode = "0700"; };
+    "data/firefly" = { };
   };
 }

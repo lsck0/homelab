@@ -124,9 +124,9 @@ lawsOf {
     ++ lib.optional (v.type != "router" && lib.any (s: lib.any (inPool v.ip) s.pools) kea) "${id}: ${v.ip} lies in a dhcp pool"
   ) inventory);
 
-  # no guest trusts the homepage, the prober or the agent with every guarded port
+  # no guest trusts the homepage, the prober or the agent with every guarded port; each trusts its own address
   "ingress guards" = lib.concatLists (lib.mapAttrsToList (name: config:
-    map (s: "${name} trusts ${s} on every guarded port") (lib.intersectLists config.homelab.ingressOnly.extraSources
-      (map net.hostSource [ "103" "105" "114" ]))
+    map (s: "${name} trusts ${s} on every guarded port") (lib.intersectLists config.homelab.ingressOnly.trusted
+      (map net.hostSource (lib.remove config.homelab.vmid [ "103" "105" "114" ])))
   ) configs);
 }

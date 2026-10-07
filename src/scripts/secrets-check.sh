@@ -99,10 +99,11 @@ if [ -s "$WORK/secrets.json" ]; then
   cut -f2- "$WORK/values" > "$WORK/patterns"
 fi
 
-# sops_file_is_encrypted <blob file>: sops metadata present and every value (keys aside) is ciphertext
+# sops_file_is_encrypted <blob file>: sops metadata present and every value (keys aside) is ciphertext; sops leaves an
+# empty value (a placeholder to fill) as "", which holds nothing
 sops_file_is_encrypted() {
   [ "$(sops filestatus --input-type json "$1" 2>/dev/null | jq -r '.encrypted // false' 2>/dev/null)" = true ] || return 1
-  jq -e 'del(.sops) | [paths(scalars) as $p | getpath($p)] | all(type == "string" and startswith("ENC[AES256_GCM,"))' \
+  jq -e 'del(.sops) | [paths(scalars) as $p | getpath($p)] | all(type == "string" and (. == "" or startswith("ENC[AES256_GCM,")))' \
     "$1" >/dev/null 2>&1
 }
 

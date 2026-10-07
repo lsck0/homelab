@@ -1,15 +1,18 @@
 # *arr stack: prowlarr + flaresolverr, radarr, sonarr, lidarr, bazarr, recyclarr
 { lib, ... }:
 let
-  # each exports its api key as <name>-key; hermes' skill of the same name calls its api
+  # each api key is <name>-key: a sops secret the servarr apps take from their environment (lib/servarr.nix), a lab
+  # token bazarr mints itself; hermes' skill of the same name calls the api
   arrs = {
-    bazarr = { port = 6767; description = "Subtitles"; };
-    lidarr = { port = 8686; description = "Music"; };
-    prowlarr = { port = 9696; description = "Indexers (Tor)"; };
-    radarr = { port = 7878; description = "Movies"; };
-    sonarr = { port = 8989; description = "Series & anime"; };
+    bazarr = { port = 6767; description = "Subtitles"; minted = true; };
+    lidarr = { port = 8686; description = "Music"; minted = false; };
+    prowlarr = { port = 9696; description = "Indexers (Tor)"; minted = false; };
+    radarr = { port = 7878; description = "Movies"; minted = false; };
+    sonarr = { port = 8989; description = "Series & anime"; minted = false; };
   };
   keyOf = name: "${name}-key";
+  # where a widget finds the key: the token share, or sops
+  keySource = arr: if arr.minted then "tokens" else "secrets";
 in {
   vm = {
     bootPhase = "media";
@@ -22,7 +25,7 @@ in {
 
   grants = lib.mapAttrsToList (name: arr: { from = [ "114" ]; tcp = [ arr.port ]; why = "hermes' ${name} skill calls the api"; }) arrs;
 
-  tokens = map keyOf (lib.attrNames arrs);
+  tokens = map keyOf (lib.attrNames (lib.filterAttrs (_: arr: arr.minted) arrs));
 
   services = lib.mapAttrs (name: arr: {
     inherit (arr) port;
@@ -30,7 +33,18 @@ in {
       inherit (arr) description;
       group = "Media";
       icon = name;
-      widget = { tokens.key = keyOf name; type = name; };
+      widget = { ${keySource arr}.key = keyOf name; type = name; };
     };
   }) arrs;
+
+  tokenReads = [ "jellyfin-key-arr" ];
+
+  shares = {
+    bulk = { };
+    "data/bazarr" = { };
+    "data/lidarr" = { };
+    "data/prowlarr" = { };
+    "data/radarr" = { };
+    "data/sonarr" = { };
+  };
 }

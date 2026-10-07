@@ -18,7 +18,7 @@
 # Guest kind: a vm when it is the router, sits outside the internal zone (strangers' traffic wants a vm's isolation),
 # passes a device through, takes extra disks, or `needs` what an unprivileged container cannot give (its own
 # container runtime, nfs); an unprivileged lxc otherwise. `vm.kind.<kind> = "<why>"` overrides the rule.
-{ lib, config, id, zone, grantSourceNames, ... }:
+{ lib, config, id, zone, telemetry, grantSourceNames, ... }:
 let
   inherit (lib) mkOption types;
   service = import ./service.nix { inherit lib; };
@@ -66,8 +66,12 @@ let
     };
   };
 
-  serviceType = types.submodule ({ name, ... }: {
-    config.off.frontend = lib.mkDefault "a nixos service's own ui sends no browser telemetry";
+  serviceType = types.submodule ({ name, config, ... }: {
+    config = {
+      off.frontend = lib.mkDefault "a nixos service's own ui sends no browser telemetry";
+      # the probers check the backend itself, not the sso portal in front of it
+      health = lib.mkDefault config.path;
+    };
     options = service.exposureOptions { inherit name zone; features = service.protectionFeatures ++ service.telemetryFeatures; } // {
       homepage = mkOption {
         type = service.cardType { inherit name; group = "Apps"; icon = "mdi-web"; description = ""; };
@@ -203,17 +207,32 @@ in {
     shares = mkOption {
       type = types.attrsOf shareType;
       default = { };
-      description = "Nas paths below /srv/nas this guest mounts (\"data/<share>\", \"bulk/media\"): vm-109 exports exactly these to it, the router opens nfs to it (lab.nasClients); tests/policy holds main.nix to them.";
+      description = "Nas paths below /srv/nas this guest mounts (\"data/<share>\", \"bulk/media\"), token dirs aside (`tokens`, `tokenReads`): vm-109 exports exactly these to it, the router opens nfs to it (lab.nasClients); modules/nas.nix holds its mounts to them.";
+    };
+    alerts = mkOption {
+      type = types.attrsOf telemetry.alertType;
+      default = { };
+      description = "Grafana rule uid -> a rule over this guest's own metrics or logs (modules/telemetry.nix alertType); vm-105 provisions it.";
+    };
+    probes = mkOption {
+      type = types.attrsOf telemetry.probeType;
+      default = { };
+      description = "Name -> a port of this guest vm-105 probes besides its routes (a tcp service no route serves).";
     };
     roles = mkOption {
       type = types.listOf (types.strMatching "[a-z][a-z0-9-]*");
       default = [ ];
-      description = "Lab-wide roles this guest holds (\"collector\", \"nas\"); one guest per role (lab.roles).";
+      description = "Lab-wide roles this guest holds (\"collector\", \"nas\"; \"dashboard\" reads every widget's token, \"operator\" every token); one guest per role (lab.roles).";
     };
     tokens = mkOption {
       type = types.listOf (types.strMatching "[a-z0-9-]+");
       default = [ ];
       description = "Lab tokens this guest mints into its own nas token dir (modules/tokens); others read them.";
+    };
+    tokenReads = mkOption {
+      type = types.listOf (types.strMatching "[a-z0-9-]+");
+      default = [ ];
+      description = "Lab tokens of other guests this one reads; vm-109 exports their minters' dirs to it read-only (lab.nasClients).";
     };
     egress = mkOption {
       type = types.nullOr (types.submodule {

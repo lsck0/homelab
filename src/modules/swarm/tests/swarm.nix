@@ -4,10 +4,10 @@
 # app's stack is removed.
 # Lab guests at their real addresses on one flat network (tests/lib/lab.nix): the real modules mount the real
 # shares (homelab.nasMounts) from a test nas that exports them by the real rules (109-internal-nas's lib/nas-exports.nix). The
-# catalog is the test's own, one app, so the production catalog can change without touching this test.
+# apps are the test's own, one app, so the production catalog can change without touching this test.
 { pkgs, lib, specialArgs, ... }:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
+  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: { inherit demo; }; };
 
   app = version: pkgs.dockerTools.buildLayeredImage {
     name = "registry.lsck0.dev/demo/web";
@@ -23,8 +23,11 @@ let
     repo = "lsck0/demo";
     branch = "master";
     routes.demo = { service = "web"; targetPort = 8000; inherit port; off.sso = "the test's public fixture"; };
+    # more than one worker holds beside a deploy's surge: the swarm gets two (modules/limits workerCountOf)
+    reservation.memoryMiB = 1536;
   };
-  catalog = lab.appsCatalog // { apps.demo = demo; };
+  # a catalog edit as sync.sh deploys it: the lab collected again with the demo changed
+  catalogWith = change: lib.mkForce (lab.withApps (apps: lib.recursiveUpdate apps { demo = change; })).catalog;
 
   w1 = lab.inventory."250".ip;
   w2 = lab.inventory."251".ip;
@@ -39,13 +42,12 @@ let
     networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
     # no collector (vm-105) here: a failing upload would fail every switch below
     services.journald.upload.enable = lib.mkForce false;
-    homelab.appsCatalog = catalog;
     # what sync.sh does after an edit of an app, on every node at once
-    specialisation.edited.configuration.homelab.appsCatalog.apps.demo = {
-      routes.demo.port = lib.mkForce portChanged;
+    specialisation.edited.configuration._module.args.catalog = catalogWith {
+      routes.demo.port = portChanged;
       env.web.GREETING = "edited";
     };
-    specialisation.disabled.configuration.homelab.appsCatalog.apps.demo.enable = lib.mkForce false;
+    specialisation.disabled.configuration._module.args.catalog = catalogWith { enable = false; };
   };
 in
 pkgs.testers.runNixOSTest {

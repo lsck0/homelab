@@ -11,4 +11,7 @@
   };
 
   secrets = { github-runner-token = "manual"; };
+
+  tokenReads = [ "forgejo-runner" ];
+
 }

@@ -95,9 +95,6 @@ in {
   # lab names without cloudflare; the ingress, not the services: traefik terminates https and gates pushes
   networking.hosts = hosts;
 
-  # forgejo (vm-115) mints the one-use registration token
-  homelab.tokens.reads = [ "forgejo-runner" ];
-
   sops.secrets.sccache-redis-pass = { };
   # the cache url carries a password, so it comes from sops, not the nix store; ci alone reads it
   sops.templates."sccache-redis.env" = {

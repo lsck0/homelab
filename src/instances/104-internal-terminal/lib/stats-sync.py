@@ -2,7 +2,7 @@
 
 Usage: stats-sync.py <out-dir>
 Env:   STATS_PROMETHEUS, STATS_LOKI, STATS_QBITTORRENT (base urls), STATS_INVENTORY (the inventory json with a `vm`
-       name per guest, 104-internal-terminal/main.nix), STATS_TOKENS (lab token dir), STATS_CLIENT_INGRESS and
+       name per guest, 104-internal-terminal/main.nix), STATS_CLIENT_INGRESS and
        STATS_EDGE_ADDRESS (promtail `host` and address of the public ingress), STATS_CLIENT_DOMAIN (suffix stripped
        from host names), the layout knobs below
 
@@ -29,7 +29,6 @@ PROMETHEUS = os.environ.get("STATS_PROMETHEUS", "")
 LOKI = os.environ.get("STATS_LOKI", "")
 QBITTORRENT = os.environ.get("STATS_QBITTORRENT", "")
 INVENTORY = os.environ.get("STATS_INVENTORY", "")
-TOKENS = os.environ.get("STATS_TOKENS", "")
 # six columns of seven
 SERVICE_ROWS = int(os.environ.get("STATS_SERVICE_ROWS", "42"))
 TORRENT_ROWS = int(os.environ.get("STATS_TORRENT_ROWS", "4"))
@@ -416,44 +415,9 @@ def storage():
     return {"top": out, "free_total": human_size(scalar(free))}
 
 
-def qb_session():
-    """Log in with the generated password; works beyond the whitelist."""
-    try:
-        with open(os.path.join(TOKENS, "qbittorrent-user.token")) as f:
-            user = f.read().strip()
-        with open(os.path.join(TOKENS, "qbittorrent-pass.token")) as f:
-            password = f.read().strip()
-    except OSError as e:
-        feed_io.log(f"no qBittorrent credentials: {e}")
-        return None
-
-    # this guest is on qBittorrent's bypass_auth_subnet_whitelist (112-internal-qbittorrent/main.nix)
-    try:
-        req = urllib.request.Request(QBITTORRENT + "/api/v2/app/version")
-        with urllib.request.urlopen(req, timeout=QBITTORRENT_TIMEOUT_S) as r:
-            if r.status == 200:
-                return ""
-    except (urllib.error.URLError, socket.timeout):
-        pass
-
-    data = urllib.parse.urlencode({"username": user, "password": password}).encode()
-    req = urllib.request.Request(
-        QBITTORRENT + "/api/v2/auth/login", data=data,
-        headers={"Referer": QBITTORRENT})
-    try:
-        with urllib.request.urlopen(req, timeout=QBITTORRENT_TIMEOUT_S) as r:
-            cookie = r.headers.get("Set-Cookie", "")
-            if r.read().strip() != b"Ok.":
-                feed_io.log("qBittorrent rejected the login")
-                return None
-    except (urllib.error.URLError, socket.timeout) as e:
-        feed_io.log(f"qBittorrent login failed: {e}")
-        return None
-    return cookie.split(";")[0] if cookie else ""
-
-
-def qb_get(path, cookie):
-    req = urllib.request.Request(QBITTORRENT + path, headers={"Cookie": cookie})
+def qb_get(path):
+    """One api call; this guest is on qBittorrent's login whitelist (its grant in 112-internal-qbittorrent)."""
+    req = urllib.request.Request(QBITTORRENT + path)
     try:
         with urllib.request.urlopen(req, timeout=QBITTORRENT_TIMEOUT_S) as r:
             return json.load(r)
@@ -465,12 +429,8 @@ def qb_get(path, cookie):
 def torrents():
     empty = {"available": False, "dl": "0B/s", "ul": "0B/s",
              "downloading": 0, "seeding": 0, "paused": 0, "total": 0, "items": []}
-    cookie = qb_session()
-    if cookie is None:
-        return empty
-
-    transfer = qb_get("/api/v2/transfer/info", cookie) or {}
-    listing = qb_get("/api/v2/torrents/info", cookie)
+    transfer = qb_get("/api/v2/transfer/info") or {}
+    listing = qb_get("/api/v2/torrents/info")
     if listing is None:
         return empty
 
@@ -525,7 +485,7 @@ def torrents():
 
 
 def main():
-    if len(sys.argv) != 2 or not all((PROMETHEUS, LOKI, QBITTORRENT, INVENTORY, TOKENS, CLIENT_INGRESS, EDGE_ADDRESS)):
+    if len(sys.argv) != 2 or not all((PROMETHEUS, LOKI, QBITTORRENT, INVENTORY, CLIENT_INGRESS, EDGE_ADDRESS)):
         print(__doc__.split("\n\n")[1], file=sys.stderr)
         return 2
     out_dir = sys.argv[1]

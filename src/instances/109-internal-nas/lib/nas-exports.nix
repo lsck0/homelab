@@ -1,4 +1,4 @@
-# the NAS's nfs exports, derived from what every guest mounts (nasClients, modules/nas-clients.nix)
+# the NAS's nfs exports, from the shares every guest declares (nasClients: lab.nasClients, a test's tests/lib/nas-clients.nix)
 #
 # Each guest gets exactly the paths it mounts, read-only where it mounts them read-only; the dmz and the apps zone
 # additionally get subtree checks. Every exported data share is a directory created with its parents before the

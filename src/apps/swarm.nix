@@ -15,8 +15,8 @@
 
   nodes = {
     first = 250;
-    # fixed until modules/lab derives it from modules/limits workerCountOf (review-2 fix round, unfinished)
-    count = 3;
+    # the join token the manager mints (modules/swarm)
+    tokenReads = [ "swarm-worker-token" ];
     vm = {
       bootPhase = "public";
       needs = [ "containers" "nfs" ];

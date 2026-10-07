@@ -5,7 +5,7 @@
 # disabled check carries its reason in a directive next to the code.
 #
 # An embedded body is read from `nix-instantiate --parse`, which has already stripped the indentation and resolved
-# the escapes; each antiquotation becomes the word __NIX__. Its file is bodies/<nix file>.<attribute>-<n>.sh, line 1
+# the escapes; each antiquotation becomes a word of its own, __NIX1__, __NIX2__, ... Its file is bodies/<nix file>.<attribute>-<n>.sh, line 1
 # the shebang, so its line N is line N - 1 of the string. A body behind a function call (lib.mkAfter "...") is
 # not reached. An antiquotation hides what it expands to, so three checks cannot judge a body and are off for bodies
 # alone: SC1091 (a sourced store path), SC2043 (a loop over a nix list) and SC2154 (a variable the unit's environment
@@ -149,6 +149,9 @@ let
                 body = body_render(toks, start)
                 if body is None or not body.replace(PLACEHOLDER, "").strip():
                     continue
+                # numbered: one shared word would read as one file or one constant to every check
+                first, *rest = body.split(PLACEHOLDER)
+                body = first + "".join(f"__NIX{k}__{part}" for k, part in enumerate(rest, 1))
                 target = out / f"{name}.{attr}-{n}.sh"
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_text(SHEBANG + body)

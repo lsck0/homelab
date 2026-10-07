@@ -25,9 +25,11 @@ let
     inherit hosts;
     hermes = {
       address = inventory."114".ip;
-      tools = map lib.getName (lib.filter (p: lib.hasPrefix "lab-" (lib.getName p)) hermes.services.hermes-agent.extraPackages);
+      tools = map lib.getName (lib.filter (p: lib.hasPrefix "lab-" (lib.getName p) || lib.elem (lib.getName p) [ "pve" "vm" "mc" ])
+        hermes.services.hermes-agent.extraPackages);
     };
-    tokens = hermes.homelab.tokens.all;
+    # what `lab-token <name>` answers
+    tokens = (lib.findSingle (p: lib.getName p == "lab-token") null null hermes.services.hermes-agent.extraPackages).names;
     # the router answers ssh on its address in every zone too
     inherit routerName;
     routerAddresses = map (z: z.routerIp) (lib.attrValues net.zones);

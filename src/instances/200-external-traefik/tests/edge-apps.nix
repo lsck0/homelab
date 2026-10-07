@@ -5,18 +5,20 @@
 #
 # The fixture is the real `wat` app (src/apps/wat), enabled for this test (every edge feature: anubis on /, a direct
 # /api with its metrics on the same port, an upload path without the waf and a 100 MiB limit, an internal route).
-# `appnodes` serves its ports on two of the three swarm workers' addresses (the third is absent: the health check
-# must drop it), the terminal's feed (vm-104) and authelia's forwardauth (vm-101, lib/authelia_stub.py: no session
+# Its reservation here needs three swarm workers (modules/limits workerCountOf); `appnodes` serves its ports on two
+# of their addresses (the third is absent: the health check must drop it), the terminal's feed (vm-104) and authelia's forwardauth (vm-101, lib/authelia_stub.py: no session
 # here, every gated host is sent to the portal); `world` owns the flat lab's gateways and the outside clients.
 { pkgs, lib, specialArgs, ... }:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
+  lab = import ../../../tests/lib/lab.nix {
+    inherit pkgs lib specialArgs;
+    apps = apps: lib.recursiveUpdate apps { wat = { enable = true; reservation.memoryMiB = 2048; }; };
+  };
   net = import ../../../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
   ip = id: lab.inventory.${id}.ip;
-  appsCatalog = lib.recursiveUpdate lab.appsCatalog { apps.wat.enable = true; };
   # the internal routes (the instances') the edge relays, and the fixture app as src/apps/wat states it
   internalRoutes = lab.routes.internal;
-  wat = appsCatalog.apps.wat;
+  wat = lab.appsCatalog.apps.wat;
   # an app's routes answer at its name unless a route names another host (modules/apps-catalog)
   watHost = "wat";
   echoBackend = pkgs.writers.writePython3Bin "echo-backend" { flakeIgnore = [ "E501" ]; } (builtins.readFile ../../../tests/lib/echo_backend.py);
@@ -33,7 +35,6 @@ let
 
   guest = vmid: instance: memory: {
     imports = [ (lab.guest vmid { flat = true; inherit instance; }) ../../../tests/lib/offline-traefik.nix ];
-    homelab.appsCatalog = appsCatalog;
     virtualisation.memorySize = memory;
   };
 in

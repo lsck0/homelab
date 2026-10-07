@@ -6,9 +6,8 @@
 let
   # the real vm-105, with the template app enabled so its board and its rules are built too
   fixtureApp = "wat";
-  grafana = (inputs.self.nixosConfigurations."105-internal-grafana".extendModules {
-    modules = [{ homelab.appsCatalog = lib.recursiveUpdate specialArgs.lab.appsCatalog { apps.${fixtureApp}.enable = true; }; }];
-  }).config;
+  hostWith = import ../../../tests/lib/host-with.nix { inherit inputs; };
+  grafana = hostWith (specialArgs.lab.withApps (apps: lib.recursiveUpdate apps { ${fixtureApp}.enable = true; })) "105-internal-grafana";
   telemetry = import ../../../modules/telemetry.nix { inherit lib; inherit (specialArgs) inventory; };
   builder = telemetry.vmName specialArgs.inventory.${toString specialArgs.lab.appsCatalog.builder};
   inherit (specialArgs) inventory;

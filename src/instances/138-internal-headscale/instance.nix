@@ -1,5 +1,5 @@
 # Tailscale control server (VPN mesh) + Headplane UI; internal, not dmz: it controls mesh membership
-{ ... }: {
+{ id, ... }: {
   vm = {
     bootPhase = "network";
     needs = [ "containers" "nfs" ];
@@ -39,5 +39,10 @@
         waf = "tailscale's control protocol the rules misread";
       };
     };
+  };
+
+  shares = {
+    "data/db-dumps/vm-${id}" = { mode = "0700"; };
+    "data/headscale" = { };
   };
 }

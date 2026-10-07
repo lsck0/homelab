@@ -12,7 +12,6 @@
 #     path = [ pkgs.curl pkgs.jq ];
 #     script = ''
 #       ${retry} 90 2 curl -sf http://127.0.0.1:80/health
-#       token_secret_ensure foo-admin-pass
 #       curl -sf ... | jq -j .apiKey | token_write foo-key
 #     '';
 #   };
@@ -20,7 +19,6 @@
 # Token helpers in every setupUnit script (modules/tokens has the dirs):
 #   token_write <name>          the value on stdin becomes this host's <name>.token, renamed into its own dir and
 #                               rewritten only when it changed; refuses an empty value or one that is no token
-#   token_secret_ensure <name>  a random secret this host owns (an app login it sets up), made once, then kept
 #   token_read <name>           a token this host reads or mints, refusing a value that is no token
 # Writes go to the real file in tokens.ownDir, never through the links in tokens.dir: a rename or `rm` through a
 # link replaces the link with a local file, and the nas copy, which every consumer reads, goes stale.
@@ -71,9 +69,6 @@ let
       ${pkgs.coreutils}/bin/chmod 0644 "$tmp"
       ${pkgs.coreutils}/bin/mv -f "$tmp" "$own/$1.token"
       echo "token $1 exported"
-    }
-    token_secret_ensure() { # <name>
-      [ -s "${tokens.ownDir}/$1.token" ] || ${pkgs.openssl}/bin/openssl rand -hex 16 | token_write "$1"
     }
   '';
 

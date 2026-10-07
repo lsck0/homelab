@@ -1,6 +1,6 @@
 ---
 name: proxmox
-description: The Proxmox host, its VMs and snapshots: what the owner runs there.
+description: Manage Proxmox VMs, snapshots and the host.
 version: 1.0.0
 author: homelab
 license: MIT
@@ -13,8 +13,8 @@ metadata:
 
 # Proxmox (host 192.168.178.200, node `luca-server`)
 
-VM ids, names and IPs: `AGENTS.md`. You have no access to this host: every command below is the owner's, as root
-on it (`ssh 192.168.178.200 <cmd>`); send the exact command and what it changes.
+VM ids, names and IPs: `AGENTS.md`. Power actions: `vm` (see `homelab-ops`).
+Everything else with `terminal` on the host: `ssh 192.168.178.200 <cmd>`.
 
 ## Common tasks
 
@@ -29,11 +29,10 @@ on it (`ssh 192.168.178.200 <cmd>`); send the exact command and what it changes.
 - Console when SSH is dead: `qm guest exec <id> -- <cmd>` (QEMU guest agent) or `qm terminal <id>`.
 - Storage: `pvesm status`; disk health `smartctl -a /dev/sda` (also scraped: debian's smartmon and nvme collectors,
   textfile dir `/var/lib/prometheus/node-exporter`).
-- Firewall: Terraform (`src/terraform/lib.tf`) keeps an ip and mac filter per guest (ipset `ipfilter-net0`) and host
-  rules for ssh, 8006 and 9100, but they bind only while the datacenter firewall is on (`var.proxmox_firewall`).
-  Check before relying on them: `pve-firewall status` says `enabled/running` or `disabled/running`. When on, a guest
-  that cannot talk at all after an address change needs its ipset, which the next `sync.sh` writes;
-  `pve-firewall compile` shows the rules.
+- Firewall: the datacenter firewall binds every guest to its own address and mac (ipset `ipfilter-net0` per guest,
+  Terraform `src/terraform/lib.tf`); the host keeps ssh, 8006 and 9100 open by explicit rules. A guest that cannot talk at all
+  after an address change needs its ipset, which the next `sync.sh` writes. `pve-firewall status`,
+  `pve-firewall compile`.
 - GPU mapping `gpu` = RTX 2060, 10de:1f08 at 0000:2b:00.0 (`lspci -nnk -s 2b:00.0` shows `vfio-pci`).
 
 ## Rules

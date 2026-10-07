@@ -140,7 +140,7 @@ let
   '';
   # a client holding one connection open: port, seconds
   holdConnection = pkgs.writeShellScript "hold-connection" ''
-    exec 3<>/dev/tcp/127.0.0.1/$1
+    exec 3<>"/dev/tcp/127.0.0.1/$1"
     ${pkgs.coreutils}/bin/sleep "$2"
   '';
 in

@@ -18,7 +18,6 @@
 
   shares = {
     "data/qbittorrent" = { };
-    "data/tokens/vm-112" = { mode = "0755"; };
     bulk = { };
   };
 

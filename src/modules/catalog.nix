@@ -25,6 +25,7 @@
 #   metricsBlocks   [{ app; host; path; }] metrics a public route would expose: the edge denies them
 #   appsZone        the workers' subnet (cidr, modules/net.nix)
 #   ingress         { internal; external; } the inventory entries of the two ingresses (modules/net.nix zones)
+#   probeUrlOf r    the url the prober and the status dots check an http route at
 #   registry        the registry's name, which the builder pushes to and every stack's images name
 #   problems        what breaks the lab-wide rules, one line each naming every side; empty when the catalog holds
 #
@@ -278,6 +279,9 @@ in {
 
   internal = routesOf "internal";
   external = routesOf "external";
+  # where the prober and the dashboard's status dot check an http route: through its ingress, at its health path,
+  # which the ingress answers past sso for them alone (modules/traefik); without one the route's own door
+  probeUrlOf = r: "https://${net.fqdn r.host}${if r.health == null then r.path else r.health}";
   access = {
     admins = "admins";
     groups = lib.genAttrs ssoNames (name: "app-${name}");

@@ -175,7 +175,7 @@ let
   # readable): the session token in a header file, the passwords through jq --rawfile
   jellyfinApi = ''
     J=http://127.0.0.1:${toString route.port}
-    ADMIN_PASS_FILE=${T}/jellyfin-admin-pass.token
+    ADMIN_PASS_FILE=${config.sops.secrets.jellyfin-admin-pass.path}
     AUTH_HEADER=$RUNTIME_DIRECTORY/auth.header
     # jellyfin 12 only accepts the Authorization header, the client fields identify the setup's session
     CLIENT_HEADER='Authorization: MediaBrowser Client="homelab", Device="setup", DeviceId="homelab-setup", Version="1.0"'
@@ -242,7 +242,6 @@ let
   '';
 in {
   # janitorr cleans up through the arrs and jellyseerr
-  homelab.tokens.reads = [ "radarr-key" "sonarr-key" "jellyseerr-key" ];
 
   # nvidia driver and cuda are unfree
   nixpkgs.config.allowUnfree = gpu;
@@ -342,7 +341,6 @@ in {
     };
     script = ''
       ${jellyfinApi}
-      token_secret_ensure jellyfin-admin-pass
       jellyfin_wait_ready
 
       # -- admin: the first start runs the wizard with the generated password
@@ -414,10 +412,9 @@ in {
       done
 
       # -- janitorr deletes through a user of its own: content deletion, no admin
-      token_secret_ensure janitorr-pass
       janitorr_id=$(api "$J/Users" | jq -r 'first(.[] | select(.Name == "janitorr")) | .Id')
       if [ -z "$janitorr_id" ]; then
-        janitorr_id=$(jq -cn --rawfile p ${T}/janitorr-pass.token '{Name: "janitorr", Password: $p}' \
+        janitorr_id=$(jq -cn --rawfile p ${config.sops.secrets.janitorr-pass.path} '{Name: "janitorr", Password: $p}' \
           | api -X POST "$J/Users/New" -d @- | jq -er .Id)
         echo "user janitorr created"
       fi
@@ -492,21 +489,24 @@ in {
     '';
   };
 
-  sops.secrets.jellyfin-oidc-secret = {};
+  sops.secrets = lib.genAttrs [ "jellyfin-oidc-secret" "jellyfin-admin-pass" "janitorr-pass" "radarr-key" "sonarr-key" ] (_: { });
 
-  # render janitorr's configs from the exported api keys
+  # render janitorr's configs from the api keys
   systemd.services.janitorr-config = setupUnit {
-    description = "Render Janitorr configuration from exported API keys";
+    description = "Render Janitorr configuration from the API keys";
     after = [ "jellyfin-setup.service" ];
     wants = [ "jellyfin-setup.service" ];
     before = [ "podman-janitorr.service" "podman-janitorr-stats.service" ];
     wantedBy = [ "podman-janitorr.service" "podman-janitorr-stats.service" ];
     path = [ pkgs.coreutils ];
     script = ''
-      # token_read checks each value is a token, so none carries a yaml quote or a second line
-      radarr=$(token_read radarr-key) && sonarr=$(token_read sonarr-key) && jellyseerr=$(token_read jellyseerr-key) \
-        && jellyfin=$(token_read jellyfin-key-janitorr) && janitorr=$(token_read janitorr-pass) \
-        || { echo "waiting for the arr, jellyseerr and jellyfin keys"; exit 1; }
+      # token_read checks each value is a token, so none carries a yaml quote or a second line; the secrets are hex
+      radarr=$(cat ${config.sops.secrets.radarr-key.path})
+      sonarr=$(cat ${config.sops.secrets.sonarr-key.path})
+      janitorr=$(cat ${config.sops.secrets.janitorr-pass.path})
+      if ! jellyseerr=$(token_read jellyseerr-key) || ! jellyfin=$(token_read jellyfin-key-janitorr); then
+        echo "waiting for the jellyseerr and jellyfin keys"; exit 1
+      fi
       render() { # <template> <target>; substituted in the shell, so no key passes through argv
         local text
         text=$(cat "$1")

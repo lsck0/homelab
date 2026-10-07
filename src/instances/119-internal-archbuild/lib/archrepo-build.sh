@@ -517,16 +517,28 @@ unsatisfied_deps() {
 
 # listed aur names plus every dependency neither the repos nor another base satisfies
 resolve() {
-  local round pending name base lines new
+  local round pending name base lines new remote
   declare -A found
   mapfile -t pending < <({ printf '%s\n' "${aur_wanted[@]}"; unsatisfied_deps "${bases[@]}"; } | sort -u | sed '/^$/d')
   for (( round = 0; round < RESOLVE_ROUNDS_MAX && ${#pending[@]} > 0; round++ )); do
-    found=()
-    lines=$(aur_bases "${pending[@]}") || { log "aur rpc failed"; resolve_complete=0; return 0; }
-    while read -r name base; do
-      [ -n "$name" ] && found[$name]=$base
-    done <<<"$lines"
+    # a local recipe wins for a dependency as for a listed name: the aur's copy may be the broken one it replaces
     new=()
+    remote=()
+    for name in "${pending[@]}"; do
+      if [ -f "$DOTFILES/$PKGBUILDS/$name/PKGBUILD" ]; then
+        [ -n "${kind[$name]:-}" ] || { add_base "$name" local; new+=("$name"); }
+      else
+        remote+=("$name")
+      fi
+    done
+    pending=("${remote[@]}")
+    found=()
+    if (( ${#pending[@]} > 0 )); then
+      lines=$(aur_bases "${pending[@]}") || { log "aur rpc failed"; resolve_complete=0; return 0; }
+      while read -r name base; do
+        [ -n "$name" ] && found[$name]=$base
+      done <<<"$lines"
+    fi
     for name in "${pending[@]}"; do
       looked_up[$name]=1
       base=${found[$name]:-}

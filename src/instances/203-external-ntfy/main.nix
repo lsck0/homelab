@@ -52,6 +52,7 @@ in {
     script = ''
       set -euo pipefail
       # `ntfy user hash` prompts twice on stdout, then prints the hash
+      # shellcheck disable=SC2016 # a bcrypt hash's literal $2y$ prefix
       hash_of() { printf '%s\n%s\n' "$1" "$1" | ntfy user hash | grep -o '\$2[aby]\$[^ ]*'; }
       # ntfy tokens are tk_ and 29 of [a-z0-9]: 15 random bytes in hex, one digit dropped
       if [ ! -s ${heartbeatToken} ]; then
@@ -118,10 +119,11 @@ in {
       # the first start: no user database yet, no account to remove
       [ -e ${authFile} ] || exit 0
       listing=$(ntfy user list)
-      for name in $(awk -v declared=${lib.escapeShellArg (toString (lib.attrNames users))} -f ${./lib/users-prune.awk} <<<"$listing"); do
-        ntfy user remove "$name"
-        echo "removed account $name, it is not in 203-external-ntfy/main.nix"
-      done
+      awk -v declared=${lib.escapeShellArg (toString (lib.attrNames users))} -f ${./lib/users-prune.awk} <<<"$listing" \
+        | while read -r name; do
+            ntfy user remove "$name"
+            echo "removed account $name, it is not in 203-external-ntfy/main.nix"
+          done
     '';
   };
 

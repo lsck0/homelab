@@ -11,10 +11,7 @@
 { config, pkgs, lib, inventory, nasClients, site, catalog, lab, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
-  flows = import ../../modules/flows.nix {
-    inherit lib net inventory catalog nasClients lab;
-    appsCatalog = config.homelab.appsCatalog;
-  };
+  flows = import ../../modules/flows.nix { inherit lib net inventory catalog nasClients lab; };
   inherit (net) zones ports;
   wan = net.wan.interface;
 

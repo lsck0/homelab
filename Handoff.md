@@ -32,9 +32,91 @@ ordered task list are below. Paths are relative to the repo root (`homelab/`), t
 - **Live hot fix not yet in a generation:** vm-100 (internal ingress) had thrashed to a halt with a 512 MiB balloon
   floor; the owner's session raised it live (`qm set 100 --balloon 1024`) and wrote `balloonMiB = 1024` into
   `src/instances/100-internal-traefik/instance.nix`. That edit must survive into the next deploy.
-- **Uncommitted, partial work:** an interrupted fix round (section 2) left about 135 changed files (+4.5k/-3.7k
-  lines) in the owner's working tree. These edits are partial and unverified. If they were pushed to a branch for
-  you, treat them as a starting point, not as done; if you only see `master`, redo the round from the plan below.
+- **Review-2 fix round:** in progress on branch `review2-fixes`; the checkpoint below (section 1a) is what the branch
+  holds now, what is verified, what is open, and what the owner must do before deploying it.
+
+## 1a. Checkpoint of the review-2 fix round (2026-10-07, branch `review2-fixes`)
+
+**Recommendation: do not deploy this checkpoint yet.** It is a consistent, evaluating base, but most review-2
+findings are still open and policy-eval fails on the memory budget (#1). Deploy when the round is finished; the
+steps below are written so that a local agent with lab access can do them then (or now, if the owner decides to).
+
+### What holds now (verified in the cloud, no lab access)
+- Every nixosConfiguration evaluates (32). Every eval-only check builds, except `policy-eval` (below).
+- `shellcheck` (now including every shell body embedded in nix) and `secrets-check` pass (git flake).
+- `terraform init -backend=false && terraform validate && terraform fmt -check` pass (terraform 1.14.0, providers
+  from a filesystem mirror; the lock file is unchanged).
+- VM test `harness-smoke` passes. Every other VM test evaluates; none of them has been run on this branch yet.
+- `policy-eval` reports: the host memory budget (#1: floors 41984 MiB vs 32022 MiB on the node, open), and secrets
+  files that do not hold exactly their declared names (clears with the secrets steps below).
+
+### Finding status at this checkpoint
+| status | findings |
+|---|---|
+| fixed and verified by checks | 28 (pinned hermes-agent reads `ANTHROPIC_TOKEN` as the OAuth token and scrubs it from every command; `CLAUDE_CODE_OAUTH_TOKEN` was not scrubbed, so the leak was real: switched), 42, 43, 47, 48, 49, 81, 85 |
+| rejected by the owner | 3; 16 (Hermes keeps root ssh everywhere; only its key comment was corrected to vm-114, and Hermes now checks host keys strictly against `src/generated/known_hosts`) |
+| partly done (draft finished to evaluate, not yet reviewed against the finding) | 1 (law exists, shapes do not fit yet), 5, 14, 15, 45, 46, 50, 53 |
+| open (the draft may hold partial work in these areas; unreviewed) | every other finding |
+
+Main changes beyond the draft: the typed app catalog lives in `modules/lab` once (`lab.appsCatalog`, `lab.catalog`,
+`lab.withApps f` for fixture apps; `homelab.appsCatalog` is gone); swarm workers derive from the enabled apps'
+reservations (`modules/limits` `workerCountOf`); hosts and test guests get their instance record as `instance`; NAS
+shares are declared in instance.nix and checked by a policy law (`tests/policy/guests.nix`); every policy law has a
+positive control (`tests/policy-controls.nix`); the Hermes "observer" account of the draft is reverted (owner
+decision), keeping its strict known-hosts, `ANTHROPIC_TOKEN` and the declared skills tree; sync.sh's
+`terraform init` passes `-reconfigure` (the draft moved the state path to `~/.local/state/homelab/terraform`, and
+init on a workstation with an existing `.terraform` failed with "Backend configuration changed"); `DOTFILES_SECRETS`
+works again.
+
+### Owner / local agent steps, in order (only when deploying this branch)
+1. **Secrets: restore the values that moved from runtime tokens to sops** (guardsData: `secrets-sync` stops until each
+   is set; never generate new ones, the apps hold the live values). On the workstation, in the repo, for each line
+   (`<token dir>`: where the live token is, `<file>`: where the value goes):
+   ```
+   # name                 token dir      file
+   # radarr-key           vm-130         src/secrets/shared.sops.json
+   # sonarr-key           vm-130         src/secrets/shared.sops.json
+   # lidarr-key           vm-130         src/secrets/shared.sops.json
+   # prowlarr-key         vm-130         src/secrets/shared.sops.json
+   # jellyfin-admin-pass  vm-134         src/secrets/shared.sops.json
+   # janitorr-pass        vm-134         src/instances/134-internal-jellyfin/secrets.sops.json
+   # navidrome-pass       vm-136         src/instances/136-internal-navidrome/secrets.sops.json
+   ssh root@10.100.0.109 cat /srv/nas/data/tokens/<token dir>/<name>.token | jq -Rc . \
+     | SOPS_AGE_KEY_FILE=secrets/age.txt sops set --value-stdin <file> '["<name>"]'
+   ```
+   (`--value-stdin` keeps the value off argv; `jq -Rc .` makes it the JSON string sops expects.) The two
+   `secrets.sops.json` files above are new and hold empty placeholders; the shared values live in
+   `src/secrets/shared.sops.json`.
+2. `src/scripts/secrets-sync.sh` (dry run), read it, then `--apply`: it moves `registry-push-password` from vm-100's
+   file to the shared file (value kept), generates the new `qbittorrent-pass` (vm-112 sets the web UI password from it at every start) and the
+   readers' shared copies, drops `proxmox-ca` (#53), and rewrites `.sops.yaml` (rules for 134/136 added, workers 251/252
+   removed). Run `--prune` only after reading what it would delete.
+3. **Terraform plan check** (sync.sh prints it; nothing is applied without reading it): expected
+   - destroy vm-251 and vm-252 (stateless swarm workers; the derived worker count is 1 for the one enabled app);
+   - vm-105 disk 16 -> 80 GiB (grow, in place): prometheus, loki and pyroscope move to local disk through
+     `homelab.localState`, whose first seed copies the NAS copy (keep the share; the first start takes a while);
+   - the Proxmox firewall turns on with input policy DROP (#2, draft): host rules admit ssh from the house lan,
+     8006 only from the workstation (`site.json lan.workstation`) and the router, node exporter and ping. **Before
+     applying, check `src/generated/site.json` `lan.workstation` (192.168.178.138) is the workstation's real address**, and keep a
+     console (or `pve-firewall stop` over ssh) ready: a wrong address locks the API and web UI out;
+   - no `must be replaced` on any existing guest. The draft removed the `moved {}` block of the gpu mapping
+     (`gpu` -> `gpu[0]`): fine once a deploy applied it; if the plan wants to destroy `gpu` or create `gpu[0]`, stop.
+4. Deploy: `cd ~/projects/homelab && DOTFILES_SECRETS=~/projects/arch-dotfiles/configs/secrets ./sync.sh`
+   (the terraform state moves once to `~/.local/state/homelab/terraform`, a copy stays beside it as `.moved-from-src`).
+5. Live checks: section 3 below, plus `ssh root@10.100.0.140 docker node ls` (vm-250 Ready, 251/252 gone),
+   `ssh root@10.100.0.105 systemctl status prometheus-seed loki-seed` (seeded, not diverged), Hermes answers on
+   Telegram and `ssh root@<guest>` works from vm-114 (strict host keys), the *arr apps, Jellyfin, Janitorr, Navidrome
+   and the homepage widgets work with the restored keys.
+
+### Still to do in the round (cloud side)
+- Groups collector, telemetry and host-tooling were in progress at this checkpoint; network-edge, swarm-apps,
+  data-secrets and instances not started (plan: section 2).
+- New owner requirement for every group: everything that depends on a third-party service (AUR, GitHub, Cloudflare,
+  Let's Encrypt, Proton, Telegram, Anthropic, image registries, crowdsec hub, upstream DNS, feeds) survives its
+  outage: bounded timeouts, retry with backoff, keep the last good state, no bogus failures, self-recovery, one
+  distinct "<service> unavailable" alert. First known case: archbuild (vm-119) recorded 67 failures during an AUR
+  outage on 2026-10-07; it must retry, then skip the night as "AUR unavailable".
+- Run every touched VM test (one at a time), the final 7-dimension review, then update this section.
 
 ## 2. The task: fix every confirmed review-2 finding except #3
 

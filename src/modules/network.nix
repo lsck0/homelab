@@ -21,7 +21,6 @@ let
   net = import ./net.nix { inherit lib inventory site; };
   flows = import ./flows.nix {
     inherit lib net inventory catalog lab;
-    inherit (lab) appsCatalog;
     nasClients = throw "modules/network.nix renders the guards only, which name no nas client";
   };
 

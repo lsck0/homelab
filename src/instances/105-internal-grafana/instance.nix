@@ -9,8 +9,8 @@
     memoryMiB = 2560;
     # explicit floor: tsdb head and loki chunks are working memory
     balloonMiB = 1536;
-    # the stores on local disk (main.nix sizes prometheus' retention from it), journal-remote's 1G, the system
-    diskGiB = 64;
+    # the stores on local disk (main.nix sizes prometheus' retention from it: 56GB), journal-remote's 1G, the system
+    diskGiB = 80;
   };
 
   grants = [
@@ -32,5 +32,15 @@
         widget = { type = "prometheus"; url = telemetry.urls.prometheus; };
       };
     };
+  };
+
+  tokenReads = [ "hass-key" ];
+
+  shares = {
+    "data/app-dashboards".readOnly = true;
+    "data/grafana" = { };
+    "data/loki" = { };
+    "data/prometheus" = { };
+    "data/pyroscope" = { };
   };
 }

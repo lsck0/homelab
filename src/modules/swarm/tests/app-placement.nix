@@ -1,7 +1,7 @@
 # an app on its own guest is the same app as one on the shared swarm: same render, same deploy, same limits,
 # capabilities and tenant, reached the same way through the edge
 #
-# A fixture tree (the real src plus two apps) collected by modules/lab: `level` runs on the shared swarm
+# The real lab plus two apps (tests/lib/lab.nix `apps`): `level` runs on the shared swarm
 # (manager vm-140, worker vm-250), `own` is placed on its own guest, a swarm of one. Every property is checked by
 # one function over both apps, so a difference between the two placements is a failure of that property.
 { pkgs, lib, specialArgs, ... }:
@@ -34,17 +34,8 @@ let
   # INTERNAL
   # -----------------------------------------------------------------------------
 
-  tree = pkgs.runCommand "lab-placement" { } (''
-    cp -r ${../../..} $out
-    chmod -R u+w $out/apps
-  '' + lib.concatStrings (lib.mapAttrsToList (name: a: ''
-    mkdir -p $out/apps/${name}
-    cp ${pkgs.writeText "app.nix" (lib.generators.toPretty { } a)} $out/apps/${name}/app.nix
-  '') apps));
-  collected = import ../../lab { inherit lib; root = tree; };
-  facts = specialArgs // { inherit (collected) inventory site; lab = collected; };
-  lab = assert lib.assertMsg (collected.problems == [ ]) (lib.concatLines collected.problems);
-    import ../../../tests/lib/lab.nix { inherit pkgs lib; specialArgs = facts; };
+  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = folders: folders // apps; };
+  collected = lab.specialArgs.lab;
   net = import ../../net.nix { inherit lib; inherit (collected) inventory site; };
   telemetry = import ../../telemetry.nix { inherit lib; inherit (collected) inventory; };
   ip = id: collected.inventory.${id}.ip;

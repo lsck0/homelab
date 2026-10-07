@@ -12,11 +12,11 @@ let
     # nix eval --json --no-warn-dirty <src>#lab.instances --apply <function>
     set -euo pipefail
     flake=$4
-    exec nix-instantiate --eval --strict --json --store dummy:// \
+    exec ${pkgs.nix}/bin/nix-instantiate --eval --strict --json --store dummy:// \
       -E "(''${6}) (import ''${flake%#*}/modules/lab { lib = import ${pkgs.path}/lib; }).instances"
   '';
 in
-pkgs.runCommand "stack" { nativeBuildInputs = [ pkgs.bash pkgs.python3 pkgs.nix nixEval ]; } ''
+pkgs.runCommand "stack" { nativeBuildInputs = [ pkgs.bash pkgs.python3 nixEval ]; } ''
   export HOME=$TMPDIR NIX_STATE_DIR=$TMPDIR/nix
   mkdir fixture && cp -r ${src} fixture/src && chmod -R u+w fixture
   python3 ${./stack_test.py} fixture

@@ -350,15 +350,13 @@ in {
         local verb=$1 gone_pattern=$2 out err item
         shift 2
         err=$(mktemp)
-        out=$(proton-drive filesystem "$verb" -j "$@" 2>"$err")
-        if [ $? = 0 ] && jq -e 'all(.[]; .ok == true)' <<<"$out" >/dev/null 2>&1; then
+        if out=$(proton-drive filesystem "$verb" -j "$@" 2>"$err") && jq -e 'all(.[]; .ok == true)' <<<"$out" >/dev/null 2>&1; then
           rm -f "$err"
           return 0
         fi
         # one unresolvable path fails the whole call before anything moves: retry one by one
         for item in "$@"; do
-          out=$(proton-drive filesystem "$verb" -j "$item" 2>"$err")
-          if [ $? = 0 ] && jq -e 'all(.[]; .ok == true)' <<<"$out" >/dev/null 2>&1; then continue; fi
+          if out=$(proton-drive filesystem "$verb" -j "$item" 2>"$err") && jq -e 'all(.[]; .ok == true)' <<<"$out" >/dev/null 2>&1; then continue; fi
           grep -q "$gone_pattern" "$err" && continue
           echo ">>> $verb $item failed: $(head -c 300 "$err") $(head -c 300 <<<"$out")" >&2
           echo "$item"

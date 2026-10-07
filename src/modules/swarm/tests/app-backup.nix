@@ -6,10 +6,10 @@
 # (lib/controller-api.py) is the only way the state worker wakes an app.
 { pkgs, lib, specialArgs, ... }:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
+  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: apps; };
   registryAddress = lab.inventory."100".ip;
   manager = lab.inventory."140".ip;
-  controllerPort = lab.appsCatalog.controllerPort;
+  inherit (lab.appsCatalog) controllerPort;
 
   image = pkgs.dockerTools.buildLayeredImage {
     name = "fixture";
@@ -25,20 +25,17 @@ let
     stateful = [ "web" ];
     volumes.data.backup = true;
   } extra;
-  catalog = lab.appsCatalog // {
-    apps = {
-      keep = appOf "keep" 20160 { };
-      sleepy = appOf "sleepy" 20170 {
-        volumes.data.backup = lib.mkForce false;
-        dumps.page = { service = "web"; command = "cat /data/index.html"; };
-        idle.stopAfter = "30m";
-      };
+  apps = {
+    keep = appOf "keep" 20160 { };
+    sleepy = appOf "sleepy" 20170 {
+      volumes.data.backup = lib.mkForce false;
+      dumps.page = { service = "web"; command = "cat /data/index.html"; };
+      idle.stopAfter = "30m";
     };
   };
 
   node = vmid: {
     imports = [ (lab.guest vmid { flat = true; nas = true; }) ];
-    homelab.appsCatalog = catalog;
     networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
     environment.systemPackages = [ pkgs.curl pkgs.zstd ];
     virtualisation.memorySize = 2048;

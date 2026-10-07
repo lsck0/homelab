@@ -5,6 +5,8 @@
 # - host memory budget: every powered guest's floor (a vm's balloon floor, its whole memory when unballooned, an
 #   lxc's limit) plus the zfs arc and the node's reserve fit the node's memory (src/lab/node.nix). Past it the
 #   balloon squeezes guests below their floors and the node swaps; onDemand guests count, since all may wake at once.
+# - a guest mounts exactly the shares its instance.nix declares (lab.shares, its token dirs derived): vm-109 exports
+#   those, so a mount it does not export hangs and an export nothing mounts is open for nothing
 { lib, configs, lab, ... }:
 let
   node = import ../../lab/node.nix;
@@ -23,6 +25,16 @@ let
       "${name}: vm.needs is [ ${toString declared} ], its configuration uses [ ${toString used} ]"
   ) lab.hosts);
 
+  sortedShares = shares: lib.sort (a: b: a.path < b.path) (map (s: { inherit (s) path readOnly mode; }) shares);
+  shareLaws = lib.concatLists (lib.mapAttrsToList (name: host: let
+      declared = sortedShares lab.shares.${host.id};
+      mounted = sortedShares configs.${name}.homelab.nasShares;
+    in
+    lib.optional (host.id != "300" && declared != mounted)
+      ("${name} mounts ${builtins.toJSON (lib.subtractLists declared mounted)} it does not declare and declares "
+        + "${builtins.toJSON (lib.subtractLists mounted declared)} it does not mount: instance.nix `shares`")
+  ) lab.hosts);
+
   floorOf = vm: if vm.guestKind == "lxc" || vm.balloonMiB == 0 then vm.memoryMiB else vm.balloonMiB;
   floors = lib.sort (a: b: a.miB > b.miB) (map (i: { inherit (i) id; kind = i.config.vm.guestKind; miB = floorOf i.config.vm; })
     (lib.filter (i: i.config.vm.power == "on") (lib.attrValues lab.instances)));
@@ -34,4 +46,4 @@ let
       + " by ${toString (totalMiB - node.memoryMiB)}; largest: "
       + lib.concatMapStringsSep ", " (f: "${f.id} ${toString f.miB}") (lib.take largestShown floors));
 in
-needsLaws ++ budgetLaws
+needsLaws ++ shareLaws ++ budgetLaws

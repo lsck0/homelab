@@ -19,13 +19,12 @@
 #     there; a test's own files sit beside the test that names them; every test in src/tests says why it is
 #     lab-wide in its first lines (`# lab-wide: <reason>`)
 #   - an instance folder holds main.nix and instance.nix, a module folder default.nix, lib/ and tests/ only
-{ lib, ... }:
+{ lib, src, ... }:
 let
   # -------------------------------------------------------------------------------------------------------------
   # CONSTANTS
   # -------------------------------------------------------------------------------------------------------------
 
-  src = ../..;
   topAllowed = [ "flake.nix" "flake.lock" "apps" "generated" "instances" "lab" "modules" "scripts" "secrets" "terraform" "tests" ];
   moduleFolderAllowed = [ "default.nix" "lib" "tests" ];
   # src/tests: the harness folders beside the lab-wide tests

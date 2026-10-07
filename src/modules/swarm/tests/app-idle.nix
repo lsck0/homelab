@@ -6,7 +6,7 @@
 # sleeping app updates it asleep.
 { pkgs, lib, specialArgs, ... }:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
+  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: apps; };
   net = import ../../net.nix { inherit lib; inherit (specialArgs) inventory site; };
   ip = id: lab.inventory.${id}.ip;
   registryAddress = ip "100";
@@ -29,11 +29,8 @@ let
     branch = "master";
     routes.${name} = { inherit port; health = "/"; off = { sso = "the fixture is public"; anubis = "no browser here"; }; };
   } extra;
-  catalog = lab.appsCatalog // {
-    apps = { lazy = appOf "lazy" 20180 { idle.stopAfter = idleWindow; }; steady = appOf "steady" 20190 { }; };
-  };
+  apps = { lazy = appOf "lazy" 20180 { idle.stopAfter = idleWindow; }; steady = appOf "steady" 20190 { }; };
   common = {
-    homelab.appsCatalog = catalog;
     networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
     environment.systemPackages = [ pkgs.curl ];
   };

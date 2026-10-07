@@ -121,7 +121,7 @@ in {
             exit 1
           fi
           rsync -a --delete ${excludes s} ${lib.concatMapStringsSep " " (g: "--exclude ${lib.escapeShellArg "${g}*"}") s.sqlite} ${s.path}/ ${nasDir name}/
-          cd ${s.path}
+          cd ${s.path} || exit 1
           for db in ${lib.concatStringsSep " " s.sqlite}; do
             [ -f "$db" ] || continue
             mkdir -p "${nasDir name}/$(dirname "$db")"

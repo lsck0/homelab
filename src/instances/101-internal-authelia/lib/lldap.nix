@@ -222,9 +222,5 @@ in {
 
   # ldap for authelia on this host and the proxmox realm, the web ui through the ingress
   networking.firewall.allowedTCPPorts = [ ldapPort httpPort ];
-  homelab.ingressOnly = {
-    ports = [ ldapPort httpPort ];
-    # the proxmox realm's sync (scripts/pve-install.sh)
-    portSources.${toString ldapPort} = [ "${net.wan.proxmox}/32" ];
-  };
+  homelab.ingressOnly.ports = [ ldapPort httpPort ];
 }

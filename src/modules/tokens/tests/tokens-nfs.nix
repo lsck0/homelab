@@ -2,8 +2,8 @@
 # exports exactly what they mount by the real rules (109-internal-nas's lib/nas-exports.nix). The oracle is the policy itself, as a
 # table: who may mount which producer's directory, and how.
 #
-#   vm-130  producer of radarr-key, sonarr-key, ...   rw tokens/vm-130
-#   vm-134  producer of the jellyfin keys, reads radarr-key        ro tokens/vm-130
+#   vm-130  producer of bazarr-key                    rw tokens/vm-130
+#   vm-134  producer of the jellyfin keys, reads bazarr-key  ro tokens/vm-130
 #   vm-121  producer of paperless-key, reads nothing of vm-130
 #   vm-250  apps zone, reads swarm-worker-token                    ro tokens/vm-140 (subtree checked)
 #
@@ -43,7 +43,7 @@ pkgs.testers.runNixOSTest {
   node.specialArgs = lab.specialArgs;
   nodes.vm-109 = lab.nas { flat = true; };
   nodes.vm-130 = guest "130" [ ];
-  nodes.vm-134 = guest "134" [ "radarr-key" ];
+  nodes.vm-134 = guest "134" [ "bazarr-key" ];
   nodes.vm-121 = guest "121" [ ];
   nodes.vm-250 = guest "250" [ "swarm-worker-token" ];
 
@@ -77,7 +77,7 @@ pkgs.testers.runNixOSTest {
 
     def token_write(value):
         # how a producer writes: a temp file in its own dir, renamed into place
-        vm_130.succeed(f"printf %s {value} > {OWN_130}/radarr-key.token.tmp && mv {OWN_130}/radarr-key.token.tmp {OWN_130}/radarr-key.token")
+        vm_130.succeed(f"printf %s {value} > {OWN_130}/bazarr-key.token.tmp && mv {OWN_130}/bazarr-key.token.tmp {OWN_130}/bazarr-key.token")
 
     start_all()
     vm_109.wait_for_unit("nfs-exports-reload.service")
@@ -101,25 +101,25 @@ pkgs.testers.runNixOSTest {
     with subtest("a producer's write lands in its own dir on the nas"):
         vm_130.wait_for_unit("multi-user.target")
         token_write("k1")
-        assert vm_109.succeed("cat /srv/nas/data/tokens/vm-130/radarr-key.token") == "k1"
+        assert vm_109.succeed("cat /srv/nas/data/tokens/vm-130/bazarr-key.token") == "k1"
 
     with subtest("a consumer reads exactly what it lists"):
-        vm_134.wait_until_succeeds("[ \"$(cat /var/lib/lab-tokens/radarr-key.token)\" = k1 ]", timeout=60)
-        vm_134.fail("test -e /var/lib/lab-tokens/sonarr-key.token")
+        vm_134.wait_until_succeeds("[ \"$(cat /var/lib/lab-tokens/bazarr-key.token)\" = k1 ]", timeout=60)
+        vm_134.fail("test -e /var/lib/lab-tokens/paperless-key.token")
 
     with subtest("a consumer cannot write, even as root"):
         d = "/var/lib/lab-tokens.d/vm-130"
-        for cmd in (f"touch {d}/new", f"echo x > {d}/radarr-key.token", f"rm {d}/radarr-key.token",
-                    f"mv {d}/radarr-key.token {d}/moved", "echo x > /var/lib/lab-tokens/radarr-key.token"):
+        for cmd in (f"touch {d}/new", f"echo x > {d}/bazarr-key.token", f"rm {d}/bazarr-key.token",
+                    f"mv {d}/bazarr-key.token {d}/moved", "echo x > /var/lib/lab-tokens/bazarr-key.token"):
             out = vm_134.fail(f"( {cmd} ) 2>&1")
             assert "Read-only file system" in out, f"{cmd}: {out}"
         vm_134.succeed(f"findmnt -no OPTIONS {d} | tr , '\\n' | grep -qx ro")
-        assert vm_109.succeed("cat /srv/nas/data/tokens/vm-130/radarr-key.token") == "k1"
+        assert vm_109.succeed("cat /srv/nas/data/tokens/vm-130/bazarr-key.token") == "k1"
 
     with subtest("a guest that reads nothing of vm-130 cannot mount it; the entitled one can"):
         denied(vm_121, "/srv/nas/data/tokens/vm-130")
         mounts(vm_134, "/srv/nas/data/tokens/vm-130")
-        assert vm_134.succeed("cat /mnt/probe/radarr-key.token") == "k1"
+        assert vm_134.succeed("cat /mnt/probe/bazarr-key.token") == "k1"
         unmount(vm_134)
 
     with subtest("the pseudo-root shows a guest only its own exports"):
@@ -155,13 +155,13 @@ pkgs.testers.runNixOSTest {
         # cached lookup would serve the old version for up to a minute and prove nothing. A read that errs (a name
         # replaced mid-lookup) records nothing: an error is no wrong value
         vm_134.succeed("systemd-run --unit=token-reader --setenv=PATH=$PATH bash -c 'while :; do "
-                       "echo 2 > /proc/sys/vm/drop_caches; if t=$(cat /var/lib/lab-tokens/radarr-key.token); then printf \"%s\\n\" \"$t\"; fi; "
+                       "echo 2 > /proc/sys/vm/drop_caches; if t=$(cat /var/lib/lab-tokens/bazarr-key.token); then printf \"%s\\n\" \"$t\"; fi; "
                        "done > /tmp/reads'")
         vm_130.succeed(
             "systemd-run --unit=token-rotate --remain-after-exit --setenv=PATH=$PATH bash -euc '"
             "for i in $(seq 0 ${toString (rotations - 1)}); do "
-            "yes $(printf %08d $i) | tr -d \"\\\\n\" | head -c ${toString tokenBytes} > " + OWN_130 + "/radarr-key.token.tmp "
-            "&& mv " + OWN_130 + "/radarr-key.token.tmp " + OWN_130 + "/radarr-key.token; done'"
+            "yes $(printf %08d $i) | tr -d \"\\\\n\" | head -c ${toString tokenBytes} > " + OWN_130 + "/bazarr-key.token.tmp "
+            "&& mv " + OWN_130 + "/bazarr-key.token.tmp " + OWN_130 + "/bazarr-key.token; done'"
         )
         vm_130.wait_until_succeeds("systemctl show -p SubState token-rotate | grep -qx SubState=exited", timeout=300)
         vm_130.succeed("systemctl show -p Result token-rotate | grep -qx Result=success")
@@ -176,25 +176,25 @@ pkgs.testers.runNixOSTest {
 
     with subtest("nas outage: the producer's write waits and lands, the reader errs and recovers"):
         token_write("before-outage")
-        vm_134.wait_until_succeeds("[ \"$(cat /var/lib/lab-tokens/radarr-key.token)\" = before-outage ]", timeout=60)
+        vm_134.wait_until_succeeds("[ \"$(cat /var/lib/lab-tokens/bazarr-key.token)\" = before-outage ]", timeout=60)
         vm_109.block()
         vm_130.succeed("systemd-run --unit=outage-write --remain-after-exit --setenv=PATH=$PATH bash -euc 'printf after-outage > " + OWN_130
-                       + "/radarr-key.token.tmp && mv " + OWN_130 + "/radarr-key.token.tmp " + OWN_130 + "/radarr-key.token'")
+                       + "/bazarr-key.token.tmp && mv " + OWN_130 + "/bazarr-key.token.tmp " + OWN_130 + "/bazarr-key.token'")
         # the hard mount blocks the writer instead of failing it, for as long as the outage lasts
         vm_130.succeed("sleep ${toString outageS}; systemctl show -p SubState outage-write | grep -qx SubState=running")
         # a soft read-only reader fails, or still answers with a whole version; never empty
-        out = vm_134.execute("timeout 60 cat /var/lib/lab-tokens/radarr-key.token")[1]
+        out = vm_134.execute("timeout 60 cat /var/lib/lab-tokens/bazarr-key.token")[1]
         assert out in ("", "before-outage"), f"read during the outage: {out!r}"
         vm_109.unblock()
         vm_130.wait_until_succeeds("systemctl show -p SubState outage-write | grep -qx SubState=exited", timeout=180)
         vm_130.succeed("systemctl show -p Result outage-write | grep -qx Result=success")
-        assert vm_109.succeed("cat /srv/nas/data/tokens/vm-130/radarr-key.token") == "after-outage"
-        vm_134.wait_until_succeeds("[ \"$(cat /var/lib/lab-tokens/radarr-key.token)\" = after-outage ]", timeout=180)
+        assert vm_109.succeed("cat /srv/nas/data/tokens/vm-130/bazarr-key.token") == "after-outage"
+        vm_134.wait_until_succeeds("[ \"$(cat /var/lib/lab-tokens/bazarr-key.token)\" = after-outage ]", timeout=180)
 
     with subtest("nas restart under a reader: reads resume"):
         vm_109.succeed("systemctl restart nfs-server")
-        vm_134.wait_until_succeeds("[ \"$(cat /var/lib/lab-tokens/radarr-key.token)\" = after-outage ]", timeout=180)
+        vm_134.wait_until_succeeds("[ \"$(cat /var/lib/lab-tokens/bazarr-key.token)\" = after-outage ]", timeout=180)
         token_write("after-restart")
-        vm_134.wait_until_succeeds("[ \"$(cat /var/lib/lab-tokens/radarr-key.token)\" = after-restart ]", timeout=180)
+        vm_134.wait_until_succeeds("[ \"$(cat /var/lib/lab-tokens/bazarr-key.token)\" = after-restart ]", timeout=180)
   '';
 }

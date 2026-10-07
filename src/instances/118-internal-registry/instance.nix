@@ -43,4 +43,8 @@ in {
     };
     registry-ui = { port = 80; homepage = { group = "Dev"; icon = "docker-moby"; name = "Registry"; }; };
   };
+
+  shares = {
+    "data/registry" = { };
+  };
 }

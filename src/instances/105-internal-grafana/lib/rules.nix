@@ -57,7 +57,7 @@ let
   # INTERNAL
   # -----------------------------------------------------------------------------
 
-  isApp = s: s.kind == "swarm";
+  isApp = s: s.app != null;
   alerted = lib.filterAttrs (_: s: s.on.alerts) services;
   exporterJobs = lib.concatLists (lib.mapAttrsToList (key: s: map (exporterJobOf key s) (lib.attrNames (exportersOf s))) alerted);
   appsWithMetric = name: lib.filterAttrs (_: s: isApp s && exportersOf s ? ${name}) alerted;

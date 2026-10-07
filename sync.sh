@@ -479,7 +479,8 @@ if [ -d "$TFSTATE_LEGACY_DIR" ] && [ ! -e "$TFSTATE_DIR" ]; then
 fi
 install -d -m 700 "$TFSTATE_DIR"
 # idempotent; installs a provider main.tf gained since the last run (the lock file pins it)
-terraform -chdir="$TF_DIR" init -input=false -backend-config="path=$TFSTATE_LOCAL" > /dev/null
+# -reconfigure: the path is the only backend setting, and the state already lives there (moved above)
+terraform -chdir="$TF_DIR" init -input=false -reconfigure -backend-config="path=$TFSTATE_LOCAL" > /dev/null
 if [ "${TF_STATE_OFFLINE:-0}" = 1 ]; then
   [ -f "$TFSTATE_LOCAL" ] || { echo "ERROR: TF_STATE_OFFLINE=1 needs the local copy $TFSTATE_LOCAL."; exit 1; }
   echo "WARNING: TF_STATE_OFFLINE=1: applying from the local state copy, unlocked; it may be behind the nas."

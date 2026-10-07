@@ -188,6 +188,7 @@ let
     runtimeInputs = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
     bashOptions = [ "nounset" "pipefail" ];
     text = ''
+      # shellcheck disable=SC2034 # read by each service's block below, which nix renders
       now=$(date +%s)
       ${pauseCheck}
       metrics=$(mktemp "${metricsFile}.XXXXXX")

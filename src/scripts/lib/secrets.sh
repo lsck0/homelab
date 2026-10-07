@@ -12,7 +12,8 @@
 SECRETS_ADMIN_FILE="$SRC/secrets/admins.txt"
 # the dotfiles checkout; its git-crypt secrets hold the admin age key (age.txt), the deploy ssh key and the ntfy token
 SECRETS_DOTFILES="${DOTFILES:-$HOME/projects/arch-dotfiles}"
-SECRETS_DOTFILES_DIR="$SECRETS_DOTFILES/secrets"
+# env DOTFILES_SECRETS overrides it, e.g. a checkout still on the pre-modules layout (configs/secrets)
+SECRETS_DOTFILES_DIR="${DOTFILES_SECRETS:-$SECRETS_DOTFILES/secrets}"
 SECRETS_RECIPIENT_PATTERN='^age1[0-9a-z]+$'
 SECRETS_ATTR="legacyPackages.x86_64-linux.secrets"
 # the layout's names (modules/secrets.nix): the folders holding host homes, and the files a home holds

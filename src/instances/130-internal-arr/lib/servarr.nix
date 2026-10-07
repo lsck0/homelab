@@ -4,7 +4,7 @@
 # from its <NAME>__<SECTION>__<KEY> environment, which overrides config.xml (the servarr Options pattern; bootstrap
 # AddEnvironmentVariables in every pinned image). Bazarr has no such override: it mints its own key, which its setup
 # exports as the lab token <name>-key.
-{ config, lib, pkgs, site, catalog, nasPath, retry, setupUnit, ... }:
+{ config, lib, pkgs, site, catalog, nasPath, retry, setupUnit, instance, ... }:
 let
   cfg = config.homelab.servarr;
 
@@ -50,6 +50,12 @@ in {
   };
 
   config = lib.mkIf (cfg != {}) {
+    # instance.nix tells the dashboard and hermes where each key is
+    assertions = lib.mapAttrsToList (name: app: {
+      assertion = (app.configFormat == "yaml") == lib.elem (keySecretOf name) instance.config.tokens;
+      message = "${name}: instance.nix `tokens` lists ${keySecretOf name} exactly when the app mints it (configFormat yaml)";
+    }) cfg;
+
     # a host's own mount of the same path wins
     homelab.nasMounts = lib.mapAttrs (_: lib.mkDefault) (nasPath "/data" "bulk");
 

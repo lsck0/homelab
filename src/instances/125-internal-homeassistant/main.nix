@@ -7,8 +7,6 @@ let
   stateDir = "/var/lib/homeassistant";
   uid = "1000";
   tokensDir = config.homelab.tokens.dir;
-  # the onboarding admin's login, used once on a fresh install: auth_providers below allows oidc only
-  adminPassword = config.sops.secrets.hass-pass.path;
   # the onboarding api's client: home assistant's own frontend at the address the setup calls
   onboardingClientId = "${local}/";
   longLivedTokenLifespanDays = 3650;
@@ -126,7 +124,6 @@ in {
   };
 
   sops.secrets.homeassistant-oidc-secret = {};
-  sops.secrets.hass-pass = {};
 
   systemd.services.hass-http = {
     before = [ "podman-homeassistant.service" ];
@@ -160,7 +157,7 @@ in {
   systemd.services.hass-homepage-token = setupUnit {
     description = "Generate Home Assistant token for Homepage";
     after = [ "podman-homeassistant.service" ];
-    path = [ pkgs.curl pkgs.coreutils pkgs.jq (pkgs.python3.withPackages (ps: [ ps.websockets ])) ];
+    path = [ pkgs.curl pkgs.coreutils pkgs.jq pkgs.openssl (pkgs.python3.withPackages (ps: [ ps.websockets ])) ];
     script = ''
       [ -s ${tokensDir}/hass-key.token ] && exit 0
       # any http answer means it is up, a 401 included
@@ -171,8 +168,9 @@ in {
         exit 1
       fi
 
-      auth_code=$(jq -cn --rawfile p ${adminPassword} \
-          '{client_id: "${onboardingClientId}", name: "Admin", username: "admin", password: $p, language: "en"}' \
+      # the onboarding admin's password is never needed again: auth_providers allows oidc only
+      auth_code=$(openssl rand -hex 16 | jq -cR \
+          '{client_id: "${onboardingClientId}", name: "Admin", username: "admin", password: ., language: "en"}' \
         | curl -sf -X POST ${local}/api/onboarding/users -H "Content-Type: application/json" -d @- \
         | jq -er .auth_code)
       access_token=$(curl -sf -X POST ${local}/auth/token \

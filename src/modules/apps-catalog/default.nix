@@ -6,7 +6,7 @@
 # routes, hosts and ports, every secret reference generated) are modules/catalog.nix's `problems`, which stop the
 # flake's evaluation. A test with a fixture app hands its hosts another catalog:
 #
-#   _module.args.catalog = lab.catalogOf (lib.recursiveUpdate lab.appsCatalog { apps.wat.enable = true; });
+#   lab.withApps (apps: lib.recursiveUpdate apps { wat.enable = true; })    (tests/lib/lab.nix `apps`)
 #
 # The smallest app, src/apps/demo/app.nix, serves one public path:
 #
@@ -16,7 +16,7 @@
 #     branch = "master";
 #     routes.demo = { service = "web"; targetPort = 8000; port = 20130; off.sso = "public"; };
 #   }
-{ config, lib, ... }:
+{ config, lib, telemetry, ... }:
 let
   inherit (lib) mkOption types;
   cfg = config;
@@ -173,6 +173,11 @@ let
       override = mkOption { type = types.attrs; default = { }; description = "A compose overlay merged last, as nix attrs; the policy still applies to the result."; };
       images = mkOption { type = types.listOf digestPinned; default = [ ]; description = "Public images the stack may run besides its own builds, each pinned by digest."; };
       metrics = mkOption { type = types.attrsOf metricsType; default = { }; description = "Name -> an exporter scraped every 15s by vm-105, never routed."; };
+      alerts = mkOption {
+        type = types.attrsOf telemetry.alertType;
+        default = { };
+        description = "Name -> a rule over the app's own metrics or logs (modules/telemetry.nix alertType); its Grafana uid is app_<app>_<name>.";
+      };
       homepage = mkOption {
         type = service.cardType { inherit name; group = "Swarm"; icon = "mdi-docker"; description = "${config.repo}@${config.branch}"; };
         default = { };

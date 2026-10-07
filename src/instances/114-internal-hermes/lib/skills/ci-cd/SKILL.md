@@ -36,9 +36,10 @@ Flow on every push to that branch:
 
    Then it deploys. New tasks start before old ones stop; a failed update rolls back and the deploy counts as
    failed. The stack is kept in `/var/lib/swarm-apply/<app>.yaml`.
-4. **Converge.** Every sync that changes the catalog, the policy or an app secret re-renders every kept stack on
-   vm-140 (`swarm-converge`) and removes the stacks of disabled or deleted apps. No app commit needed.
-5. **Serving.** The workers vm-250, 251 and 252 (apps zone) serve the app. A route of zone `external` goes
+4. **Converge.** Every sync that changes an app's catalog entry or secrets re-renders its kept stack on vm-140
+   (`swarm-converge-<app>`, one unit per app); `swarm-prune` removes the stacks of disabled or deleted apps. No
+   app commit needed.
+5. **Serving.** The workers (apps zone, vm-250 on, as many as the apps' reservations need) serve the app. A route of zone `external` goes
    through the edge (vm-200), one of zone `internal` through vm-100; on both every protection is on (authelia,
    crowdsec, the waf, anubis where authelia is off, rate and body limits) unless the route says
    `off.<feature> = "<why>"`.
@@ -69,7 +70,7 @@ Flow on every push to that branch:
   State per app: `/var/lib/app-builder/<app>.json` (`sha` live, `failure` with its retry time).
   Metrics: `homelab_app_deploy_ok{app}`, `homelab_app_deploy_failures{app}`,
   `homelab_app_builder_last_run_timestamp_seconds`.
-- Manager: `ssh 10.100.0.140 'journalctl -t swarm-deploy -u swarm-converge -n 50'`; metric
+- Manager: `ssh 10.100.0.140 'journalctl -t swarm-deploy -u swarm-converge-<app> -n 50'`; metric
   `homelab_swarm_deploy_ok{app}`.
 - Swarm (manager only, workers hold no control):
   - `ssh 10.100.0.140 'docker stack ls; docker service ls; docker node ls'`
@@ -85,7 +86,7 @@ Flow on every push to that branch:
 - **Restore a volume:** on vm-140 `docker service scale <app>_<service>=0`, then on the state worker
   `swarm-volume-restore <app> <volume> [<archive>]` (newest of `/var/backup/db/<app>-volume-<volume>/` by
   default), then scale back.
-- **Apply the catalog again:** on vm-140, `systemctl restart swarm-converge`.
+- **Apply the catalog again:** on vm-140, `systemctl restart swarm-converge-<app>`.
 - **Roll back to an older build:** `ssh 10.100.0.140 docker service update --image registry.lsck0.dev/<app>/<service>@<digest> <app>_<service>`.
   The next push or converge replaces it; for a lasting rollback, revert the commit on the branch.
 - **Scale a stateless service:** `docker service scale <app>_<service>=<n>` on vm-140. Stateful ones stay at 1.

@@ -29,4 +29,8 @@ in {
     terminal-token = "hex:32";
     trmnl-api-key = "manual";
   };
+
+  shares = {
+    "data/calendar" = { };
+  };
 }

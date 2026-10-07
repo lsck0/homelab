@@ -18,10 +18,10 @@ in {
   };
 
   # one api key per consumer, so a leaked one is revoked alone
-  tokens = [
-    "jellyfin-key-homepage" "jellyfin-key-hermes" "jellyfin-key-arr" "jellyfin-key-janitorr"
-    "jellyfin-admin-pass" "janitorr-pass"
-  ];
+  tokens = [ "jellyfin-key-homepage" "jellyfin-key-hermes" "jellyfin-key-arr" "jellyfin-key-janitorr" ];
+
+  # janitorr's own jellyfin user, set once by the setup
+  secrets = { janitorr-pass = "guardsData:hex:16"; };
 
   grants = [
     { from = [ "114" "128" "130" ]; tcp = [ port ]; why = "hermes, jellyseerr and the arrs' notifications call its api directly"; }
@@ -57,5 +57,13 @@ in {
         bodyLimit = "image and plugin uploads";
       };
     };
+  };
+
+  tokenReads = [ "jellyseerr-key" ];
+
+  shares = {
+    bulk = { };
+    "data/janitorr" = { };
+    "data/jellyfin" = { };
   };
 }

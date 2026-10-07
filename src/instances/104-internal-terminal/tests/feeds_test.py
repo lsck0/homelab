@@ -679,7 +679,7 @@ class StatsSync(unittest.TestCase):
             listing = [{"name": "Secret.Movie.2026.2160p", "category": "radarr", "state": "downloading",
                         "progress": 0.5, "dlspeed": 1000, "size": 10 ** 9, "eta": 600}]
             patches = {"INVENTORY": inv, "promql": promql, "logql": lambda query: [],
-                       "qb_session": lambda: "", "qb_get": lambda path, cookie: listing if "info" in path and "torrents" in path else {}}
+                       "qb_get": lambda path: listing if "info" in path and "torrents" in path else {}}
             saved = {k: getattr(stats_sync, k) for k in patches}
             try:
                 for k, v in patches.items():

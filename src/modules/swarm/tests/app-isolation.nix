@@ -9,7 +9,7 @@
 # boards and datasources each app gets. The seed picks the flood order and the flooding clients' addresses.
 { pkgs, lib, specialArgs, seed ? 7, ... }:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
+  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: apps; };
   net = import ../../net.nix { inherit lib; inherit (specialArgs) inventory site; };
   telemetry = import ../../telemetry.nix { inherit lib; inherit (lab) inventory; };
   limits = import ../../limits { inherit lib; };
@@ -62,10 +62,9 @@ let
     metrics.web = { service = "web"; targetPort = 8000; port = ports.${name} + 1; path = metricsPath; };
     resources.web = task;
   };
-  catalog = lab.appsCatalog // { apps = { quiet = appOf "quiet" "/metrics.txt"; noisy = appOf "noisy" "/big.txt"; }; };
+  apps = { quiet = appOf "quiet" "/metrics.txt"; noisy = appOf "noisy" "/big.txt"; };
 
   common = { lib, ... }: {
-    homelab.appsCatalog = catalog;
     networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
     environment.systemPackages = [ pkgs.curl pkgs.jq ];
   };

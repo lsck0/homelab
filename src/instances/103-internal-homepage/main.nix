@@ -12,21 +12,26 @@ let
 
   backendUrlOf = route: let r = routes.${route}; in "http://${inventory.${toString r.vmid}.ip}:${toString r.port}";
 
-  # the lab tokens the widgets use (modules/tokens), each as HOMEPAGE_VAR_<NAME> in the container's env
-  tokens = lib.unique (lib.concatMap (c: lib.optionals (c.widget != null) (lib.attrValues c.widget.tokens)) lab.homepage);
-  varOf = token: "HOMEPAGE_VAR_${lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] token)}";
-  key = token: "{{${varOf token}}}";
+  # the proxmox widget checks the host against its ca pinned in site.json (init.sh); with none it is off, never unverified
+  proxmoxCa = site.proxmoxCa or null;
+  proxmoxCaFile = pkgs.writeText "pve-root-ca.pem" proxmoxCa;
+  proxmoxCaPath = "/etc/homepage/pve-root-ca.pem";
+  proxmoxWidget = { type = "proxmox"; url = "https://${frame.proxmoxApi}"; node = site.node;
+    secrets = { username = "proxmox-user"; password = "proxmox-pass"; }; };
+
+  # every widget's credentials, each as HOMEPAGE_VAR_<NAME> in the container's env: lab tokens (modules/tokens), minted
+  # at runtime, and sops secrets
+  widgets = lib.filter (w: w != null) (map (c: c.widget) lab.homepage) ++ lib.optional (proxmoxCa != null) proxmoxWidget;
+  tokens = config.homelab.tokens.reads;
+  secrets = lib.unique (lib.concatMap (w: lib.attrValues w.secrets) widgets);
+  varOf = name: "HOMEPAGE_VAR_${lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] name)}";
+  credentialsOf = w: lib.mapAttrs (_: name: "{{${varOf name}}}") ((w.tokens or { }) // w.secrets);
 
   # a card's widget (instance.nix `homepage.<route>.widget`): its api at the route's own address unless it names one
   widgetOf = card: let w = card.widget; in
     if w == null then null
     else { inherit (w) type; url = if w.url == null then backendUrlOf card.route + w.path else w.url; }
-      // lib.mapAttrs (_: key) w.tokens // w.settings;
-
-  # the proxmox widget checks the host against its ca pinned in site.json (init.sh); with none it is off, never unverified
-  proxmoxCa = site.proxmoxCa or null;
-  proxmoxCaFile = pkgs.writeText "pve-root-ca.pem" proxmoxCa;
-  proxmoxCaPath = "/etc/homepage/pve-root-ca.pem";
+      // credentialsOf w // w.settings;
 
   # dashboard groups in display order; cards come from the instances (instance.nix `homepage`) and, for Swarm, the apps
   layout = [
@@ -46,24 +51,22 @@ let
       cards = [ swarmCard ] ++ lib.mapAttrsToList appCard catalog.apps;
     };
 
-  # a swarm app is up while the cluster is; its route names no vm
-  stateOf = r: if r.vmid != null then inventory.${toString r.vmid}.enabled else "true";
-
-  # every service listed, whatever its vm state
-  stateSuffix = state:
-    if state == "onDemand" then " (on-demand)"
-    else if state == "false" then " (disabled)"
+  # every service listed, whatever its guest's power; a swarm app is up while its cluster is
+  guestOf = r: if r.vmid == null then null else inventory.${toString r.vmid};
+  stateSuffix = guest:
+    if guest == null then ""
+    else if !guest.powered then " (disabled)"
+    else if guest.idle != null then " (on-demand)"
     else "";
 
-  # a route's own port, not its url: the status dot skips authelia and the edge
-  monitorOf = r: let backend = if r.vmid != null then inventory.${toString r.vmid}.ip else lib.head (r.nodes ++ [ null ]); in
-    if backend == null then null else "http://${backend}:${toString r.port}${if r.health == null then "" else r.health}";
+  # the dot checks what the prober does (catalog.probeUrlOf)
+  monitorOf = r: if r.off.probe != null then null else catalog.probeUrlOf r;
 
-  routeCard = c: let r = routes.${c.route}; state = stateOf r; in {
+  routeCard = c: let r = routes.${c.route}; guest = guestOf r; in {
     inherit (c) name icon;
     href = urlOf c.route;
-    siteMonitor = if state == "false" then null else monitorOf r;
-    description = lib.removePrefix " " (c.description + stateSuffix state);
+    siteMonitor = if guest != null && !guest.powered then null else monitorOf r;
+    description = lib.removePrefix " " (c.description + stateSuffix guest);
     widget = widgetOf c;
   };
 
@@ -122,10 +125,7 @@ let
   frame = import ../../modules/infra.nix { inherit net; };
   frameWidgets = {
     FritzBox = { type = "fritzbox"; url = frame.fritzbox; };
-    Proxmox = if proxmoxCa == null then null else {
-      type = "proxmox"; url = "https://${frame.proxmoxApi}";
-      username = key "proxmox-user"; password = key "proxmox-pass"; node = site.node;
-    };
+    Proxmox = if proxmoxCa == null then null else removeAttrs proxmoxWidget [ "secrets" ] // credentialsOf proxmoxWidget;
   };
   infra = {
     name = "Infra";
@@ -204,7 +204,7 @@ let
   # a token minted after homepage started (first boot, a rotated key) reaches it within this
   envRefreshInterval = "10min";
 
-  # the container's env: every exported widget token (token_read refuses one that could inject a line), the proxmox login
+  # the container's env: every exported widget token (token_read refuses one that could inject a line), every secret
   envRender = ''
     env_render() { # <file>
       local entry token value
@@ -214,21 +214,13 @@ let
         value=$(token_read "$token") || { echo "widget token $token: not exported yet or no token, skipped"; continue; }
         printf '%s=%s\n' "''${entry#*=}" "$value" >> "$1"
       done
-    '' + lib.optionalString (proxmoxCa != null) ''
-      printf '${varOf "proxmox-user"}=%s\n${varOf "proxmox-pass"}=%s\n' \
-        "$(cat ${config.sops.secrets.proxmox-user.path})" "$(cat ${config.sops.secrets.proxmox-pass.path})" >> "$1"
-    '' + ''
+      ${lib.concatMapStrings (secret: ''
+        printf '%s=%s\n' ${varOf secret} "$(cat ${config.sops.secrets.${secret}.path})" >> "$1"
+      '') secrets}
     }
   '';
 in {
-  networking.hostName = "vm-103";
-
-  homelab.tokens.reads = tokens;
-
-  sops.secrets = lib.mkIf (proxmoxCa != null) {
-    proxmox-user = { };
-    proxmox-pass = { };
-  };
+  sops.secrets = lib.genAttrs secrets (_: { });
   warnings = lib.optional (proxmoxCa == null)
     "vm-103: site.json pins no Proxmox CA (proxmoxCa); the homepage Proxmox widget is off. Run src/scripts/init.sh to pin it.";
 

@@ -48,7 +48,7 @@ owner's runbook (README.md, "Recovery"): it needs the Proton sign-in and the
 `kopia-password`, which only the owner can decrypt. Report the state
 (`systemctl status proton-sync` on vm-109) and point the owner there.
 
-The commands below are root's: send them to the owner with the snapshot you picked and what it overwrites.
+All commands run on vm-109 with `terminal`: `ssh 10.100.0.109 nas-restore ...`
 
 ## Restore a service
 
