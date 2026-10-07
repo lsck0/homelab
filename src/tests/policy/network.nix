@@ -50,11 +50,33 @@ let
     (lib.range 0 (lib.length forwardLines - 1));
 
   transports = config: (httpOf config).serversTransports or { };
-  relays = lib.filterAttrs (name: _: lib.hasSuffix "-relay" name) (websecure edge);
+  relays = lib.filterAttrs (_: r: lib.hasSuffix "-relay" r.service) (websecure edge);
 
   metricsBlocks = lib.filterAttrs (name: _: lib.hasSuffix "-metrics-block" name) (httpOf edge).routers;
   appRouters = lib.filterAttrs (name: r: r ? service && lib.elem "websecure" (r.entryPoints or [ ]) && (r.priority or 0) < 1000
     && lib.any (a: lib.hasPrefix "${a}-" name || name == "${a}-tls") (lib.attrNames catalog.apps)) (httpOf edge).routers;
+
+  # the methods a rule admits: those of a top-level method-only conjunct; null (any) without one or with a top-level ||
+  depthOf = text: (lib.foldl' (s: c:
+    if c == "`" then s // { quoted = !s.quoted; }
+    else if s.quoted then s
+    else if c == "(" then s // { depth = s.depth + 1; }
+    else if c == ")" then s // { depth = s.depth - 1; }
+    else s) { depth = 0; quoted = false; } (lib.stringToCharacters text));
+  balanced = text: depthOf text == { depth = 0; quoted = false; };
+  topLevel = separator: text: lib.foldl' (acc: piece:
+    if acc.open == "" then (if balanced piece then acc // { parts = acc.parts ++ [ piece ]; } else acc // { open = piece; })
+    else let joined = acc.open + separator + piece; in
+      if balanced joined then { parts = acc.parts ++ [ joined ]; open = ""; } else acc // { open = joined; })
+    { parts = [ ]; open = ""; } (lib.splitString separator text);
+  methodClause = builtins.match "\\(?(Method\\(`[A-Z]+`\\)( \\|\\| Method\\(`[A-Z]+`\\))*)\\)?";
+  admittedMethods = rule: let
+    conjuncts = (topLevel " && " rule).parts;
+    clauses = lib.filter (c: methodClause c != null) conjuncts;
+  in
+    if lib.any (c: lib.length (topLevel " || " c).parts > 1) conjuncts || clauses == [ ] then null
+    else map lib.head (lib.filter lib.isList (builtins.split "Method\\(`([A-Z]+)`\\)" (lib.head clauses)));
+  buffering = config: lib.attrNames (lib.filterAttrs (_: m: m ? buffering) (httpOf config).middlewares);
 
   portForwardLines = lines router.networking.nftables.tables.port-forwards.content;
 
@@ -91,8 +113,17 @@ lawsOf {
   "tls verification" = lib.concatLists (lib.mapAttrsToList (host: config: lib.mapAttrsToList (name: _:
     "${host} transport ${name} skips verification") (lib.filterAttrs (_: t: t.insecureSkipVerify or false) (transports config)))
     { vm-100 = internalIngress; vm-200 = edge; })
-  ++ lib.concatLists (lib.mapAttrsToList (name: r: let t = (transports edge).${r.service} or null; host = lib.head (builtins.match "Host\\(`([^`]+)`\\)" r.rule); in
+  ++ lib.concatLists (lib.mapAttrsToList (name: r: let t = (transports edge).${r.service} or null; host = lib.head (builtins.match ".*Host\\(`([^`]+)`\\).*" r.rule); in
     lib.optional (t == null || t.serverName or null != host) "vm-200 relay ${name} does not verify the internal ingress as ${host}") relays);
+
+  # a buffering middleware spools whole responses to disk: no download passes one
+  "buffered downloads" = lib.concatLists (lib.mapAttrsToList (host: config: lib.concatLists (lib.mapAttrsToList (name: r: let
+      methods = admittedMethods r.rule;
+    in
+    lib.optional (lib.intersectLists (buffering config) (r.middlewares or [ ]) != [ ]
+      && (methods == null || lib.elem "GET" methods || lib.elem "HEAD" methods))
+      "${host} router ${name} admits GET or HEAD behind a buffering middleware"
+  ) (websecure config))) { vm-100 = internalIngress; vm-200 = edge; });
 
   # an unknown name gets a 404 at the edge, nothing travels inward for it
   "no catch-all" = lib.mapAttrsToList (name: _: "vm-200 router ${name} matches any host")

@@ -504,14 +504,21 @@ let
   basicAuthRoutes = lib.filterAttrs (_: r: r.basicAuth != null) cfg.routes;
   basicAuthSecrets = lib.unique (lib.concatMap (r: lib.attrValues r.basicAuth) (lib.attrValues basicAuthRoutes));
 
-  # the limit is traefik's buffering, which also spools every response to /tmp: a route whose methods carry no body
-  # (a download mirror) has nothing to limit and must not buffer multi-gigabyte responses on the 8 GiB edge disk
-  methodsWithBody = [ "POST" "PUT" "PATCH" "DELETE" ];
-  limitsBody = r: on r "bodyLimit" && lib.any (m: lib.elem m methodsWithBody) (r.methods or methodsWithBody);
+  # the body limit (buffering) also spools whole responses to /tmp: a router splits so only body methods pass it
+  bodyMethods = [ "POST" "PUT" "PATCH" "DELETE" ];
+  bodyRouterSuffix = "-body";
+  # vulcand/oxy's multibuffer files
+  spoolFilePattern = "temp-multibuf-*";
+  # a hand-written router names no methods: it admits every one
+  methodsOf = r: r.methods or null;
+  admitsBody = r: methodsOf r == null || lib.any (m: lib.elem m bodyMethods) (methodsOf r);
+  admitsBodyless = r: methodsOf r == null || lib.any (m: !(lib.elem m bodyMethods)) (methodsOf r);
+  limitsBody = r: on r "bodyLimit" && admitsBody r;
+  splitsByBody = r: limitsBody r && admitsBodyless r;
 
   # every websecure router's chain, ahead of its own middlewares; the strip runs before a router's own authelia sets
   # the identity, cloudflare-only refuses a direct caller before the waf spends anything on it
-  chainOf = name: r:
+  chainOf = name: r: withBody:
     [ "client-ip" "strip-client-headers" ]
     # a route kept off the internet admits private sources only, cloudflare's included in none
     ++ lib.optional (cfg.cloudflareOnly.enable && on r "cloudflare" && on r "internet") "cloudflare-only"
@@ -521,7 +528,7 @@ let
     ++ lib.optionals (on r "rateLimit") [ "rate-limit" "route-rate-limit" ]
     ++ lib.optionals (on r "inflightLimit") [ "inflight-limit" "route-inflight-limit" ]
     # buffered once, outside the retry: a retry inside the buffer re-read a consumed body and sent it empty
-    ++ lib.optional (limitsBody r) "body-limit-${toString r.bodyLimitBytes}"
+    ++ lib.optional withBody "body-limit-${toString r.bodyLimitBytes}"
     ++ [ "retry-upstream" ]
     ++ lib.optional (on r "secureHeaders") (
       if r.frames == "sameorigin" then "secure-headers-sameorigin"
@@ -539,13 +546,27 @@ let
     if cfg.refusedClients == [ ] || r.sources != null then rule
     else "(${rule}) && " + lib.concatMapStringsSep " && " (range: "!ClientIP(`${range}`)") cfg.refusedClients;
 
-  routersWithTls = lib.mapAttrs (name: router: let r = recordOf router; in
-    removeAttrs router [ "route" "off" ] // lib.optionalAttrs (lib.elem "websecure" (router.entryPoints or [ ])) {
-      rule = refuse r router.rule;
+  websecure = router: lib.elem "websecure" (router.entryPoints or [ ]);
+  routersWithTls = lib.concatMapAttrs (name: router: let
+    r = recordOf router;
+    rule = refuse r router.rule;
+    plain = removeAttrs router [ "route" "off" ] // lib.optionalAttrs (!(on r "accessLog")) { observability.accessLogs = false; };
+    secured = withBody: plain // {
       tls = wildcardTls // (router.tls or { });
-      middlewares = chainOf name r ++ (router.middlewares or [ ]);
-    } // lib.optionalAttrs (!(on r "accessLog")) { observability.accessLogs = false; }
+      middlewares = chainOf name r withBody ++ (router.middlewares or [ ]);
+    };
+    # both halves keep the priority the whole rule had, so the split moves neither against any other router
+    half = withBody: secured withBody // {
+      rule = "(${rule}) && ${if withBody then "" else "!"}${anyOf "Method" bodyMethods}";
+      priority = router.priority or (lib.stringLength rule);
+    };
+  in
+    if !(websecure router) then { ${name} = plain; }
+    else if splitsByBody r then { ${name} = half false; "${name}${bodyRouterSuffix}" = half true; }
+    else { ${name} = secured (limitsBody r) // { inherit rule; }; }
   ) allRouters;
+  splitClashes = lib.filter (name: allRouters ? "${name}${bodyRouterSuffix}")
+    (lib.attrNames (lib.filterAttrs (_: router: websecure router && splitsByBody (recordOf router)) allRouters));
   allRouters = cfg.routers // routeRouters // probeRouters // frontendRouters // relayRouters // botDefenseRouters;
   allMiddlewares = cfg.middlewares // routeMiddlewareDefs // frontendMiddlewares // secureHeadersMiddleware // limitMiddlewares
     // bouncerMiddleware // stripClientHeadersMiddleware // autheliaMiddleware;
@@ -636,6 +657,9 @@ in {
       # traefik drops a router naming a missing middleware and answers its host with a 404
       assertion = missingMiddlewares == [ ];
       message = "${config.networking.hostName}: routers name middlewares nothing defines: ${toString missingMiddlewares}";
+    } {
+      assertion = splitClashes == [ ];
+      message = "${config.networking.hostName}: routers whose body half (${bodyRouterSuffix}) would replace another router: ${toString splitClashes}";
     }];
 
     sops.templates."traefik.env".content = ''
@@ -680,6 +704,23 @@ in {
         OnUnitActiveSec = "5min";
         AccuracySec = "30s";
       };
+    };
+
+    # leaked buffering spool files (vm-105's ingress_spool alert); traefik's PrivateTmp lies below /tmp
+    systemd.services.traefik-spool-metric = {
+      description = "Measure traefik's buffering spool files";
+      path = [ pkgs.findutils pkgs.gawk pkgs.coreutils ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        bytes=$(find /tmp -type f -name '${spoolFilePattern}' -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }')
+        d=${config.homelab.textfileDir}
+        printf '# TYPE homelab_traefik_spool_bytes gauge\nhomelab_traefik_spool_bytes %s\n' "$bytes" > $d/traefik_spool.prom.tmp
+        mv $d/traefik_spool.prom.tmp $d/traefik_spool.prom
+      '';
+    };
+    systemd.timers.traefik-spool-metric = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = { OnBootSec = "5min"; OnUnitActiveSec = "5min"; };
     };
 
     # the access log is only ever appended to
