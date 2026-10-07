@@ -67,7 +67,7 @@ let
       tampered = tamper "200-external-traefik" [ "services" "promtail" "configuration" "scrape_configs" ]
         (map (j: j // { pipeline_stages = lib.filter (s: !(s ? replace)) (j.pipeline_stages or [ ]); })
           configs."200-external-traefik".services.promtail.configuration.scrape_configs); };
-    test-of-another-instance = { file = "placement"; marker = "tests files of instances/101-internal-b";
+    test-of-another-instance = { file = "placement"; marker = "tests instances/101-internal-b/lib/b.nix";
       tampered = facts // { src = ./policy/lib/placement-fixture; }; };
     instance-folder = { file = "placement"; marker = "src/instances/101-internal-authelia has no main.nix";
       tampered = facts // { src = builtins.path {
