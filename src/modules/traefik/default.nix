@@ -161,7 +161,7 @@ let
       memRequestBodyBytes = 1048576;
       maxResponseBodyBytes = 0;
     };
-  }) (lib.unique (map (r: r.bodyLimitBytes) (lib.filter (r: on r "bodyLimit") (map recordOf (lib.attrValues allRouters))))));
+  }) (lib.unique (map (r: r.bodyLimitBytes) (lib.filter limitsBody (map recordOf (lib.attrValues allRouters))))));
 
   # user agents served the labyrinth
   labyrinthUserAgents = [
@@ -504,6 +504,11 @@ let
   basicAuthRoutes = lib.filterAttrs (_: r: r.basicAuth != null) cfg.routes;
   basicAuthSecrets = lib.unique (lib.concatMap (r: lib.attrValues r.basicAuth) (lib.attrValues basicAuthRoutes));
 
+  # the limit is traefik's buffering, which also spools every response to /tmp: a route whose methods carry no body
+  # (a download mirror) has nothing to limit and must not buffer multi-gigabyte responses on the 8 GiB edge disk
+  methodsWithBody = [ "POST" "PUT" "PATCH" "DELETE" ];
+  limitsBody = r: on r "bodyLimit" && lib.any (m: lib.elem m methodsWithBody) (r.methods or methodsWithBody);
+
   # every websecure router's chain, ahead of its own middlewares; the strip runs before a router's own authelia sets
   # the identity, cloudflare-only refuses a direct caller before the waf spends anything on it
   chainOf = name: r:
@@ -516,7 +521,7 @@ let
     ++ lib.optionals (on r "rateLimit") [ "rate-limit" "route-rate-limit" ]
     ++ lib.optionals (on r "inflightLimit") [ "inflight-limit" "route-inflight-limit" ]
     # buffered once, outside the retry: a retry inside the buffer re-read a consumed body and sent it empty
-    ++ lib.optional (on r "bodyLimit") "body-limit-${toString r.bodyLimitBytes}"
+    ++ lib.optional (limitsBody r) "body-limit-${toString r.bodyLimitBytes}"
     ++ [ "retry-upstream" ]
     ++ lib.optional (on r "secureHeaders") (
       if r.frames == "sameorigin" then "secure-headers-sameorigin"
