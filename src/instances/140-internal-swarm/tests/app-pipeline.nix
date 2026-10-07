@@ -15,9 +15,9 @@
 # The fixture images are built FROM scratch around a static busybox httpd, so `docker build --pull` needs no
 # registry; hello's real one (alpine plus apk) cannot build offline, which is accepted here.
 #
-# Faults: the registry down, the guest's manager partitioned, the controller partitioned from its workers, the
-# worker running the task crashed (the seed picks it), a worker rejoining, an image whose task dies (the swarm rolls
-# back), the builder killed mid-build.
+# Faults: the registry down, github down (an upstream outage: skipped, nothing fails), the guest's manager
+# partitioned, the controller partitioned from its workers, the worker running the task crashed (the seed picks it), a
+# worker rejoining, an image whose task dies (the swarm rolls back), the builder killed mid-build.
 { pkgs, lib, specialArgs, seed ? 1, ... }:
 let
   # -----------------------------------------------------------------------------
@@ -58,7 +58,7 @@ let
   lab = import ../../../tests/lib/lab.nix {
     inherit pkgs lib specialArgs;
     # more than one worker holds beside a deploy's surge: the shared swarm gets two (modules/limits workerCountOf)
-    apps = folders: lib.recursiveUpdate folders { hello.reservation.memoryMiB = 1536; } // { own = ownApp; };
+    apps = folders: lib.recursiveUpdate folders { hello.reservation.memoryMiB = 512; } // { own = ownApp; };
   };
   collected = lab.specialArgs.lab;
   net = import ../../../modules/net.nix { inherit lib; inherit (collected) inventory site; };
@@ -215,6 +215,8 @@ pkgs.testers.runNixOSTest {
     systemd.timers.app-builder.wantedBy = lib.mkForce [ ];
     # its runs follow each other faster than systemd's start limit (5 in 10s) allows a unit
     systemd.services.app-builder.startLimitIntervalSec = 0;
+    # modules/upstream's retries without their backoff: an outage is decided in seconds
+    systemd.services.app-builder.environment.UPSTREAM_BACKOFF_S = "0";
     networking.hosts.${githubAddress} = [ "github.com" "api.github.com" ];
     homelab.appBuilder = { inherit knownHosts backoff; };
   };
@@ -443,6 +445,20 @@ pkgs.testers.runNixOSTest {
         time.sleep(${toString backoff.maxS})  # the backoff is the claim: wall time is what the builder waits on
         assert build()["hello"]["sha"] == sha_d
         serves("v3")
+
+    with subtest("github down: every app is skipped as github unavailable, nothing fails, the next look lands"):
+        before = {app: state(app) for app in REPOS}
+        sha_o = commit("hello", {"${context}/www/index.html": "v3b\n"}, "during the outage")
+        world.succeed("systemctl stop nginx")
+        since = vm_140.succeed("date +%s").strip()
+        assert build() == before
+        vm_140.succeed(f"journalctl -u app-builder --since @{since} | grep -q 'hello: skipped: github unavailable'")
+        assert deploy_ok("hello")
+        serves("v3")
+        world.succeed("systemctl start nginx")
+        world.wait_for_unit("nginx.service")
+        assert build()["hello"]["sha"] == sha_o
+        serves("v3b")
 
     with subtest("the guest's manager partitioned: its app fails fast, the shared swarm's app lands, the retry lands"):
         vm_${placedId}.block()

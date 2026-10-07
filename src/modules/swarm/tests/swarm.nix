@@ -1,36 +1,59 @@
 # the apps swarm end to end: a manager and two workers build the cluster from the inventory over the nas, the
 # manager deploys an app through swarm-apply, the workers serve it, the policy, the rollback check and the autolock
-# hold, and a catalog edit reaches the running app without a commit: a changed port and env roll out, a disabled
-# app's stack is removed.
+# hold, a tcp and a udp route answer a client from anywhere on every worker (the router forwards to each, asserted
+# from flows.nix), and a catalog edit reaches the running app without a commit: a changed port and env roll out, a
+# disabled app's stack is removed.
 # Lab guests at their real addresses on one flat network (tests/lib/lab.nix): the real modules mount the real
 # shares (homelab.nasMounts) from a test nas that exports them by the real rules (109-internal-nas's lib/nas-exports.nix). The
 # apps are the test's own, one app, so the production catalog can change without touching this test.
 { pkgs, lib, specialArgs, ... }:
 let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: { inherit demo; }; };
+  net = import ../../net.nix { inherit lib; inherit (lab) inventory site; };
+  flows = import ../../flows.nix {
+    inherit lib net;
+    inherit (lab) inventory catalog;
+    lab = lab.specialArgs.lab;
+    nasClients = throw "the test reads the port forwards only";
+  };
 
   app = version: pkgs.dockerTools.buildLayeredImage {
     name = "registry.lsck0.dev/demo/web";
     tag = version;
-    contents = [ pkgs.busybox pkgs.curl (pkgs.writeTextDir "www/index.html" "demo ${version}\n") ];
+    contents = [ pkgs.busybox pkgs.curl pkgs.socat (pkgs.writeTextDir "www/index.html" "demo ${version}\n") ];
     config.Cmd = [ "httpd" "-f" "-p" "8000" "-h" "/www" ];
   };
 
   port = 20130;
   portChanged = 20131;
+  tcpPort = 20132;
+  udpPort = 20133;
+  # the echo service's datagram port in its container
+  echoPort = 9000;
+  # a client on the internet, as the router's forward hands it to a worker (source kept)
+  client = "198.51.100.7";
   demo = {
     enable = true;
     repo = "lsck0/demo";
     branch = "master";
-    routes.demo = { service = "web"; targetPort = 8000; inherit port; off.sso = "the test's public fixture"; };
+    routes = {
+      demo = { service = "web"; targetPort = 8000; inherit port; off.sso = "the test's public fixture"; };
+      demo-tcp = { protocol = "tcp"; service = "web"; targetPort = 8000; port = tcpPort; publicPort = tcpPort; };
+      demo-udp = { protocol = "udp"; service = "echo"; targetPort = echoPort; port = udpPort; publicPort = udpPort; };
+    };
+    resources = { web.memoryMiB = 256; echo.memoryMiB = 128; };
     # more than one worker holds beside a deploy's surge: the swarm gets two (modules/limits workerCountOf)
-    reservation.memoryMiB = 1536;
+    reservation.memoryMiB = 512;
   };
   # a catalog edit as sync.sh deploys it: the lab collected again with the demo changed
   catalogWith = change: lib.mkForce (lab.withApps (apps: lib.recursiveUpdate apps { demo = change; })).catalog;
 
   w1 = lab.inventory."250".ip;
   w2 = lab.inventory."251".ip;
+
+  # the router forwards each l4 route to every worker, by its own protocol
+  forwards = lib.filter (f: lib.elem f.port [ tcpPort udpPort ]) flows.portForwards;
+  forwardsWrong = lib.filter (f: f.addresses != [ w1 w2 ] || f.proto != (if f.port == tcpPort then "tcp" else "udp")) forwards;
   # registry.lsck0.dev resolves to the internal ingress; here the registry itself answers there
   registryAddress = lab.inventory."100".ip;
 
@@ -50,6 +73,7 @@ let
     specialisation.disabled.configuration._module.args.catalog = catalogWith { enable = false; };
   };
 in
+assert lib.assertMsg (lib.length forwards == 2 && forwardsWrong == [ ]) "the router's l4 forwards: ${builtins.toJSON forwards}";
 pkgs.testers.runNixOSTest {
   name = "swarm";
 
@@ -68,6 +92,12 @@ pkgs.testers.runNixOSTest {
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
   };
 
+  # the internet behind the router: the workers' gateway, so their answers to the client come back here
+  nodes.world = {
+    imports = [ (lab.multi { addresses = [ "${client}/24" "${lab.inventory."250".gateway}/8" ]; }) ];
+    environment.systemPackages = [ pkgs.curl pkgs.socat ];
+  };
+
   nodes.vm-140 = swarmNode "140";
   nodes.vm-250 = swarmNode "250";
   nodes.vm-251 = swarmNode "251";
@@ -79,7 +109,8 @@ pkgs.testers.runNixOSTest {
         web = {"image": image, "healthcheck": {"test": ["CMD", "curl", "-f", "http://localhost:8000/"],
                "interval": "2s", "retries": 3, "start_period": "2s"}}
         web.update(extra)
-        vm_140.succeed(f"echo {json.dumps(json.dumps({'services': {'web': web}}))} > /tmp/stack.json")
+        echo = {"image": image, "command": ["socat", "-T1", "UDP4-RECVFROM:${toString echoPort},fork", "EXEC:cat"]}
+        vm_140.succeed(f"echo {json.dumps(json.dumps({'services': {'web': web, 'echo': echo}}))} > /tmp/stack.json")
 
     def push(path, version):
         ref = "registry.lsck0.dev/demo/web"
@@ -121,7 +152,7 @@ pkgs.testers.runNixOSTest {
         # a worker holds no control: it cannot read the cluster
         vm_250.fail("docker node ls")
         # nothing kept yet: converge has nothing to apply
-        vm_140.wait_for_unit("swarm-converge.service")
+        vm_140.wait_for_unit("swarm-converge-demo.service")
 
     with subtest("an app deploys through swarm-apply, runs on the workers only, and is kept for converge"):
         v1 = push("${app "v1"}", "v1")
@@ -137,6 +168,13 @@ pkgs.testers.runNixOSTest {
 
     with subtest("only the edge and the trusted sources reach a published port"):
         vm_140.fail("curl -sf -m 5 http://${w1}:${toString port}/")
+
+    with subtest("a tcp and a udp route answer a client from anywhere on every worker"):
+        for ip in ("${w1}", "${w2}"):
+            world.wait_until_succeeds(f"curl -sf -m 5 --interface ${client} http://{ip}:${toString tcpPort}/ | grep -q 'demo v1'", timeout=120)
+            world.wait_until_succeeds(f"echo ping | socat -T2 - UDP4:{ip}:${toString udpPort},bind=${client} | grep -qx ping", timeout=120)
+        # positive control: the same client on the http route's port, which only the edge's grant opens
+        world.fail("curl -sf -m 5 --interface ${client} http://${w1}:${toString port}/")
 
     with subtest("the policy refuses a privileged stack and leaves the app running"):
         stack(push("${app "v2"}", "v2"), privileged=True)
@@ -175,7 +213,7 @@ pkgs.testers.runNixOSTest {
         vm_140.wait_for_unit("swarm-cluster.service")
         vm_140.succeed("docker info --format '{{.Swarm.LocalNodeState}}' | grep -qx active")
         vm_140.succeed("docker service ls --filter name=demo_web --format '{{.Name}}' | grep -qx demo_web")
-        vm_140.wait_for_unit("swarm-converge.service")
+        vm_140.wait_for_unit("swarm-converge-demo.service")
         serves(${toString port}, "demo v2")
 
     with subtest("a catalog edit reaches the running app without a commit"):
