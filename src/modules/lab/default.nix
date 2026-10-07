@@ -26,6 +26,7 @@
 #   lab.nasClients."10.100.0.140" # the same of every powered guest, by address: what vm-109 exports
 #   lab.roles.collector           # "105": the vmid of the one instance declaring a role (instance.nix `roles`)
 #   lab.alerts.backup_stale       # an instance's own alert rule (instance.nix `alerts`) plus its vmid; lab.probes alike
+#   lab.upstreams.aur             # { url; } a third-party service the lab depends on (src/lab/upstreams.nix, modules/upstream)
 #
 # problems: every broken lab-wide rule (zones.json against the instances, vmid ranges, vm shapes, duplicate names),
 # one line each; the flake refuses to evaluate past one, so no host and no terraform plan proceeds.
@@ -353,6 +354,7 @@ let
       shares nasClients problems;
     alerts = withVmid alertEntries;
     probes = withVmid probeEntries;
+    upstreams = import (root + "/lab/upstreams.nix");
     withApps = f: import ./. { inherit lib root; apps = folders: f (apps folders); };
     # zone: from: the address a grant's source stands for in a guard of that zone
     inherit sourceOf;

@@ -1,7 +1,7 @@
 # the lab-wide alert rules vm-105 writes itself (telemetry.nix alertType, keyed by uid): the guests, the proxmox host,
 # the monitoring pipeline, the shared modules' timestamps and the rules every service gets from its record. A rule over
 # one instance's own metrics lives in that instance.nix `alerts`, an app's in its app.nix.
-{ lib, telemetry, ntfy, catalog, nodeJob, guestsExpectedUp, monitoringUnitsRegex, services, exportersOf, exporterJobOf, edgeTraefikTarget }:
+{ lib, telemetry, ntfy, catalog, nodeJob, guestsExpectedUp, monitoringUnitsRegex, services, exportersOf, exporterJobOf, edgeTraefikTarget, upstreamJob }:
 let
   inherit (telemetry) vmName;
 
@@ -95,6 +95,15 @@ let
       severity = "critical"; telegram = true;
       summary = "{{ $labels.service }} on {{ $labels.vm }} does not answer";
       description = "The blackbox probe of the service has failed for 10 minutes while its guest is up.";
+    };
+    upstream_unavailable = {
+      title = "Upstream unavailable";
+      category = "upstream";
+      expr = "probe_success{job=\"${upstreamJob}\"}";
+      op = "lt"; threshold = 1;
+      for = "15m";
+      summary = "{{ $labels.upstream }} unavailable";
+      description = "The lab has not reached this third-party service (src/lab/upstreams.nix) for 15 minutes. Its callers skip their runs and keep their last state; nothing to do unless it lasts.";
     };
     memory_pressure = {
       title = "Guest thrashing";

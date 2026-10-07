@@ -68,6 +68,7 @@ let
     apps = { firing = "Apps failing"; resolved = "Apps ok"; };
     builds = { firing = "Builds failing"; resolved = "Builds ok"; };
     monitoring = { firing = "Monitoring degraded"; resolved = "Monitoring ok"; };
+    upstream = { firing = "Upstream unavailable"; resolved = "Upstream back"; };
     heartbeat = { firing = "Alerting alive"; resolved = "Alerting stopped"; };
   };
 

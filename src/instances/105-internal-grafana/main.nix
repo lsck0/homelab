@@ -219,6 +219,8 @@ let
     vm = vmName (guest p.vmid);
     target = if p.protocol == "http" then "http://${(guest p.vmid).ip}:${toString p.port}${p.path}" else "${(guest p.vmid).ip}:${toString p.port}";
   }) (lib.filterAttrs (_: p: awake (guest p.vmid)) lab.probes);
+  # every third-party service the lab depends on (modules/upstream), one alert each
+  upstreamJob = "upstream";
   probesOf = protocol: lib.filter (p: p.protocol == protocol) instanceProbes ++ (if protocol == "http" then httpProbes else tcpProbes);
   probeJob = protocol: {
     job_name = "blackbox-${protocol}";
@@ -238,7 +240,7 @@ let
   # -----------------------------------------------------------------------------
 
   labRules = telemetry.alertsOf (import ./lib/rules.nix {
-    inherit lib telemetry ntfy catalog nodeJob guestsExpectedUp monitoringUnitsRegex services exportersOf exporterJobOf;
+    inherit lib telemetry ntfy catalog nodeJob guestsExpectedUp monitoringUnitsRegex services exportersOf exporterJobOf upstreamJob;
     edgeTraefikTarget = traefikTargetOf "external";
   });
   # the rules instances and apps declare over their own metrics; an app's uid carries the app
@@ -744,6 +746,16 @@ in {
             preferred_ip_protocol = "ip4";
           };
         };
+        # a third party's service is up while it answers below 500 (modules/upstream)
+        upstream_up = {
+          prober = "http";
+          timeout = "10s";
+          http = {
+            valid_status_codes = lib.range 100 499;
+            follow_redirects = false;
+            preferred_ip_protocol = "ip4";
+          };
+        };
         tcp_up = {
           prober = "tcp";
           timeout = "5s";
@@ -789,6 +801,11 @@ in {
       }
       (probeJob "http")
       (probeJob "tcp")
+      (probeJob "http" // {
+        job_name = upstreamJob;
+        params.module = [ "upstream_up" ];
+        static_configs = lib.mapAttrsToList (upstream: u: { targets = [ u.url ]; labels = { inherit upstream; }; }) lab.upstreams;
+      })
       {
         job_name = nodeJob;
         static_configs = map (t: {

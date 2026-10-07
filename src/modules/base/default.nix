@@ -32,6 +32,7 @@ in {
     ../retry.nix
     ../tokens
     ../textfile.nix
+    ../upstream
   ];
 
   # every secret from the file the layout puts it in: its folder's, its app's, or its own copy of the shared ones
