@@ -1,5 +1,9 @@
 # media streaming + Janitorr (deletes media unwatched for months)
-{ lib, site, ... }: {
+{ lib, site, ... }:
+let
+  port = 80;
+  ollama = import ../../modules/ollama.nix;
+in {
   vm = {
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
@@ -19,9 +23,14 @@
     "jellyfin-admin-pass" "janitorr-pass"
   ];
 
+  grants = [
+    { from = [ "114" "128" "130" ]; tcp = [ port ]; why = "hermes, jellyseerr and the arrs' notifications call its api directly"; }
+    { from = [ "121" ]; tcp = [ ollama.port ]; why = "paperless-ai asks the local llm"; }
+  ];
+
   services = {
     jellyfin = {
-      port = 80;
+      inherit port;
       loginPaths = [ "/Users/AuthenticateByName" ];
       loginRedirect = { path = "/"; to = "/sso/OID/start/authelia"; };
       frames = "sameorigin";
@@ -43,7 +52,6 @@
         tokenAuthMethod = "client_secret_post";
       };
       off = {
-        guard = "open to the lab until its direct clients are grants";
         sso = "logs in itself through authelia oidc (sso plugin); apps use quick connect";
         anubis = "the jellyfin apps run no proof of work";
         bodyLimit = "image and plugin uploads";

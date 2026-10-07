@@ -26,16 +26,19 @@ let
   };
   zoneAddresses = {
     internal = map ip [ "100" "101" "105" "109" "112" "117" "130" "140" ];
-    dmz = map ip [ "200" "203" "204" "206" "207" "210" ];
+    external = map ip [ "200" "203" "204" "206" "207" "210" ];
     apps = map ip [ "250" "251" "252" ];
   };
 
   facts = {
     nasClients = lib.attrNames lab.nasClients;
-    appsPorts = lab.catalog.ports.external;
+    # the edge's way to the workers: the public http routes of the shared swarm's apps
+    appsPorts = lib.unique (map (r: r.port) (lib.filter (r: r.app != null) (lib.attrValues lab.catalog.external)));
     vpnMembers = map (e: ip (toString e.vmid)) (lib.attrValues lab.egress);
     appsNodes = zoneAddresses.apps;
+    stateWorker = ip lab.catalog.swarm.stateId;
   };
+  dhcpPool = net.zones.external.dhcpPool;
   # the split horizon serves the catalog: every route's name at its ingress, the enabled apps' public and internal
   # hosts with them
   dnsExpected = lib.listToAttrs (
@@ -71,10 +74,9 @@ let
   udpPorts = [ 53 111 2049 4789 7946 ];
 
   tools = { environment.systemPackages = [ pkgs.dig pkgs.netcat pkgs.tcpdump pkgs.python3 pkgs.busybox pkgs.nftables ]; };
-  zoneNode = zone: vlan: extra: {
-    imports = [ (lab.multi { inherit vlan; addresses = map (a: "${a}/24") zoneAddresses.${zone}; gateway = net.zones.${zone'.${zone}}.routerIp; }) tools extra ];
+  zoneNode = zone: extra: {
+    imports = [ (lab.multi { vlan = vlans.${zone}; addresses = map (a: "${a}/24") zoneAddresses.${zone}; gateway = net.zones.${zone}.routerIp; }) tools extra ];
   };
-  zone' = { internal = "internal"; dmz = "external"; apps = "apps"; };
   # a second nic on the zone's vlan, unaddressed, for a dhcp client
   dhcpNic = vlan: {
     virtualisation.vlans = lib.mkForce [ vlan vlan ];
@@ -97,11 +99,12 @@ pkgs.testers.runNixOSTest {
       routes = [ { address = "10.0.0.0"; prefixLength = 8; via = routerWan; } ];
     }) tools ];
   };
-  nodes.internal = zoneNode "internal" vlans.internal { };
-  nodes.dmz = zoneNode "dmz" vlans.dmz (dhcpNic vlans.dmz);
-  nodes.apps = zoneNode "apps" vlans.apps (dhcpNic vlans.apps);
+  nodes.internal = zoneNode "internal" { };
+  nodes.dmz = zoneNode "external" (dhcpNic vlans.external);
+  nodes.apps = zoneNode "apps" (dhcpNic vlans.apps);
 
   testScript = lab.driverPython + builtins.readFile ./lib/zones.py + ''
+    import ipaddress
     import random
     import re
 
@@ -114,13 +117,14 @@ pkgs.testers.runNixOSTest {
     ROUTER_WAN = "${routerWan}"
     HOUSE = json.loads('${builtins.toJSON house}')
     ZONES = json.loads('${builtins.toJSON zoneAddresses}')
+    POOL = (ipaddress.ip_address("${dhcpPool.first}"), ipaddress.ip_address("${dhcpPool.last}"))
     ORACLE = ZoneOracle(FACTS)
     # three high ports the policy never names, a fresh sample per seed
     TCP = sorted(set(${builtins.toJSON tcpPorts}) | set(rng.sample(range(30000, 60000), 3)))
     UDP = ${builtins.toJSON udpPorts}
 
     machines_by_address = {a: house for a in HOUSE.values()}
-    for zone, machine in (("internal", internal), ("dmz", dmz), ("apps", apps)):
+    for zone, machine in (("internal", internal), ("external", dmz), ("apps", apps)):
         machines_by_address.update({a: machine for a in ZONES[zone]})
 
     # esp has no ports: conntrack tracks it per address pair only, so an earlier esp probe decides a later one. A
@@ -131,6 +135,19 @@ pkgs.testers.runNixOSTest {
 
     def reach(machine, src, dst, port):
         return machine.execute(f"nc -z -w 2 -s {src} {dst} {port}")[0] == 0
+
+    # a capture counts only once tcpdump listens; packet-buffered, so a read sees every packet so far
+    def capture_start(machine, interface, pcap, bpf):
+        machine.succeed(f"tcpdump -n -U -i {interface} -w {pcap} '{bpf}' > {pcap}.log 2>&1 & echo $! > {pcap}.pid")
+        machine.wait_until_succeeds(f"grep -q 'listening on' {pcap}.log", timeout=30)
+
+    def capture_read(machine, pcap):
+        return machine.succeed(f"tcpdump -n -r {pcap} 2>/dev/null")
+
+    def capture_stop(machine, pcap):
+        machine.succeed(f"kill -INT $(cat {pcap}.pid)")
+        machine.wait_until_fails(f"kill -0 $(cat {pcap}.pid)", timeout=30)
+        return capture_read(machine, pcap)
 
     def counter(table, chain, marker):
         out = luca_router.succeed(f"nft list chain ip {table} {chain}")
@@ -172,7 +189,7 @@ pkgs.testers.runNixOSTest {
             {"src": HOUSE["device"], "dst": ROUTER_WAN, "proto": "tcp", "port": 443, "expect": "open"},
             {"src": ZONES["internal"][1], "dst": ROUTER_WAN, "proto": "tcp", "port": 443, "expect": "open"},
             # a dmz or the apps zone reaching the public address would be a way around its isolation
-            {"src": ZONES["dmz"][1], "dst": ROUTER_WAN, "proto": "tcp", "port": 443, "expect": "closed"},
+            {"src": ZONES["external"][1], "dst": ROUTER_WAN, "proto": "tcp", "port": 443, "expect": "closed"},
             {"src": ZONES["apps"][0], "dst": ROUTER_WAN, "proto": "tcp", "port": 443, "expect": "closed"},
             # minecraft's vm is disabled: no forward; and nothing else is forwarded
             {"src": HOUSE["internet"], "dst": ROUTER_WAN, "proto": "tcp", "port": 25565, "expect": "closed"},
@@ -188,17 +205,17 @@ pkgs.testers.runNixOSTest {
             (internal, ZONES["internal"][1], "10.100.0.1", 22, True), (internal, ZONES["internal"][1], "10.100.0.1", 53, True),
             (internal, ZONES["internal"][1], "10.100.0.1", 9100, False), (internal, "${ip "105"}", "10.100.0.1", 9100, True),
             (internal, ZONES["internal"][1], "10.100.0.1", 9055, False), (internal, "${ip "130"}", "10.100.0.1", 9055, True),
-            (dmz, ZONES["dmz"][1], "10.200.0.1", 53, True), (dmz, ZONES["dmz"][1], "10.200.0.1", 22, False),
-            (dmz, ZONES["dmz"][1], "10.200.0.1", 9100, False),
+            (dmz, ZONES["external"][1], "10.200.0.1", 53, True), (dmz, ZONES["external"][1], "10.200.0.1", 22, False),
+            (dmz, ZONES["external"][1], "10.200.0.1", 9100, False),
             (apps, ZONES["apps"][0], "10.250.0.1", 53, True), (apps, ZONES["apps"][0], "10.250.0.1", 22, False),
             # another interface's address does not open another interface's services
-            (apps, ZONES["apps"][0], "10.100.0.1", 22, False), (dmz, ZONES["dmz"][1], "10.100.0.1", 53, False),
+            (apps, ZONES["apps"][0], "10.100.0.1", 22, False), (dmz, ZONES["external"][1], "10.100.0.1", 53, False),
         ]
         wrong = [c[1:] for c in cases if reach(*c[:4]) != c[4]]
         assert not wrong, f"router services: (src, dst, port, expected) wrong for {wrong}"
 
     with subtest("the split horizon answers from the catalog in every zone"):
-        for machine, src, server in ((internal, ZONES["internal"][1], "10.100.0.1"), (dmz, ZONES["dmz"][1], "10.200.0.1"),
+        for machine, src, server in ((internal, ZONES["internal"][1], "10.100.0.1"), (dmz, ZONES["external"][1], "10.200.0.1"),
                                      (apps, ZONES["apps"][0], "10.250.0.1")):
             for name, address in DNS.items():
                 got = machine.succeed(f"dig +short +time=3 -b {src} @{server} {name}").strip()
@@ -212,21 +229,22 @@ pkgs.testers.runNixOSTest {
         apps.succeed("ip link set eth2 up")
         out = dmz.succeed("busybox udhcpc -i eth2 -n -q -t 5 -s ${leaseScript}")
         lease = re.search(r"lease (\S+) router (\S+) dns (\S+)", out)
-        assert lease and 211 <= int(lease.group(1).split(".")[3]) <= 254 and lease.group(2) == "10.200.0.1", out
+        assert lease and POOL[0] <= ipaddress.ip_address(lease.group(1)) <= POOL[1] and lease.group(2) == "10.200.0.1", out
         apps.fail("busybox udhcpc -i eth2 -n -q -t 3 -s ${leaseScript}")
 
     with subtest("vpn members never leave through the house, whichever piece of the exit is missing"):
         member, other = "${ip "112"}", ZONES["internal"][1]
-        house.succeed("tcpdump -n -i eth1 -w /tmp/leak.pcap 'tcp port ${toString killswitchPort}' >/dev/null 2>&1 & sleep 1")
+        capture_start(house, "eth1", "/tmp/leak.pcap", "tcp port ${toString killswitchPort}")
         steps = ["true", "systemctl stop wireguard-wg-egress", "ip rule del fwmark 1 table 100"]
         for step in steps:
             luca_router.succeed(step)
             internal.fail(f"nc -z -w 2 -s {member} {HOUSE['internet']} ${toString killswitchPort}")
         assert counter("egress", "killswitch", "drop") > 0, "the killswitch saw nothing once the rule was gone"
-        # read before the positive control, whose connection leaves through the house by design
-        house.succeed("pkill -INT -f leak.pcap; sleep 1")
-        leak = house.succeed("tcpdump -n -r /tmp/leak.pcap 2>/dev/null")
-        assert leak == "", f"a member's connection left through the house:\n{leak}"
+        # inside the capture: a non-member's connection to the house, which the capture must see
+        internal.succeed(f"nc -z -w 2 -s {other} {HOUSE['device']} ${toString killswitchPort}")
+        house.wait_until_succeeds(f"tcpdump -n -r /tmp/leak.pcap 2>/dev/null | grep -q '> {HOUSE['device']}.${toString killswitchPort}:'", timeout=10)
+        leak = [l for l in capture_stop(house, "/tmp/leak.pcap").splitlines() if f"{HOUSE['device']}.${toString killswitchPort}" not in l]
+        assert not leak, "a member's connection left through the house:\n" + "\n".join(leak)
         # positive control: a non-member reaches the same listener, masqueraded
         probe_check([{"src": other, "dst": HOUSE["internet"], "proto": "tcp", "port": ${toString killswitchPort}, "expect": "open",
                       "seen_src": ROUTER_WAN}], sources=machines_by_address, sinks=[house], seed=SEED)
@@ -234,31 +252,33 @@ pkgs.testers.runNixOSTest {
         luca_router.succeed("ip rule | grep -q 'fwmark 0x1 lookup 100'")
 
     with subtest("vpn members' dns goes into the tunnel, everyone else's to blocky, nobody's through the house"):
-        house.succeed("tcpdump -n -i eth1 -w /tmp/dns-leak.pcap 'udp port 53' >/dev/null 2>&1 & sleep 1")
-        luca_router.succeed("tcpdump -n -i wg-egress -c 1 'udp port 53' > /tmp/tunnel-dns 2>&1 &")
+        capture_start(house, "eth1", "/tmp/dns-leak.pcap", "udp port 53")
+        capture_start(luca_router, "wg-egress", "/tmp/tunnel-dns.pcap", "udp port 53")
         internal.execute("dig +time=2 +tries=1 -b ${ip "112"} @10.100.0.1 example.org")
-        luca_router.wait_until_succeeds("grep -q 'IP ' /tmp/tunnel-dns", timeout=20)
+        luca_router.wait_until_succeeds("tcpdump -n -r /tmp/tunnel-dns.pcap 2>/dev/null | grep -q example.org", timeout=20)
         # a split horizon name still answers for a member
         assert internal.succeed("dig +short +time=3 -b ${ip "112"} @10.100.0.1 grafana.${net.domain}").strip() == "${ip "100"}"
-        luca_router.succeed("tcpdump -n -i wg-egress -w /tmp/tunnel-dns-other.pcap 'udp port 53' >/dev/null 2>&1 & sleep 1")
         internal.execute(f"dig +time=2 +tries=1 -b {other} @10.100.0.1 example.net")
-        luca_router.succeed("sleep 3; pkill -INT -f tunnel-dns-other.pcap; sleep 1")
-        # the member's own query above may still be retried into the tunnel (its exit is offline): count the other's name
-        tunnel = luca_router.succeed("tcpdump -n -r /tmp/tunnel-dns-other.pcap 2>/dev/null")
+        # positive control, last in the capture: the tunnel capture sees a member's query sent after the other's
+        internal.execute("dig +time=2 +tries=1 -b ${ip "112"} @10.100.0.1 control.example")
+        luca_router.wait_until_succeeds("tcpdump -n -r /tmp/tunnel-dns.pcap 2>/dev/null | grep -q control.example", timeout=20)
+        tunnel = capture_stop(luca_router, "/tmp/tunnel-dns.pcap")
         assert "example.net" not in tunnel, tunnel
-        house.succeed("pkill -INT -f dns-leak.pcap; sleep 1")
-        leak = house.succeed("tcpdump -n -r /tmp/dns-leak.pcap 2>/dev/null")
-        assert leak == "", f"a dns query left through the house:\n{leak}"
+        # inside the house capture: a query to a house address, which the capture must see
+        internal.execute(f"dig +time=1 +tries=1 -b {other} @{HOUSE['device']} control.example")
+        house.wait_until_succeeds(f"tcpdump -n -r /tmp/dns-leak.pcap 2>/dev/null | grep -q '> {HOUSE['device']}.53:'", timeout=10)
+        leak = [l for l in capture_stop(house, "/tmp/dns-leak.pcap").splitlines() if f"{HOUSE['device']}.53" not in l]
+        assert not leak, "a dns query left through the house:\n" + "\n".join(leak)
 
     with subtest("a source never arrives on another network's interface"):
         before = counter("antispoof", "prerouting", "${net.zones.external.interface}")
         dmz.succeed("ip addr add 10.100.0.199/32 dev eth1")
         assert not reach(dmz, "10.100.0.199", "10.200.0.1", 53)
         assert counter("antispoof", "prerouting", "${net.zones.external.interface}") > before
-        assert reach(dmz, ZONES["dmz"][1], "10.200.0.1", 53)
+        assert reach(dmz, ZONES["external"][1], "10.200.0.1", 53)
         house.succeed("ip addr add 10.100.0.198/32 dev eth1")
-        assert not reach(house, "10.100.0.198", ZONES["dmz"][1], TCP[0])
-        assert reach(house, HOUSE["device"], ZONES["dmz"][1], TCP[0])
+        assert not reach(house, "10.100.0.198", ZONES["external"][1], TCP[0])
+        assert reach(house, HOUSE["device"], ZONES["external"][1], TCP[0])
 
     with subtest("nat's blanket accept toward the wan comes after every drop of the policy"):
         rules = [l.strip() for l in luca_router.succeed("nft list chain inet nixos-fw forward-allow").splitlines()]
@@ -274,7 +294,7 @@ pkgs.testers.runNixOSTest {
             assert grew == metered, f"{src}: wan-syn grew {grew}, expected {metered}"
 
     with subtest("no forbidden flow opens while the ruleset reloads or the router boots"):
-        loop = (f"for i in $(seq 300); do echo try; nc -z -w 1 -s {ZONES['dmz'][1]} ${ip "109"} 2049 && echo OPEN; done "
+        loop = (f"for i in $(seq 300); do echo try; nc -z -w 1 -s {ZONES['external'][1]} ${ip "109"} 2049 && echo OPEN; done "
                 "> /tmp/window.log 2>&1 &")
         dmz.succeed(loop)
         # ten restarts within a second pass systemd's start limit (5 in 10 s); reset-failed clears its count

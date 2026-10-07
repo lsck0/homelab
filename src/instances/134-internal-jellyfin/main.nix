@@ -44,8 +44,15 @@ let
   # the setup waits for ready at most twice (start, the one restart) and talks to the api in between
   setupTimeoutS = 2 * readyTimeoutS + 300;
 
-  ssoManifest = "https://raw.githubusercontent.com/9p4/jellyfin-plugin-sso/manifest-release/manifest.json";
-  ssoPackage = "SSO Authentication";
+  # the version installed live: a bump runs the plugin's own migrations, so it is a deliberate change here
+  ssoVersion = "4.0.0.4";
+  ssoPlugin = pkgs.fetchzip {
+    url = "https://github.com/9p4/jellyfin-plugin-sso/releases/download/v${ssoVersion}/sso-authentication_${ssoVersion}.zip";
+    hash = "sha256-MJTyE6CeVLk7mlugauJ/F6bpi1kYwNtzNmQeH3+CFeQ=";
+    stripRoot = false;
+  };
+  pluginsDir = "${stateDir}/config/plugins";
+  ssoDir = "${pluginsDir}/SSO Authentication_${ssoVersion}";
   # login is for app-jellyfin members; admins among them get jellyfin's admin flag on top, never a way in alone
   ssoConfig = {
     SamlConfigs = { };
@@ -234,8 +241,6 @@ let
     }
   '';
 in {
-  networking.hostName = "vm-134";
-
   # janitorr cleans up through the arrs and jellyseerr
   homelab.tokens.reads = [ "radarr-key" "sonarr-key" "jellyseerr-key" ];
 
@@ -274,7 +279,6 @@ in {
   # jellyfin db local, the nas keeps a nightly copy
   homelab.localState.jellyfin = {
     path = stateDir;
-    share = "jellyfin";
     unit = "podman-jellyfin";
     sqlite = [ "config/data/*.db" ];
   };
@@ -330,7 +334,7 @@ in {
     description = "Set up Jellyfin (admin, API keys, libraries, janitorr, network, Authelia SSO)";
     partOf = [ "podman-jellyfin.service" ];
     after = [ "podman-jellyfin.service" ];
-    path = [ pkgs.curl pkgs.jq pkgs.coreutils ];
+    path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.diffutils pkgs.findutils ];
     serviceConfig = {
       RuntimeDirectory = "jellyfin-setup";
       RuntimeDirectoryMode = "0700";
@@ -457,16 +461,19 @@ in {
         restart_needed "ldap plugin removed"
       fi
 
-      # -- authelia sso: repository and plugin; the install request returns once the files are in place
-      if ! api "$J/Repositories" | jq -e --arg u ${ssoManifest} 'any(.[]; .Url == $u)' >/dev/null; then
-        api "$J/Repositories" | jq -c --arg u ${ssoManifest} '. + [{Name: "jellyfin-plugin-sso", Url: $u, Enabled: true}]' \
-          | api -X POST "$J/Repositories" -d @-
-        echo "sso plugin repository added"
+      # -- plugins come from the store alone: no repository, so nothing installs or updates behind this unit
+      if ! api "$J/Repositories" | jq -e 'length == 0' >/dev/null; then
+        api -X POST "$J/Repositories" -d '[]'
+        echo "plugin repositories removed"
       fi
-      if [ -z "$(plugin_find "$plugins" '^SSO')" ]; then
-        api -X POST "$J/Packages/Installed/${lib.escapeURL ssoPackage}"
-        restart_needed "sso plugin installed"
-      fi
+      # authelia sso, the pinned build; jellyfin rewrites meta.json, so only the assemblies are compared
+      for dll in ${ssoPlugin}/*.dll; do
+        cmp -s "$dll" "${ssoDir}/''${dll##*/}" && continue
+        find ${pluginsDir} -maxdepth 1 -name 'SSO Authentication_*' -exec rm -rf {} +
+        install -D -m 0644 -t "${ssoDir}" ${ssoPlugin}/*
+        restart_needed "sso plugin ${ssoVersion} installed"
+        break
+      done
 
       # -- the one restart
       if [ -n "$RESTART_REASONS" ]; then
@@ -513,10 +520,9 @@ in {
     '';
   };
 
-  networking.firewall.allowedTCPPorts = [ route.port ollama.port ];
-
+  # ollama is no route: its port and guard are here, its client a grant in instance.nix
+  networking.firewall.allowedTCPPorts = [ ollama.port ];
   homelab.ingressOnly.ports = [ ollama.port ];
-  homelab.ingressOnly.portSources.${toString ollama.port} = map (id: net.hostSource (toString id)) ollama.clients;
 
   # vfio pins all ram, so dropped caches return nothing to the host
   homelab.dropCaches = false;

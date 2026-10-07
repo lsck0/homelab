@@ -10,7 +10,14 @@
     diskGiB = 16;
   };
 
-  tokens = [ "hass-key" "hass-pass" ];
+  tokens = [ "hass-key" ];
+
+  shares = {
+    "data/homeassistant" = { };
+    "data/tokens/vm-125" = { mode = "0755"; };
+  };
+
+  secrets = { hass-pass = "hex:16"; };
 
   services = {
     homeassistant = {

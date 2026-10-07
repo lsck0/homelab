@@ -2,17 +2,17 @@
 
 Usage: app-builder.py <catalog.json> <state-dir> [app]
 
-Without an app: for every app whose branch moved, or whose build settings in the catalog changed, since its last
-good deploy, fetch the newest commit that matters (the branch head, or the newest touching `watch`), build each
-service the stack builds (in parallel, `buildParallelism` at a time) unless the registry already holds an image of
-the same content, push it tagged with its content key, pin it by the digest the registry answered, inline
-every env_file the stack reads from the repo, and hand the stack to the app's swarm manager (this host's through
-swarm-deploy@<app>, a guest's own over its forced command: modules/swarm), which adds the homelab's ports,
-secrets, limits and policy, rolls
-it out and fails the deploy when the swarm rolled it back. A deployed build is also tagged `latest`, which the
-registry's prune keeps. A failed app is retried with backoff (the same commit
-and catalog entry no sooner than `backoff`); the others go on. With an app: rebuild and deploy it now, whatever
-its state.
+Without an app: for every app whose branch moved, whose build settings in the catalog changed, or whose last good
+deploy is older than `baseRefreshS`, fetch the newest commit that matters (the branch head, or the newest touching
+`watch`), build each service the stack builds (in parallel, `buildParallelism` at a time) unless the registry
+already holds an image of the same content, push it tagged with its content key, pin it by the digest the registry
+answered, inline every env_file the stack reads from the repo, and hand the stack to the app's swarm manager (this
+host's through swarm-deploy@<app>, a guest's own over its forced command: modules/swarm), which adds the homelab's
+ports, secrets, limits and policy, rolls it out and fails the deploy when the swarm rolled it back. A deployed
+build is also tagged `latest`, which the registry's prune keeps. A failed app is retried with backoff (the same
+commit and catalog entry no sooner than `backoff`); the others go on. With an app: the same look at that app alone,
+now (its ci's /redeploy). Each app's turn holds that app's lock: a run finding an app busy in another leaves it to
+that one, a run for one app waits for it.
 
 State per app in <state-dir>/<app>.json, written after every attempt:
     {"head", "sha", "build_hash", "deployed_at", "committed_at", "built", "reused",
@@ -21,9 +21,10 @@ State per app in <state-dir>/<app>.json, written after every attempt:
 (lib/app-builder.nix) carries the registry, the manager, the timeouts and the backoff; nothing is defined
 twice. Forget an app's state (`app-builder-redeploy <app>` does) to deploy it again.
 
-Content key: the git tree of the build context, the dockerfile's blob, the target and the build args, so a commit
-that leaves a service's sources alone reuses its image (same digest: the swarm leaves the service running) and a
-fresh or pruned builder reuses what the registry holds. GIT_COMMIT and LAST_UPDATED are passed as build args and
+Content key: the git tree of the build context, the dockerfile's blob, the target, the build args and the digest of
+every image a stage starts from, so a commit that leaves a service's sources alone reuses its image (same digest:
+the swarm leaves the service running), a fresh or pruned builder reuses what the registry holds, and a base image's
+security fix rebuilds the service at the next look, at the latest after `baseRefreshS`. GIT_COMMIT and LAST_UPDATED are passed as build args and
 count in the key only where the dockerfile declares them; the commit and its date also go on every image as
 labels, which touch no layer. Layers of a rebuilt service come from the local cache, else from the last live image
 (inline cache, `--cache-from`).
@@ -79,11 +80,17 @@ MANIFEST_ACCEPT = ", ".join(("application/vnd.oci.image.index.v1+json", "applica
                              "application/vnd.docker.distribution.manifest.list.v2+json",
                              "application/vnd.docker.distribution.manifest.v2+json"))
 HTTP_NOT_FOUND = 404
-LOCK_FILE = "lock"
+LOCK_SUFFIX = ".lock"
 METRICS_FILE = "metrics.prom"
 STATE_SUFFIX = ".json"
 STATE_EMPTY = {"head": None, "sha": None, "build_hash": None, "deployed_at": None, "committed_at": None,
                "built": None, "reused": None, "failure": None}
+# a stage starting from nothing or from an earlier stage has no base image of its own
+BASE_NONE = "scratch"
+FROM_LINE = re.compile(r"^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?\s*$", re.IGNORECASE)
+ARG_LINE = re.compile(r"^\s*ARG\s+([A-Za-z_][A-Za-z0-9_]*)(?:=(\S*))?", re.IGNORECASE)
+VARIABLE = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?")
+DIGEST_SEPARATOR = "@"
 DOTENV_COMMENT = "#"
 DOTENV_EXPORT = "export "
 
@@ -190,6 +197,19 @@ def registry_digest(ctx, app, name, tag):
     if not digest.startswith("sha256:"):
         raise BuildError(f"the registry named no digest for {app}/{name}:{tag}")
     return digest
+
+
+def image_base_digest(ctx, image):
+    """The digest the image's registry serves now: a pull that moves only what changed, then its pinned name."""
+    if DIGEST_SEPARATOR in image:
+        return image.split(DIGEST_SEPARATOR, 1)[1]
+    timeout_s = ctx["timeouts"]["pushS"]
+    process_run(["docker", "pull", "-q", image], timeout_s, capture_output=True)
+    digests = json.loads(process_run(["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image],
+                                     timeout_s, capture_output=True).stdout)
+    if not digests:
+        raise BuildError(f"the registry of {image} named no digest")
+    return digests[0].split(DIGEST_SEPARATOR, 1)[1]
 
 
 def image_build_push(ctx, app, name, build, tag, labels, args):
@@ -390,12 +410,36 @@ def dockerfile_declares(path, arg):
         return re.search(rf"^\s*ARG\s+{arg}\b", f.read(), re.MULTILINE | re.IGNORECASE) is not None
 
 
+def dockerfile_bases(path, args):
+    """The images the dockerfile's stages start from, build args applied: never scratch, never an earlier stage."""
+    with open(path, encoding="utf-8", errors="replace") as f:
+        lines = f.read().splitlines()
+    values, stages, bases = {}, set(), []
+    for line in lines:
+        arg = ARG_LINE.match(line)
+        # only an ARG before the first FROM reaches a FROM line
+        if arg and not stages:
+            values[arg.group(1)] = args.get(arg.group(1), arg.group(2) or "")
+        stage = FROM_LINE.match(line)
+        if not stage:
+            continue
+        image = VARIABLE.sub(lambda m: values.get(m.group(1), m.group(0)), stage.group(1))
+        if "$" in image:
+            raise BuildError(f"{os.path.basename(path)}: FROM {stage.group(1)} names an argument without a value")
+        if image.lower() != BASE_NONE and image not in stages:
+            bases.append(image)
+        stages.add(stage.group(2) or image)
+    return bases
+
+
 def content_key(ctx, repo_dir, build, args):
-    """What the image is made of: the context's git tree, the dockerfile, the target, the args it reads."""
+    """What the image is made of: the context's git tree, the dockerfile, the target, the args it reads, its bases."""
     read = {k: v for k, v in args.items() if k not in METADATA_ARGS or dockerfile_declares(build["dockerfile"], k)}
     context = os.path.relpath(build["context"], repo_dir)
+    bases = sorted((image, image_base_digest(ctx, image)) for image in set(dockerfile_bases(build["dockerfile"], args)))
     parts = [git_object(ctx, repo_dir, "" if context == os.curdir else context),
-             git_object(ctx, repo_dir, os.path.relpath(build["dockerfile"], repo_dir)), build["target"], sorted(read.items())]
+             git_object(ctx, repo_dir, os.path.relpath(build["dockerfile"], repo_dir)), build["target"], sorted(read.items()),
+             bases]
     return hashlib.sha256(json.dumps(parts).encode()).hexdigest()[:KEY_LENGTH]
 
 
@@ -463,8 +507,9 @@ def sha_short(sha):
 
 
 def file_write_atomic(path, text):
-    tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    """Readers see the old file or the new one; two writers of one path never share a temp file."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=os.path.basename(path) + ".")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         f.write(text)
     os.replace(tmp, path)
 
@@ -539,25 +584,26 @@ def metrics_render(states, run_at):
 # FUNCTIONS
 # -----------------------------------------------------------------------------
 
-def app_run(ctx, app, spec, state, forced):
+def app_run(ctx, app, spec, state):
     """One app's turn: the next state. Raises nothing for an operating error; that is a failure in the state."""
     now = time_now()
     build_hash = spec["hash"]
     failure = state["failure"]
+    # a deploy this old is looked at again for its base images, even when nothing of the app moved
+    fresh = state["deployed_at"] is not None and now - state["deployed_at"] < ctx["baseRefreshS"]
     head = None
     target = None
     try:
         head = branch_head(ctx, spec["repo"], spec["branch"])
-        if not forced:
-            if head == state["head"] and build_hash == state["build_hash"] and failure is None:
-                return state
-            if (failure is not None and head == failure["head"] and build_hash == failure["build_hash"]
-                    and now < failure["retry_at"]):
-                log(app, f"failed {failure['count']} times at {sha_short(failure['sha'])}, next try at {failure['retry_at']}")
-                return state
+        if head == state["head"] and build_hash == state["build_hash"] and failure is None and fresh:
+            return state
+        if (failure is not None and head == failure["head"] and build_hash == failure["build_hash"]
+                and now < failure["retry_at"]):
+            log(app, f"failed {failure['count']} times at {sha_short(failure['sha'])}, next try at {failure['retry_at']}")
+            return state
         # an app inside a busy repo follows its own paths, not every commit of the branch
         target = branch_last_change(ctx, spec["repo"], spec["branch"], spec["watch"]) if spec["watch"] else head
-        if not forced and target == state["sha"] and build_hash == state["build_hash"]:
+        if target == state["sha"] and build_hash == state["build_hash"] and fresh:
             return dict(state, head=head, failure=None)
         facts = app_build_deploy(ctx, app, spec, target)
     except BuildError as e:
@@ -570,18 +616,32 @@ def app_run(ctx, app, spec, state, forced):
     return dict(facts, head=head, sha=target, build_hash=build_hash, deployed_at=time_now(), failure=None)
 
 
+def app_lock(state_dir, app, wait):
+    """The app's lock, held; None when another run holds it and this one does not wait."""
+    lock = open(os.path.join(state_dir, app + LOCK_SUFFIX), "w", encoding="utf-8")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | (0 if wait else fcntl.LOCK_NB))
+    except BlockingIOError:
+        lock.close()
+        return None
+    return lock
+
+
 def builder_run(ctx, apps, state_dir, only):
-    """Every app in name order, or only the named one, forced; the run's exit code."""
+    """Every app in name order, or only the named one; the run's exit code."""
     assert only is None or only in apps, only
-    states = {}
     failed = 0
-    for app in sorted(apps):
-        state = state_load(state_dir, app)
-        if only is None or only == app:
-            state = app_run(ctx, app, apps[app], state, forced=only == app)
+    for app in sorted(apps) if only is None else [only]:
+        # the timer's run leaves an app to the run already at it; a run for one app waits for it
+        lock = app_lock(state_dir, app, wait=only is not None)
+        if lock is None:
+            log(app, "busy in another run")
+            continue
+        with lock:
+            state = app_run(ctx, app, apps[app], state_load(state_dir, app))
             state_save(state_dir, app, state)
-            failed += state["failure"] is not None
-        states[app] = state
+        failed += state["failure"] is not None
+    states = {app: state_load(state_dir, app) for app in apps}
     file_write_atomic(os.path.join(state_dir, METRICS_FILE), metrics_render(states, time_now()))
     return 1 if failed else 0
 
@@ -597,11 +657,7 @@ def main():
     if only is not None and only not in catalog["apps"]:
         print(f"app-builder: unknown app {only}; known: {sorted(catalog['apps'])}", file=sys.stderr)
         return 2
-    ctx = dict(catalog, loggedIn=False)
-    # the timer's run and a forced redeploy share one docker and one state dir: one at a time
-    with open(os.path.join(state_dir, LOCK_FILE), "w", encoding="utf-8") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        return builder_run(ctx, catalog["apps"], state_dir, only)
+    return builder_run(dict(catalog, loggedIn=False), catalog["apps"], state_dir, only)
 
 
 if __name__ == "__main__":

@@ -19,7 +19,8 @@ derived.
 
 Flow on every push to that branch:
 
-1. **Builder.** `app-builder` on vm-140 notices within a minute (`git ls-remote`, run as user `appbuild`).
+1. **Builder.** `app-builder` on vm-140 notices within 30 minutes (`git ls-remote`, run as user `appbuild`), at
+   once when the app's CI posts to its `/redeploy` endpoint.
    With `watch` set it deploys only commits touching those paths. It builds the images in the lab and pushes
    them to `registry.lsck0.dev/<app>/<service>:<commit>` (user `builder`), `:latest` once deployed.
 2. **Hand-off.** It hands the stack, pinned by digest, to the app's cluster: the apps swarm, whose manager is

@@ -1,5 +1,5 @@
 """The apps' share of the swarm as modules/swarm/lib/swarm-render.py renders and admits it, table by table: reservations, the
-workers' generic resources, the app's reservation, placement over the workers, capabilities, the telemetry tenant.
+workers' generic resources, the app's reservation, placement over the workers, capabilities.
 
 Usage: render_limits_test.py <path to swarm-render.py>
 """
@@ -25,8 +25,6 @@ REGISTRY = "registry.lsck0.dev"
 OWN = f"{REGISTRY}/{APP}/web@sha256:" + "a" * 64
 TASK_DEFAULTS = {"memoryMiB": 512, "cpus": 1.0, "pids": 512, "cpuMillis": 100}
 GENERIC = {"memory": "HOMELAB_MEMORY_MIB", "cpu": "HOMELAB_CPU_MILLIS"}
-HEADER = "X-Scope-OrgID"
-OTLP = "OTEL_EXPORTER_OTLP_HEADERS"
 PER_NODE = 2
 SERVICES_MAX = 4
 
@@ -35,13 +33,13 @@ SERVICES_MAX = 4
 # INTERNAL
 # -----------------------------------------------------------------------------
 
-def catalog_of(memory=1024, cpu=500, tenant=None, resources=None, stateful=(), exclude=(), override=None):
+def catalog_of(memory=1024, cpu=500, resources=None, stateful=(), exclude=(), override=None):
     app = {"exclude": list(exclude), "stateful": list(stateful), "volumes": {"data": {"backup": False}},
            "override": override or {}, "images": [],
-           "published": [{"service": "web", "targetPort": 8000, "port": 20100}],
-           "resources": resources or {}, "reservation": {"memoryMiB": memory, "cpuMillis": cpu}, "tenant": tenant}
+           "published": [{"service": "web", "targetPort": 8000, "port": 20100, "protocol": "tcp"}],
+           "resources": resources or {}, "reservation": {"memoryMiB": memory, "cpuMillis": cpu}}
     return {"registry": REGISTRY, "replicasMax": 5, "replicasPerNodeMax": PER_NODE, "servicesMax": SERVICES_MAX,
-            "taskDefaults": TASK_DEFAULTS, "genericResources": GENERIC, "tenantHeader": HEADER,
+            "taskDefaults": TASK_DEFAULTS, "genericResources": GENERIC, "replicasLabel": "homelab.replicas",
             "stackBytesMax": 1024 * 1024, "apps": {APP: app}}
 
 
@@ -64,10 +62,6 @@ def refusal(case, stack, catalog, env=None):
         render(stack, catalog, env)
     case.assertEqual(e.exception.code, 2)
     return err.getvalue()
-
-
-def unescape(value):
-    return value.replace("$$", "$")
 
 
 # -----------------------------------------------------------------------------
@@ -183,29 +177,6 @@ class Idle(unittest.TestCase):
             svc["deploy"]["replicas"] = 0
         self.assertEqual(stopped, running)
         self.assertIn("need 1536 MiB", refusal(self, stack, catalog_of(memory=1024, cpu=1000)))
-
-
-class Tenant(unittest.TestCase):
-    def test_every_service_of_a_telemetry_app_carries_its_tenant(self):
-        out = render(stack_of(worker={}), catalog_of(tenant="app-demo"))
-        for name in ("web", "worker"):
-            self.assertEqual(out["services"][name]["environment"][OTLP], f"{HEADER}=app-demo")
-
-    def test_an_apps_own_headers_are_kept(self):
-        out = render(stack_of(worker={"environment": {OTLP: "authorization=Basic x"}}), catalog_of(tenant="app-demo"))
-        self.assertEqual(unescape(out["services"]["worker"]["environment"][OTLP]), f"authorization=Basic x,{HEADER}=app-demo")
-
-    def test_an_app_naming_a_tenant_is_refused(self):
-        for value in (f"{HEADER}=app-other", "x-scope-orgid=app-other", f"a=b, {HEADER} = app-other"):
-            with self.subTest(value=value):
-                self.assertIn("the homelab sets the app's tenant",
-                              refusal(self, stack_of(worker={"environment": {OTLP: value}}), catalog_of(tenant="app-demo")))
-        self.assertIn("web.environment", refusal(self, stack_of(), catalog_of(tenant="app-demo"),
-                                                 env={"web": {OTLP: f"{HEADER}=app-other"}}))
-
-    def test_no_telemetry_no_tenant(self):
-        out = render(stack_of(), catalog_of(tenant=None))
-        self.assertNotIn("environment", out["services"]["web"])
 
 
 if __name__ == "__main__":

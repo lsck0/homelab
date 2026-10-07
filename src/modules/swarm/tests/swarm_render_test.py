@@ -30,12 +30,13 @@ SPEC = {
     "volumes": {"data": {"backup": True}},
     "override": {},
     "images": [PUBLIC],
-    "published": [{"service": "web", "targetPort": 8000, "port": 20100}, {"service": "web", "targetPort": 9100, "port": 20101}],
+    "published": [{"service": "web", "targetPort": 8000, "port": 20100, "protocol": "tcp"},
+                  {"service": "web", "targetPort": 9100, "port": 20101, "protocol": "tcp"}],
     "resources": {},
     "reservation": {"memoryMiB": 8192, "cpuMillis": 4000},
-    "tenant": None,
 }
 REPLICAS_MAX = 6
+REPLICAS_LABEL = "homelab.replicas"
 
 
 # -----------------------------------------------------------------------------
@@ -45,7 +46,7 @@ REPLICAS_MAX = 6
 def catalog_of(**changes):
     app = dict(SPEC, **changes)
     return {"registry": REGISTRY, "replicasMax": REPLICAS_MAX, "replicasPerNodeMax": 2, "servicesMax": 32,
-            "taskDefaults": TASK_DEFAULTS, "genericResources": GENERIC, "tenantHeader": "X-Scope-OrgID",
+            "taskDefaults": TASK_DEFAULTS, "genericResources": GENERIC, "replicasLabel": REPLICAS_LABEL,
             "stackBytesMax": 1024 * 1024, "apps": {APP: app}}
 
 
@@ -151,7 +152,7 @@ class Refused(unittest.TestCase):
                 self.refuses(stack)
 
     def test_catalog_names_services_the_stack_lacks(self):
-        self.refuses(base(), catalog_of(published=[{"service": "nope", "targetPort": 1, "port": 20102}]))
+        self.refuses(base(), catalog_of(published=[{"service": "nope", "targetPort": 1, "port": 20102, "protocol": "tcp"}]))
         self.refuses(base(), catalog_of(stateful=["db", "nope"]))
         self.refuses(base(), env={"nope": {"A": "1"}})
         self.refuses(base(), catalog_of(resources={"nope": TASK_DEFAULTS}))
@@ -160,9 +161,26 @@ class Refused(unittest.TestCase):
 class Rendered(unittest.TestCase):
     def test_homelab_ports_replace_the_apps_own(self):
         out = render(base(ports=["80:8000"]))
-        ports = {(p["target"], p["published"]) for p in out["services"]["web"]["ports"]}
-        self.assertEqual(ports, {(8000, 20100), (9100, 20101)})
+        ports = {(p["target"], p["published"], p["protocol"]) for p in out["services"]["web"]["ports"]}
+        self.assertEqual(ports, {(8000, 20100, "tcp"), (9100, 20101, "tcp")})
         self.assertEqual(out["services"]["db"]["ports"], [])
+
+    def test_a_udp_route_is_published_as_udp(self):
+        catalog = catalog_of(published=[{"service": "web", "targetPort": 27015, "port": 20120, "protocol": "udp"},
+                                        {"service": "web", "targetPort": 27015, "port": 20121, "protocol": "tcp"}])
+        ports = {(p["target"], p["published"], p["protocol"]) for p in render(base(), catalog)["services"]["web"]["ports"]}
+        self.assertEqual(ports, {(27015, 20120, "udp"), (27015, 20121, "tcp")})
+
+    def test_every_service_carries_its_replicas_asleep_too(self):
+        # an idle app's wake scales each service back to this label (modules/swarm swarm-idle-wake)
+        stack = base(deploy={"replicas": 2, "labels": ["keep=1", f"{REPLICAS_LABEL}=9"]})
+        stack["services"]["db"]["deploy"] = {"replicas": 3}
+        out = render(stack)
+        self.assertEqual(out["services"]["web"]["deploy"]["labels"], {"keep": "1", REPLICAS_LABEL: "2"})
+        self.assertEqual(out["services"]["db"]["deploy"]["labels"], {REPLICAS_LABEL: "1"})
+        asleep = yaml.safe_load(render_module.replicas_stop(render_module.render(APP, catalog_of(), {}, stack)))
+        self.assertEqual({n: s["deploy"]["replicas"] for n, s in asleep["services"].items()}, {"web": 0, "db": 0})
+        self.assertEqual(asleep["services"]["web"]["deploy"]["labels"][REPLICAS_LABEL], "2")
 
     def test_networks_are_encrypted_overlays(self):
         out = render(base())
@@ -194,7 +212,8 @@ class Rendered(unittest.TestCase):
             with self.subTest(order=(first, second)):
                 text = (f"x-dep: &dep {{replicas: 3}}\nservices:\n  {first}: {{image: '{OWN}', deploy: *dep}}\n"
                         f"  {second}: {{image: '{PUBLIC}', deploy: *dep, volumes: ['data:/data']}}\nvolumes: {{data: {{}}}}\n")
-                catalog = catalog_of(stateful=[second], published=[{"service": first, "targetPort": 8000, "port": 20100}])
+                catalog = catalog_of(stateful=[second], published=[{"service": first, "targetPort": 8000, "port": 20100,
+                                                                   "protocol": "tcp"}])
                 out = render(yaml.safe_load(text), catalog)
                 self.assertEqual(out["services"][first]["deploy"]["replicas"], 3)
                 self.assertNotIn("constraints", out["services"][first]["deploy"]["placement"])

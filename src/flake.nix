@@ -34,13 +34,8 @@
     lab = let collected = import ./modules/lab { inherit lib; }; in
       assert lib.assertMsg (collected.problems == [ ]) "the lab's instances break its rules:\n${lib.concatLines collected.problems}";
       collected;
-    inherit (lab) inventory site;
-    # every running guest's nas mounts by address: vm-109 exports exactly these, the router opens nfs to them
-    nasClients = import ./modules/nas-clients.nix {
-      inherit lib inventory;
-      configs = lib.mapAttrs (_: sys: sys.config) (removeAttrs self.nixosConfigurations [ "109-internal-nas" ]);
-    };
-    specialArgs = { inherit inputs inventory nasClients site lab; };
+    # every host's facts; each host also gets its own instance record as `instance` (modules/network.nix)
+    specialArgs = { inherit inputs lab; inherit (lab) inventory site nasClients; };
 
     common = {
       imports = [
@@ -112,12 +107,12 @@
     # sync.sh writes `lab.export` to generated/lab.json, the desktop clients' interface (modules/lab-export.nix)
     lab = lab // { export = import ./modules/lab-export.nix { inherit lib lab; }; };
 
-    # one configuration per instance folder (its main.nix) and per generated swarm node (modules/swarm alone);
-    # the hostname comes from the folder, so a host cannot claim another's
+    # one configuration per instance folder (its main.nix) and per generated swarm node (modules/swarm alone); the
+    # hostname comes from the instance record, so a host cannot claim another's
     nixosConfigurations = lib.mapAttrs (_: host: lib.nixosSystem {
-      inherit system specialArgs;
-      modules = [ common ./modules/platform-${host.kind}.nix { networking.hostName = host.hostName; } ]
-        ++ lib.optional (host.main != null) host.main;
+      inherit system;
+      specialArgs = specialArgs // { instance = host; };
+      modules = [ common ./modules/platform-${host.config.vm.guestKind}.nix ] ++ lib.optional (host.main != null) host.main;
     }) lab.hosts;
   };
 }

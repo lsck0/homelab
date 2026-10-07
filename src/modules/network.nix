@@ -1,53 +1,58 @@
-# a guest's place in the lab: its static address from the inventory, and the ingress guard on the ports only its
-# zone's ingress may reach
+# a guest's place in the lab: its name and static address from its own instance record, and the ingress guard on
+# the ports only its zone's ingress may reach
+#
+# Every lab host gets its instance record (modules/lab) as the argument `instance`; its hostname, vmid, zone and
+# services come from there. The install images and the router's lan-side tests have none (null).
 #
 # The guard (homelab.ingressOnly) is one nftables table, homelab-ingress, hooked into prerouting ahead of every
 # dnat, so a podman- or docker-published port is guarded like a native one. Trusted on every guarded port:
 # loopback, the guest's own address (containers calling siblings through it), its zone's ingress and, unless
-# trustContainers is off, the local container bridges. Anyone else needs a grant: `portSources` here, or a line in
-# modules/flows.nix `guards`, which this module renders for the guest it runs on.
+# trustContainers is off, whatever enters from the host's own container bridges (by interface: a container range
+# arriving on eth0 is a neighbour's spoof). Anyone else needs a grant: the guest's instance.nix `grants`, or a line
+# in modules/flows.nix `guards` for what spans the lab; flows.nix holds both.
 #
 # The table is its own, not the firewall's: a firewall reload or stop leaves it in place, so the guard never fails
 # open. Where the host runs nixos' nftables firewall the table lives in networking.nftables.tables (that service
 # flushes the ruleset and reloads its tables together); elsewhere a oneshot loads it with `nft -f`, atomically.
 # Rejected: iptables chains rebuilt by networking.firewall.extraCommands, which a restart rebuilds with a window
 # and a stopped firewall deletes.
-{ config, lib, pkgs, inventory, site, catalog, lab, ... }:
+{ config, lib, pkgs, inventory, site, catalog, lab, instance, ... }:
 let
   net = import ./net.nix { inherit lib inventory site; };
   flows = import ./flows.nix {
     inherit lib net inventory catalog lab;
-    appsCatalog = config.homelab.appsCatalog;
+    inherit (lab) appsCatalog;
     nasClients = throw "modules/network.nix renders the guards only, which name no nas client";
   };
 
-  vmId = config.homelab.vmid;
-  vm = if vmId == null then null else inventory.${vmId} or null;
-  zone = if vm == null then null else net.zones.${vm.type} or null;
+  # the router is no guest of a zone: its own main.nix addresses it
+  vm = if instance == null || instance.zone == "router" then null else inventory.${instance.id};
+  vmId = if vm == null then null else instance.id;
+  zone = if vm == null then null else net.zones.${instance.zone};
 
   cfg = config.homelab.ingressOnly;
   tableName = "homelab-ingress";
 
-  # podman's default bridge and docker's: the host's own containers calling its other services
-  containerRanges = [ "10.88.0.0/16" "172.16.0.0/12" ];
+  # podman's bridges (podman0, one per network) and docker's (docker0, br-<id> per user network)
+  containerInterfaces = [ "podman*" "docker0" "br-*" ];
   # never guarded: a mistake in the guard can always be undone over ssh, and the scrape shows it
   recoveryPorts = [ net.ports.ssh net.ports.nodeExporter ];
 
-  trustedSources = [ "127.0.0.0/8" ]
-    ++ lib.optionals cfg.trustContainers containerRanges
+  trusted = [ "127.0.0.0/8" ]
     ++ lib.optional (zone != null && zone.ingress != null && zone.ingress != vmId) (net.hostSource zone.ingress)
-    ++ lib.optional (vm != null) (net.hostSource vmId)
-    ++ cfg.extraSources;
+    ++ lib.optional (vm != null) (net.hostSource vmId);
 
-  # the guest's own services (instance.nix `services`): every port open, an http one's guarded unless it says why
-  ownRoutes = lib.filter (r: toString r.vmid == vmId) (lib.attrValues lab.routes);
-  portsOf = protocol: lib.unique (map (r: r.port) (lib.filter (r: r.protocol == protocol) ownRoutes));
-  guardedPorts = lib.unique (map (r: r.port) (lib.filter (r: r.protocol == "http" && r.off.guard == null) ownRoutes));
+  # the guest's own services: every port open, an http or lab-only tcp one guarded unless it says why; a port the
+  # router forwards from the house's public address answers the world
+  services = if vm == null then [ ] else lib.attrValues instance.config.services;
+  portsOf = protocol: lib.unique (map (s: s.port) (lib.filter (s: s.protocol == protocol) services));
+  isGuarded = s: s.off.guard == null && (s.protocol == "http" || (s.protocol == "tcp" && s.publicPort == null));
+  guardedPorts = lib.unique (map (s: s.port) (lib.filter isGuarded services));
 
-  # flows.nix grants onto this guest: port -> sources
-  grants = lib.foldl' (acc: g: lib.foldl' (acc': port: acc' // {
-    ${toString port} = (acc'.${toString port} or [ ]) ++ map net.hostSource g.from;
-  }) acc g.tcp) { } (lib.filter (g: g.to == vmId) flows.guards);
+  # port -> sources: every guard onto this guest, its instance.nix grants among them (modules/flows.nix `guards`)
+  grants = lib.filter (g: g.to == vmId) flows.guards;
+  allowed = lib.zipAttrsWith (_: lib.concatLists)
+    (lib.concatMap (g: map (port: { ${toString port} = map (lab.sourceOf instance.zone) g.from; }) g.tcp) grants);
 
   # one rule per source: an anonymous set refuses overlapping prefixes (a /32 inside a granted subnet)
   sourceRules = match: sources: lib.concatMapStrings (source: "    ${match}ip saddr ${source} return\n") (lib.unique sources);
@@ -59,8 +64,9 @@ let
       type filter hook prerouting priority mangle; policy accept;
       # replies and flows admitted when they began
       ct state { established, related } return
-  '' + sourceRules "" trustedSources
-    + lib.concatMapStrings (port: sourceRules "tcp dport ${toString port} " (cfg.portSources.${toString port} or [ ])) (lib.unique cfg.ports)
+  '' + sourceRules "" cfg.trusted
+    + lib.optionalString cfg.trustContainers (lib.concatMapStrings (i: "    iifname \"${i}\" return\n") containerInterfaces)
+    + lib.concatMapStrings (port: sourceRules "tcp dport ${toString port} " (cfg.allowed.${toString port} or [ ])) (lib.unique cfg.ports)
     + ''
       tcp dport { ${lib.concatMapStringsSep ", " toString (lib.unique cfg.ports)} } counter drop
     }
@@ -79,8 +85,8 @@ in {
   options.homelab.vmid = lib.mkOption {
     type = lib.types.nullOr lib.types.str;
     readOnly = true;
-    default = let match = builtins.match "vm-([0-9]+)" config.networking.hostName; in if match == null then null else lib.head match;
-    description = "The guest's vmid, from its hostName vm-<vmid>; null on the router and the install images.";
+    default = vmId;
+    description = "The guest's vmid, from its instance record; null on the router and the install images.";
   };
 
   options.homelab.ingressOnly = {
@@ -88,9 +94,8 @@ in {
       type = lib.types.listOf lib.types.port;
       default = [ ];
       description = ''
-        TCP ports that only the zone's ingress, loopback and the sources granted below may reach: an app whose own
-        login is off because Authelia gates its route is otherwise one direct call away. SSH and node-exporter are
-        never guarded.
+        TCP ports that only the zone's ingress, loopback and the granted sources may reach: an app whose own login is
+        off because Authelia gates its route is otherwise one direct call away. SSH and node-exporter are never guarded.
       '';
     };
 
@@ -100,23 +105,32 @@ in {
       description = "Let this host's container bridges reach every guarded port.";
     };
 
-    extraSources = lib.mkOption {
+    trusted = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ ];
-      description = "Additional CIDRs allowed to reach every guarded port.";
+      readOnly = true;
+      internal = true;
+      default = trusted;
+      description = "Sources trusted on every guarded port; the laws read the rendered guard here.";
     };
 
-    portSources = lib.mkOption {
+    allowed = lib.mkOption {
       type = lib.types.attrsOf (lib.types.listOf lib.types.str);
-      default = { };
-      example = lib.literalExpression ''{ "9090" = [ "192.168.178.0/24" ]; }'';
-      description = "Extra CIDRs allowed to reach one port, keyed by port number; modules/flows.nix `guards` adds to it.";
+      readOnly = true;
+      internal = true;
+      default = allowed;
+      description = "Guarded port -> the sources granted it (instance.nix `grants`, modules/flows.nix `guards`).";
     };
   };
 
   config = lib.mkMerge [
-    # the guest's own address, for services that hand it to their containers
-    { _module.args.hostIp = if vm != null then vm.ip else null; }
+    {
+      # the install images and the stand-ins of a test name no instance
+      _module.args.instance = lib.mkDefault null;
+      # the guest's own address, for services that hand it to their containers
+      _module.args.hostIp = if vm != null then vm.ip else null;
+    }
+
+    (lib.mkIf (instance != null) { networking.hostName = instance.config.hostName; })
 
     (lib.mkIf (vm != null) {
       networking.useDHCP = lib.mkDefault false;
@@ -137,7 +151,6 @@ in {
         };
       };
 
-      homelab.ingressOnly.portSources = grants;
       homelab.ingressOnly.ports = guardedPorts;
       networking.firewall.allowedTCPPorts = portsOf "http" ++ portsOf "tcp";
       networking.firewall.allowedUDPPorts = portsOf "udp";

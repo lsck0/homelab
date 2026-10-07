@@ -48,6 +48,34 @@ pkgs.runCommand "archrepo-build" {
     "pkgbase = apparmor.d|pkgname = apparmor.d|  depends = apparmor.d-base-extra|pkgname = apparmor.d-base" "apparmor.d-base-extra"
   check_deps "a recipe without depends installs nothing" "pkgbase = data|pkgname = data" ""
 
+  # ---- the completeness gate ----
+  # <case> <what current links to> <days since $gate_served at the run> <lost names> <held back: yes|no>
+  gate_served=2026-10-05
+  check_gate() {
+    SNAPSHOT_CURRENT=$PWD/served-gate/current
+    rm -rf served-gate
+    mkdir -p served-gate
+    ln -s "$2" "$SNAPSHOT_CURRENT"
+    RUN_STARTED=$(( $(date -u -d "$gate_served" +%s) + $3 * SECONDS_PER_DAY ))
+    snapshot_missing=kept
+    gate_lost=$4
+    # shellcheck disable=SC2086 # one name per word
+    listed_missing() { printf '%s\n' kept $gate_lost; }
+    held_back=
+    completeness_check > gate.out
+    case "$5" in
+      yes) [ -n "$held_back" ] || fail "$1: published" ;;
+      no) [ -z "$held_back" ] || fail "$1: held back: $held_back" ;;
+    esac
+    pass "$1"
+  }
+  check_gate "nothing lost publishes" "$gate_served" 0 "" no
+  check_gate "a lost name holds the night back" "$gate_served" 1 "gone" yes
+  check_gate "the last night of the hold still holds" "$gate_served" $((COMPLETENESS_HOLD_DAYS - 1)) "gone" yes
+  check_gate "past the hold the official updates publish" "$gate_served" "$COMPLETENESS_HOLD_DAYS" "gone other" no
+  check_gate "an unreadable snapshot date holds" not-a-date 30 "gone" yes
+  check_gate "a link that is no snapshot date holds" ../../etc 30 "gone" yes
+
   # ---- the push to the mirror ----
   secret=SIGNING-KEY-MATERIAL
   mkdir -p run

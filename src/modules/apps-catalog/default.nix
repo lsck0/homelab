@@ -1,10 +1,12 @@
 # the app catalog's schema: what an app's src/apps/<name>/app.nix (and src/apps/swarm.nix) may say, typed once
 #
-# modules/lab collects the app folders into `lab.appsCatalog`; this file types it. Routes, cards and telemetry
-# share modules/service.nix with the instances. Lab-wide rules (unique routes, hosts and ports, every secret
-# reference generated) are modules/catalog.nix's `problems`, asserted on every host. A test enables a fixture app:
+# modules/lab evaluates this module over the app folders and src/apps/swarm.nix: `lab.appsCatalog` is the typed
+# result, `lab.catalog` (modules/catalog.nix) the lab-wide view over it that every host gets as the argument
+# `catalog`. Routes, cards and telemetry share modules/service.nix with the instances. Lab-wide rules (unique
+# routes, hosts and ports, every secret reference generated) are modules/catalog.nix's `problems`, which stop the
+# flake's evaluation. A test with a fixture app hands its hosts another catalog:
 #
-#   homelab.appsCatalog = lib.recursiveUpdate lab.appsCatalog { apps.wat.enable = true; };
+#   _module.args.catalog = lab.catalogOf (lib.recursiveUpdate lab.appsCatalog { apps.wat.enable = true; });
 #
 # The smallest app, src/apps/demo/app.nix, serves one public path:
 #
@@ -14,17 +16,15 @@
 #     branch = "master";
 #     routes.demo = { service = "web"; targetPort = 8000; port = 20130; off.sso = "public"; };
 #   }
-{ config, lib, inventory, site, lab, ... }:
+{ config, lib, ... }:
 let
   inherit (lib) mkOption types;
-  cfg = config.homelab.appsCatalog;
+  cfg = config;
 
   # -----------------------------------------------------------------------------
   # CONSTANTS
   # -----------------------------------------------------------------------------
 
-  # compose service names; a stack's services become swarm services <app>_<service>
-  serviceName = types.strMatching "[A-Za-z0-9][A-Za-z0-9_.-]*";
   # scripts/secrets-sync.sh knows these generators
   secretGenerator = types.strMatching "hex:[1-9][0-9]*|garage-key-id";
   digestPinned = types.strMatching ".+@sha256:[0-9a-f]{64}";
@@ -40,6 +40,7 @@ let
   # -----------------------------------------------------------------------------
 
   service = import ../service.nix { inherit lib; };
+  inherit (service) serviceName;
 
   metricsType = types.submodule {
     options = service.swarmBackend // {
@@ -201,46 +202,29 @@ let
       };
     };
   });
-
-  catalogType = types.submodule {
-    options = {
-      apps = mkOption {
-        type = types.attrsOf appType;
-        default = { };
-        description = "App name ([a-z][a-z0-9-]*) -> a GitHub repo and a branch, everything else derived.";
-      };
-      swarm = {
-        manager = mkOption { type = types.ints.positive; description = "Vmid of the swarm manager, a guest of the internal zone."; };
-        state = mkOption { type = types.ints.positive; description = "Vmid of the worker holding every stateful service's volumes; moving it moves no data."; };
-        workers = mkOption { type = types.listOf types.ints.positive; description = "Vmids of the shared swarm's workers (apps/swarm.nix `nodes`); an app's own guest is not one."; };
-        portRange = {
-          first = mkOption { type = types.port; default = 20100; description = "First port an app may publish."; };
-          last = mkOption { type = types.port; default = 20999; description = "Last port an app may publish."; };
-        };
-        taskDefaults = mkOption { type = resourcesType taskDefaults; default = { }; description = "Limits of a task whose service `resources` does not list."; };
-        taskMax = mkOption { type = resourcesType taskMax; default = { }; description = "The most an app's `resources` may grant one task."; };
-      };
-      builder = mkOption {
-        type = types.ints.positive;
-        description = "Vmid of the guest that builds and deploys the apps (140-internal-swarm/lib/app-builder.nix); the manager's forced command accepts its address only.";
-      };
-      cadvisorPort = mkOption { type = types.port; description = "Per-worker container metrics, scraped on every worker; outside the app range."; };
-      controllerPort = mkOption { type = types.port; description = "The managers' controller (redeploys, an idle app's wake and sleep)."; };
-    };
-  };
-
-  catalog = import ../catalog.nix { inherit inventory lib site; appsCatalog = cfg; inherit lab; };
 in {
-  options.homelab.appsCatalog = mkOption {
-    type = catalogType;
-    default = lab.appsCatalog;
-    defaultText = lib.literalExpression "lab.appsCatalog";
-    description = "The app catalog (src/apps/) every consumer of apps reads, normalized by the schema above.";
-  };
-
-  config = {
-    _module.args.catalog = catalog;
-    # the lab-wide rules: every host refuses a catalog that breaks them, naming both sides of a collision
-    assertions = map (problem: { assertion = false; message = "src/apps: ${problem}"; }) catalog.problems;
+  options = {
+    apps = mkOption {
+      type = types.attrsOf appType;
+      default = { };
+      description = "App name ([a-z][a-z0-9-]*) -> a GitHub repo and a branch, everything else derived.";
+    };
+    swarm = {
+      manager = mkOption { type = types.ints.positive; description = "Vmid of the swarm manager, a guest of the internal zone."; };
+      state = mkOption { type = types.ints.positive; description = "Vmid of the worker holding every stateful service's volumes; moving it moves no data."; };
+      workers = mkOption { type = types.listOf types.ints.positive; description = "Vmids of the shared swarm's workers (apps/swarm.nix `nodes`); an app's own guest is not one."; };
+      portRange = {
+        first = mkOption { type = types.port; default = 20100; description = "First port an app may publish."; };
+        last = mkOption { type = types.port; default = 20999; description = "Last port an app may publish."; };
+      };
+      taskDefaults = mkOption { type = resourcesType taskDefaults; default = { }; description = "Limits of a task whose service `resources` does not list."; };
+      taskMax = mkOption { type = resourcesType taskMax; default = { }; description = "The most an app's `resources` may grant one task."; };
+    };
+    builder = mkOption {
+      type = types.ints.positive;
+      description = "Vmid of the guest that builds and deploys the apps (140-internal-swarm/lib/app-builder.nix); the manager's forced command accepts its address only.";
+    };
+    cadvisorPort = mkOption { type = types.port; description = "Per-worker container metrics, scraped on every worker; outside the app range."; };
+    controllerPort = mkOption { type = types.port; description = "The managers' controller (redeploys, an idle app's wake and sleep)."; };
   };
 }

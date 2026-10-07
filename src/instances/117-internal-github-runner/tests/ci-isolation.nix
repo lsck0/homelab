@@ -157,6 +157,13 @@ pkgs.testers.runNixOSTest {
         # positive control: a non-ephemeral user keeps its images
         vm_117.succeed("${asUser "ci"} env DOCKER_HOST=${dockerHost users.ci} docker image inspect labprobe:test")
 
+    with subtest("the runners' state root is traversable whoever made it, and boot clears dropped runners"):
+        vm_117.succeed("chown 994:993 /var/lib/github-runner && chmod 0750 /var/lib/github-runner")
+        vm_117.succeed("mkdir /var/lib/github-runner/dropped-1")
+        vm_117.succeed("systemd-tmpfiles --create --remove --boot --prefix=/var/lib/github-runner")
+        vm_117.succeed("runuser -u ${ghUser} -- test -x /var/lib/github-runner")
+        vm_117.fail("test -e /var/lib/github-runner/dropped-1")
+
     def loop_successes(user, dst, port):
         """Connections that got through while the firewall restarted ten times."""
         vm_117.succeed(f"rm -f /tmp/loop-{user}; (runuser -u {user} -- bash -c 'for i in $(seq 1 400); do "

@@ -21,8 +21,8 @@
 #     '';
 #   }
 #
-# Routed tests put each zone on its own vlan and boot `router`; vlans follow terraform's router_zones order:
-# 1 the house lan and wan (ens18), 2 internal (ens19), 3 dmz (ens20), 4 apps (ens21). Flat tests (`flat = true`)
+# Routed tests put each zone on its own vlan and boot `router`; vlans follow the router's nics (zones.json router_nic):
+# 1 the house lan and wan (proxmox net0), each zone's the number of its router leg plus one. Flat tests (`flat = true`)
 # put every node on vlan 1 with a /8, so all lab subnets are on-link; a guest answers anything else through its
 # gateway, so a `multi` node owning the outside addresses (192.168.178.138/24, ...) must also own the gateways
 # (10.100.0.1/8, ...). The test driver names machines by hostname: vm-121 is `vm_121` in the script.
@@ -30,6 +30,8 @@
 # nas: a guest's nas mounts bind-mount directories of its own disk by default (lib/nas-local.nix), so the units
 # keyed on them run as in the lab; `nas = true` mounts them for real from a `nas` node, which exports exactly what
 # the test's guests mount (109-internal-nas/lib/nas-exports.nix over modules/nas-clients.nix, lib/nas-mounts.nix).
+#
+# testDefaults: what every vm test takes, `imports = [ lab.testDefaults ];` next to its name.
 { pkgs, lib, specialArgs }:
 let
   # the flake's, under another name: the attribute set below exports its own specialArgs
@@ -39,10 +41,14 @@ let
   pki = import ./pki.nix { inherit pkgs; };
   labprobe = import ./labprobe.nix { inherit pkgs; };
 
-  vlans = { lan = 1; internal = 2; dmz = 3; apps = 4; };
-  # the zone vlan of an inventory guest type
-  vlanOfType = { internal = vlans.internal; external = vlans.dmz; apps = vlans.apps; };
+  net = import ../../modules/net.nix { inherit lib; inherit (facts) inventory site; };
+
+  # proxmox's net0 is the router's wan
+  wanVlan = 1;
+  vlans = { lan = wanVlan; } // lib.mapAttrs (_: z: z.routerNic + wanVlan) net.zones;
   nasId = "109";
+  # the slowest test runs about 10 min (monitoring, 615 s); a hang ends at three times that, not at the driver's hour
+  globalTimeoutS = 1800;
 
   # what every lab node shares, whatever it runs
   node = {
@@ -62,6 +68,7 @@ let
 in rec {
   inherit (facts) inventory site nasClients;
   inherit pki labprobe vlans;
+  testDefaults.globalTimeout = globalTimeoutS;
   secretValues = import ./secret-values.nix { inherit pkgs; };
   images = import ./images.nix { inherit pkgs; };
   # what homelab.appsCatalog defaults to; a test enabling a fixture app sets the option to a variant of it
@@ -85,7 +92,7 @@ in rec {
   ];
 
   # the inventory guest <vmid> through the real network.nix, at its address on the test nic eth1
-  guest = vmid: { flat ? false, vlan ? (if flat then vlans.lan else vlanOfType.${inventory.${vmid}.type}),
+  guest = vmid: { flat ? false, vlan ? (if flat then vlans.lan else vlans.${inventory.${vmid}.type}),
                   instance ? null, nas ? false }:
     let vm = inventory.${vmid}; in { config, ... }: {
       imports = production ++ [ node testNic (if nas then ./nas-mounts.nix else ./nas-local.nix) ]
@@ -121,12 +128,8 @@ in rec {
     imports = production ++ [ node ../../instances/300-router/main.nix ./offline-router.nix ];
     _module.args.nasClients = facts.nasClients;
     virtualisation.vlans = lib.mkForce [ ];
-    virtualisation.interfaces = {
-      ens18.vlan = vlans.lan;
-      ens19.vlan = vlans.internal;
-      ens20.vlan = vlans.dmz;
-      ens21.vlan = vlans.apps;
-    };
+    virtualisation.interfaces = { ${net.wan.interface}.vlan = vlans.lan; }
+      // lib.mapAttrs' (name: z: lib.nameValuePair z.interface { vlan = vlans.${name}; }) net.zones;
   };
 
   # the nas at 10.100.0.109, exporting exactly what the test's guests mount, by the real export rules

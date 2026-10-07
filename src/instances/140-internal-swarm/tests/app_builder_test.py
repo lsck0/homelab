@@ -199,6 +199,36 @@ class Parallel(unittest.TestCase):
         self.assertEqual((facts["built"], facts["reused"]), (len(services), 0))
 
 
+class Locks(unittest.TestCase):
+    """Each app's turn holds its own lock: a busy app delays nobody else."""
+
+    def run_builder(self, state_dir, only):
+        ran = []
+        saved = builder.app_run
+        builder.app_run = lambda ctx, app, spec_, state: ran.append(app) or state
+        try:
+            code = builder.builder_run({}, {"a": {}, "b": {}}, state_dir, only)
+        finally:
+            builder.app_run = saved
+        return code, ran
+
+    def test_the_timer_run_leaves_a_busy_app_to_the_run_at_it(self):
+        with tempfile.TemporaryDirectory() as state_dir:
+            held = builder.app_lock(state_dir, "a", wait=True)
+            try:
+                self.assertIsNone(builder.app_lock(state_dir, "a", wait=False))
+                code, ran = self.run_builder(state_dir, None)
+            finally:
+                held.close()
+            self.assertEqual((code, ran), (0, ["b"]))
+            # positive control: free again, the timer's run takes both
+            self.assertEqual(self.run_builder(state_dir, None), (0, ["a", "b"]))
+
+    def test_a_run_for_one_app_looks_at_it_alone(self):
+        with tempfile.TemporaryDirectory() as state_dir:
+            self.assertEqual(self.run_builder(state_dir, "b"), (0, ["b"]))
+
+
 class Deploy(unittest.TestCase):
     def deploy(self, manager):
         calls = []
@@ -237,6 +267,9 @@ class ContentKey(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.repo = self.tmp.name
         self.ctx = {"timeouts": {"gitS": 30}}
+        self.bases = {"debian:13": "sha256:" + "d" * 64}
+        self.saved = builder.image_base_digest
+        builder.image_base_digest = lambda ctx, image: self.bases[image]
         self.git("init", "-q")
         write(self.repo, "web/Dockerfile", "FROM scratch\nCOPY . /\n")
         write(self.repo, "web/index.html", "v1")
@@ -244,6 +277,7 @@ class ContentKey(unittest.TestCase):
         self.commit()
 
     def tearDown(self):
+        builder.image_base_digest = self.saved
         self.tmp.cleanup()
 
     def git(self, *args):
@@ -281,6 +315,45 @@ class ContentKey(unittest.TestCase):
         self.commit()
         declared = self.key()
         self.assertNotEqual(self.key(args={"GIT_COMMIT": "c2"}), declared)
+
+    def test_a_new_base_image_digest_changes_it(self):
+        write(self.repo, "web/Dockerfile", "FROM debian:13\nCOPY . /\n")
+        self.commit()
+        before = self.key()
+        self.assertEqual(self.key(), before)
+        self.bases["debian:13"] = "sha256:" + "e" * 64
+        self.assertNotEqual(self.key(), before)
+
+
+class Bases(unittest.TestCase):
+    """dockerfile_bases: the images a dockerfile's stages start from, table by table."""
+
+    CASES = [
+        ("FROM scratch\n", {}, []),
+        ("FROM debian:13 AS build\nFROM build\nFROM --platform=linux/amd64 alpine:3\n", {}, ["debian:13", "alpine:3"]),
+        ("ARG BASE=debian:13\nFROM ${BASE}\n", {}, ["debian:13"]),
+        ("ARG BASE=debian:13\nFROM $BASE\n", {"BASE": "alpine:3"}, ["alpine:3"]),
+        ("from node:24 as deps\nfrom deps as run\n", {}, ["node:24"]),
+        ("FROM redis@sha256:" + "f" * 64 + "\n", {}, ["redis@sha256:" + "f" * 64]),
+    ]
+
+    def bases(self, text, args):
+        with tempfile.TemporaryDirectory() as tmp:
+            write(tmp, "Dockerfile", text)
+            return builder.dockerfile_bases(os.path.join(tmp, "Dockerfile"), args)
+
+    def test_cases(self):
+        for text, args, expected in self.CASES:
+            with self.subTest(text=text):
+                self.assertEqual(self.bases(text, args), expected)
+
+    def test_an_argument_without_a_value_is_an_operating_error(self):
+        for text in ("FROM ${BASE}\n", "FROM debian:13\nARG LATE=x\nFROM ${LATE}\n"):
+            with self.subTest(text=text), self.assertRaises(builder.BuildError):
+                self.bases(text, {})
+
+    def test_a_pinned_base_is_its_own_digest(self):
+        self.assertEqual(builder.image_base_digest({}, "redis@sha256:" + "f" * 64), "sha256:" + "f" * 64)
 
 
 if __name__ == "__main__":

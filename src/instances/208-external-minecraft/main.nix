@@ -10,8 +10,9 @@ let
   data = "/var/lib/minecraft";
   modpacksDir = "/var/lib/minecraft-modpacks";
   modpackEnv = "${data}/modpack.env";
-  rconEnv = "${data}/rcon.env";
-  lazymcToml = "${data}/lazymc.toml";
+  # the server's secrets and lazymc's config, rendered by sops under /run: never on the nas, never in a snapshot
+  serverEnv = config.sops.templates."minecraft-server.env".path;
+  lazymcToml = config.sops.templates."lazymc.toml".path;
   image = "itzg/minecraft-server:2026.9.1-java25";
   container = "minecraft";
   # the image's uid and gid
@@ -42,7 +43,7 @@ let
       ${lib.concatMapStringsSep " " (ip: "--dns=${ip}") containerDns} \
       -p 127.0.0.1:${toString serverPort}:${toString publicPort} -p 127.0.0.1:${toString rconPort}:${toString rconPort} \
       -v ${data}:/data -v ${modpacksDir}:/modpacks:ro \
-      --env-file ${rconEnv} --env-file ${modpackEnv} \
+      --env-file ${serverEnv} --env-file ${modpackEnv} \
       -e EULA=TRUE \
       -e MEMORY=${heapSize} \
       -e DIFFICULTY=hard \
@@ -60,39 +61,9 @@ let
       ${image}
   '';
 
-  # lazymc's pre-start: the toml embeds mcStart, so a new start command restarts lazymc
-  mcEnv = pkgs.writeShellScript "minecraft-env" ''
-    set -euo pipefail
-    umask 077
-    pw=$(cat ${config.sops.secrets.minecraft-rcon-password.path})
-    echo "RCON_PASSWORD=$pw" > ${rconEnv}
+  # the default pack on a fresh data dir; mc-modpack replaces it
+  mcModpackDefault = pkgs.writeShellScript "minecraft-modpack-default" ''
     [ -s ${modpackEnv} ] || printf '%s' ${lib.escapeShellArg defaultModpack} > ${modpackEnv}
-
-    cat > ${lazymcToml} <<EOF
-    [public]
-    address = "0.0.0.0:${toString publicPort}"
-
-    [server]
-    address = "127.0.0.1:${toString serverPort}"
-    command = "${mcStart}"
-    # stop frees the heap, freeze would keep it
-    freeze_process = false
-    wake_on_start = false
-
-    [rcon]
-    enabled = true
-    port = ${toString rconPort}
-    password = "$pw"
-    # itzg sets the password from the env; lazymc must not rewrite server.properties
-    randomize_password = false
-
-    [time]
-    sleep_after = ${toString sleepAfterS}
-    minimum_online_time = ${toString minimumOnlineS}
-
-    [advanced]
-    rewrite_server_properties = false
-    EOF
   '';
 
   mcModpack = pkgs.writeShellScriptBin "mc-modpack" ''
@@ -106,7 +77,7 @@ let
     slug=$(basename "''${arg%/}")
     case "$arg" in
       vanilla) env="TYPE=VANILLA" ;;
-      # most curseforge packs need CF_API_KEY in rcon.env
+      # most curseforge packs need the minecraft-cf-api-key secret
       *curseforge.com*) env=$(printf 'TYPE=AUTO_CURSEFORGE\nCF_PAGE_URL=%s' "$arg") ;;
       *) env=$(printf 'TYPE=MODRINTH\nMODRINTH_MODPACK=%s' "$arg") ;;
     esac
@@ -124,6 +95,43 @@ in {
   homelab.nasMounts = nasMount data "minecraft" // nasMount modpacksDir "minecraft-modpacks";
 
   sops.secrets.minecraft-rcon-password = { };
+  sops.secrets.minecraft-cf-api-key = { };
+  sops.templates."minecraft-server.env" = {
+    content = ''
+      RCON_PASSWORD=${config.sops.placeholder.minecraft-rcon-password}
+      CF_API_KEY=${config.sops.placeholder.minecraft-cf-api-key}
+    '';
+    restartUnits = [ "lazymc.service" ];
+  };
+  # it embeds mcStart, so a new start command restarts lazymc
+  sops.templates."lazymc.toml" = {
+    content = ''
+      [public]
+      address = "0.0.0.0:${toString publicPort}"
+
+      [server]
+      address = "127.0.0.1:${toString serverPort}"
+      command = "${mcStart}"
+      # stop frees the heap, freeze would keep it
+      freeze_process = false
+      wake_on_start = false
+
+      [rcon]
+      enabled = true
+      port = ${toString rconPort}
+      password = "${config.sops.placeholder.minecraft-rcon-password}"
+      # itzg sets the password from the env; lazymc must not rewrite server.properties
+      randomize_password = false
+
+      [time]
+      sleep_after = ${toString sleepAfterS}
+      minimum_online_time = ${toString minimumOnlineS}
+
+      [advanced]
+      rewrite_server_properties = false
+    '';
+    restartUnits = [ "lazymc.service" ];
+  };
 
   # lazymc runs the server as a raw `podman run`, not via oci-containers
   virtualisation.podman.enable = true;
@@ -139,7 +147,7 @@ in {
     startLimitIntervalSec = 0;
     path = [ pkgs.podman ];
     serviceConfig = {
-      ExecStartPre = mcEnv;
+      ExecStartPre = mcModpackDefault;
       ExecStart = "${pkgs.lazymc}/bin/lazymc start --config ${lazymcToml}";
       Restart = "on-failure";
       RestartSec = 5;
@@ -153,5 +161,4 @@ in {
     "d ${modpacksDir} 0750 ${serverUid} ${serverUid} -"
   ];
 
-  networking.firewall.allowedTCPPorts = [ publicPort ];
 }

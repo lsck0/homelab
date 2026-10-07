@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # initialize the homelab against an existing proxmox ve
 #
-# usage: src/scripts/init.sh <proxmox-ip>         pin the host key, ask the site, make secrets, set up proxmox
+# usage: src/scripts/init.sh <proxmox-ip>         pin the host key, ask the site, make secrets, converge proxmox
 #        src/scripts/init.sh --pin <proxmox-ip>   only (re)pin Proxmox's ssh host key in src/generated/known_hosts
 #
 # The pin is the root of every later ssh: sync.sh and deinit.sh refuse any other key for Proxmox, and read every
@@ -25,7 +25,6 @@ KEYSCAN_TIMEOUT_S=5
 # of the bulk disk's bytes, the thin pool and its metadata fit in this share
 BULK_POOL_SHARE=0.96
 BYTES_PER_GIB=1073741824
-LLDAP_ID=101
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -38,7 +37,7 @@ SSH_PORT=$PROXMOX_SSH_PORT_DEFAULT
 # shellcheck source=src/scripts/lib/secrets.sh
 . "$SCRIPT_DIR/lib/secrets.sh"
 tools_require ssh ssh-keyscan ssh-keygen jq
-[ "$PIN_ONLY" = 1 ] || tools_require sops openssl git nix age-keygen wg
+[ "$PIN_ONLY" = 1 ] || tools_require sops git nix age-keygen
 
 # -----------------------------------------------------------------------------
 # PIN: Proxmox's ed25519 host key, confirmed against the console
@@ -78,21 +77,22 @@ else
 fi
 
 proxmox_ssh_init "$TARGET_IP" "$SSH_PORT" "$ROOT_PASS"
+PROXMOX_SSH_USER=$PROXMOX_SSH_USER_DEFAULT
 
-if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER_DEFAULT@$TARGET_IP" "pveversion" >/dev/null 2>&1; then
+if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$TARGET_IP" "pveversion" >/dev/null 2>&1; then
   echo "ERROR: Cannot reach Proxmox at $TARGET_IP."
   echo "Ensure Proxmox VE is installed, the credentials are correct and the pinned key is its own (init.sh --pin)."
   exit 1
 fi
-echo ">>> Connected to $("${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER_DEFAULT@$TARGET_IP" "pveversion")"
+echo ">>> Connected to $("${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$TARGET_IP" "pveversion")"
 
 
 # -----------------------------------------------------------------------------
 # SITE: the machine and the house network, asked once and kept in src/generated/site.json for terraform, nix and sync.sh
 # -----------------------------------------------------------------------------
-SITE="$SRC/generated/site.json"
+SITE=$LAB_SITE
 [ -f "$SITE" ] || echo '{}' > "$SITE"
-pve() { "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER_DEFAULT@$TARGET_IP" "$@"; }
+pve() { "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$TARGET_IP" "$@"; }
 # ask <question> <default>; enter keeps the default, "-" clears it
 ask() {
   local answer
@@ -108,12 +108,13 @@ WORKSTATION=$(ip -4 route get "$TARGET_IP" | sed -n 's/.* src \([0-9.]*\).*/\1/p
 WORKSTATION_MAC=$(ip -o link show "$(ip -4 route get "$TARGET_IP" | sed -n 's/.* dev \([^ ]*\).*/\1/p')" | sed -n 's/.*link\/ether \([0-9a-f:]*\).*/\1/p')
 DOMAIN=$(ask "public domain, every service is <name>.<domain>" "$(old .domain)")
 TIME_ZONE=$(ask "the house's time zone (tz database name)" "$(old .timeZone)")
+LATITUDE=$(ask "the house's latitude (weather and sun times)" "$(old .location.latitude)")
+LONGITUDE=$(ask "the house's longitude" "$(old .location.longitude)")
 REPO=$(ask "this repository on github (owner/name), which hermes opens pull requests on" "$(old .repo)")
 ROUTER=$(ask "router address on the lan (forward 443 and 25565 to it)" "$(old .lan.router)")
 INVERTER=$(ask "fronius inverter address" "$(old .lan.inverter)")
 # vm-109's smb shares admit the workstation and the notebook, both dhcp-reserved in the fritzbox
 NOTEBOOK=$(ask "notebook address on the lan" "$(old .lan.notebook)")
-NOTEBOOK_MAC=$(ask "notebook mac address" "$(old .lan.notebookMac)")
 
 echo ">>> GPUs on the host:"
 pve "lspci -nn -D | grep -E 'VGA|3D controller'" | nl -w2 -s') '
@@ -121,7 +122,8 @@ GPU_PATH=$(ask "gpu to pass through to jellyfin (pci path)" "$(old .gpu.path)")
 
 echo ">>> Disks on the host (the nvme pool is local-lvm; the bulk disk gets wiped once):"
 pve "lsblk -dno NAME,SIZE,ROTA,MODEL; ls -l /dev/disk/by-id/ | grep -v -- -part | awk '/ata-|nvme-|scsi-/ {print \$9, \$11}'"
-BULK_DISK=$(ask "bulk disk for media (/dev/disk/by-id/...)" "$(old .bulk.disk)")
+# the disk itself is the host's business and stays out of the public repo; only the pool's size is a lab fact
+BULK_DISK=$(ask "bulk disk for media, wiped once (/dev/disk/by-id/...); blank keeps the bulk pool as it is" "")
 
 GPU_JSON=null
 if [ -n "$GPU_PATH" ]; then
@@ -134,27 +136,26 @@ if [ -n "$GPU_PATH" ]; then
     --argjson functions "$(gpu_id "${GPU_PATH%.*}" | jq -R . | jq -s .)" \
     '{id: $id, subsystemId: $sub, path: $path, iommuGroup: $group, functionIds: $functions}')
 fi
-BULK_JSON=null
-if [ -n "$BULK_DISK" ]; then
-  # a disk already in use keeps its size, terraform cannot shrink
-  BULK_JSON=$(jq -n --arg disk "$BULK_DISK" --argjson bytes "$(pve "lsblk -dbno SIZE $BULK_DISK")" \
-    --argjson old "$(jq --arg d "$BULK_DISK" 'if .bulk.disk == $d then .bulk.sizeGiB else null end' "$SITE")" \
-    --argjson gib "$BYTES_PER_GIB" --argjson share "$BULK_POOL_SHARE" \
-    '{disk: $disk, sizeGiB: ($old // ($bytes / $gib * $share | floor))}')
+# a pool in use keeps its size, terraform cannot shrink
+BULK_JSON=$(jq -c '.bulk // null' "$SITE")
+if [ -n "$BULK_DISK" ] && [ "$BULK_JSON" = null ]; then
+  BULK_JSON=$(jq -n --argjson bytes "$(pve "lsblk -dbno SIZE $BULK_DISK")" --argjson gib "$BYTES_PER_GIB" \
+    --argjson share "$BULK_POOL_SHARE" '{sizeGiB: ($bytes / $gib * $share | floor)}')
 fi
 # the cluster ca, read over the pinned ssh: hosts that call the proxmox api verify its tls against it
 PROXMOX_CA=$(pve "cat /etc/pve/pve-root-ca.pem")
 # merged into what is there: keys this script does not ask for stay
 jq --arg node "$(pve hostname)" --arg domain "$DOMAIN" --arg ca "$PROXMOX_CA" --arg subnet "$LAN_SUBNET" --arg gateway "$LAN_GATEWAY" --arg router "$ROUTER" \
-  --arg proxmox "$TARGET_IP" --arg workstation "$WORKSTATION" --arg mac "$WORKSTATION_MAC" --arg inverter "$INVERTER" \
-  --arg notebook "$NOTEBOOK" --arg notebookMac "$NOTEBOOK_MAC" --arg timeZone "$TIME_ZONE" --arg repo "$REPO" \
+  --arg proxmox "$TARGET_IP" --arg workstation "$WORKSTATION" --arg mac "$WORKSTATION_MAC" --arg inverter "$INVERTER" --arg notebook "$NOTEBOOK" \
+  --arg timeZone "$TIME_ZONE" --arg repo "$REPO" --arg latitude "$LATITUDE" --arg longitude "$LONGITUDE" \
   --argjson gpu "$GPU_JSON" --argjson bulk "$BULK_JSON" '. * {
     node: $node,
     domain: $domain,
     timeZone: $timeZone,
     repo: $repo,
+    location: { latitude: ($latitude | tonumber), longitude: ($longitude | tonumber) },
     lan: { subnet: $subnet, gateway: $gateway, router: $router, proxmox: $proxmox, workstation: $workstation,
-           inverter: $inverter, workstationMac: $mac, notebook: $notebook, notebookMac: $notebookMac }
+           workstationMac: $mac, inverter: $inverter, notebook: $notebook }
   } | .gpu = $gpu | .bulk = $bulk | .proxmoxCa = $ca' "$SITE" > "$SITE.new" && mv "$SITE.new" "$SITE"
 echo ">>> Wrote $SITE"
 
@@ -167,11 +168,8 @@ if ! grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY"; then
 fi
 export SOPS_AGE_KEY_FILE="$AGE_KEY"
 
-# every declared secret in its file, generated where secrets-sync.sh can; then the formats it cannot generate
 echo ">>> Generating secrets..."
 "$SCRIPT_DIR/secrets-sync.sh" --apply
-[ -n "$(secrets_get wireguard-private-key)" ] || secrets_set wireguard-private-key "$(wg genkey)"
-[ -n "$(secrets_get firefly-app-key)" ] || secrets_set firefly-app-key "base64:$(openssl rand -base64 32)"
 
 mkdir -p "$ROOT_DIR/images"
 if [ ! -f "$ROOT_DIR/images/nixos.img" ]; then
@@ -185,55 +183,15 @@ if [ ! -f "$ROOT_DIR/images/nixos.img" ]; then
   sudo rm -rf "$ROOT_DIR/images/nixos-build"
 fi
 
-echo ">>> Configuring Proxmox (bridges + API token)..."
-# the realm's read-only lldap user; pve-install skips the ldap realm without it, so an unset one reads as empty
-LLDAP_BIND_PASSWORD=$(secrets_get lldap-proxmox-bind-password 2>/dev/null || true)
-LLDAP_HOST=$(nix eval --raw --no-warn-dirty "$SRC#lab.inventory.\"$LLDAP_ID\".ip")
-# the zones whose ingress wakes onDemand guests: each gets a token for its own pool only
-WAKE_ZONES=$(jq -r '[to_entries[] | select(.value.ingress != null) | .key] | join(" ")' "$SRC/generated/zones.json")
-# every zone's bridge, created on the host when missing
-ZONE_BRIDGES=$(jq -r '[.[].bridge] | join(" ")' "$SRC/generated/zones.json")
-# passwords go ahead of the script on stdin, never onto the ssh command line
-{
-  printf 'LLDAP_BIND_PASSWORD=%q\nLLDAP_HOST=%q\nGPU_IDS=%q\nBULK_DISK=%q\nWAKE_ZONES=%q\nZONE_BRIDGES=%q\n' \
-    "$LLDAP_BIND_PASSWORD" "$LLDAP_HOST" "$(jq -r '.gpu.functionIds // [] | join(",")' "$SITE")" \
-    "$(jq -r '.bulk.disk // empty' "$SITE")" "$WAKE_ZONES" "$ZONE_BRIDGES"
-  cat "$SCRIPT_DIR/pve-install.sh"
-} | "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER_DEFAULT@$TARGET_IP" "bash -s"
-unset LLDAP_BIND_PASSWORD
-
-# the token secrets leave the host once read: they live in sops from here on
-read_token() { "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER_DEFAULT@$TARGET_IP" "cat /root/$1 && rm -f /root/$1"; }
-TOKEN_SECRET=$(read_token terraform_token.txt)
-HOMEPAGE_TOKEN=$(read_token homepage_token.txt)
-
-jq -n \
-  --arg proxmox_api_token_id "terraform-prov@pve!terraform-token" \
-  --arg proxmox_api_token_secret "$TOKEN_SECRET" \
-  --arg proxmox_datastore "local-lvm" \
-  --argjson proxmox_ssh_port "$SSH_PORT" \
-  --arg proxmox_ssh_user "$PROXMOX_SSH_USER_DEFAULT" \
-  '{
-    proxmox_api_token_id: $proxmox_api_token_id,
-    proxmox_api_token_secret: $proxmox_api_token_secret,
-    proxmox_datastore: $proxmox_datastore,
-    proxmox_ssh_port: $proxmox_ssh_port,
-    proxmox_ssh_user: $proxmox_ssh_user,
-    proxmox_insecure: true
-  }' | "$SCRIPT_DIR/sops-encrypt.sh" "$PROXMOX_TFVARS_ENC"
-rm -f "$PROXMOX_TFVARS_PLAIN"
-
-echo ">>> Storing the Homepage and on-demand wake Proxmox API tokens in secrets..."
-secrets_set proxmox-user "homepage@pve!homepage"
-secrets_set proxmox-pass "$HOMEPAGE_TOKEN"
-# the traefiks verify the proxmox api against it (on-demand wake)
-secrets_set proxmox-ca "$PROXMOX_CA"
-for zone in $WAKE_ZONES; do
-  secrets_set "proxmox-wake-token-$zone" "wake-$zone@pve!ondemand=$(read_token "wake_token_$zone.txt")"
-done
-unset TOKEN_SECRET HOMEPAGE_TOKEN
+echo ">>> Converging Proxmox..."
+LAB_EXPORT=$(mktemp --suffix=.lab.json)
+TFVARS_TEMP=$(umask 077; mktemp --suffix=.tfvars.json)
+trap 'rm -f "$LAB_EXPORT" "$TFVARS_TEMP"' EXIT
+nix eval --json --no-warn-dirty "$SRC#lab.export" > "$LAB_EXPORT"
+# a rerun keeps the tokens: the converge creates only missing ones, and stores those in the tfvars and secrets
+proxmox_tfvars_load "$TFVARS_TEMP" || true
+proxmox_converge "$LAB_EXPORT" "$BULK_DISK"
 
 echo ">>> INIT COMPLETE!"
 echo ">>> External secrets (cloudflare-token, telegram-*, ...): fill the empty ones secrets-sync.sh listed with 'sops <file>'"
-echo ">>> Terraform connection vars: encrypted at src/terraform/terraform.tfvars.sops.json"
 echo ">>> Next step: ./sync.sh"

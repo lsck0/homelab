@@ -3,9 +3,9 @@
 Written from the policy, not from the nftables the router renders (modules/flows.nix, instances/300-router/main.nix):
 if the two disagree, one of them is wrong, and the test says which probe showed it. The only inputs taken from the
 lab are the ones the claim itself is about: which guests vm-109 exports to (nas clients), which ports the enabled
-swarm apps publish, and who leaves through the vpn exit.
+swarm apps publish, who leaves through the vpn exit, and which worker holds the apps' state.
 
-    oracle = ZoneOracle(facts)        # facts: {"nasClients": [...], "appsPorts": [...], "vpnMembers": [...]}
+    oracle = ZoneOracle(facts)        # facts: {"nasClients", "appsPorts", "vpnMembers", "appsNodes", "stateWorker"}
     expect, seen_src = oracle.forward("10.200.0.203", "10.100.0.109", "tcp", 2049)
 
 expect is "open" or "closed" (labprobe's vocabulary); seen_src is the source the destination sees: the router's wan
@@ -42,7 +42,7 @@ OTLP = 4317
 OTLP_HTTP = 4318
 OTLP_FRONTEND = 4319
 PYROSCOPE = 4040
-# the swarm controller on the manager: ci's redeploy through the edge's public deploy route
+# the swarm controller on the manager: ci's redeploy through the edge's public deploy route, the state worker's wakes
 CONTROLLER = 8095
 HTTPS = 443
 SSH = 22
@@ -72,6 +72,7 @@ class ZoneOracle:
         self.apps_ports = set(facts["appsPorts"])
         self.vpn_members = set(facts["vpnMembers"])
         self.apps_nodes = set(facts["appsNodes"])
+        self.state_worker = facts["stateWorker"]
 
     def _dmz_allows(self, src, dst, proto, port):
         tcp = proto == "tcp"
@@ -91,6 +92,7 @@ class ZoneOracle:
             (dst == INGRESS and tcp and port == HTTPS)
             or (dst == COLLECTOR and tcp and port in (JOURNAL, OTLP, OTLP_HTTP, PYROSCOPE, LOKI))
             or (dst == MANAGER and ((tcp and port in SWARM_TCP) or (proto == "udp" and port in SWARM_UDP) or proto == "esp"))
+            or (src == self.state_worker and dst == MANAGER and tcp and port == CONTROLLER)
             or (src in self.nas_clients and dst == NAS and proto in ("tcp", "udp") and port in NFS_PORTS)
         )
 

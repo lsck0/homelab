@@ -8,12 +8,9 @@ let
   stateDir = "/var/lib/jellyseerr";
   conf = "${stateDir}/settings.json";
 in {
-  networking.hostName = "vm-128";
-
   # sqlite on local disk: over nfs it died of SIGBUS every few minutes; the nas keeps a nightly copy
   homelab.localState.jellyseerr = {
     path = stateDir;
-    share = "jellyseerr";
     unit = "podman-jellyseerr";
     sqlite = [ "db/db.sqlite3" ];
     exclude = [ "cache" "logs" ];
@@ -46,6 +43,4 @@ in {
       jq -j '.main.apiKey // empty' ${conf} | token_write jellyseerr-key
     '';
   };
-
-  networking.firewall.allowedTCPPorts = [ route.port ];
 }

@@ -7,15 +7,15 @@
 #     whose every value is encrypted: a plaintext key added next to the ciphertext is refused too
 #   - a decrypted copy by name (x.dec.json, x.plain.yaml, x.decrypted) is refused wherever it lies
 #   - no blob may contain private key material (age, PEM, YubiKey identities)
-#   - no blob may contain a secret value (src/secrets/shared.sops.json and every folder's secrets.sops.json): every line of
-#     every value of SECRET_VALUE_MIN_CHARS or more, except the `public` kind (modules/secrets.nix). This needs the
-#     admin key; without it the scan is skipped with a warning, or refused with --require-values (sync.sh, which always
-#     holds the key).
+#   - no blob may contain a secret value: every line of every value of SECRET_VALUE_MIN_CHARS or more, in every file
+#     modules/secrets.nix declares a secret in (the terraform vars too), except the `public` kind. This needs the admin
+#     key and the flake; without either the scan is skipped with a warning, or refused with --require-values (sync.sh,
+#     which always holds the key).
 # Limit: a secret that is in no sops file (a token pasted from a website) is caught only by its shape, if it is key
 # material; gitleaks or a review must find the rest.
 #
 # usage: secrets-check.sh [--require-values]
-# env: SECRETS_PUBLIC_NAMES  space separated names of the public kind, in place of evaluating the flake (tests)
+# env: SECRETS_DECLARED  a json file of modules/secrets.nix `declared`, in place of evaluating the flake (tests)
 set -euo pipefail
 
 usage() { echo "usage: secrets-check.sh [--require-values]" >&2; exit 2; }
@@ -41,9 +41,6 @@ tools_require git jq sops grep
 SECRET_PATTERNS='AGE-SECRET-KEY-1[0-9A-Z]{50,}|-----BEGIN [A-Z ]*PRIVATE KEY-----|-----BEGIN PGP PRIVATE KEY BLOC[K]-----|AGE-PLUGIN-YUBIKEY-1[0-9A-Z]{20,}'
 # sops-managed whatever .sops.yaml says: a file of a host the rules do not list yet is still one
 SOPS_PATHS=('\.sops(\.json)?$')
-# every file holding secret values; the shared copies hold a subset of the first
-VALUE_FILES_GLOB=("$SRC/$SECRETS_CATALOG_FILE")
-for dir in "${SECRETS_HOME_DIRS[@]}"; do VALUE_FILES_GLOB+=("$SRC/$dir"/*/"$SECRETS_VALUES_NAME"); done
 # names of decrypted copies: sops -d > x.dec.json, x.plain.yaml, x.decrypted
 DECRYPTED_NAME='\.(dec|plain|decrypted)(\.|$)'
 # shorter values (ports, flags, short ids) collide with ordinary text; every generated secret is 32 hex chars or more
@@ -64,25 +61,35 @@ trap 'find "$WORK" -type f -exec shred -u {} + 2>/dev/null; rm -rf "$WORK"' EXIT
 # -----------------------------------------------------------------------------
 : > "$WORK/values"
 export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$ROOT_DIR/secrets/age.txt}"
-values_open=0
-n=0
-for f in "${VALUE_FILES_GLOB[@]}"; do
-  [ -f "$f" ] || continue
-  n=$((n + 1)); values_open=1
-  sops --decrypt "$f" > "$WORK/values.$n.json" 2>/dev/null || { values_open=0; break; }
-done
-if [ "$values_open" = 1 ]; then
-  jq -s 'add' "$WORK"/values.*.json > "$WORK/secrets.json"
-  if [ -n "${SECRETS_PUBLIC_NAMES+set}" ]; then
-    public=$SECRETS_PUBLIC_NAMES
-  elif ! public=$(nix eval --raw --extra-experimental-features "nix-command flakes" "$ROOT_DIR/src#legacyPackages.x86_64-linux.secrets.declared" \
-      --apply 'd: toString (builtins.filter (n: (builtins.getAttr n d).kind == "public") (builtins.attrNames d))' 2>/dev/null); then
-    echo "WARNING: the flake does not evaluate: public values (ids, account names) are scanned like secrets." >&2
-    public=""
-  fi
-  public=$(jq -R 'split(" ") | map(select(. != ""))' <<<"$public")
-  jq -r --argjson public "$public" --argjson min "$SECRET_VALUE_MIN_CHARS" --arg armor "$ARMOR_LINE" '
-    del(.sops) | to_entries[] | select(.key as $k | $public | index($k) | not)
+# skip_values <why>: the scan cannot run; sync.sh's mode refuses then
+skip_values() {
+  [ "$REQUIRE_VALUES" = 0 ] || { echo "ERROR: $1; the value scan is required here." >&2; exit 1; }
+  echo "WARNING: $1: staged files are not scanned for secret values." >&2
+}
+if [ -n "${SECRETS_DECLARED:-}" ]; then
+  cp "$SECRETS_DECLARED" "$WORK/declared.json"
+elif ! nix eval --json --extra-experimental-features "nix-command flakes" "$ROOT_DIR/src#$SECRETS_ATTR.declared" > "$WORK/declared.json" 2>/dev/null; then
+  : > "$WORK/declared.json"
+fi
+if [ ! -s "$WORK/declared.json" ]; then
+  skip_values "the flake does not evaluate, so the secret files are unknown"
+elif ! grep -qs '^AGE-SECRET-KEY-' "$SOPS_AGE_KEY_FILE"; then
+  skip_values "no admin key at $SOPS_AGE_KEY_FILE"
+else
+  echo '{}' > "$WORK/secrets.json"
+  while IFS= read -r f; do
+    [ -f "$SRC/$f" ] || continue
+    if ! sops --decrypt "$SRC/$f" > "$WORK/one.json" 2>/dev/null; then
+      skip_values "src/$f does not decrypt with $SOPS_AGE_KEY_FILE"
+      : > "$WORK/secrets.json"
+      break
+    fi
+    jq -s '.[0] + (.[1] | del(.sops))' "$WORK/secrets.json" "$WORK/one.json" > "$WORK/t" && mv "$WORK/t" "$WORK/secrets.json"
+  done < <(jq -r '[.[].file] | unique[]' "$WORK/declared.json")
+fi
+if [ -s "$WORK/secrets.json" ]; then
+  jq -r --slurpfile d "$WORK/declared.json" --argjson min "$SECRET_VALUE_MIN_CHARS" --arg armor "$ARMOR_LINE" '
+    to_entries[] | select($d[0][.key].kind != "public")
     | .key as $k | (.value | tostring | split("\n")) as $lines
     | range(0; $lines | length) as $i
     # the line after BEGIN is the key format header (openssh-key-v1, cipher, kdf), the same in every key of a type
@@ -90,11 +97,6 @@ if [ "$values_open" = 1 ]; then
     | $lines[$i] | sub("^\\s+"; "") | sub("\\s+$"; "")
     | select(length >= $min and (test($armor) | not)) | "\($k)\t\(.)"' "$WORK/secrets.json" > "$WORK/values"
   cut -f2- "$WORK/values" > "$WORK/patterns"
-elif [ "$REQUIRE_VALUES" = 1 ]; then
-  echo "ERROR: the secrets do not decrypt with $SOPS_AGE_KEY_FILE; the value scan is required here." >&2
-  exit 1
-else
-  echo "WARNING: no admin key at $SOPS_AGE_KEY_FILE: staged files are not scanned for secret values." >&2
 fi
 
 # sops_file_is_encrypted <blob file>: sops metadata present and every value (keys aside) is ciphertext

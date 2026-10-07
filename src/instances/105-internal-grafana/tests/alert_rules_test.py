@@ -1,6 +1,8 @@
 """The provisioned Grafana alert rules (105-internal-grafana.nix) as Prometheus rules, for promtool.
 
-Usage: alert_rules_test.py <rules.json> <app> <out dir>     (<app>: an app the catalog enables)
+Usage: alert_rules_test.py <rules.json> <app> <builder> <out dir>
+
+<app>: an app the catalog enables; <builder>: the `vm` label of the app builder's guest.
 
 Writes <out dir>/rules.json, every Prometheus-backed Grafana rule as an alerting rule with the same expression,
 threshold, `for` and labels (Loki rules stay out: promtool evaluates PromQL only), and <out dir>/tests.json, the
@@ -8,14 +10,15 @@ cases below in promtool's unit test format. tests/alert-rules.nix runs `promtool
 rules` on them.
 
 The cases are the policy, written out as an oracle: which series make which rule fire with which labels, and which
-must stay quiet (an on-demand guest asleep, a service on a guest that is down, a 5xx share at noise traffic, a
-dump stale only because its guest just woke up).
+must stay quiet (an idle guest asleep, a service on a guest that is down, a 5xx share at noise traffic, a dump
+stale only because its guest just woke up, a stale deploy metric on a guest that is no builder, a manager failure the
+builder already reports).
 """
 import json
 import os
 import sys
 
-RULES, APP, OUT = sys.argv[1:4]
+RULES, APP, BUILDER, OUT = sys.argv[1:5]
 OPERATORS = {"gt": ">", "lt": "<"}
 NODE = 'job="homelab-node-exporter"'
 EDGE = "10.200.0.200:8082"
@@ -60,7 +63,8 @@ def expect(uid, **series):
 
 paperless = {"instance": "10.100.0.121:9100", "vm": "paperless"}
 nas = {"instance": "10.100.0.109:9100", "vm": "nas"}
-archbuild = {"instance": "10.100.0.119:9100", "vm": "archbuild"}
+# idle: the scrape labels a guest that sleeps on purpose
+archbuild = {"instance": "10.100.0.119:9100", "vm": "archbuild", "idle": "true"}
 # the app's routes as the edge names its services (catalog.nix): the app itself and a path of it
 app_root = f"{APP}@file"
 app_api = f"{APP}-api@file"
@@ -68,13 +72,13 @@ app_server = f"{APP}_server"
 
 tests = [
     {
-        "name": "guests: an enabled guest down pages, an on-demand one asleep does not; a service on a down guest is "
+        "name": "guests: an enabled guest down pages, an idle one asleep does not; a service on a down guest is "
                 "the guest's alert",
         "interval": "1m",
         "input_series": [
             {"series": f'up{{{NODE},instance="{paperless["instance"]}",vm="paperless"}}', "values": "1x20"},
             {"series": f'up{{{NODE},instance="{nas["instance"]}",vm="nas"}}', "values": "0x20"},
-            {"series": f'up{{{NODE},instance="{archbuild["instance"]}",vm="archbuild"}}', "values": "0x20"},
+            {"series": f'up{{{NODE},instance="{archbuild["instance"]}",vm="archbuild",idle="true"}}', "values": "0x20"},
             {"series": 'probe_success{job="blackbox-http",service="paperless",vm="paperless"}', "values": "0x20"},
             {"series": 'probe_success{job="blackbox-http",service="nas",vm="nas"}', "values": "0x20"},
         ],
@@ -94,7 +98,11 @@ tests = [
             {"series": f'traefik_service_requests_total{{instance="{EDGE}",service="{app_root}",code="500"}}', "values": "0+60x20"},
             {"series": f'traefik_service_requests_total{{instance="{EDGE}",service="{app_api}",code="500"}}', "values": "0+3x20"},
             {"series": f'traefik_service_requests_total{{instance="{INTERNAL}",service="{GUEST_ROUTE}",code="500"}}', "values": "0+60x20"},
-            {"series": f'homelab_app_deploy_ok{{app="{APP}"}}', "values": "1 1 0x10"},
+            {"series": f'homelab_app_deploy_ok{{app="{APP}",vm="{BUILDER}"}}', "values": "1 1 0x10"},
+            # the builder's old guest kept its last file: it must not page, nor outvote the builder
+            {"series": f'homelab_app_deploy_ok{{app="{APP}",vm="github-runner"}}', "values": "0x15"},
+            # the manager failed the same deploy: the builder's alert is the page
+            {"series": f'homelab_swarm_deploy_ok{{app="{APP}",vm="swarm-internal"}}', "values": "1 1 0x10"},
             {"series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{app_server}",name="{app_server}.1.a"}}', "values": "1 1 1 _x10"},
             {"series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{app_server}",name="{app_server}.1.b"}}', "values": "_ _ 1 1 _x10"},
             {"series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{app_server}",name="{app_server}.1.c"}}', "values": "_ _ _ 1 1 _x10"},
@@ -107,6 +115,7 @@ tests = [
              "exp_alerts": [expect("app_5xx", service=app_root), expect("app_5xx", service=GUEST_ROUTE)]},
             {"eval_time": "1m", "alertname": "app_deploy_failed", "exp_alerts": []},
             {"eval_time": "3m", "alertname": "app_deploy_failed", "exp_alerts": [expect("app_deploy_failed", app=APP)]},
+            {"eval_time": "3m", "alertname": "app_swarm_deploy_failed", "exp_alerts": []},
             {"eval_time": "6m", "alertname": "app_restart_loop", "exp_alerts": [expect("app_restart_loop", swarm_service=app_server)]},
         ],
     },
@@ -172,6 +181,55 @@ tests = [
              "exp_alerts": [expect("monitoring_unit_down", name="loki.service", state="active", vm="grafana")]},
             {"eval_time": "20m", "alertname": "logs_not_arriving", "exp_alerts": []},
             {"eval_time": "40m", "alertname": "logs_not_arriving", "exp_alerts": [expect("logs_not_arriving")]},
+        ],
+    },
+]
+
+tests += [
+    {
+        "name": "deploys: a manager that fails a deploy the builder got through pages, naming the manager",
+        "interval": "1m",
+        "input_series": [
+            {"series": f'homelab_app_deploy_ok{{app="{APP}",vm="{BUILDER}"}}', "values": "1x10"},
+            {"series": f'homelab_swarm_deploy_ok{{app="{APP}",vm="swarm-internal"}}', "values": "1 0x9"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "3m", "alertname": "app_swarm_deploy_failed",
+             "exp_alerts": [expect("app_swarm_deploy_failed", app=APP, vm="swarm-internal")]},
+            {"eval_time": "3m", "alertname": "app_deploy_failed", "exp_alerts": []},
+        ],
+    },
+    {
+        "name": "hardware: a thrashing guest, an nvme warning and a hot nvme page; a busy but healthy guest does not",
+        "interval": "1m",
+        "input_series": [
+            {"series": 'node_pressure_memory_stalled_seconds_total{vm="traefik-internal"}', "values": "0+30x30"},
+            {"series": 'node_pressure_memory_stalled_seconds_total{vm="nas"}', "values": "0+1x30"},
+            {"series": 'nvme_critical_warning{vm="proxmox",device="nvme1n1"}', "values": "0 0 4x10"},
+            {"series": 'nvme_temperature_celsius{vm="proxmox",device="nvme1n1"}', "values": "75x30"},
+            {"series": 'nvme_temperature_celsius{vm="proxmox",device="nvme0n1"}', "values": "40x30"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "20m", "alertname": "memory_pressure", "exp_alerts": [expect("memory_pressure", vm="traefik-internal")]},
+            {"eval_time": "3m", "alertname": "nvme_critical_warning",
+             "exp_alerts": [expect("nvme_critical_warning", vm="proxmox", device="nvme1n1")]},
+            {"eval_time": "20m", "alertname": "nvme_temperature",
+             "exp_alerts": [expect("nvme_temperature", vm="proxmox", device="nvme1n1")]},
+        ],
+    },
+    {
+        "name": "idle: a wake that never answered and an api the ingress cannot reach page",
+        "interval": "1m",
+        "input_series": [
+            {"series": 'homelab_ondemand_wake_ok{vm="traefik-internal",deployment="vm-119"}', "values": "1 0x5"},
+            {"series": 'homelab_ondemand_wake_ok{vm="traefik-internal",deployment="vm-121"}', "values": "1x6"},
+            {"series": 'homelab_ondemand_api_ok{vm="traefik-external"}', "values": "0x20"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "2m", "alertname": "ondemand_wake_failed",
+             "exp_alerts": [expect("ondemand_wake_failed", vm="traefik-internal", deployment="vm-119")]},
+            {"eval_time": "10m", "alertname": "ondemand_api_failing", "exp_alerts": []},
+            {"eval_time": "16m", "alertname": "ondemand_api_failing", "exp_alerts": [expect("ondemand_api_failing", vm="traefik-external")]},
         ],
     },
 ]

@@ -162,7 +162,8 @@ ask() {
   echo ">>> $1 saved"
 }
 
-ask telegram-bot-token "Telegram bot token (from @BotFather)"
-ask telegram-chat-id   "Your Telegram user id (numeric)"
+ask hermes-anthropic-api-key "Anthropic API key for Hermes (console.anthropic.com, its own key)"
+ask telegram-bot-token       "Telegram bot token (from @BotFather)"
+ask telegram-chat-id         "Your Telegram user id (numeric)"
 
 echo ">>> Done. Run ./sync.sh to deploy Hermes."

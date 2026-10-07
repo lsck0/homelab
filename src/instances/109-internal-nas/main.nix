@@ -45,12 +45,8 @@ let
     "create mask" = "0664";
     "directory mask" = "0775";
   };
-
-  tokenDirOf = id: "/srv/nas/data/tokens/vm-${toString id}";
 in {
   imports = [ ./lib/kopia.nix ./lib/nas-exports.nix ];
-
-  networking.hostName = "vm-109";
 
   # hdd; media and torrents share a fs for hardlinks
   fileSystems.${bulk} = {
@@ -273,26 +269,6 @@ in {
     };
   };
 
-  # a token an app minted once (an admin password it was set up with) must move from the old shared dir, a fresh one
-  # would not log in; what stays behind belongs to no registered producer (modules/tokens)
-  systemd.services.lab-tokens-migrate = {
-    description = "Move tokens from the shared homepage-tokens dir into their producers' dirs";
-    wantedBy = [ "multi-user.target" ];
-    before = [ "nfs-server.service" ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
-    script = ''
-      old=/srv/nas/data/homepage-tokens
-      [ -d "$old" ] || exit 0
-      ${lib.concatStrings (lib.mapAttrsToList (name: id: ''
-        if [ -e "$old/${name}.token" ] && [ ! -e ${tokenDirOf id}/${name}.token ]; then
-          ${pkgs.coreutils}/bin/install -d -m 0777 ${tokenDirOf id}
-          ${pkgs.coreutils}/bin/mv -n "$old/${name}.token" ${tokenDirOf id}/
-          echo "moved ${name} to vm-${toString id}"
-        fi
-      '') config.homelab.tokens.producers)}
-    '';
-  };
-
   # official repos update a few times a day, so hourly caps the lag; flock drops a tick the slow first sync overlaps
   systemd.services.archmirror-sync = {
     description = "Sync the full official Arch mirror (core/extra/multilib, x86_64) from a tier-1 upstream";
@@ -314,11 +290,8 @@ in {
     };
   };
 
-  networking.firewall.allowedTCPPorts = [ routes.nas.port archrepoPort routes.syncthing.port syncthingSyncPort ];
+  networking.firewall.allowedTCPPorts = [ archrepoPort syncthingSyncPort ];
   networking.firewall.allowedUDPPorts = [ syncthingSyncPort syncthingDiscoveryPort ];
-
-  # authelia is the only gate of filebrowser and the syncthing gui
-  homelab.ingressOnly.ports = [ routes.nas.port routes.syncthing.port ];
 
   # hot page cache is the point here (nfs serving, tsdb, streams)
   homelab.dropCaches = false;

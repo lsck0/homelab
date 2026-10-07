@@ -3,18 +3,17 @@
 # Five lists, each entry with the reason it exists:
 # - networks: the router's interfaces and where each may connect by default. A trusted network reaches
 #   everything, the house lan the lab's zones, an isolated zone (a dmz) the internet only.
-# - forward: the exceptions that cross the router: one source, one destination, its ports.
+# - guards: grants of one or more guests onto ports of one guest. A grant is the whole path: the guest's guard admits
+#   the sources (modules/network.nix, ports guarded with homelab.ingressOnly; its zone's ingress and loopback are
+#   trusted there already), and every source whose network the router would not let through gets its forward.
+# - forward: the network-wide exceptions across the router: one source, one destination, its ports.
 # - router: the router's own services and who may use them.
 # - portForwards: the house's public address forwarded: https to the edge, every tcp and udp route to its backend.
-# - guards: grants inside a zone, onto ports a guest guards with homelab.ingressOnly (the zone's ingress and loopback
-#   are trusted there already, everyone else needs a line here).
 #
 # instances/300-router/main.nix renders networks, forward, router and portForwards; modules/network.nix renders the
-# guards of the guest it runs on. A grant onto one instance lives in its instance.nix (`grants`, collected by
-# modules/lab), a tcp or udp forward is a route of its service; what spans the lab stays here. Ports come from
-# their owners: modules/net.nix (protocols), modules/telemetry.nix (vm-105), an instance's routes, the swarm apps
-# (src/apps/). tests/lib/zones.py states the router's part independently and tests/router-zones.nix holds the running
-# router to it.
+# grants onto the guest it runs on. A grant onto one instance lives in its instance.nix (`grants`, collected by
+# modules/lab), a route's own path from its ingress is derived from the route; what spans the lab stays here.
+# tests/lib/zones.py states the router's part independently and tests/router-zones.nix holds the running router to it.
 #
 # An endpoint is { network; addresses; }: a network of `networks`, and the addresses in it (null: all of it).
 { lib, net, inventory, catalog, appsCatalog, nasClients, lab }:
@@ -52,53 +51,105 @@ let
   internalIngress = zones.internal.ingress;
   edge = zones.external.ingress;
   collector = telemetry.collectorVmid;
-  # the guests behind these services
   nas = toString lab.routes.nas.vmid;
   homepage = toString lab.routes.homepage.vmid;
   prowlarr = toString lab.routes.prowlarr.vmid;
-  swarmManager = toString appsCatalog.swarm.manager;
-
+  swarmManager = catalog.swarm.managerId;
 
   nfsPorts = [ ports.rpcbind ports.nfs ];
   torPorts = import ./tor-ports.nix;
+  appTelemetryPorts = with telemetry.ports; [ journalRemote otlpGrpc otlpHttp pyroscope loki ];
 
-  # a public route of a guest outside the dmz: the edge reaches that one port of it, across the router and its guard
-  innerPublicRoutes = lib.filter (r: r.vmid != null && (net.zoneOf (toString r.vmid)).name != "external") (lib.attrValues catalog.external);
+  # -------------------------------------------------------------------------------------------------------------
+  # ROUTE BACKENDS
+  # -------------------------------------------------------------------------------------------------------------
 
-  # every instance service's route as the guest and port it answers on
-  vmRoutes = lib.attrValues (lib.filterAttrs (_: r: r.vmid != null) (catalog.internal // catalog.external));
-  # every node of the apps zone: the routing mesh answers each app's published ports on all of them
-  appNodes = { network = "apps"; addresses = zones.apps.hosts; };
+  running = id: inventory.${id}.enabled != "false";
+  # the swarm an app runs on: the shared one or its own guest (catalog.clusters)
+  clusterOf = app: lib.findFirst (c: c.apps ? ${app}) (throw "flows.nix: app ${app} is in no cluster") (lib.attrValues catalog.clusters);
+  # the running guests a route's backend answers on: an instance's own, or every node of its app's cluster
+  backendIdsOf = r: lib.filter running (if r.vmid != null then [ (toString r.vmid) ] else (clusterOf r.app).workerIds);
+
+  httpRoutes = lib.attrValues (catalog.internal // catalog.external);
   # every guest app tasks run on: the shared swarm's workers and each guest-placed app's own guest
   appNodeIds = lib.unique (lib.concatMap (c: c.workerIds) (lib.attrValues catalog.clusters));
   # the app guests outside the apps zone, by zone: their telemetry crosses the router like the workers'
   appGuestsByZone = lib.groupBy (id: (net.zoneOf id).name) (lib.filter (id: (net.zoneOf id).name != "apps") appNodeIds);
-  appTelemetryPorts = with telemetry.ports; [ journalRemote otlpGrpc otlpHttp pyroscope loki ];
-in
-{
+
+  # -------------------------------------------------------------------------------------------------------------
+  # GRANTS
+  # -------------------------------------------------------------------------------------------------------------
+
+  # every route from the ingress of its zone to each guest answering it; a guest's own zone ingress is trusted already
+  routeGrants = lib.concatMap (r: let ingress = zones.${r.zone}.ingress; in map (id: {
+    from = [ ingress ]; to = id; tcp = [ r.port ];
+    why = "the ${r.zone} ingress serves ${net.fqdn r.host}";
+  }) (lib.filter (id: (net.zoneOf id).ingress != ingress) (backendIdsOf r))) httpRoutes;
+
+  # a dashboard widget with no url of its own queries its route's api on the guest
+  widgetGrants = map (c: let r = lab.routes.${c.route}; in {
+    from = [ homepage ]; to = toString r.vmid; tcp = [ r.port ];
+    why = "the dashboard's ${c.widget.type} widget queries ${c.route}";
+  }) (lib.filter (c: c.widget != null && c.widget.url == null) lab.homepage);
+
+  # who wakes an idle app on the deploy controller: the ingresses for a request, the state worker for a dump;
+  # modules/swarm admits the same list in the controller itself
+  controllerWakerIds = lib.unique [ internalIngress edge catalog.swarm.stateId ];
+  wakerGrants = [{
+    from = controllerWakerIds; to = swarmManager; tcp = [ catalog.swarm.controllerPort ];
+    why = "the ingresses wake an idle app for a request, the state worker for its nightly dump";
+  }];
+
+  ingressMetricsGrants = map (z: {
+    from = [ collector ]; to = z.ingress; tcp = [ ports.traefikMetrics ];
+    why = "vm-105 scrapes the ${z.name} ingress";
+  }) (lib.filter (z: z.ingress != null) (lib.attrValues zones));
+
+  metricsGrants = map (id: {
+    from = [ collector ]; to = id; tcp = catalog.ports.metrics ++ [ appsCatalog.cadvisorPort telemetry.ports.promtail ];
+    why = "vm-105 scrapes the apps' metrics, and each app node's cadvisor and log shipper";
+  }) appNodeIds
+  ++ lib.mapAttrsToList (key: s: {
+    from = [ collector ]; to = toString s.vmid; tcp = lib.unique (map (m: m.port) (lib.attrValues s.metrics));
+    why = "vm-105 scrapes ${key}'s exporters";
+  }) (lib.filterAttrs (_: s: s.kind == "vm" && s.on.metrics && s.metrics != { }) catalog.services);
+
+  guards = routeGrants ++ widgetGrants ++ wakerGrants ++ ingressMetricsGrants ++ metricsGrants
+    # an instance's own `grants`: who may reach which of its guarded ports
+    ++ lab.grants;
+
+  # the router's part of a grant: each source network the router keeps out of the guest's zone
+  grantForwards = g: let target = net.zoneOf g.to; in lib.concatLists (lib.mapAttrsToList (network: ids:
+    lib.optional (network != target.name && networks.${network}.reaches != "everything") {
+      from = hosts ids; to = host g.to; inherit (g) tcp why;
+    }) (lib.groupBy (id: (net.zoneOf id).name) g.from));
+  # one rule for the guests of one zone that the same sources reach on the same ports for the same reason
+  forwardsMerged = fs: lib.mapAttrsToList (_: group: lib.head group // {
+    to = (lib.head group).to // { addresses = lib.unique (lib.concatMap (f: f.to.addresses) group); };
+  }) (lib.groupBy (f: builtins.toJSON { inherit (f) from tcp why; network = f.to.network; }) fs);
+
   # -------------------------------------------------------------------------------------------------------------
   # NETWORKS: the router's interfaces, by default reach
   # -------------------------------------------------------------------------------------------------------------
 
   networks = {
     internal = { interface = zones.internal.interface; sources = [ zones.internal.subnet ]; reaches = "everything"; };
-    # the owner's devices (300-router.nix wg0 peers)
+    # the owner's devices (instances/300-router/main.nix wg0 peers)
     wireguard = { interface = "wg0"; sources = [ net.wireguard.subnet ]; reaches = "everything"; };
-    # the house routes the lab through the router; the swarm workers it reaches only through the ingresses
+    # the house routes the lab through the router; the apps zone it reaches only through the ingresses
     lan = { interface = net.wan.interface; sources = [ net.wan.subnet ]; reaches = [ "internal" "external" ]; };
     external = { interface = zones.external.interface; sources = [ zones.external.subnet ]; reaches = "internet"; };
     apps = { interface = zones.apps.interface; sources = [ zones.apps.subnet ]; reaches = "internet"; };
   };
+in
+{
+  inherit networks guards controllerWakerIds;
 
   # -------------------------------------------------------------------------------------------------------------
   # FORWARD: the exceptions across the router; a dmz reaches nothing private but these
   # -------------------------------------------------------------------------------------------------------------
 
-  forward = map (r: {
-    from = host edge; to = host (toString r.vmid); tcp = [ r.port ];
-    why = "the edge serves the public route ${r.host} of a guest outside the dmz";
-  }) innerPublicRoutes
-  ++ [
+  forward = forwardsMerged (lib.concatMap grantForwards guards) ++ [
     {
       from = house [ net.wan.workstation ]; to = all "apps"; tcp = [ ports.ssh ];
       why = "sync.sh on the workstation deploys the swarm workers over ssh like every guest";
@@ -124,10 +175,6 @@ in
       why = "the edge wakes the dmz's onDemand guests; its token powers only their pool";
     }
     {
-      from = host edge; to = appNodes; tcp = catalog.ports.external;
-      why = "the edge routes the apps' public paths to the ports the routing mesh publishes on every worker";
-    }
-    {
       from = all "apps"; to = host internalIngress; tcp = [ ports.https ];
       why = "the workers pull their images from the registry route";
     }
@@ -136,7 +183,7 @@ in
       why = "the workers upload journals and ship their apps' logs, the apps send traces and profiles";
     }
     {
-      from = host collector; to = appNodes; tcp = [ telemetry.ports.promtail ];
+      from = host collector; to = { network = "apps"; addresses = zones.apps.hosts; }; tcp = [ telemetry.ports.promtail ];
       why = "vm-105 scrapes the workers' log shippers for dropped lines";
     }
     {
@@ -211,41 +258,16 @@ in
 
   portForwards = [
     {
-      proto = "tcp"; port = ports.https; address = net.ipOf edge; targetPort = ports.https;
+      proto = "tcp"; port = ports.https; addresses = [ (net.ipOf edge) ]; targetPort = ports.https;
       host = null; srv = null; why = "every public route";
       off = { inflightLimit = "the edge limits every client itself"; accessLog = "traefik logs every request"; };
     }
   ]
-  # every tcp and udp route (an instance service's or an app's) straight to its backend, while it is not off
-  ++ map (r: {
+  # every tcp and udp route (an instance service's or an app's) to every guest answering it, while one runs
+  ++ lib.filter (f: f.addresses != [ ]) (map (r: {
     proto = r.protocol; port = r.publicPort; targetPort = r.port;
-    address = if r.vmid != null then net.ipOf (toString r.vmid) else lib.head r.nodes;
+    addresses = map net.ipOf (backendIdsOf r);
     inherit (r) host srv off;
     why = "${r.protocol} ${net.fqdn r.host}";
-  }) (lib.filter (r: r.vmid == null || inventory.${toString r.vmid}.enabled != "false") (lib.attrValues catalog.l4));
-
-  # -------------------------------------------------------------------------------------------------------------
-  # GUARDS: grants onto ingressOnly ports inside a zone
-  # -------------------------------------------------------------------------------------------------------------
-
-  guards = lib.concatLists [
-    (lib.unique (map (r: {
-      from = [ homepage collector ]; to = toString r.vmid; tcp = [ r.port ];
-      why = "the dashboard's status dot and the prober's blackbox check of every route's own port";
-    }) vmRoutes))
-    (map (r: {
-      from = [ edge ]; to = toString r.vmid; tcp = [ r.port ];
-      why = "the edge serves the public route ${r.host}";
-    }) innerPublicRoutes)
-    # an instance's own `grants`: who may reach which of its guarded ports
-    lab.grants
-    (map (id: {
-      from = [ collector ]; to = id; tcp = catalog.ports.metrics ++ [ appsCatalog.cadvisorPort telemetry.ports.promtail ];
-      why = "vm-105 scrapes the apps' metrics, and each app node's cadvisor and log shipper";
-    }) appNodeIds)
-    (lib.mapAttrsToList (key: s: {
-      from = [ collector ]; to = toString s.vmid; tcp = lib.unique (map (m: m.port) (lib.attrValues s.metrics));
-      why = "vm-105 scrapes ${key}'s exporters";
-    }) (lib.filterAttrs (_: s: s.kind == "vm" && s.on.metrics && s.metrics != { }) catalog.services))
-  ];
+  }) (lib.attrValues catalog.l4));
 }

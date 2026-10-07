@@ -22,6 +22,7 @@
         };
       };
       off = {
+        guard = "the house's pacman fetches straight from here (arch-dotfiles pacman.conf); public and signed";
         sso = "public pacman mirror";
         anubis = "pacman clients run no proof of work";
         cloudflare = "pacman pulls large binaries, not through the proxy";

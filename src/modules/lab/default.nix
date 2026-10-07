@@ -13,11 +13,15 @@
 # that could go stale.
 #
 #   lab = import ./modules/lab { inherit lib; };
-#   lab.inventory."134"           # { name; type; kind; privileged; features; ip; prefix; gateway; enabled; cooldown; }
-#                                 # cooldown: idle.stopAfter, null for a guest that never idles
-#   lab.instances."134".config    # the evaluated instance.nix (vm, services, idle, grants, tokens, ...)
+#   lab.inventory."134"           # { name; type; kind; privileged; features; ip; prefix; gateway; powered; idle; }
+#                                 # powered: vm.power is on; idle: idle.stopAfter, null for a guest that never idles
+#   lab.instances."134"           # { id; zone; name; dir; main; source; config; }, config the evaluated instance.nix
 #   lab.routes.jellyfin           # an instance service's route with every field (modules/service.nix), plus vmid
-#   lab.appsCatalog               # { apps; builder; swarm; cadvisorPort; controllerPort; } for modules/apps-catalog
+#   lab.appsCatalog               # src/apps/ typed by modules/apps-catalog: { apps; builder; swarm; cadvisorPort; controllerPort; }
+#   lab.catalog                   # modules/catalog.nix over it: every route and app, what every host gets as `catalog`
+#   lab.catalogOf c               # the same over another catalog (a test's fixture apps)
+#   lab.nasClients."10.100.0.140" # [{ path; readOnly; mode; }] the nas paths a powered guest declares (instance.nix `shares`)
+#   lab.roles.collector           # "105": the vmid of the one instance declaring a role (instance.nix `roles`)
 #
 # problems: every broken lab-wide rule (zones.json against the instances, vmid ranges, vm shapes, duplicate names),
 # one line each; the flake refuses to evaluate past one, so no host and no terraform plan proceeds.
@@ -45,6 +49,8 @@ let
   nodeService = "swarm";
   # `_template` and the like: documentation, never a guest
   hiddenPrefix = "_";
+  # every nas path a guest declares lives below this on vm-109
+  nasRoot = "/srv/nas";
   # a boot phase starts all its guests at once; the next waits this long so their boots do not stack up in ram
   bootPhaseWaitSeconds = 60;
 
@@ -79,7 +85,7 @@ let
   # instance.nix over the schema; net and telemetry read the collected inventory, lazily, for ports and addresses
   instanceEval = { id, zone, module }: (lib.evalModules {
     modules = [ schema module ];
-    specialArgs = { inherit id zone site net telemetry swarmManagers; };
+    specialArgs = { inherit id zone site net telemetry swarmManagers grantSourceNames; };
   }).config;
 
   instanceOfFolder = folder:
@@ -95,7 +101,7 @@ let
       config = instanceEval { inherit (parsed) id zone; module = dir + "/instance.nix"; };
     };
 
-  # one entry generates every worker of the shared swarm: same shape, consecutive vmids
+  # one entry generates every worker of the shared swarm: consecutive vmids, every field but those its instance.nix
   workerIds = lib.genList (n: toString (swarm.nodes.first + n)) swarm.nodes.count;
   nodeOf = id: {
     inherit id;
@@ -104,13 +110,13 @@ let
     dir = null;
     main = null;
     source = "apps/swarm.nix";
-    config = instanceEval { inherit id; zone = nodeZone; module = { vm = swarm.nodes.vm; }; };
+    config = instanceEval { inherit id; zone = nodeZone; module = removeAttrs swarm.nodes [ "first" "count" ]; };
   };
 
   # every enabled swarm's manager: the shared one and each enabled guest-placed app's own guest (a swarm of one)
-  placedApps = lib.filterAttrs (_: a: (a.placement or null) != null) appsCatalog.apps;
+  placedApps = lib.filterAttrs (_: a: a.placement != null) appsCatalog.apps;
   swarmManagers = [ (toString swarm.manager) ]
-    ++ lib.mapAttrsToList (_: a: toString a.placement.vmid) (lib.filterAttrs (_: a: a.enable or false) placedApps);
+    ++ lib.mapAttrsToList (_: a: toString a.placement.vmid) (lib.filterAttrs (_: a: a.enable) placedApps);
 
   # an app placed on its own guest: a single-node swarm in its zone, powered while the app is enabled
   appGuestOf = app: a: let id = toString a.placement.vmid; in {
@@ -123,8 +129,11 @@ let
     config = instanceEval {
       inherit id;
       inherit (a.placement) zone;
-      # its manager role mounts its unlock-key share like the shared manager (modules/swarm)
-      module = { vm = { power = if a.enable or false then "on" else "off"; needs = [ "containers" "nfs" ]; } // a.placement.vm or { }; };
+      module = {
+        vm = { power = if a.enable then "on" else "off"; needs = [ "containers" "nfs" ]; } // a.placement.vm;
+        # its manager role keeps its unlock key on its own share, as the shared manager does (modules/swarm)
+        shares."data/swarm-manager-${id}" = { };
+      };
     };
   };
 
@@ -150,7 +159,7 @@ let
   # the router is named by its hostname in proxmox; every guest by its folder
   nameOf = i: if i.zone == routerZone then i.config.hostName else i.name;
 
-  # enabled: the string every consumer and terraform compares; "onDemand" is a powered guest with idle set
+  # enabled: the tri-state string terraform and the scripts still compare, until they read powered and idle
   enabledOf = i: if i.config.vm.power == "off" then "false" else if i.config.idle.stopAfter != null then "onDemand" else "true";
 
   inventory = lib.mapAttrs (_: i: let vm = i.config.vm; in addressOf i // {
@@ -158,12 +167,28 @@ let
     type = i.zone;
     kind = vm.guestKind;
     inherit (vm) privileged features;
+    powered = vm.power == "on";
+    idle = i.config.idle.stopAfter;
     enabled = enabledOf i;
     cooldown = i.config.idle.stopAfter;
   }) instances;
 
   net = import ../net.nix { inherit lib inventory site; };
   telemetry = import ../telemetry.nix { inherit lib inventory; };
+
+  # a grant's source (instance.nix `grants`, modules/flows.nix `guards`): a guest by vmid, or the house lan, the
+  # proxmox node, the owner's wireguard devices, every address of a zone, or the router's leg in the granting guest's
+  # zone; as the address a guard admits
+  namedSources = {
+    lan = net.wan.subnet;
+    proxmox = "${net.wan.proxmox}/32";
+    wireguard = net.wireguard.subnet;
+  } // lib.mapAttrs (_: z: z.subnet) net.zones;
+  grantSourceNames = [ "router" ] ++ lib.attrNames namedSources;
+  sourceOf = zone: from:
+    if builtins.match "[0-9]+" from != null then net.hostSource from
+    else if from == "router" then "${net.zones.${zone}.routerIp}/32"
+    else namedSources.${from};
 
   # -------------------------------------------------------------------------------------------------------------
   # FACTS: what instance.nix files declare for others, merged and checked for collisions
@@ -188,6 +213,13 @@ let
     (lib.filterAttrs (_: i: i.config.egress != null) instances);
   secretEntries = lib.concatMap (i: lib.mapAttrsToList (name: kind: { inherit name kind i; }) i.config.secrets) ordered;
   secrets = lib.listToAttrs (map (e: lib.nameValuePair e.name { inherit (e) kind; vmid = idOf e.i; }) secretEntries);
+  roleEntries = lib.concatMap (i: map (name: { inherit name i; }) i.config.roles) ordered;
+  roles = lib.listToAttrs (map (e: lib.nameValuePair e.name e.i.id) roleEntries);
+
+  # what vm-109 exports and the router opens nfs to: every powered guest's declared shares, by address
+  nasClients = lib.listToAttrs (map (i: lib.nameValuePair inventory.${i.id}.ip
+    (lib.mapAttrsToList (path: s: { path = "${nasRoot}/${path}"; inherit (s) readOnly mode; }) i.config.shares))
+    (lib.filter (i: inventory.${i.id}.powered && i.config.shares != { }) ordered));
 
   # -------------------------------------------------------------------------------------------------------------
   # APPS
@@ -199,12 +231,15 @@ let
     assert lib.assertMsg ((builtins.readDir dir) ? "app.nix") "src/apps/${name}: an app folder holds app.nix (see src/apps/_template)";
     import (dir + "/app.nix");
 
-  # the raw catalog modules/apps-catalog types: production never sets homelab.appsCatalog, so this is it
-  appsCatalog = {
+  # the app folders and src/apps/swarm.nix over modules/apps-catalog: every field typed and defaulted, once
+  appsCatalogOf = raw: removeAttrs (lib.evalModules { modules = [ ../apps-catalog { config = raw; } ]; }).config [ "_module" ];
+  appsCatalog = appsCatalogOf {
     apps = lib.genAttrs appFolders appOf;
     inherit (swarm) builder cadvisorPort controllerPort;
     swarm = { inherit (swarm) manager state; workers = map lib.toInt workerIds; };
   };
+  catalogOver = typed: import ../catalog.nix { inherit lib site inventory; appsCatalog = typed; lab = result; };
+  catalog = catalogOver appsCatalog;
 
   # -------------------------------------------------------------------------------------------------------------
   # TERRAFORM: what lib.tf turns into proxmox guests, one json string (the external data source's protocol)
@@ -212,9 +247,9 @@ let
 
   # proxmox starts guests by order, then id, waiting up_delay after each: only a phase's last autostarted guest waits
   bootLast = lib.mapAttrs (_: is: lib.foldl' lib.max 0 (map idOf is))
-    (lib.groupBy (i: toString i.config.vm.bootOrder) (lib.filter (i: inventory.${i.id}.enabled == "true") instanceList));
+    (lib.groupBy (i: toString i.config.vm.bootOrder) (lib.filter (i: inventory.${i.id}.powered && inventory.${i.id}.idle == null) instanceList));
   terraformOf = id: i: let vm = i.config.vm; inv = inventory.${id}; in {
-    inherit (inv) name type enabled kind privileged features ip prefix gateway;
+    inherit (inv) name type enabled powered idle kind privileged features ip prefix gateway;
     memory = vm.memoryMiB;
     balloon = vm.balloonMiB;
     inherit (vm) cores machine;
@@ -272,19 +307,23 @@ let
     ) (lib.groupBy (i: i.id) instanceList))
     ++ duplicates "service" serviceEntries
     ++ duplicates "token" tokenEntries
-    ++ duplicates "secret" secretEntries;
-in {
-  inherit site instances inventory appsCatalog homepage oidc grants tokens egress secrets problems;
+    ++ duplicates "secret" secretEntries
+    ++ duplicates "role" roleEntries
+    ++ map (p: "src/apps: ${p}") catalog.problems;
 
-  # service name -> its route (modules/service.nix exposure) plus the instance's vmid; modules/catalog.nix adds the apps'
-  inherit routes;
+  result = {
+    inherit site instances inventory appsCatalog catalog homepage oidc grants tokens egress secrets roles nasClients problems;
+    catalogOf = c: catalogOver (appsCatalogOf c);
+    # zone: from: the address a grant's source stands for in a guard of that zone
+    inherit sourceOf;
 
-  # configuration name -> { id; main; hostName; kind; }: what the flake builds
-  hosts = lib.listToAttrs (map (i: lib.nameValuePair i.name {
-    inherit (i) id main;
-    inherit (i.config) hostName;
-    kind = i.config.vm.guestKind;
-  }) instanceList);
+    # service name -> its route (modules/service.nix exposure) plus the instance's vmid; modules/catalog.nix adds the apps'
+    inherit routes;
 
-  terraform.json = builtins.toJSON (lib.mapAttrs terraformOf instances);
-}
+    # configuration name -> its instance record: what the flake builds, each host getting its own as `instance`
+    hosts = lib.listToAttrs (map (i: lib.nameValuePair i.name i) instanceList);
+
+    terraform.json = builtins.toJSON (lib.mapAttrs terraformOf instances);
+  };
+in
+result

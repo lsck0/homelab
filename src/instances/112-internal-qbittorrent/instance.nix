@@ -8,7 +8,19 @@
     disks = [ { sizeGiB = 150; } ];
   };
 
-  tokens = [ "qbittorrent-pass" "qbittorrent-user" ];
+  tokens = [ "qbittorrent-user" ];
+
+  grants = [ {
+    from = [ "router" "104" "114" "130" ];
+    tcp = [ 80 ];
+    why = "the webui api without its login: the router's protonvpn-port sets the leased port, terminal stats, hermes, the arrs' download client";
+  } ];
+
+  shares = {
+    "data/qbittorrent" = { };
+    "data/tokens/vm-112" = { mode = "0755"; };
+    bulk = { };
+  };
 
   # peers find it through the exit's forwarded port
   egress = { via = "vpn"; inbound = true; };
@@ -23,7 +35,8 @@
         icon = "qbittorrent";
         name = "qBittorrent";
         widget = {
-          tokens = { password = "qbittorrent-pass"; username = "qbittorrent-user"; };
+          tokens = { username = "qbittorrent-user"; };
+          secrets = { password = "qbittorrent-pass"; };
           type = "qbittorrent";
         };
       };

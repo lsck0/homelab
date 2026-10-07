@@ -33,8 +33,6 @@ let
     end
   '';
 in {
-  networking.hostName = "vm-126";
-
   homelab.nasMounts = nasMount stateDir "huginn"
     // nasMount "/var/lib/postgresql" "huginn-db";
 
@@ -92,8 +90,6 @@ in {
     "d ${stateDir} 0750 ${toString containerUid} ${toString containerUid} -"
   ];
 
-  networking.firewall.allowedTCPPorts = [ route.port ];
-  homelab.ingressOnly.ports = [ route.port ];
   # postgres for the podman bridge only
   networking.firewall.interfaces.podman0.allowedTCPPorts = [ postgresPort ];
 

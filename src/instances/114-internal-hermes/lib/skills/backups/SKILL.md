@@ -1,7 +1,7 @@
 ---
 name: backups
 description: Restore or inspect NAS backups with Kopia.
-version: 1.1.0
+version: 1.2.0
 author: homelab
 license: MIT
 platforms: [linux]
@@ -48,7 +48,7 @@ owner's runbook (README.md, "Recovery"): it needs the Proton sign-in and the
 `kopia-password`, which only the owner can decrypt. Report the state
 (`systemctl status proton-sync` on vm-109) and point the owner there.
 
-All commands run on vm-109 with `terminal`: `ssh 10.100.0.109 nas-restore ...`
+The commands below are root's: send them to the owner with the snapshot you picked and what it overwrites.
 
 ## Restore a service
 
@@ -65,6 +65,12 @@ All commands run on vm-109 with `terminal`: `ssh 10.100.0.109 nas-restore ...`
 4. Stop the VM that writes the data: `vm stop <id>`.
 5. Restore in place: `ssh 10.100.0.109 nas-restore service <name> <snapshot-id|YYYY-MM-DD> --yes`
 6. Start the VM: `vm start <id>` and check the service (`podman ps`, logs, HTTP).
+   A service whose state lives on its VM's own disk (`homelab.localState`, a `<name>-seed` unit on the VM)
+   takes the restored copy when the app starts: the seed sees the restore's new generation and replaces the
+   local files. Check `ssh <ip> journalctl -u <name>-seed -n 5`
+   says "replaced ... with the restored nas copy". If the VM was not stopped, `ssh <ip> systemctl start
+   <name>-reseed` does the same; the nightly mirror never overwrites a restore, it starts the reseed itself.
+   A seed that says "diverged" stops the app: report it to the owner, never pick a copy yourself.
 7. Report which snapshot (id, date/time) was restored, and the id of the
    safety snapshot if you took one.
 

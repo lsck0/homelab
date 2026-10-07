@@ -8,8 +8,9 @@ Usage: controller-api.py <config.json>   (systemd socket activation, Accept=yes:
     GET  /state/<app>      from a waker, for an app with idle         "running" or "stopped"
 
 It only ever starts one of those units (polkit allows this user nothing else), takes no payload, and answers
-202 started, 401 wrong token, 403 not a waker, 404 no such app or action, 405, 413 a body, 429 asked too often.
-A redeploy while one runs coalesces into it: starting an active unit starts nothing. Every token is compared in
+202 started, 401 wrong token, 403 not a waker, 404 no such app or action, 405, 413 a body, 429 asked too often,
+503 the unit did not start. A redeploy while one runs coalesces into it: starting an active unit starts nothing; a
+redeploy counts against the window only once its unit started. Every token is compared in
 constant time; an unknown app answers 404 before any token is read, so the answer names no app's token.
 
 Config keys: apps { <app>: { tokenFile (null on a guest's own swarm: redeploys are the controller's); idle } }, wakers [ip] (the ingresses, the state worker), redeployIntervalS, stateDir, stoppedDir, units
@@ -24,7 +25,9 @@ import subprocess
 import sys
 import time
 
-# ---- constants ----------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# CONSTANTS
+# -----------------------------------------------------------------------------
 
 HEAD_BYTES_MAX = 8192
 READ_TIMEOUT_S = 5
@@ -32,14 +35,16 @@ APP_NAME = re.compile(r"[a-z][a-z0-9-]*")
 PATH = re.compile(r"/(redeploy|wake|sleep|state)/([^/]+)")
 BEARER = "Bearer "
 REASONS = {200: "OK", 202: "Accepted", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
-           405: "Method Not Allowed", 413: "Payload Too Large", 429: "Too Many Requests"}
+           405: "Method Not Allowed", 413: "Payload Too Large", 429: "Too Many Requests", 503: "Service Unavailable"}
 METHODS = {"redeploy": "POST", "wake": "POST", "sleep": "POST", "state": "GET"}
 
 
-# ---- functions ----------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# FUNCTIONS
+# -----------------------------------------------------------------------------
 
 def respond(config, method, path, headers, remote, now_s, start_unit):
-    """(status, body) for one request; start_unit(name) is the only effect besides the redeploy stamp."""
+    """(status, body) for one request; start_unit(name) -> started is the only effect besides the redeploy stamp."""
     match = PATH.fullmatch(path)
     if not match:
         return 404, "no such action\n"
@@ -65,9 +70,10 @@ def respond(config, method, path, headers, remote, now_s, start_unit):
         stamp = os.path.join(config["stateDir"], app)
         if os.path.exists(stamp) and now_s - os.path.getmtime(stamp) < config["redeployIntervalS"]:
             return 429, f"one redeploy per {config['redeployIntervalS']}s\n"
+        if not start_unit(config["units"]["redeploy"] % app):
+            return 503, "the redeploy did not start\n"
         with open(stamp, "w", encoding="utf-8"):
             pass
-        start_unit(config["units"]["redeploy"] % app)
         return 202, "redeploy started\n"
     if remote not in config["wakers"]:
         return 403, "the ingresses and the state worker only\n"
@@ -75,7 +81,8 @@ def respond(config, method, path, headers, remote, now_s, start_unit):
         return 404, "the app never idles\n"
     if action == "state":
         return 200, "stopped\n" if os.path.exists(os.path.join(config["stoppedDir"], app)) else "running\n"
-    start_unit(config["units"][action] % app)
+    if not start_unit(config["units"][action] % app):
+        return 503, f"the {action} did not start\n"
     return 202, f"{action} started\n"
 
 
@@ -101,7 +108,7 @@ def request_read(conn):
 
 
 def unit_start(name):
-    subprocess.run(["systemctl", "start", "--no-block", name], check=True)
+    return subprocess.run(["systemctl", "start", "--no-block", name], check=False).returncode == 0
 
 
 def main():

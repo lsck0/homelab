@@ -1,7 +1,9 @@
-# minecraft modpack switching on vm-208
+# minecraft on vm-208: modpack switching, the server's secrets rendered under /run and never on the nas share
 { pkgs, lib, specialArgs, ... }:
 let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
+  serverEnv = "/run/secrets/rendered/minecraft-server.env";
+  secrets = { RCON_PASSWORD = "test-minecraft-rcon-password"; CF_API_KEY = "test-minecraft-cf-api-key"; };
 in
 pkgs.testers.runNixOSTest {
   name = "minecraft";
@@ -11,10 +13,10 @@ pkgs.testers.runNixOSTest {
     imports = [ (lab.guest "208" { instance = ../main.nix; }) ];
     # lazymc would boot the real server; record the env mc-start would hand it instead
     systemd.services.lazymc.serviceConfig = {
-      # env files in mc-start's order; optional because ExecStartPre writes them on first boot
-      EnvironmentFile = [ "-/var/lib/minecraft/rcon.env" "-/var/lib/minecraft/modpack.env" ];
+      # env files in mc-start's order; the pack one optional because ExecStartPre writes it on first boot
+      EnvironmentFile = [ serverEnv "-/var/lib/minecraft/modpack.env" ];
       ExecStart = lib.mkForce (pkgs.writeShellScript "fake-lazymc" ''
-        env | grep -E '^(TYPE|MODRINTH_MODPACK|CF_PAGE_URL|VERSION|LEVEL|RCON_PASSWORD)=' | sort > /tmp/server-env
+        env | grep -E '^(TYPE|MODRINTH_MODPACK|CF_PAGE_URL|VERSION|LEVEL|RCON_PASSWORD|CF_API_KEY)=' | sort > /tmp/server-env
         exec sleep infinity
       '');
     };
@@ -29,18 +31,17 @@ pkgs.testers.runNixOSTest {
 
     vm_208.wait_for_unit("lazymc.service")
 
-    with subtest("first boot writes the default pack and the lazymc config"):
+    with subtest("first boot writes the default pack; the secrets and the lazymc config live under /run only"):
         e = env()
-        assert e == {"TYPE": "VANILLA", "VERSION": "LATEST", "LEVEL": "vanilla",
-                     "RCON_PASSWORD": "test-minecraft-rcon-password"}, e
-        vm_208.succeed("grep -q 'password = \"test-minecraft-rcon-password\"' /var/lib/minecraft/lazymc.toml")
+        assert e == {"TYPE": "VANILLA", "VERSION": "LATEST", "LEVEL": "vanilla", **secrets}, e
+        vm_208.succeed("grep -q 'password = \"test-minecraft-rcon-password\"' /run/secrets/rendered/lazymc.toml")
+        vm_208.fail("grep -rq test-minecraft /var/lib/minecraft /var/lib/minecraft-modpacks")
 
     with subtest("switch to another Modrinth pack"):
         vm_208.succeed("mc-modpack https://modrinth.com/modpack/fabulously-optimized 1.21.4")
         e = env()
         assert e == {"TYPE": "MODRINTH", "MODRINTH_MODPACK": "https://modrinth.com/modpack/fabulously-optimized",
-                     "VERSION": "1.21.4", "LEVEL": "fabulously-optimized",
-                     "RCON_PASSWORD": "test-minecraft-rcon-password"}, e
+                     "VERSION": "1.21.4", "LEVEL": "fabulously-optimized", **secrets}, e
 
     with subtest("CurseForge URL"):
         vm_208.succeed("mc-modpack https://www.curseforge.com/minecraft/modpacks/all-the-mods-10/")
@@ -60,9 +61,9 @@ pkgs.testers.runNixOSTest {
         assert "TYPE=VANILLA" in out, out
         vm_208.fail("test -e /tmp/server-env")
 
-    with subtest("choice survives a redeploy (pre-start re-runs)"):
+    with subtest("choice and secrets survive a restart (pre-start re-runs)"):
         vm_208.succeed("systemctl restart lazymc.service")
         e = env()
-        assert e["TYPE"] == "VANILLA", e
+        assert e["TYPE"] == "VANILLA" and e["CF_API_KEY"] == secrets["CF_API_KEY"], e
   '';
 }

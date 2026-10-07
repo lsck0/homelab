@@ -1,10 +1,9 @@
 #!/usr/bin/env bash
-# secrets-sync.sh and secrets-migrate.sh in scratch repos with throwaway age keys: placement and isolation, kinds,
+# secrets-sync.sh in scratch repos with throwaway age keys: placement and isolation, kinds, guarded secrets,
 # idempotence, moves between files, prune, hosts leaving, refusals, the admin-key rotation (fresh data keys, renewed
-# host keys, the history splice), atomicity under injected sops failures, the one-time migration, and one run over
-# the real plan.
+# host keys, the history splice), atomicity under injected sops failures, and one run over the real plan.
 #
-# usage: secrets_sync_test.sh <repo src dir> <seed> <dir of plans: base moved minus unman problem real .json>
+# usage: secrets_sync_test.sh <repo src dir> <seed> <dir of plans: base moved minus unman renamed problem real .json>
 # needs sops, age, jq, openssl, git, coreutils, findutils, diffutils on PATH; no network.
 set -euo pipefail
 
@@ -88,7 +87,7 @@ check_layout() {
     grep -qF "path_regex: src/${f//./\\.}\$" "$dir/.sops.yaml" || fail ".sops.yaml has no rule for $f"
     pubs=("$@"); for c in $(plan_q "$plan" ".files[\"$f\"][]"); do pubs+=("${pub[$c]}"); done
     [ "$(recipients "$dir/src/$f")" = "$(sorted "${pubs[@]}")" ] || fail "$f is not encrypted to exactly the admins and its readers"
-    case "$f" in */age.sops|terraform/terraform.tfvars.sops.json) continue ;; esac
+    case "$f" in */age.sops) continue ;; esac
     want=$(names_of "$plan" "$f" | paste -sd' '); got=$(dec "$key" "$dir/src/$f" | jq -r 'keys[]' | paste -sd' ')
     [ "$got" = "$want" ] || fail "$f holds [$got], the plan says [$want]"
   done
@@ -102,11 +101,12 @@ check_layout() {
 value() { dec "$3" "$1/src/$2" | jq -r --arg k "$4" '.[$k]'; }
 
 # -----------------------------------------------------------------------------
-# 1 to 4: a first run over an empty repo
+# 1 to 4: a first run over an empty repo, a first deploy
 # -----------------------------------------------------------------------------
 R=$T/repo
 repo_create "$R"
-sync "$R" A1.key "$A1 $A2" base --apply --host-keys-out "$T/out.json" > run1.log
+refuses "$R" "vault in src/secrets/shared.sops.json" A1.key "$A1 $A2" base --apply
+sync "$R" A1.key "$A1 $A2" base --apply --generate-guarded --host-keys-out "$T/out.json" > run1.log
 check_layout "$R" base A1.key "$A1" "$A2"
 ok "1 every file the plan lists, with its names, encrypted to the admins and its readers; host keys open exactly theirs"
 
@@ -114,11 +114,13 @@ CAT=secrets/shared.sops.json
 [[ "$(value "$R" "$CAT" A1.key gen)" =~ ^[0-9a-f]{32}$ ]] || fail "gen (hex:16) is $(value "$R" "$CAT" A1.key gen)"
 [[ "$(value "$R" "$CAT" A1.key tok)" =~ ^tk_[a-z0-9]{29}$ ]] || fail "tok is no ntfy token"
 [[ "$(value "$R" apps/x/secrets.sops.json A1.key x-app)" =~ ^GK[0-9a-f]{24}$ ]] || fail "x-app is no garage key id"
+[[ "$(value "$R" "$CAT" A1.key vault)" =~ ^[0-9a-f]{32}$ ]] || fail "vault (guardsData:hex:16) is $(value "$R" "$CAT" A1.key vault)"
+[ "$(value "$R" "$CAT" A1.key wg | base64 -d | wc -c)" = 32 ] || fail "wg is no 32-byte base64 wireguard key"
 [ -z "$(value "$R" "$CAT" A1.key man)" ] && [ -z "$(value "$R" "$CAT" A1.key pub)" ] || fail "manual and public are not empty"
 grep -qF "add     man -> $CAT (empty, fill it: sops src/$CAT)" run1.log || fail "an empty manual secret is not reported"
 [ "$(value "$R" instances/100-internal-a/secrets.shared.sops.json A1.key shared)" = "$(value "$R" "$CAT" A1.key shared)" ] \
   || fail "a's shared copy differs from src/secrets/shared.sops.json"
-ok "2 values by kind (hex, ntfy token, garage key id; manual and public empty), shared copies equal the source"
+ok "2 values by kind (hex, wireguard, ntfy token, garage key id, guarded hex; manual and public empty), shared copies equal the source"
 
 for v in $(dec A1.key "$R/src/$CAT" | jq -r '.[] | select(length > 0)') tfvars-secret-value; do
   grep -rqF -- "$v" "$R" && fail "plaintext $v lies in the repo"
@@ -156,10 +158,14 @@ ok "6 a dry run reports and writes nothing; a value moves into its new file and 
 sync "$R" A1.key "$A1 $A2" unman --apply > unman.log
 { grep -qF "unused  man in $CAT" unman.log && dec A1.key "$R/src/$CAT" | jq -e 'has("man")' >/dev/null; } \
   || fail "an undeclared value is not kept and reported"
+TFV=terraform/terraform.tfvars.sops.json
+dec A1.key "$R/src/$TFV" | jq '.proxmox_ssh_password = "tfvars-dead-value"' | SOPS_AGE_KEY_FILE="$T/A1.key" "$R/src/scripts/sops-encrypt.sh" "$R/src/$TFV"
 sync "$R" A1.key "$A1 $A2" unman --apply --prune > prune.log
 dec A1.key "$R/src/$CAT" | jq -e 'has("man") | not' >/dev/null || fail "--prune kept man"
+dec A1.key "$R/src/$TFV" | jq -e 'has("proxmox_ssh_password") | not' >/dev/null || fail "--prune kept the dead tfvars key"
+[ "$(value "$R" "$TFV" A1.key proxmox_api_token_secret)" = tfvars-secret-value ] || fail "--prune touched a declared tfvars value"
 sync "$R" A1.key "$A1 $A2" base --apply > /dev/null
-ok "7 an undeclared value is kept and reported, --prune deletes it"
+ok "7 an undeclared value is kept and reported, --prune deletes it, in the terraform vars too"
 
 a_before=$(hash_of "$R/src/instances/100-internal-a/secrets.sops.json")
 sync "$R" A1.key "$A1 $A2" minus --apply > minus.log
@@ -176,14 +182,12 @@ ok "8 removed hosts lose key, copy and folder, the app's file its reader; others
 # 9: refusals leave the tree as it was
 # -----------------------------------------------------------------------------
 refuses "$R" "101-internal-b reads nope, which nothing declares" A1.key "$A1 $A2" problem --apply
+refuses "$R" "vault2 in src/secrets/shared.sops.json" A1.key "$A1 $A2" renamed --apply
 refuses "$R" "is not an admin recipient" A1.key "$A2 $A3" base --apply
 cp "$R/src/instances/300-router/age.pub" "$T/pub.saved"; age-keygen -y A3.key > "$R/src/instances/300-router/age.pub"
 refuses "$R" "instances/300-router/age.pub is not the public half" A1.key "$A1 $A2" base --apply
 cp "$T/pub.saved" "$R/src/instances/300-router/age.pub"
-touch "$R/src/secrets.json"
-refuses "$R" "run src/scripts/secrets-migrate.sh" A1.key "$A1 $A2" base --apply
-rm "$R/src/secrets.json"
-ok "9 refused, nothing written: an undeclared read, a run locking its own key out, a foreign age.pub, the old layout"
+ok "9 refused, nothing written: an undeclared read, a guarded secret without its value, a run locking its own key out, a foreign age.pub"
 
 # -----------------------------------------------------------------------------
 # 10: rotating the admin key, A1 out and A3 in
@@ -271,62 +275,16 @@ done
 ok "11 $FAULT_TRIALS injected sops failures: safe, and a rerun converges"
 
 # -----------------------------------------------------------------------------
-# 12: the one-time migration from src/secrets.json and src/host-keys.json
-# -----------------------------------------------------------------------------
-M=$T/migrate
-repo_create "$M"
-for h in vm-100 vm-101 luca-router vm-150; do age-keygen -o "$T/old-$h.key" 2>/dev/null; done
-printf '  - path_regex: src/secrets\\.json$\n    age: %s,%s\n  - path_regex: src/host-keys\\.json$\n    age: %s,%s\n' "$A1" "$A2" "$A1" "$A2" >> "$M/.sops.yaml"
-jq -n '{"shared": "v-shared-0c1e", "gen": "v-gen-77ab", "tok": "tk_old", "pub": "v-pub", "man": "v-man-55f0",
-  "a-own": "v-a-own-1d2c", "r-own": "v-r-own-9e3a", "x-app": "GKold", "app-x-redeploy-token": "v-deploy-41aa",
-  "b-oidc-secret": "v-oidc-6b7c", "extra": "v-extra-unused"}' > old-values.json
-SOPS_AGE_KEY_FILE=A1.key "$M/src/scripts/sops-encrypt.sh" "$M/src/secrets.json" < old-values.json
-for h in vm-100 vm-101 luca-router vm-150; do grep AGE-SECRET-KEY "$T/old-$h.key"; done \
-  | jq -R . | jq -s '{"vm-100": .[0], "vm-101": .[1], "luca-router": .[2], "vm-150": .[3]}' \
-  | SOPS_AGE_KEY_FILE=A1.key "$M/src/scripts/sops-encrypt.sh" "$M/src/host-keys.json"
-mkdir -p "$M/src/host-secrets" && cp "$M/src/host-keys.json" "$M/src/host-secrets/vm-100.json"
-migrate() { SOPS_AGE_KEY_FILE="$T/A1.key" SECRETS_ADMIN_RECIPIENTS="$A1 $A2" DOTFILES="$T/no-dotfiles" "$M/src/scripts/secrets-migrate.sh" --plan "$P/base.json"; }
-partial_refused() { # partial_refused <name>: the migration refuses the repo at $T/<name> and leaves it as it was
-  local before rc=0
-  before=$(tree_hash "$T/$1")
-  SOPS_AGE_KEY_FILE="$T/A1.key" SECRETS_ADMIN_RECIPIENTS="$A1 $A2" "$T/$1/src/scripts/secrets-migrate.sh" --plan "$P/base.json" > "$T/partial.log" 2>&1 || rc=$?
-  { [ "$rc" = 1 ] && grep -qF "partial secrets layout" "$T/partial.log"; } || fail "$1: not refused: rc=$rc $(cat "$T/partial.log")"
-  [ "$(tree_hash "$T/$1")" = "$before" ] || fail "$1: a refused migration wrote"
-}
-cp -a "$M" "$T/half-old" && rm "$T/half-old/src/host-keys.json"
-partial_refused half-old
-cp -a "$M" "$T/mixed" && mkdir -p "$T/mixed/src/secrets" && echo '{}' > "$T/mixed/src/secrets/shared.sops.json"
-partial_refused mixed
-migrate > migrate.log
-[ ! -e "$M/src/secrets.json" ] && [ ! -e "$M/src/host-keys.json" ] && [ ! -e "$M/src/host-secrets" ] || fail "the old layout is still there"
-[ "$(value "$M" "$CAT" A1.key extra)" = v-extra-unused ] || fail "an undeclared value did not survive the migration"
-sync "$M" A1.key "$A1 $A2" base --apply --prune > /dev/null
-check_layout "$M" base A1.key "$A1" "$A2"
-for pair in 100-internal-a:vm-100 101-internal-b:vm-101 300-router:luca-router; do
-  cmp -s <(grep AGE-SECRET-KEY "$T/old-${pair#*:}.key") "$T/${pair%:*}.key" || fail "${pair%:*} did not keep its old key"
-done
-grep -qF "drop    the key of vm-150 (no such host)" migrate.log || fail "the gone host's key is not reported dropped"
-grep -qF "key     250-apps-swarm: new" migrate.log || fail "the worker without an old key got none"
-while read -r k v; do
-  [ "$k" = extra ] && continue
-  [ "$(value "$M" "$(plan_q base ".secrets[\"$k\"].file")" A1.key "$k")" = "$v" ] || fail "$k lost its value in the migration"
-done < <(jq -r 'to_entries[] | "\(.key) \(.value)"' old-values.json)
-before=$(tree_hash "$M")
-migrate > migrate2.log
-{ grep -qF "nothing to do" migrate2.log && [ "$(tree_hash "$M")" = "$before" ]; } || fail "a second migration changed something"
-ok "12 the migration keeps host keys and values, places every value, drops a gone host's key, refuses partial trees, runs once"
-
-# -----------------------------------------------------------------------------
-# 13: the real plan
+# 12: the real plan
 # -----------------------------------------------------------------------------
 RR=$T/real
 repo_create "$RR"
-sync "$RR" A1.key "$A1 $A2" real --apply > real1.log
+sync "$RR" A1.key "$A1 $A2" real --apply --generate-guarded > real1.log
 mapfile -t REAL_CONFIGS < <(plan_q real '.hosts | keys[]')
 mapfile -t REAL_FILES < <(plan_q real '.files | keys[]')
 for c in "${REAL_CONFIGS[@]}"; do host_key "$RR" "$c" real "$T/real-$c.key" A1.key; done
 for f in "${REAL_FILES[@]}"; do
-  case "$f" in */age.sops|terraform/terraform.tfvars.sops.json) continue ;; esac
+  case "$f" in */age.sops) continue ;; esac
   [ "$(dec A1.key "$RR/src/$f" | jq -r 'keys[]' | paste -sd' ')" = "$(names_of real "$f" | paste -sd' ')" ] || fail "real $f holds other names than declared"
 done
 for _ in $(seq 1 "$REAL_PAIRS"); do
@@ -336,6 +294,6 @@ done
 before=$(tree_hash "$RR")
 sync "$RR" A1.key "$A1 $A2" real --apply > real2.log
 [ "$(tree_hash "$RR")" = "$before" ] || fail "a second run over the real plan changed bytes"
-ok "13 the real plan (${#REAL_CONFIGS[@]} configurations, ${#REAL_FILES[@]} files): contents, sampled isolation, idempotence"
+ok "12 the real plan (${#REAL_CONFIGS[@]} configurations, ${#REAL_FILES[@]} files): contents, sampled isolation, idempotence"
 
 echo "secrets-sync: all assertions hold"

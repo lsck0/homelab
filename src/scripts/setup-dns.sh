@@ -1,14 +1,23 @@
 #!/usr/bin/env bash
 # split dns on the workstation: NetworkManager's dnsmasq sends *.<domain> to the router's coredns
+#
+# The lab's facts come from src/generated/lab.json (the desktop clients' interface, written by sync.sh) and the
+# router's lan address from src/generated/site.json.
 set -euo pipefail
 
-ROUTER_IP="192.168.178.29"
+SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# shellcheck source=src/scripts/lib/tools.sh
+. "$SRC/scripts/lib/tools.sh"
+tools_require jq
+
+LAB_EXPORT="$SRC/generated/lab.json"
+ROUTER_IP=$(jq -r .lan.router "$SRC/generated/site.json")
 # coredns; 5353 on the router is avahi
-ROUTER_DNS_PORT="53"
-DOMAIN="lsck0.dev"
-# a name the split horizon answers with the internal ingress, vm-100
-PROBE_NAME="homelab.$DOMAIN"
-PROBE_ANSWER="10.100.0.100"
+ROUTER_DNS_PORT=53
+DOMAIN=$(jq -r .domain "$LAB_EXPORT")
+# an internal route the split horizon answers with the internal ingress
+PROBE_NAME=$(jq -r .routes.homepage.host "$LAB_EXPORT")
+PROBE_ANSWER=$(jq -r '.guests[.zones.internal.ingress | tostring].ip' "$LAB_EXPORT")
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run with sudo" >&2

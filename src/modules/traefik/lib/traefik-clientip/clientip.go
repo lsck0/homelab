@@ -1,5 +1,6 @@
-// Package clientip sets X-Real-Ip to the request's real client: the nearest address of its forwarding chain that is
-// not a trusted proxy.
+// Package clientip makes the request's real client its only client address: the nearest address of its forwarding
+// chain that is not a trusted proxy becomes X-Real-Ip and the request's remote address, and X-Forwarded-For is
+// dropped, so traefik forwards exactly that client as the backend's X-Forwarded-For.
 //
 // The chain is X-Forwarded-For as received, oldest hop first, then the socket peer. Walking it from the peer
 // backwards, every address in trustedIPs is a proxy that appended the one before it; the first address that is not,
@@ -9,8 +10,10 @@
 //
 // Traefik's own sources fall short of this: X-Real-Ip from a trusted sender is whatever that sender passed on
 // (Cloudflare passes a client-sent one through), and an ipStrategy over X-Forwarded-For sees no header at all for a
-// direct client, so every direct client shares the key "". Rate limits, the crowdsec bouncer, anubis and the
-// access log all read X-Real-Ip after this middleware (modules/traefik puts it first on every websecure router).
+// direct client, so every direct client shares the key "". Rate limits, anubis and the access log read X-Real-Ip
+// after this middleware (modules/traefik puts it first on every websecure router); the crowdsec bouncer, forwardauth
+// and every backend read the remote address and the X-Forwarded-For traefik derives from it, so no backend has to
+// know the ingress's trusted proxies to find the client.
 //
 // Interpreted by traefik's yaegi, so the standard library only.
 package clientip
@@ -66,11 +69,7 @@ func (c *ClientIP) isTrusted(ip net.IP) bool {
 
 // client walks the chain from the peer backwards and returns the first untrusted address; a hop that is no address
 // ends the walk at the last address that was one, since nothing before garbage can be believed.
-func (c *ClientIP) client(req *http.Request) string {
-	peer, _, err := net.SplitHostPort(req.RemoteAddr)
-	if err != nil {
-		peer = req.RemoteAddr
-	}
+func (c *ClientIP) client(req *http.Request, peer string) string {
 	client := peer
 	peerIP := net.ParseIP(peer)
 	if peerIP == nil || !c.isTrusted(peerIP) {
@@ -95,6 +94,13 @@ func (c *ClientIP) client(req *http.Request) string {
 }
 
 func (c *ClientIP) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
-	req.Header.Set(headerRealIP, c.client(req))
+	peer, port, err := net.SplitHostPort(req.RemoteAddr)
+	if err != nil {
+		peer, port = req.RemoteAddr, "0"
+	}
+	client := c.client(req, peer)
+	req.Header.Set(headerRealIP, client)
+	req.Header.Del(headerForwardedFor)
+	req.RemoteAddr = net.JoinHostPort(client, port)
 	c.next.ServeHTTP(rw, req)
 }

@@ -44,6 +44,12 @@ class Door(unittest.TestCase):
                        "units": {"redeploy": "app-builder@%s.service", "wake": "swarm-idle-wake@%s.service",
                                  "sleep": "swarm-idle-sleep@%s.service"}}
         self.started = []
+        self.startable = True
+
+    def start(self, unit):
+        if self.startable:
+            self.started.append(unit)
+        return self.startable
 
     def tearDown(self):
         self.dir.cleanup()
@@ -52,7 +58,7 @@ class Door(unittest.TestCase):
         h = dict(headers or {})
         if token is not None:
             h["authorization"] = f"Bearer {token}"
-        return api.respond(self.config, method, path, h, remote, now_s, self.started.append)[0]
+        return api.respond(self.config, method, path, h, remote, now_s, self.start)[0]
 
     def test_redeploy_table(self):
         # (method, path, token) -> status; nothing but the valid case starts a unit
@@ -90,6 +96,15 @@ class Door(unittest.TestCase):
         os.utime(stamp, (NOW_S - INTERVAL_S, NOW_S - INTERVAL_S))
         self.assertEqual(self.ask("POST", "/redeploy/demo", TOKENS["demo"]), 202)
 
+    def test_a_unit_that_does_not_start_is_503_and_no_stamp(self):
+        self.startable = False
+        self.assertEqual(self.ask("POST", "/redeploy/demo", TOKENS["demo"]), 503)
+        self.assertEqual(self.ask("POST", "/wake/demo", remote=INGRESS), 503)
+        self.assertFalse(os.path.exists(os.path.join(self.config["stateDir"], "demo")))
+        # the retry is not rate limited by the failure
+        self.startable = True
+        self.assertEqual(self.ask("POST", "/redeploy/demo", TOKENS["demo"], now_s=NOW_S + 1), 202)
+
     def test_no_payload(self):
         self.assertEqual(self.ask("POST", "/redeploy/demo", TOKENS["demo"], headers={"content-length": "12"}), 413)
         self.assertEqual(self.ask("POST", "/redeploy/demo", TOKENS["demo"], headers={"content-length": "x"}), 400)
@@ -109,7 +124,7 @@ class Door(unittest.TestCase):
 
     def test_state(self):
         def respond():
-            return api.respond(self.config, "GET", "/state/demo", {}, INGRESS, NOW_S, self.started.append)
+            return api.respond(self.config, "GET", "/state/demo", {}, INGRESS, NOW_S, self.start)
 
         self.assertEqual(respond(), (200, "running\n"))
         open(os.path.join(self.config["stoppedDir"], "demo"), "w").close()

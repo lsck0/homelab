@@ -77,7 +77,7 @@ let
     };
   };
 in rec {
-  inherit protectionFeatures telemetryFeatures webMethods bodyLimitDefaultBytes offType urlPath why;
+  inherit protectionFeatures telemetryFeatures webMethods bodyLimitDefaultBytes offType urlPath why serviceName;
 
   # the dashboard card; a deployment's defaults name its kind (an instance service, an app)
   cardType = { name, group, icon, description }: types.submodule {
@@ -104,9 +104,13 @@ in rec {
     protocol = mkOption {
       type = types.enum [ "http" "tcp" "udp" ];
       default = "http";
-      description = "http: through the zone's ingress; tcp, udp: the house's publicPort forwarded by the router.";
+      description = "http: through the zone's ingress; tcp, udp: straight to the port, from the lab or the router's forward.";
     };
-    publicPort = mkOption { type = types.nullOr types.port; default = null; description = "tcp, udp: the house's public port."; };
+    publicPort = mkOption {
+      type = types.nullOr types.port;
+      default = null;
+      description = "tcp, udp: the house's public port the router forwards; null: lab-only, guarded like an http port.";
+    };
     srv = mkOption {
       type = types.nullOr (types.strMatching "_[a-z0-9-]+\\._(tcp|udp)");
       default = null;

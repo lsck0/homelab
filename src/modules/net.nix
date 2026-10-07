@@ -75,6 +75,7 @@ let
     inherit (z) bridge subnet;
     prefix = cidr.prefix z.subnet;
     routerIp = cidr.host z.subnet routerHost;
+    routerNic = z.router_nic;
     interface = "ens${toString (nicPciSlotFirst + z.router_nic)}";
     # the vmid of the zone's ingress, a string like inventory keys; null: the zone publishes nothing itself
     ingress = if z.ingress == null then null else toString z.ingress;

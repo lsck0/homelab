@@ -7,14 +7,22 @@
 # limits, the body limit, retries, the security headers, then sso, anubis, basic auth and the route's own headers.
 # A hand-written router gets the same chain and may name opt-outs in an `off` attribute of its own. Every quantity
 # that names a client reads X-Real-Ip, which client-ip sets from the socket peer and the X-Forwarded-For hops of
-# trustedProxies and Cloudflare only.
+# trustedProxies and Cloudflare only; the backend's X-Forwarded-For is that client alone. The probers check a route
+# at its health path through the ingress, past sso and anubis but nowhere else (probe routers below).
 { config, lib, pkgs, retry, inventory, site, lab, catalog, ... }:
 let
   cfg = config.homelab.traefik;
   net = import ../net.nix { inherit lib inventory site; };
   service = import ../service.nix { inherit lib; };
   telemetry = import ../telemetry.nix { inherit lib inventory; };
+  htpasswd = import ./lib/htpasswd.nix { inherit pkgs lib; };
   inherit (net) cloudflareRanges privateRanges;
+
+  # the prober (vm-105's blackbox) and the dashboard's status dots (vm-103)
+  probeSources = map net.hostSource [ telemetry.collectorVmid (toString lab.routes.homepage.vmid) ];
+  probeMethods = [ "GET" "HEAD" ];
+  # a route kept off the internet answers the networks the router lets into the internal zone, never a dmz
+  internalOnlySources = [ net.wan.subnet net.wireguard.subnet net.zones.internal.subnet ];
 
   # whose X-Forwarded-For hops count: the entrypoint keeps them, client-ip and the bouncer walk past them
   trustedHops = cfg.trustedProxies ++ lib.optionals cfg.trustCloudflare cloudflareRanges;
@@ -134,6 +142,8 @@ let
       sourceCriterion = clientSource;
     };
     client-ip.plugin.client-ip.trustedIPs = trustedHops;
+    # anubis hands a request back with the client client-ip named, then its own hop
+    client-ip-anubis.plugin.client-ip.trustedIPs = [ "${loopback}/32" ];
     # retry requests that never reached the backend
     retry-upstream.retry = {
       attempts = 4;
@@ -381,8 +391,6 @@ let
     # the template's nginx compressed for its browsers; nixos services answer as they choose
     ++ lib.optional (r.app != null) "compress";
 
-  accessLogOf = r: lib.optionalAttrs (!(on r "accessLog")) { observability.accessLogs = false; };
-
   routeRouters = lib.concatMapAttrs (name: r: {
     "${name}-tls" = {
       rule = routeRule r;
@@ -390,7 +398,7 @@ let
       entryPoints = [ "websecure" ];
       middlewares = routeMiddlewares name r;
       route = r;
-    } // accessLogOf r;
+    };
   } // lib.optionalAttrs (r.loginPaths != [ ]) {
     # password endpoints: the route's rule and chain plus the login limit; the longer rule outranks the route's own
     "${name}-login-tls" = {
@@ -402,8 +410,19 @@ let
     };
   } // lib.optionalAttrs (anubisOn r) {
     # what anubis lets through comes back on loopback and goes to the route's backend
-    "${name}-balancer" = { rule = fqdnRule r; service = name; entryPoints = [ "anubis-balancer" ]; };
+    "${name}-balancer" = { rule = fqdnRule r; service = name; entryPoints = [ "anubis-balancer" ]; middlewares = [ "client-ip-anubis" ]; };
   }) cfg.routes;
+
+  # the probers' door: GET and HEAD of the health path from their addresses, to the backend past sso and anubis
+  probeOn = r: r.health != null && on r "probe";
+  probeRoutes = lib.filterAttrs (_: probeOn) cfg.routes;
+  probesOutsideRoute = lib.attrNames (lib.filterAttrs (_: r: !(lib.hasPrefix r.path r.health)) probeRoutes);
+  probeRouters = lib.mapAttrs' (name: r: lib.nameValuePair "${name}-probe" {
+    rule = "${fqdnRule r} && Path(`${r.health}`) && ${anyOf "Method" probeMethods} && ${anyOf "ClientIP" probeSources}";
+    service = name;
+    entryPoints = [ "websecure" ];
+    route = r // { off = r.off // { accessLog = "a probe every few seconds would bury the clients' requests"; }; };
+  }) probeRoutes;
 
   # an instance route to its guest (or its on-demand proxy), an app route to every node of its cluster, health-checked
   serversOf = name: r:
@@ -427,14 +446,15 @@ let
         replacement = "https://${net.fqdn r.host}${r.loginRedirect.to}";
       };
     } // lib.optionalAttrs (r.basicAuth != null) {
-      "${name}-auth".basicAuth = { usersFile = "${basicAuthDir}/${name}"; realm = name; removeHeader = true; };
+      # the header goes on: a backend checks the same users again (118's registry)
+      "${name}-auth".basicAuth = { usersFile = "${basicAuthDir}/${name}"; realm = name; removeHeader = false; };
     } // lib.optionalAttrs (r.headers != { }) {
       "${name}-headers".headers = r.headers;
     }) cfg.routes // {
     compress.compress = { };
   } // lib.optionalAttrs (cfg.relays != { }) {
-    # a route without `internet`: the edge relays it to private sources only
-    internal-only.ipAllowList.sourceRange = privateRanges;
+    # a route without `internet`: the edge relays it to the house, wireguard and the internal zone only
+    internal-only.ipAllowList.sourceRange = internalOnlySources;
   };
 
   # -- frontend telemetry: the browser's otlp beacons on the app's own origin, to the collector ----------------
@@ -472,7 +492,7 @@ let
     entryPoints = [ "websecure" ];
     middlewares = lib.optional (!(on r "internet")) "internal-only";
     route = r;
-  } // accessLogOf r)) cfg.relays;
+  })) cfg.relays;
   relayServices = lib.mapAttrs' (name: _: lib.nameValuePair "${name}-relay" {
     loadBalancer = { servers = [{ url = cfg.relayTarget; }]; serversTransport = "${name}-relay"; passHostHeader = true; };
   }) cfg.relays;
@@ -519,9 +539,9 @@ let
       rule = refuse r router.rule;
       tls = wildcardTls // (router.tls or { });
       middlewares = chainOf name r ++ (router.middlewares or [ ]);
-    }
+    } // lib.optionalAttrs (!(on r "accessLog")) { observability.accessLogs = false; }
   ) allRouters;
-  allRouters = cfg.routers // routeRouters // frontendRouters // relayRouters // botDefenseRouters;
+  allRouters = cfg.routers // routeRouters // probeRouters // frontendRouters // relayRouters // botDefenseRouters;
   allMiddlewares = cfg.middlewares // routeMiddlewareDefs // frontendMiddlewares // secureHeadersMiddleware // limitMiddlewares
     // bouncerMiddleware // stripClientHeadersMiddleware // autheliaMiddleware;
   missingMiddlewares = lib.subtractLists (lib.attrNames allMiddlewares)
@@ -603,6 +623,10 @@ in {
       assertion = loopbackClashes == [ ];
       message = "${config.networking.hostName}: loopback ports bound twice: "
         + lib.concatMapStringsSep "; " (group: "${toString (lib.head group).port} by ${lib.concatMapStringsSep ", " (p: p.name) group}") loopbackClashes;
+    } {
+      # a health path outside the route's prefix matches none of its routers: every probe would answer 404
+      assertion = probesOutsideRoute == [ ];
+      message = "${config.networking.hostName}: routes whose health path lies outside their path: ${toString probesOutsideRoute}";
     } {
       # traefik drops a router naming a missing middleware and answers its host with a 404
       assertion = missingMiddlewares == [ ];
@@ -864,17 +888,12 @@ in {
         RuntimeDirectoryMode = "0750";
         Group = "traefik";
       };
-      # bcrypt from stdin: the password never reaches an argv
       script = ''
         set -euo pipefail
         umask 027
-      '' + lib.concatStrings (lib.mapAttrsToList (name: r: ''
-        : > ${basicAuthDir}/${name}.tmp
-        ${lib.concatStrings (lib.mapAttrsToList (user: secret: ''
-          ${pkgs.apacheHttpd}/bin/htpasswd -niB ${user} < ${config.sops.secrets.${secret}.path} >> ${basicAuthDir}/${name}.tmp
-        '') r.basicAuth)}
-        mv ${basicAuthDir}/${name}.tmp ${basicAuthDir}/${name}
-      '') basicAuthRoutes);
+      '' + lib.concatStrings (lib.mapAttrsToList (name: r:
+        htpasswd.render "${basicAuthDir}/${name}" (lib.mapAttrs (_: secret: config.sops.secrets.${secret}.path) r.basicAuth)
+      ) basicAuthRoutes);
     };
 
     # the metrics entrypoint is for the scraper only (modules/flows.nix guards)

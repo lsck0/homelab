@@ -7,6 +7,7 @@
 # -----------------------------------------------------------------------------
 # CONSTANTS
 T=${TOKEN_DIR:?directory of the lab tokens}
+SECRETS=${SECRET_DIR:?directory of the sops secrets}
 INDEXERS=${INDEXERS:?space separated prowlarr indexer definitions to seed}
 QBIT_HOST=${QBIT_HOST:?};         QBIT_PORT=${QBIT_PORT:?}
 PROWLARR_HOST=${PROWLARR_HOST:?}; PROWLARR_PORT=${PROWLARR_PORT:?}
@@ -22,7 +23,7 @@ RADARR_PUBLIC_URL=${RADARR_PUBLIC_URL:?}; SONARR_PUBLIC_URL=${SONARR_PUBLIC_URL:
 TOR_HOST=${TOR_HOST:?};           TOR_PORT=${TOR_PORT:?}
 # jellyseerr's initialisation wants a mail address for the jellyfin admin it imports
 JELLYSEERR_ADMIN_EMAIL=${JELLYSEERR_ADMIN_EMAIL:?}
-# the jellyfin api key the arrs' library notifications use (134-internal-jellyfin.nix mints one per consumer)
+# the jellyfin api key the arrs' library notifications use (134-internal-jellyfin mints one per consumer)
 JELLYFIN_KEY=jellyfin-key-arr
 # when radarr starts looking
 MIN_AVAILABILITY=announced
@@ -37,7 +38,8 @@ pending=0
 # jq prelude: field(name; value) sets one entry of an *arr row's .fields
 JQ_FIELD='def field($n; $v): .fields |= map(if .name == $n then .value = $v else . end);'
 
-key() { cat "$T/$1.token" 2>/dev/null; }
+token() { cat "$T/$1.token" 2>/dev/null; }
+secret() { cat "$SECRETS/$1" 2>/dev/null; }
 api() { # method url apikey [json]
   if [ -n "${4:-}" ]; then
     curl -sf -X "$1" -H "X-Api-Key: $3" -H "Content-Type: application/json" --data "$4" "$2"
@@ -79,8 +81,8 @@ fix_prowlarr_indexers() {
 wire_servarr() {
   local name=$1 url=$2 v=$3 catfield=$4 cat=$5; shift 5
   local k a body qpass
-  k=$(key "$name-key") || { later "$name: API key not exported yet"; return; }
-  qpass=$(key qbittorrent-pass) || { later "$name: qBittorrent password not exported yet"; return; }
+  k=$(secret "$name-key") || { later "$name: no API key"; return; }
+  qpass=$(secret qbittorrent-pass) || { later "$name: no qBittorrent password"; return; }
   a="$url/api/$v"
   api GET "$a/system/status" "$k" >/dev/null || { later "$name: unreachable"; return; }
   [ "$name" = prowlarr ] || fix_prowlarr_indexers "$name" "$a" "$k"
@@ -130,8 +132,8 @@ wire_servarr() {
 # JELLYFIN NOTIFICATION
 wire_jellyfin_notify() {
   local name=$1 url=$2 k jk cur body
-  k=$(key "$name-key") || { later "$name: API key not exported yet"; return; }
-  jk=$(key "$JELLYFIN_KEY") || { later "$name: waiting for the Jellyfin API key"; return; }
+  k=$(secret "$name-key") || { later "$name: no API key"; return; }
+  jk=$(token "$JELLYFIN_KEY") || { later "$name: waiting for the Jellyfin API key"; return; }
   local a="$url/api/v3" notify
   # library changes on import and rename
   notify="$JQ_FIELD"' .onDownload = true | .onUpgrade = true | .onRename = true
@@ -158,13 +160,13 @@ wire_jellyfin_notify() {
 wire_prowlarr() {
   local prowlarr_url="http://$PROWLARR_HOST:$PROWLARR_PORT" P pk apps spec impl name url k cur body have schema="" def
   P="$prowlarr_url/api/v1"
-  pk=$(key prowlarr-key) || { later "prowlarr: API key not exported yet"; return; }
+  pk=$(secret prowlarr-key) || { later "prowlarr: no API key"; return; }
   apps=$(api GET "$P/applications" "$pk") || { later "prowlarr: unreachable"; return; }
 
   for spec in "Radarr radarr http://$RADARR_HOST:$RADARR_PORT" "Sonarr sonarr http://$SONARR_HOST:$SONARR_PORT" \
               "Lidarr lidarr http://$LIDARR_HOST:$LIDARR_PORT"; do
     read -r impl name url <<< "$spec"
-    k=$(key "$name-key") || { later "prowlarr: waiting for $name API key"; continue; }
+    k=$(secret "$name-key") || { later "prowlarr: no $name API key"; continue; }
     cur=$(row_of "$apps" "$impl")
     if [ -n "$cur" ]; then
       fix_fields "prowlarr/$name" "$P/applications" "$pk" "$cur" --arg u "$url" --arg pu "$prowlarr_url" \
@@ -245,7 +247,7 @@ wire_jellyseerr() {
   local S="$JELLYSEERR_URL/api/v1" jar rk sk rp sp ids public initialised
   public=$(curl -sf "$S/settings/public") || { later "jellyseerr: unreachable"; return; }
   initialised=$(echo "$public" | jq -r '.initialized // empty')
-  if ! { rk=$(key radarr-key) && sk=$(key sonarr-key) && [ -s "$T/$JELLYFIN_KEY.token" ]; }; then
+  if ! { rk=$(secret radarr-key) && sk=$(secret sonarr-key) && [ -s "$T/$JELLYFIN_KEY.token" ]; }; then
     later "jellyseerr: waiting for radarr/sonarr/jellyfin"; return
   fi
 
@@ -269,9 +271,9 @@ wire_jellyseerr() {
 
   # endpoint shape differs before initialisation; the password goes on stdin, never on argv
   if [ "$initialised" = true ]; then
-    jq -cn --rawfile p "$T/jellyfin-admin-pass.token" '{username: "admin", password: $p}'
+    jq -cn --rawfile p "$SECRETS/jellyfin-admin-pass" '{username: "admin", password: $p}'
   else
-    jq -cn --rawfile p "$T/jellyfin-admin-pass.token" --arg h "$JELLYFIN_HOST" --argjson port "$JELLYFIN_PORT" \
+    jq -cn --rawfile p "$SECRETS/jellyfin-admin-pass" --arg h "$JELLYFIN_HOST" --argjson port "$JELLYFIN_PORT" \
       --arg email "$JELLYSEERR_ADMIN_EMAIL" '{username: "admin", password: $p, hostname: $h, port: $port,
         useSsl: false, urlBase: "", email: $email, serverType: 2}'
   fi | js -X POST "$S/auth/jellyfin" -d @- >/dev/null
@@ -342,7 +344,7 @@ SUBTITLE_PROVIDERS=${SUBTITLE_PROVIDERS:-podnapisi gestdown tvsubtitles yifysubt
 
 wire_bazarr() {
   local B="$BAZARR_URL/api" bk rk sk cur want args=()
-  if ! { bk=$(key bazarr-key) && rk=$(key radarr-key) && sk=$(key sonarr-key); }; then
+  if ! { bk=$(token bazarr-key) && rk=$(secret radarr-key) && sk=$(secret sonarr-key); }; then
     later "bazarr: waiting for API keys"; return
   fi
   cur=$(curl -sf -H "X-API-KEY: $bk" "$B/system/settings") || { later "bazarr: unreachable"; return; }

@@ -3,14 +3,16 @@
 # Runs as `appbuild` against its own rootless docker (modules/rootless-docker.nix), apart from every ci user: only
 # this user holds the registry's `builder` credential and the key to the guest swarms' forced command, and it
 # builds only the branches the catalog names. It looks at every app every half hour (`git ls-remote` per app, one
-# request each); an app's ci asks for a look now through the controller's /redeploy (modules/swarm). A build is
-# rolled out start-first with rollback (modules/swarm/lib/swarm-render.py); a failed commit is retried with backoff.
+# request each) and whenever a switch changes the catalog; an app's ci asks for a look at that app now through the
+# controller's /redeploy (modules/swarm). A build is rolled out start-first with rollback
+# (modules/swarm/lib/swarm-render.py); a failed commit is retried with backoff.
 # Deploys to the swarm this host manages go through swarm-deploy@<app>, the one unit polkit lets this user start,
 # with the stack in its inbox; guest swarms through their manager's forced command. lib/app-builder.py holds
 # the logic; everything it needs is the json below.
 #
 #   systemctl start app-builder              look at every app now
-#   app-builder-redeploy <app>               rebuild and deploy one app now, whatever its state
+#   systemctl start app-builder@<app>        look at one app now, what its ci's /redeploy does
+#   app-builder-redeploy <app>               forget the app's state, then deploy it again whatever it was
 #   journalctl -u app-builder -u 'app-builder@*'
 { config, lib, pkgs, catalog, inventory, lab, ... }:
 let
@@ -20,12 +22,18 @@ let
 
   user = "appbuild";
   uid = 2001;
+  builderId = lab.roles.app-builder;
   docker = config.homelab.rootlessDocker.${user};
   stateDir = "/var/lib/app-builder";
   # a push is live within this, plus its build, unless its ci asks for a redeploy
   pollInterval = "30min";
-  bootDelay = "3min";
-  textfile = "/var/lib/node-exporter-textfile/app_builder.prom";
+  # a deploy this old is looked at again for its base images (a security fix in debian or alpine) without a commit
+  baseRefreshS = 24 * 60 * 60;
+  textfile = "${config.homelab.textfileDir}/app_builder.prom";
+  # rust nightly and node builds; the ci users cap their own share
+  memoryMaxMiB = 3 * 1024;
+  # the peak of one cold rust or node build: builds run side by side only as far as both cores and memory hold
+  buildMemoryMiB = 1024;
   github = "https://github.com";
   githubApi = "https://api.github.com";
   # its own registry user: a ci job that reads ci's push secret cannot push as the builder
@@ -39,6 +47,7 @@ let
     loginS = 60;
     # a cold rust or node build with --pull
     buildS = 2 * 60 * 60;
+    # one image's push or pull
     pushS = 30 * 60;
     # the manager's own bound plus the ssh handshake and the stack upload
     deployS = config.homelab.swarm.deployTimeoutS + 5 * 60;
@@ -62,21 +71,21 @@ let
   inbox = "${stateDir}/inbox";
   dashboardsImport = pkgs.writers.writePython3 "dashboards-import" { flakeIgnore = [ "E501" ]; } (builtins.readFile ./dashboards-import.py);
   # the cluster this host manages takes its stacks here; any other's (a guest's own swarm) over its forced command
-  managerOf = a: if a.cluster.manager == toString config.homelab.appsCatalog.builder then null
+  managerOf = a: if a.cluster.manager == builderId then null
     else { address = inventory.${a.cluster.manager}.ip; knownHosts = "${cfg.knownHosts}"; };
 
-  # what decides the images: a change here rebuilds the newest commit even when the branch stood still
-  buildInputsOf = a: { inherit (a) repo branch stack build exclude watch; };
+  # what decides a deploy: a change here deploys the newest commit again even when the branch stood still
+  buildInputsOf = a: { inherit (a) repo branch stack build exclude watch dashboards; };
   catalogJson = pkgs.writeText "app-builder.json" (builtins.toJSON {
     inherit (catalog) registry;
     inherit registryUser github githubApi timeouts;
     inherit (cfg) backoff;
+    inherit baseRefreshS;
     registryPasswordFile = config.sops.secrets.registry-builder-password.path;
     deployKeyFile = config.sops.secrets.app-deploy-key.path;
     inherit inbox;
     deployUnit = config.homelab.swarm.deployUnit;
-    # one build per core: a rust build uses them all for a while, a small service is mostly waiting on the registry
-    buildParallelism = lab.instances.${toString config.homelab.appsCatalog.builder}.config.vm.cores;
+    buildParallelism = lib.max 1 (lib.min lab.instances.${builderId}.config.vm.cores (memoryMaxMiB / buildMemoryMiB));
     dashboardsImport = "${dashboardsImport}";
     dashboardsDir = config.homelab.swarm.appDashboardsDir;
     apps = lib.mapAttrs (_: a: buildInputsOf a // {
@@ -89,7 +98,7 @@ let
 
   # the longest one app may take: every git call, every watched path, every image, the deploy
   appTimeoutS = a: gitCallsPerApp * timeouts.gitS + lib.length a.watch * timeouts.apiS + timeouts.loginS
-    + lib.length (lib.attrNames a.build) * (timeouts.buildS + 2 * timeouts.pushS) + timeouts.deployS;
+    + lib.length (lib.attrNames a.build) * (timeouts.buildS + 3 * timeouts.pushS) + timeouts.deployS;
   appTimeouts = map appTimeoutS (lib.attrValues catalog.apps);
   runTimeoutS = lib.foldl' (sum: t: sum + t) runOverheadS appTimeouts;
 
@@ -155,14 +164,13 @@ in {
 
   config = {
     assertions = [{
-      assertion = config.networking.hostName == "vm-${toString config.homelab.appsCatalog.builder}";
-      message = "the app builder runs on vm-${toString config.homelab.appsCatalog.builder} (src/apps/swarm.nix `builder`), the address the manager's forced command accepts";
+      assertion = config.homelab.vmid == builderId;
+      message = "the app builder runs on vm-${builderId} (the role app-builder), the address the managers' forced command accepts";
     }];
 
     homelab.rootlessDocker.${user} = {
       inherit uid;
-      # rust nightly and node builds; the ci users cap their own share
-      memoryMax = "3G";
+      memoryMax = "${toString memoryMaxMiB}M";
       buildCacheKeep = "20GB";
       # the registry through the internal ingress, and the guest swarms' forced command; nothing else inside
       labAccess = [ { ip = catalog.ingress.internal.ip; port = 443; } ] ++ map (ip: { inherit ip; port = 22; }) guestManagers;
@@ -193,22 +201,40 @@ in {
         TimeoutStartSec = runTimeoutS;
       };
     };
-    # `app-builder-redeploy <app>`: the app, now, whatever its state; waits for a running look at every app
     systemd.services."app-builder@" = unit // {
-      description = "Rebuild and redeploy the app %i";
+      description = "Look at the app %i now";
       serviceConfig = serviceConfig // {
         ExecStart = "${builder} %i";
-        # it may wait for a whole run to release the lock first
-        TimeoutStartSec = runTimeoutS + lib.foldl' lib.max 0 appTimeouts;
+        # it may wait for a run already at this app first
+        TimeoutStartSec = 2 * lib.foldl' lib.max 0 appTimeouts;
       };
     };
-    environment.systemPackages = [ (pkgs.writeShellScriptBin "app-builder-redeploy" ''
-      exec ${config.systemd.package}/bin/systemctl start "app-builder@''${1:?usage: app-builder-redeploy <app>}.service"
-    '') ];
+    # a switch that changes the catalog (an app's build settings, dashboards, a new app) is looked at now, as is a boot
+    systemd.services.app-builder-catalog = {
+      description = "Look at every app when the catalog changes";
+      wantedBy = [ "multi-user.target" ];
+      restartTriggers = [ catalogJson ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "${config.systemd.package}/bin/systemctl start --no-block app-builder.service";
+      };
+    };
+    environment.systemPackages = [ (pkgs.writeShellApplication {
+      name = "app-builder-redeploy";
+      runtimeInputs = [ pkgs.util-linux config.systemd.package ];
+      text = ''
+        app=''${1:?usage: app-builder-redeploy <app>}
+        [[ "$app" =~ ^[a-z][a-z0-9-]*$ ]] || { echo "app-builder-redeploy: '$app' is no app name" >&2; exit 2; }
+        # under the app's lock (lib/app-builder.py app_lock), as its owner: a run at it finishes first
+        runuser -u ${user} -- flock ${stateDir}/"$app".lock rm -f ${stateDir}/"$app".json
+        systemctl start "app-builder@$app.service"
+      '';
+    }) ];
 
     systemd.timers.app-builder = {
       wantedBy = [ "timers.target" ];
-      timerConfig = { OnBootSec = bootDelay; OnUnitInactiveSec = pollInterval; };
+      timerConfig.OnUnitInactiveSec = pollInterval;
     };
   };
 }

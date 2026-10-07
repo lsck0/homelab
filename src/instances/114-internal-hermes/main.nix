@@ -1,5 +1,6 @@
-# hermes: the owner's telegram agent, root on every guest and the proxmox host, with the lab's tools and skills
-{ config, lib, pkgs, inputs, inventory, nasPath, site, catalog, lab, retry, ... }:
+# hermes: the owner's telegram agent, read-only on every lab host (the observer account, src/lab/keys/observer), with
+# the lab's tools and skills; what changes the lab goes to the owner as exact commands or a pull request
+{ config, lib, pkgs, inputs, inventory, nasPath, site, catalog, lab, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   ntfy = import ../../modules/ntfy.nix;
@@ -14,56 +15,18 @@ let
 
   modelDefault = "claude-sonnet-5";
   modelHard = "claude-opus-5";
-  # a guest boots within a minute, the first deploy of a fresh guest takes a few
-  bootWaitAttempts = 60;
-  bootWaitIntervalS = 5;
 
-  # root on every guest (the router's lan side included), on the router's zone legs and on the proxmox host
+  # every guest, the router's lan side and its zone legs; the proxmox host has no observer account
   guests = lib.filter (v: v.type != "router") (lib.attrValues inventory);
-  rootHosts = lib.unique (map (v: v.ip) (lib.attrValues inventory) ++ map (v: v.gateway) guests ++ [ site.lan.proxmox ]);
-
-  # pve <get|create|set|delete> <api path> [--<param> <value>...]: the proxmox api as json through pvesh over root
-  # ssh, so this vm holds no api token and pins no tls
-  pve = pkgs.writeShellScriptBin "pve" ''
-    set -euo pipefail
-    m="''${1:?method: get, create, set or delete}"; p="''${2:?api path, e.g. /nodes/${site.node}/qemu}"; shift 2
-    case "$m" in get|create|set|delete) ;; *) echo "pve: method $m is none of get, create, set, delete" >&2; exit 2 ;; esac
-    # ssh hands the remote shell one string: quote every word
-    exec ${pkgs.openssh}/bin/ssh ${site.lan.proxmox} "pvesh $(printf '%q ' "$m" "$p" "$@")--output-format json"
-  '';
-
-  vm = pkgs.writeShellScriptBin "vm" ''
-    set -euo pipefail
-    export PATH="${lib.makeBinPath [ pve pkgs.jq pkgs.openssh pkgs.coreutils ]}:$PATH"
-    inventory=${pkgs.writeText "inventory.json" (builtins.toJSON inventory)}
-    node=/nodes/${site.node}
-    field() { jq -er --arg id "$1" --arg f "$2" '.[$id][$f]' "$inventory"; }
-    at() { if [ "$(field "$1" kind)" = lxc ]; then echo "$node/lxc/$1"; else echo "$node/qemu/$1"; fi; }
-    action=''${1:-list}
-    case "$action" in status|start|stop|reboot) N=$(at "''${2:?id}") ;; esac
-    case "$action" in
-      list)   { pve get "$node/qemu"; pve get "$node/lxc"; } \
-                | jq -rs 'add | sort_by(.vmid)[] | "\(.vmid)\t\(.status)\t\(.name)"' ;;
-      status) pve get "$N/status/current" | jq -r .status ;;
-      start)  [ "$(pve get "$N/status/current" | jq -r .status)" = running ] || pve create "$N/status/start" >/dev/null
-              ${retry} ${toString bootWaitAttempts} ${toString bootWaitIntervalS} \
-                ssh -o ConnectTimeout=3 -o BatchMode=yes "$(field "$2" ip)" true \
-                || { echo "vm-$2 did not answer ssh within ${toString (bootWaitAttempts * bootWaitIntervalS)} s"; exit 1; }
-              echo "vm-$2 up" ;;
-      stop)   pve create "$N/status/shutdown" >/dev/null; echo "vm-$2 shutting down" ;;
-      reboot) pve create "$N/status/reboot" >/dev/null; echo "vm-$2 rebooting" ;;
-      *)      echo "usage: vm list | status <id> | start <id> | stop <id> | reboot <id>"; exit 1 ;;
-    esac
-  '';
+  router = lib.findSingle (v: v.type == "router") null null (lib.attrValues inventory);
+  routerLegs = lib.unique (map (v: v.gateway) guests);
+  labHosts = lib.unique (map (v: v.ip) (lib.attrValues inventory) ++ routerLegs);
+  # every host key of the lab, checked strictly: no trust on first use
+  knownHosts = ../../generated/known_hosts;
 
   labToken = pkgs.writeShellScriptBin "lab-token" ''
     if [ -z "''${1:-}" ]; then cd ${tokensDir} && ls *.token | sed 's/\.token$//'; exit 0; fi
     exec cat "${tokensDir}/$1.token"
-  '';
-
-  # mc <command...>: rcon through vm-208
-  mc = pkgs.writeShellScriptBin "mc" ''
-    exec ${pkgs.openssh}/bin/ssh ${net.ipOf "208"} mc-rcon "$@"
   '';
 
   # lab-notify [-t <title>] [-p <priority>] [-g <tags>] [-c <click url>] <message...>: a push to the owner as ntfy user
@@ -130,20 +93,28 @@ let
   urlOf = id: lib.concatStringsSep ", " (lib.concatLists (lib.mapAttrsToList (_: side:
     lib.mapAttrsToList (_: r: "https://${net.fqdn r.host}") (lib.filterAttrs (_: r: r.vmid != null && toString r.vmid == id) side)
   ) { inherit (catalog) internal external; }));
+  powerOf = v: if !v.powered then "off" else if v.idle != null then "idle after ${v.idle}" else "on";
   inventoryTable = lib.concatStringsSep "\n" (lib.mapAttrsToList (id: v:
-    "| ${id} | ${v.name} | ${v.ip} | ${v.enabled}${lib.optionalString (v.enabled == "onDemand") " (${v.cooldown})"} | ${urlOf id} |"
+    "| ${id} | ${v.name} | ${v.ip} | ${powerOf v} | ${urlOf id} |"
   ) inventory);
 
   agentsMd = ''
     # Homelab
 
     You are Hermes, the operator of this homelab. The owner talks to you on
-    Telegram. You run on vm-114 (${net.ipOf "114"}), use only Anthropic's API, and have root
-    SSH on every VM and on the Proxmox host (${site.lan.proxmox}). Start with the
-    `homelab-ops` skill; there is one skill per subsystem:
+    Telegram. You run on vm-114 (${net.ipOf "114"}) and use only Anthropic's API.
+
+    SSH reaches every VM and the router as the read-only account `observer`:
+    `ssh <ip> systemctl status|show|cat|is-active|is-failed|is-enabled|list-units|list-timers|list-unit-files`,
+    `journalctl`, `df`, `free`, `uptime`, nothing else, and the Proxmox host not at
+    all. The skills also describe root commands (restarts, restores, starting a
+    VM): you never run those; send the owner the exact commands with what they
+    do, or change the repo and open a pull request with `lab-pr`.
+
+    Start with the `homelab-ops` skill; there is one skill per subsystem:
     ${lib.concatMapStringsSep ", " (n: "`${n}`") skillNames}.
 
-    The owner's own skills are under `skills/luca`:
+    The owner's own skills are in the category `luca`:
     ${lib.concatMapStringsSep ", " (n: "`${n}`") lucaSkillNames}.
 
     ## Which model to use
@@ -169,12 +140,13 @@ let
 
     ## VMs
 
-    enabled: true = always on, onDemand = boots on first request and powers off
-    after the cooldown (start it with `vm start <id>` before using its API),
-    false = stopped/not deployed. This table is generated from the inventory and
-    wins over anything a skill says about a VM's state or address.
+    power: on = always on; idle after <time> = boots on the first request to
+    one of its urls (give it a minute, then call its API) and powers off after
+    that long without one; off = stopped, not deployed. This table is generated
+    from the inventory and wins over anything a skill says about a VM's state
+    or address.
 
-    | id | name | ip | enabled | urls |
+    | id | name | ip | power | urls |
     |---|---|---|---|---|
     ${inventoryTable}
   '';
@@ -196,15 +168,23 @@ let
   lucaSkillNames = lib.attrNames (lib.filterAttrs
     (n: t: t == "directory" && builtins.pathExists "${lucaSkillsDir}/${n}/SKILL.md")
     (builtins.readDir lucaSkillsDir));
+
+  # every declared skill as one read-only tree (skills.external_dirs): a skill dropped here is gone on the next
+  # deploy, and the skills hermes writes itself stay in its own skills dir
+  skillsTree = pkgs.linkFarm "hermes-skills" (
+    lib.mapAttrsToList (name: file: { name = "homelab/${name}/SKILL.md"; path = file; }) skills
+    ++ map (name: { name = "luca/${name}/SKILL.md"; path = "${lucaSkillsDir}/${name}/SKILL.md"; }) lucaSkillNames);
+  # the copies earlier deploys installed would shadow skillsTree; they are root's, what hermes writes is its own
+  skillsCopiesRemove = pkgs.writeShellScript "hermes-skills-copies-remove" ''
+    ${pkgs.findutils}/bin/find ${stateDir}/.hermes/skills -mindepth 1 -maxdepth 1 -user root -exec ${pkgs.coreutils}/bin/rm -rf {} +
+  '';
 in {
   imports = [ inputs.hermes-agent.nixosModules.default ];
-
-  networking.hostName = "vm-114";
 
   sops.secrets = {
     hermes-ssh-key = { owner = "hermes"; mode = "0400"; };
     hermes-github-app-key = { owner = "hermes"; mode = "0400"; };
-    hermes-claude-token = {};
+    hermes-anthropic-api-key = {};
     telegram-bot-token = {};
     telegram-chat-id = {};
     ntfy-hermes-password = {};
@@ -227,15 +207,14 @@ in {
   sops.templates."hermes.env" = {
     owner = "hermes";
     content = ''
-      # a claude subscription token (`claude setup-token`); hermes reads it as an oauth credential, not an api key
-      CLAUDE_CODE_OAUTH_TOKEN=${config.sops.placeholder.hermes-claude-token}
+      ANTHROPIC_API_KEY=${config.sops.placeholder.hermes-anthropic-api-key}
       TELEGRAM_BOT_TOKEN=${config.sops.placeholder.telegram-bot-token}
       TELEGRAM_ALLOWED_USERS=${config.sops.placeholder.telegram-chat-id}
       TELEGRAM_HOME_CHANNEL=${config.sops.placeholder.telegram-chat-id}
     '';
   };
 
-  # root everywhere by the owner's choice, so every token too
+  # the skills call every service's api
   homelab.tokens.reads = config.homelab.tokens.all;
 
   # /srv/sync is the owner's ~/Sync
@@ -243,11 +222,15 @@ in {
     // nasPath "/srv/media" "bulk/media";
 
   programs.ssh.extraConfig = ''
-    Host ${lib.concatStringsSep " " rootHosts}
-      User root
+    # one router, one host key, whichever zone leg answers
+    Host ${lib.concatStringsSep " " routerLegs}
+      HostKeyAlias ${router.ip}
+    Host ${lib.concatStringsSep " " labHosts}
+      User observer
       IdentityFile ${sshKey}
       IdentitiesOnly yes
-      StrictHostKeyChecking accept-new
+      StrictHostKeyChecking yes
+      UserKnownHostsFile ${knownHosts}
   '';
 
   programs.git = {
@@ -264,7 +247,7 @@ in {
     environmentFiles = [ config.sops.templates."hermes.env".path ];
 
     settings = {
-      # anthropic only. No fallback provider: a root agent's sessions hold tokens and config files, and free tiers
+      # anthropic only. No fallback provider: the agent's sessions hold tokens and config files, and free tiers
       # may train on what they are sent; an anthropic outage waits instead of leaking
       model = {
         provider = "anthropic";
@@ -273,7 +256,7 @@ in {
 
       # the model sees the owner's telegram photos as pixels; the default may route them through text
       agent.image_input_mode = "native";
-      # the owner granted root, so no prompts
+      # the observer account is the boundary, not a prompt the owner answers on the phone
       approvals.mode = "off";
       # the owner only, by TELEGRAM_ALLOWED_USERS
       unauthorized_dm_behavior = "ignore";
@@ -282,10 +265,11 @@ in {
         backend = "local";
         timeout = 900;
       };
+      skills.external_dirs = [ "${skillsTree}" ];
     };
 
     extraPackages = with pkgs; [
-      pve vm mc labToken labNotify labPr labGithubToken config.nix.package
+      labToken labNotify labPr labGithubToken config.nix.package
       openssh curl jq yq-go git gnugrep gnused coreutils findutils netcat-gnu
       poppler-utils python3 openssl
       # fetching into /srv/sync or /srv/media
@@ -294,13 +278,14 @@ in {
 
     workingDirectory = "${stateDir}/workspace";
     documents."AGENTS.md" = agentsMd;
-    hermesHomeFiles = lib.mapAttrs' (name: file: lib.nameValuePair "skills/homelab/${name}/SKILL.md" file) skills
-      // lib.genAttrs' lucaSkillNames
-      (name: lib.nameValuePair "skills/luca/${name}/SKILL.md" "${lucaSkillsDir}/${name}/SKILL.md");
   };
 
-  # the parent, not the automounts: the hardened unit still starts without the nas
-  systemd.services.hermes-agent.serviceConfig.ReadWritePaths = [ "/srv" ];
+  systemd.services.hermes-agent.serviceConfig = {
+    # the parent, not the automounts: the hardened unit still starts without the nas
+    ReadWritePaths = [ "/srv" ];
+    # "-": a fresh home has no skills dir yet
+    ExecStartPre = [ "-+${skillsCopiesRemove}" ];
+  };
 
   # the agent never deploys and holds no admin key: removes the copies an earlier deploy path left
   systemd.tmpfiles.rules = [

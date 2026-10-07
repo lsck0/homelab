@@ -1,5 +1,5 @@
 # media requests: movies, series, anime (-> Radarr/Sonarr)
-{ ... }: {
+{ ... }: let port = 80; in {
   vm = {
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
@@ -13,12 +13,16 @@
 
   tokens = [ "jellyseerr-key" ];
 
+  grants = [
+    { from = [ "114" "130" "134" ]; tcp = [ port ]; why = "hermes, arr-wire and janitorr call its api directly"; }
+  ];
+
   idle = { stopAfter = "30m"; };
 
   services = {
     jellyseerr = {
       host = "requests";
-      port = 80;
+      inherit port;
       guest = true;
       homepage = {
         description = "Requests";
@@ -26,7 +30,6 @@
         icon = "jellyseerr";
         widget = { tokens = { key = "jellyseerr-key"; }; type = "jellyseerr"; };
       };
-      off.guard = "open to the lab until its direct clients are grants";
     };
   };
 }

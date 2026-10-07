@@ -78,8 +78,21 @@ let
     };
     no-workers = {
       input = { apps = { a = app { }; }; workers = { }; };
-      expect = "the swarm has no worker";
+      expect = "the swarm has no running worker";
     };
+  };
+
+  # case -> the shared swarm's size for these apps on the uncapped 2560 MiB, 2 core worker (2048 MiB, 1500
+  # millicores for apps), and every size admits its apps
+  uncapped = { memoryMiB = 2560; cores = 2; };
+  sized = {
+    no-app-still-one = { apps = { }; expect = 1; };
+    # 1024 + 1024 surge = 2048 MiB, 500 + 500 = 1000 millicores: one worker, exactly full
+    hello-alone = { apps = { hello = app { }; }; expect = 1; };
+    # 2048 + 1024 surge = 3072 MiB
+    two-apps = { apps = { a = app { }; b = app { }; }; expect = 2; };
+    # memory 1024 + 512 surge fits one; cpu 1500 + 1000 surge = 2500 millicores needs two
+    cpu-decides = { apps = { a = app { memoryMiB = 512; cpus = 1.0; }; b = app { memoryMiB = 512; cpus = 0.5; }; }; expect = 2; };
   };
 
   # -----------------------------------------------------------------------------
@@ -100,11 +113,20 @@ let
     lib.concatLists (lib.mapAttrsToList (name: c: mismatches name c.expect (viewOf c.input)) derived)
     ++ lib.concatLists (lib.mapAttrsToList (name: c: let problems = (limitsOf c.input).problems; in
       lib.optional (!(lib.any (lib.hasInfix c.expect) problems))
-        "refused.${name}: no problem says \"${c.expect}\"; problems: ${builtins.toJSON problems}") refused);
+        "refused.${name}: no problem says \"${c.expect}\"; problems: ${builtins.toJSON problems}") refused)
+    ++ lib.concatLists (lib.mapAttrsToList (name: c: let
+      count = limits.workerCountOf { inherit (c) apps; vm = uncapped; };
+      problemsOn = n: (limitsOf { inherit (c) apps; workers = lib.genAttrs (map toString (lib.range 1 n)) (_: uncapped); }).problems;
+    in
+      lib.optional (count != c.expect) "sized.${name}: ${toString count} workers, expected ${toString c.expect}"
+      ++ map (p: "sized.${name}: ${toString count} workers do not admit the apps: ${p}") (problemsOn count)
+      # positive control of the minimum: one worker fewer no longer admits them
+      ++ lib.optional (count > 1 && problemsOn (count - 1) == [ ]) "sized.${name}: ${toString (count - 1)} workers already admit the apps"
+    ) sized);
   count = attrs: toString (lib.length (lib.attrNames attrs));
 in
 pkgs.runCommand "limits" { nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ])) ]; } (if failures == [ ] then ''
-  echo "limits: ${count derived} derivations and ${count refused} refusals hold"
+  echo "limits: ${count derived} derivations, ${count refused} refusals and ${count sized} swarm sizes hold"
   python3 ${./render_limits_test.py} ${../../swarm/lib/swarm-render.py}
   touch $out
 '' else ''

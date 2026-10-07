@@ -142,6 +142,10 @@ let
   # the networks a port forward answers: the wan and, hairpinned, the trusted ones; never a dmz
   forwardSources = set (map (n: "\"${n.interface}\"") (lib.attrValues (lib.filterAttrs (name: n: name == "lan" || n.reaches == "everything") flows.networks)));
   conntrackMax = 262144;
+  # a forward to several guests (an app's nodes) keeps each client on one of them
+  dnatTarget = f: if lib.length f.addresses == 1 then "${lib.head f.addresses}:${toString f.targetPort}"
+    else "jhash ip saddr mod ${toString (lib.length f.addresses)} map { "
+      + lib.concatStringsSep ", " (lib.imap0 (i: ip: "${toString i} : ${ip}") f.addresses) + " } : ${toString f.targetPort}";
 
   # a dhcp discover's source before it has an address
   dhcpUnaddressed = "0.0.0.0";
@@ -412,7 +416,7 @@ in {
     '' + lib.optionalString (f.off.accessLog or null == null) ''
         ${match} ct state new limit rate ${toString forwardLogPerMinute}/minute log prefix "forward ${toString f.port}: "
     '' + ''
-        ${match} dnat to ${f.address}:${toString f.targetPort}
+        ${match} dnat to ${dnatTarget f}
     '') flows.portForwards + ''
       }
     '';
@@ -481,7 +485,7 @@ in {
     '' + hostLines (ingressIp "external") (hostsOf "external" ++ installHosts) + ''
           # names that skip the ingresses
     '' + lib.concatStrings (lib.mapAttrsToList (h: ip: hostLines ip [ h ]) directHosts)
-      + lib.concatMapStrings (f: hostLines f.address [ f.host ]) hostForwards + ''
+      + lib.concatMapStrings (f: lib.concatMapStrings (ip: hostLines ip [ f.host ]) f.addresses) hostForwards + ''
           fallthrough
         }
     '' + lib.concatMapStrings (f: ''

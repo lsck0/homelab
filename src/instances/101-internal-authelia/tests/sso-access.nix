@@ -1,7 +1,7 @@
 # who reaches which internal route, through the real internal ingress (100-internal-traefik.nix) and the real
 # authelia with lldap (101-internal-authelia.nix): anonymous, first factor only, and three users each with a second
 # factor, the own-login routes, the login redirect, regulation, the login rate limit, oidc's policy, the read-only
-# bind user, the guarded portal port, and the apps zone refused
+# bind user, the guarded portal port, the probers' health path, and the apps zone refused
 #
 # The oracle is the table below, the policy as stated: admins everywhere, a user where their app-<route> group
 # says, own-login routes without forwardauth and without any identity header reaching them.
@@ -29,7 +29,7 @@ let
 
   # the backends of the routes under test, each at its guest's address and route port; all always-on guests
   backendAddresses = map ip [ "103" "105" "109" "115" "125" "138" "250" "251" "252" ];
-  backendPorts = lib.unique (map (r: r.port) (with routes; [ homepage grafana kopia forgejo homeassistant headscale wat-db ]));
+  backendPorts = lib.unique (map (r: r.port) (with routes; [ homepage grafana kopia forgejo homeassistant headscale headplane wat-db ]));
 
   # client addresses on the house lan, one per actor, so the login limit (per client) counts each alone
   clients = { anon = "192.168.178.138"; luca = "192.168.178.139"; guest = "192.168.178.140"; dbuser = "192.168.178.141"; probe = "192.168.178.142"; };
@@ -204,11 +204,27 @@ pkgs.testers.runNixOSTest {
         assert "code=" in luca_headers, luca_headers
         assert "code=" not in guest_headers, guest_headers
 
-    with subtest("authelia's port answers the ingress and the granted probers only"):
-        backends.fail("nc -z -w 2 -s ${ip "115"} ${ip "101"} ${toString routes.authelia.port}")
+    with subtest("authelia's port answers the ingress only, the probers included"):
+        for source in ("${ip "115"}", "${ip "103"}", "${ip "105"}"):
+            backends.fail(f"nc -z -w 2 -s {source} ${ip "101"} ${toString routes.authelia.port}")
         world.fail("nc -z -w 2 -s ${clients.anon} ${ip "101"} ${toString routes.authelia.port}")
-        backends.succeed("nc -z -w 2 -s ${ip "103"} ${ip "101"} ${toString routes.authelia.port}")
-        backends.succeed("nc -z -w 2 -s ${ip "105"} ${ip "101"} ${toString routes.authelia.port}")
+
+    with subtest("the probers reach a route's health path past sso, and nothing else of it"):
+        def probe(src, path, method="GET"):
+            host = "${net.fqdn routes.headplane.host}"
+            verb = "-I" if method == "HEAD" else f"-X {method}"
+            return backends.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {verb} --interface {src} --resolve {host}:443:{INGRESS} https://{host}{path}")
+        backends.succeed(": > /run/echo/requests.jsonl")
+        for source in ("${ip "103"}", "${ip "105"}"):
+            assert probe(source, "${routes.headplane.health}") == "200", source
+            assert probe(source, "${routes.headplane.health}", "HEAD") == "200", source
+            # the rest of the route, and any other method on the health path, still meet authelia
+            assert probe(source, "/") == "302", source
+            assert probe(source, "${routes.headplane.health}", "POST") != "200", source
+        # positive control of the source check: another internal guest meets authelia on the health path
+        assert probe("${ip "115"}", "${routes.headplane.health}") == "302"
+        logged = backends.succeed("cat /run/echo/requests.jsonl")
+        assert logged.count("${routes.headplane.health}") == 4 and "remote-user" not in logged, logged
 
     with subtest("the apps zone gets a 404 for every internal route"):
         for host in [page.split("/")[0] for page in MATRIX] + OWN:
@@ -223,12 +239,14 @@ pkgs.testers.runNixOSTest {
         status, _, _ = curl(CLIENTS["dbuser"], f"{PORTAL}/api/state", jars["dbuser"])
         assert status == 200, status
 
-    with subtest("regulation bans a user after three wrong passwords, and lifts the ban"):
+    with subtest("regulation bans a client after three wrong passwords, never the user, and lifts the ban"):
         for i in range(3):
             curl(CLIENTS["probe"], f"{PORTAL}/api/firstfactor", None, "POST", {"username": "guest", "password": f"wrong-{i}", "keepMeLoggedIn": False})
         status, _, _ = curl(CLIENTS["probe"], f"{PORTAL}/api/firstfactor", "/tmp/jar-ban", "POST",
                             {"username": "guest", "password": passwords["guest"], "keepMeLoggedIn": False})
-        assert status != 200, f"banned user logged in: {status}"
+        assert status != 200, f"banned client logged in: {status}"
+        # the user from their own address is not locked out by someone else's guesses
+        login("guest", passwords["guest"], second_factor=False)
         world.wait_until_succeeds(
             f"[ $(curl -s -o /dev/null -w '%{{http_code}}' --interface {CLIENTS['probe']} --resolve ${net.fqdn routes.authelia.host}:443:{INGRESS} "
             f"-H 'Content-Type: application/json' --data '{json.dumps({'username': 'guest', 'password': passwords['guest'], 'keepMeLoggedIn': False})}' "

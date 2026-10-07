@@ -4,11 +4,7 @@ let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   atticPort = catalog.internal.attic.port;
   stateDir = "/var/lib/atticd";
-  # the ci hosts whose jobs set SCCACHE_REDIS: both runners live on vm-117 (117's forgejo runner)
-  sccacheClients = [ "117" ];
 in {
-  networking.hostName = "vm-110";
-
   # nix binary cache for every vm and the forgejo runner
   sops.secrets.attic-server-token = {};
   sops.templates."atticd.env".content = ''
@@ -58,8 +54,7 @@ in {
   };
   environment.systemPackages = [ pkgs.attic-client pkgs.sccache ];
 
-  networking.firewall.allowedTCPPorts = [ atticPort net.ports.redis ];
-  # password plus firewall: only the ci hosts reach it
+  networking.firewall.allowedTCPPorts = [ net.ports.redis ];
+  # password plus guard: only the grants in instance.nix reach it
   homelab.ingressOnly.ports = [ net.ports.redis ];
-  homelab.ingressOnly.portSources.${toString net.ports.redis} = map net.hostSource sccacheClients;
 }

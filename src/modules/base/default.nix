@@ -1,4 +1,7 @@
 # what every lab host runs: the lab's module stack, sops, ssh, metrics and log shipping, the binary cache
+#
+# ssh: a key's scope is the folder it lives in, src/lab/keys/<account>/: root/ logs in as root, observer/ as the
+# observer account, whose forced command (lib/observer-command.sh) runs read-only inspection only.
 { config, pkgs, lib, inventory, lab, ... }:
 let
   # where every host ships its journal and logs: the collector's address and ports are telemetry.nix's
@@ -15,14 +18,20 @@ let
   # which file each secret comes from (modules/secrets.nix); null on the install images, which have no key
   secrets = import ../secrets.nix { inherit lib lab; };
   host = secrets.hostOf config.networking.hostName;
-  # the layout before per-folder files, kept until src/scripts/secrets-migrate.sh deletes it: delete both with it
-  legacyFile = ../../host-secrets + "/${config.networking.hostName}.json";
-  sopsFileOf = key: if builtins.pathExists legacyFile then legacyFile else ../.. + "/${secrets.fileOf host key}";
   # the golden image and lxc template boot as "nixos"; they have no key, the first deploy brings host and secrets
   isInstallImage = config.networking.hostName == "nixos";
+
+  keyFilesOf = account: lib.filesystem.listFilesRecursive (../../lab/keys + "/${account}");
+  observer = "observer";
+  observerCommand = pkgs.writeShellScript "observer-command" (builtins.readFile ./lib/observer-command.sh);
+  # a key line may carry options of its own (from="..."): the forced command joins them
+  restrictedLine = line: let options = ''restrict,command="${observerCommand}"''; in
+    if builtins.match "(ssh-|sk-|ecdsa-).*" line != null then "${options} ${line}" else "${options},${line}";
+
+  # a path segment or query value of 32+ token characters is a secret in the url (feed tokens, share links)
+  urlSecretPattern = "[/=]([A-Za-z0-9_-]{32,})";
 in {
   imports = [
-    ../apps-catalog
     ../db-backup
     ../swarm
     ../local-state
@@ -38,8 +47,17 @@ in {
   # every secret from the file the layout puts it in: its folder's, its app's, or its own copy of the shared ones
   options.sops.secrets = lib.mkOption {
     type = lib.types.attrsOf (lib.types.submodule ({ config, ... }: {
-      config.sopsFile = lib.mkIf (host != null) (lib.mkDefault (sopsFileOf config.key));
+      config.sopsFile = lib.mkIf (host != null) (lib.mkDefault (../.. + "/${secrets.fileOf host config.key}"));
     }));
+  };
+
+  # transitional: the typed catalog for the readers not yet on the `catalog` argument; goes with the last of them
+  options.homelab.appsCatalog = lib.mkOption {
+    type = lib.types.attrs;
+    readOnly = true;
+    internal = true;
+    default = lab.appsCatalog;
+    description = "lab.appsCatalog, read-only.";
   };
 
   options.homelab.acmeEmail = lib.mkOption {
@@ -49,6 +67,8 @@ in {
   };
 
   config = {
+    _module.args.catalog = lib.mkDefault lab.catalog;
+
     sops = {
       # the host's own key, pushed by sync.sh; it opens this host's files and nothing else
       age.keyFile = "/var/lib/sops-nix/key.txt";
@@ -59,8 +79,17 @@ in {
 
     # eth0 naming so cloud-init config matches
     networking.usePredictableInterfaceNames = false;
-    # deployer, owner, owner's YubiKey, hermes: the same files terraform and sync.sh (proxmox) install
-    users.users.root.openssh.authorizedKeys.keyFiles = lib.filesystem.listFilesRecursive ../../lab/keys;
+    # the same files terraform and sync.sh (proxmox) install for root
+    users.users.root.openssh.authorizedKeys.keyFiles = keyFilesOf "root";
+    users.users.${observer} = {
+      isSystemUser = true;
+      group = observer;
+      extraGroups = [ "systemd-journal" ];
+      # sshd runs the forced command through the account's shell
+      shell = pkgs.bashInteractive;
+      openssh.authorizedKeys.keys = map (file: restrictedLine (lib.trim (builtins.readFile file))) (keyFilesOf observer);
+    };
+    users.groups.${observer} = { };
 
     services.openssh = {
       enable = true;
@@ -130,6 +159,7 @@ in {
             };
           }];
           pipeline_stages = [
+            { replace = { expression = urlSecretPattern; replace = "<redacted>"; }; }
             { json.expressions = {
                 country = "\"request_Cf-Ipcountry\"";
                 status = "DownstreamStatus";

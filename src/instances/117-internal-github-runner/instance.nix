@@ -3,7 +3,7 @@
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
-    # always on, the app stacks build here: five .net listeners, the forgejo runner and ci's docker; jobs fit below
+    # always on: the github listener, the forgejo runner and their rootless dockers, one job each at a time
     memoryMiB = 4096;
     balloonMiB = 2048;
     cores = 4;

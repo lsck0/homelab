@@ -1,5 +1,7 @@
 # the deploy controller: the apps swarm's manager (drained of tasks) and the app builder
 { ... }: {
+  roles = [ "swarm-manager" "app-builder" ];
+
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
@@ -26,10 +28,11 @@
       anubis = "ci jobs run no proof of work";
       homepage = "an endpoint, no page";
       probe = "POST only; socket activated, idle costs nothing";
+      cloudflare = "a ci bearer token is nobody else's to decrypt";
     };
   };
 
   secrets = {
-    app-deploy-key = "manual"; # ssh-keygen -t ed25519; public half in modules/swarm
+    app-deploy-key = "manual"; # ssh-keygen -t ed25519; the public half is app-deploy-key.pub here
   };
 }

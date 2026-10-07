@@ -2,22 +2,26 @@
 #
 # An instance service's route (modules/lab: a vm and a port) and a swarm app's route (src/apps/: the cluster's
 # nodes and a published port) are the same exposure (modules/service.nix); here they meet, plus vmid (null for an
-# app's), app (null for an instance's) and nodes. Modules get this as the argument `catalog`
-# (modules/apps-catalog, which also asserts `problems`).
+# app's), app (null for an instance's) and nodes (an app's cluster). modules/lab evaluates this once over the typed
+# catalog (`lab.catalog`, its `problems` stopping the flake) and every host gets it as the argument `catalog`.
 #
 #   apps            the enabled apps, normalized by the schema, `{{homelab.*}}` endpoints resolved
 #   internal        route name -> route served by vm-100, behind authelia unless its `off.sso` says why not
 #   external        route name -> route served by the edge, vm-200
+#   l4              route name -> tcp or udp route: forwarded from the house's publicPort, or lab-only without one
+#   forwarded       the l4 routes the router forwards from the house's public address
 #   access          { admins; groups.<name>; } the lldap groups authelia admits: admins everywhere, else the sso
 #                   route's or the oidc client's own group; lldap creates exactly these
-#   nodes         the shared swarm's workers' addresses: the routing mesh answers every published port on each
-#   nodeShapes      [{ id; ip; memoryMiB; cores; cpuLimitCores; }] those workers as admission sees them
-#   clusters        swarm name (`shared`, `app-<name>`) -> { managerId; workerIds; apps; admission }
-#   services        service key (an instance service or an app) -> { kind; on.<feature>; metrics; idle; routes; ... }
+#   nodes           the shared swarm's workers' addresses: the routing mesh answers every published port on each
+#   clusters        swarm name (`shared`, `app-<name>`) -> { managerId; workerIds; stateId; wakers; nodes; zone; apps;
+#                   admission }: wakers the guests calling its controller (the ingresses, the state worker's dumps)
+#   services        service key (an instance service or an app) -> { vmid; app; on.<feature>; metrics; idle; routes; ... }
 #   manager         the swarm manager's inventory entry
 #   builder         the app builder's inventory entry
-#   swarm           { managerId; stateId; ports; portRange; } the cluster's fixed facts
-#   ports           { external; internal; metrics; } the enabled apps' published ports by group
+#   swarm           { managerId; builderId; stateId; controllerPort; cadvisorPort; taskDefaults; ports; portRange; }
+#   ports           { external; internal; metrics; tcp; udp; } the enabled apps' published ports by group: http by
+#                   its zone, exporters, and the tcp and udp ports of l4 routes, which answer anyone
+#   secretRefs      the sops secrets a string names as {{name}}
 #   metricsBlocks   [{ app; host; path; }] metrics a public route would expose: the edge denies them
 #   appsZone        the workers' subnet (cidr, modules/net.nix)
 #   ingress         { internal; external; } the inventory entries of the two ingresses (modules/net.nix zones)
@@ -33,6 +37,7 @@ let
   # -----------------------------------------------------------------------------
 
   telemetry = import ./telemetry.nix { inherit lib inventory; };
+  service = import ./service.nix { inherit lib; };
   limits = import ./limits { inherit lib; };
   net = import ./net.nix { inherit lib inventory site; };
   inherit (net) domain;
@@ -40,8 +45,8 @@ let
   ingressIds = { internal = net.zones.internal.ingress; external = net.zones.external.ingress; };
   # swarm's control plane, its gossip, and the vxlan data path of the overlays
   swarmPorts = { manager = net.ports.swarmManager; gossip = net.ports.swarmGossip; vxlan = net.ports.vxlan; };
-  # an app publishes a port for each route, by its zone, and for each exporter
-  groups = [ "external" "internal" "metrics" ];
+  # an app publishes a port for each http route by its zone, each l4 route by its protocol, and each exporter
+  groups = [ "external" "internal" "metrics" "tcp" "udp" ];
 
   # `{{homelab.<name>}}` in an app's env or override: lab endpoints an app may not hard-code; all telemetry
   collector = inventory.${telemetry.collectorVmid};
@@ -60,7 +65,7 @@ let
   enabledRaw = lib.filterAttrs (_: a: a.enable) allApps;
 
   # the shared swarm's running workers; the routing mesh answers on each (an app's own guest is no worker)
-  workerIds = lib.filter (id: inventory.${id}.enabled != "false") (map toString appsCatalog.swarm.workers);
+  workerIds = lib.filter (id: inventory.${id}.powered) (map toString appsCatalog.swarm.workers);
   nodes = map (id: inventory.${id}.ip) workerIds;
   # a guest's shape as admission reads it (modules/limits allocatableOf)
   shapeOf = id: { inherit id; inherit (inventory.${id}) ip; inherit (lab.instances.${id}.config.vm) memoryMiB cores cpuLimitCores; };
@@ -102,15 +107,23 @@ let
 
   # every swarm by name: `shared` (the workers of apps/swarm.nix, the apps without placement) and `app-<name>` per
   # app on its own guest, a swarm of one; admission (modules/limits) holds each to its own workers
+  wakersOf = stateId: lib.unique (lib.attrValues ingressIds ++ [ stateId ]);
+  sharedStateId = toString appsCatalog.swarm.state;
   clusters = {
     shared = {
       managerId = toString appsCatalog.swarm.manager;
-      inherit workerIds;
+      stateId = sharedStateId;
+      wakers = wakersOf sharedStateId;
+      inherit workerIds nodes;
+      zone = "apps";
       apps = lib.filterAttrs (_: a: a.placement == null) apps;
     };
   } // lib.mapAttrs' (app: a: let id = toString a.placement.vmid; in lib.nameValuePair "app-${app}" {
     managerId = id;
+    stateId = id;
+    wakers = wakersOf id;
     workerIds = [ id ];
+    inherit (a.cluster) nodes zone;
     apps.${app} = a;
   }) (lib.filterAttrs (_: a: a.placement != null) apps);
   admissionOf = c: limits.clusterOf {
@@ -142,7 +155,7 @@ let
   uses = lib.concatLists (lib.mapAttrsToList (app: a:
     lib.mapAttrsToList (key: p: {
       inherit (p) port;
-      group = p.zone;
+      group = if p.protocol == "http" then p.zone else p.protocol;
       owner = "${app}/${p.service}:${toString p.targetPort}";
       where = "apps.${app}.routes.${key}";
     }) a.routes
@@ -157,7 +170,7 @@ let
   # a metrics endpoint served by a container port that a public path also routes to is public unless denied
   metricsBlocks = lib.concatLists (lib.mapAttrsToList (app: a: lib.concatMap (m:
     map (r: { inherit app; inherit (r) host; inherit (m) path; })
-      (lib.filter (r: r.zone == "external" && r.service == m.service && r.targetPort == m.targetPort) (lib.attrValues a.routes))
+      (lib.filter (r: r.protocol == "http" && r.zone == "external" && r.service == m.service && r.targetPort == m.targetPort) (lib.attrValues a.routes))
   ) (lib.attrValues a.metrics)) apps);
 
   # -----------------------------------------------------------------------------
@@ -222,37 +235,36 @@ let
     ++ lib.concatLists (lib.mapAttrsToList (service: r: map (limit:
       "${where}.resources.${service}.${limit} ${toString r.${limit}} is above swarm.taskMax.${limit} ${toString taskMax.${limit}}: a worker cannot hold it"
     ) (lib.filter (limit: r.${limit} > taskMax.${limit}) (lib.attrNames taskMax))) a.resources);
-  # every deployment's telemetry and protection switches, by service key: an instance service or an app
-  enabledOf = off: lib.mapAttrs (_: why: why == null) off;
+  # every deployment's telemetry and protection switches, by service key: an instance service (vmid) or an app
   services = lib.mapAttrs (name: r: {
     key = name;
-    kind = "vm";
     inherit (r) vmid zone;
+    app = null;
     routes = [ name ];
-    on = enabledOf r.off;
+    on = service.enabledOf r.off;
     inherit (lab.instances.${toString r.vmid}.config) idle;
     inherit (lab.instances.${toString r.vmid}.config.services.${name}) metrics;
   }) lab.routes // lib.mapAttrs (app: a: {
     key = app;
-    kind = "swarm";
+    vmid = null;
     inherit app;
     inherit (a) metrics idle cluster;
     routes = lib.attrNames a.routes;
-    on = enabledOf a.off;
+    on = service.enabledOf a.off;
   }) apps;
 in {
-  inherit apps nodes domain metricsBlocks services;
-  # the shared swarm's workers as admission sees them
-  nodeShapes = map shapeOf workerIds;
-  # swarm name -> { managerId; workerIds; apps; admission } (admission: limits.clusterOf over its workers)
+  inherit apps nodes domain metricsBlocks services secretRefs;
+  # admission: limits.clusterOf over the cluster's workers
   clusters = lib.mapAttrs (_: c: c // { admission = admissionOf c; }) clusters;
   manager = inventory.${toString appsCatalog.swarm.manager};
   builder = inventory.${toString appsCatalog.builder};
 
   swarm = {
     managerId = toString appsCatalog.swarm.manager;
-    inherit (appsCatalog) controllerPort;
-    stateId = toString appsCatalog.swarm.state;
+    builderId = toString appsCatalog.builder;
+    stateId = sharedStateId;
+    inherit (appsCatalog) controllerPort cadvisorPort;
+    inherit (appsCatalog.swarm) taskDefaults;
     ports = swarmPorts;
     inherit portRange;
   };
@@ -270,21 +282,21 @@ in {
     admins = "admins";
     groups = lib.genAttrs ssoNames (name: "app-${name}");
   };
-  # route name -> route: tcp and udp exposures the router forwards from the house's public address
   l4 = lib.listToAttrs (map (e: lib.nameValuePair e.name e.route) l4Entries);
+  forwarded = lib.listToAttrs (map (e: lib.nameValuePair e.name e.route) (lib.filter (e: e.route.publicPort != null) l4Entries));
 
   problems = duplicatesBy (e: e.name) "route name" routeEntries
-    ++ map (e: "${e.owner} route ${e.name}: a ${e.route.protocol} route names its publicPort")
-      (lib.filter (e: e.route.publicPort == null) l4Entries)
+    ++ map (e: "${e.owner} route ${e.name}: an srv record points at the house's publicPort, which the route lacks")
+      (lib.filter (e: e.route.srv != null && e.route.publicPort == null) l4Entries)
     ++ map (e: "${e.owner} route ${e.name}: an http route goes through its zone's ingress, publicPort is for tcp and udp")
       (lib.filter (e: e.route.protocol == "http" && e.route.publicPort != null) routeEntries)
     # an idle deployment sleeps until an ingress's wake proxy sees a connection; the router forwards past it
     ++ map (e: "${e.owner} route ${e.name}: a ${e.route.protocol} route goes from the router straight to its backend, which no wake proxy sees; its deployment cannot idle")
       (lib.filter (e: if e.route.app != null then apps.${e.route.app}.idle.stopAfter != null
-        else inventory.${toString e.route.vmid}.enabled == "onDemand") l4Entries)
+        else inventory.${toString e.route.vmid}.idle != null) l4Entries)
     # the house's public address: https for the ingresses, wireguard for the owner's devices, every l4 route once
     ++ duplicatesBy (e: "${e.route.protocol}/${toString e.route.publicPort}") "public port"
-      (l4Entries ++ [
+      (lib.filter (e: e.route.publicPort != null) l4Entries ++ [
         { name = "https"; owner = "the edge"; route = { protocol = "tcp"; publicPort = net.ports.https; }; }
         { name = "wireguard"; owner = "the router"; route = { protocol = "udp"; publicPort = net.ports.wireguard; }; }
       ])

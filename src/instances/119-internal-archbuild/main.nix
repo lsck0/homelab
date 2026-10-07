@@ -1,5 +1,6 @@
-{ config, pkgs, inventory, nasPath, catalog, ... }:
+{ config, lib, pkgs, inventory, nasPath, catalog, lab, ... }:
 let
+  vm = lab.instances.${config.homelab.vmid}.config.vm;
   route = catalog.internal.archbuild;
   # pushed to vm-210, which serves mirror.lsck0.dev
   repoDir = "/var/lib/archrepo";
@@ -15,8 +16,12 @@ let
   busyFlag = "/run/archbuild.busy";
   # a build started at the nightly wake stays fresh until the next one
   staleMinutes = 20 * 60;
-  # rolling like the distro; pulled per run so the in-container -Syu stays small
-  image = "docker.io/library/archlinux:base-devel";
+  # rolling like the distro, pulled per run so the in-container -Syu stays small; the build holds no secret
+  buildImage = "docker.io/library/archlinux:base-devel";
+  # the publish container holds the signing and push keys: a reviewed index digest of the same tag, bumped by hand
+  publishImage = "${buildImage}@sha256:996c3a1d6b0d87b01242f6fcd8cfa3ad3eece1a67ab5c8f108e20af1d7b97bdd";
+  # the push checks vm-210 against the lab's host keys, no trust on first use
+  knownHosts = ../../generated/known_hosts;
   # arch-dotfiles bootstrap.sh SIGNING_KEY_FINGERPRINT: only commits this primary key signed get built and signed
   dotfilesSigningKey = "E7501F533316E9AFC6AAE907122F2CB527D1EFE3";
   dotfilesSource = "https://github.com/lsck0/arch-dotfiles";
@@ -26,9 +31,15 @@ let
   listScript = ./lib/archrepo-list.sh;
   containerBuild = "archbuild-build";
   containerPublish = "archbuild-publish";
-  # memory one compile job may take: c++ with lto peaks near 2 GiB; ninja ignores MAKEFLAGS and runs nproc + 2 jobs,
-  # which on the ballooned vm stalled the guest until the night died (wivrn-server), so the cpus follow the memory
-  buildJobMemoryKiB = 2 * 1024 * 1024;
+  # memory one compile job may take: c++ with lto peaks near 2 GiB
+  buildJobMemoryMiB = 2048;
+  # nginx, sshd, conmon, node-exporter and the kernel stay outside the build container's limit
+  systemReserveMiB = 768;
+  # the balloon floor, not memoryMiB: the host may take the rest back mid-build
+  buildMemoryMiB = vm.balloonMiB - systemReserveMiB;
+  # make, ninja and cargo all run this many: more than the limit holds would only page or get killed
+  buildJobs = let jobs = lib.min vm.cores (buildMemoryMiB / buildJobMemoryMiB); in
+    assert lib.assertMsg (jobs >= 1) "the balloon floor (instance.nix) leaves no ${toString buildJobMemoryMiB} MiB compile job"; jobs;
   # podman rm grace before it kills a container
   containerStopTimeoutS = 30;
   # what both containers get of the run: the verified commit and the run id
@@ -45,8 +56,6 @@ let
     ${pkgs.coreutils}/bin/mv -f ${metricsFile}.tmp ${metricsFile}
   '';
 in {
-  networking.hostName = "vm-119";
-
   homelab.nasMounts = nasPath repoDir "bulk/archrepo";
 
   sops.secrets.archrepo-signing-key = {};
@@ -63,7 +72,7 @@ in {
     description = "Snapshot and build every package arch-dotfiles lists into the lsck0 pacman repo";
     wants = [ "network-online.target" ];
     after = [ "network-online.target" ];
-    path = [ pkgs.podman pkgs.coreutils pkgs.git pkgs.gnupg pkgs.gawk ];
+    path = [ pkgs.podman pkgs.coreutils pkgs.git pkgs.gnupg ];
     # a deploy must not kill a running build
     restartIfChanged = false;
     unitConfig.RequiresMountsFor = [ repoDir ];
@@ -76,8 +85,6 @@ in {
     serviceConfig = {
       Type = "oneshot";
       TimeoutStartSec = "20h";
-      # one compile the kernel kills for memory fails its package, not the night
-      OOMPolicy = "continue";
       ExecStartPre = "${pkgs.coreutils}/bin/touch ${busyFlag}";
       # conmon lives outside this unit's cgroup, a stop would leave the build running unflagged
       ExecStopPost = [
@@ -95,12 +102,9 @@ in {
         ARCHBUILD_RUN_STARTED=$(date +%s)
         # an unsigned or foreign-signed head stops here: nothing builds, the published snapshot stays
         ARCHBUILD_COMMIT=$(${pkgs.bash}/bin/bash ${./lib/archrepo-fetch.sh} ${dotfilesSource} ${dotfilesRef} ${dotfilesDir} ${dotfilesSigningKey})
-        jobs=$(( $(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) / ${toString buildJobMemoryKiB} ))
-        (( jobs > $(nproc) )) && jobs=$(nproc)
-        (( jobs < 1 )) && jobs=1
         podman run --rm --init --replace --pull=newer --name ${containerBuild} \
-          --cpuset-cpus "0-$(( jobs - 1 ))" \
-          ${runEnv} \
+          --memory ${toString buildMemoryMiB}m --cpuset-cpus 0-${toString (buildJobs - 1)} \
+          ${runEnv} -e ARCHBUILD_JOBS=${toString buildJobs} \
           -v ${repoDir}:/repo:ro \
           -v ${dotfilesDir}:/dotfiles:ro \
           -v ${cacheDir}:/cache \
@@ -108,8 +112,8 @@ in {
           -v ${publicDir}:/public \
           -v ${buildScript}:/build.sh:ro \
           -v ${listScript}:/list.sh:ro \
-          ${image} bash /build.sh build
-        podman run --rm --init --replace --pull=never --name ${containerPublish} \
+          ${buildImage} bash /build.sh build
+        podman run --rm --init --replace --pull=missing --name ${containerPublish} \
           ${runEnv} -e ARCHBUILD_PUSH_TARGET \
           -v ${repoDir}:/repo \
           -v ${dotfilesDir}:/dotfiles:ro \
@@ -117,9 +121,10 @@ in {
           -v ${publicDir}:/public:ro \
           -v ${config.sops.secrets.archrepo-signing-key.path}:/run/signing.asc:ro \
           -v ${config.sops.secrets.archrepo-push-key.path}:/run/push-key:ro \
+          -v ${knownHosts}:/run/known_hosts:ro \
           -v ${buildScript}:/build.sh:ro \
           -v ${listScript}:/list.sh:ro \
-          ${image} bash /build.sh publish
+          ${publishImage} bash /build.sh publish
         # -P onto fresh names: the build container may have left links here
         rm -f ${publicDir}/status.txt ${publicDir}/status.json
         cp -P ${repoDir}/status.txt ${repoDir}/status.json ${publicDir}/
@@ -169,9 +174,4 @@ in {
   };
 
   systemd.tmpfiles.rules = map (dir: "d ${dir} 0755 root root -") [ cacheDir outboxDir dotfilesDir publicDir ];
-
-  networking.firewall.allowedTCPPorts = [ route.port ];
-
-  # authelia gates the status page
-  homelab.ingressOnly.ports = [ route.port ];
 }

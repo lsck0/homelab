@@ -6,8 +6,8 @@
 # (unique hosts, ports, tokens, vmids) are modules/lab's and modules/catalog.nix's.
 #
 # instance.nix is a module over this schema with the arguments id (the vmid, a string), zone, site (site.json), net
-# (modules/net.nix over the collected inventory), telemetry (modules/telemetry.nix) and swarmManagers (the vmids of
-# every enabled swarm's manager, modules/lab). The smallest:
+# (modules/net.nix over the collected inventory), telemetry (modules/telemetry.nix), swarmManagers (the vmids of
+# every enabled swarm's manager) and grantSourceNames (modules/lab). The smallest:
 #
 #   # what the guest is for, in one line
 #   { ... }: {
@@ -18,7 +18,7 @@
 # Guest kind: a vm when it is the router, sits outside the internal zone (strangers' traffic wants a vm's isolation),
 # passes a device through, takes extra disks, or `needs` what an unprivileged container cannot give (its own
 # container runtime, nfs); an unprivileged lxc otherwise. `vm.kind.<kind> = "<why>"` overrides the rule.
-{ lib, config, id, zone, ... }:
+{ lib, config, id, zone, grantSourceNames, ... }:
 let
   inherit (lib) mkOption types;
   service = import ./service.nix { inherit lib; };
@@ -33,6 +33,8 @@ let
   memoryDefaultMiB = 768;
   # at 384 MiB a vm drops ssh
   balloonFloorMiB = 512;
+  # the lab's own path (router, ingresses, sso) and the public side: squeezed, every route stalls with them
+  unballoonedPhases = [ "network" "public" ];
   # proxmox's own cpu weight
   cpuUnitsDefault = 100;
   diskDefaultGiB = 8;
@@ -92,9 +94,23 @@ let
 
   grantType = types.submodule {
     options = {
-      from = mkOption { type = types.nonEmptyListOf vmidString; description = "Guests (vmids) that may connect."; };
+      from = mkOption {
+        type = types.nonEmptyListOf (types.either vmidString (types.enum grantSourceNames));
+        description = "Who may connect: guests by vmid, or ${lib.concatStringsSep ", " grantSourceNames} (modules/lab `sourceOf`).";
+      };
       tcp = mkOption { type = types.nonEmptyListOf types.port; description = "Guarded ports of this guest they may reach."; };
       why = mkOption { type = why; description = "Why the grant exists."; };
+    };
+  };
+
+  shareType = types.submodule {
+    options = {
+      readOnly = mkOption { type = types.bool; default = false; description = "vm-109 exports it read-only to this guest."; };
+      mode = mkOption {
+        type = types.nullOr (types.strMatching "0[0-7]{3}");
+        default = null;
+        description = "The share's mode on the nas, root's (tokens, db dumps); null: 0777, for services running as their own uid.";
+      };
     };
   };
 
@@ -149,9 +165,10 @@ in {
       memoryMiB = mkOption { type = types.ints.positive; default = memoryDefaultMiB; description = "Memory ceiling."; };
       balloonMiB = mkOption {
         type = types.ints.unsigned;
-        default = lib.max balloonFloorMiB (config.vm.memoryMiB / 2);
-        defaultText = lib.literalExpression "max ${toString balloonFloorMiB} (memoryMiB / 2)";
-        description = "Balloon floor (vm), 0: no balloon.";
+        default = if lib.elem config.vm.bootPhase unballoonedPhases then config.vm.memoryMiB
+          else lib.max balloonFloorMiB (config.vm.memoryMiB / 2);
+        defaultText = lib.literalExpression "memoryMiB in boot phases ${toString unballoonedPhases}, else max ${toString balloonFloorMiB} (memoryMiB / 2)";
+        description = "Balloon floor (vm), 0: no balloon; tests/policy/guests.nix holds the floors to the node's memory.";
       };
       cores = mkOption { type = types.ints.positive; default = 2; description = "CPU cores."; };
       cpuUnits = mkOption { type = types.ints.positive; default = cpuUnitsDefault; description = "Proxmox cpu weight."; };
@@ -181,7 +198,17 @@ in {
     grants = mkOption {
       type = types.listOf grantType;
       default = [ ];
-      description = "Who may reach which of this guest's guarded ports (homelab.ingressOnly), besides its zone's ingress.";
+      description = "Who may reach which of this guest's guarded ports (homelab.ingressOnly), besides its zone's ingress: every source but those is one.";
+    };
+    shares = mkOption {
+      type = types.attrsOf shareType;
+      default = { };
+      description = "Nas paths below /srv/nas this guest mounts (\"data/<share>\", \"bulk/media\"): vm-109 exports exactly these to it, the router opens nfs to it (lab.nasClients); tests/policy holds main.nix to them.";
+    };
+    roles = mkOption {
+      type = types.listOf (types.strMatching "[a-z][a-z0-9-]*");
+      default = [ ];
+      description = "Lab-wide roles this guest holds (\"collector\", \"nas\"); one guest per role (lab.roles).";
     };
     tokens = mkOption {
       type = types.listOf (types.strMatching "[a-z0-9-]+");

@@ -1,7 +1,7 @@
 # a guest's nas mounts: the helpers (nasMount, nasMountRo, nasMedia, nasPath), its fileSystems and the shares vm-109 exports
 { config, lib, utils, inventory, lab, ... }:
 let
-  nasIP = inventory.${toString lab.routes.nas.vmid}.ip;
+  nasIP = inventory.${lab.roles.nas}.ip;
   # systemd refuses automounts inside a container, so lxc guests mount at boot
   container = config.boot.isContainer;
   # after a power loss the nas may still be booting: a mount waits for it instead of failing its dependents
@@ -104,6 +104,27 @@ in {
         TimeoutStopSec = "3min";
         Restart = lib.mkForce "on-failure";
         RestartSec = 10;
+      };
+
+      # a deploy that drops a mount leaves its automount active without a unit: autofs stays on the mountpoint
+      # and every access fails with "host is down" until a reboot. Stop those, and nas mounts left without a unit
+      nas-mounts-prune = {
+        description = "Stop NAS mounts this configuration no longer declares";
+        wantedBy = [ "multi-user.target" ];
+        before = [ "nas-tmpfiles.service" ];
+        restartTriggers = [ (builtins.toJSON nasMountpoints) ];
+        path = [ config.systemd.package ];
+        serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+        script = ''
+          systemctl list-units --all --plain --no-legend --type=automount,mount | while read -r unit _; do
+            [ "$(systemctl show -P LoadState "$unit")" = not-found ] || continue
+            case "$unit" in
+              *.mount) case "$(systemctl show -P What "$unit")" in ${nasIP}:*) ;; *) continue ;; esac ;;
+            esac
+            echo "stopping $unit ($(systemctl show -P Where "$unit")), no longer declared"
+            systemctl stop "$unit"
+          done
+        '';
       };
 
       # tmpfiles skips unmounted automounts

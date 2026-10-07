@@ -20,7 +20,6 @@ in {
   # its sqlite runs in wal mode, which nfs breaks; local, the nas keeps a nightly copy
   homelab.localState.paperless-ai = {
     path = stateDir;
-    share = "paperless-ai";
     unit = "podman-paperless-ai";
     sqlite = [ "documents.db" ];
     # paperless-ai-config rewrites it, with the api token, on every start
@@ -105,10 +104,6 @@ in {
     "d ${stateDir} 0700 root root -"
     "Z ${stateDir} - root root -"
   ];
-
-  networking.firewall.allowedTCPPorts = [ port ];
-  # its /setup page asks for no login and the container holds the paperless api token
-  homelab.ingressOnly.ports = [ port ];
 
   # consistent copy for the snapshot, the live file may be mid-write
   homelab.dbBackup.databases.paperless-ai.sqlite = "${stateDir}/documents.db";

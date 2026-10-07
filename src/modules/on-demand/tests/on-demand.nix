@@ -1,7 +1,7 @@
 # on-demand guests (modules/on-demand) against a fake proxmox api: wake on connect, sleep after the cooldown,
 # the reaper, sibling routes on one guest, an lxc, a non-http backend, a boot past its timeout, the deploy pause, an
-# orphaned proxy, and the api call itself: its token from a header file (never in an argv) over tls pinned to the
-# proxmox ca
+# orphaned proxy, each proxy's port fixed by its own guest, and the api call itself: its token from a header file
+# (never in an argv) over tls pinned to the proxmox ca, a failed call an error the reaper exports
 #
 # `backend` stands in for proxmox and the guests: each fake guest is a unit there the fake api starts and stops.
 # Nothing waits on the clock but the guest's own cooldown, observed through the fake api's call log and uptime.
@@ -25,8 +25,12 @@ let
   ports = { app = 80; app2 = 81; ct = 7000; slow = 7001; };
 
   inventoryFor = ip: lib.mapAttrs (id: g: {
-    name = "${id}-internal-test"; type = "internal"; inherit ip; enabled = "onDemand"; inherit cooldown; inherit (g) kind;
+    name = "${id}-internal-test"; type = "internal"; inherit ip; powered = true; idle = cooldown; inherit (g) kind;
   }) guests;
+  # the ca the proxy pins, a file the test swaps
+  caFile = "/run/pve-ca.pem";
+  # portBase + vmid x portsPerGuest + the slot in name order (modules/on-demand)
+  listenPorts = { app = 21500; app2 = 21501; ct = 21600; slow = 21700; };
 
   pki = pkgs.runCommand "fake-pve-pki" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out && cd $out
@@ -168,20 +172,18 @@ pkgs.testers.runNixOSTest {
     };
   };
 
-  nodes.proxy = { nodes, ... }: {
-    imports = [ ../default.nix ../../../tests/stubs/sops.nix ];
+  nodes.proxy = { config, nodes, ... }: {
+    imports = [ ../default.nix ../../textfile.nix ../../../tests/stubs/sops.nix ];
     _module.args = { inventory = inventoryFor nodes.backend.networking.primaryIPAddress; site = { }; };
     environment.systemPackages = [ pkgs.curl pkgs.netcat-gnu pkgs.jq ];
     networking.hosts.${nodes.backend.networking.primaryIPAddress} = [ apiName ];
-    testing.secretValues = {
-      proxmox-wake-token-internal = token;
-      # a derivation: the stub installs its file, a string would be the value itself
-      proxmox-ca = pkgs.runCommand "fake-pve-ca.pem" { } "cp ${pki}/ca.pem $out";
-    };
+    testing.secretValues.proxmox-wake-token-internal = token;
+    systemd.tmpfiles.rules = [ "C ${caFile} 0644 root root - ${pki}/ca.pem" "d ${config.homelab.textfileDir} 0755 root root -" ];
     homelab.onDemand = {
       enable = true;
       side = "internal";
       apiUrl = "https://${apiName}:${toString apiPort}/api2/json";
+      inherit caFile;
       node = "pve";
       services = {
         app = { vmid = 150; targetPort = ports.app; bootTimeout = bootTimeoutSeconds; busyPath = "/busy"; wakeAt = "03:00"; };
@@ -195,7 +197,7 @@ pkgs.testers.runNixOSTest {
   testScript = { nodes, ... }: let
     port = name: toString nodes.proxy.homelab.onDemand.services.${name}.listenPort;
     pauseFile = nodes.proxy.homelab.onDemand.pauseFile;
-    caPath = nodes.proxy.sops.secrets.proxmox-ca.path;
+    metrics = "${nodes.proxy.homelab.textfileDir}/ondemand.prom";
   in ''
     API = "https://${apiName}:${toString apiPort}/api2/json/nodes/pve"
 
@@ -219,10 +221,10 @@ pkgs.testers.runNixOSTest {
     proxy.wait_for_unit("sockets.target")
     backend.fail("systemctl is-active nginx")
 
-    with subtest("each route listens on its own allocated port"):
-        for name in ("app", "app2", "ct", "slow"):
+    with subtest("each route listens on the port its own guest fixes"):
+        for name, expected in ${builtins.toJSON listenPorts}.items():
             proxy.succeed(f"systemctl is-active ondemand-{name}.socket")
-        assert len({${port "app"}, ${port "app2"}, ${port "ct"}, ${port "slow"}}) == 4
+            proxy.succeed(f"ss -Hltn 'sport = :{expected}' | grep -q LISTEN")
 
     with subtest("first request boots the guest and is answered; the token is never on a command line"):
         # the brackets keep the sampler's own grep out of what it finds
@@ -238,14 +240,18 @@ pkgs.testers.runNixOSTest {
         backend.wait_until_fails("systemctl is-active nginx", timeout=120)
         assert "/qemu/150/status/shutdown" in calls()
 
-    with subtest("a proxmox answering with a certificate of another ca gets no call"):
+    with subtest("a proxmox answering with a certificate of another ca gets no call, and the reaper says so"):
         backend.succeed("rm -f /tmp/pve-calls")
-        proxy.succeed("cp ${caPath} /tmp/ca.pem && cp ${pki}/other-ca.pem ${caPath}")
+        proxy.succeed("cp ${pki}/other-ca.pem ${caFile}")
         proxy.fail("curl -sf --max-time 20 http://127.0.0.1:${port "app2"}/")
         assert calls() == "", calls()
         backend.fail("systemctl is-active nginx")
-        # positive control: with the proxmox ca back, the same request wakes it
-        proxy.succeed("cp /tmp/ca.pem ${caPath}")
+        proxy.fail("systemctl start ondemand-reaper.service")
+        proxy.succeed("grep -qx 'homelab_ondemand_api_ok{service=\"app2\",target=\"vm-150\"} 0' ${metrics}")
+        # positive control: with the proxmox ca back, the reaper's calls answer and the same request wakes it
+        proxy.succeed("cp ${pki}/ca.pem ${caFile}")
+        reap()
+        proxy.succeed("grep -qx 'homelab_ondemand_api_ok{service=\"app2\",target=\"vm-150\"} 1' ${metrics}")
         out = proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app2"}/")
         assert "hello from the second route" in out, out
         backend.wait_until_fails("systemctl is-active nginx", timeout=120)

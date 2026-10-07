@@ -56,11 +56,13 @@
 # Completeness: arch-dotfiles' install.sh no longer builds what the mirror lacks, so every listed name must
 # stay installable from the served snapshot. A failed base keeps its last build staged while that still
 # resolves; a night whose db would still lose a listed name the served db provides is held back, so a
-# client never misses a package once served. A listed name the served db never provided (never built, not
-# in the aur) does not hold the night back, which would stall every other update for it: the night
-# publishes without it and it shows at once in status.{txt,json} `missing` and in vm-119's
-# homelab_archrepo_missing_packages. Rejected: publishing with the lost name's served build carried over,
-# since no closure was resolved for it and drop_unresolvable drops exactly the builds that no longer resolve.
+# client never misses a package once served, for COMPLETENESS_HOLD_DAYS after the served snapshot at most:
+# a name whose source is gone for good (deleted from the aur) would otherwise freeze every official update,
+# security fixes included. A listed name the served db lacks, never provided or lost after the hold, does
+# not hold the night back: the night publishes without it and it shows at once in status.{txt,json}
+# `missing` and in vm-119's homelab_archrepo_missing_packages. Rejected: publishing with the lost name's
+# served build carried over, since no closure was resolved for it and drop_unresolvable drops exactly the
+# builds that no longer resolve.
 set -euo pipefail
 shopt -s nullglob
 
@@ -109,8 +111,10 @@ SIGNING_KEY_FILE=/run/signing.asc
 # ssh push to the always-on dmz mirror after each run; empty disables it
 PUSH_TARGET=${ARCHBUILD_PUSH_TARGET:-}
 PUSH_KEY_FILE=/run/push-key
+# the lab's host keys (src/generated/known_hosts): the mirror proves itself before the push key is offered
+PUSH_KNOWN_HOSTS_FILE=/run/known_hosts
 PUSH_CONNECT_TIMEOUT_S=15
-PUSH_SSH="ssh -i $PUSH_KEY_FILE -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/dev/null -o ConnectTimeout=$PUSH_CONNECT_TIMEOUT_S"
+PUSH_SSH="ssh -i $PUSH_KEY_FILE -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$PUSH_KNOWN_HOSTS_FILE -o ConnectTimeout=$PUSH_CONNECT_TIMEOUT_S"
 # where the commit came from, for the status only; archrepo-fetch.sh verified COMMIT
 SOURCE=${ARCHBUILD_SOURCE:-}
 REF=${ARCHBUILD_REF:-}
@@ -134,6 +138,7 @@ HTTP_RETRIES=3
 # where a recipe's validpgpkeys come from; makepkg's source check fails a build whose key is missing
 KEYSERVER=hkps://keyserver.ubuntu.com
 KEY_FETCH_TIMEOUT=2m
+NINJA_WRAPPER=/usr/local/bin/ninja
 # bound on the depth of aur dependency chains
 RESOLVE_ROUNDS_MAX=16
 # names per aur rpc request
@@ -162,6 +167,8 @@ NAME_PATTERN='^[a-z0-9@_+][a-z0-9@._+-]*$'
 FILE_PATTERN='^[a-z0-9@_+][a-z0-9@._+-]*-[A-Za-z0-9.:_+~]+-[0-9.]+-(x86_64|any)\.pkg\.tar\.zst$'
 # a recipe key is a sha256
 KEY_PATTERN='^[0-9a-f]{64}$'
+# how long a lost listed name may hold official updates back: two nights to fix the list or the recipe
+COMPLETENESS_HOLD_DAYS=3
 # bytes of the held back reason that quotes rejected names
 HELD_BACK_QUOTE_MAX=300
 TIME_FORMAT=+%Y-%m-%dT%H:%M:%SZ
@@ -350,13 +357,17 @@ setup_build() {
   [ ! -d "$SERVED_STATE_DIR" ] || cp -a "$SERVED_STATE_DIR/." "$STATE_DIR/"
   packager=$(gpg --show-keys --with-colons "$DOTFILES/$REPO_PUBLIC_KEY" | awk -F: '$1 == "uid" { print $10; exit }')
   [ -n "$packager" ] || { log "no key uid in $DOTFILES/$REPO_PUBLIC_KEY"; exit 1; }
-  # the container's cpuset is the memory budget (main.nix), so nproc is the job count make, ninja and cargo agree on
+  # main.nix sizes the jobs to the container's memory limit and its cpuset to them, so cargo and go agree
+  : "${ARCHBUILD_JOBS:?compile jobs within the build container memory limit}"
   cat > /etc/makepkg.conf.d/archbuild.conf <<EOF
-MAKEFLAGS="-j$(nproc)"
+MAKEFLAGS="-j$ARCHBUILD_JOBS"
 BUILDDIR=$CACHE/build
 OPTIONS=(strip docs !libtool !staticlibs emptydirs zipman purge !debug lto)
 PACKAGER="$packager"
 EOF
+  # ninja reads no MAKEFLAGS and runs nproc + 2; cmake and meson find it first on PATH, a recipe's own -j still wins
+  printf '#!/bin/sh\nexec /usr/bin/ninja -j%s "$@"\n' "$ARCHBUILD_JOBS" > "$NINJA_WRAPPER"
+  chmod 755 "$NINJA_WRAPPER"
 }
 
 setup_build_pacman() {
@@ -1080,13 +1091,27 @@ snapshot_verify() {
   fi
 }
 
-# the gate (header, Completeness): no listed name the served db provides may go missing
+# whole days since the served snapshot was published, empty without one
+served_age_days() {
+  local served
+  served=$(readlink "$SNAPSHOT_CURRENT" 2>/dev/null) || return 0
+  # shellcheck disable=SC2053 # the glob is the pattern
+  [[ $served == $SNAPSHOT_GLOB ]] || return 0
+  echo $(( (RUN_STARTED - $(date -u -d "$served" +%s)) / SECONDS_PER_DAY ))
+}
+
+# the gate (header, Completeness): no listed name the served db provides may go missing, within the hold
 completeness_check() {
-  local lost=() list
+  local lost=() list age
   proposed_missing=$(listed_missing "$WORK/db/$REPO.db.tar.gz") || { log "checking the proposed db against the list failed"; exit 1; }
   mapfile -t lost < <(LC_ALL=C comm -23 <(echo "$proposed_missing") <(echo "$snapshot_missing") | sed '/^$/d')
   (( ${#lost[@]} > 0 )) || return 0
   list="${lost[*]}"
+  age=$(served_age_days)
+  if [ -n "$age" ] && (( age >= COMPLETENESS_HOLD_DAYS )); then
+    log "publishing without names held back for $age days: ${list:0:HELD_BACK_QUOTE_MAX}"
+    return 0
+  fi
   held_back="listed names the served snapshot has and this one lacks: ${list:0:HELD_BACK_QUOTE_MAX}"
 }
 

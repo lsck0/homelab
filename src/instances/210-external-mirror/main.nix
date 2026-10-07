@@ -1,9 +1,11 @@
-{ lib, pkgs, inventory, site, ... }:
+{ lib, pkgs, lab, ... }:
 let
-  net = import ../../modules/net.nix { inherit lib inventory site; };
   repoDir = "/var/lib/archrepo";
-  # vm-119 rsyncs the built repo here over ssh; the private half is its sops secret archrepo-push-key
-  pushKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG9cIMqnQ/zKn2GxU/yTcEZlCZk+Ct8gx7GF2qzCrlXM archrepo-push@vm-119";
+  # the builder rsyncs the built repo here over ssh; the public half lives beside the private one, its secret
+  pushSecret = "archrepo-push-key";
+  pusher = lib.findSingle (i: i.config.secrets ? ${pushSecret}) (throw "no instance holds ${pushSecret}")
+    (throw "two instances hold ${pushSecret}") (lib.attrValues lab.instances);
+  pushKey = lib.fileContents (pusher.dir + "/archrepo-push.pub");
 in {
   # push target for the builder; owns the served tree, the key only runs a write-only rsync into it
   users.users.archrepo = {
@@ -39,7 +41,4 @@ in {
   systemd.tmpfiles.rules = [
     "d ${repoDir} 0755 archrepo archrepo -"
   ];
-
-  # the home networks' pacman comes straight here (arch-dotfiles pacman.conf); public and signed, it bypasses nothing
-  homelab.ingressOnly.portSources.${toString net.ports.http} = [ net.wan.subnet net.zones.internal.subnet net.wireguard.subnet ];
 }

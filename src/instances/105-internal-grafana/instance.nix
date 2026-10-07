@@ -1,5 +1,7 @@
-# observability: prometheus, loki, tempo, grafana
+# observability: prometheus, loki, tempo, pyroscope, grafana and the alerting
 { telemetry, ... }: {
+  roles = [ "collector" ];
+
   vm = {
     bootPhase = "network";
     needs = [ "nfs" ];
@@ -7,26 +9,27 @@
     memoryMiB = 2560;
     # explicit floor: tsdb head and loki chunks are working memory
     balloonMiB = 1536;
-    # remote journal buffer (1G) plus local grafana state
-    diskGiB = 16;
+    # the stores on local disk (main.nix sizes prometheus' retention from it), journal-remote's 1G, the system
+    diskGiB = 64;
   };
 
   grants = [
     {
-      from = [ "103" "114" ];
+      from = [ "103" "104" "114" ];
       tcp = [ telemetry.ports.prometheus ];
-      why = "the dashboard's widgets and hermes read the query api";
+      why = "the dashboard's widgets, the terminal's feeds and hermes read the query api";
     }
-    { from = [ "114" ]; tcp = [ telemetry.ports.loki ]; why = "hermes reads logs"; }
+    { from = [ "104" "114" ]; tcp = [ telemetry.ports.loki ]; why = "stats-sync and hermes read logs"; }
+    { from = [ "200" ]; tcp = [ telemetry.ports.otlpFrontend ]; why = "the edge relays the browsers' frontend telemetry"; }
   ];
 
   services = {
     grafana = {
-      port = 80;
+      port = telemetry.ports.grafana;
       homepage = {
         group = "Core";
         icon = "grafana";
-        widget = { type = "prometheus"; url = "http://10.100.0.105:9090"; };
+        widget = { type = "prometheus"; url = telemetry.urls.prometheus; };
       };
     };
   };

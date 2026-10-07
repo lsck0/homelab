@@ -27,7 +27,7 @@ Two separate things:
 - The VM is woken at 03:00 by the internal traefik. `archbuild-if-stale.timer` starts a build when
   the last finished one is older than 20h. While a build runs, `/busy` answers 200 and the
   on-demand reaper leaves the VM up.
-- Start a build now: `vm start 119`, wait for ssh, then `ssh 10.100.0.119 systemctl start --no-block archbuild.service`.
+- Start a build now (the owner's, root): `vm start 119`, then `ssh 10.100.0.119 systemctl start --no-block archbuild.service`.
 - Watch it: `ssh 10.100.0.119 journalctl -fu archbuild` or `curl -s http://10.100.0.119/status.txt`.
   Per-package logs: `http://10.100.0.119/logs/<pkgbase>.log`. Whole run: `/build.log`.
 - After each publish the mirror has the same beside its status: `https://mirror.lsck0.dev/status.txt`,

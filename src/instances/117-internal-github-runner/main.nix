@@ -29,6 +29,8 @@ let
   restartDelayS = 10;
   # the module takes only ghp_/github_pat_ as a pat, so mint a registration token per start
   regTokenDir = "/run/github-runner-regtoken";
+  # the module's StateDirectory root, github-runner/<name>
+  stateRoot = "/var/lib/github-runner";
 
   # -----------------------------------------------------------------------------
   # INTERNAL
@@ -81,7 +83,7 @@ let
       # "+": as root, outside the sandbox: the user starts from nothing, then a registration token from sops
       ExecStartPre = lib.mkBefore [ "+${daemon.resetScript}" "+${mintToken repo}" ];
       # "-": unconfigure.sh deletes the file
-      InaccessiblePaths = lib.mkForce [ "-${regTokenFile repo}" "-/var/lib/github-runner/${nameOf repo}/.current-token" ];
+      InaccessiblePaths = lib.mkForce [ "-${regTokenFile repo}" "-${stateRoot}/${nameOf repo}/.current-token" ];
       Slice = daemon.slice;
       RuntimeMaxSec = jobRuntimeMax;
       Restart = lib.mkForce "always";
@@ -95,8 +97,6 @@ in {
     ../../modules/rootless-docker.nix
     ./lib/forgejo-runner.nix
   ];
-
-  networking.hostName = "vm-117";
 
   homelab.rootlessDocker = lib.mapAttrs' (repo: r: lib.nameValuePair (userOf repo) {
     inherit (r) uid;
@@ -114,5 +114,9 @@ in {
 
   services.github-runners = lib.mapAttrs' (repo: _: lib.nameValuePair (nameOf repo) (runner repo)) repos;
 
-  systemd.tmpfiles.rules = [ "d ${regTokenDir} 0700 root root -" ];
+  systemd.tmpfiles.rules = [
+    "d ${regTokenDir} 0700 root root -"
+    # the runners' StateDirectory parent, whoever made it first; ephemeral state only, so boot clears dropped runners
+    "D ${stateRoot} 0755 root root -"
+  ];
 }

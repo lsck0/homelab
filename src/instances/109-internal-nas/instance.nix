@@ -1,5 +1,7 @@
 # storage: NFS + SMB + Syncthing + FileBrowser, Kopia backups of it
 { lib, site, ... }: {
+  roles = [ "nas" ];
+
   vm = {
     bootPhase = "nas";
     needs = [ "containers" "nfs" ];
@@ -22,5 +24,8 @@
     syncthing = { host = "sync"; port = 8384; homepage = { group = "Core"; icon = "syncthing"; }; };
   };
 
-  secrets = { kopia-password = "hex:24"; }; # the backup repository's key: never regenerate, see README restore
+  secrets = {
+    kopia-password = "guardsData:hex:24"; # the backup repository's key, see README restore
+    kopia-server-password = "hex:24"; # the web ui's basic auth, user kopia
+  };
 }

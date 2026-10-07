@@ -10,6 +10,8 @@
 #   limits.allocatableOf vm { memoryMiB; cpuMillis; } what a worker of this vm shape holds for apps: swarm advertises
 #                           it as generic resources, apps.slice caps the containers to it (swarm.nix)
 #   limits.lab              what the lab's own journals and access logs may send to loki, one tenant
+#   limits.workerCountOf { apps; vm; }   the fewest workers of that vm shape the apps fit on, at least one: the
+#                           shared swarm's size (modules/lab), so no worker idles and none is missing
 #   limits.clusterOf { apps; workers; taskDefaults; }   one swarm (the shared one, or an app's own guest):
 #     .workers.<vmid>       allocatableOf each worker
 #     .capacity, .reserved, .surge   { memoryMiB; cpuMillis; } over the workers, the apps' sums, the largest single
@@ -18,7 +20,7 @@
 #     .problems             what does not fit, one line each naming the numbers and the knob
 #
 # Admission: a catalog fits when sum(reservations) + max(reservation) <= sum(allocatable), memory and cpu each.
-# Deploys run one at a time (swarm-apply holds a lock on the manager), and a start-first update runs at most one
+# Deploys run one at a time (swarm-deploy holds the manager's rollout slot), and a start-first update runs at most one
 # extra task per stateless service, which is at most the deploying app's own reservation again. Render
 # (modules/swarm/lib/swarm-render.py) holds each app inside its reservation at deploy; swarm holds each worker inside its
 # allocatable at scheduling, so a task that fits no worker stays pending and fails its deploy, never a neighbour.
@@ -74,6 +76,11 @@ let
   maxOf = key: sets: lib.foldl' (acc: s: lib.max acc s.${key}) 0 sets;
   minOf = key: sets: lib.foldl' (acc: s: lib.min acc s.${key}) (lib.head sets).${key} sets;
 
+  reservationOf = a: { inherit (a.reservation) memoryMiB; cpuMillis = cpuMillisUp a.reservation.cpus; };
+  # what the apps reserve plus one deploy's surge: what their workers must hold together
+  demandOf = apps: let reservations = map reservationOf (lib.attrValues apps); in
+    lib.genAttrs [ "memoryMiB" "cpuMillis" ] (key: sumOf key reservations + maxOf key reservations);
+
   # proxmox's cpu limit, when set, is what the guest can use of its cores
   allocatableOf = vm: {
     memoryMiB = vm.memoryMiB - nodeReserveMiB;
@@ -85,11 +92,17 @@ let
   # FUNCTIONS
   # -----------------------------------------------------------------------------
 
+  workerCountOf = { apps, vm }: let
+    allocatable = allocatableOf vm;
+    demand = demandOf apps;
+    countOf = key: assert lib.assertMsg (allocatable.${key} > 0) "limits.workerCountOf: a worker keeps all its ${key} for itself";
+      (demand.${key} + allocatable.${key} - 1) / allocatable.${key};
+  in lib.max 1 (lib.max (countOf "memoryMiB") (countOf "cpuMillis"));
+
   clusterOf = { apps, workers, taskDefaults }: let
     allocatable = lib.mapAttrs (_: allocatableOf) workers;
 
-    reservations = lib.mapAttrs (_: a: { inherit (a.reservation) memoryMiB; cpuMillis = cpuMillisUp a.reservation.cpus; })
-      apps;
+    reservations = lib.mapAttrs (_: reservationOf) apps;
     totalsOf = sets: { memoryMiB = sumOf "memoryMiB" sets; cpuMillis = sumOf "cpuMillis" sets; };
     capacity = totalsOf (lib.attrValues allocatable);
     reserved = totalsOf (lib.attrValues reservations);
@@ -100,10 +113,10 @@ let
     largestOf = key:
       lib.head (lib.sort (x: y: reservations.${x}.${key} > reservations.${y}.${key}) (lib.attrNames reservations));
     fitProblem = key: unit: knob:
-      lib.optional (apps != { } && reserved.${key} + surge.${key} > capacity.${key})
+      lib.optional (apps != { } && (demandOf apps).${key} > capacity.${key})
         ("the apps reserve ${toString reserved.${key}} ${unit} plus ${toString surge.${key}} ${unit} for a rolling deploy, "
           + "the workers hold ${toString capacity.${key}} ${unit}: lower apps.<app>.reservation.${knob} "
-          + "(the largest: ${largestOf key}) or add a worker (apps/swarm.nix nodes.count)");
+          + "(the largest: ${largestOf key}) or grow the workers (apps/swarm.nix nodes.vm, an app's placement.vm)");
 
     # the smallest worker bounds a task: a larger one finds no worker once another is down
     taskProblems = app: a: let smallest = minOf "memoryMiB" (lib.attrValues allocatable); in
@@ -116,7 +129,7 @@ let
 
     problems =
       if apps == { } then [ ]
-      else if workers == { } then [ "apps are enabled, but the swarm has no worker (apps/swarm.nix nodes.count)" ]
+      else if workers == { } then [ "apps are enabled, but the swarm has no running worker" ]
       else map (id: "worker vm-${id} keeps ${toString nodeReserveMiB} MiB and ${toString nodeReserveCpuMillis} "
           + "millicores for itself and has nothing left for apps")
           (lib.attrNames (lib.filterAttrs (_: w: w.memoryMiB <= 0 || w.cpuMillis <= 0) allocatable))
@@ -132,5 +145,5 @@ let
   };
 in
 {
-  inherit tenant route frontend lab clusterOf allocatableOf taskCpuMillis cpuMillisUp;
+  inherit tenant route frontend lab clusterOf allocatableOf workerCountOf taskCpuMillis cpuMillisUp;
 }

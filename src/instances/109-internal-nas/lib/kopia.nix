@@ -17,6 +17,9 @@
 # Retention: prometheus and loki compact, rewriting their blocks, so every snapshot pins fresh copies for up to two
 # years. Loki keeps 14 days of logs, so its tree is not backed up; prometheus keeps 10 years, so it is a source of
 # its own with a short retention. Registry images are rebuilt from git by ci.
+#
+# Verification: kopia-verify re-reads a share of the stored files every week and downloads a few repository blobs
+# back from proton drive, comparing them with the local ones; each part publishes its own freshness metric.
 { config, lib, pkgs, catalog, site, ... }:
 let
   protonDir = "/var/lib/proton-drive";
@@ -53,8 +56,33 @@ let
   cacheDir = "/var/cache/kopia";
   configFile = "${stateDir}/repository.config";
   snapshotTime = "02:00";
-  # --without-password: authelia gates the route
   serverPort = catalog.internal.kopia.port;
+  # share of the stored files a verify reads back: every file about every 20 weeks
+  verifyFilesPercent = 5;
+  # after the 02:00 snapshot and the 04:00 off-site upload's usual end
+  verifyAt = "Sun 06:00";
+  # repository blobs downloaded back from proton drive per verify, a few hundred MiB at most
+  offsiteSampleCount = 4;
+  # one proton session: proton-sync and the off-site sample never run the cli at once
+  protonLock = "/run/proton-drive.lock";
+  protonEnv = {
+    HOME = protonDir;
+    PROTON_DRIVE_CREDENTIALS_STORE = "unsafe_file";
+    PROTON_DRIVE_CACHE_DIR = protonDir;
+  };
+  # the remote layout proton-sync uploads to, posix paths below the drive's /my-files section
+  offsiteRoot = "/my-files/homelab-offsite";
+  offsiteRepo = "${offsiteRoot}/BACKUPS/${baseNameOf repo}";
+  manifest = "${protonDir}/offsite-manifest.txt";
+  # metric_write <file> <name> <help> <value>: one gauge, renamed into place
+  metricWrite = ''
+    metric_write() {
+      local d=${config.homelab.textfileDir}
+      mkdir -p "$d"
+      printf '# HELP %s %s\n# TYPE %s gauge\n%s %s\n' "$2" "$3" "$2" "$2" "$4" > "$d/$1.prom.tmp"
+      mv "$d/$1.prom.tmp" "$d/$1.prom"
+    }
+  '';
 
   kopiaEnv = ''
     export KOPIA_CONFIG_PATH=${configFile}
@@ -110,6 +138,14 @@ let
                fi
                kopia restore "$obj/data/$name" "${source}/data/$name" \
                  --overwrite-files --overwrite-directories --overwrite-symlinks --no-ignore-permission-errors
+               # a guest's local-state copy (modules/local-state): a new generation makes the guest take it
+               if [ -e "${source}/data/$name/.generation" ]; then
+                 gen=$(cat /proc/sys/kernel/random/uuid)
+                 printf '%s\n' "$gen" > "${source}/data/$name/.generation"
+                 printf '%s\n' "$gen" > "${source}/data/$name/.restored"
+                 echo ">>> $name is a guest's local state: it takes the restore at its next start or mirror,"
+                 echo ">>> or now: systemctl start $name-reseed on the guest that mounts data/$name"
+               fi
                echo ">>> done: ${source}/data/$name restored from $when" ;;
       restore) # restore <snapshot> <subpath> <target-dir>
                sel="''${1:?snapshot}"; sub="''${2:?subpath under ${source}}"; tgt="''${3:?target dir}"
@@ -118,7 +154,7 @@ let
                mkdir -p "$tgt"
                kopia restore "$obj/$sub" "$tgt" ;;
       now)     kopia snapshot create ${source} ;;
-      verify)  kopia snapshot verify --verify-files-percent=5 ;;
+      verify)  kopia snapshot verify --verify-files-percent=${toString verifyFilesPercent} ;;
       *) cat <<EOF
 nas-restore: restore/inspect the NAS Kopia backups (UI: https://backup.lsck0.dev)
 
@@ -132,7 +168,7 @@ nas-restore: restore/inspect the NAS Kopia backups (UI: https://backup.lsck0.dev
   nas-restore files [snapshot] [subpath]        list files in a snapshot
   nas-restore restore <snapshot> <subpath> <dir> restore a subtree into <dir>
   nas-restore now                          take a snapshot now
-  nas-restore verify                       re-read 5% of the stored files
+  nas-restore verify                       re-read ${toString verifyFilesPercent}% of the stored files
 
 Raw kopia with the repository connected: kopia-nas <args>
 Repo: ${repo}
@@ -142,6 +178,8 @@ EOF
   '';
 in {
   sops.secrets.kopia-password = {};
+  # the web ui's basic auth (user kopia) behind authelia: the port stays closed to whoever else reaches it
+  sops.secrets.kopia-server-password = {};
 
   environment.systemPackages = [ kopiaWrapper restoreScript protonDriveCli protonLogin ];
 
@@ -201,8 +239,9 @@ in {
     serviceConfig = { Restart = "always"; RestartSec = 10; CPUWeight = "idle"; IOSchedulingClass = "idle"; MemoryMax = "1G"; };
     script = ''
       ${kopiaEnv}
-      exec kopia server start --ui --insecure --without-password \
-        --address=http://0.0.0.0:${toString serverPort}
+      KOPIA_SERVER_PASSWORD="$(cat ${config.sops.secrets.kopia-server-password.path})"
+      export KOPIA_SERVER_PASSWORD
+      exec kopia server start --ui --insecure --address=http://0.0.0.0:${toString serverPort}
     '';
   };
 
@@ -234,9 +273,6 @@ in {
     timerConfig = { OnBootSec = "10m"; OnUnitActiveSec = "15m"; };
   };
 
-  networking.firewall.allowedTCPPorts = [ serverPort ];
-  homelab.ingressOnly.ports = [ serverPort ];
-
   # the repository shares the data's disk; the header says how the mirror works
   systemd.services.proton-sync = {
     description = "Mirror the Kopia repository to Proton Drive";
@@ -253,13 +289,11 @@ in {
       CPUWeight = "idle";
       IOSchedulingClass = "idle";
     };
-    environment = {
-      HOME = protonDir;
-      PROTON_DRIVE_CREDENTIALS_STORE = "unsafe_file";
-      PROTON_DRIVE_CACHE_DIR = protonDir;
-    };
-    path = [ protonDriveCli pkgs.coreutils pkgs.findutils pkgs.gnugrep pkgs.jq ];
+    environment = protonEnv;
+    path = [ protonDriveCli pkgs.coreutils pkgs.findutils pkgs.gnugrep pkgs.jq pkgs.util-linux ];
     script = ''
+      exec 9>${protonLock}
+      flock 9
       # nixos starts scripts with set -e; a failed batch must not skip the rest, and create-folder-exists is non-fatal
       set +e -uo pipefail
       shopt -s nullglob
@@ -271,7 +305,7 @@ in {
       # touch to let the next run prune past PRUNE_SHARE_MAX_PERCENT once, after checking the loss is intended
       prune_allow_large=${protonDir}/prune-allow-large
       # repo files (relative paths) earlier runs uploaded, or failed to trash
-      manifest=${protonDir}/offsite-manifest.txt
+      manifest=${manifest}
       # remote names trashed but not yet deleted from the trash
       purge_queue=${protonDir}/offsite-purge.txt
 
@@ -285,10 +319,9 @@ in {
         exit 1
       fi
 
-      # posix paths; the top-level section is /my-files (see `filesystem list /`)
-      root=/my-files/homelab-offsite
+      root=${offsiteRoot}
       # same remote layout as when all of BACKUPS went up, so the repo uploaded before is reused
-      remote=$root/BACKUPS/${baseNameOf repo}
+      remote=${offsiteRepo}
       # remote parents must exist before an upload; create-folder errors if present, so ignore it
       proton-drive filesystem create-folder /my-files homelab-offsite >/dev/null 2>&1 || true
       proton-drive filesystem create-folder "$root" BACKUPS >/dev/null 2>&1 || true
@@ -405,14 +438,49 @@ in {
       [ "$ok" = 1 ] || { echo "one or more uploads or prunes failed"; exit 1; }
 
       # freshness metric only on a fully successful run
-      d=${config.homelab.textfileDir}; mkdir -p $d
-      {
-        echo "# HELP homelab_offsite_last_success_timestamp_seconds Unix time of the last Proton Drive sync."
-        echo "# TYPE homelab_offsite_last_success_timestamp_seconds gauge"
-        echo "homelab_offsite_last_success_timestamp_seconds $(date +%s)"
-      } > $d/proton_sync.prom.tmp
-      mv $d/proton_sync.prom.tmp $d/proton_sync.prom
+      ${metricWrite}
+      metric_write proton_sync homelab_offsite_last_success_timestamp_seconds "Unix time of the last Proton Drive sync." "$(date +%s)"
     '';
+  };
+
+  # the header says what a verify reads back; a failed part leaves its metric stale, which grafana alerts on
+  systemd.services.kopia-verify = {
+    description = "Re-read a share of the Kopia repository and sample its off-site copy";
+    after = [ "kopia-init.service" "network-online.target" ];
+    requires = [ "kopia-init.service" ];
+    wants = [ "network-online.target" ];
+    restartIfChanged = false;
+    environment = protonEnv;
+    path = [ protonDriveCli pkgs.util-linux pkgs.diffutils pkgs.gnugrep ];
+    serviceConfig = { Type = "oneshot"; CPUWeight = "idle"; IOSchedulingClass = "idle"; MemoryMax = "1G"; };
+    script = ''
+      ${kopiaEnv}
+      ${metricWrite}
+      kopia snapshot verify --verify-files-percent=${toString verifyFilesPercent}
+      metric_write backup_verify_repository homelab_backup_verify_last_success_timestamp_seconds \
+        "Unix time of the last Kopia repository verify." "$(date +%s)"
+
+      [ -s ${protonDir}/auth-session.json ] || { echo "no proton session: off-site copy not sampled"; exit 0; }
+      exec 9>${protonLock}
+      flock 9
+      sample=$(mktemp -d)
+      trap 'rm -rf "$sample"' EXIT
+      # pack blobs only: written once, so the remote copy of an uploaded one equals the local one
+      grep -E '(^|/)[pq][0-9a-f]+[^/]*$' ${manifest} | while IFS= read -r rel; do [ -f "${repo}/$rel" ] && echo "$rel"; done \
+        | shuf -n ${toString offsiteSampleCount} > "$sample/list"
+      [ -s "$sample/list" ] || { echo "no uploaded pack blob to sample yet"; exit 0; }
+      while IFS= read -r rel; do
+        proton-drive filesystem download -f remove "${offsiteRepo}/$rel" "$sample" </dev/null >/dev/null
+        cmp "$sample/$(basename "$rel")" "${repo}/$rel" || { echo "off-site $rel differs from the local blob" >&2; exit 1; }
+        echo "off-site $rel matches"
+      done < "$sample/list"
+      metric_write backup_verify_offsite homelab_offsite_verify_last_success_timestamp_seconds \
+        "Unix time of the last off-site sample that matched the local repository." "$(date +%s)"
+    '';
+  };
+  systemd.timers.kopia-verify = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnCalendar = verifyAt; Persistent = true; RandomizedDelaySec = "1h"; };
   };
 
   # after the 02:00 snapshot
