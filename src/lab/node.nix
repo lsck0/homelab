@@ -2,8 +2,9 @@
 {
   # MemTotal of the node (32 GiB less the firmware's share)
   memoryMiB = 32022;
-  # the zfs arc is capped at 3202 MiB, but the node has no zfs pool (its storage is lvm-thin), so the arc holds nothing
-  arcMaxMiB = 0;
+  # zfs_arc_max as measured; the guest disks are lvm-thin, and with no zfs pool the arc holds nothing (0), which
+  # `zpool list` on the node shows
+  arcMaxMiB = 3202;
   # the node's own kernel, pve daemons and the page cache of the guest disks
   reserveMiB = 2048;
 }

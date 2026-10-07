@@ -5,7 +5,7 @@
   vm = {
     bootPhase = "nas";
     needs = [ "containers" "nfs" ];
-    # kopia snapshots the whole nas, measured 624 MiB
+    # kopia snapshots the whole nas, measured 624 MiB; the rest above the floor is page cache for nfs
     memoryMiB = 3072;
     balloonMiB = 1536;
     # nvme root: state, backups, documents

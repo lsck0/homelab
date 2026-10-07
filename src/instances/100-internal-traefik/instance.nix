@@ -1,11 +1,8 @@
 # internal reverse proxy: tls, forwardauth, on-demand wake
 { ... }: {
-  vm = {
+  vm = import ../../modules/traefik/lib/vm.nix // {
     bootPhase = "network";
     needs = [ "containers" ];
-    memoryMiB = 1024;
-    # every internal route and sso: never ballooned below what it runs in (the 512 MiB floor thrashed it to a halt)
-    balloonMiB = 1024;
   };
 
   secrets = {
