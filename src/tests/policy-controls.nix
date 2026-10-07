@@ -90,7 +90,8 @@ let
       tampered = tamper owner [ "services" "lldap" "enable" ] false; };
     realm-ldaps = { file = "sso"; marker = "proxmox realm: ";
       tampered = tamper owner [ "networking" "firewall" "allowedTCPPorts" ] [ 3890 ]; };
-
+    image-pulled-at-start = { file = "images"; marker = "pulls 'always' at every start";
+      tampered = tamper "207-external-share" [ "virtualisation" "oci-containers" "containers" "share" "pull" ] "always"; };
     secret-readable = { file = "secrets"; marker = "is readable by others";
       tampered = tamper owner [ "sops" "secrets" "authelia-jwt-secret" "mode" ] "0444"; };
     secret-source = { file = "secrets"; marker = "secret authelia-jwt-secret comes from";
