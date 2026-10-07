@@ -17,6 +17,18 @@ let
   instance = text: { "main.nix" = "{ ... }: { }"; "instance.nix" = text; };
   problemsOf = folders: (import ../default.nix { inherit lib; root = treeOf folders; }).problems;
 
+  # adding an instance or an app is copying its template folder into the real tree (README); both collect as they are
+  templates = import ../default.nix { inherit lib; root = pkgs.runCommand "lab-templates" { } ''
+    mkdir $out
+    cp -r ${../../../generated} $out/generated
+    cp -r ${../../../lab} $out/lab
+    cp -r ${../../../instances} $out/instances
+    cp -r ${../../../apps} $out/apps
+    chmod -R u+w $out
+    cp -r ${../../../instances/_template} $out/instances/199-internal-demo
+    cp -r ${../../../apps/_template} $out/apps/demo-app
+  ''; };
+
   # -----------------------------------------------------------------------------
   # TABLES
   # -----------------------------------------------------------------------------
@@ -43,10 +55,13 @@ let
   failures = lib.concatLists (lib.mapAttrsToList (name: c: let problems = problemsOf c.folders; in
     lib.optional (!(lib.any (lib.hasInfix c.expect) problems))
       "refused.${name}: no problem says \"${c.expect}\"; problems: ${builtins.toJSON problems}") refused)
-    ++ map (p: "the real tree: ${p}") (import ../default.nix { inherit lib; }).problems;
+    ++ map (p: "the real tree: ${p}") (import ../default.nix { inherit lib; }).problems
+    ++ map (p: "the templates: ${p}") templates.problems
+    ++ lib.optional (!(templates.routes ? demo)) "the templates: the instance template's service is not collected"
+    ++ lib.optional (!(templates.catalog.apps ? demo-app)) "the templates: the app template is not collected";
 in
 pkgs.runCommand "lab" { } (if failures == [ ] then ''
-  echo "lab: ${toString (lib.length (lib.attrNames refused))} broken trees refused, the real tree holds"
+  echo "lab: ${toString (lib.length (lib.attrNames refused))} broken trees refused, the real tree and the templates hold"
   touch $out
 '' else ''
   cat ${pkgs.writeText "lab-failures" (lib.concatLines failures)} >&2
