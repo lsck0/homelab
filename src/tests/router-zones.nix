@@ -50,7 +50,7 @@ let
 
   # the ports the policy names, and 4444, which only the killswitch subtest uses
   killswitchPort = 4444;
-  tcpPorts = [ 22 53 80 111 443 2049 2377 3100 4040 4317 4318 4319 7946 8006 8095 9055 9100 19532 25565 killswitchPort ]
+  tcpPorts = [ 22 53 80 111 443 2049 2377 3100 3102 4040 4317 4318 4319 7946 8006 8095 9055 9100 19532 25565 killswitchPort ]
     ++ facts.appsPorts;
   # count syns from one source at one address, as fast as the kernel sends them
   synFlood = pkgs.writers.writePython3 "syn-flood" { } ''

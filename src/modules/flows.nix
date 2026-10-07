@@ -58,7 +58,7 @@ let
 
   nfsPorts = [ ports.rpcbind ports.nfs ];
   torPorts = import ./tor-ports.nix;
-  appTelemetryPorts = with telemetry.ports; [ journalRemote otlpGrpc otlpHttp pyroscope loki ];
+  appTelemetryPorts = with telemetry.ports; [ journalRemote otlpGrpc otlpHttp pyroscope lokiPush ];
 
   # -------------------------------------------------------------------------------------------------------------
   # ROUTE BACKENDS
@@ -176,7 +176,7 @@ in
       why = "the edge relays the internal routes it publishes to the internal ingress";
     }
     {
-      from = host edge; to = host collector; tcp = [ telemetry.ports.loki ];
+      from = host edge; to = host collector; tcp = [ telemetry.ports.lokiPush ];
       why = "the edge's promtail pushes its access log";
     }
     {
