@@ -92,13 +92,11 @@ let
     why = "the dashboard's ${c.widget.type} widget queries ${c.route}";
   }) (lib.filter (c: c.widget != null && c.widget.url == null) lab.homepage);
 
-  # who wakes an idle app on the deploy controller: the ingresses for a request, the state worker for a dump;
-  # modules/swarm admits the same list in the controller itself
-  controllerWakerIds = lib.unique [ internalIngress edge catalog.swarm.stateId ];
-  wakerGrants = [{
-    from = controllerWakerIds; to = swarmManager; tcp = [ catalog.swarm.controllerPort ];
-    why = "the ingresses wake an idle app for a request, the state worker for its nightly dump";
-  }];
+  # each swarm's wakers (catalog.clusters), which modules/swarm admits in the controller itself
+  wakerGrants = lib.mapAttrsToList (name: c: {
+    from = c.wakers; to = c.managerId; tcp = [ catalog.swarm.controllerPort ];
+    why = "the ingresses wake an idle app of swarm ${name} for a request, its state worker for a nightly dump";
+  }) catalog.clusters;
 
   ingressMetricsGrants = map (z: {
     from = [ collector ]; to = z.ingress; tcp = [ ports.traefikMetrics ];
@@ -160,7 +158,7 @@ let
   };
 in
 {
-  inherit networks guards controllerWakerIds;
+  inherit networks guards;
 
   # -------------------------------------------------------------------------------------------------------------
   # FORWARD: the exceptions across the router; a dmz reaches nothing private but these
