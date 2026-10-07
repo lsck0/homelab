@@ -28,7 +28,8 @@ let
   portBase = 20000;
   # the most routes one guest serves (the arr guest has five)
   portsPerGuest = 10;
-  metricsFile = "${config.homelab.textfileDir}/ondemand.prom";
+  metricsName = "ondemand";
+  metricsFile = "${config.homelab.textfileDir}/${metricsName}.prom";
 
   # silence from a saturated build counts as busy until this uptime; 21h stays clear of the next daily wakeAt
   silentBusyUptimeMax = 21 * 3600;
@@ -309,6 +310,7 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
+    homelab.textfiles = [ metricsName ];
     homelab.onDemand.address = lib.mapAttrs (_: svc:
       if (targetOf svc).sleeps then "${loopback}:${toString svc.listenPort}"
       else "${(targetOf svc).ip}:${toString svc.targetPort}"

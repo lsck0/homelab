@@ -29,7 +29,8 @@ let
   pollInterval = "30min";
   # a deploy this old is looked at again for its base images (a security fix in debian or alpine) without a commit
   baseRefreshS = 24 * 60 * 60;
-  textfile = "${config.homelab.textfileDir}/app_builder.prom";
+  textfileName = "app_builder";
+  textfile = "${config.homelab.textfileDir}/${textfileName}.prom";
   # rust nightly and node builds; the ci users cap their own share
   memoryMaxMiB = 3 * 1024;
   # the peak of one cold rust or node build: builds run side by side only as far as both cores and memory hold
@@ -163,6 +164,8 @@ in {
   };
 
   config = {
+    homelab.textfiles = [ textfileName ];
+
     assertions = [{
       assertion = config.homelab.vmid == builderId;
       message = "the app builder runs on vm-${builderId} (the role app-builder), the address the managers' forced command accepts";

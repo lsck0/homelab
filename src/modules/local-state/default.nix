@@ -87,6 +87,7 @@ in {
 
   config = lib.mkIf (cfg != { }) {
     homelab.nasMounts = lib.mkMerge (lib.mapAttrsToList (name: _: nasMount (nasDir name) name) cfg);
+    homelab.textfiles = map (name: "local_state_${name}") (lib.attrNames cfg);
 
     systemd.services = lib.mkMerge (lib.mapAttrsToList (name: s: {
       # no RemainAfterExit: every start of the app runs it again

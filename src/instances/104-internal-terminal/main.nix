@@ -221,6 +221,8 @@ in {
   # footers and "today" in the payloads are the house's local time
   time.timeZone = site.timeZone;
 
+  homelab.textfiles = map (lib.removeSuffix ".prom") (lib.concatMap (f: f.exports or [ ]) (lib.attrValues collectors));
+
   # feed state on the nas, vm is disposable
   homelab.nasMounts = nasMount calendarState "calendar";
 

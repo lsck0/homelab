@@ -13,7 +13,7 @@ in {
       description = "Where services drop their .prom files for the node exporter.";
     };
     textfiles = lib.mkOption {
-      type = lib.types.listOf (lib.types.strMatching "[a-z0-9_]+[*]?");
+      type = lib.types.listOf (lib.types.strMatching "[a-z0-9_-]+[*]?");
       default = [ ];
       description = "The files this host's units write to textfileDir, without .prom; a trailing * stands for a runtime part (an app, a database).";
     };

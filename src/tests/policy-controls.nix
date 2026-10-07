@@ -54,6 +54,8 @@ let
       tampered = tamper "101-internal-authelia" [ "systemd" "services" "lldap-bootstrap" "environment" "BOOTSTRAP_GROUPS" ] "admins"; };
     secret-readable = { file = "secrets"; marker = "is readable by others";
       tampered = tamper "101-internal-authelia" [ "sops" "secrets" "authelia-jwt-secret" "mode" ] "0444"; };
+    textfile-undeclared = { file = "textfiles"; marker = "homelab.textfiles does not name";
+      tampered = tamper "105-internal-grafana" [ "homelab" "textfiles" ] [ ]; };
     instance-folder = { file = "placement"; marker = "src/instances/101-internal-authelia has no main.nix";
       tampered = facts // { src = builtins.path {
         path = facts.src;

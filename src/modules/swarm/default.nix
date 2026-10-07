@@ -610,6 +610,8 @@ in {
     }
 
     (lib.mkIf isManager {
+      # one per app; swarm-prune removes a departed app's
+      homelab.textfiles = [ "swarm_app_*" "swarm_idle_*" ];
       homelab.nasMounts = nasMount managerShare (if single then "swarm-manager-${ownId}" else "swarm-manager")
         // lib.optionalAttrs isController (nasMount appDashboardsMount telemetry.appDashboardsShare);
 

@@ -48,6 +48,8 @@ let
 in {
   imports = [ ./lib/kopia.nix ./lib/nas-exports.nix ];
 
+  homelab.textfiles = [ "media_quota" ];
+
   # hdd; media and torrents share a fs for hardlinks
   fileSystems.${bulk} = {
     device = "/dev/disk/by-label/${bulkLabel}";
