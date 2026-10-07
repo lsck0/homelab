@@ -54,6 +54,12 @@ let
       tampered = tamper "101-internal-authelia" [ "systemd" "services" "lldap-bootstrap" "environment" "BOOTSTRAP_GROUPS" ] "admins"; };
     secret-readable = { file = "secrets"; marker = "is readable by others";
       tampered = tamper "101-internal-authelia" [ "sops" "secrets" "authelia-jwt-secret" "mode" ] "0444"; };
+    test-reads-other-instance = { file = "placement"; marker = "a case about another instance's file belongs in its tests/";
+      tampered = facts // { src = pkgs.runCommand "src-with-a-stray-case" { } ''
+        cp -r ${facts.src} $out
+        chmod -R u+w $out
+        echo '{ ... }: ../../105-internal-grafana/lib/spot-price.py' > $out/instances/104-internal-terminal/tests/stray.nix
+      ''; }; };
     textfile-undeclared = { file = "textfiles"; marker = "homelab.textfiles does not name";
       tampered = tamper "105-internal-grafana" [ "homelab" "textfiles" ] [ ]; };
     instance-folder = { file = "placement"; marker = "src/instances/101-internal-authelia has no main.nix";

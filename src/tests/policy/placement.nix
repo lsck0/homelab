@@ -16,7 +16,8 @@
 #   - src/scripts holds the workstation's tools: a script that nix code names runs on a host, and one that serves a
 #     single instance belongs in its folder
 #   - a test lives with what it tests: one in an owner's tests/ that names files of exactly one other owner belongs
-#     there; a test's own files sit beside the test that names them; every test in src/tests says why it is
+#     there; a test reads no other instance's files but its host (main.nix, as a node); a test's own files sit beside
+#     the test that names them; every test in src/tests says why it is
 #     lab-wide in its first lines (`# lab-wide: <reason>`)
 #   - an instance folder holds main.nix and instance.nix, a module folder default.nix, lib/ and tests/ only
 { lib, src, ... }:
@@ -170,6 +171,7 @@ let
   # a test runnable by hand (media-stack.sh): it starts with its interpreter
   isScript = path: lib.hasPrefix "#!" (builtins.readFile (src + "/${path}"));
   instanceFolders = lib.filter (f: (builtins.readDir (src + "/instances")).${f} == "directory") (entriesOf "instances");
+  instanceOwners = map (f: "instances/${f}") instanceFolders;
   # a test reaches its host by path or by configuration name (inputs.self.nixosConfigurations."<folder>")
   hostsNamedIn = path: map (f: "instances/${f}") (lib.filter (f: lib.hasInfix "\"${f}\"" (codeOf path)) instanceFolders);
   labWideLaws = lib.concatMap (path: let head = lib.take labWideLines (lib.splitString "\n" (builtins.readFile (src + "/${path}"))); in
@@ -188,6 +190,10 @@ let
       "src/${path} is named by no test beside it: it belongs beside the test that runs it"
     ++ lib.optional (r != null && lib.hasSuffix ".nix" path && !(lib.elem owner reached) && lib.length targets == 1)
       "src/${path} tests ${lib.head targets} alone: move it into src/${lib.head targets}/tests/"
+    # another instance's host joins a test as a node; its other files are tested in its own tests/
+    ++ map (t: "src/${path} reads src/${t}: a case about another instance's file belongs in its tests/")
+      (lib.filter (t: kindOf owner == "instances" && lib.elem (ownerOf t) instanceOwners && ownerOf t != owner
+        && !(lib.hasSuffix "/main.nix" t)) (if r == null then [ ] else r.refs))
   ) (lib.filter (path: ownerOf path != "lab" && builtins.match "[^/]+/[^/]+/tests/[^/]+" path != null) testFiles);
 
   folderLaws = lib.concatMap (folder: let files = builtins.readDir (src + "/instances/${folder}"); in
