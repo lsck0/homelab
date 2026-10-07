@@ -13,8 +13,21 @@ let
       broken.url = "${base}/502";
       # nothing listens on port 1
       gone.url = "http://127.0.0.1:1/";
+      hub = { url = "${base}/200"; registry = "docker.io"; };
+      quay = { url = "${base}/200"; registry = "quay.io"; };
     };
   })._module.args.upstream;
+
+  # image reference -> the upstream it is pulled from
+  images = {
+    "alpine:3.21" = "hub";
+    "alpine/socat:1.8@sha256:00" = "hub";
+    "docker.io/library/redis:8" = "hub";
+    "quay.io/prometheus/node-exporter:v1" = "quay";
+    "registry.lsck0.dev/hello/web@sha256:00" = null;
+    "localhost:5000/x" = null;
+  };
+  imagesWrong = lib.filterAttrs (image: name: upstream.ofImage image != name) images;
 
   # the path names the status the stand-in answers
   standIn = pkgs.writeText "stand-in.py" ''
@@ -61,6 +74,7 @@ let
     grep -q "^${c.upstream} unavailable" ${name}.log || { echo "FAIL ${name}: no '${c.upstream} unavailable' line"; failed=1; }
   '';
 in
+assert lib.assertMsg (imagesWrong == { }) "upstream.ofImage: ${builtins.toJSON (lib.mapAttrs (image: _: upstream.ofImage image) imagesWrong)}";
 pkgs.runCommand "upstream" { nativeBuildInputs = [ pkgs.python3 pkgs.curl ]; } ''
   python3 ${standIn} &
   for _ in $(seq 50); do curl -s -o /dev/null ${base}/200 && break; sleep 0.1; done

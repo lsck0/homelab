@@ -14,7 +14,7 @@
 #   systemctl start app-builder@<app>        look at one app now, what its ci's /redeploy does
 #   app-builder-redeploy <app>               forget the app's state, then deploy it again whatever it was
 #   journalctl -u app-builder -u 'app-builder@*'
-{ config, lib, pkgs, catalog, inventory, lab, ... }:
+{ config, lib, pkgs, catalog, inventory, lab, upstream, ... }:
 let
   # -----------------------------------------------------------------------------
   # CONSTANTS
@@ -83,6 +83,11 @@ let
     inherit registryUser github githubApi timeouts;
     inherit (cfg) backoff;
     inherit baseRefreshS;
+    # github and the image registries (lib/app-builder.py UPSTREAMS)
+    upstreams = {
+      urls = lib.mapAttrs (_: u: u.url) lab.upstreams;
+      inherit (upstream) registries retry unavailable;
+    };
     registryPasswordFile = config.sops.secrets.registry-builder-password.path;
     deployKeyFile = config.sops.secrets.app-deploy-key.path;
     inherit inbox;
@@ -98,9 +103,13 @@ let
     }) catalog.apps;
   });
 
-  # the longest one app may take: every git call, every watched path, every image, the deploy
-  appTimeoutS = a: gitCallsPerApp * timeouts.gitS + lib.length a.watch * timeouts.apiS + timeouts.loginS
-    + lib.length (lib.attrNames a.build) * (timeouts.buildS + 3 * timeouts.pushS) + timeouts.deployS;
+  # an upstream call at its worst: every attempt at its bound, the doubling backoffs between them, the probe
+  backoffsS = (lib.foldl' (acc: _: { sumS = acc.sumS + acc.delayS; delayS = acc.delayS * 2; })
+    { sumS = 0; delayS = upstream.retry.backoffS; } (lib.range 2 upstream.retry.attempts)).sumS;
+  retriedS = boundS: upstream.retry.attempts * boundS + backoffsS + upstream.retry.probeTimeoutS;
+  # the longest one app may take: every git call, every watched path, every image (its base's pull retried), the deploy
+  appTimeoutS = a: retriedS (gitCallsPerApp * timeouts.gitS + lib.length a.watch * timeouts.apiS) + timeouts.loginS
+    + lib.length (lib.attrNames a.build) * (retriedS timeouts.pushS + timeouts.buildS + 2 * timeouts.pushS) + timeouts.deployS;
   appTimeouts = map appTimeoutS (lib.attrValues catalog.apps);
   runTimeoutS = lib.foldl' (sum: t: sum + t) runOverheadS appTimeouts;
 
