@@ -73,6 +73,8 @@ in {
     serviceConfig = {
       Type = "oneshot";
       TimeoutStartSec = "20h";
+      # one compile the kernel kills for memory fails its package, not the night
+      OOMPolicy = "continue";
       ExecStartPre = "${pkgs.coreutils}/bin/touch ${busyFlag}";
       # conmon lives outside this unit's cgroup, a stop would leave the build running unflagged
       ExecStopPost = [
