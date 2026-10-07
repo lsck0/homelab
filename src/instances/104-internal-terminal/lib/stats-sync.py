@@ -490,6 +490,11 @@ def main():
         return 2
     out_dir = sys.argv[1]
 
+    # every guest would read as down; the panel keeps its last stats instead
+    if feed_io.prometheus_query(PROMETHEUS, "vector(1)") is None:
+        feed_io.log("prometheus unavailable, keeping the last stats.json")
+        return feed_io.EXIT_UNAVAILABLE
+
     rows, summary = services()
     # grid shows enabled vms; disabled ones as names
     running = [r for r in rows if not r["disabled"]]

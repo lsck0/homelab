@@ -4,7 +4,7 @@
 # sender's address: every lab host writes the lab's, an app node only the tenants of the apps its cluster runs (its
 # relay names them, modules/app-telemetry.nix). The query doors serve reads to their grants only. The stores listen on
 # loopback, where grafana, the alert rules and the frontend intake reach them.
-{ config, pkgs, lib, inventory, nasMountRo, site, catalog, lab, ... }:
+{ config, pkgs, lib, inventory, nasMountRo, site, catalog, lab, upstream, ... }:
 let
   telemetry = import ../../modules/telemetry.nix { inherit lib inventory; };
   net = import ../../modules/net.nix { inherit lib inventory site; };
@@ -1015,8 +1015,10 @@ in {
     serviceConfig = {
       Type = "oneshot";
       StateDirectory = baseNameOf spotPriceState;
+      SuccessExitStatus = [ upstream.unavailable ];
     };
-    script = "${spotPrice}/bin/spot-price ${spotPriceState}/spot.json ${textfileDir}/${spotPriceFile}.prom";
+    # no price for now: retried from the cache, then "energycharts unavailable" while the api is down
+    script = "${upstream.run} energycharts ${spotPrice}/bin/spot-price ${spotPriceState}/spot.json ${textfileDir}/${spotPriceFile}.prom";
   };
 
   # quarter-hour slots; the prices themselves come from the cache, fetched a few times a day

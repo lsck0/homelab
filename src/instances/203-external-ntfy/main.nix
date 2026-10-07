@@ -1,4 +1,4 @@
-{ config, pkgs, lib, catalog, site, ... }:
+{ config, pkgs, lib, catalog, site, lab, upstream, ... }:
 let
   ntfy = import ../../modules/ntfy.nix;
   inherit (ntfy) topics;
@@ -29,9 +29,15 @@ let
   heartbeatMissedMax = 3;
   heartbeatWindowMin = heartbeatIntervalMin * heartbeatMissedMax;
   local = "http://127.0.0.1:${toString route.port}";
+  # off-site dead man's switch: healthchecks.io pages the owner when the pings stop, a whole-site outage included
+  healthchecksUrl = lab.upstreams.healthchecks.url;
+  healthchecksTimeoutS = 10;
 in {
   sops.secrets = lib.mapAttrs' (_: u: lib.nameValuePair u.password { restartUnits = [ "ntfy-sh.service" ]; }) secretUsers
-    // { ntfy-desktop-token.restartUnits = [ "ntfy-sh.service" ]; };
+    // { ntfy-desktop-token.restartUnits = [ "ntfy-sh.service" ]; healthchecks-ping-uuid = { }; };
+  # curl reads the url from a file: the ping uuid never reaches argv
+  sops.templates."healthchecks-ping.curlrc".content =
+    ''url = "${healthchecksUrl}/${config.sops.placeholder.healthchecks-ping-uuid}"'';
 
   # NTFY_AUTH_* from the sops passwords; partOf: a restart of ntfy (a changed secret) renders them first
   systemd.services.${authUnit} = {
@@ -86,7 +92,7 @@ in {
     settings = {
       base-url = "https://${route.host}.${site.domain}";
       listen-http = ":${toString route.port}";
-      # only the zone's ingress reaches the port (the guard, modules/network.nix), its x-forwarded-for is the visitor's
+      # only the zone's ingress and vm-105 reach the port (the guard, modules/network.nix); the ingress's xff is the visitor's
       behind-proxy = true;
       auth-file = authFile;
       auth-default-access = "deny-all";
@@ -132,14 +138,20 @@ in {
     description = "Alert when vm-105's alerting heartbeat stops";
     after = [ "ntfy-sh.service" ];
     path = [ pkgs.curl pkgs.gnugrep pkgs.coreutils ];
-    serviceConfig = { Type = "oneshot"; StateDirectory = "heartbeat-check"; };
+    serviceConfig = {
+      Type = "oneshot";
+      StateDirectory = "heartbeat-check";
+      SuccessExitStatus = [ upstream.unavailable ];
+    };
     script = ''
       set -euo pipefail
       auth() { printf 'Authorization: Bearer %s\n' "$(cat ${heartbeatToken})"; }
       alerted=/var/lib/heartbeat-check/alerted
       if auth | curl -sSf -H @- "${local}/${topics.heartbeat}/json?poll=1&since=${toString heartbeatWindowMin}m" \
         | grep -q '"event":"message"'; then
-        rm -f "$alerted"; exit 0
+        rm -f "$alerted"
+        exec ${upstream.run} healthchecks curl -sSf -m ${toString healthchecksTimeoutS} -o /dev/null \
+          --config ${config.sops.templates."healthchecks-ping.curlrc".path}
       fi
       [ -e "$alerted" ] && exit 0
       auth | curl -sSf -H @- -H "Title: FIRING: Monitoring silent" -H "Tags: rotating_light" -o /dev/null \

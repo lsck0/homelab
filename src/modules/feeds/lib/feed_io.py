@@ -30,6 +30,8 @@ import urllib.request
 HTTP_TIMEOUT_S = 15
 # a log line names the call, not its whole query
 LOG_QUERY_CHARS = 60
+# modules/upstream's exit status: the source is down, the last output stays, the unit does not fail
+EXIT_UNAVAILABLE = 75
 
 
 def log(message):

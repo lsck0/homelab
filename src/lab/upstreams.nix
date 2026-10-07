@@ -13,4 +13,8 @@
   dockerhub.url = "https://registry-1.docker.io/v2/";
   ghcr.url = "https://ghcr.io/v2/";
   crowdsec.url = "https://hub-data.crowdsec.net";
+  healthchecks.url = "https://hc-ping.com";
+  energycharts.url = "https://api.energy-charts.info";
+  arxiv.url = "https://rss.arxiv.org";
+  trmnl.url = "https://trmnl.com";
 }
