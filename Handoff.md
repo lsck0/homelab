@@ -48,8 +48,8 @@ steps below are written so that a local agent with lab access can do them then (
   from a filesystem mirror; the lock file is unchanged).
 - VM test `harness-smoke` passes. New check `pve-install` (realm fail-closed, ldaps binding, apt/GitHub outage, tampered
   archive) passes. Every other VM test evaluates; none of them has been run on this branch yet.
-- `policy-eval` reports: the host memory budget (#1: floors 41984 MiB vs 32022 MiB on the node, open), and secrets
-  files that do not hold exactly their declared names (clears with the secrets steps below).
+- `policy-eval` reports only secrets files that do not hold exactly their declared names (clears with the secrets
+  steps below); the memory budget (#1) holds.
 
 ### Finding status at this checkpoint
 | status | findings |
@@ -61,7 +61,7 @@ steps below are written so that a local agent with lab access can do them then (
 | needs-owner (repo side done, lab steps below) | 2 (Proxmox firewall), 4 (lldap realm: ldaps + TOTP), 9 (pve certificate SAN) |
 | fixed and verified by checks | 28 (pinned hermes-agent reads `ANTHROPIC_TOKEN` as the OAuth token and scrubs it from every command; `CLAUDE_CODE_OAUTH_TOKEN` was not scrubbed, so the leak was real: switched), 42, 43, 47, 48, 49, 81, 85 |
 | rejected by the owner | 3; 16 (Hermes keeps root ssh everywhere; only its key comment was corrected to vm-114, and Hermes now checks host keys strictly against `src/generated/known_hosts`) |
-| partly / needs-owner | 1: memory law in place; ingresses 1536/1024, nas floor 1536, worker 1536; still 11628 MiB over (43650 vs 32022). Owner: `cat /sys/module/zfs/parameters/zfs_arc_max; zpool list` on the node (no pool: arc 0, -3202), then decide floors (119 build 5120->3072 with #31, 117/140 2048->1024) or add RAM |
+| fixed (owner's local session aacd5b8, kept over the collector's sizing) | 1: floors 25600 + lxc 3840 + reserve 2048 within the node's 32022 MiB; arc 0 (no zfs pool on the node, per the owner's session) |
 | partly done (draft finished to evaluate, not yet reviewed against the finding) | 5, 14, 15, 53 |
 | open (the draft may hold partial work in these areas; unreviewed) | every other finding |
 

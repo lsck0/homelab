@@ -33,12 +33,10 @@ let
       fi
       name=$1
       shift
-      case $name in
-        ${lib.concatStrings (lib.mapAttrsToList (n: u: ''
-          ${n}) url=${lib.escapeShellArg u.url} ;;
-        '') lab.upstreams)}
-        *) echo "upstream: no upstream $name in src/lab/upstreams.nix" >&2; exit 2 ;;
-      esac
+      declare -A urls
+      ${lib.concatStrings (lib.mapAttrsToList (n: u: "urls[${n}]=${lib.escapeShellArg u.url}\n") lab.upstreams)}
+      url=''${urls[$name]:-}
+      [ -n "$url" ] || { echo "upstream: no upstream $name in src/lab/upstreams.nix" >&2; exit 2; }
       attempts=''${UPSTREAM_ATTEMPTS:-${toString attempts}}
       backoff=''${UPSTREAM_BACKOFF_S:-${toString backoffS}}
       limit=''${UPSTREAM_TIMEOUT_S:-${toString attemptTimeoutS}}

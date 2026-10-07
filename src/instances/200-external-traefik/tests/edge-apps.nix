@@ -5,14 +5,15 @@
 #
 # The fixture is the real `wat` app (src/apps/wat), enabled for this test (every edge feature: anubis on /, a direct
 # /api with its metrics on the same port, an upload path without the waf and a 100 MiB limit, an internal route).
-# With it the apps' reservations need three swarm workers (modules/limits workerCountOf); `appnodes` serves its ports
-# on two of their addresses (the third is absent: the health check must drop it), the terminal's feed (vm-104) and authelia's forwardauth (vm-101, lib/authelia_stub.py: no session
+# Its reservation here needs three swarm workers (modules/limits workerCountOf); `appnodes` serves its ports on
+# two of their addresses (the third is absent: the health check must drop it), the terminal's feed (vm-104) and authelia's forwardauth (vm-101, lib/authelia_stub.py: no session
 # here, every gated host is sent to the portal); `world` owns the flat lab's gateways and the outside clients.
 { pkgs, lib, specialArgs, ... }:
 let
   lab = import ../../../tests/lib/lab.nix {
     inherit pkgs lib specialArgs;
-    apps = apps: lib.recursiveUpdate apps { wat.enable = true; };
+    # its reservation needs three workers beside hello's (modules/limits workerCountOf)
+    apps = apps: lib.recursiveUpdate apps { wat = { enable = true; reservation.memoryMiB = 1024; }; };
   };
   net = import ../../../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
   ip = id: lab.inventory.${id}.ip;
