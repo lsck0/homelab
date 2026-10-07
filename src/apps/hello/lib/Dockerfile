@@ -1,10 +1,15 @@
 # syntax=docker/dockerfile:1.10
 FROM alpine:3.21 AS builder
 
-RUN apk add --no-cache gcc musl-dev make sccache
+RUN apk add --no-cache gcc musl-dev make sccache curl
 
 WORKDIR /build
-COPY main.c httpserver.h Makefile ./
+COPY main.c Makefile ./
+
+# the header at the commit and hash app.nix pins
+ARG HTTPSERVER_URL
+ARG HTTPSERVER_SHA256
+RUN curl -fsSL -o httpserver.h "$HTTPSERVER_URL" && echo "$HTTPSERVER_SHA256  httpserver.h" | sha256sum -c -
 
 ENV SCCACHE_DIR=/tmp/sccache
 
