@@ -28,6 +28,9 @@ let
     repo = "lsck0/${name}";
     branch = "master";
     routes.${name} = { inherit port; health = "/"; off = { sso = "the fixture is public"; anubis = "no browser here"; }; };
+    # both apps and a deploy's surge on the one worker (modules/limits workerCountOf)
+    resources.web.memoryMiB = 128;
+    reservation.memoryMiB = 256;
   } extra;
   apps = { lazy = appOf "lazy" 20180 { idle.stopAfter = idleWindow; }; steady = appOf "steady" 20190 { }; };
   common = {

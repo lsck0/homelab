@@ -24,6 +24,9 @@ let
     routes.${name} = { inherit port; off.sso = "the fixture is public"; };
     stateful = [ "web" ];
     volumes.data.backup = true;
+    # both apps and a deploy's surge on the one worker (modules/limits workerCountOf)
+    resources.web.memoryMiB = 128;
+    reservation.memoryMiB = 256;
   } extra;
   apps = {
     keep = appOf "keep" 20160 { };
