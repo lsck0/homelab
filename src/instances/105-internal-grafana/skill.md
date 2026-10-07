@@ -55,14 +55,14 @@ Ports and addresses are defined once in `src/modules/telemetry.nix`; rules, cont
   Silence: `POST localhost/api/alertmanager/grafana/api/v2/silences` (same way) with matchers, startsAt, endsAt,
   createdBy, comment.
 - The `watchdog` rule fires on purpose, always: it posts to ntfy topic `homelab-heartbeat` every 5 minutes, and
-  vm-203 alerts on `homelab-alerts` when that stops (vm-105 down, alerting stalled, Prometheus down). Never
-  silence it.
-- Tempo (traces) OTLP at 10.100.0.105:4317/4318 and Pyroscope (profiles) at :4040, 14 days, one tenant per app:
-  every request carries `X-Scope-OrgID: app-<app>` (the swarm injects it into the app's containers as
-  `OTEL_EXPORTER_OTLP_HEADERS`), each tenant 1 MiB/s (burst 4 MiB) of each; above that, 429 for that app alone.
-  Datasources "Tempo <app>", "Pyroscope <app>", "Loki <app>". Span metrics (`traces_spanmetrics_*`,
-  `traces_service_graph_*`, label `tenant`) land in Prometheus.
-  Read one trace: `curl -s -H 'X-Scope-OrgID: app-wat' http://10.100.0.105:3200/api/traces/<id>`.
+  vm-203 alerts on `homelab-alerts` when that stops (vm-105 down, alerting stalled, Prometheus down), and pings
+  healthchecks.io while it arrives, which pages the owner off-site when the whole lab is down. Never silence it.
+- Tempo (traces) OTLP at 10.100.0.105:4317/4318 and Pyroscope (profiles) at :4040, push only, 14 days, one tenant
+  per app: an app's containers send to their node's relay (172.17.0.1, same ports), which names the tenant
+  `app-<app>` of the sending container's stack, whatever the app claims; each tenant 1 MiB/s (burst 4 MiB) of each,
+  above that 429 for that app alone. Datasources "Tempo <app>", "Pyroscope <app>", "Loki <app>". Span metrics
+  (`traces_spanmetrics_*`, `traces_service_graph_*`, label `tenant`) land in Prometheus.
+  Read one trace, on vm-105: `curl -s -H 'X-Scope-OrgID: app-wat' http://127.0.0.1:3200/api/traces/<id>`.
 - Browsers: `<host>/otlp/` on each app's own origin reaches the frontend intake (:4319, from the ingresses only),
   which keeps allow-listed attributes (no cookies, query strings or form data) and files them under the app's
   tenant: traces to Tempo, logs to Loki, metrics (label `tenant`) to Prometheus.
