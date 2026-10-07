@@ -508,15 +508,17 @@ let
       fi
       dir=$(docker volume inspect --format '{{.Mountpoint}}' "$app"_"$volume")
       staged=$(mktemp -d "$(dirname "$dir")/restore.XXXXXX")
-      trap 'rm -rf "$staged" "$staged.previous"' EXIT
+      trap 'rm -rf "$staged"' EXIT
       case "$archive" in
         *.zst)
           zstd -tq "$archive"
           zstd -dc "$archive" | tar -C "$staged" -xf - ;;
         *) tar -C "$staged" -xf "$archive" ;;
       esac
+      # the old data goes only once the new is in place
       mv "$dir" "$staged.previous"
       mv "$staged" "$dir"
+      rm -rf "$staged.previous"
       echo "swarm-volume-restore: $app's volume $volume restored from $archive"
     '';
   };

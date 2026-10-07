@@ -98,6 +98,10 @@ pkgs.testers.runNixOSTest {
         assert "in use" in refusal, refusal
         vm_140.succeed("docker service scale --detach keep_web=0")
         vm_250.wait_until_succeeds("[ -z \"$(docker ps -q --filter volume=keep_data)\" ]", timeout=60)
+        # a truncated archive is refused before the volume is touched
+        vm_250.succeed("head -c 64 $(ls -1 /var/backup/db/keep-volume-data/*.tar.zst | tail -n1) > /tmp/truncated.tar.zst")
+        vm_250.fail("swarm-volume-restore keep data /tmp/truncated.tar.zst")
+        assert vm_250.succeed("cat $(docker volume inspect -f '{{.Mountpoint}}' keep_data)/index.html").strip() == "lost"
         vm_250.succeed("swarm-volume-restore keep data")
         vm_140.succeed("docker service scale --detach keep_web=1")
         vm_250.wait_until_succeeds("[ -n \"$(docker ps -q --filter label=com.docker.swarm.service.name=keep_web)\" ]", timeout=120)
