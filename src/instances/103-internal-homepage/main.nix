@@ -6,7 +6,10 @@ let
   stateDir = "/var/lib/homepage";
   containerPort = 3000;
   # read-only behind nginx on vm-105: the widgets only query
-  prometheus = (import ../../modules/telemetry.nix { inherit lib inventory; }).urls.prometheus;
+  telemetry = import ../../modules/telemetry.nix { inherit lib inventory; };
+  inherit (telemetry.urls) prometheus;
+  # only the builder's own deploy metric counts, as in vm-105's alert
+  builderVm = telemetry.vmName catalog.builder;
   hostUrl = host: "https://${net.fqdn host}";
   urlOf = route: hostUrl routes.${route}.host;
 
@@ -87,7 +90,7 @@ let
       { label = "Nodes"; query = "count(up{job=\"${cadvisorJob}\"} == 1) or vector(0)"; format.suffix = "/${toString nodeCount}"; }
       { label = "Tasks"; query = "count(container_last_seen${everyApp}) or vector(0)"; }
       { label = "Memory"; query = "sum(container_memory_working_set_bytes${everyApp})"; format.type = "bytes"; }
-      { label = "Failed deploys"; query = "count(homelab_app_deploy_ok == 0) or vector(0)"; }
+      { label = "Failed deploys"; query = "count(homelab_app_deploy_ok{vm=\"${builderVm}\"} == 0) or vector(0)"; }
     ];
   };
 
@@ -111,8 +114,8 @@ let
       label = "Healthy"; query = "sum(traefik_service_server_up{service=\"${r.name}@file\"})"; format.suffix = "/${toString nodeCount}";
     } ++ [
       { label = "Memory"; query = "sum(container_memory_working_set_bytes${own})"; format.type = "bytes"; }
-      # the builder's textfile metric on vm-117 (instances/140-internal-swarm/lib/app-builder.nix)
-      { label = "Deployed"; query = "time() - homelab_app_deploy_last_success_timestamp_seconds{app=\"${app}\"}"; format.type = "duration"; }
+      # the builder's textfile metric (instances/140-internal-swarm/lib/app-builder.nix)
+      { label = "Deployed"; query = "time() - homelab_app_deploy_last_success_timestamp_seconds{vm=\"${builderVm}\",app=\"${app}\"}"; format.type = "duration"; }
     ]);
   };
 
@@ -134,11 +137,18 @@ let
 
   servicesYaml = pkgs.writeText "services.yaml" (lib.concatMapStrings groupYaml ([ infra ] ++ groups));
 
+  # served by homepage itself (its own favicon too): a visit loads nothing from a third party
+  background = pkgs.fetchurl {
+    name = "homepage-background.jpg";
+    url = "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=2560";
+    sha256 = "1xcfnlp2frzn32smp2j8b9ni52gkq223y6annj7jlrdhfk49avcs";
+  };
+  backgroundPath = "/images/background.jpg";
+
   settingsYaml = pkgs.writeText "settings.yaml" (''
     title: Homelab
-    favicon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/homepage.svg
     background:
-      image: https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=2560
+      image: ${backgroundPath}
       blur: md
       brightness: 50
       saturate: 60
@@ -179,8 +189,8 @@ let
           hour12: false
     - openmeteo:
         label: Weather
-        latitude: 51.23
-        longitude: 6.78
+        latitude: ${toString site.location.latitude}
+        longitude: ${toString site.location.longitude}
         timezone: ${site.timeZone}
         units: metric
     - search:
@@ -284,6 +294,7 @@ in {
     ports = [ "${toString routes.homepage.port}:${toString containerPort}" ];
     volumes = [
       "${stateDir}:/app/config"
+      "${background}:/app/public${backgroundPath}:ro"
     ] ++ lib.optional (proxmoxCa != null) "${proxmoxCaFile}:${proxmoxCaPath}:ro";
     environment = {
       HOMEPAGE_ALLOWED_HOSTS = publicHost;
@@ -292,7 +303,8 @@ in {
       NODE_EXTRA_CA_CERTS = proxmoxCaPath;
     };
     environmentFiles = [ envFile ];
-    extraOptions = [ "--cap-add=NET_RAW" ];
+    # NET_RAW: the ping cards; the image's own healthcheck logged every 30s, the prober watches the route
+    extraOptions = [ "--cap-add=NET_RAW" "--no-healthcheck" ];
   };
 
   systemd.tmpfiles.rules = [
