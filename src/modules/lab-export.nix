@@ -10,8 +10,8 @@
 #   router       the router's address on the house lan
 #   zones        <zone> -> { subnet; router; ingress; }  the router's address in the zone, the ingress's vmid or null
 #   guests       <vmid> -> { name; zone; ip; powered; idle; enabled; }  name <vmid>-<zone>-<service> (the router: its
-#                hostname), zone also "router", powered a bool, idle its stop delay ("30m") or null; enabled the
-#                former tri-state "true" | "false" | "onDemand", kept until the desktop clients read powered and idle
+#                hostname), zone also "router", powered a bool, idle its stop delay ("30m") or null; enabled
+#                "true" | "false" | "onDemand" derived from both, kept until the desktop clients read powered and idle
 #   routes       <route> -> { host; path; zone; protocol; vmid; app; port; health; }  host the fqdn, zone internal or
 #                external, vmid (an instance's) or app (a swarm app's), port the backend's, health null for none
 #   infra        [{ name; href; ping; }]  the lab's frame (modules/infra.nix) in display order, null where none
@@ -27,6 +27,9 @@ let
   telemetry = import ./telemetry.nix { inherit lib inventory; };
   infra = import ./infra.nix { inherit net; };
   ntfy = import ./ntfy.nix;
+
+  # schema 1's tri-state, for the desktop clients that still read it; schema 2 drops it for powered and idle
+  enabledOf = g: if !g.powered then "false" else if g.idle != null then "onDemand" else "true";
 
   urlOf = host: "https://${net.fqdn host}";
   routeOf = r: {
@@ -46,7 +49,8 @@ in
   }) net.zones;
 
   guests = lib.mapAttrs (_: g: {
-    inherit (g) name ip powered idle enabled;
+    inherit (g) name ip powered idle;
+    enabled = enabledOf g;
     zone = g.type;
   }) inventory;
 

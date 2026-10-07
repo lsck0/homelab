@@ -30,7 +30,6 @@ locals {
     for id, i in local.instances : id => {
       name        = i.name
       type        = i.type
-      enabled     = i.enabled
       kind        = i.kind
       privileged  = i.privileged
       features    = i.features
@@ -48,6 +47,10 @@ locals {
       boot_order  = i.boot_order
       boot_wait   = i.boot_wait
 
+      # an idle guest starts once so the first deploy reaches it, then sleeps until its ingress wakes it
+      started = i.powered
+      on_boot = i.powered && i.idle == null
+
       bridge        = i.type == "router" ? var.wan_bridge : local.zones[i.type].bridge
       extra_bridges = i.type == "router" ? [for z in local.router_zones : local.zones[z].bridge] : []
 
@@ -55,13 +58,13 @@ locals {
       prefix  = tostring(i.prefix)
       gateway = i.gateway
 
-      # the zone's ingress wakes its onDemand guests as this proxmox user (scripts/pve-install.sh creates it)
-      wake_user = i.enabled == "onDemand" ? "wake-${i.type}@pve" : null
+      # the zone's ingress wakes its idle guests as this proxmox user (scripts/pve-install.sh creates it)
+      wake_user = i.idle != null ? "wake-${i.type}@pve" : null
     }
   }
 }
 
-# a wake user and its privsep token may power exactly their zone's onDemand guests: one acl per guest, not a pool,
+# a wake user and its privsep token may power exactly their zone's idle guests: one acl per guest, not a pool,
 # since the provider recreates a container whose pool changes
 locals {
   wake_acls = merge([for id, v in local.vms : v.wake_user == null ? {} : {
@@ -102,11 +105,9 @@ resource "proxmox_virtual_environment_vm" "vm" {
   name      = each.value.name
   node_name = local.site.node
   vm_id     = tonumber(each.key)
-  # ondemand vms start once so the first deploy reaches them
-  started = each.value.enabled != "false"
-  # ondemand vms stay off at host boot
-  on_boot = each.value.enabled == "true"
-  machine = each.value.machine
+  started   = each.value.started
+  on_boot   = each.value.on_boot
+  machine   = each.value.machine
 
   startup {
     order    = each.value.boot_order
@@ -217,8 +218,8 @@ resource "proxmox_virtual_environment_container" "ct" {
   node_name     = local.site.node
   vm_id         = tonumber(each.key)
   unprivileged  = !each.value.privileged
-  started       = each.value.enabled != "false"
-  start_on_boot = each.value.enabled == "true"
+  started       = each.value.started
+  start_on_boot = each.value.on_boot
 
   startup {
     order    = each.value.boot_order

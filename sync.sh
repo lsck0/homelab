@@ -536,22 +536,22 @@ while read -r id features onboot; do
 done
 REMOTE
 )
-jq -r 'to_entries[] | select(.value.kind == "lxc") | "\(.key) \(.value.features) \(if .value.enabled == "true" then 1 else 0 end)"' "$INVENTORY" \
+jq -r 'to_entries[] | select(.value.kind == "lxc") | "\(.key) \(.value.features) \(if .value.powered and .value.idle == null then 1 else 0 end)"' "$INVENTORY" \
   | "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
       "bash -c $(printf %q "$GUEST_SETTINGS_REMOTE")" \
   || { echo "ERROR: Proxmox did not take the guests' root-only settings (above)."; DEPLOY_FAILURE=1; }
 
-# every enabled guest but the router, built and deployed below; its configuration is named like the guest (modules/lab)
-mapfile -t GUEST_IDS < <(jq -r 'to_entries[] | select(.value.type != "router" and .value.enabled != "false") | .key' "$INVENTORY")
-DISABLED_VMS=$(jq -r '[to_entries[] | select(.value.enabled == "false") | .key] | join(" ")' "$INVENTORY")
+# every powered guest but the router, built and deployed below; its configuration is named like the guest (modules/lab)
+mapfile -t GUEST_IDS < <(jq -r 'to_entries[] | select(.value.type != "router" and .value.powered) | .key' "$INVENTORY")
+DISABLED_VMS=$(jq -r '[to_entries[] | select(.value.powered | not) | .key] | join(" ")' "$INVENTORY")
 if [ -n "$DISABLED_VMS" ]; then echo ">>> Disabled VMs, neither built nor deployed: $DISABLED_VMS"; fi
 
 # the traefiks are always on: pause their reaper before waking anything it could stop again
 host_keys_learn "${ONDEMAND_IDS[@]}"
 reaper_pause
 
-# enabled vms must run to receive a deploy
-mapfile -t ENABLED_IDS < <(jq -r 'to_entries[] | select(.value.enabled != "false") | .key' "$INVENTORY")
+# powered vms must run to receive a deploy
+mapfile -t ENABLED_IDS < <(jq -r 'to_entries[] | select(.value.powered) | .key' "$INVENTORY")
 if [ "${#ENABLED_IDS[@]}" -gt 0 ]; then
   for vmid in "${ENABLED_IDS[@]}"; do vm_wake "$vmid"; done
   # waits for the guests just started: their agents answer once they are up

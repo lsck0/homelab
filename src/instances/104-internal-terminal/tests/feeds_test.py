@@ -662,9 +662,10 @@ class StatsSync(unittest.TestCase):
         self.assertEqual([r["pct"] for r in rows], [100, 50, 0])
 
     def test_payload_names_guests_like_grafana_and_hides_torrent_names(self):
-        inventory = {"121": {"name": "121-internal-paperless", "vm": "paperless", "enabled": "true"},
-                     "150": {"name": "150-apps-swarm", "vm": "swarm-150", "enabled": "true"},
-                     "126": {"name": "126-internal-huginn", "vm": "huginn", "enabled": "false"}}
+        inventory = {"121": {"name": "121-internal-paperless", "vm": "paperless", "powered": True, "idle": None},
+                     "128": {"name": "128-internal-jellyseerr", "vm": "jellyseerr", "powered": True, "idle": "30m"},
+                     "150": {"name": "150-apps-swarm", "vm": "swarm-150", "powered": True, "idle": None},
+                     "126": {"name": "126-internal-huginn", "vm": "huginn", "powered": False, "idle": None}}
         with tempfile.TemporaryDirectory() as tmp:
             inv = os.path.join(tmp, "inventory.json")
             with open(inv, "w") as handle:
@@ -695,7 +696,8 @@ class StatsSync(unittest.TestCase):
             finally:
                 for k, v in saved.items():
                     setattr(stats_sync, k, v)
-        self.assertEqual([r["name"] for r in rows], ["paperless", "huginn", "swarm-150"])
+        self.assertEqual([r["name"] for r in rows], ["paperless", "huginn", "jellyseerr", "swarm-150"])
+        # an idle guest asleep is no outage
         self.assertEqual(summary["down"], ["swarm-150"])
         self.assertEqual(torrents["items"][0]["name"], "radarr")
         payload_write("stats", payload)

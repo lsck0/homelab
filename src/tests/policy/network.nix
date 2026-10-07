@@ -119,8 +119,7 @@ lawsOf {
     ++ lib.optional (natAccept != null && natAccept < lastDrop) "a drop of the router's forward policy comes after nat's accept";
 
   "inventory" = lib.concatLists (lib.mapAttrsToList (id: v:
-    lib.optional (!(lib.elem v.enabled [ "true" "false" "onDemand" ])) "${id}: enabled ${v.enabled}"
-    ++ lib.optional (v.enabled == "onDemand" && (net.zones.${v.type}.ingress or null) == null) "${id}: onDemand in a zone without an ingress"
+    lib.optional (v.idle != null && (net.zones.${v.type}.ingress or null) == null) "${id}: idle in a zone without an ingress"
     ++ lib.optional (v.type != "router" && lib.any (s: lib.any (inPool v.ip) s.pools) kea) "${id}: ${v.ip} lies in a dhcp pool"
   ) inventory);
 

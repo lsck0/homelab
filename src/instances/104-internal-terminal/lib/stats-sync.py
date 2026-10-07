@@ -210,14 +210,13 @@ def services():
     rows = []
     for vmid, vm in sorted(inv.items(), key=lambda kv: int(kv[0])):
         name = vm["vm"]
-        enabled = vm.get("enabled", "true")
         online = up.get(name, 0) >= 1
         rows.append({
             "vmid": vmid,
             "name": name,
             "online": online,
-            "disabled": enabled == "false",
-            "on_demand": enabled == "onDemand",
+            "disabled": not vm["powered"],
+            "on_demand": vm["idle"] is not None,
             "cpu": round(cpu.get(name, 0.0), 1) if online else 0.0,
             "mem": round(mem.get(name, 0.0), 1) if online else 0.0,
             "cpu_pct": percent_clamp(cpu.get(name, 0.0)) if online else 0,
