@@ -197,11 +197,12 @@ let
         mv "$metrics.tmp" "$metrics"
       }
       # a deploy that failed while a registry of the stack's public images is down: no failure, the running version stays
+      unavailable=${toString upstream.unavailable}
       outage_exit() {
         for upstream in $(jq -r --arg app "$app" '.apps[$app].upstreams[]' "$catalog"); do
           if ! ${upstream.run} "$upstream"; then
             say "$upstream unavailable: $app keeps its running version" >&2
-            exit ${toString upstream.unavailable}
+            exit "$unavailable"
           fi
         done
       }
@@ -664,7 +665,7 @@ in {
             for marker in ${convergePendingDir}/*; do
               [ -e "$marker" ] || continue
               app=$(basename "$marker")
-              systemctl restart --no-block "${convergeUnitOf "$app"}.service"
+              systemctl restart --no-block "${convergeUnitOf ""}$app.service"
             done
           '';
         };

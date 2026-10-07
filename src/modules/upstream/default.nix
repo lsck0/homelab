@@ -23,9 +23,12 @@ let
   # sysexits EX_TEMPFAIL: the upstream is down, the caller did nothing wrong
   unavailable = 75;
 
+  # one "<name> <url>" line per upstream
+  urlsFile = pkgs.writeText "upstreams" (lib.concatLines (lib.mapAttrsToList (name: u: "${name} ${u.url}") lab.upstreams));
+
   run = pkgs.writeShellApplication {
     name = "upstream";
-    runtimeInputs = [ pkgs.coreutils pkgs.curl ];
+    runtimeInputs = [ pkgs.coreutils pkgs.curl pkgs.gawk ];
     text = ''
       if [ "$#" -lt 1 ]; then
         echo "usage: upstream <name> [command...]" >&2
@@ -33,12 +36,12 @@ let
       fi
       name=$1
       shift
-      case $name in
-        ${lib.concatStrings (lib.mapAttrsToList (n: u: ''
-          ${n}) url=${lib.escapeShellArg u.url} ;;
-        '') lab.upstreams)}
-        *) echo "upstream: no upstream $name in src/lab/upstreams.nix" >&2; exit 2 ;;
-      esac
+      url=$(awk -v name="$name" '$1 == name { print $2 }' ${urlsFile})
+      if [ -z "$url" ]; then
+        echo "upstream: no upstream $name in src/lab/upstreams.nix" >&2
+        exit 2
+      fi
+      unavailable=${toString unavailable}
       attempts=''${UPSTREAM_ATTEMPTS:-${toString attempts}}
       backoff=''${UPSTREAM_BACKOFF_S:-${toString backoffS}}
       limit=''${UPSTREAM_TIMEOUT_S:-${toString attemptTimeoutS}}
@@ -69,7 +72,7 @@ let
         exit "$status"
       fi
       echo "$name unavailable ($url $answer), keeping the last state" >&2
-      exit ${toString unavailable}
+      exit "$unavailable"
     '';
   };
   # an image registry's host -> its upstream name
