@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # point the lab's cloudflare A records at the house's public address
 #
-# Run by the router's ddns-cloudflare timer (instances/300-router/main.nix), which generates the record list from the
-# route catalog. A record's state is converged, never assumed: a missing record is created, a wrong address or
+# Run by the router after it learned the public address (instances/300-router/main.nix public-address), with the
+# record list generated from the route catalog. A record's state is converged, never assumed: a missing record is created, a wrong address or
 # proxy flag is put right, and duplicates of one name (a past run that created a second record) are deleted down to
 # one. The address is recorded as synced only when every record converged, so a failed call is retried by the next
 # run; while the address is unchanged and synced within DDNS_RESYNC_MIN, cloudflare is not asked at all.
@@ -12,18 +12,15 @@
 #   DDNS_ZONE         the cloudflare zone, e.g. lsck0.dev
 #   DDNS_TOKEN_FILE   file holding the api token (zone dns edit)
 #   DDNS_STATE_DIR    where the last synced address is kept
-#   DDNS_IP_URL       [https://api.ipify.org] answers the caller's public address as text
+#   DDNS_ADDRESS_FILE the public address, the first field of its first line; empty: none learned yet
 #   DDNS_API_URL      [https://api.cloudflare.com/client/v4]
 #   DDNS_RESYNC_MIN   [60] minutes after which an unchanged address is checked against cloudflare anyway
 #
 # The token reaches curl in a header file, never on a command line.
 set -euo pipefail
-# record names contain "*" (the wildcard), which must never glob
-set -f
 
 : "${DDNS_RECORDS:?a json list of records}" "${DDNS_ZONE:?the cloudflare zone}" "${DDNS_TOKEN_FILE:?the api token file}"
-: "${DDNS_STATE_DIR:?a state directory}"
-DDNS_IP_URL=${DDNS_IP_URL:-https://api.ipify.org}
+: "${DDNS_STATE_DIR:?a state directory}" "${DDNS_ADDRESS_FILE:?the learned public address}"
 DDNS_API_URL=${DDNS_API_URL:-https://api.cloudflare.com/client/v4}
 DDNS_RESYNC_MIN=${DDNS_RESYNC_MIN:-60}
 # cloudflare answers within a few seconds; a hung call must not hold the timer's next run
@@ -33,9 +30,13 @@ RECORD_TTL=1
 
 LAST="$DDNS_STATE_DIR/ip"
 
-ip=$(curl -sSf --max-time "$CURL_TIMEOUT_S" "$DDNS_IP_URL")
+ip=$(head -n 1 "$DDNS_ADDRESS_FILE" | cut -d ' ' -f 1)
+if [ -z "$ip" ]; then
+    echo "ddns: no public address learned yet, nothing to point the records at"
+    exit 0
+fi
 if ! [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-    echo "ddns: $DDNS_IP_URL answered no ipv4 address: '$ip'" >&2
+    echo "ddns: $DDNS_ADDRESS_FILE holds no ipv4 address: '$ip'" >&2
     exit 1
 fi
 

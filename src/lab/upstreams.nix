@@ -11,6 +11,7 @@
   proton.url = "https://drive-api.proton.me";
   dockerhub.url = "https://registry-1.docker.io/v2/";
   ghcr.url = "https://ghcr.io/v2/";
+  githubusercontent.url = "https://raw.githubusercontent.com/";
   crowdsec.url = "https://hub-data.crowdsec.net";
   keyserver.url = "https://keyserver.ubuntu.com";
 }
