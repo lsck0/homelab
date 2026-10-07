@@ -1065,11 +1065,11 @@ in {
   };
 
   networking.firewall.allowedTCPPorts = with ports; [
-    grafana prometheus loki lokiPush otlpGrpc otlpHttp pyroscope journalRemote otlpFrontend
+    prometheus loki lokiPush otlpGrpc otlpHttp pyroscope journalRemote otlpFrontend
   ];
-  # grafana trusts Remote-User (auth.proxy), the query doors read every tenant: the ingress and the grants only. The
-  # push doors are open to whoever the router lets through; their tenant map decides what a sender may write
-  homelab.ingressOnly.ports = with ports; [ grafana prometheus loki otlpFrontend ];
+  # the query doors read every tenant: the ingress and the grants only (grafana's route port is guarded as a route).
+  # The push doors are open to whoever the router lets through; their tenant map decides what a sender may write
+  homelab.ingressOnly.ports = with ports; [ prometheus loki otlpFrontend ];
 
   # tsdb and loki read their hot blocks from the page cache
   homelab.dropCaches = false;
