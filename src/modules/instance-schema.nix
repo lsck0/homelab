@@ -29,13 +29,11 @@ let
 
   # host boot starts the lab phase by phase: storage first, the public side last (proxmox startup order)
   bootPhases = [ "nas" "network" "dev" "apps" "media" "public" ];
-  # plain vm working set measured 445-600 MiB; an lxc runs no kernel of its own, and its whole limit counts in the
-  # host budget (tests/policy/guests.nix)
+  # plain vm working set measured 445-600 MiB; an lxc runs no kernel of its own
   memoryDefaultMiB = { vm = 768; lxc = 512; };
   # at 384 MiB a vm drops ssh
   balloonFloorMiB = 512;
-  # the lab's own path (router, ingresses, sso) and the public side: squeezed, every route stalls with them. An idle
-  # guest is ballooned in any phase: it is down most of the time, yet its floor counts in the host budget
+  # the lab's own path (router, ingresses, sso) and the public side, unless idle: squeezed, every route stalls
   unballoonedPhases = [ "network" "public" ];
   # proxmox's own cpu weight
   cpuUnitsDefault = 100;

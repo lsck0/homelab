@@ -5,8 +5,7 @@
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
-    # raft and the deploys beside appbuild's rootless docker and buildkit; the floor holds the manager, a build
-    # takes what the host has free (lib/app-builder.nix bounds it)
+    # the floor holds the manager; a build takes what the host has free
     memoryMiB = 3072;
     balloonMiB = 1024;
     cores = 4;

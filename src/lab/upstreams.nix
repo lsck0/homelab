@@ -1,5 +1,4 @@
-# the third-party services the lab depends on, each with the url that tells whether it is up: any answer below 500
-# is up. modules/upstream wraps every call to one, vm-105 probes each and alerts "<name> unavailable" once per name.
+# third-party services the lab depends on -> the url whose answer below 500 means up (modules/upstream)
 {
   aur.url = "https://aur.archlinux.org/rpc/v5/info";
   archlinux.url = "https://geo.mirror.pkgbuild.com/core/os/x86_64/core.db";

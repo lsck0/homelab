@@ -5,13 +5,8 @@
 #   ${upstream.run} aur                                                 a probe alone, before a run that needs it
 #   serviceConfig.SuccessExitStatus = [ upstream.unavailable ];          an outage is no failed unit
 #
-# Each attempt runs under a time bound; a failed one is retried after a backoff that doubles. When the last attempt
-# fails too, the upstream's probe url decides: unreachable or answering 5xx, the upstream is down, `run` logs
-# "<name> unavailable" and exits `unavailable` (EX_TEMPFAIL), and the caller keeps its last good state and tries again
-# on its next run; reachable, the failure is the caller's own and its status passes through. vm-105 probes every
-# upstream itself and raises one "<name> unavailable" alert per upstream, whichever hosts depend on it.
-#
-# UPSTREAM_ATTEMPTS, UPSTREAM_BACKOFF_S and UPSTREAM_TIMEOUT_S override the defaults (tests, a long clone).
+# After the last attempt the probe url decides: down -> "<name> unavailable", exit `unavailable`, the caller keeps its
+# last state; up -> the command's own status. UPSTREAM_{ATTEMPTS,BACKOFF_S,TIMEOUT_S} override the defaults.
 { lib, pkgs, lab, ... }:
 let
   # three retries over about two minutes ride out a blip; a real outage is the next run's
