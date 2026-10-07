@@ -291,21 +291,11 @@ host_age_key_of() {
   printf '%s\n' "$host_key"
 }
 
-# host_age_key_push <name> <ip>: this host's own age key, written ahead of the identities the key file holds when it
-# differs, so the running system and the next boot still decrypt until a switch takes it; prints "changed" if it did
-host_age_key_push() {
-  host_age_key_of "$1" | lab_ssh "root@$2" \
-    "install -d -m 700 ${HOST_AGE_KEY_PATH%/*} && umask 077 && cat > $HOST_AGE_KEY_PATH.new \
-     && if cmp -s $HOST_AGE_KEY_PATH.new $HOST_AGE_KEY_PATH; then rm $HOST_AGE_KEY_PATH.new; \
-        else { cat $HOST_AGE_KEY_PATH.new; grep -vxF -f $HOST_AGE_KEY_PATH.new $HOST_AGE_KEY_PATH || true; } \
-               > $HOST_AGE_KEY_PATH.both && mv $HOST_AGE_KEY_PATH.both $HOST_AGE_KEY_PATH \
-             && rm $HOST_AGE_KEY_PATH.new && echo changed; fi"
-}
-
-# host_age_key_settle <name> <ip>: after a switch that decrypted with it, the key file holds this host's key alone
-host_age_key_settle() {
-  host_age_key_of "$1" | lab_ssh "root@$2" \
-    "umask 077 && cat > $HOST_AGE_KEY_PATH.new && mv $HOST_AGE_KEY_PATH.new $HOST_AGE_KEY_PATH"
+# host_age_key_run <push|settle> <name> <ip>: scripts/lib/host-age-key.sh on the guest with its own key
+host_age_key_run() {
+  local key
+  key=$(host_age_key_of "$2") || return 1
+  lab_ssh "root@$3" "bash -c $(printf %q "$(cat "$SRC/scripts/lib/host-age-key.sh")") host-age-key $1 $HOST_AGE_KEY_PATH" <<<"$key"
 }
 
 # switch_failures_real <ip> <switch output>: what failed the switch beyond transient units (scripts/lib/switch-failures.sh)
@@ -331,7 +321,7 @@ deploy_nixos() {
 
   # before the up-to-date check: a lost or stale key on an unchanged host is repaired, then re-activated
   local key_state current
-  key_state=$(host_age_key_push "$name" "$ip") || return 1
+  key_state=$(host_age_key_run push "$name" "$ip") || return 1
   # unreadable means deploy anyway
   current=$(lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@${ip}" "readlink -f /run/current-system" 2>/dev/null || true)
   if [ "$current" = "$toplevel" ] && [ "$key_state" != changed ]; then
@@ -357,7 +347,7 @@ deploy_nixos() {
     echo ">>> $name: only transient units failed during the switch."
   fi
   rm -f "$out"
-  [ "$key_state" != changed ] || host_age_key_settle "$name" "$ip" || return 1
+  [ "$key_state" != changed ] || host_age_key_run settle "$name" "$ip" || return 1
   echo ">>> $name deployed."
 
   # a terraform disk bump grows the disk, not the partition (GROW_REBOOT_SLACK_BYTES); an lxc has no /dev/sda, reads 0
