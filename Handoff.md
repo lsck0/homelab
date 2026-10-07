@@ -54,11 +54,15 @@ steps below are written so that a local agent with lab access can do them then (
 ### Finding status at this checkpoint
 | status | findings |
 |---|---|
+| fixed and verified by checks (telemetry group) | 7, 22, 25, 46, 58, 66, 76, 77, 92; 11 (plus a live cleanup below) |
+| partly (telemetry) | 20 (disk warnings page; mirroring the NVMe is hardware), 21 (direct ntfy, channel-failure alerts, off-site dead man's switch needs an account), 61 (no Unsplash/jsDelivr favicon; card icons still from jsDelivr until vendored with network) |
+| fixed and verified by checks (collector group) | 43, 48, 49, 50 (`enabled`/`cooldown` gone; lab.export still derives `enabled` for the desktop widget), 82, 88, 89, 90; 45 (two guests keep `off.guard` until their direct clients are known) |
 | fixed and verified by checks (host-tooling group) | 6, 33, 41, 52, 63, 64, 68, 78, 83, 84, 94; 93 partly (stale comments left in other groups' files) |
 | needs-owner (repo side done, lab steps below) | 2 (Proxmox firewall), 4 (lldap realm: ldaps + TOTP), 9 (pve certificate SAN) |
 | fixed and verified by checks | 28 (pinned hermes-agent reads `ANTHROPIC_TOKEN` as the OAuth token and scrubs it from every command; `CLAUDE_CODE_OAUTH_TOKEN` was not scrubbed, so the leak was real: switched), 42, 43, 47, 48, 49, 81, 85 |
 | rejected by the owner | 3; 16 (Hermes keeps root ssh everywhere; only its key comment was corrected to vm-114, and Hermes now checks host keys strictly against `src/generated/known_hosts`) |
-| partly done (draft finished to evaluate, not yet reviewed against the finding) | 1 (law exists, shapes do not fit yet), 5, 14, 15, 45, 46, 50, 53 |
+| partly / needs-owner | 1: memory law in place; ingresses 1536/1024, nas floor 1536, worker 1536; still 11628 MiB over (43650 vs 32022). Owner: `cat /sys/module/zfs/parameters/zfs_arc_max; zpool list` on the node (no pool: arc 0, -3202), then decide floors (119 build 5120->3072 with #31, 117/140 2048->1024) or add RAM |
+| partly done (draft finished to evaluate, not yet reviewed against the finding) | 5, 14, 15, 53 |
 | open (the draft may hold partial work in these areas; unreviewed) | every other finding |
 
 Main changes beyond the draft: the typed app catalog lives in `modules/lab` once (`lab.appsCatalog`, `lab.catalog`,
@@ -131,8 +135,15 @@ works again.
    and the homepage widgets work with the restored keys.
 
 ### Still to do in the round (cloud side)
-- Group host-tooling is merged. Groups collector and telemetry were still in progress at this checkpoint;
-  network-edge, swarm-apps, data-secrets and instances not started (plan: section 2).
+- Groups host-tooling, telemetry and collector are merged; network-edge, swarm-apps, data-secrets and instances
+  not started (plan: section 2).
+- Telemetry owner steps: `ssh root@10.100.0.117 rm -f /var/lib/node-exporter-textfile/app_builder.prom` (#11); read
+  and clear the queued SMART mails on the Proxmox host (`mailq`, `postsuper -d ALL`, #20); create an off-site
+  dead man's switch check (healthchecks.io, 5 min period, 15 min grace) and put its ping URL in the new manual
+  secret `deadman-ping-url` of 203 before deploying (#21); the draft hand-edited `src/generated/site.json`
+  (dropped `notebookMac`, `bulk.disk`; added `location`): rerun `src/scripts/init.sh` to regenerate it.
+- Terraform plan additions from collector: vm-100 memory 1024->1536 (floor 1024), vm-200 same shape, vm-109 floor
+  2048->1536, vm-250 2560->1536: in-place only.
 - Not yet outage-tolerant (seen by host-tooling): nix has no connect timeout in sync.sh; router ddns (Cloudflare) and
   ACME unreviewed; no Grafana alert on `homelab_ossec_up`. Stale comments to remove: net.nix `cidrContains`,
   catalog.nix/service.nix `enabledOf`, 103 main.nix (builder on vm-117), secrets/shared.nix "set by sync.sh",

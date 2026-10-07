@@ -24,12 +24,13 @@ let
     branch = "master";
     routes.demo = { service = "web"; targetPort = 8000; inherit port; off.sso = "the test's public fixture"; };
     # more than one worker holds beside a deploy's surge: the swarm gets two (modules/limits workerCountOf)
-    reservation.memoryMiB = 1536;
+    reservation.memoryMiB = 768;
   };
   # a catalog edit as sync.sh deploys it: the lab collected again with the demo changed
   catalogWith = change: lib.mkForce (lab.withApps (apps: lib.recursiveUpdate apps { demo = change; })).catalog;
 
-  w1 = lab.inventory."250".ip;
+  w1 = assert lib.assertMsg (lab.appsCatalog.swarm.workers == [ 250 251 ]) "swarm: the fixture needs two workers";
+    lab.inventory."250".ip;
   w2 = lab.inventory."251".ip;
   # registry.lsck0.dev resolves to the internal ingress; here the registry itself answers there
   registryAddress = lab.inventory."100".ip;

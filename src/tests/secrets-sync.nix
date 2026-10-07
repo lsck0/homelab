@@ -12,7 +12,8 @@ let
     instance = { inherit id name; dir = if lib.hasSuffix "-apps-swarm" name then null else "fixture"; config = { inherit hostName secrets; }; };
     config.sops.secrets = lib.genAttrs reads (key: { inherit key; });
   };
-  planOf = { guests, catalog, apps ? { x.secrets.x-app = "garage-key-id"; } }:
+  # an app as modules/apps-catalog types it, its fields all present
+  planOf = { guests, catalog, apps ? { x = { secrets.x-app = "garage-key-id"; placement = null; }; } }:
     let
       layout = import ../modules/secrets.nix {
         inherit lib catalog;

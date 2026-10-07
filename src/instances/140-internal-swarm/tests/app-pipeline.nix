@@ -58,7 +58,7 @@ let
   lab = import ../../../tests/lib/lab.nix {
     inherit pkgs lib specialArgs;
     # more than one worker holds beside a deploy's surge: the shared swarm gets two (modules/limits workerCountOf)
-    apps = folders: lib.recursiveUpdate folders { hello.reservation.memoryMiB = 1536; } // { own = ownApp; };
+    apps = folders: lib.recursiveUpdate folders { hello.reservation.memoryMiB = 768; } // { own = ownApp; };
   };
   collected = lab.specialArgs.lab;
   net = import ../../../modules/net.nix { inherit lib; inherit (collected) inventory site; };
@@ -82,7 +82,8 @@ let
   guest = ip placedId;
   homepage = ip "103";
   workstation = lab.site.lan.workstation;
-  workers = { "250" = ip "250"; "251" = ip "251"; };
+  workers = assert lib.assertMsg (lab.appsCatalog.swarm.workers == [ 250 251 ]) "app-pipeline: the fixture needs two workers";
+    { "250" = ip "250"; "251" = ip "251"; };
   stateDir = "/var/lib/app-builder";
 
   # the guest's host key, pinned on the builder like production's (homelab.appBuilder.knownHosts)
