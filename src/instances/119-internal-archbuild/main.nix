@@ -80,7 +80,7 @@ in {
       ARCHBUILD_SOURCE = dotfilesSource;
       ARCHBUILD_REF = dotfilesRef;
       # relative: the key on vm-210 runs rrsync rooted at the repo
-      ARCHBUILD_PUSH_TARGET = "archrepo@${inventory."210".ip}:.";
+      ARCHBUILD_PUSH_TARGET = "archrepo@${inventory.${toString lab.routes.mirror.vmid}.ip}:.";
     };
     serviceConfig = {
       Type = "oneshot";
