@@ -293,8 +293,9 @@ users_converge() {
   done
   # the lab declares no pool: terraform grants per guest, since the provider recreates a container whose pool changes
   for pool in $(pveum pool list --output-format json | jq -r '.[].poolid'); do
-    pveum pool delete "$pool"
-    echo ">>> Proxmox: removed pool $pool"
+    # proxmox refuses a pool that still holds guests or storage: someone's own, kept
+    if pveum pool delete "$pool"; then echo ">>> Proxmox: removed pool $pool"
+    else echo ">>> Proxmox: kept pool $pool, it is not empty"; fi
   done
 }
 

@@ -46,13 +46,16 @@ steps below are written so that a local agent with lab access can do them then (
 - `shellcheck` (now including every shell body embedded in nix) and `secrets-check` pass (git flake).
 - `terraform init -backend=false && terraform validate && terraform fmt -check` pass (terraform 1.14.0, providers
   from a filesystem mirror; the lock file is unchanged).
-- VM test `harness-smoke` passes. Every other VM test evaluates; none of them has been run on this branch yet.
+- VM test `harness-smoke` passes. New check `pve-install` (realm fail-closed, ldaps binding, apt/GitHub outage, tampered
+  archive) passes. Every other VM test evaluates; none of them has been run on this branch yet.
 - `policy-eval` reports: the host memory budget (#1: floors 41984 MiB vs 32022 MiB on the node, open), and secrets
   files that do not hold exactly their declared names (clears with the secrets steps below).
 
 ### Finding status at this checkpoint
 | status | findings |
 |---|---|
+| fixed and verified by checks (host-tooling group) | 6, 33, 41, 52, 63, 64, 68, 78, 83, 84, 94; 93 partly (stale comments left in other groups' files) |
+| needs-owner (repo side done, lab steps below) | 2 (Proxmox firewall), 4 (lldap realm: ldaps + TOTP), 9 (pve certificate SAN) |
 | fixed and verified by checks | 28 (pinned hermes-agent reads `ANTHROPIC_TOKEN` as the OAuth token and scrubs it from every command; `CLAUDE_CODE_OAUTH_TOKEN` was not scrubbed, so the leak was real: switched), 42, 43, 47, 48, 49, 81, 85 |
 | rejected by the owner | 3; 16 (Hermes keeps root ssh everywhere; only its key comment was corrected to vm-114, and Hermes now checks host keys strictly against `src/generated/known_hosts`) |
 | partly done (draft finished to evaluate, not yet reviewed against the finding) | 1 (law exists, shapes do not fit yet), 5, 14, 15, 45, 46, 50, 53 |
@@ -69,6 +72,9 @@ init on a workstation with an existing `.terraform` failed with "Backend configu
 works again.
 
 ### Owner / local agent steps, in order (only when deploying this branch)
+0. Read README "Proxmox host", "Proxmox firewall" and "Proxmox login" (new). Checks to run beforehand:
+   `src/generated/site.json` `lan.workstation` and `lan.notebook` are the real addresses (sync.sh now refuses to run
+   from any other machine, and 8006 admits only those two and the router).
 1. **Secrets: restore the values that moved from runtime tokens to sops** (guardsData: `secrets-sync` stops until each
    is set; never generate new ones, the apps hold the live values). On the workstation, in the repo, for each line
    (`<token dir>`: where the live token is, `<file>`: where the value goes):
@@ -87,10 +93,12 @@ works again.
    (`--value-stdin` keeps the value off argv; `jq -Rc .` makes it the JSON string sops expects.) The two
    `secrets.sops.json` files above are new and hold empty placeholders; the shared values live in
    `src/secrets/shared.sops.json`.
-2. `src/scripts/secrets-sync.sh` (dry run), read it, then `--apply`: it moves `registry-push-password` from vm-100's
+2. `src/scripts/init.sh` writes the new router secret `workstation-mac` (the workstation's MAC left the public
+   site.json, #63); then `src/scripts/secrets-sync.sh` (dry run), read it, then `--apply`: it moves `registry-push-password` from vm-100's
    file to the shared file (value kept), generates the new `qbittorrent-pass` (vm-112 sets the web UI password from it at every start) and the
    readers' shared copies, drops `proxmox-ca` (#53), and rewrites `.sops.yaml` (rules for 134/136 added, workers 251/252
-   removed). Run `--prune` only after reading what it would delete.
+   removed). Run `--prune` (after reading what it would delete): it drops tfvars `proxmox_insecure`, since
+   terraform now verifies the Proxmox CA (#6).
 3. **Terraform plan check** (sync.sh prints it; nothing is applied without reading it): expected
    - destroy vm-251 and vm-252 (stateless swarm workers; the derived worker count is 1 for the one enabled app);
    - vm-105 disk 16 -> 80 GiB (grow, in place): prometheus, loki and pyroscope move to local disk through
@@ -103,14 +111,33 @@ works again.
      (`gpu` -> `gpu[0]`): fine once a deploy applied it; if the plan wants to destroy `gpu` or create `gpu[0]`, stop.
 4. Deploy: `cd ~/projects/homelab && DOTFILES_SECRETS=~/projects/arch-dotfiles/configs/secrets ./sync.sh`
    (the terraform state moves once to `~/.local/state/homelab/terraform`, a copy stays beside it as `.moved-from-src`).
-5. Live checks: section 3 below, plus `ssh root@10.100.0.140 docker node ls` (vm-250 Ready, 251/252 gone),
+5. Proxmox host (sync.sh runs scripts/pve-install.sh, one idempotent converge, #41):
+   - it now deletes every `@pve` user the lab does not declare (terraform-prov, homepage, wake-<zone>) and every
+     empty pool: this revokes Hermes' old API token (section 5 step 3); move anything hand-made you want to keep to
+     `@pam` first. Non-empty pools are kept.
+   - the certificate is re-signed with 192.168.178.200 in its SAN (#9): check `openssl x509 -in
+     /etc/pve/local/pve-ssl.pem -noout -ext subjectAltName`, then on-demand wake works (vm-100/200 logs).
+   - lldap realm (#4): proxmox binds over ldaps (6360) to vm-101 with its certificate, read through the hypervisor;
+     the first sync after vm-101 created the certificate restores the realm's `admins` Administrator rights (the
+     sync before revokes them, fail closed). Give every realm user a TOTP key, as root on the host:
+     `key=$(head -c 20 /dev/urandom | base32); pveum user modify <user>@lldap --keys "$key"` and enroll `$key` in the
+     authenticator; a realm user without a key cannot log in.
+   - firewall (#2): `pve-firewall status` says enabled/running (sync.sh fails otherwise); locked out:
+     `ssh root@192.168.178.200 pve-firewall stop` from the house lan.
+   - `nix-collect-garbage` on the workstation drops the old terraform state copies from the store (#64).
+6. Live checks: section 3 below, plus `ssh root@10.100.0.140 docker node ls` (vm-250 Ready, 251/252 gone),
    `ssh root@10.100.0.105 systemctl status prometheus-seed loki-seed` (seeded, not diverged), Hermes answers on
    Telegram and `ssh root@<guest>` works from vm-114 (strict host keys), the *arr apps, Jellyfin, Janitorr, Navidrome
    and the homepage widgets work with the restored keys.
 
 ### Still to do in the round (cloud side)
-- Groups collector, telemetry and host-tooling were in progress at this checkpoint; network-edge, swarm-apps,
-  data-secrets and instances not started (plan: section 2).
+- Group host-tooling is merged. Groups collector and telemetry were still in progress at this checkpoint;
+  network-edge, swarm-apps, data-secrets and instances not started (plan: section 2).
+- Not yet outage-tolerant (seen by host-tooling): nix has no connect timeout in sync.sh; router ddns (Cloudflare) and
+  ACME unreviewed; no Grafana alert on `homelab_ossec_up`. Stale comments to remove: net.nix `cidrContains`,
+  catalog.nix/service.nix `enabledOf`, 103 main.nix (builder on vm-117), secrets/shared.nix "set by sync.sh",
+  tests/policy/secrets.nix (names the deleted secrets-migrate.sh).
+- VM tests touched by host-tooling, not yet run: sso-access, share, router-zones.
 - New owner requirement for every group: everything that depends on a third-party service (AUR, GitHub, Cloudflare,
   Let's Encrypt, Proton, Telegram, Anthropic, image registries, crowdsec hub, upstream DNS, feeds) survives its
   outage: bounded timeouts, retry with backoff, keep the last good state, no bogus failures, self-recovery, one
