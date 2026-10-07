@@ -51,8 +51,7 @@ let
   internalIngress = zones.internal.ingress;
   edge = zones.external.ingress;
   collector = telemetry.collectorVmid;
-  nas = toString lab.routes.nas.vmid;
-  homepage = toString lab.routes.homepage.vmid;
+  inherit (lab.roles) nas dashboard;
   prowlarr = toString lab.routes.prowlarr.vmid;
   swarmManager = catalog.swarm.managerId;
 
@@ -89,7 +88,7 @@ let
 
   # a dashboard widget with no url of its own queries its route's api on the guest
   widgetGrants = map (c: let r = lab.routes.${c.route}; in {
-    from = [ homepage ]; to = toString r.vmid; tcp = [ r.port ];
+    from = [ dashboard ]; to = toString r.vmid; tcp = [ r.port ];
     why = "the dashboard's ${c.widget.type} widget queries ${c.route}";
   }) (lib.filter (c: c.widget != null && c.widget.url == null) lab.homepage);
 
@@ -115,12 +114,8 @@ let
     why = "vm-105 scrapes ${key}'s exporters";
   }) (lib.filterAttrs (_: s: s.vmid != null && s.on.metrics && s.metrics != { }) catalog.services);
 
-  # the prober's checks of a guest's own ports: what an instance probes (instance.nix `probes`), a lab-only tcp route
-  probeGrants = lib.mapAttrsToList (name: p: {
-    from = [ collector ]; to = toString p.vmid; tcp = [ p.port ];
-    why = "vm-105 probes ${name}";
-  }) lab.probes
-  ++ map (r: {
+  # the prober's checks of a lab-only tcp route at its guest
+  probeGrants = map (r: {
     from = [ collector ]; to = toString r.vmid; tcp = [ r.port ];
     why = "vm-105 probes the lab-only tcp route ${r.host}";
   }) (lib.filter (r: r.vmid != null && r.protocol == "tcp" && r.publicPort == null && r.off.probe == null) (lib.attrValues catalog.l4));

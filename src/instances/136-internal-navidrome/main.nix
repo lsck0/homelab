@@ -11,8 +11,6 @@ let
   # the subsonic api level hermes speaks (navidrome skill)
   subsonicApiVersion = "1.16.1";
 in {
-  networking.hostName = "vm-136";
-
   homelab.nasMounts = nasMount stateDir "navidrome" // nasMedia musicDir "music";
 
   virtualisation.oci-containers.containers.navidrome = {

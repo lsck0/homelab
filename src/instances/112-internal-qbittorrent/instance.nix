@@ -11,7 +11,7 @@
   tokens = [ "qbittorrent-user" ];
 
   grants = [ {
-    from = [ "router" "104" "114" "130" ];
+    from = [ "router" "104" "operator" "130" ];
     tcp = [ 80 ];
     why = "the webui api without its login: the router's protonvpn-port sets the leased port, terminal stats, hermes, the arrs' download client";
   } ];

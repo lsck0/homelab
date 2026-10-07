@@ -42,8 +42,6 @@ let
 in {
   imports = [ ./lib/lldap.nix ];
 
-  networking.hostName = "vm-101";
-
   # authelia session store
   services.redis.servers.authelia = {
     enable = true;
@@ -192,8 +190,4 @@ in {
       totp.issuer = net.domain;
     };
   };
-
-  networking.firewall.allowedTCPPorts = [ portal.port ];
-  # regulation trusts X-Forwarded-For: a direct caller could name any address
-  homelab.ingressOnly.ports = [ portal.port ];
 }

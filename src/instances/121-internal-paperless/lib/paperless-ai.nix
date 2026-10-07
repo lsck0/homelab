@@ -1,12 +1,12 @@
 # paperless-ai: llm tagging for paperless
-{ config, lib, pkgs, inventory, hostIp, catalog, ... }:
+{ config, lib, pkgs, inventory, hostIp, catalog, lab, ... }:
 let
   port = catalog.internal.paperless-ai.port;
   containerPort = 3000;
   stateDir = "/var/lib/paperless-ai";
-  # the local ollama on vm-134's gpu; documents stay in the lab
+  # the local ollama on the llm role's gpu; documents stay in the lab
   ollama = import ../../../modules/ollama.nix;
-  llmUrl = "http://${inventory.${toString ollama.vmid}.ip}:${toString ollama.port}";
+  llmUrl = "http://${inventory.${lab.roles.llm}.ip}:${toString ollama.port}";
   # its own superuser, ../main.nix says why
   apiUser = "paperless-ai";
   prompt = lib.concatStringsSep " " [

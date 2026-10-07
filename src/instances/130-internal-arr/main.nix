@@ -7,8 +7,6 @@
     ./lib/recyclarr.nix
   ];
 
-  networking.hostName = "vm-130";
-
   homelab.servarr = {
     radarr.image = "lscr.io/linuxserver/radarr:6.4.4.10685-ls317";
     sonarr.image = "lscr.io/linuxserver/sonarr:4.0.20.3014-ls325";

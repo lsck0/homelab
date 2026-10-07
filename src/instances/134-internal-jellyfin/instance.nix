@@ -4,6 +4,9 @@ let
   port = 80;
   ollama = import ../../modules/ollama.nix;
 in {
+  # ollama on the site's gpu (modules/ollama.nix)
+  roles = [ "llm" ];
+
   vm = {
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
@@ -24,7 +27,7 @@ in {
   secrets = { janitorr-pass = "guardsData:hex:16"; };
 
   grants = [
-    { from = [ "114" "128" "130" ]; tcp = [ port ]; why = "hermes, jellyseerr and the arrs' notifications call its api directly"; }
+    { from = [ "operator" "128" "130" ]; tcp = [ port ]; why = "hermes, jellyseerr and the arrs' notifications call its api directly"; }
     { from = [ "121" ]; tcp = [ ollama.port ]; why = "paperless-ai asks the local llm"; }
   ];
 

@@ -1,8 +1,7 @@
 # build caches: attic (nix substituter) + redis for sccache
-{ config, lib, pkgs, inventory, site, catalog, ... }:
+{ config, pkgs, instance, ... }:
 let
-  net = import ../../modules/net.nix { inherit lib inventory site; };
-  atticPort = catalog.internal.attic.port;
+  atticPort = instance.config.services.attic.port;
   stateDir = "/var/lib/atticd";
 in {
   # nix binary cache for every vm and the forgejo runner
@@ -41,7 +40,7 @@ in {
 
   services.redis.servers.sccache = {
     enable = true;
-    port = net.ports.redis;
+    inherit (instance.config.services.sccache) port;
     bind = "0.0.0.0";
     requirePassFile = config.sops.secrets.sccache-redis-pass.path;
     settings = {
@@ -53,8 +52,4 @@ in {
     };
   };
   environment.systemPackages = [ pkgs.attic-client pkgs.sccache ];
-
-  networking.firewall.allowedTCPPorts = [ net.ports.redis ];
-  # password plus guard: only the grants in instance.nix reach it
-  homelab.ingressOnly.ports = [ net.ports.redis ];
 }

@@ -56,8 +56,6 @@ let
     '';
   };
 in {
-  networking.hostName = "vm-115";
-
   homelab.nasMounts = nasMount data "forgejo";
 
   sops.secrets.forgejo-oidc-secret = {};
@@ -224,9 +222,8 @@ in {
     "d ${data} 0750 ${toString containerUid} ${toString containerUid} -"
   ];
 
-  networking.firewall.allowedTCPPorts = [ route.port sshPort ];
-  # the web login is behind authelia; git ssh stays open
-  homelab.ingressOnly.ports = [ route.port ];
+  # git ssh, unguarded; the web port is its route's
+  networking.firewall.allowedTCPPorts = [ sshPort ];
 
   # consistent copy for the snapshot, the live file may be mid-write
   homelab.dbBackup.databases.forgejo.sqlite = db;

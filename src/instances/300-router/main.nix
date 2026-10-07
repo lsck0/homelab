@@ -96,8 +96,9 @@ let
   # the edge answers these itself
   installHosts = lib.attrNames (import ../../modules/install-hosts.nix);
   forwardHosts = lib.filter (h: h != null) (map (f: f.host) flows.portForwards);
-  # names that skip the ingresses
-  directHosts = { smb = net.ipOf (toString lab.routes.nas.vmid); sccache = net.ipOf (toString lab.routes.attic.vmid); };
+  # names that skip the ingresses: the nas's smb, every lab-only tcp or udp route of an instance at its guest
+  directHosts = { smb = net.ipOf lab.roles.nas; } // lib.mapAttrs' (_: r: lib.nameValuePair r.host (net.ipOf (toString r.vmid)))
+    (lib.filterAttrs (_: r: r.vmid != null && r.publicPort == null) catalog.l4);
 
   # proxied unless a route opts out; install lines, the wireguard endpoint and port forwards are raw by nature
   routeHosts = side: lib.mapAttrsToList (_: r: { inherit (r) host; proxied = r.off.cloudflare == null; }) catalog.${side};

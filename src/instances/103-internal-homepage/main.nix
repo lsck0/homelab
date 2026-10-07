@@ -98,7 +98,7 @@ let
     public = ofApp catalog.external;
   in lib.head (lib.filter (r: r.path == "/") public ++ public ++ ofApp catalog.internal ++ [ null ]);
 
-  appCard = app: a: let r = mainRoute app; ui = a.homepage or { }; own = appContainers "swarm_stack=\"${app}\""; in {
+  appCard = app: a: let r = mainRoute app; ui = a.homepage; own = appContainers "swarm_stack=\"${app}\""; in {
     name = ui.name or (lib.toUpper (lib.substring 0 1 app) + lib.substring 1 (-1) app);
     icon = ui.icon or "mdi-docker";
     href = if r == null then null else hostUrl r.host;
@@ -295,8 +295,4 @@ in {
     "d ${stateDir} 0750 1000 1000 -"
   ];
 
-  networking.firewall.allowedTCPPorts = [ routes.homepage.port ];
-
-  # no login but holds every api key
-  homelab.ingressOnly.ports = [ routes.homepage.port ];
 }

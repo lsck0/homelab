@@ -1,6 +1,6 @@
-{ config, lib, pkgs, inventory, nasPath, catalog, lab, ... }:
+{ config, lib, pkgs, inventory, nasPath, catalog, lab, instance, ... }:
 let
-  vm = lab.instances.${config.homelab.vmid}.config.vm;
+  inherit (instance.config) vm;
   route = catalog.internal.archbuild;
   # pushed to vm-210, which serves mirror.lsck0.dev
   repoDir = "/var/lib/archrepo";
@@ -82,7 +82,7 @@ in {
       ARCHBUILD_SOURCE = dotfilesSource;
       ARCHBUILD_REF = dotfilesRef;
       # relative: the key on vm-210 runs rrsync rooted at the repo
-      ARCHBUILD_PUSH_TARGET = "archrepo@${inventory."210".ip}:.";
+      ARCHBUILD_PUSH_TARGET = "archrepo@${inventory.${toString lab.routes.mirror.vmid}.ip}:.";
     };
     serviceConfig = {
       Type = "oneshot";

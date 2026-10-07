@@ -24,7 +24,7 @@ in {
     diskGiB = 16;
   };
 
-  grants = lib.mapAttrsToList (name: arr: { from = [ "114" ]; tcp = [ arr.port ]; why = "hermes' ${name} skill calls the api"; }) arrs;
+  grants = lib.mapAttrsToList (name: arr: { from = [ "operator" ]; tcp = [ arr.port ]; why = "hermes' ${name} skill calls the api"; }) arrs;
 
   tokens = map keyOf (lib.attrNames (lib.filterAttrs (_: arr: arr.minted) arrs));
 

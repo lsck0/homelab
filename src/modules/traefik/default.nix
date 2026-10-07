@@ -19,7 +19,7 @@ let
   inherit (net) cloudflareRanges privateRanges;
 
   # the prober (vm-105's blackbox) and the dashboard's status dots (vm-103)
-  probeSources = map net.hostSource [ telemetry.collectorVmid (toString lab.routes.homepage.vmid) ];
+  probeSources = map net.hostSource [ telemetry.collectorVmid lab.roles.dashboard ];
   probeMethods = [ "GET" "HEAD" ];
   # a route kept off the internet answers the networks the router lets into the internal zone, never a dmz
   internalOnlySources = [ net.wan.subnet net.wireguard.subnet net.zones.internal.subnet ];

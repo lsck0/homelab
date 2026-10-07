@@ -1,5 +1,5 @@
 # docker image registry and its ui, internal only
-{ lib, net, swarmManagers, ... }:
+{ lib, net, roles, swarmManagers, ... }:
 let
   apiPort = 5000;
   # docker clients: no browser login, no proof of work, layers the waf rules misread, nobody outside the lab
@@ -12,7 +12,7 @@ let
     homepage = "no web ui; registry-ui has the card";
   };
   # by socket address: the deploy controller, the forgejo runner's ci and the workstation
-  pushers = [ (net.hostSource "140") (net.hostSource "117") "${net.wan.workstation}/32" ];
+  pushers = map net.hostSource [ roles.app-builder roles.ci ] ++ [ "${net.wan.workstation}/32" ];
   pushUsers = { ci = "registry-push-password"; builder = "registry-builder-password"; };
 in {
   vm = {

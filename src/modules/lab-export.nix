@@ -11,7 +11,7 @@
 #   zones        <zone> -> { subnet; router; ingress; }  the router's address in the zone, the ingress's vmid or null
 #   guests       <vmid> -> { name; zone; ip; powered; idle; enabled; }  name <vmid>-<zone>-<service> (the router: its
 #                hostname), zone also "router", powered a bool, idle its stop delay ("30m") or null; enabled the
-#                former tri-state "true" | "false" | "onDemand", kept until the desktop clients read powered and idle
+#                two as "false" | "onDemand" | "true", which the bar's homelab widget still reads
 #   routes       <route> -> { host; path; zone; protocol; vmid; app; port; health; }  host the fqdn, zone internal or
 #                external, vmid (an instance's) or app (a swarm app's), port the backend's, health null for none
 #   infra        [{ name; href; ping; }]  the lab's frame (modules/infra.nix) in display order, null where none
@@ -47,8 +47,9 @@ in
   }) net.zones;
 
   guests = lib.mapAttrs (_: g: {
-    inherit (g) name ip powered idle enabled;
+    inherit (g) name ip powered idle;
     zone = g.type;
+    enabled = if !g.powered then "false" else if g.idle != null then "onDemand" else "true";
   }) inventory;
 
   routes = lib.mapAttrs (_: routeOf) (catalog.internal // catalog.external // catalog.l4);

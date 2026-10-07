@@ -3,7 +3,7 @@
 # Each law is stated as the policy, read off the rendered configuration, never recomputed the way the module
 # computes it: a chain in the order the defences must run, a rule the router must contain before another, an
 # address the dmz must never be trusted with.
-{ lib, configs, inventory, site, catalog, appsCatalog, ... }:
+{ lib, configs, lab, inventory, site, catalog, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   internalIngress = configs."100-internal-traefik";
@@ -118,15 +118,14 @@ lawsOf {
   "router order" = lib.optional (natAccept == null) "the nat module's accept is missing from the forward rules"
     ++ lib.optional (natAccept != null && natAccept < lastDrop) "a drop of the router's forward policy comes after nat's accept";
 
+  # the router's rendered lease pools, against every static address
   "inventory" = lib.concatLists (lib.mapAttrsToList (id: v:
-    lib.optional (!(lib.elem v.enabled [ "true" "false" "onDemand" ])) "${id}: enabled ${v.enabled}"
-    ++ lib.optional (v.enabled == "onDemand" && (net.zones.${v.type}.ingress or null) == null) "${id}: onDemand in a zone without an ingress"
-    ++ lib.optional (v.type != "router" && lib.any (s: lib.any (inPool v.ip) s.pools) kea) "${id}: ${v.ip} lies in a dhcp pool"
+    lib.optional (v.type != "router" && lib.any (s: lib.any (inPool v.ip) s.pools) kea) "${id}: ${v.ip} lies in a dhcp pool"
   ) inventory);
 
   # no guest trusts the homepage, the prober or the agent with every guarded port; each trusts its own address
   "ingress guards" = lib.concatLists (lib.mapAttrsToList (name: config:
     map (s: "${name} trusts ${s} on every guarded port") (lib.intersectLists config.homelab.ingressOnly.trusted
-      (map net.hostSource (lib.remove config.homelab.vmid [ "103" "105" "114" ])))
+      (map net.hostSource (lib.remove config.homelab.vmid (with lab.roles; [ dashboard collector operator ]))))
   ) configs);
 }

@@ -375,9 +375,9 @@ class StatsSync(unittest.TestCase):
         self.assertEqual([r["pct"] for r in rows], [100, 50, 0])
 
     def test_payload_names_guests_like_grafana_and_hides_torrent_names(self):
-        inventory = {"121": {"name": "121-internal-paperless", "vm": "paperless", "enabled": "true"},
-                     "150": {"name": "150-apps-swarm", "vm": "swarm-150", "enabled": "true"},
-                     "126": {"name": "126-internal-huginn", "vm": "huginn", "enabled": "false"}}
+        inventory = {"121": {"name": "121-internal-paperless", "vm": "paperless", "powered": True, "idle": None},
+                     "150": {"name": "150-apps-swarm", "vm": "swarm-150", "powered": True, "idle": None},
+                     "126": {"name": "126-internal-huginn", "vm": "huginn", "powered": False, "idle": None}}
         with tempfile.TemporaryDirectory() as tmp:
             inv = os.path.join(tmp, "inventory.json")
             with open(inv, "w") as handle:

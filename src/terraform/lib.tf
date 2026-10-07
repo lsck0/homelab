@@ -30,7 +30,8 @@ locals {
     for id, i in local.instances : id => {
       name        = i.name
       type        = i.type
-      enabled     = i.enabled
+      powered     = i.powered
+      idle        = i.idle
       kind        = i.kind
       privileged  = i.privileged
       features    = i.features
@@ -56,7 +57,7 @@ locals {
       gateway = i.gateway
 
       # the zone's ingress wakes its onDemand guests as this proxmox user (scripts/pve-install.sh creates it)
-      wake_user = i.enabled == "onDemand" ? "wake-${i.type}@pve" : null
+      wake_user = i.powered && i.idle != null ? "wake-${i.type}@pve" : null
     }
   }
 }
@@ -102,10 +103,10 @@ resource "proxmox_virtual_environment_vm" "vm" {
   name      = each.value.name
   node_name = local.site.node
   vm_id     = tonumber(each.key)
-  # ondemand vms start once so the first deploy reaches them
-  started = each.value.enabled != "false"
-  # ondemand vms stay off at host boot
-  on_boot = each.value.enabled == "true"
+  # idling vms start once so the first deploy reaches them
+  started = each.value.powered
+  # idling vms stay off at host boot
+  on_boot = each.value.powered && each.value.idle == null
   machine = each.value.machine
 
   startup {
@@ -217,8 +218,8 @@ resource "proxmox_virtual_environment_container" "ct" {
   node_name     = local.site.node
   vm_id         = tonumber(each.key)
   unprivileged  = !each.value.privileged
-  started       = each.value.enabled != "false"
-  start_on_boot = each.value.enabled == "true"
+  started       = each.value.powered
+  start_on_boot = each.value.powered && each.value.idle == null
 
   startup {
     order    = each.value.boot_order

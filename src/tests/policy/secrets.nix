@@ -12,9 +12,8 @@
 #   (what a producer mints is its instance.nix `tokens`)
 # - db dumps: a host with databases mounts exactly its own dump dir, read-write, and no other host's
 # - the dmz and the apps zone mount per-service state only
-{ lib, configs, inventory, lab, ... }:
+{ lib, configs, inventory, lab, src, ... }:
 let
-  src = ../..;
   # the rules live beside src/; a tree evaluated as `path:src` lacks them, a git checkout has them
   sopsConfig = ../../../.sops.yaml;
   adminRecipients = lib.sort lib.lessThan (lib.filter (r: r != "") (map

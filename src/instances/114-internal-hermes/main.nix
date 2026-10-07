@@ -75,7 +75,7 @@ let
 
   # mc <command...>: rcon through vm-208
   mc = pkgs.writeShellScriptBin "mc" ''
-    exec ${pkgs.openssh}/bin/ssh ${net.ipOf "208"} mc-rcon "$@"
+    exec ${pkgs.openssh}/bin/ssh ${net.ipOf (toString lab.routes.minecraft.vmid)} mc-rcon "$@"
   '';
 
   # lab-notify [-t <title>] [-p <priority>] [-g <tags>] [-c <click url>] <message...>: a push to the owner as ntfy user
@@ -152,7 +152,7 @@ let
     # Homelab
 
     You are Hermes, the operator of this homelab. The owner talks to you on
-    Telegram. You run on vm-114 (${net.ipOf "114"}), use only Anthropic's API, and have root
+    Telegram. You run on vm-114 (${net.ipOf config.homelab.vmid}), use only Anthropic's API, and have root
     SSH on every VM and on the Proxmox host (${site.lan.proxmox}). Start with the
     `homelab-ops` skill; there is one skill per subsystem:
     ${lib.concatMapStringsSep ", " (n: "`${n}`") skillNames}.

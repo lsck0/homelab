@@ -27,7 +27,8 @@ let
   # CONSTANTS
   # -----------------------------------------------------------------------------
 
-  collectorVmid = "105";
+  collectorVmid = lib.findFirst (id: lib.elem "collector" inventory.${id}.roles)
+    (throw "modules/telemetry.nix: no guest holds the role collector") (lib.attrNames inventory);
 
   ports = {
     grafana = 80;
@@ -129,16 +130,8 @@ let
       description = mkOption { type = types.str; description = "What it means and the first command to run."; };
     };
   };
-
-  probeType = types.submodule {
-    options = {
-      port = mkOption { type = types.port; description = "The port on the guest's own address."; };
-      protocol = mkOption { type = types.enum [ "http" "tcp" ]; default = "http"; description = "http: any answer below 500 is up; tcp: a connect."; };
-      path = mkOption { type = types.strMatching "/.*"; default = "/"; description = "http: the path probed."; };
-    };
-  };
 in {
-  inherit collectorVmid ports categories alertType probeType relayAddress relayBridge pushPaths;
+  inherit collectorVmid ports categories alertType relayAddress relayBridge pushPaths;
 
   urls = {
     prometheus = urlOf ports.prometheus;

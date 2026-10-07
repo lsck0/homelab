@@ -396,8 +396,4 @@ in {
     '';
   };
 
-  networking.firewall.allowedTCPPorts = [ terminalRoute.port ];
-
-  # every feed carries no secret beyond its path token
-  homelab.ingressOnly.ports = [ terminalRoute.port ];
 }

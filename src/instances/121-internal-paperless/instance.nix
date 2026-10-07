@@ -12,7 +12,7 @@
   };
 
   grants = [
-    { from = [ "114" ]; tcp = [ config.services.paperless.port ]; why = "hermes' paperless skill calls the api"; }
+    { from = [ "operator" ]; tcp = [ config.services.paperless.port ]; why = "hermes' paperless skill calls the api"; }
   ];
 
   tokens = [ "paperless-key" ];

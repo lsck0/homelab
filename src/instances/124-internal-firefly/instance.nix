@@ -7,7 +7,7 @@
   };
 
   grants = [
-    { from = [ "114" ]; tcp = [ config.services.firefly.port ]; why = "hermes' firefly skill calls the api"; }
+    { from = [ "operator" ]; tcp = [ config.services.firefly.port ]; why = "hermes' firefly skill calls the api"; }
   ];
 
   tokens = [ "firefly-token" ];

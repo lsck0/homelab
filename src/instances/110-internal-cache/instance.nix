@@ -8,13 +8,12 @@
   };
 
   grants = [
-    { from = [ "117" ]; tcp = [ net.ports.redis ]; why = "the forgejo runner's ci jobs share sccache (SCCACHE_REDIS)"; }
+    { from = [ "ci" ]; tcp = [ net.ports.redis ]; why = "the forgejo runner's ci jobs share sccache (SCCACHE_REDIS)"; }
   ];
 
-  # sccache speaks redis, not http, and no route serves it
-  probes.sccache = { port = net.ports.redis; protocol = "tcp"; };
-
   services = {
+    # redis, lab-only: guarded, probed and named in the lab's dns at this guest
+    sccache = { protocol = "tcp"; port = net.ports.redis; off.homepage = "a cache, no page"; };
     attic = {
       port = 8080;
       off = {

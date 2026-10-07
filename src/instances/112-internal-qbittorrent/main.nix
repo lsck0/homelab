@@ -15,7 +15,7 @@ let
 
   # the webui skips its own login for the ingress and every source instance.nix grants the port
   apiClients = [ (net.hostSource net.zones.${instance.zone}.ingress) ]
-    ++ map (lab.sourceOf instance.zone) (lib.concatMap (g: g.from) instance.config.grants);
+    ++ map (lab.sourceOf instance.zone) (lib.concatMap (g: g.from) (lib.filter (g: g.to == instance.id) lab.grants));
 
   # download only: finished torrents stop at once (ratio 0) for the arrs to import; upload slots serve queued ones
   activeDownloadsMax = 5;

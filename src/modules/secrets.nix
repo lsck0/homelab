@@ -51,7 +51,7 @@ let
 
   instanceList = lib.attrValues lab.instances;
   guestApps = lib.listToAttrs (lib.concatLists (lib.mapAttrsToList (app: a:
-    lib.optional ((a.placement or null) != null) (lib.nameValuePair (toString a.placement.vmid) app)) lab.appsCatalog.apps));
+    lib.optional (a.placement != null) (lib.nameValuePair (toString a.placement.vmid) app)) lab.appsCatalog.apps));
   homeOf = i:
     if i.dir != null then "instances/${i.name}"
     else if guestApps ? ${i.id} then "apps/${guestApps.${i.id}}"
@@ -61,7 +61,7 @@ let
   entries =
     lib.concatMap (i: entriesOf { file = "${homeOf i}/${ownName}"; home = homeOf i; } i.config.secrets) instanceList
     ++ lib.concatLists (lib.mapAttrsToList (app: a: entriesOf { file = "apps/${app}/${ownName}"; }
-      ((a.secrets or { }) // { "app-${app}-redeploy-token" = deployTokenKind; })) lab.appsCatalog.apps)
+      (a.secrets // { "app-${app}-redeploy-token" = deployTokenKind; })) lab.appsCatalog.apps)
     ++ entriesOf { file = catalogFile; } catalog
     ++ entriesOf { file = tfvarsFile; } tfvars
     ++ map (c: { name = c.secret; kind = oidcSecretKind; file = catalogFile; home = null; }) lab.oidc;

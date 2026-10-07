@@ -60,8 +60,6 @@ let
     '';
   };
 in {
-  networking.hostName = "vm-118";
-
   homelab.nasMounts = nasMount stateDir "registry";
 
   virtualisation.oci-containers.containers.registry = {
@@ -138,7 +136,4 @@ in {
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0750 1000 1000 -"
   ];
-
-  networking.firewall.allowedTCPPorts = [ uiPort apiPort ];
-  homelab.ingressOnly.ports = [ uiPort apiPort ];
 }

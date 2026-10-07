@@ -1,5 +1,7 @@
 # ci runners for github and forgejo, rootless: a job owns the ci user, never the vm
 { ... }: {
+  roles = [ "ci" ];
+
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];

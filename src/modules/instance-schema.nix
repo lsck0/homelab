@@ -6,8 +6,8 @@
 # (unique hosts, ports, tokens, vmids) are modules/lab's and modules/catalog.nix's.
 #
 # instance.nix is a module over this schema with the arguments id (the vmid, a string), zone, site (site.json), net
-# (modules/net.nix over the collected inventory), telemetry (modules/telemetry.nix), swarmManagers (the vmids of
-# every enabled swarm's manager) and grantSourceNames (modules/lab). The smallest:
+# (modules/net.nix over the collected inventory), telemetry (modules/telemetry.nix), roles (lab.roles: role -> vmid),
+# swarmManagers (the vmids of every enabled swarm's manager) and grantSourceNames (modules/lab). The smallest:
 #
 #   # what the guest is for, in one line
 #   { ... }: {
@@ -102,7 +102,7 @@ let
     options = {
       from = mkOption {
         type = types.nonEmptyListOf (types.either vmidString (types.enum grantSourceNames));
-        description = "Who may connect: guests by vmid, or ${lib.concatStringsSep ", " grantSourceNames} (modules/lab `sourceOf`).";
+        description = "Who may connect: guests by vmid or role, or ${lib.concatStringsSep ", " grantSourceNames} (modules/lab `sourceOf`).";
       };
       tcp = mkOption { type = types.nonEmptyListOf types.port; description = "Guarded ports of this guest they may reach."; };
       why = mkOption { type = why; description = "Why the grant exists."; };
@@ -216,15 +216,10 @@ in {
       default = { };
       description = "Grafana rule uid -> a rule over this guest's own metrics or logs (modules/telemetry.nix alertType); vm-105 provisions it.";
     };
-    probes = mkOption {
-      type = types.attrsOf telemetry.probeType;
-      default = { };
-      description = "Name -> a port of this guest vm-105 probes besides its routes (a tcp service no route serves).";
-    };
     roles = mkOption {
       type = types.listOf (types.strMatching "[a-z][a-z0-9-]*");
       default = [ ];
-      description = "Lab-wide roles this guest holds (\"collector\", \"nas\"; \"dashboard\" reads every widget's token, \"operator\" every token); one guest per role (lab.roles).";
+      description = "Lab-wide roles this guest holds (\"collector\", \"nas\"; \"dashboard\" reads every widget's token, \"operator\" every token); one guest per role (lab.roles), a grant's source by name.";
     };
     tokens = mkOption {
       type = types.listOf (types.strMatching "[a-z0-9-]+");

@@ -210,16 +210,9 @@ let
     vm = vmName node;
     target = "${node.ip}:${toString r.port}";
   }) (lib.filterAttrs (_: r: r.protocol == "tcp" && r.off.probe == null && (r.vmid == null || awake (guest r.vmid))) catalog.l4);
-  # what an instance probes besides its routes (instance.nix `probes`), at its own address
-  instanceProbes = lib.mapAttrsToList (name: p: {
-    inherit name;
-    inherit (p) protocol;
-    vm = vmName (guest p.vmid);
-    target = if p.protocol == "http" then "http://${(guest p.vmid).ip}:${toString p.port}${p.path}" else "${(guest p.vmid).ip}:${toString p.port}";
-  }) (lib.filterAttrs (_: p: awake (guest p.vmid)) lab.probes);
   # every third-party service the lab depends on (modules/upstream), one alert each
   upstreamJob = "upstream";
-  probesOf = protocol: lib.filter (p: p.protocol == protocol) instanceProbes ++ (if protocol == "http" then httpProbes else tcpProbes);
+  probesOf = protocol: if protocol == "http" then httpProbes else tcpProbes;
   probeJob = protocol: {
     job_name = "blackbox-${protocol}";
     metrics_path = "/probe";
@@ -350,7 +343,7 @@ let
     uid = telemetry.homelabDashboardUid;
     inherit nodeJob guestsExpectedUp edgeHost;
     ssoHost = "vm-${toString lab.routes.authelia.vmid}";
-    nasVm = vmName (guest lab.routes.nas.vmid);
+    nasVm = vmName (guest lab.roles.nas);
     hostVm = proxmoxVm;
   };
   # energy.py takes no config, every query is energy_model's
@@ -1066,9 +1059,9 @@ in {
   networking.firewall.allowedTCPPorts = with ports; [
     grafana prometheus loki lokiPush otlpGrpc otlpHttp pyroscope journalRemote otlpFrontend
   ];
-  # grafana trusts Remote-User (auth.proxy), the query doors read every tenant: the ingress and the grants only. The
-  # push doors are open to whoever the router lets through; their tenant map decides what a sender may write
-  homelab.ingressOnly.ports = with ports; [ grafana prometheus loki otlpFrontend ];
+  # the query doors read every tenant: the grants only (grafana's own port is its route's). The push doors are open
+  # to whoever the router lets through; their tenant map decides what a sender may write
+  homelab.ingressOnly.ports = with ports; [ prometheus loki otlpFrontend ];
 
   # tsdb and loki read their hot blocks from the page cache
   homelab.dropCaches = false;
