@@ -28,6 +28,9 @@ let
     apps-zone = network "apps zone" (tamper "100-internal-traefik" (traefik ++ [ "routers" "grafana-tls" "rule" ]) "Host(`grafana.lsck0.dev`)");
     tls-verification = network "tls verification" (tamper "200-external-traefik" (traefik ++ [ "serversTransports" "grafana-relay" ])
       { insecureSkipVerify = true; });
+    buffered-downloads = network "buffered downloads" (tamper "200-external-traefik" (traefik ++ [ "routers" "mirror-tls" "middlewares" ])
+      ((http "200-external-traefik").routers.mirror-tls.middlewares
+        ++ lib.take 1 (lib.attrNames (lib.filterAttrs (_: m: m ? buffering) (http "200-external-traefik").middlewares))));
     no-catch-all = network "no catch-all" (tamper "200-external-traefik" (traefik ++ [ "routers" "catch-all" ])
       { rule = "HostRegexp(`.+`)"; service = "noop@internal"; });
     client-identity = network "client identity" (tamper "100-internal-traefik" (traefik ++ [ "middlewares" "client-ip" "plugin" "client-ip" "trustedIPs" ])

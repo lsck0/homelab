@@ -12,7 +12,7 @@
 let
   lab = import ../../../tests/lib/lab.nix {
     inherit pkgs lib specialArgs;
-    apps = apps: lib.recursiveUpdate apps { wat = { enable = true; reservation.memoryMiB = 2048; }; };
+    apps = apps: lib.recursiveUpdate apps { wat = { enable = true; reservation.memoryMiB = 1024; }; };
   };
   net = import ../../../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
   ip = id: lab.inventory.${id}.ip;
@@ -32,6 +32,8 @@ let
   bannedClient = "203.0.113.66";
   bodyLimit = 1024 * 1024;
   uploadLimit = wat.routes.wat-user-files.bodyLimitBytes;
+  # a few seconds per transfer, long enough to look at /tmp while it runs
+  transferRate = "1M";
 
   guest = vmid: instance: memory: {
     imports = [ (lab.guest vmid { flat = true; inherit instance; }) ../../../tests/lib/offline-traefik.nix ];
@@ -60,7 +62,11 @@ pkgs.testers.runNixOSTest {
     environment.systemPackages = [ pkgs.curl pkgs.python3 ];
   };
 
-  testScript = lab.driverPython + ''
+  testScript = { nodes, ... }: let
+    # past this a buffered body spills to a temp-multibuf file in traefik's /tmp
+    spillBytes = (lib.findFirst (m: m ? buffering) null
+      (lib.attrValues nodes.vm-200.services.traefik.dynamicConfigOptions.http.middlewares)).buffering.memRequestBodyBytes;
+  in lab.driverPython + ''
 
     EDGE, INTERNAL = "${ip "200"}", "${ip "100"}"
     CF, NET, LAN = "${outside.cloudflare}", "${outside.internet}", "${outside.lan}"
@@ -129,6 +135,32 @@ pkgs.testers.runNixOSTest {
         proxied = backend_log()
         sizes = sorted(e["body_len"] for e in proxied)
         assert sizes == [${toString bodyLimit}, ${toString uploadLimit}], [(e["method"], e["path"], e["body_len"]) for e in proxied]
+
+    with subtest("a download streams past the body limit's buffer, only an upload spools to /tmp"):
+        spooled = "find /tmp -type f -name 'temp-multibuf-*' | grep -q ."
+
+        def transfer_start(name, args):
+            world.succeed(f"rm -f /tmp/{name}.status; (curl -s -o /tmp/{name} -w '%{{http_code}} %{{size_download}}' "
+                          f"--limit-rate ${transferRate} --interface {CF} --resolve ${watHost}.${net.domain}:443:{EDGE} "
+                          f"-H 'X-Forwarded-For: ${realClient}' {args} > /tmp/{name}.part; mv /tmp/{name}.part /tmp/{name}.status) "
+                          ">/dev/null 2>&1 &")
+
+        def transfer_wait(name):
+            world.wait_until_succeeds(f"[ -s /tmp/{name}.status ]", timeout=60)
+            return world.succeed(f"cat /tmp/{name}.status").split()
+
+        # positive control: a slow upload past the buffer spools while it lasts
+        world.succeed("head -c ${toString (4 * spillBytes)} /dev/zero > /tmp/slow-upload")
+        transfer_start("upload", f"--data-binary @/tmp/slow-upload {WAT}/user-files/u")
+        vm_200.wait_until_succeeds(spooled, timeout=30)
+        assert transfer_wait("upload")[0] == "200"
+        vm_200.fail(spooled)
+        transfer_start("blob", f"{WAT}/api/blob")
+        world.wait_until_succeeds("[ $(stat -c %s /tmp/blob 2>/dev/null || echo 0) -gt ${toString spillBytes} ]", timeout=30)
+        vm_200.fail(spooled)
+        status, size = transfer_wait("blob")
+        assert status == "200" and int(size) > ${toString spillBytes}, (status, size)
+        vm_200.fail(spooled)
 
     with subtest("methods a browser app does not use reach nothing, not even the internal ingress"):
         backend_reset()

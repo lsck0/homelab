@@ -21,6 +21,10 @@ let
   # a 3d trend smooths nightly dumps and gc; two weeks is time to order a disk or clean up
   diskForecastWindow = "3d";
   diskForecastHorizonSeconds = 14 * 86400;
+  # a buffered upload holds at most its body limit there briefly; a gigabyte that stays is leaked responses
+  ingressSpoolBytesMax = 1024 * 1024 * 1024;
+  # traefik renews at 30 days left; two weeks of failed retries is time to fix the dns token by hand
+  certificateExpiryDaysMin = 14;
   thinpoolDataWarnPercent = 80;
   thinpoolDataCriticalPercent = 90;
   # metadata exhaustion corrupts every thin volume at once, so it warns earlier than data
@@ -197,6 +201,26 @@ let
       for = "2h";
       summary = "{{ $labels.vm }} {{ $labels.mountpoint }}: full within 14 days at the 3-day trend";
       description = "The free space trend of the last 3 days reaches zero within two weeks. Find what grows before it is full.";
+    };
+    ingress_spool = {
+      title = "Ingress spool files pile up";
+      category = "storage";
+      expr = "max by (vm) (homelab_traefik_spool_bytes)";
+      threshold = ingressSpoolBytesMax;
+      for = "15m";
+      telegram = true;
+      summary = "{{ $labels.vm }}: {{ humanize1024 $values.A.Value }}B of traefik buffering files in /tmp";
+      description = "traefik's buffering middleware (the body limit) leaks temp-multibuf-* files when a copy fails; past the disk they fail every buffered request with 500. `systemctl restart traefik` clears its private /tmp.";
+    };
+    certificate_expiring = {
+      title = "Ingress certificate expiring";
+      category = "service";
+      expr = "min by (instance) ((traefik_tls_certs_not_after - time()) / 86400)";
+      op = "lt"; threshold = certificateExpiryDaysMin;
+      for = "1h";
+      telegram = true;
+      summary = "{{ $labels.instance }}: the certificate expires in {{ printf \"%.0f\" $values.A.Value }} days";
+      description = "traefik renews 30 days ahead and retries; renewals failing for weeks (cloudflare dns or let's encrypt unavailable, a revoked token) leave this. `journalctl -u traefik | grep -i acme` on the ingress.";
     };
   };
 
