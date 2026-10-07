@@ -1,0 +1,25 @@
+{
+	"proxmox_api_token_id": "ENC[AES256_GCM,data:bJqDwiX9abQliFeSyP/3b3P6vb0RWrPUK79Yi14EqvVG4g==,iv:+ons9xmoNA93mAXxex4+/tgkNFIaXDdiwWvLdSbE2ts=,tag:HZr+ePq/2XM7GhPvSCYF8w==,type:str]",
+	"proxmox_api_token_secret": "ENC[AES256_GCM,data:QbubzJDzxsZqkqVBr2MIVg3HTq1JkU5lrKH2zKgiovXDCGn6,iv:JFDLA5KCUY4Z2ez+x0CDI5bP3MB+HMQmf6DIBtN2gCQ=,tag:sVvPvDi3dln7pOSLFtkTOg==,type:str]",
+	"proxmox_datastore": "ENC[AES256_GCM,data:bdN8FVob6m7V,iv:OtHYEztFcnywlDnbbdEDdWnfhhay+P8lY4hgTfpm4kM=,tag:ToVARfqzg+XstzCpAc/Z4A==,type:str]",
+	"proxmox_ssh_port": "ENC[AES256_GCM,data:sKU=,iv:cmhDSuWxzVdXPP69qHi64fPQV5saAdfxgL1GP0uPqcw=,tag:5MyxOhE2NduhVfci1NBiOQ==,type:float]",
+	"proxmox_ssh_user": "ENC[AES256_GCM,data:0JSDbA==,iv:qcFgGpbR66DcbQwE7lSVCjgKs8xoFCxTuFKxXW2dWig=,tag:7MjRREqSofnkSVWhd0Capw==,type:str]",
+	"proxmox_ssh_password": "ENC[AES256_GCM,data:iDcknhRE4C+xBW96,iv:Cmx2zPQvzG/D4jnFKseZTo7e4sEw7n+lCV4l7rKfjOc=,tag:vx6VeRqQZp/GhdaoSy9YyA==,type:str]",
+	"proxmox_insecure": "ENC[AES256_GCM,data:VLL8zw==,iv:l/SsuS8Gsc9uigSHh+rMEHcY10OJU6Q9XBrmfZzUAKI=,tag:0MvyC7Qp1/Hi3R9/nlEjrg==,type:bool]",
+	"sops": {
+		"age": [
+			{
+				"recipient": "age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBrNktBajNVMklZQ01KbVRQ\nWlFWaWlxNFhMbHVXaTkzcVZnNlowelB3L0ZrCkx4aVNTdVY4QkZVb0hVZ2ptQnhi\nTktXZE03d2RZK1hERVFNUnFmeExPVjQKLS0tIHpmRjNRQ3dSeWJLRmsxSWs1ZE00\nMXhOY3hQRWpmOHJvYUpJL3pQcDk0OU0KhZlrbg/zS9xmMF6tSb5XIFkmiesM8aGh\nuTBmOWxhZ6e7VzeAL9sx4X54Y1EnCWIK42oiEIbuZeYgxJmbmMCDkA==\n-----END AGE ENCRYPTED FILE-----\n"
+			},
+			{
+				"recipient": "age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80",
+				"enc": "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IHBpdi1wMjU2IDl5NGZLUSBBK3hSUDQr\nZy9VTExCVkhKdDcydm5zZDFFSlJyT213YnMzSnhYODhLSjdNSApDVGhiWGw3Zldp\nemVZMVhtT0hQZ2RUdUlvVHpKR2JlTDJYTnJEZldRZGhzCi0tLSBaWkpXaXpESWp0\nOFpJUklPaXpTeXFiTHNBeWpJbWVSK2dIZ2IyQjNYWCswCqyFOKkoNSEYS91IaDy2\nWCTCanN/rB+r8y6LfNGKZ6079gbveVcUxyW57wWpcnJbXc0SX2mdZe26qPAmLNrW\nWOo=\n-----END AGE ENCRYPTED FILE-----\n"
+			}
+		],
+		"lastmodified": "2026-10-06T21:53:43Z",
+		"mac": "ENC[AES256_GCM,data:VGmITRxqIWNBIkx0nbzLGlXnkb5VbJ2Wfydg+jYXrbuM4SHegU2KX+T2EaOxPpRjTniUYsFFc3mfdceEKbbpChHIb4dLZdaNhooJPPtaLcwnY0D66zMY1CbPdvF+V9UChLchGJHkfhV0N/Ne9G/3tK1SjxfibC3QWAd07ny5xWc=,iv:nTOQPeUWUJzTk1f1/P042fWYtVAX0IRmY90BQw9aon8=,tag:8zTlc9RUK3uJPpjm7T+bvg==,type:str]",
+		"unencrypted_suffix": "_unencrypted",
+		"version": "3.12.1"
+	}
+}

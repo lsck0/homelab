@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# split dns: route *.lsck0.dev to the homelab coredns
-
+# split dns on the workstation: NetworkManager's dnsmasq sends *.<domain> to the router's coredns
 set -euo pipefail
 
 ROUTER_IP="192.168.178.29"
-ROUTER_DNS_PORT="53"  # CoreDNS on the router (5353 is avahi)
+# coredns; 5353 on the router is avahi
+ROUTER_DNS_PORT="53"
 DOMAIN="lsck0.dev"
+# a name the split horizon answers with the internal ingress, vm-100
+PROBE_NAME="homelab.$DOMAIN"
+PROBE_ANSWER="10.100.0.100"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Run with sudo" >&2
@@ -27,7 +30,7 @@ cat > /etc/NetworkManager/conf.d/dns.conf << EOF
 dns=dnsmasq
 EOF
 
-cat > /etc/NetworkManager/dnsmasq.d/${DOMAIN//./-}.conf << EOF
+cat > "/etc/NetworkManager/dnsmasq.d/${DOMAIN//./-}.conf" << EOF
 server=/${DOMAIN}/${ROUTER_IP}#${ROUTER_DNS_PORT}
 EOF
 
@@ -35,4 +38,8 @@ systemctl restart NetworkManager
 
 echo "Split DNS configured: *.${DOMAIN} -> ${ROUTER_IP}:${ROUTER_DNS_PORT}"
 echo "Verifying..."
-dig +short homelab.${DOMAIN} @${ROUTER_IP} -p ${ROUTER_DNS_PORT} 2>/dev/null | grep -q "10.100.0.100" && echo "OK" || echo "FAIL - is ${ROUTER_IP}:${ROUTER_DNS_PORT} reachable?"
+if dig +short "$PROBE_NAME" "@$ROUTER_IP" -p "$ROUTER_DNS_PORT" 2>/dev/null | grep -x "$PROBE_ANSWER" >/dev/null; then
+  echo "OK"
+else
+  echo "FAIL: is ${ROUTER_IP}:${ROUTER_DNS_PORT} reachable?"
+fi

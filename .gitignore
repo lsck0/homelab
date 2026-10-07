@@ -7,8 +7,8 @@
 result
 result-*
 
-# key material and certificates stay local
-secrets/
+# key material and certificates stay local (the repo's own; src/secrets/ is the encrypted lab secrets)
+/secrets/
 
 # OS
 .DS_Store
@@ -27,7 +27,10 @@ images/
 terraform.tfstate
 # terraform's own backups, one per apply and per `state mv`
 terraform.tfstate.backup
+# the hash of the nas state the working copy last agreed with (src/scripts/lib/tfstate.sh)
+terraform.tfstate.synced
 *.tfstate.*.backup
 
 __pycache__/
 *.pyc
+.hypothesis/

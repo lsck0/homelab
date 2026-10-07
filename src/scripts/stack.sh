@@ -1,82 +1,104 @@
 #!/usr/bin/env bash
-# toggle a boot phase's guests in src/instances.tf, then ./sync.sh
+# toggle a boot phase's guests (vm.power in their instance.nix), then ./sync.sh
+#
+# usage: stack.sh status
+#        stack.sh <phase> on|off [--apply]     (phases: TOGGLEABLE_PHASES; without --apply a dry run)
+#
+# A guest is src/instances/<name>/instance.nix, the swarm's workers are the one `nodes.vm` of src/apps/swarm.nix.
+# Every read and write stays inside that file: a guest without `power` has the schema's default
+# (modules/instance-schema.nix), and turning it gets an explicit `power` line after its bootPhase line. Whether a
+# guest idles is its instance.nix `idle`, not a group's state.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-TF="$ROOT_DIR/src/instances.tf"
+# shellcheck source=src/scripts/lib/tools.sh
+. "$ROOT_DIR/src/scripts/lib/tools.sh"
+tools_require python3
+
+exec python3 - "$ROOT_DIR/src" "$@" <<'PY'
+import re
+import sys
+from pathlib import Path
 
 # the toggleable groups are boot phases; the rest of the lab depends on nas, network and dev
-PHASES="apps media public"
+TOGGLEABLE_PHASES = ("apps", "media", "public")
+STATES = ("on", "off")
+# instance folders starting with this are documentation (the template)
+HIDDEN_PREFIX = "_"
 
-usage() { echo "usage: $0 status | {${PHASES// /|}} {on|off|onDemand} [--apply]" >&2; exit 1; }
+src, args = Path(sys.argv[1]), sys.argv[2:]
 
-group_ids() {
-  awk -v phase="\"$1\"" '
-    match($0, /^ *"[0-9]+" = \{/) { id = substr($0, RSTART, RLENGTH); gsub(/[^0-9]/, "", id) }
-    index($0, "boot_phase") && index($0, phase) { print id }' "$TF"
-}
 
-state_of() { # id -> current `enabled` value
-  awk -v id="\"$1\" = {" '
-    index($0, id) { found = 1 }
-    found && /enabled[[:space:]]*=/ {
-      gsub(/.*enabled[[:space:]]*=[[:space:]]*/, ""); gsub(/,.*/, ""); gsub(/"/, "")
-      print; exit
-    }' "$TF"
-}
+def usage():
+    print(f"usage: stack.sh status | {{{'|'.join(TOGGLEABLE_PHASES)}}} {{{'|'.join(STATES)}}} [--apply]", file=sys.stderr)
+    sys.exit(2)
 
-name_of() {
-  awk -v id="\"$1\" = {" '
-    index($0, id) { found = 1 }
-    found && /name[[:space:]]*=/ { gsub(/.*name[[:space:]]*=[[:space:]]*"/, ""); gsub(/".*/, ""); print; exit }' "$TF"
-}
 
-[ $# -ge 1 ] || usage
+def field_find(text, name):
+    """the match of `name = "<value>";` (or `vm.name = ...`), None when the file does not set it."""
+    return re.search(rf'^(\s*)((?:vm\.)?){name}\s*=\s*"([^"]*)"\s*;', text, re.MULTILINE)
 
-if [ "$1" = status ]; then
-  for g in $PHASES; do
-    printf '%s:\n' "$g"
-    for id in $(group_ids "$g"); do
-      printf '  %-4s %-34s %s\n' "$id" "$(name_of "$id")" "$(state_of "$id")"
-    done
-  done
-  exit 0
-fi
 
-[ $# -ge 2 ] || usage
-GROUP="$1"; WANT="$2"; APPLY=0
-case " $PHASES " in *" $GROUP "*) ;; *) usage ;; esac
-[ "${3:-}" = "--apply" ] && APPLY=1
-case "$WANT" in on) VALUE=true ;; off) VALUE=false ;; onDemand) VALUE='"onDemand"' ;; *) usage ;; esac
+schema = (src / "modules/instance-schema.nix").read_text()
+default = re.search(r'power = mkOption \{.*?default = "([^"]+)";', schema, re.DOTALL)
+if default is None:
+    sys.exit("ERROR: no `power` default in modules/instance-schema.nix")
+POWER_DEFAULT = default.group(1)
 
-CHANGED=0
-for id in $(group_ids "$GROUP"); do
-  cur=$(state_of "$id")
-  [ -n "$cur" ] || { echo "WARNING: no entry for id $id in instances.tf"; continue; }
-  want_bare=${VALUE//\"/}
-  if [ "$cur" = "$want_bare" ]; then
-    printf '  %-4s %-34s already %s\n' "$id" "$(name_of "$id")" "$cur"
-    continue
-  fi
-  printf '  %-4s %-34s %s -> %s\n' "$id" "$(name_of "$id")" "$cur" "$want_bare"
-  CHANGED=1
-  if [ "$APPLY" = 1 ]; then
-    # replace `enabled` only inside this id's block
-    python3 - "$TF" "$id" "$VALUE" <<'PY'
-import re, sys
-path, vm_id, value = sys.argv[1], sys.argv[2], sys.argv[3]
-text = open(path).read()
-start = text.index(f'"{vm_id}" = {{')
-m = re.compile(r'(enabled\s*=\s*)("onDemand"|true|false)').search(text, start)
-assert m, f"no enabled field after {vm_id}"
-open(path, "w").write(text[:m.start()] + m.group(1) + value + text[m.end():])
+# every guest file: name -> (path, phase, power, explicit)
+guests = {}
+sources = [(d.name, d / "instance.nix") for d in sorted((src / "instances").iterdir())
+           if d.is_dir() and not d.name.startswith(HIDDEN_PREFIX)]
+sources.append(("swarm nodes (apps/swarm.nix)", src / "apps/swarm.nix"))
+for name, path in sources:
+    text = path.read_text()
+    phase, power = field_find(text, "bootPhase"), field_find(text, "power")
+    if phase is None:
+        sys.exit(f"ERROR: {path} sets no bootPhase")
+    guests[name] = (path, phase.group(3), power.group(3) if power else POWER_DEFAULT, power is not None)
+
+if not args:
+    usage()
+if args[0] == "status":
+    if len(args) != 1:
+        usage()
+    for phase in TOGGLEABLE_PHASES:
+        print(f"{phase}:")
+        for name, (_, p, power, explicit) in guests.items():
+            if p == phase:
+                print(f"  {name:<34} {power}{'' if explicit else ' (default)'}")
+    sys.exit(0)
+
+if len(args) not in (2, 3) or args[0] not in TOGGLEABLE_PHASES or args[1] not in STATES:
+    usage()
+if len(args) == 3 and args[2] != "--apply":
+    usage()
+phase, want, apply = args[0], args[1], len(args) == 3
+
+edits = []
+for name, (path, p, power, explicit) in guests.items():
+    if p != phase:
+        continue
+    if power == want:
+        print(f"  {name:<34} already {power}")
+        continue
+    print(f"  {name:<34} {power} -> {want}")
+    text = path.read_text()
+    if explicit:
+        m = field_find(text, "power")
+        text = text[:m.start()] + f'{m.group(1)}{m.group(2)}power = "{want}";' + text[m.end():]
+    else:
+        m = field_find(text, "bootPhase")
+        line_end = text.index("\n", m.end()) + 1
+        text = text[:line_end] + f'{m.group(1)}{m.group(2)}power = "{want}";\n' + text[line_end:]
+    edits.append((path, text))
+
+if not edits:
+    print("nothing to change.")
+elif apply:
+    for path, text in edits:
+        path.write_text(text)
+    print("instance files updated. Deploy with ./sync.sh")
+else:
+    print("dry run. Re-run with --apply to write the instance files.")
 PY
-  fi
-done
-
-[ "$CHANGED" = 1 ] || { echo "nothing to change."; exit 0; }
-if [ "$APPLY" = 1 ]; then
-  echo "src/instances.tf updated. Deploy with ./sync.sh"
-else
-  echo "dry run. Re-run with --apply to write src/instances.tf."
-fi

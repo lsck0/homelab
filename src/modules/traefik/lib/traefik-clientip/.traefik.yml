@@ -1,0 +1,7 @@
+displayName: Client IP
+type: middleware
+import: github.com/lsck0/homelab/clientip
+summary: Sets X-Real-Ip to the nearest untrusted address of the forwarding chain.
+testData:
+  trustedIPs:
+    - 10.200.0.200/32

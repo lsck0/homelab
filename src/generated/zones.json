@@ -1,0 +1,26 @@
+{
+  "internal": {
+    "bridge": "vmbr100",
+    "subnet": "10.100.0.0/24",
+    "vmids": { "first": 100, "last": 199 },
+    "router_nic": 1,
+    "ingress": 100,
+    "dhcp_pool": { "first": 200, "last": 254 }
+  },
+  "external": {
+    "bridge": "vmbr200",
+    "subnet": "10.200.0.0/24",
+    "vmids": { "first": 200, "last": 249 },
+    "router_nic": 2,
+    "ingress": 200,
+    "dhcp_pool": { "first": 250, "last": 254 }
+  },
+  "apps": {
+    "bridge": "vmbr250",
+    "subnet": "10.250.0.0/24",
+    "vmids": { "first": 250, "last": 299 },
+    "router_nic": 3,
+    "ingress": null,
+    "dhcp_pool": null
+  }
+}

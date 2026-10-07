@@ -1,68 +1,30 @@
-# test stand-ins for lab secrets and templates
-{ lib, config, ... }:
+# the lab's module stack for tests that boot one module or instance without modules/base: the modules base.nix
+# would bring that the instances lean on, sops and the nas as stand-ins (stubs/), and the lab's static facts
+#
+# A test that runs the production stack instead uses lib/lab.nix, whose nodes import base.nix and stubs/sops.nix.
+{ lib, ... }:
 let
-  # numeric where parsed as a number
-  dummy = name: if lib.hasSuffix "chat-id" name then "12345" else "test-${name}";
-in
-{
+  # the collected facts (modules/lab), the same the flake hands every host
+  facts = import ../modules/lab { inherit lib; };
+in {
   imports = [
+    ./stubs/sops.nix
+    ./stubs/nas.nix
+    ./stubs/platform.nix
+    ../modules/apps-catalog
     ../modules/network.nix
-    ../modules/db-backup.nix
-    ../modules/local-state.nix
-    ../modules/tokens.nix
+    ../modules/db-backup
+    ../modules/local-state
+    ../modules/tokens
+    ../modules/textfile.nix
   ];
 
-  options.sops = {
-    secrets = lib.mkOption {
-      default = { };
-      type = lib.types.attrsOf (lib.types.submodule ({ name, ... }: {
-        options = {
-          key = lib.mkOption { type = lib.types.str; default = name; };
-          path = lib.mkOption { type = lib.types.str; default = "/run/secrets/${name}"; };
-          owner = lib.mkOption { type = lib.types.str; default = "root"; };
-          group = lib.mkOption { type = lib.types.str; default = "root"; };
-          mode = lib.mkOption { type = lib.types.str; default = "0400"; };
-        };
-      }));
-    };
-    templates = lib.mkOption {
-      default = { };
-      type = lib.types.attrsOf (lib.types.submodule ({ name, ... }: {
-        options = {
-          content = lib.mkOption { type = lib.types.str; default = ""; };
-          path = lib.mkOption { type = lib.types.str; default = "/run/secrets/rendered/${name}"; };
-          owner = lib.mkOption { type = lib.types.str; default = "root"; };
-          mode = lib.mkOption { type = lib.types.str; default = "0400"; };
-        };
-      }));
-    };
-    placeholder = lib.mkOption { type = lib.types.attrsOf lib.types.str; default = { }; };
-  };
-
-  # declared by platform-vm.nix, which a test vm cannot import (grub, disk layout)
-  options.homelab.dropCaches = lib.mkOption { type = lib.types.bool; default = true; };
-
-  config = {
-    sops.placeholder = lib.mapAttrs (name: _: dummy name) config.sops.secrets;
-
-    # world-readable, dummy values
-    system.activationScripts.sopsStub = lib.stringAfter [ "users" ] (''
-      mkdir -p /run/secrets/rendered
-    '' + lib.concatStrings (lib.mapAttrsToList (_: s: ''
-      printf '%s' ${lib.escapeShellArg (dummy s.key)} > ${s.path}; chmod 0444 ${s.path}
-    '') config.sops.secrets) + lib.concatStrings (lib.mapAttrsToList (_: t: ''
-      printf '%s' ${lib.escapeShellArg t.content} > ${t.path}; chmod 0444 ${t.path}
-    '') config.sops.templates));
-
-    _module.args = {
-      nasMount = _: _: { };
-      nasMountRo = _: _: { };
-      nasPath = _: _: { };
-      nasMedia = _: _: { };
-      # network.nix reads the inventory
-      inventory = lib.mkDefault { };
-      # static host facts, the same file the flake hands every host
-      site = lib.importJSON ../site.json;
-    };
+  _module.args = {
+    # network.nix and the catalog read the inventory; a test may pass its own
+    inventory = lib.mkDefault facts.inventory;
+    # apps-catalog.nix's default catalog
+    lab = lib.mkDefault facts;
+    # static host facts, the same file the flake hands every host
+    site = lib.importJSON ../generated/site.json;
   };
 }

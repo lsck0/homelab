@@ -1,12 +1,14 @@
+# the router's one wireguard exit for every instance whose egress is vpn (instance.nix `egress`)
 { config, lib, pkgs, ... }:
 let
   cfg = config.homelab.egress.vpn;
   endpointHost = lib.head (lib.splitString ":" cfg.endpoint);
+  # any metric above the tunnel route's 0
+  gatewayBlackholeMetric = 1000;
 in
 {
-  # one router tunnel for every via = "vpn" member
   options.homelab.egress.vpn = {
-    enable = lib.mkEnableOption "a shared WireGuard exit for egress.nix members";
+    enable = lib.mkEnableOption "a shared WireGuard exit for the instances whose egress is vpn";
 
     privateKeyFile = lib.mkOption {
       type = lib.types.path;
@@ -27,13 +29,19 @@ in
     endpoint = lib.mkOption {
       type = lib.types.str;
       example = "89.222.96.158:51820";
-      description = "host:port. An address, not a name - DNS is what the tunnel is waiting on.";
+      description = "host:port. An address, not a name: DNS is what the tunnel is waiting on.";
     };
 
     gateway = lib.mkOption {
       type = lib.types.str;
       default = "10.2.0.1";
       description = "Provider gateway. Needs its own main-table route, or NAT-PMP goes out the WAN and fails.";
+    };
+
+    dns = lib.mkOption {
+      type = lib.types.str;
+      default = cfg.gateway;
+      description = "The provider's resolver inside the tunnel, which answers the members' dns so no name leaves through the house.";
     };
 
     table = lib.mkOption {
@@ -81,6 +89,18 @@ in
       '';
     };
 
+    # with the tunnel down the gateway's route above is gone: the provider's resolver and nat-pmp must then reach
+    # nothing rather than leave through the house in the clear
+    systemd.services.wg-egress-gateway-blackhole = {
+      description = "Blackhole the VPN gateway outside the tunnel";
+      wantedBy = [ "multi-user.target" ];
+      before = [ "wireguard-wg-egress.service" ];
+      after = [ "network-setup.service" ];
+      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+      # below the tunnel's own route (metric 0), so it only answers while that one is missing
+      script = "${pkgs.iproute2}/bin/ip route replace blackhole ${cfg.gateway}/32 metric ${toString gatewayBlackholeMetric}";
+    };
+
     # the router blackhole route and forward guard are the killswitch
     systemd.services.wireguard-wg-egress.unitConfig.StartLimitIntervalSec = 0;
     systemd.services.wireguard-wg-egress.serviceConfig = {
@@ -89,7 +109,7 @@ in
     };
 
     assertions = [{
-      assertion = endpointHost != "" && (builtins.match "[0-9.]+" endpointHost) != null;
+      assertion = builtins.match "[0-9.]+" endpointHost != null;
       message = "homelab.egress.vpn.endpoint must be an address, not a name (got ${endpointHost}).";
     }];
   };

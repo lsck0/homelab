@@ -1,0 +1,252 @@
+{%- comment -%} one markup for all views; one polling url per instance; keep flat {%- endcomment -%}
+
+<style>
+/* undo trmnl's centring wrapper; the framework sets the height above the title bar */
+.layout { display: block !important; width: 100% !important; padding: 0 !important; margin: 0 !important; container-type: size; }
+/* --u: 1px on the 780x420 og layout, the smaller ratio on bigger panels */
+.cal { --u: min(calc(100cqw / 780), calc(100cqh / 420)); display: flex; flex-direction: column; height: 100%; width: 100%; padding: calc(4 * var(--u)) calc(8 * var(--u)) 0; box-sizing: border-box; font-family: "Inter Variable", Inter, sans-serif; color: #000; }
+.cal--day { flex-direction: row; gap: calc(10 * var(--u)); }
+
+/* ---- shared event text ------------------------------------------------- */
+.ev-t { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ev-s { font-weight: 600; overflow-wrap: anywhere; }
+.ev-src { font-weight: 800; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- day: agenda left ---------------------------------------------------- */
+.ag { flex: 0 0 38%; min-width: 0; display: flex; flex-direction: column; gap: calc(6 * var(--u)); min-height: 0; }
+.ag-date { display: flex; align-items: center; gap: calc(10 * var(--u)); border-bottom: calc(3 * var(--u)) solid #000; padding-bottom: calc(4 * var(--u)); flex: 0 0 auto; }
+.ag-dom { font-size: calc(54 * var(--u)); font-weight: 800; line-height: .95; font-variant-numeric: tabular-nums; }
+.ag-dom--today { background: #000; color: #fff; border-radius: calc(6 * var(--u)); padding: 0 calc(8 * var(--u)) calc(2 * var(--u)); }
+.ag-dow { font-size: calc(22 * var(--u)); font-weight: 800; line-height: 1.05; }
+.ag-mon { font-size: calc(13 * var(--u)); font-weight: 600; }
+.ag-list { flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; gap: calc(6 * var(--u)); }
+.ag-ev { border-left: calc(6 * var(--u)) solid #000; padding-left: calc(8 * var(--u)); min-width: 0; }
+.ag-ev .ev-t { font-size: calc(15 * var(--u)); }
+.ag-ev .ev-s { font-size: calc(19 * var(--u)); line-height: 1.12; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ag-ev .ev-m { font-size: calc(12 * var(--u)); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* all-day: a filled label, it has no time to lead with */
+.ag-ev--allday { border-left: 0; padding-left: 0; }
+.ag-ev--allday .ev-s { font-size: calc(15 * var(--u)); background: #000; color: #fff; border-radius: calc(3 * var(--u)); padding: calc(1 * var(--u)) calc(6 * var(--u)); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ag-none { font-size: calc(20 * var(--u)); font-weight: 700; padding-top: calc(8 * var(--u)); }
+.ag-more { font-size: calc(12 * var(--u)); font-weight: 800; }
+
+/* ---- time grid (day + week) ------------------------------------------ */
+.tg { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* rows share columns so axis and events align */
+.tg-row { display: flex; width: 100%; }
+.tg-row--grid { flex: 1 1 auto; min-height: 0; border-top: calc(2 * var(--u)) solid #000; }
+.tg-gutter { width: calc(44 * var(--u)); flex: 0 0 calc(44 * var(--u)); }
+.tg-gutter--label { font-size: calc(10 * var(--u)); font-weight: 800; text-transform: uppercase; letter-spacing: .06em; align-self: center; text-align: right; padding-right: calc(6 * var(--u)); }
+/* capped so all-day titles cannot push the grid */
+.tg-row--allday { flex: 0 0 auto; max-height: calc(58 * var(--u)); overflow: hidden; border-top: calc(1 * var(--u)) solid #000; }
+.tg-axis { position: relative; }
+.tg-h { position: absolute; right: calc(6 * var(--u)); font-size: calc(11.5 * var(--u)); font-weight: 700; transform: translateY(-50%); font-variant-numeric: tabular-nums; }
+/* first hangs below the top edge, last sits above the bottom one: else the frame clips them */
+.tg-h--first { transform: none; }
+.tg-h--last { transform: translateY(-100%); }
+
+/* weekends are mostly empty: narrower, the weekdays get the width */
+.tg-we { flex-grow: .6 !important; }
+.tg-hd { flex: 1 1 0; min-width: 0; display: flex; align-items: baseline; gap: calc(5 * var(--u)); padding: 0 calc(6 * var(--u)) calc(3 * var(--u)); }
+.tg-dow { font-size: calc(12 * var(--u)); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }
+.tg-dom { font-size: calc(24 * var(--u)); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+/* mark only today's number */
+.tg-hd--today .tg-dom { background: #000; color: #fff; border-radius: calc(4 * var(--u)); padding: 0 calc(6 * var(--u)) calc(2 * var(--u)); }
+
+.tg-adcell { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: calc(2 * var(--u)); padding: calc(2 * var(--u)) calc(3 * var(--u)); overflow: hidden; }
+.tg-adcell + .tg-adcell, .tg-col + .tg-col { border-left: calc(1 * var(--u)) solid #000; }
+/* all-day as filled labels, like the agenda */
+.tg-adcell .ev-s { display: block; font-size: calc(12.5 * var(--u)); line-height: 1.25; background: #000; color: #fff; border-radius: calc(2 * var(--u)); padding: 0 calc(4 * var(--u)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-adcell .ev-m { font-size: calc(11 * var(--u)); font-weight: 800; }
+
+.tg-col { position: relative; flex: 1 1 0; min-width: 0; overflow: hidden; }
+/* dither-safe weekend: a light fill, text stays black on white chips */
+.tg-col--weekend { background: #e8e8e8; }
+.tg-line { position: absolute; left: 0; right: 0; border-top: calc(1 * var(--u)) dotted #7a7a7a; }
+.tg-line--major { border-top: calc(1 * var(--u)) solid #000; }
+
+/* thick left rule, hairline body */
+.tg-ev { position: absolute; box-sizing: border-box; border: calc(1 * var(--u)) solid #000; border-left: calc(5 * var(--u)) solid #000; border-radius: calc(2 * var(--u)); padding: 0 calc(3 * var(--u)); overflow: hidden; background: #fff; display: flex; flex-direction: column; justify-content: center; line-height: 1.08; }
+.tg-ev .ev-t { font-size: calc(12 * var(--u)); flex: 0 0 auto; }
+/* never shrink, one line: else the title vanishes */
+.tg-ev .ev-s { font-size: calc(13.5 * var(--u)); flex: 0 0 auto; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tg-ev .ev-src { font-size: calc(10 * var(--u)); flex: 0 0 auto; }
+/* calendar-sync already enforces a minimum height */
+.tg-ev--compact { justify-content: flex-start; }
+.tg-ev--compact .ev-s { display: block; font-size: calc(12 * var(--u)); line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tg-ev--compact .ev-t { font-size: calc(10.5 * var(--u)); }
+/* day grid: one line, the agenda carries the detail */
+.tg-ev--wide { flex-direction: row; align-items: center; justify-content: flex-start; gap: calc(8 * var(--u)); }
+.tg-ev--wide .ev-s { -webkit-line-clamp: 1; font-size: calc(14 * var(--u)); }
+
+/* ---- month ----------------------------------------------------------- */
+.mo { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; min-height: 0; box-sizing: border-box; border-top: calc(2 * var(--u)) solid #000; }
+.mo-dows { display: flex; padding: calc(2 * var(--u)) 0; border-bottom: calc(1 * var(--u)) solid #000; }
+.mo-dow { flex: 1 1 0; font-size: calc(11 * var(--u)); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; text-align: center; }
+/* hairlines, not a box per cell */
+.mo-wk { display: flex; flex: 1 1 0; min-height: 0; }
+.mo-wk + .mo-wk { border-top: calc(1 * var(--u)) solid #000; }
+.mo-cell { flex: 1 1 0; min-width: 0; padding: calc(2 * var(--u)) calc(4 * var(--u)); display: flex; flex-direction: column; gap: calc(1 * var(--u)); overflow: hidden; }
+.mo-cell + .mo-cell { border-left: calc(1 * var(--u)) solid #000; }
+/* other months: fewer marks, not grey text, which dithers to noise */
+.mo-cell--other .mo-n { font-weight: 400; }
+.mo-cell--other .mo-e { border-left-style: dotted; }
+.mo-cell--weekend { background: #e8e8e8; }
+.mo-n { font-size: calc(16 * var(--u)); font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.mo-cell--today .mo-n { background: #000; color: #fff; border-radius: calc(3 * var(--u)); padding: 0 calc(6 * var(--u)) calc(1 * var(--u)); align-self: flex-start; }
+.mo-e { font-size: calc(12 * var(--u)); font-weight: 500; line-height: 1.25; border-left: calc(3 * var(--u)) solid #000; padding-left: calc(4 * var(--u)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mo-e b { font-weight: 800; }
+.mo-more { font-size: calc(11 * var(--u)); font-weight: 800; }
+</style>
+
+{% if view == 'month' %}
+<div class="layout">
+<div class="cal">
+<div class="mo">
+<div class="mo-dows">
+<span class="mo-dow">Mon</span><span class="mo-dow">Tue</span><span class="mo-dow">Wed</span><span class="mo-dow">Thu</span><span class="mo-dow">Fri</span><span class="mo-dow">Sat</span><span class="mo-dow">Sun</span>
+</div>
+{% for wk in weeks %}
+<div class="mo-wk">
+{% for d in wk.days %}
+<div class="mo-cell{% if d.is_today %} mo-cell--today{% endif %}{% if d.other_month %} mo-cell--other{% endif %}{% if d.is_weekend %} mo-cell--weekend{% endif %}">
+<span class="mo-n">{{ d.day | escape }}</span>
+{% for ev in d.events %}
+<div class="mo-e">{% unless ev.all_day %}<b>{{ ev.time | escape }}</b> {% endunless %}{{ ev.summary | escape }}</div>
+{% endfor %}
+{% if d.more > 0 %}<div class="mo-more">+{{ d.more | escape }} more</div>{% endif %}
+</div>
+{% endfor %}
+</div>
+{% endfor %}
+</div>
+</div>
+</div>
+<div class="title_bar">
+<span class="title">{{ label | escape }}</span>
+<span class="instance">{{ total_events | escape }} {% if total_events == 1 %}event{% else %}events{% endif %}</span>
+</div>
+
+{% elsif view == 'day' %}
+{% assign d = days[0] %}
+<div class="layout">
+<div class="cal cal--day">
+
+<div class="ag">
+<div class="ag-date">
+<span class="ag-dom{% if d.is_today %} ag-dom--today{% endif %}">{{ d.day | escape }}</span>
+<span><span class="ag-dow">{{ weekday | escape }}</span><br><span class="ag-mon">{{ label | escape }}</span></span>
+</div>
+<div class="ag-list">
+{% for ev in d.all_day_events %}
+<div class="ag-ev ag-ev--allday"><span class="ev-s">{{ ev.summary | escape }}</span></div>
+{% endfor %}
+{% if d.all_day_more > 0 %}<div class="ag-more">+{{ d.all_day_more | escape }} more all day</div>{% endif %}
+{% for ev in d.timed_events %}
+<div class="ag-ev">
+<div class="ev-t">{{ ev.time | escape }}&ndash;{{ ev.end_time | escape }}</div>
+<div class="ev-s">{{ ev.summary | escape }}</div>
+<div class="ev-m">{% if ev.location %}{{ ev.location | escape }} &middot; {% endif %}<span class="ev-src">{{ ev.source_label | escape }}</span></div>
+</div>
+{% endfor %}
+{% if total_events == 0 %}<div class="ag-none">Nothing scheduled.</div>{% endif %}
+</div>
+</div>
+
+<div class="tg">
+<div class="tg-row tg-row--grid">
+<div class="tg-gutter tg-axis">
+{% for h in grid.hours %}
+<div class="tg-h{% if forloop.first %} tg-h--first{% endif %}{% if forloop.last %} tg-h--last{% endif %}" style="top:{{ h.top_pct | escape }}%">{{ h.label | escape }}</div>
+{% endfor %}
+</div>
+<div class="tg-col">
+{% for h in grid.hours %}
+<div class="tg-line{% if h.major %} tg-line--major{% endif %}" style="top:{{ h.top_pct | escape }}%"></div>
+{% endfor %}
+{% for ev in d.timed_events %}
+<div class="tg-ev tg-ev--wide" style="top:{{ ev.top_pct | escape }}%;height:{{ ev.height_pct | escape }}%;left:{{ ev.left_pct | escape }}%;width:{{ ev.width_pct | escape }}%">
+<div class="ev-t">{{ ev.time | escape }}</div>
+<div class="ev-s">{{ ev.summary | escape }}</div>
+</div>
+{% endfor %}
+</div>
+</div>
+</div>
+
+</div>
+</div>
+<div class="title_bar">
+<span class="title">{{ weekday | escape }}</span>
+<span class="instance">{{ total_events | escape }} {% if total_events == 1 %}event{% else %}events{% endif %}{% if later > 0 %} &middot; {{ later | escape }} outside {{ grid.start_label | escape }}&ndash;{{ grid.end_label | escape }}{% endif %}</span>
+</div>
+
+{% elsif view == 'week' %}
+<div class="layout">
+<div class="cal">
+<div class="tg">
+
+<div class="tg-row tg-row--head">
+<div class="tg-gutter"></div>
+{% for d in days %}
+<div class="tg-hd{% if d.is_today %} tg-hd--today{% endif %}{% if d.weekday == 'Sat' or d.weekday == 'Sun' %} tg-we{% endif %}"><span class="tg-dow">{{ d.weekday | escape }}</span><span class="tg-dom">{{ d.day | escape }}</span></div>
+{% endfor %}
+</div>
+
+{% if has_all_day %}
+<div class="tg-row tg-row--allday">
+<div class="tg-gutter tg-gutter--label">all day</div>
+{% for d in days %}
+<div class="tg-adcell{% if d.weekday == 'Sat' or d.weekday == 'Sun' %} tg-we{% endif %}">
+{% for ev in d.all_day_events %}
+<span class="ev-s">{{ ev.summary | escape }}</span>
+{% endfor %}
+{% if d.all_day_more > 0 %}<div class="ev-m">+{{ d.all_day_more | escape }} more</div>{% endif %}
+</div>
+{% endfor %}
+</div>
+{% endif %}
+
+<div class="tg-row tg-row--grid">
+<div class="tg-gutter tg-axis">
+{% for h in grid.hours %}
+{% if h.major %}<div class="tg-h{% if forloop.first %} tg-h--first{% endif %}" style="top:{{ h.top_pct | escape }}%">{{ h.label | escape }}</div>{% endif %}
+{% endfor %}
+</div>
+{% for d in days %}
+<div class="tg-col{% if d.weekday == 'Sat' or d.weekday == 'Sun' %} tg-col--weekend tg-we{% endif %}">
+{% for h in grid.hours %}
+<div class="tg-line{% if h.major %} tg-line--major{% endif %}" style="top:{{ h.top_pct | escape }}%"></div>
+{% endfor %}
+{% for ev in d.timed_events %}
+<div class="tg-ev{% if ev.compact %} tg-ev--compact{% endif %}" style="top:{{ ev.top_pct | escape }}%;height:{{ ev.height_pct | escape }}%;left:{{ ev.left_pct | escape }}%;width:{{ ev.width_pct | escape }}%">
+{% if ev.compact %}
+<div class="ev-s"><b class="ev-t">{{ ev.time | escape }}</b> {{ ev.summary | escape }}</div>
+{% else %}
+<div class="ev-t">{{ ev.time | escape }}</div>
+<div class="ev-s">{{ ev.summary | escape }}</div>
+{% if ev.tall %}<div class="ev-src">{{ ev.source_label | escape }}</div>{% endif %}
+{% endif %}
+</div>
+{% endfor %}
+</div>
+{% endfor %}
+</div>
+
+</div>
+</div>
+</div>
+<div class="title_bar">
+<span class="title">{% if offset == 0 %}This week{% elsif offset == -1 %}Last week{% elsif offset == 1 %}Next week{% else %}Week {{ week_number | escape }}{% endif %}</span>
+<span class="instance">{{ label | escape }} &middot; {{ total_events | escape }} {% if total_events == 1 %}event{% else %}events{% endif %}{% if later > 0 %} &middot; {{ later | escape }} outside {{ grid.start_label | escape }}&ndash;{{ grid.end_label | escape }}{% endif %}{% if max_overlap > 1 %} &middot; up to {{ max_overlap | escape }} at once{% endif %}</span>
+</div>
+
+{% else %}
+<div class="layout">
+<div class="markdown">
+<span class="title">Calendar: no data</span>
+<div class="content">No `view` in the payload. Check the plugin's Polling URL points at one of day.json / week.json / month.json on cal.lsck0.dev.</div>
+</div>
+</div>
+<div class="title_bar"><span class="title">Calendar</span><span class="instance">waiting for data</span></div>
+{% endif %}

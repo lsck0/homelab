@@ -1,65 +1,131 @@
-#!/bin/bash
-# sync the entire lab: apply terraform, deploy nixos
+#!/usr/bin/env bash
+# sync the entire lab: apply terraform, deploy nixos, commit the generation
+#
+# Trust: the Proxmox host's ssh key is pinned in src/generated/known_hosts by src/scripts/init.sh --pin, after the owner
+# compared its fingerprint on the console. Every guest's host key is read through that pinned channel from the
+# hypervisor's own view of the guest (qemu guest agent, pct pull) and written to src/generated/known_hosts, and every ssh of the
+# run checks it strictly. Nothing secret goes to an address whose key the network vouched for.
+#
+# Each guest gets only its own age key (src/scripts/secrets-sync.sh); the admin key never leaves this machine.
+#
+# env: TF_STATE_FRESH=1    first deploy of an empty lab: no terraform state on the nas yet
+#      TF_STATE_OFFLINE=1  the nas is down: apply from the local state copy without its lock (it may be behind)
+#      HOMELAB_PARALLEL    deploys at once (default DEPLOY_PARALLEL_DEFAULT)
+# shellcheck disable=SC2016 # the remote scripts are single-quoted on purpose: they expand on the Proxmox host
 set -euo pipefail
 export SHELL=/bin/bash
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TFVARS_PATH="$ROOT_DIR/src/terraform.tfvars"
-TFVARS_ENC_PATH="$ROOT_DIR/src/terraform.tfvars.sops.json"
-# the age key lives in the dotfiles' git-crypt secrets, which the YubiKey unlocks
-DOTFILES="${DOTFILES:-$HOME/projects/arch-dotfiles}"
+SRC="$ROOT_DIR/src"
+# shellcheck source=src/scripts/lib/tools.sh
+. "$SRC/scripts/lib/tools.sh"
+# shellcheck source=src/scripts/lib/tfstate.sh
+. "$SRC/scripts/lib/tfstate.sh"
+# shellcheck source=src/scripts/lib/secrets.sh
+. "$SRC/scripts/lib/secrets.sh"
+# shellcheck source=src/scripts/lib/proxmox.sh
+. "$SRC/scripts/lib/proxmox.sh"
+tools_require git jq sops ssh ssh-keygen ssh-agent ssh-add terraform nix curl openssl
+
+# the age key lives in the dotfiles' git-crypt secrets, which the YubiKey unlocks; the link follows them when they move
 AGE_KEY="$ROOT_DIR/secrets/age.txt"
-[ -e "$AGE_KEY" ] || { mkdir -p "$ROOT_DIR/secrets"; ln -sfn "$DOTFILES/configs/secrets/age.txt" "$AGE_KEY"; }
+secrets_age_key_link "$AGE_KEY"
 # locked, the file is ciphertext and no secret decrypts
 if ! grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY"; then
   echo ">>> dotfiles secrets locked: touch the YubiKey"
-  "$DOTFILES/scripts/yubikey.sh" unlock || true
+  # a failed unlock is reported by the check below
+  "$SECRETS_DOTFILES/scripts/yubikey.sh" unlock || true
   grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY" || { echo "ERROR: $AGE_KEY is not an age key, unlock the dotfiles secrets."; exit 1; }
 fi
 export SOPS_AGE_KEY_FILE="$AGE_KEY"
-# deploys log in with this key; src/keys/ authorizes it everywhere
+# deploys log in with this key; src/lab/keys/ authorizes it everywhere
 DEPLOY_KEY="$HOME/.ssh/id_ed25519"
 DEPLOY_PUB="$DEPLOY_KEY.pub"
 # a fresh dotfiles install has the key only in the dotfiles secrets
 if [ ! -f "$DEPLOY_PUB" ]; then
-  DEPLOY_KEY="$DOTFILES/configs/secrets/ssh_privatekey.asc"
-  DEPLOY_PUB="$DOTFILES/configs/secrets/ssh_publickey.asc"
+  DEPLOY_KEY="$SECRETS_DOTFILES_DIR/ssh_privatekey.asc"
+  DEPLOY_PUB="$SECRETS_DOTFILES_DIR/ssh_publickey.asc"
 fi
-ACTIVE_TFVARS_PATH=""
 # the machine and the house network, written by src/scripts/init.sh
-SITE="$ROOT_DIR/src/site.json"
+SITE="$SRC/generated/site.json"
+# the guests, collected by nix from src/instances/ and src/apps/swarm.nix (modules/lab); filled below
+INVENTORY=""
 ROUTER_WAN_IP=$(jq -r .lan.router "$SITE")
 DEPLOY_FAILURE=0
 # instance name -> built toplevel, filled once the batch build is done
 declare -A TOPLEVELS=()
 CLEANUP_FILES=()
 CLEANUP_AGENT=0
+
+# the owner's ssh config (arch-dotfiles configs/ssh/config) reads the lab's keys from here
+USER_KNOWN_HOSTS="$HOME/.ssh/known_hosts.homelab"
+HOST_KEY_PATH=/etc/ssh/ssh_host_ed25519_key.pub
+# a guest booting or rebooting: up to 5 minutes for its sshd, and 3 for its qemu agent or container to answer
+SSH_WAIT_ATTEMPTS=60
+SSH_WAIT_INTERVAL_S=5
+HOST_KEY_ATTEMPTS=36
+HOST_KEY_RETRY_S=5
+# one ssh call that must not hang the run; a probe in a retry loop gives up sooner
+SSH_CONNECT_TIMEOUT_S=5
+SSH_PROBE_TIMEOUT_S=3
+# after the router's own deploy: 2.5 minutes for the bastion, then 1 for the internal zone behind it
+ROUTER_WAIT_ATTEMPTS=30
+INGRESS_WAIT_ATTEMPTS=12
+# the router's resolver after its deploy: 2 minutes, probed with a name every build pulls from
+DNS_WAIT_ATTEMPTS=24
+DNS_WAIT_INTERVAL_S=5
+DNS_PROBE_NAME=ghcr.io
+# a zone gateway answers ssh within this when the house lan routes the zone here
+ROUTE_PROBE_TIMEOUT_S=4
+PVE_API_PORT=8006
+# hdparm -S units of 5 s: 10 minutes
+HDD_SPINDOWN_SETTING=120
+# containers cannot load kernel modules: nfs for the privileged ones, the rest for docker swarm
+LXC_MODULES="nfs nfsv4 overlay br_netfilter ip_vs ip_vs_rr vxlan"
+NIX_FEATURES=(--extra-experimental-features "nix-command flakes")
+
 # the traefiks run the on-demand reaper; it must not shut a guest down mid-deploy
-ONDEMAND_HOSTS=(10.100.0.100 10.200.0.200)
+ONDEMAND_IDS=(100 200)
 REAPER_PAUSE_FILE=/run/ondemand-reaper-pause-until
 # outlives any sync, expires on its own if the trap never runs
 REAPER_PAUSE_SECONDS=14400
 REAPER_PAUSED=0
-# {"<instance>": "<its age key>"}, from secrets-hosts.sh: each host gets its own key, never the admin key
+# the internal ingress: the first guest reached through the router bastion
+INGRESS_ID=100
+# {"<instance>": "<its age key>"}, from secrets-sync.sh: each host gets its own key, never the admin key
 HOST_KEYS_FILE=""
-# hermes runs this script itself (lab-deploy), so it holds the admin key: the owner gave it root everywhere
-DEPLOYER_HOSTS=(114-internal-hermes)
-DEPLOYER_KEY_PATH=/var/lib/hermes/age.txt
-DEPLOYER_KEY_OWNER=hermes
-# terraform's state lives on the nas, which kopia snapshots; src/terraform.tfstate is only the working copy
-NAS_IP=10.100.0.109
-STATE_LOCAL="$ROOT_DIR/src/terraform.tfstate"
+HOST_AGE_KEY_PATH=/var/lib/sops-nix/key.txt
+# terraform's state lives on the nas, which kopia snapshots; src/generated/terraform/terraform.tfstate is only the
+# working copy, the path terraform/main.tf's backend names
+NAS_ID=109
+TFSTATE_LOCAL="$SRC/generated/terraform/terraform.tfstate"
+TF_DIR="$SRC/terraform"
 STATE_REMOTE=/srv/nas/terraform/terraform.tfstate
+STATE_LOCK_REMOTE=/srv/nas/terraform/.lock
+TF_ATTEMPTS=5
+TF_RETRY_S=5
+TF_PARALLELISM=3
+# a terraform disk bump grows the disk but not the partition: more unpartitioned space than this reboots the guest
+# so boot.growPartition takes it; 64 MiB is above the alignment slack every partitioning leaves
+GROW_REBOOT_SLACK_BYTES=$((64 * 1024 * 1024))
+DEPLOY_PARALLEL_DEFAULT=6
+
 cleanup() {
   [ "$REAPER_PAUSED" = 1 ] && reaper_resume
+  tfstate_lock_release
   [ "$CLEANUP_AGENT" = 1 ] && ssh-agent -k >/dev/null 2>&1
   rm -rf "${CLEANUP_FILES[@]}"
 }
 trap cleanup EXIT
 
+# the same facts every host and terraform read: no generated file to go stale
+INVENTORY=$(mktemp --suffix=.inventory.json); CLEANUP_FILES+=("$INVENTORY")
+nix eval "${NIX_FEATURES[@]}" --json --no-warn-dirty "$SRC#lab.inventory" > "$INVENTORY" \
+  || { echo "ERROR: the lab's instances do not evaluate (nix eval .#lab.inventory)."; exit 1; }
+
 echo ">>> SYNCING HARDWARE + OS..."
 
-# abort if behind upstream
+# abort if behind upstream; offline, or without an upstream, there is nothing to be behind
 git -C "$ROOT_DIR" fetch origin --quiet 2>/dev/null || true
 BEHIND=$(git -C "$ROOT_DIR" rev-list "HEAD..@{u}" --count 2>/dev/null || echo "0")
 if [ "$BEHIND" -gt 0 ]; then
@@ -69,26 +135,20 @@ fi
 
 # -----------------------------------------------------------------------------
 # HELPERS
-read_tfvar() {
-  jq -r --arg k "$1" 'if has($k) and .[$k] != null then .[$k] else empty end' "$ACTIVE_TFVARS_PATH"
-}
+# -----------------------------------------------------------------------------
+ip_of() { jq -r --arg id "$1" '.[$id].ip // empty' "$INVENTORY"; }
+name_of() { jq -r --arg id "$1" '.[$id].name' "$INVENTORY"; }
+# the proxmox api's guest type: containers live under /lxc, vms under /qemu
+kind_of() { jq -r --arg id "$1" 'if .[$id].kind == "lxc" then "lxc" else "qemu" end' "$INVENTORY"; }
 
-load_tfvars() {
-  if [ -f "$TFVARS_PATH" ]; then
-    ACTIVE_TFVARS_PATH="$TFVARS_PATH"; return 0
-  fi
-  [ -f "$TFVARS_ENC_PATH" ] || { echo "ERROR: Missing tfvars. Run ./src/scripts/init.sh first."; exit 1; }
-  command -v sops >/dev/null || { echo "ERROR: sops not installed."; exit 1; }
-  ACTIVE_TFVARS_PATH="$(mktemp --suffix=.tfvars.json)"
-  CLEANUP_FILES+=("$ACTIVE_TFVARS_PATH")
-  sops --decrypt "$TFVARS_ENC_PATH" > "$ACTIVE_TFVARS_PATH"
-  jq empty "$ACTIVE_TFVARS_PATH" >/dev/null || { echo "ERROR: Decrypted tfvars is not valid JSON."; exit 1; }
-}
+# ssh to a lab host: the generated config pins every host key and routes each zone
+# shellcheck disable=SC2029 # remote commands are assembled here from this run's own values
+lab_ssh() { ssh "${BASTION_SSHOPTS[@]}" "$@"; }
 
 wait_for_ssh() {
-  local ip="$1" attempts="${2:-60}" interval="${3:-5}"
+  local ip="$1" attempts="${2:-$SSH_WAIT_ATTEMPTS}" interval="${3:-$SSH_WAIT_INTERVAL_S}"
   for _ in $(seq 1 "$attempts"); do
-    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=3 "${BASTION_SSHOPTS[@]}" "root@${ip}" true 2>/dev/null && return 0
+    lab_ssh -o ConnectTimeout="$SSH_PROBE_TIMEOUT_S" "root@${ip}" true 2>/dev/null && return 0
     sleep "$interval"
   done
   echo "ERROR: SSH not reachable at $ip"; return 1
@@ -96,148 +156,166 @@ wait_for_ssh() {
 
 # a deadline, not a stop: switch-to-configuration restarts timers.target and with it a stopped reaper timer
 reaper_pause() {
-  local ip
-  for ip in "${ONDEMAND_HOSTS[@]}"; do
-    ssh -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@$ip" \
+  local id
+  for id in "${ONDEMAND_IDS[@]}"; do
+    lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@$(ip_of "$id")" \
       "echo \$((\$(date +%s) + $REAPER_PAUSE_SECONDS)) > $REAPER_PAUSE_FILE" 2>/dev/null \
-      || echo "WARNING: could not pause the on-demand reaper on $ip"
+      || echo "WARNING: could not pause the on-demand reaper on vm-$id"
   done
   REAPER_PAUSED=1
 }
 
 reaper_resume() {
-  local ip
-  for ip in "${ONDEMAND_HOSTS[@]}"; do
-    ssh -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@$ip" "rm -f $REAPER_PAUSE_FILE" 2>/dev/null \
-      || echo "WARNING: could not resume the on-demand reaper on $ip, it resumes by itself at the deadline"
+  local id
+  for id in "${ONDEMAND_IDS[@]}"; do
+    lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@$(ip_of "$id")" "rm -f $REAPER_PAUSE_FILE" 2>/dev/null \
+      || echo "WARNING: could not resume the on-demand reaper on vm-$id, it resumes by itself at the deadline"
   done
 }
 
-# "<lineage> <serial>" of a state file
-state_meta() { jq -r '"\(.lineage) \(.serial)"' "$1"; }
-
-# copies the nas state to $1; 1: nas unreachable, 2: no state on the nas yet
-state_fetch() {
+# the nas side of lib/tfstate.sh
+tfstate_remote_read() {
   local out
-  out=$(ssh -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@$NAS_IP" \
+  out=$(lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@$(ip_of "$NAS_ID")" \
     "if [ -f $STATE_REMOTE ]; then cat $STATE_REMOTE; else echo NO_STATE; fi") || return 1
   [ "$out" = NO_STATE ] && return 2
   printf '%s\n' "$out" > "$1"
-  jq empty "$1" 2>/dev/null || { echo "ERROR: $NAS_IP:$STATE_REMOTE is not valid JSON."; exit 1; }
 }
-
-# makes the local working copy current. A different lineage is never resolved automatically: a lost or
-# reset local file starts an empty state, and applying that recreates every guest
-state_pull() {
-  local remote rc=0 l_lin l_ser r_lin r_ser
-  remote=$(mktemp --suffix=.tfstate); CLEANUP_FILES+=("$remote")
-  state_fetch "$remote" || rc=$?
-  if [ "$rc" != 0 ]; then
-    [ "$rc" = 1 ] && echo "WARNING: nas $NAS_IP unreachable, terraform state not pulled."
-    [ -f "$STATE_LOCAL" ] && { echo ">>> Terraform state: using the local copy."; return 0; }
-    # first deploy: no nas, no state
-    [ "${TF_STATE_FRESH:-0}" = 1 ] && { echo ">>> Terraform state: starting empty (TF_STATE_FRESH=1)."; return 0; }
-    echo "ERROR: no terraform state, neither on the nas nor in $STATE_LOCAL."
-    echo "       First deploy of an empty lab: rerun with TF_STATE_FRESH=1."
-    exit 1
-  fi
-  read -r r_lin r_ser < <(state_meta "$remote")
-  if [ ! -f "$STATE_LOCAL" ]; then
-    cp "$remote" "$STATE_LOCAL"
-  else
-    read -r l_lin l_ser < <(state_meta "$STATE_LOCAL")
-    if [ "$l_lin" != "$r_lin" ]; then
-      echo "ERROR: terraform state lineage differs: nas $r_lin (serial $r_ser), local $l_lin (serial $l_ser)."
-      echo "       Keep the right one, delete the other, and rerun."
-      exit 1
-    fi
-    # a newer local copy is a push that failed last run
-    if [ "$l_ser" -gt "$r_ser" ]; then
-      echo ">>> Terraform state: local serial $l_ser is ahead of the nas ($r_ser), keeping it."
-      return 0
-    fi
-    cp "$remote" "$STATE_LOCAL"
-  fi
-  chmod 600 "$STATE_LOCAL"
-  echo ">>> Terraform state: pulled from the nas (serial $(state_meta "$STATE_LOCAL" | cut -d' ' -f2))."
-}
-
-# never fatal: the local copy stays ahead and the next run pushes it
-state_push() {
-  local remote rc=0 l_lin l_ser r_lin r_ser
-  [ -f "$STATE_LOCAL" ] || return 0
-  read -r l_lin l_ser < <(state_meta "$STATE_LOCAL")
-  remote=$(mktemp --suffix=.tfstate); CLEANUP_FILES+=("$remote")
-  state_fetch "$remote" || rc=$?
-  [ "$rc" = 1 ] && { echo "WARNING: nas $NAS_IP unreachable, terraform state not pushed; the next sync pushes it."; return 0; }
-  if [ "$rc" = 0 ]; then
-    read -r r_lin r_ser < <(state_meta "$remote")
-    if [ "$l_lin" != "$r_lin" ] || [ "$l_ser" -lt "$r_ser" ]; then
-      echo "WARNING: nas state ($r_lin, serial $r_ser) does not precede the local one ($l_lin, serial $l_ser): not pushed."
-      return 0
-    fi
-    [ "$l_ser" = "$r_ser" ] && return 0
-  fi
-  # the previous state stays next to it; kopia keeps the history
-  ssh -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@$NAS_IP" \
+# the previous state stays next to it; kopia keeps the history
+tfstate_remote_write() {
+  lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@$(ip_of "$NAS_ID")" \
     "umask 077 && mkdir -p ${STATE_REMOTE%/*} && cat > $STATE_REMOTE.new && sync $STATE_REMOTE.new \
-     && { [ ! -f $STATE_REMOTE ] || cp -p $STATE_REMOTE $STATE_REMOTE.prev; } && mv $STATE_REMOTE.new $STATE_REMOTE" \
-    < "$STATE_LOCAL" \
-    && echo ">>> Terraform state: pushed to the nas (serial $l_ser)." \
-    || echo "WARNING: terraform state push failed; the next sync pushes it."
+     && { [ ! -f $STATE_REMOTE ] || cp -p $STATE_REMOTE $STATE_REMOTE.prev; } && mv $STATE_REMOTE.new $STATE_REMOTE" < "$1"
+}
+# the lock lives as long as this ssh: closing its stdin, or losing the connection, drops it
+tfstate_remote_lock() {
+  lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" -o ServerAliveInterval=15 "root@$(ip_of "$NAS_ID")" \
+    "mkdir -p ${STATE_REMOTE%/*} && { flock -n $STATE_LOCK_REMOTE -c 'echo locked; exec cat >/dev/null' || echo busy; }"
 }
 
-# returns 1 if it had to start the vm
+pve_api() { curl -sf -k --pinnedpubkey "$PVE_TLS_PIN" -H @"$PVE_AUTH_FILE" "$@"; }
+
+# vm_wake <id>: start the guest unless it runs; a start that fails surfaces as its deploy's ssh wait timing out
 vm_wake() {
   local st kind
-  # containers live under /lxc, vms under /qemu
-  kind=$(jq -r --arg id "$1" '.[$id].kind // "vm"' "$ROOT_DIR/src/inventory.json" 2>/dev/null)
-  [ "$kind" = lxc ] && kind=lxc || kind=qemu
-  st=$(curl -sk "$PVE_API/nodes/$PROXMOX_NODE/$kind/$1/status/current" -H "$PVE_AUTH" | jq -r '.data.status // "unknown"' 2>/dev/null)
-  [ "$st" = "running" ] && return 0
+  kind=$(kind_of "$1")
+  st=$(pve_api "$PVE_API/nodes/$PROXMOX_NODE/$kind/$1/status/current" | jq -r '.data.status // "unknown"' 2>/dev/null || echo unknown)
+  [ "$st" != "running" ] || return 0
   echo ">>>   starting vm-$1 ($st)"
-  curl -sk -X POST "$PVE_API/nodes/$PROXMOX_NODE/$kind/$1/status/start" -H "$PVE_AUTH" >/dev/null 2>&1 || true
-  return 1
+  pve_api -X POST "$PVE_API/nodes/$PROXMOX_NODE/$kind/$1/status/start" >/dev/null 2>&1 || true
+}
+
+# guest_host_keys_read <id>...: "<id> <key type> <key>" for every guest whose ed25519 host key the hypervisor could
+# read from inside it; a guest still booting is left out
+guest_host_keys_read() {
+  local args=() id kind payload type key _
+  for id in "$@"; do args+=("$id:$(kind_of "$id")"); done
+  # on proxmox: "<id> lxc <key line>" (pct pull) or "<id> vm <agent json>"; the final true ignores a silent last guest
+  local remote
+  remote=$(cat <<'REMOTE'
+for g in "${@:2}"; do
+  id=${g%:*}
+  if [ "${g#*:}" = lxc ]; then
+    # pull, not exec: a nixos container has no cat on pct's PATH
+    t=$(mktemp) && pct pull "$id" "$1" "$t" 2>/dev/null && printf '%s lxc %s\n' "$id" "$(cat "$t")"
+    rm -f "$t"
+  else
+    out=$(qm guest exec "$id" --timeout 10 -- cat "$1" 2>/dev/null) && printf '%s vm %s\n' "$id" "$(echo "$out" | tr -d '\n')"
+  fi
+done
+true
+REMOTE
+)
+  "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "bash -s -- $HOST_KEY_PATH ${args[*]}" <<<"$remote" \
+    | while read -r id kind payload; do
+        # a reply that is no json, or no key line, is filtered out below
+        [ "$kind" = vm ] && payload=$(jq -r '."out-data" // empty' <<<"$payload" 2>/dev/null || true)
+        read -r type key _ <<<"$payload" || true
+        if [ "$type" = ssh-ed25519 ] && [[ "$key" =~ ^[A-Za-z0-9+/]+=*$ ]]; then echo "$id $type $key"; fi
+      done
+}
+
+# host_keys_learn <id>...: rewrites the guests' lines of src/generated/known_hosts from the hypervisor's view; a guest it cannot
+# read keeps its previous line, and fails its deploy if it has none
+host_keys_learn() {
+  local pending=("$@") attempt id type key ip old new
+  declare -A learned=()
+  for attempt in $(seq 1 "$HOST_KEY_ATTEMPTS"); do
+    while read -r id type key; do learned[$id]="$type $key"; done < <(guest_host_keys_read "${pending[@]}")
+    pending=(); for id in "$@"; do [ -n "${learned[$id]:-}" ] || pending+=("$id"); done
+    [ "${#pending[@]}" = 0 ] && break
+    [ "$attempt" = "$HOST_KEY_ATTEMPTS" ] || sleep "$HOST_KEY_RETRY_S"
+  done
+  [ "${#pending[@]}" = 0 ] \
+    || echo "WARNING: no host key from the hypervisor for $(printf 'vm-%s ' "${pending[@]}")(agent or container not answering)"
+  new=$(umask 022; mktemp "$(dirname "$LAB_KNOWN_HOSTS")/.known_hosts.XXXXXX")
+  {
+    echo "# every ssh host key of the lab, checked strictly by sync.sh, hermes and the owner's ssh config"
+    echo "# Proxmox: pinned by src/scripts/init.sh --pin after a console check. Guests: written by sync.sh from each"
+    echo "# guest's own $HOST_KEY_PATH, read through the Proxmox host (qemu agent, pct pull)"
+    awk -v ip="$PROXMOX_SSH_HOST" '$1 == ip || $1 == "[" ip "]:" port' port="$PROXMOX_SSH_PORT" "$LAB_KNOWN_HOSTS"
+    for id in $(jq -r 'keys[]' "$INVENTORY"); do
+      ip=$(ip_of "$id")
+      old=$(awk -v ip="$ip" '$1 == ip { print $2 " " $3; exit }' "$LAB_KNOWN_HOSTS")
+      if [ -n "${learned[$id]:-}" ]; then
+        [ -n "$old" ] && [ "$old" != "${learned[$id]}" ] && echo ">>> vm-$id: new host key (the guest was recreated)" >&2
+        echo "$ip ${learned[$id]}"
+      elif [ -n "$old" ]; then
+        echo "$ip $old"
+      fi
+    done
+  } > "$new"
+  mv "$new" "$LAB_KNOWN_HOSTS"
+}
+
+# host_age_key_push <name> <ip>: this host's own age key, written only when it differs; prints "changed" if it did
+host_age_key_push() {
+  local host_key
+  host_key=$(jq -r --arg n "$1" '.[$n] // empty' "$HOST_KEYS_FILE")
+  [ -n "$host_key" ] || { echo "ERROR: no age key for $1: src/scripts/secrets-sync.sh did not plan it" >&2; return 1; }
+  printf '%s\n' "$host_key" | lab_ssh "root@$2" \
+    "install -d -m 700 ${HOST_AGE_KEY_PATH%/*} && umask 077 && cat > $HOST_AGE_KEY_PATH.new \
+     && if cmp -s $HOST_AGE_KEY_PATH.new $HOST_AGE_KEY_PATH; then rm $HOST_AGE_KEY_PATH.new; \
+        else mv $HOST_AGE_KEY_PATH.new $HOST_AGE_KEY_PATH && echo changed; fi"
 }
 
 deploy_nixos() {
   local name="$1" ip="$2"
   echo ">>> Deploying $name to $ip..."
-  wait_for_ssh "$ip" 60 5 || return 1
+  ssh-keygen -F "$ip" -f "$LAB_KNOWN_HOSTS" >/dev/null \
+    || { echo "ERROR: no host key for $name ($ip) in src/generated/known_hosts: the hypervisor could not read it"; return 1; }
+  wait_for_ssh "$ip" || return 1
 
   # the router deploys before the batch build finishes, so it builds its own
   local toplevel="${TOPLEVELS[$name]:-}"
   if [ -z "$toplevel" ]; then
-    toplevel=$(nix build "$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel" \
-      --extra-experimental-features "nix-command flakes" --no-link --print-out-paths 2>&1 | tail -n1)
+    toplevel=$(nix build "$SRC#nixosConfigurations.${name}.config.system.build.toplevel" \
+      "${NIX_FEATURES[@]}" --no-link --print-out-paths 2>&1 | tail -n1)
   fi
   [ -n "$toplevel" ] && [ -e "$toplevel" ] || { echo "ERROR: Build failed for $name"; return 1; }
 
-  local current
-  current=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-    "readlink -f /run/current-system" 2>/dev/null || true)
-  [ "$current" = "$toplevel" ] && { echo ">>> $name already up-to-date. Skipping."; return 0; }
-
-  local host_key
-  host_key=$(jq -r --arg n "$name" '.[$n] // empty' "$HOST_KEYS_FILE")
-  [ -n "$host_key" ] || { echo "ERROR: no age key for $name in src/host-keys.json"; return 1; }
-  printf '%s\n' "$host_key" | ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-    "install -d -m 700 /var/lib/sops-nix && umask 077 && cat > /var/lib/sops-nix/key.txt.new \
-     && mv /var/lib/sops-nix/key.txt.new /var/lib/sops-nix/key.txt" || return 1
+  # before the up-to-date check: a lost or stale key on an unchanged host is repaired, then re-activated
+  local key_state current
+  key_state=$(host_age_key_push "$name" "$ip") || return 1
+  # unreadable means deploy anyway
+  current=$(lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@${ip}" "readlink -f /run/current-system" 2>/dev/null || true)
+  if [ "$current" = "$toplevel" ] && [ "$key_state" != changed ]; then
+    echo ">>> $name already up-to-date. Skipping."; return 0
+  fi
+  [ "$key_state" = changed ] && echo ">>> $name: age key replaced, re-activating to decrypt its secrets"
 
   # closures are local builds, no sigs
-  nix copy --extra-experimental-features "nix-command flakes" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
+  nix copy "${NIX_FEATURES[@]}" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
     || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
 
   # switch in place, no reboot
   local out rc=0 failed
   out=$(mktemp)
-  ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
+  lab_ssh "root@${ip}" \
     "nix-env -p /nix/var/nix/profiles/system --set '${toplevel}' \
      && '${toplevel}/bin/switch-to-configuration' switch" 2>&1 | tee "$out" || rc=$?
   if [ "$rc" -ne 0 ]; then
-    # podman healthchecks fire mid-restart; those alone are not a failed deploy
-    # the timer suffix is hex without leading zeros, 15 digits seen on vm-103
+    # podman healthchecks fire mid-restart and are no failed deploy; their unit is <container id>-<hex timer id>
     failed=$(sed -n 's/^warning: the following units failed: //p' "$out" | tr ',' '\n' | tr -d ' ' \
       | grep -v -E '^[0-9a-f]{64}-[0-9a-f]{1,16}\.service$' || true)
     if grep -q '^warning: the following units failed: ' "$out" && [ -z "$failed" ]; then
@@ -247,60 +325,48 @@ deploy_nixos() {
     fi
   fi
   rm -f "$out"
-  # after the switch: the switch creates the user the key belongs to
-  if printf '%s\n' "${DEPLOYER_HOSTS[@]}" | grep -qx "$name"; then
-    ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-      "umask 077 && cat > $DEPLOYER_KEY_PATH.new && chown $DEPLOYER_KEY_OWNER: $DEPLOYER_KEY_PATH.new \
-       && chmod 400 $DEPLOYER_KEY_PATH.new && mv $DEPLOYER_KEY_PATH.new $DEPLOYER_KEY_PATH" < "$AGE_KEY" || return 1
-  fi
   echo ">>> $name deployed."
 
-  # a terraform disk bump grows the qcow live but not the guest partition; reboot so
-  # boot.growPartition expands it. no-op for lxc (no /dev/sda) and once the partition fills.
-  local disk part
-  disk=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-    "lsblk -brno SIZE /dev/sda 2>/dev/null | head -1" 2>/dev/null || true)
-  part=$(ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" "root@${ip}" \
-    "lsblk -brno SIZE /dev/sda1 2>/dev/null | head -1" 2>/dev/null || true)
-  if [ -n "$disk" ] && [ -n "$part" ] && [ $((disk - part)) -gt 67108864 ]; then
+  # a terraform disk bump grows the disk, not the partition (GROW_REBOOT_SLACK_BYTES); an lxc has no /dev/sda, reads 0
+  local disk part boot_id
+  read -r disk part boot_id < <(lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@${ip}" \
+    "echo \$(lsblk -bdno SIZE /dev/sda 2>/dev/null || echo 0) \$(lsblk -bdno SIZE /dev/sda1 2>/dev/null || echo 0) \
+     \$(cat /proc/sys/kernel/random/boot_id)" 2>/dev/null || echo "0 0 -")
+  if [ "$disk" -gt 0 ] && [ "$part" -gt 0 ] && [ $((disk - part)) -gt "$GROW_REBOOT_SLACK_BYTES" ]; then
     echo ">>> $name: disk grew to $((disk / 1024 / 1024 / 1024))G, rebooting to expand the partition"
-    ssh -o StrictHostKeyChecking=accept-new "${BASTION_SSHOPTS[@]}" "root@${ip}" "systemctl reboot" 2>/dev/null || true
-    sleep 5
-    wait_for_ssh "$ip" 60 5 || echo "WARNING: $name did not return after the grow reboot"
+    # the reboot drops the connection, which ssh reports as a failure
+    lab_ssh "root@${ip}" "systemctl reboot" 2>/dev/null || true
+    wait_for_reboot "$ip" "$boot_id" || echo "WARNING: $name did not return after the grow reboot"
   fi
+}
+
+# wait_for_reboot <ip> <boot id before>: the guest answers again, with another boot id
+wait_for_reboot() {
+  local now
+  for _ in $(seq 1 "$SSH_WAIT_ATTEMPTS"); do
+    # down while it reboots
+    now=$(lab_ssh -o ConnectTimeout="$SSH_PROBE_TIMEOUT_S" "root@$1" "cat /proc/sys/kernel/random/boot_id" 2>/dev/null || true)
+    [ -n "$now" ] && [ "$now" != "$2" ] && return 0
+    sleep "$SSH_WAIT_INTERVAL_S"
+  done
+  return 1
 }
 
 # -----------------------------------------------------------------------------
-# MAIN
-load_tfvars
+# PROXMOX
+# -----------------------------------------------------------------------------
+tfvars_temp=$(umask 077; mktemp --suffix=.tfvars.json)
+CLEANUP_FILES+=("$tfvars_temp")
+proxmox_tfvars_load "$tfvars_temp" || { echo "ERROR: Missing tfvars. Run ./src/scripts/init.sh first."; exit 1; }
+proxmox_login_load
 
-# ssh transport
 PROXMOX_SSH_HOST=$(jq -r .lan.proxmox "$SITE")
-PROXMOX_SSH_PORT="$(read_tfvar proxmox_ssh_port)"; : "${PROXMOX_SSH_PORT:=22}"
-PROXMOX_SSH_USER="$(read_tfvar proxmox_ssh_user)"; : "${PROXMOX_SSH_USER:=root}"
-PROXMOX_SSH_PASSWORD="$(read_tfvar proxmox_ssh_password)"
+proxmox_ssh_init "$PROXMOX_SSH_HOST" "$PROXMOX_SSH_PORT"
+# the owner's own ssh sees what this run trusts
+mkdir -p "$HOME/.ssh" && ln -sfn "$LAB_KNOWN_HOSTS" "$USER_KNOWN_HOSTS"
 
-# the lab's host keys, also pinned by the owner's ssh config (arch-dotfiles configs/ssh/config)
-LAB_KNOWN_HOSTS="$HOME/.ssh/known_hosts.homelab"
-# refreshes one host's entry; a guest recreated by terraform comes back with a new key
-lab_known_host() {
-  local key
-  # keyscan prints a banner comment; grep fails when no key came back
-  key=$(ssh-keyscan -T 3 -t ed25519 -p "${2:-22}" "$1" 2>/dev/null | grep -v "^#") || return 1
-  ssh-keygen -R "$1" -f "$LAB_KNOWN_HOSTS" >/dev/null 2>&1 || true
-  echo "$key" >> "$LAB_KNOWN_HOSTS"
-  rm -f "$LAB_KNOWN_HOSTS.old"
-}
-
-SSH_CMD=(ssh -p "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS")
-if [ -n "$PROXMOX_SSH_PASSWORD" ]; then
-  # -e reads SSHPASS: -p would show the password in ps
-  export SSHPASS="$PROXMOX_SSH_PASSWORD"
-  SSH_CMD=(sshpass -e "${SSH_CMD[@]}")
-fi
-
-[ -f "$DEPLOY_PUB" ] && cat "$ROOT_DIR"/src/keys/*.pub | grep -qF "$(cut -d' ' -f2 "$DEPLOY_PUB")" \
-  || { echo "ERROR: $DEPLOY_PUB is not in src/keys/. Add it, then deploy once from a machine whose key is."; exit 1; }
+{ [ -f "$DEPLOY_PUB" ] && cat "$SRC"/lab/keys/*.pub | grep -qF "$(cut -d' ' -f2 "$DEPLOY_PUB")"; } \
+  || { echo "ERROR: $DEPLOY_PUB is not in src/lab/keys/. Add it, then deploy once from a machine whose key is."; exit 1; }
 
 # bpg provider imports vm disks over ssh, through the agent
 if ! ssh-add -l >/dev/null 2>&1; then
@@ -310,78 +376,67 @@ fi
 ssh-add -T "$DEPLOY_PUB" 2>/dev/null || ssh-add "$DEPLOY_KEY" </dev/null >/dev/null 2>&1 \
   || echo "WARNING: could not add the deploy key to the ssh-agent."
 
-mkdir -p "$HOME/.ssh" && touch "$LAB_KNOWN_HOSTS"
-lab_known_host "$PROXMOX_SSH_HOST" "$PROXMOX_SSH_PORT" \
-  || { echo "ERROR: Cannot reach Proxmox at $PROXMOX_SSH_HOST:$PROXMOX_SSH_PORT"; exit 1; }
+"${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" true \
+  || { echo "ERROR: Cannot reach Proxmox at $PROXMOX_SSH_HOST:$PROXMOX_SSH_PORT, or its host key changed (see above)."; exit 1; }
 
-SSH_CONFIG="$(mktemp --suffix=.ssh_config)"; CLEANUP_FILES+=("$SSH_CONFIG")
-
-# per zone: direct where the house lan routes it (a fritzbox static route), else through the router bastion.
-# the zone's gateway answers ssh on the router's wan side whenever the zone is routed here
-: > "$SSH_CONFIG"
-for gateway in $(jq -r '[.[] | select(.type != "router") | .gateway] | unique | .[]' "$ROOT_DIR/src/inventory.json"); do
-  zone="${gateway%.*}.*"
-  if timeout 4 bash -c "echo > /dev/tcp/$gateway/22" 2>/dev/null; then
-    echo ">>> $zone directly routable: no bastion."
-    printf 'Host %s\n  StrictHostKeyChecking accept-new\n  UserKnownHostsFile /dev/null\n' "$zone" >> "$SSH_CONFIG"
-  else
-    echo ">>> $zone not routed from here: through the router bastion."
-    printf 'Host %s\n  ProxyCommand %s -F %s -o StrictHostKeyChecking=accept-new -W %%h:%%p root@%s\n  StrictHostKeyChecking accept-new\n  UserKnownHostsFile /dev/null\n' \
-      "$zone" "$(command -v ssh)" "$SSH_CONFIG" "$ROUTER_WAN_IP" >> "$SSH_CONFIG"
-  fi
-done
-BASTION_SSHOPTS=(-F "$SSH_CONFIG")
-export NIX_SSHOPTS="-F $SSH_CONFIG"
-
-PROXMOX_API_TOKEN_ID="$(read_tfvar proxmox_api_token_id)"
-PROXMOX_API_TOKEN_SECRET="$(read_tfvar proxmox_api_token_secret)"
+# the api's tls key, read over the pinned ssh: the certificate is self-signed, the pin is what curl checks
+PVE_TLS_PIN="sha256//$("${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+  'f=/etc/pve/local/pveproxy-ssl.pem; [ -f "$f" ] || f=/etc/pve/local/pve-ssl.pem; openssl x509 -in "$f" -pubkey -noout' \
+  | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl enc -base64)"
+PROXMOX_API_TOKEN_ID="$(proxmox_tfvar_read proxmox_api_token_id)"
+PROXMOX_API_TOKEN_SECRET="$(proxmox_tfvar_read proxmox_api_token_secret)"
 PROXMOX_NODE=$(jq -r .node "$SITE")
-PVE_API="https://$PROXMOX_SSH_HOST:8006/api2/json"
-PVE_AUTH="Authorization: PVEAPIToken=$PROXMOX_API_TOKEN_ID=$PROXMOX_API_TOKEN_SECRET"
+PVE_API="https://$PROXMOX_SSH_HOST:$PVE_API_PORT/api2/json"
+# a header file, out of argv
+PVE_AUTH_FILE=$(umask 077; mktemp); CLEANUP_FILES+=("$PVE_AUTH_FILE")
+printf 'Authorization: PVEAPIToken=%s=%s\n' "$PROXMOX_API_TOKEN_ID" "$PROXMOX_API_TOKEN_SECRET" > "$PVE_AUTH_FILE"
+unset PROXMOX_API_TOKEN_SECRET
+[ -z "$PROXMOX_API_TOKEN_ID" ] || pve_api "$PVE_API/version" >/dev/null \
+  || { echo "ERROR: the Proxmox api refused the token, or its tls key is not the one ssh reads from the host."; exit 1; }
 
-# proxmox root takes exactly src/keys plus the node's own key, which pve uses to reach itself
-cat "$ROOT_DIR"/src/keys/*.pub | "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+# proxmox root takes exactly src/lab/keys plus the node's own key, which pve uses to reach itself
+cat "$SRC"/lab/keys/*.pub | "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
   'keys=$(cat); [ -n "$keys" ] || exit 1
    f=$(readlink -f /root/.ssh/authorized_keys)
    { grep " root@$(hostname)\$" "$f"; echo "$keys"; } > "$f.new" && cat "$f.new" > "$f" && rm "$f.new"' \
   || echo "WARNING: could not set the Proxmox authorized keys."
 
-# proxmox root password = authelia password
-if PVE_ROOT_PASS=$(sops --decrypt \
-     --extract '["authelia-admin-pass"]' "$ROOT_DIR/src/secrets.json" 2>/dev/null) \
+# proxmox root@pam has its own password: one shared with a guest would make root there root on the hypervisor
+if PVE_ROOT_PASS=$(sops --decrypt --extract '["proxmox-root-pass"]' "$SRC/$SECRETS_CATALOG_FILE" 2>/dev/null) \
    && [ -n "$PVE_ROOT_PASS" ]; then
   if printf 'root:%s\n' "$PVE_ROOT_PASS" \
-       | "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "chpasswd" 2>/dev/null; then
-    echo ">>> Proxmox: root password set to the Authelia password."
+       | "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "chpasswd" 2>/dev/null; then
+    echo ">>> Proxmox: root password set from proxmox-root-pass."
   else
     echo "WARNING: could not set the Proxmox root password."
   fi
   unset PVE_ROOT_PASS
+else
+  echo "WARNING: no proxmox-root-pass in src/$SECRETS_CATALOG_FILE: run src/scripts/secrets-sync.sh --apply."
 fi
 
-# proxmox power and noise, applied now and on every host boot: cpu biased to efficiency, hdds sleep after 10 min idle
-"${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
-  'printf "%s\n" \
+# proxmox power and noise, applied now and on every host boot: cpu biased to efficiency, hdds sleep when idle
+"${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+  "spindown=$HDD_SPINDOWN_SETTING; "'printf "%s\n" \
      "w /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor - - - - powersave" \
      "w /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference - - - - balance_power" \
      > /etc/tmpfiles.d/homelab-power.conf
-   echo "ACTION==\"add\", SUBSYSTEM==\"block\", KERNEL==\"sd[a-z]\", ATTR{queue/rotational}==\"1\", RUN+=\"/usr/sbin/hdparm -S 120 /dev/%k\"" \
+   echo "ACTION==\"add\", SUBSYSTEM==\"block\", KERNEL==\"sd[a-z]\", ATTR{queue/rotational}==\"1\", RUN+=\"/usr/sbin/hdparm -S $spindown /dev/%k\"" \
      > /etc/udev/rules.d/69-homelab-hdd-spindown.rules
    systemd-tmpfiles --create /etc/tmpfiles.d/homelab-power.conf
-   for d in /sys/block/sd*; do [ "$(cat $d/queue/rotational)" = 1 ] && hdparm -q -S 120 /dev/${d##*/}; done
+   for d in /sys/block/sd*; do [ "$(cat $d/queue/rotational)" = 1 ] && hdparm -q -S "$spindown" /dev/${d##*/}; done
    echo ">>> Proxmox: cpu powersave/balance_power, hdd spin-down 10min"' \
   || echo "WARNING: could not set the Proxmox power settings."
 
-# containers cannot load kernel modules: nfs for the privileged ones, the rest for docker swarm
-"${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
-  'printf "%s\n" nfs nfsv4 overlay br_netfilter ip_vs ip_vs_rr vxlan > /etc/modules-load.d/homelab-lxc.conf
-   for m in nfs nfsv4 overlay br_netfilter ip_vs ip_vs_rr vxlan; do modprobe "$m"; done' \
+"${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+  "modules='$LXC_MODULES'; "'printf "%s\n" $modules > /etc/modules-load.d/homelab-lxc.conf
+   for m in $modules; do modprobe "$m"; done' \
   2>/dev/null || echo "WARNING: could not load the lxc kernel modules on Proxmox."
 
 # bulk (hdd) stays disabled in proxmox: pvestatd polls enabled storages every 10s, which keeps the disk
 # spinning; vm-109's hookscript enables it only around its own start and stop
-"${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
-  'set -e
+"${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+  "set -e; nas=$NAS_ID"'
    grep -A3 "^dir: local$" /etc/pve/storage.cfg | grep -q snippets || pvesm set local --content backup,vztmpl,iso,snippets
    install -d /var/lib/vz/snippets
    cat > /var/lib/vz/snippets/homelab-bulk.sh <<"HOOK"
@@ -393,8 +448,8 @@ esac
 exit 0
 HOOK
    chmod 755 /var/lib/vz/snippets/homelab-bulk.sh
-   qm config 109 | grep -q "^hookscript: local:snippets/homelab-bulk.sh" || qm set 109 --hookscript local:snippets/homelab-bulk.sh >/dev/null
-   [ "$(qm status 109 | cut -d" " -f2)" = running ] && pvesm set bulk --disable 1
+   qm config $nas | grep -q "^hookscript: local:snippets/homelab-bulk.sh" || qm set $nas --hookscript local:snippets/homelab-bulk.sh >/dev/null
+   [ "$(qm status $nas | cut -d" " -f2)" = running ] && pvesm set bulk --disable 1
    # onboot start checks the storage before the hookscript runs, so host boot enables bulk for the autostart
    d=/etc/systemd/system/pve-guests.service.d; install -d $d
    printf "[Service]\nExecStartPre=/usr/sbin/pvesm set bulk --disable 0\n" > $d/homelab-bulk.conf.new
@@ -416,54 +471,84 @@ HOOK
   || echo "WARNING: could not set up the bulk storage hookscript."
 
 # golden image
-if ! "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
+if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
   [ -f "$ROOT_DIR/images/nixos.img" ] || { echo "ERROR: Golden image missing. Run: sudo nix build ./src#cloud-image"; exit 1; }
   echo ">>> Uploading golden image..."
-  scp -P "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS" "$ROOT_DIR/images/nixos.img" \
+  scp -P "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS" -o StrictHostKeyChecking=yes "$ROOT_DIR/images/nixos.img" \
     "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:/var/lib/vz/template/iso/nixos.img"
 fi
 
 # lxc template; only seeds new containers, so upload once
 LXC_TEMPLATE=/var/lib/vz/template/cache/nixos-homelab.tar.xz
-if ! "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f $LXC_TEMPLATE" 2>/dev/null; then
+if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f $LXC_TEMPLATE" 2>/dev/null; then
   echo ">>> Building and uploading the LXC template..."
-  tarball=$(nix build "$ROOT_DIR/src#lxc-template" --extra-experimental-features "nix-command flakes" \
-    --no-link --print-out-paths)
-  scp -P "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS" "$tarball"/tarball/*.tar.xz \
+  tarball=$(nix build "$SRC#lxc-template" "${NIX_FEATURES[@]}" --no-link --print-out-paths)
+  scp -P "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS" -o StrictHostKeyChecking=yes "$tarball"/tarball/*.tar.xz \
     "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:$LXC_TEMPLATE"
 fi
 
-# terraform
-[ -d "$ROOT_DIR/src/.terraform" ] || terraform -chdir="$ROOT_DIR/src" init
-state_pull
+# -----------------------------------------------------------------------------
+# SSH TO THE LAB: per zone direct where the house lan routes it (a fritzbox static route), else through the router
+# bastion; every host key checked against src/generated/known_hosts
+# -----------------------------------------------------------------------------
+SSH_CONFIG="$(mktemp --suffix=.ssh_config)"; CLEANUP_FILES+=("$SSH_CONFIG")
+: > "$SSH_CONFIG"
+# the zone's gateway answers ssh on the router's wan side whenever the zone is routed here
+for gateway in $(jq -r '[.[] | select(.type != "router") | .gateway] | unique | .[]' "$INVENTORY"); do
+  zone="${gateway%.*}.*"
+  if timeout "$ROUTE_PROBE_TIMEOUT_S" bash -c "echo > /dev/tcp/$gateway/22" 2>/dev/null; then
+    echo ">>> $zone directly routable: no bastion."
+  else
+    echo ">>> $zone not routed from here: through the router bastion."
+    printf 'Host %s\n  ProxyCommand %s -F %s -W %%h:%%p root@%s\n' "$zone" "$(command -v ssh)" "$SSH_CONFIG" "$ROUTER_WAN_IP" >> "$SSH_CONFIG"
+  fi
+done
+printf 'Host *\n  UserKnownHostsFile %s\n  StrictHostKeyChecking yes\n  HostKeyAlgorithms ssh-ed25519\n' "$LAB_KNOWN_HOSTS" >> "$SSH_CONFIG"
+BASTION_SSHOPTS=(-F "$SSH_CONFIG")
+export NIX_SSHOPTS="-F $SSH_CONFIG"
+
+# -----------------------------------------------------------------------------
+# TERRAFORM
+# -----------------------------------------------------------------------------
+# idempotent; installs a provider main.tf gained since the last run (the lock file pins it)
+terraform -chdir="$TF_DIR" init -input=false > /dev/null
+if [ "${TF_STATE_OFFLINE:-0}" = 1 ]; then
+  [ -f "$TFSTATE_LOCAL" ] || { echo "ERROR: TF_STATE_OFFLINE=1 needs the local copy $TFSTATE_LOCAL."; exit 1; }
+  echo "WARNING: TF_STATE_OFFLINE=1: applying from the local state copy, unlocked; it may be behind the nas."
+elif [ "${TF_STATE_FRESH:-0}" = 1 ] && [ ! -f "$TFSTATE_LOCAL" ]; then
+  # an empty lab has no nas to lock or pull from
+  echo ">>> Terraform state: starting empty (TF_STATE_FRESH=1)."
+else
+  # the nas guest's own key first: the lock and the state travel over ssh to it
+  host_keys_learn "$NAS_ID"
+  tfstate_lock_acquire || exit 1
+  tfstate_pull || exit 1
+fi
 # every run, with refresh: proxmox drift (a half-failed apply, a manual edit) is corrected, never trusted
 echo ">>> Terraform: applying..."
-for i in $(seq 1 5); do
-  terraform -chdir="$ROOT_DIR/src" apply -auto-approve -parallelism=3 -var-file="$ACTIVE_TFVARS_PATH" && break
-  # a failed apply still writes the state
-  [ "$i" -eq 5 ] && { state_push; echo "ERROR: Terraform failed after 5 attempts."; exit 1; }
-  echo "Retrying ($i/5)..."; sleep 5
+for i in $(seq 1 "$TF_ATTEMPTS"); do
+  terraform -chdir="$TF_DIR" apply -auto-approve -parallelism="$TF_PARALLELISM" -var-file="$PROXMOX_TFVARS" && break
+  # a failed apply still writes the state; the apply's failure is the error reported, not the push's
+  if [ "$i" -eq "$TF_ATTEMPTS" ]; then
+    [ "${TF_STATE_OFFLINE:-0}" = 1 ] || tfstate_push || true
+    echo "ERROR: Terraform failed after $TF_ATTEMPTS attempts."; exit 1
+  fi
+  echo "Retrying ($i/$TF_ATTEMPTS)..."; sleep "$TF_RETRY_S"
 done
-state_push
-
-# nix inventory, evaluated from terraform
-INVENTORY="$ROOT_DIR/src/inventory.json"
-INVENTORY_NEW=$(echo 'jsonencode(local.inventory)' \
-  | terraform -chdir="$ROOT_DIR/src" console -var-file="$ACTIVE_TFVARS_PATH" \
-  | jq -r 'fromjson' | jq -S .) || { echo "ERROR: Could not evaluate the Terraform inventory."; exit 1; }
-if [ "$INVENTORY_NEW" != "$(cat "$INVENTORY" 2>/dev/null)" ]; then
-  echo "$INVENTORY_NEW" > "$INVENTORY"
-  echo ">>> Inventory updated: src/inventory.json"
+if [ "${TF_STATE_OFFLINE:-0}" != 1 ]; then
+  [ -n "${TFSTATE_LOCK_PID:-}" ] || host_keys_learn "$NAS_ID"
+  tfstate_push || DEPLOY_FAILURE=1
 fi
 
 # lxc features: root@pam only, so not terraform; a change needs a restart
 sorted_features() { tr , '\n' | sort | paste -sd, -; }
 for vmid in $(jq -r 'to_entries[] | select(.value.kind == "lxc" and .value.enabled != "false") | .key' "$INVENTORY"); do
   want=$(jq -r --arg id "$vmid" '.[$id].features' "$INVENTORY" | sorted_features)
-  have=$("${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "pct config $vmid 2>/dev/null | sed -n 's/^features: //p'" | sorted_features || true)
+  # a container terraform has not created reads as no features
+  have=$("${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "pct config $vmid 2>/dev/null | sed -n 's/^features: //p'" | sorted_features || true)
   [ "$want" = "$have" ] && continue
   echo ">>> lxc-$vmid features: ${have:-none} -> $want"
-  "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+  "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
     "pct set $vmid --features $want && if pct status $vmid | grep -q running; then pct reboot $vmid; fi" \
     || echo "WARNING: could not set features on lxc-$vmid"
 done
@@ -472,35 +557,41 @@ done
 # containers must stay off at host boot
 for vmid in $(jq -r 'to_entries[] | select(.value.kind == "lxc") | .key' "$INVENTORY"); do
   want=$(jq -r --arg id "$vmid" 'if .[$id].enabled == "true" then 1 else 0 end' "$INVENTORY")
-  "${SSH_CMD[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
+  "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" \
     "o=\$(pct config $vmid | sed -n 's/^onboot: //p'); [ \"\${o:-0}\" = $want ] || { pct set $vmid --onboot $want && echo '>>> lxc-$vmid onboot -> $want'; }" \
     || echo "WARNING: could not set onboot on lxc-$vmid"
 done
 
-VM_IPS=$(jq -r 'to_entries[] | "\(.key)=\(.value.ip)"' "$INVENTORY")
-DISABLED_VMS=$(jq -r 'to_entries[] | select(.value.enabled == "false") | .key' "$INVENTORY")
-[ -n "$DISABLED_VMS" ] && echo ">>> Disabled VMs: $(echo "$DISABLED_VMS" | tr '\n' ' ')" || true
+# every enabled guest but the router, built and deployed below; its configuration is named like the guest (modules/lab)
+mapfile -t GUEST_IDS < <(jq -r 'to_entries[] | select(.value.type != "router" and .value.enabled != "false") | .key' "$INVENTORY")
+DISABLED_VMS=$(jq -r '[to_entries[] | select(.value.enabled == "false") | .key] | join(" ")' "$INVENTORY")
+if [ -n "$DISABLED_VMS" ]; then echo ">>> Disabled VMs, neither built nor deployed: $DISABLED_VMS"; fi
 
+# the traefiks are always on: pause their reaper before waking anything it could stop again
+host_keys_learn "${ONDEMAND_IDS[@]}"
 reaper_pause
 
 # enabled vms must run to receive a deploy
-WAKE_VMS=$(jq -r 'to_entries[] | select(.value.enabled != "false") | .key' "$INVENTORY")
-if [ -n "$WAKE_VMS" ] && [ -n "$PROXMOX_API_TOKEN_ID" ]; then
-  WOKE=0
-  for vmid in $WAKE_VMS; do vm_wake "$vmid" || WOKE=1; done
-  # boot wait only if one started
-  [ "$WOKE" = 1 ] && sleep 45 || true
+mapfile -t ENABLED_IDS < <(jq -r 'to_entries[] | select(.value.enabled != "false") | .key' "$INVENTORY")
+if [ "${#ENABLED_IDS[@]}" -gt 0 ]; then
+  [ -z "$PROXMOX_API_TOKEN_ID" ] || for vmid in "${ENABLED_IDS[@]}"; do vm_wake "$vmid"; done
+  # waits for the guests just started: their agents answer once they are up
+  echo ">>> Reading every running guest's host key through Proxmox..."
+  host_keys_learn "${ENABLED_IDS[@]}"
 fi
 
+# -----------------------------------------------------------------------------
+# SECRETS AND BUILD
+# -----------------------------------------------------------------------------
 # flakes only see git-tracked files
 git -C "$ROOT_DIR" add -A src
-# per-host secret files and keys, from the configs just staged; staged again so the build sees them
+# every secret, key and rule where the configs just staged say; staged again so the build sees them
 HOST_KEYS_FILE=$(umask 077; mktemp --suffix=.host-keys.json); CLEANUP_FILES+=("$HOST_KEYS_FILE")
-"$ROOT_DIR/src/scripts/secrets-hosts.sh" --host-keys-out "$HOST_KEYS_FILE"
+"$SRC/scripts/secrets-sync.sh" --apply --host-keys-out "$HOST_KEYS_FILE"
 git -C "$ROOT_DIR" add -A src .sops.yaml
 # the repo is public: stop before anything is built from, or committed with, a plaintext secret
 git -C "$ROOT_DIR" config core.hooksPath .githooks
-"$ROOT_DIR/src/scripts/secrets-check.sh"
+"$SRC/scripts/secrets-check.sh" --require-values
 
 # one nix process for every closure: one per vm ran the workstation out of memory
 echo ">>> Building all VM closures..."
@@ -508,41 +599,37 @@ BUILD_LOG=$(mktemp --suffix=.build.log); CLEANUP_FILES+=("$BUILD_LOG")
 # out links are gc roots until the deploys are done
 BUILD_DIR=$(mktemp -d --suffix=.build); CLEANUP_FILES+=("$BUILD_DIR")
 BUILD_NAMES=(); BUILD_TARGETS=()
-for f in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix; do
-  [ -f "$f" ] || continue
-  name=$(basename "$f" .nix); vm_id="${name%%-*}"
-  if echo "$DISABLED_VMS" | grep -qx "$vm_id"; then
-    echo ">>> Skipping build for $name (disabled)"; continue
-  fi
+for vm_id in "${GUEST_IDS[@]}"; do
+  name=$(name_of "$vm_id")
   BUILD_NAMES+=("$name")
-  BUILD_TARGETS+=("$ROOT_DIR/src#nixosConfigurations.${name}.config.system.build.toplevel")
+  BUILD_TARGETS+=("$SRC#nixosConfigurations.${name}.config.system.build.toplevel")
 done
 BUILD_PID=""
 if [ "${#BUILD_TARGETS[@]}" -gt 0 ]; then
-  nix build "${BUILD_TARGETS[@]}" --extra-experimental-features "nix-command flakes" \
+  nix build "${BUILD_TARGETS[@]}" "${NIX_FEATURES[@]}" \
     --keep-going --out-link "$BUILD_DIR/result" > "$BUILD_LOG" 2>&1 &
   BUILD_PID=$!
 fi
 
+# -----------------------------------------------------------------------------
+# DEPLOY
+# -----------------------------------------------------------------------------
 # router first, it is the ssh bastion
-echo ">>> Deploying 300-router to $ROUTER_WAN_IP..."
 deploy_nixos "300-router" "$ROUTER_WAN_IP" || { echo "WARNING: Router deploy failed"; DEPLOY_FAILURE=1; }
 
 if [ "$DEPLOY_FAILURE" -eq 0 ]; then
   echo ">>> Waiting for router bastion..."
-  wait_for_ssh "$ROUTER_WAN_IP" 30 5 || { echo "ERROR: Router unreachable after deploy."; exit 1; }
+  wait_for_ssh "$ROUTER_WAN_IP" "$ROUTER_WAIT_ATTEMPTS" || { echo "ERROR: Router unreachable after deploy."; exit 1; }
 
+  # a wait, not a gate: a guest behind it that stays unreachable fails its own deploy
   echo ">>> Verifying bastion -> internal subnet..."
-  for _ in $(seq 1 12); do
-    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "${BASTION_SSHOPTS[@]}" root@10.100.0.100 true 2>/dev/null && break
-    sleep 5
-  done
+  wait_for_ssh "$(ip_of "$INGRESS_ID")" "$INGRESS_WAIT_ATTEMPTS" || true
 
   echo ">>> Verifying router DNS..."
-  for _ in $(seq 1 24); do
-    ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 "root@$ROUTER_WAN_IP" \
-      "dig +short +timeout=2 ghcr.io @127.0.0.1 2>/dev/null | grep -q ." 2>/dev/null && break
-    sleep 5
+  for _ in $(seq 1 "$DNS_WAIT_ATTEMPTS"); do
+    lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@$ROUTER_WAN_IP" \
+      "dig +short +timeout=2 $DNS_PROBE_NAME @127.0.0.1 2>/dev/null | grep -q ." 2>/dev/null && break
+    sleep "$DNS_WAIT_INTERVAL_S"
   done
 fi
 
@@ -560,61 +647,51 @@ done
 echo ">>> All builds complete."
 
 # deploy the rest in parallel
-MAX_PARALLEL="${HOMELAB_PARALLEL:-6}"
-DEPLOY_PIDS=(); DEPLOY_NAMES=()
+MAX_PARALLEL="${HOMELAB_PARALLEL:-$DEPLOY_PARALLEL_DEFAULT}"
+# pid -> instance name of every deploy still running
+declare -A DEPLOYING=()
 
-reap() {
-  local new_pids=() new_names=()
-  for i in "${!DEPLOY_PIDS[@]}"; do
-    if kill -0 "${DEPLOY_PIDS[$i]}" 2>/dev/null; then
-      new_pids+=("${DEPLOY_PIDS[$i]}"); new_names+=("${DEPLOY_NAMES[$i]}")
-    else
-      wait "${DEPLOY_PIDS[$i]}" || { echo "WARNING: Failed to deploy ${DEPLOY_NAMES[$i]}"; DEPLOY_FAILURE=1; }
-    fi
-  done
-  DEPLOY_PIDS=("${new_pids[@]}"); DEPLOY_NAMES=("${new_names[@]}")
+# deploy_reap: block until one running deploy ends, and record its failure
+deploy_reap() {
+  local pid rc=0
+  wait -n -p pid "${!DEPLOYING[@]}" || rc=$?
+  [ "$rc" = 0 ] || { echo "WARNING: Failed to deploy ${DEPLOYING[$pid]}"; DEPLOY_FAILURE=1; }
+  unset "DEPLOYING[$pid]"
 }
 
 echo ">>> Deploying VMs (up to $MAX_PARALLEL in parallel)..."
-for f in "$ROOT_DIR"/src/instances/{1,2}[0-9][0-9]-*.nix; do
-  [ -f "$f" ] || continue
-  name=$(basename "$f" .nix); vm_id="${name%%-*}"
-  if echo "$DISABLED_VMS" | grep -qx "$vm_id"; then
-    echo ">>> Skipping $name (disabled)"; continue
-  fi
-  ip=$(echo "$VM_IPS" | grep "^${vm_id}=" | cut -d= -f2 || true)
-  [ -z "$ip" ] && { echo ">>> WARNING: No IP for $name, skipping."; continue; }
-
-  while [ "${#DEPLOY_PIDS[@]}" -ge "$MAX_PARALLEL" ]; do
-    reap; [ "${#DEPLOY_PIDS[@]}" -ge "$MAX_PARALLEL" ] && sleep 2
-  done
-
+for vm_id in "${GUEST_IDS[@]}"; do
+  name=$(name_of "$vm_id")
+  ip=$(ip_of "$vm_id")
+  [ -n "$ip" ] || { echo ">>> WARNING: No IP for $name, skipping."; continue; }
+  while [ "${#DEPLOYING[@]}" -ge "$MAX_PARALLEL" ]; do deploy_reap; done
   # the reaper may have stopped it meanwhile
-  if [ -n "$PROXMOX_API_TOKEN_ID" ] && echo "$WAKE_VMS" | grep -qx "$vm_id"; then
-    vm_wake "$vm_id" || true
-  fi
+  [ -z "$PROXMOX_API_TOKEN_ID" ] || vm_wake "$vm_id"
   deploy_nixos "$name" "$ip" &
-  DEPLOY_PIDS+=("$!"); DEPLOY_NAMES+=("$name")
+  DEPLOYING[$!]=$name
 done
+while [ "${#DEPLOYING[@]}" -gt 0 ]; do deploy_reap; done
 
-for i in "${!DEPLOY_PIDS[@]}"; do
-  wait "${DEPLOY_PIDS[$i]}" || { echo "WARNING: Failed to deploy ${DEPLOY_NAMES[$i]}"; DEPLOY_FAILURE=1; }
-done
-
-for ip in $(jq -r '.[].ip' "$INVENTORY"); do lab_known_host "$ip" || true; done
-
-# commit + push, even on partial failure: the whole tree, so a generation never pairs new configs with an old sync.sh
-# or hook; secrets-check refuses it if anything staged would publish a secret
+# -----------------------------------------------------------------------------
+# COMMIT: what was deployed, even on partial failure. Tracked changes anywhere (a generation never pairs new configs
+# with an old sync.sh) and new files under src only: an untracked file elsewhere is never swept into the public repo
+# -----------------------------------------------------------------------------
 if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-  git -C "$ROOT_DIR" add -A
-  if ! git -C "$ROOT_DIR" diff --cached --quiet && "$ROOT_DIR/src/scripts/secrets-check.sh"; then
+  git -C "$ROOT_DIR" add -u
+  git -C "$ROOT_DIR" add -A src .sops.yaml
+  if git -C "$ROOT_DIR" diff --cached --quiet; then
+    :
+  elif "$SRC/scripts/secrets-check.sh" --require-values; then
     # every commit is Generation: <n>, numbered by position
     next=$(( $(git -C "$ROOT_DIR" rev-list --count HEAD) + 1 ))
     echo ">>> Git: committing generation $next"
     git -C "$ROOT_DIR" commit -m "Generation: $next"
     git -C "$ROOT_DIR" push || echo "WARNING: git push failed."
+  else
+    echo "ERROR: not committed: the staged tree would publish a secret (above). Unstage or encrypt it, then commit."
+    DEPLOY_FAILURE=1
   fi
 fi
 
-[ "$DEPLOY_FAILURE" -ne 0 ] && { echo "ERROR: One or more deployments failed."; exit 1; }
+[ "$DEPLOY_FAILURE" -ne 0 ] && { echo "ERROR: One or more deployments or the commit failed."; exit 1; }
 echo ">>> LAB IS FULLY SYNCHRONIZED"

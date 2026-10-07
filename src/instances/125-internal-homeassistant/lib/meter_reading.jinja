@@ -1,0 +1,47 @@
+{#-
+  Meter reading guard: decides what a typed-in meter reading does to the accepted one.
+
+  Loaded by home assistant from /config/custom_templates (125-internal-homeassistant.nix) and imported by each
+  meter's trigger-based template sensor; instances/104-internal-terminal/tests/feeds_test.py renders it with plain jinja2. Pure: every input is
+  an argument, so the same numbers always give the same verdict.
+
+  A meter only counts up, and readings are typed by hand once a day or so. The guard therefore accepts:
+    accept_first  the first reading of a meter, or any reading once "meter replaced" was pressed after the last
+    accept        a rise of at most max_rise_per_day for every day since the last reading (at least one day)
+    correct       a value below the last reading but not below the one before it: the last entry was a typo
+    same          the accepted value again (the reset after a rejection lands here)
+  and rejects:
+    reject_invalid  zero or negative, the unset helper
+    reject_low      below the reading before the last, or below the only one: a decimal shift, never a real meter
+    reject_high     a rise no house makes in that time: a decimal shift the other way
+
+  Consumption is read downstream as last minus minimum over a window (energy_model.meter_rise), so a too-high
+  entry that is corrected later never counts: it is above the corrected value and not the window's minimum.
+  Rejected alternative: accepting any drop as a correction lets 327.8 for 3278 wipe out the history, and right
+  after the first reading every drop would be one. A wrong first reading is started over with the button.
+
+  Arguments, all floats: reading (typed), accepted (current accepted value, 0 when none yet), previous (the
+  accepted value before it, 0 when none), read_at_s and now_s (unix seconds), replaced_s (unix seconds the
+  "meter replaced" button was last pressed, 0 never), max_rise_per_day (cubic meters).
+-#}
+{%- macro meter_verdict(reading, accepted, previous, read_at_s, now_s, replaced_s, max_rise_per_day) -%}
+{%- set seconds_per_day = 86400 -%}
+{%- if reading <= 0 -%}
+reject_invalid
+{%- elif accepted <= 0 or replaced_s > read_at_s -%}
+accept_first
+{%- elif reading == accepted -%}
+same
+{%- elif reading > accepted -%}
+{%- set days = [(now_s - read_at_s) / seconds_per_day, 1] | max -%}
+{%- if reading - accepted <= max_rise_per_day * days -%}
+accept
+{%- else -%}
+reject_high
+{%- endif -%}
+{%- elif previous > 0 and reading >= previous -%}
+correct
+{%- else -%}
+reject_low
+{%- endif -%}
+{%- endmacro -%}

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# lab-wide: the media stack of 112, 128, 130 and 134, run by hand against the real containers
 # media stack wiring e2e test, real app containers
 set -euo pipefail
 
@@ -46,14 +47,22 @@ unit_script() {
   local e; for e in "$@"; do sed -i "$e" "$out"; done
   echo "$out"
 }
-run_unit() { local s; s=$(unit_script "$@"); echo ">>> $2"; bash "$s"; }
+# the unit's RuntimeDirectory, as systemd would give it
+run_unit() { local s; s=$(unit_script "$@"); echo ">>> $2"; mkdir -p "$W/run/$2"; RUNTIME_DIRECTORY="$W/run/$2" bash "$s"; }
 
 # podman on the vms, docker here
-mkdir -p "$W/bin" "$W/tokens"
+mkdir -p "$W/bin" "$W/tokens" "$W/run"
 printf '#!/bin/sh\nexec docker "$@"\n' > "$W/bin/podman"; chmod +x "$W/bin/podman"
 export PATH="$W/bin:$PATH"
 
-TOK="s#/var/lib/lab-tokens#$W/tokens#g"
+# the lab's token layout (modules/tokens): each producer writes its own dir, tokens/<name>.token are links into
+# them, so a setup unit that wrote through a link instead of its own dir breaks here as it would in the lab
+nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.114-internal-hermes.config.homelab.tokens.producers" \
+  | jq -r 'to_entries[] | "\(.key) \(.value)"' | while read -r name id; do
+      mkdir -p "$W/tokens.d/vm-$id"
+      ln -sfn "$W/tokens.d/vm-$id/$name.token" "$W/tokens/$name.token"
+    done
+TOK="s#/var/lib/lab-tokens.d#$W/tokens.d#g; s#/var/lib/lab-tokens#$W/tokens#g"
 
 echo ">>> workdir $W"
 for a in $APPS; do docker rm -f "$P$a" >/dev/null 2>&1 || true; done
@@ -61,7 +70,7 @@ docker network rm "$NET" >/dev/null 2>&1 || true
 docker network create --subnet "$SUBNET" "$NET" >/dev/null
 
 mkdir -p "$W"/media/{movies,tv,anime,music,leaving-soon} "$W/torrents"
-chmod -R 777 "$W/media" "$W/torrents" "$W/tokens"
+chmod -R 777 "$W/media" "$W/torrents" "$W/tokens" "$W/tokens.d"
 
 # run_app <name> <image> <published host:container port> [docker args...]
 run_app() {
@@ -99,15 +108,28 @@ QPREFS=$(nixeval 112-internal-qbittorrent systemd.services.qbittorrent-settings.
 jq --arg s "$SUBNET" '.bypass_auth_subnet_whitelist = $s' "$QPREFS" > "$W/qbittorrent-prefs.json"
 run_unit 112-internal-qbittorrent qbittorrent-settings "$TOK" \
   "s#$QPREFS#$W/qbittorrent-prefs.json#" \
-  "s#podman exec qbittorrent#podman exec ${P}qbittorrent#"
+  "s#podman exec \\(-i \\)\\?qbittorrent#podman exec \\1${P}qbittorrent#g"
 
 for name in prowlarr radarr sonarr lidarr bazarr; do
   run_unit 130-internal-arr "$name-setup" "$TOK" "s#/var/lib/$name#$W/$name#g" \
     "s#systemctl stop podman-$name.service#docker stop $P$name#" "s#systemctl start podman-$name.service#docker start $P$name#"
 done
 
-run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "s#http://127.0.0.1:80#http://127.0.0.1:18096#g"
+JF="s#http://127.0.0.1:80#http://127.0.0.1:18096#g"
+run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "$JF"
 run_unit 128-internal-jellyseerr jellyseerr-token "$TOK" "s#/var/lib/jellyseerr#$W/jellyseerr#g"
+
+# -----------------------------------------------------------------------------
+# JELLYFIN SETUP UNDER A RESTART (the readiness contract, no fixed waits)
+echo ">>> jellyfin restarted, setup at once: it waits for ready instead of failing"
+docker restart "${P}jellyfin" >/dev/null
+check "jellyfin-setup right after a restart" run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "$JF"
+out=$(run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "$JF" 2>&1); echo "$out"
+if echo "$out" | grep -qE "restarting jellyfin|created|enabled|revoked|exported"; then
+  fail "jellyfin-setup third run changed something"
+else
+  ok "jellyfin-setup third run is a no-op"
+fi
 
 echo ">>> Exported tokens: $(cd "$W/tokens" && echo *)"
 
@@ -115,9 +137,13 @@ echo ">>> Exported tokens: $(cd "$W/tokens" && echo *)"
 # ARR-WIRE (THE REAL SCRIPT BUILT FOR VM-130, RUN ON THE TEST NETWORK)
 nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.130-internal-arr.config.systemd.services.arr-wire.serviceConfig.ExecStart"
 WIRE=$(nixeval 130-internal-arr systemd.services.arr-wire.serviceConfig.ExecStart)
+# the unit's own environment, addresses replaced by the test network's below
+WIRE_ENV=$(nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.130-internal-arr.config.systemd.services.arr-wire.environment" \
+  | jq -r 'to_entries[] | select(.key | test("^(INDEXERS|RADARR_PUBLIC_URL|SONARR_PUBLIC_URL|JELLYSEERR_ADMIN_EMAIL|TOR_HOST|TOR_PORT)$")) | "-e\n\(.key)=\(.value)"')
 arr_wire() {
-  docker run --rm --network "$NET" -v /nix/store:/nix/store:ro -v "$W/tokens:/tokens" \
-    -e TOKEN_DIR=/tokens \
+  local env=(); mapfile -t env <<< "$WIRE_ENV"
+  docker run --rm --network "$NET" -v /nix/store:/nix/store:ro -v "$W:$W" "${env[@]}" \
+    -e TOKEN_DIR="$W/tokens" \
     -e QBIT_HOST=qbittorrent -e QBIT_PORT=8080 \
     -e PROWLARR_HOST=prowlarr -e PROWLARR_PORT=9696 \
     -e RADARR_HOST=radarr -e RADARR_PORT=7878 \
@@ -130,15 +156,17 @@ arr_wire() {
 
 echo ">>> arr-wire until converged (it retries on a timer in the lab)"
 converged=0
-for i in 1 2 3 4 5 6; do
+# the apps answer their apis a few seconds after start; arr-wire runs every 10 minutes in the lab
+WIRE_RUNS_MAX=12; WIRE_RETRY_S=10
+for i in $(seq "$WIRE_RUNS_MAX"); do
   echo "--- run $i"
   out=$(arr_wire 2>&1); echo "$out"
   if echo "$out" | grep -q "media stack fully wired"; then converged=1; break; fi
-  sleep 20
+  sleep "$WIRE_RETRY_S"
 done
 
 echo ">>> Checks"
-[ "$converged" = 1 ] && ok "arr-wire converged" || fail "arr-wire did not converge"
+if [ "$converged" = 1 ]; then ok "arr-wire converged"; else fail "arr-wire did not converge"; fi
 
 key() { cat "$W/tokens/$1.token"; }
 api() { curl -sf -H "X-Api-Key: $2" "$1"; }
@@ -172,7 +200,8 @@ check "prowlarr: every indexer carries the tor tag" \
          [ -n \"\$t\" ] && curl -sf -H 'X-Api-Key: $pk' http://127.0.0.1:19696/api/v1/indexer | jq -e --argjson t \"\$t\" 'all(.[]; (.tags // []) | index(\$t))'"
 echo "  info  prowlarr indexers: $(api http://127.0.0.1:19696/api/v1/indexer "$pk" | jq -r '[.[].definitionName] | join(", ")')"
 check "prowlarr: nyaasi (anime) indexer present" sh -c "curl -sf -H 'X-Api-Key: $pk' http://127.0.0.1:19696/api/v1/indexer | jq -e 'any(.[]; .definitionName==\"nyaasi\")'"
-check "radarr: indexers synced from Prowlarr" sh -c "sleep 30; curl -sf -H 'X-Api-Key: $(key radarr-key)' http://127.0.0.1:17878/api/v3/indexer | jq -e 'length>0'"
+# polls up to a minute: prowlarr pushes the indexers asynchronously
+check "radarr: indexers synced from Prowlarr" sh -c "for _ in \$(seq 60); do curl -sf -H 'X-Api-Key: $(key radarr-key)' http://127.0.0.1:17878/api/v3/indexer | jq -e 'length>0' && exit 0; sleep 1; done; exit 1"
 
 jk=$(key jellyseerr-key)
 check "jellyseerr: initialized" sh -c "curl -sf http://127.0.0.1:15055/api/v1/settings/public | jq -e '.initialized==true'"
@@ -195,9 +224,14 @@ PY
 }
 check "qbittorrent: WebUI password is the generated one" qbit_password_is "$(key qbittorrent-pass)"
 
-jfk=$(key jellyfin-key)
+jfk=$(key jellyfin-key-hermes)
 check "jellyfin: Movies/Shows/Anime libraries" sh -c "curl -sf -H 'Authorization: MediaBrowser Token=\"$jfk\"' http://127.0.0.1:18096/Library/VirtualFolders | jq -e '[.[].Name] | contains([\"Movies\",\"Shows\",\"Anime\"])'"
-check "jellyfin: janitorr user can delete" sh -c "curl -sf -H 'Authorization: MediaBrowser Token=\"$jfk\"' http://127.0.0.1:18096/Users | jq -e 'any(.[]; .Name==\"janitorr\" and .Policy.EnableContentDeletion)'"
+check "jellyfin: janitorr user can delete and is no admin" sh -c "curl -sf -H 'Authorization: MediaBrowser Token=\"$jfk\"' http://127.0.0.1:18096/Users | jq -e 'any(.[]; .Name==\"janitorr\" and .Policy.EnableContentDeletion and (.Policy.IsAdministrator | not))'"
+check "jellyfin: one api key per consumer, the shared one gone" sh -c "curl -sf -H 'Authorization: MediaBrowser Token=\"$jfk\"' http://127.0.0.1:18096/Auth/Keys | jq -e '[.Items[].AppName] | (index(\"homelab\") | not) and (contains([\"homelab-homepage\",\"homelab-hermes\",\"homelab-arr\",\"homelab-janitorr\"]))'"
+check "jellyfin: only the sso plugin authenticates" sh -c "curl -sf -H 'Authorization: MediaBrowser Token=\"$jfk\"' http://127.0.0.1:18096/Plugins | jq -e '(any(.[]; .Name | test(\"SSO\")) and (any(.[]; .Name | test(\"LDAP\")) | not))'"
+for t in jellyfin-key-homepage jellyfin-admin-pass janitorr-pass; do
+  check "tokens: $t is a link into vm-134's own dir" sh -c "[ -L $W/tokens/$t.token ] && [ -f $W/tokens.d/vm-134/$t.token ] && [ ! -L $W/tokens.d/vm-134/$t.token ]"
+done
 
 
 echo ">>> Idempotence: second arr-wire run must change nothing"
@@ -209,9 +243,11 @@ if echo "$out" | grep -vE "unreachable, skipped" | grep -qE "added|connected|ini
 echo ">>> Janitorr with the config NixOS renders"
 mkdir -p "$W/janitorr/logs" "$W/janitorr/stats"; chmod -R 777 "$W/janitorr"
 run_unit 134-internal-jellyfin janitorr-config "$TOK" "s#/var/lib/janitorr#$W/janitorr#g" "s#chown 1000:1000#true#"
+# the lab's addresses (the collected inventory and routes, modules/lab) to the test network's names
+url_of() { nix eval --no-warn-dirty --raw "$SRC#lab" --apply "l: let r = l.routes.internal.$1; in \"http://\${l.inventory.\${toString r.vmid}.ip}:\${toString r.port}\""; }
 for f in application.yml stats.yml; do
-  sed -i -e 's#http://10.100.0.130:8989#http://sonarr:8989#; s#http://10.100.0.130:7878#http://radarr:7878#' \
-         -e 's#http://10.100.0.134#http://jellyfin:8096#; s#http://10.100.0.128#http://jellyseerr:5055#' \
+  sed -i -e "s#$(url_of sonarr)#http://sonarr:8989#; s#$(url_of radarr)#http://radarr:7878#" \
+         -e "s#$(url_of jellyfin)#http://jellyfin:8096#; s#$(url_of jellyseerr)#http://jellyseerr:5055#" \
          -e 's#http://127.0.0.1:8081#http://janitorr-stats:8081#' "$W/janitorr/$f"
 done
 chmod 644 "$W/janitorr/"*.yml
@@ -222,7 +258,8 @@ docker run -d --name "${P}janitorr-stats" --network "$NET" --network-alias janit
 docker run -d --name "${P}janitorr" --network "$NET" --user 1000:1000 -e SERVER_PORT=8082 --memory=512m \
   -v "$W/janitorr/application.yml:/config/application.yml:ro" -v "$W/janitorr/logs:/logs" "${DATA[@]}" \
   "$(image 134-internal-jellyfin janitorr)" >/dev/null
-sleep 90
+# janitorr runs its first cycle within a minute and a half of start
+for _ in $(seq 120); do docker logs "${P}janitorr" 2>&1 | grep -q 'Deleting Movies and updating Leaving Soon' && break; sleep 1; done
 check "janitorr-stats running" sh -c "[ \"\$(docker inspect -f '{{.State.Running}}' ${P}janitorr-stats)\" = true ]"
 check "janitorr running" sh -c "[ \"\$(docker inspect -f '{{.State.Running}}' ${P}janitorr)\" = true ]"
 levels() { docker logs "$1" 2>&1 | grep -E '^[0-9T:., -]+Z? +(ERROR|WARN)' || true; }

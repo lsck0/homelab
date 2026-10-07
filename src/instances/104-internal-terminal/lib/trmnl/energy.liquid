@@ -1,0 +1,182 @@
+{%- comment -%} house energy, data from energy-sync.py; german labels; keep flat {%- endcomment -%}
+
+<style>
+/* undo trmnl's centring wrapper; the framework keeps the height, and it is the size container */
+.layout { display: block !important; width: 100% !important; height: 100% !important; padding: 0 !important; margin: 0 !important; container-type: size; }
+/* --u: 1px on the 780x452 og layout, the smaller ratio on bigger panels so it fills, not just the top-left corner */
+.en { --u: min(calc(100cqw / 780), calc(100cqh / 452)); display: flex; flex-direction: column; height: 100%; width: 100%; gap: calc(5 * var(--u)); padding: calc(8 * var(--u)) calc(10 * var(--u)) calc(4 * var(--u)); box-sizing: border-box; font-family: "Inter Variable", Inter, sans-serif; color: #000; }
+
+/* ---- now --------------------------------------------------------------- */
+.en-top { display: flex; gap: calc(6 * var(--u)); flex: 0 0 auto; }
+.en-stat { flex: 1 1 0; border: calc(2 * var(--u)) solid #000; padding: calc(2 * var(--u)) calc(7 * var(--u)); min-width: 0; }
+.en-stat--dark { background: #000; }
+.en-stat--dark .en-k, .en-stat--dark .en-v, .en-stat--dark .en-sub { color: #fff; }
+.en-k { font-size: calc(12 * var(--u)); font-weight: 700; letter-spacing: .10em; text-transform: uppercase; }
+.en-v { font-size: calc(22 * var(--u)); font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.en-sub { font-size: calc(12 * var(--u)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.en-soc { height: calc(4 * var(--u)); background: #d2d2d2; margin-top: calc(2 * var(--u)); }
+.en-soc span { display: block; height: 100%; background: #000; }
+
+/* ---- middle ------------------------------------------------------------ */
+.en-mid { display: flex; gap: calc(6 * var(--u)); flex: 1 1 auto; min-height: 0; }
+.en-panel { border: calc(2 * var(--u)) solid #000; padding: calc(3 * var(--u)) calc(7 * var(--u)); min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+.en-h { font-size: calc(12 * var(--u)); font-weight: 700; letter-spacing: .10em; text-transform: uppercase; border-bottom: calc(1 * var(--u)) solid #000; margin-bottom: calc(2 * var(--u)); display: flex; justify-content: space-between; gap: calc(6 * var(--u)); white-space: nowrap; }
+.en-h i { font-style: normal; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.en-day { flex: 1 1 auto; }
+.en-chart { flex: 1 1 auto; min-height: 0; position: relative; }
+.en-chart svg { display: block; width: 100%; height: 100%; }
+.en-axis { display: flex; justify-content: space-between; font-size: calc(10 * var(--u)); line-height: 1; padding-top: calc(1 * var(--u)); }
+.en-legend { display: flex; gap: calc(10 * var(--u)); font-size: calc(10 * var(--u)); line-height: 1.2; }
+.en-legend b { display: inline-block; width: calc(10 * var(--u)); height: calc(8 * var(--u)); margin-right: calc(3 * var(--u)); vertical-align: calc(-1 * var(--u)); }
+.en-side { flex: 0 0 calc(236 * var(--u)); display: flex; flex-direction: column; gap: calc(5 * var(--u)); min-width: 0; }
+.en-line { display: flex; justify-content: space-between; gap: calc(6 * var(--u)); font-size: calc(13 * var(--u)); line-height: 1.3; }
+.en-line b { font-variant-numeric: tabular-nums; }
+.en-line--big { font-size: calc(16 * var(--u)); font-weight: 700; }
+
+/* ---- spot strip -------------------------------------------------------- */
+.en-spot { flex: 0 0 auto; margin-top: calc(3 * var(--u)); }
+.en-bars { display: flex; align-items: flex-end; gap: calc(2 * var(--u)); height: calc(26 * var(--u)); }
+.en-bars span { flex: 1 1 0; background: #bdbdbd; min-height: calc(2 * var(--u)); }
+.en-bars span.cheap { background: #000; }
+.en-spot-meta { display: flex; justify-content: space-between; font-size: calc(10 * var(--u)); line-height: 1.2; }
+/* strip starts now, not at midnight: own hour labels */
+.en-spot-hours { display: flex; gap: calc(2 * var(--u)); font-size: calc(9 * var(--u)); line-height: 1.1; }
+.en-spot-hours span { flex: 1 1 0; white-space: nowrap; overflow: visible; }
+
+/* ---- bottom ------------------------------------------------------------ */
+.en-bot { display: flex; gap: calc(6 * var(--u)); flex: 0 0 calc(104 * var(--u)); min-height: 0; }
+.en-hist { flex: 1 1 auto; }
+.en-cols { flex: 1 1 auto; display: flex; gap: calc(4 * var(--u)); align-items: flex-end; min-height: 0; }
+.en-col { flex: 1 1 0; display: flex; flex-direction: column; align-items: stretch; height: 100%; min-width: 0; }
+.en-col-bars { flex: 1 1 auto; display: flex; gap: calc(1 * var(--u)); align-items: flex-end; }
+.en-col-bars span { flex: 1 1 0; min-height: calc(1 * var(--u)); }
+.en-col-bars .pv { background: #bdbdbd; }
+.en-col-bars .load { background: #000; }
+.en-col-l { font-size: calc(9 * var(--u)); line-height: 1.1; text-align: center; }
+.en-meter { flex: 0 0 calc(178 * var(--u)); }
+.en-meter--stale .en-h { background: #000; color: #fff; padding: 0 calc(3 * var(--u)); }
+
+/* ---- footer ------------------------------------------------------------ */
+.en-foot { flex: 0 0 auto; display: flex; justify-content: space-between; gap: calc(10 * var(--u)); font-size: calc(11 * var(--u)); line-height: 1.3; }
+.en-foot b { font-weight: 700; letter-spacing: .10em; text-transform: uppercase; }
+.en-foot em { font-style: normal; font-weight: 700; }
+</style>
+
+{% if view == 'energy' %}
+<div class="layout">
+<div class="en">
+
+<div class="en-top">
+<div class="en-stat">
+<div class="en-k">PV</div>
+<div class="en-v">{{ now.pv | escape }}</div>
+<div class="en-sub">heute {{ today.pv | escape }} kWh</div>
+</div>
+<div class="en-stat">
+<div class="en-k">Verbrauch</div>
+<div class="en-v">{{ now.load | escape }}</div>
+<div class="en-sub">heute {{ today.load | escape }} kWh</div>
+</div>
+<div class="en-stat{% if now.grid_label == 'Netzbezug' %} en-stat--dark{% endif %}">
+<div class="en-k">{{ now.grid_label | escape }}</div>
+<div class="en-v">{{ now.grid | escape }}</div>
+<div class="en-sub">Autarkie heute {{ today.autarky | escape }}</div>
+</div>
+<div class="en-stat">
+<div class="en-k">Batterie {{ now.soc | escape }}</div>
+<div class="en-v">{{ now.battery | escape }}</div>
+<div class="en-soc"><span style="width:{{ now.soc_pct | escape }}%"></span></div>
+<div class="en-sub">{{ now.battery_label | escape }}</div>
+</div>
+<div class="en-stat">
+<div class="en-k">Börse</div>
+<div class="en-v">{{ spot.now | escape }} ct</div>
+<div class="en-sub">pro kWh, ohne Abgaben</div>
+</div>
+</div>
+
+<div class="en-mid">
+<div class="en-panel en-day">
+<div class="en-h"><span>Heute</span><i>bis {{ chart.top | escape }}</i></div>
+<div class="en-chart">
+<svg viewBox="0 0 480 120" preserveAspectRatio="none">
+<line x1="120" y1="0" x2="120" y2="120" stroke="#d2d2d2" stroke-width="1"/>
+<line x1="240" y1="0" x2="240" y2="120" stroke="#d2d2d2" stroke-width="1"/>
+<line x1="360" y1="0" x2="360" y2="120" stroke="#d2d2d2" stroke-width="1"/>
+<path d="{{ chart.pv | escape }}" fill="#bdbdbd" stroke="none"/>
+<path d="{{ chart.soc | escape }}" fill="none" stroke="#000" stroke-width="1" stroke-dasharray="3 3" vector-effect="non-scaling-stroke"/>
+<path d="{{ chart.load | escape }}" fill="none" stroke="#000" stroke-width="2" vector-effect="non-scaling-stroke"/>
+<line x1="{{ chart.now_x | escape }}" y1="0" x2="{{ chart.now_x | escape }}" y2="120" stroke="#000" stroke-width="1" vector-effect="non-scaling-stroke"/>
+</svg>
+</div>
+<div class="en-axis"><span>0</span><span>6</span><span>12</span><span>18</span><span>24 Uhr</span></div>
+<div class="en-legend"><span><b style="background:#bdbdbd"></b>PV</span><span><b style="background:#000"></b>Verbrauch</span><span><b style="border-top:1px dashed #000;height:0"></b>Batterie</span></div>
+<div class="en-spot">
+<div class="en-bars">{% for h in spot.hours %}<span{% if h.cheap %} class="cheap"{% endif %} style="height:{{ h.pct | escape }}%"></span>{% endfor %}</div>
+<div class="en-spot-hours">{% for h in spot.hours %}<span>{% if h.label %}{{ h.h | escape }}{% endif %}</span>{% endfor %}</div>
+<div class="en-spot-meta"><span>Börse 24h: {{ spot.lo | escape }} bis {{ spot.hi | escape }} ct</span><span>günstig: {{ spot.cheap | escape }}</span></div>
+</div>
+</div>
+
+<div class="en-side">
+<div class="en-panel">
+<div class="en-h"><span>Energie heute</span></div>
+<div class="en-line"><span>Erzeugt</span><b>{{ today.pv | escape }} kWh</b></div>
+<div class="en-line"><span>Verbraucht</span><b>{{ today.load | escape }} kWh</b></div>
+<div class="en-line"><span>Netzbezug</span><b>{{ today.import | escape }} kWh</b></div>
+<div class="en-line"><span>Einspeisung</span><b>{{ today.export | escape }} kWh</b></div>
+<div class="en-line"><span>Eigenverbrauchsquote</span><b>{{ today.self_use | escape }}</b></div>
+</div>
+<div class="en-panel">
+<div class="en-h"><span>Kosten</span><i>€</i></div>
+<div class="en-line en-line--big"><span>Heute</span><b>{{ today.cost | escape }}</b></div>
+<div class="en-line"><span>PV gespart heute</span><b>{{ today.saved | escape }}</b></div>
+<div class="en-line"><span>Prognose Monat</span><b>{{ forecast.month | escape }}</b></div>
+<div class="en-line"><span>Prognose Jahr</span><b>{{ forecast.year | escape }}</b></div>
+</div>
+</div>
+</div>
+
+<div class="en-bot">
+<div class="en-panel en-hist">
+<div class="en-h"><span>14 Tage</span><i>PV grau, Verbrauch schwarz, bis {{ history.top | escape }} kWh</i></div>
+<div class="en-cols">
+{% for d in history.days %}
+<div class="en-col">
+<div class="en-col-bars"><span class="pv" style="height:{{ d.pv_pct | escape }}%"></span><span class="load" style="height:{{ d.load_pct | escape }}%"></span></div>
+<div class="en-col-l">{{ d.label | escape }}</div>
+</div>
+{% endfor %}
+</div>
+</div>
+<div class="en-panel en-meter{% if gas.stale %} en-meter--stale{% endif %}">
+<div class="en-h"><span>Gas</span><i>{{ gas.age | escape }}</i></div>
+<div class="en-line"><span>Stand</span><b>{{ gas.reading | escape }} m³</b></div>
+<div class="en-line"><span>7 Tage</span><b>{{ gas.week | escape }} m³</b></div>
+<div class="en-line"><span>Kosten 7 Tage</span><b>{{ gas.week_cost | escape }} €</b></div>
+</div>
+<div class="en-panel en-meter{% if water.stale %} en-meter--stale{% endif %}">
+<div class="en-h"><span>Wasser</span><i>{{ water.age | escape }}</i></div>
+<div class="en-line"><span>Stand</span><b>{{ water.reading | escape }} m³</b></div>
+<div class="en-line"><span>7 Tage</span><b>{{ water.week | escape }} m³</b></div>
+<div class="en-line"><span>Kosten 7 Tage</span><b>{{ water.week_cost | escape }} €</b></div>
+</div>
+</div>
+
+<div class="en-foot">
+<span><b>Energie</b> &middot; {{ label | escape }}</span>
+<span>{% unless source_ok %}<em>Prometheus nicht erreichbar</em> {% else %}{% unless now.online %}<em>Wechselrichter nicht erreichbar</em> {% endunless %}{% endunless %}{% if now.unaccounted != '' %}<em>{{ now.unaccounted | escape }} nicht erfasst</em> {% endif %}{% if prices_missing > 0 %}<em>{{ prices_missing | escape }} Preise fehlen</em>{% endif %}</span>
+</div>
+
+</div>
+</div>
+
+{% else %}
+<div class="layout">
+<div class="markdown">
+<span class="title">Energie: keine Daten</span>
+<div class="content">Kein `view` in den Daten. Die Polling-URL des Plugins muss auf energy.json auf terminal.lsck0.dev zeigen.</div>
+</div>
+</div>
+<div class="title_bar"><span class="title">Energie</span><span class="instance">warte auf Daten</span></div>
+{% endif %}

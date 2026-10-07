@@ -5,4 +5,5 @@ let
 in {
   install-pc = bootstrap "luca-pc";
   install-notebook = bootstrap "luca-notebook";
+  install-wsl = bootstrap "luca-wsl";
 }
