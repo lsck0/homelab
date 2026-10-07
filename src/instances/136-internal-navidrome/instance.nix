@@ -1,5 +1,5 @@
 # music streaming (Subsonic API)
-{ id, ... }: {
+{ id, config, ... }: {
   vm = {
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
@@ -21,9 +21,14 @@
       host = "music";
       port = 80;
       homepage = { description = "Music"; group = "Media"; icon = "navidrome"; };
-      off.guard = "open to the lab until its direct clients are grants";
     };
   };
+
+  grants = [ {
+    from = [ "internal" "lan" "wireguard" ];
+    tcp = [ config.services.navidrome.port ];
+    why = "direct clients not yet named: the lab, the house and the owner's devices";
+  } ];
 
   shares = {
     "bulk/media/music".readOnly = true;
