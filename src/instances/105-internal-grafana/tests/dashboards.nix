@@ -15,12 +15,12 @@ let
     "105-internal-grafana";
   boards = lib.mapAttrsToList (_: entry: entry.source)
     (lib.filterAttrs (path: _: lib.hasPrefix "grafana-dashboards/" path || lib.hasPrefix "grafana-apps/" path) grafana.environment.etc);
-  # the inverter exporter's real output, from 104-internal-terminal/tests/feeds.nix
-  feeds = import ../../104-internal-terminal/tests/feeds.nix { inherit pkgs lib; };
+  # the inverter exporter's real output (exporters.nix)
+  exporters = import ./exporters.nix { inherit pkgs lib; };
   python = pkgs.python3.withPackages (_: [ (import ../../../modules/energy { inherit pkgs; }) ]);
 in
 pkgs.runCommand "dashboards" { nativeBuildInputs = [ python pkgs.prometheus.cli ]; } ''
   mkdir -p $out
-  python3 ${./dashboards_test.py} $out ${feeds} ${../lib/spot-price.py} ${lib.concatMapStringsSep " " (board: "${board}") boards}
+  python3 ${./dashboards_test.py} $out ${exporters} ${../lib/spot-price.py} ${lib.concatMapStringsSep " " (board: "${board}") boards}
   promtool check rules $out/queries.json
 ''

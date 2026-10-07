@@ -5,7 +5,7 @@
 { pkgs, lib, inputs, specialArgs, ... }:
 let
   facts = import ./policy/lib/facts.nix { inherit lib inputs specialArgs; };
-  inherit (facts) configs inventory;
+  inherit (facts) configs inventory site;
 
   # one config with one value replaced at a path
   tamper = name: path: value: facts // {
@@ -56,6 +56,19 @@ let
       tampered = tamper "101-internal-authelia" [ "networking" "firewall" "allowedTCPPorts" ] [ 3890 ]; };
     secret-readable ={ file = "secrets"; marker = "is readable by others";
       tampered = tamper "101-internal-authelia" [ "sops" "secrets" "authelia-jwt-secret" "mode" ] "0444"; };
+    query-readers = { file = "telemetry"; marker = "which is neither an internal guest";
+      tampered = tamper "105-internal-grafana" [ "homelab" "ingressOnly" "allowed" "9090" ] [ site.lan.subnet ]; };
+    push-tenant = { file = "telemetry"; marker = "forwards without the tenant its sender's address names";
+      tampered = tamper "105-internal-grafana" [ "services" "nginx" "virtualHosts" "otlp-http" "locations" "= /v1/traces" "extraConfig" ]
+        "proxy_pass http://127.0.0.1:14318;"; };
+    relay-tenant = { file = "telemetry"; marker = "a relay location forwards without the tenant";
+      tampered = tamper "250-apps-swarm" [ "homelab" "appTelemetry" "relayConfig" ] "location = /v1/traces { proxy_pass http://collector; }"; };
+    access-log-secrets = { file = "telemetry"; marker = "unredacted";
+      tampered = tamper "200-external-traefik" [ "services" "promtail" "configuration" "scrape_configs" ]
+        (map (j: j // { pipeline_stages = lib.filter (s: !(s ? replace)) (j.pipeline_stages or [ ]); })
+          configs."200-external-traefik".services.promtail.configuration.scrape_configs); };
+    test-of-another-instance = { file = "placement"; marker = "tests files of instances/101-internal-b";
+      tampered = facts // { src = ./policy/lib/placement-fixture; }; };
     instance-folder = { file = "placement"; marker = "src/instances/101-internal-authelia has no main.nix";
       tampered = facts // { src = builtins.path {
         path = facts.src;

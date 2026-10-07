@@ -16,8 +16,8 @@
 #   - src/scripts holds the workstation's tools: a script that nix code names runs on a host, and one that serves a
 #     single instance belongs in its folder
 #   - a test lives with what it tests: one in an owner's tests/ that names files of exactly one other owner belongs
-#     there; a test's own files sit beside the test that names them; every test in src/tests says why it is
-#     lab-wide in its first lines (`# lab-wide: <reason>`)
+#     there, and an instance's test names no other instance's or app's files; a test's own files sit beside the test
+#     that names them; every test in src/tests says why it is lab-wide in its first lines (`# lab-wide: <reason>`)
 #   - an instance folder holds main.nix and instance.nix, a module folder default.nix, lib/ and tests/ only
 { lib, src, ... }:
 let
@@ -188,6 +188,9 @@ let
       "src/${path} is named by no test beside it: it belongs beside the test that runs it"
     ++ lib.optional (r != null && lib.hasSuffix ".nix" path && !(lib.elem owner reached) && lib.length targets == 1)
       "src/${path} tests ${lib.head targets} alone: move it into src/${lib.head targets}/tests/"
+    ++ map (other: "src/${path} tests files of ${other}: those cases belong in src/${other}/tests/")
+      (lib.filter (o: kindOf owner == "instances" && o != owner && lib.elem (kindOf o) [ "instances" "apps" ])
+        (lib.optionals (r != null) targets))
   ) (lib.filter (path: ownerOf path != "lab" && builtins.match "[^/]+/[^/]+/tests/[^/]+" path != null) testFiles);
 
   folderLaws = lib.concatMap (folder: let files = builtins.readDir (src + "/instances/${folder}"); in

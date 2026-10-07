@@ -134,14 +134,9 @@ let
 
   servicesYaml = pkgs.writeText "services.yaml" (lib.concatMapStrings groupYaml ([ infra ] ++ groups));
 
+  # no favicon or background url: the image's own favicon, nothing a visit fetches from a third party
   settingsYaml = pkgs.writeText "settings.yaml" (''
     title: Homelab
-    favicon: https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/homepage.svg
-    background:
-      image: https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=2560
-      blur: md
-      brightness: 50
-      saturate: 60
     theme: dark
     color: slate
     cardBlur: xl
@@ -179,8 +174,8 @@ let
           hour12: false
     - openmeteo:
         label: Weather
-        latitude: 51.23
-        longitude: 6.78
+        latitude: ${builtins.toJSON site.location.latitude}
+        longitude: ${builtins.toJSON site.location.longitude}
         timezone: ${site.timeZone}
         units: metric
     - search:
@@ -292,7 +287,8 @@ in {
       NODE_EXTRA_CA_CERTS = proxmoxCaPath;
     };
     environmentFiles = [ envFile ];
-    extraOptions = [ "--cap-add=NET_RAW" ];
+    # NET_RAW: the cards' ping; the image's own healthcheck logged a line every few seconds and nothing reads it
+    extraOptions = [ "--cap-add=NET_RAW" "--no-healthcheck" ];
   };
 
   systemd.tmpfiles.rules = [
