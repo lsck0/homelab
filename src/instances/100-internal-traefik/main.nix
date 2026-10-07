@@ -29,8 +29,6 @@ in {
     # the apps zone is a dmz: only a route admitting it by its sources (the registry's pulls) answers it
     refusedClients = [ net.zones.apps.subnet ];
 
-    loopbackPorts = lib.mapAttrs' (name: svc: lib.nameValuePair "ondemand-${name}" svc.listenPort) config.homelab.onDemand.services;
-
     # this ingress's own pages, behind authelia
     routers = {
       traefik-dash-tls = {

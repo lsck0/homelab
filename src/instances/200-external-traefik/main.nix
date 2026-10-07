@@ -46,8 +46,7 @@ in {
     botDefense.enable = true;
     cloudflareOnly.enable = true;
 
-    loopbackPorts = { install-nginx = installPort; }
-      // lib.mapAttrs' (name: svc: lib.nameValuePair "ondemand-${name}" svc.listenPort) config.homelab.onDemand.services;
+    loopbackPorts.install-nginx = installPort;
 
     routers = lib.listToAttrs (map (b: lib.nameValuePair (metricsBlockName b) {
       # /API/Metrics, //api/metrics/x reach one handler too; traefik already resolved dot segments and escapes

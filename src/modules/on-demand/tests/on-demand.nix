@@ -1,6 +1,6 @@
 # on-demand guests (modules/on-demand) against a fake proxmox api: wake on connect, sleep after the cooldown,
 # the reaper, sibling routes on one guest, an lxc, a non-http backend, a boot past its timeout, the deploy pause, an
-# orphaned proxy, each proxy's port fixed by its own guest, and the api call itself: its token from a header file
+# orphaned proxy, each proxy's address fixed by its own guest, and the api call itself: its token from a header file
 # (never in an argv) over tls pinned to the proxmox ca, a failed call an error the reaper exports
 #
 # `backend` stands in for proxmox and the guests: each fake guest is a unit there the fake api starts and stops.
@@ -29,8 +29,8 @@ let
   }) guests;
   # the ca the proxy pins, a file the test swaps
   caFile = "/run/pve-ca.pem";
-  # portBase + vmid x portsPerGuest + the slot in name order (modules/on-demand)
-  listenPorts = { app = 21500; app2 = 21501; ct = 21600; slow = 21700; };
+  # each guest's loopback address (modules/on-demand), at the backend's own port
+  listens = { app = "127.1.0.150:80"; app2 = "127.1.0.150:81"; ct = "127.1.0.160:7000"; slow = "127.1.0.170:7001"; };
 
   pki = pkgs.runCommand "fake-pve-pki" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out && cd $out
@@ -138,10 +138,10 @@ let
     for _ in $(seq 400); do ps -eo args; done | grep -E 'PVEAPI[T]oken|t=secre[t]' > /tmp/leak
     touch /tmp/leak-done
   '';
-  # a client holding one connection open: port, seconds
+  # a client holding one connection open: address, port, seconds
   holdConnection = pkgs.writeShellScript "hold-connection" ''
-    exec 3<>"/dev/tcp/127.0.0.1/$1"
-    ${pkgs.coreutils}/bin/sleep "$2"
+    exec 3<>"/dev/tcp/$1/$2"
+    ${pkgs.coreutils}/bin/sleep "$3"
   '';
 in
 pkgs.testers.runNixOSTest {
@@ -195,7 +195,7 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = { nodes, ... }: let
-    port = name: toString nodes.proxy.homelab.onDemand.services.${name}.listenPort;
+    listen = name: nodes.proxy.homelab.onDemand.address.${name};
     pauseFile = nodes.proxy.homelab.onDemand.pauseFile;
     metrics = "${nodes.proxy.homelab.textfileDir}/ondemand.prom";
   in ''
@@ -211,9 +211,9 @@ pkgs.testers.runNixOSTest {
     def reap():
         proxy.succeed("systemctl start ondemand-reaper.service")
 
-    def hold(name, port, seconds):
+    def hold(name, listen, seconds):
         # a client keeping one connection open, in its own unit so it outlives the driver's command
-        proxy.succeed(f"systemd-run --unit=hold-{name}-{seconds} ${holdConnection} {port} {seconds}")
+        proxy.succeed(f"systemd-run --unit=hold-{name}-{seconds} ${holdConnection} {listen.replace(':', ' ')} {seconds}")
 
     start_all()
     backend.wait_for_unit("fake-pve.service")
@@ -221,15 +221,15 @@ pkgs.testers.runNixOSTest {
     proxy.wait_for_unit("sockets.target")
     backend.fail("systemctl is-active nginx")
 
-    with subtest("each route listens on the port its own guest fixes"):
-        for name, expected in ${builtins.toJSON listenPorts}.items():
+    with subtest("each route listens where its own guest fixes"):
+        for name, expected in ${builtins.toJSON listens}.items():
             proxy.succeed(f"systemctl is-active ondemand-{name}.socket")
-            proxy.succeed(f"ss -Hltn 'sport = :{expected}' | grep -q LISTEN")
+            proxy.succeed(f"ss -Hltn 'src = {expected}' | grep -q LISTEN")
 
     with subtest("first request boots the guest and is answered; the token is never on a command line"):
         # the brackets keep the sampler's own grep out of what it finds
         proxy.succeed("systemd-run --unit=leak-sampler ${leakSampler}")
-        out = proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app"}/")
+        out = proxy.succeed("curl -sf --max-time 90 http://${listen "app"}/")
         assert "hello from the app" in out, out
         backend.succeed("systemctl is-active nginx")
         assert "/qemu/150/status/start" in calls()
@@ -243,7 +243,7 @@ pkgs.testers.runNixOSTest {
     with subtest("a proxmox answering with a certificate of another ca gets no call, and the reaper says so"):
         backend.succeed("rm -f /tmp/pve-calls")
         proxy.succeed("cp ${pki}/other-ca.pem ${caFile}")
-        proxy.fail("curl -sf --max-time 20 http://127.0.0.1:${port "app2"}/")
+        proxy.fail("curl -sf --max-time 20 http://${listen "app2"}/")
         assert calls() == "", calls()
         backend.fail("systemctl is-active nginx")
         proxy.fail("systemctl start ondemand-reaper.service")
@@ -252,14 +252,14 @@ pkgs.testers.runNixOSTest {
         proxy.succeed("cp ${pki}/ca.pem ${caFile}")
         reap()
         proxy.succeed("grep -qx 'homelab_ondemand_api_ok{service=\"app2\",target=\"vm-150\"} 1' ${metrics}")
-        out = proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app2"}/")
+        out = proxy.succeed("curl -sf --max-time 90 http://${listen "app2"}/")
         assert "hello from the second route" in out, out
         backend.wait_until_fails("systemctl is-active nginx", timeout=120)
 
     with subtest("a sibling route keeps the shared guest up while it serves"):
-        proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app"}/")
+        proxy.succeed("curl -sf --max-time 90 http://${listen "app"}/")
         # app2 holds a connection well past the cooldown; app's proxy idles out meanwhile
-        hold("app2", ${port "app2"}, 60)
+        hold("app2", "${listen "app2"}", 60)
         proxy.wait_until_succeeds("systemctl is-active ondemand-app2.service")
         proxy.wait_until_fails("systemctl is-active ondemand-app.service", timeout=90)
         backend.succeed("systemctl is-active nginx")
@@ -279,7 +279,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("a deploy's pause holds both the reaper and the idle shutdown"):
         proxy.succeed("echo $(( $(date +%s) + 3600 )) > ${pauseFile}")
-        proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app"}/")
+        proxy.succeed("curl -sf --max-time 90 http://${listen "app"}/")
         proxy.wait_until_fails("systemctl is-active ondemand-app.service", timeout=90)
         wait_past_cooldown("qemu/150")
         reap()
@@ -290,20 +290,20 @@ pkgs.testers.runNixOSTest {
         backend.wait_until_fails("systemctl is-active nginx", timeout=30)
 
     with subtest("an orphaned proxy is re-armed after its guest was stopped behind its back"):
-        proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app"}/")
-        hold("app", ${port "app"}, 30)
+        proxy.succeed("curl -sf --max-time 90 http://${listen "app"}/")
+        hold("app", "${listen "app"}", 30)
         proxy.succeed(f"curl -sf -X POST --cacert ${pki}/ca.pem -H 'Authorization: PVEAPIToken=${token}' {API}/qemu/150/status/shutdown")
         backend.wait_until_fails("systemctl is-active nginx", timeout=30)
         proxy.succeed("systemctl is-active ondemand-app.service")
         reap()
         proxy.fail("systemctl is-active ondemand-app.service")
-        out = proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app"}/")
+        out = proxy.succeed("curl -sf --max-time 90 http://${listen "app"}/")
         assert "hello from the app" in out, out
         backend.wait_until_fails("systemctl is-active nginx", timeout=150)
 
     # the reaper also walks app2, the sibling without a busyPath: busy is the guest's, not the route's
     with subtest("a busy guest outlives its idle proxy and the reaper, and goes once the work is done"):
-        proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app"}/")
+        proxy.succeed("curl -sf --max-time 90 http://${listen "app"}/")
         backend.succeed("touch /run/busy")
         proxy.wait_until_fails("systemctl is-active ondemand-app.service", timeout=90)
         wait_past_cooldown("qemu/150")
@@ -314,15 +314,15 @@ pkgs.testers.runNixOSTest {
         backend.wait_until_fails("systemctl is-active nginx", timeout=30)
 
     with subtest("an lxc guest is woken through the lxc api, a non-http one by its open port"):
-        out = proxy.succeed("nc -w 10 127.0.0.1 ${port "ct"} </dev/null")
+        out = proxy.succeed("nc -w 10 ${lib.replaceStrings [ ":" ] [ " " ] (listen "ct")} </dev/null")
         assert "hello from the container" in out, out
         assert "/lxc/160/status/start" in calls()
         backend.wait_until_fails("systemctl is-active ct-app", timeout=120)
 
     with subtest("a boot past its timeout fails the connection, the next one retries"):
-        proxy.fail("curl -sf --max-time 60 http://127.0.0.1:${port "slow"}/")
+        proxy.fail("curl -sf --max-time 60 http://${listen "slow"}/")
         backend.succeed("touch /run/slow-ready")
-        proxy.wait_until_succeeds("curl -sf --max-time 60 http://127.0.0.1:${port "slow"}/", timeout=120)
+        proxy.wait_until_succeeds("curl -sf --max-time 60 http://${listen "slow"}/", timeout=120)
 
     with subtest("wakeAt boots the guest without a request"):
         proxy.succeed("systemctl list-timers --all | grep -q ondemand-wakeat-app.timer")

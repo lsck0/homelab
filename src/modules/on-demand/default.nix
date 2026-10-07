@@ -10,9 +10,8 @@
 # VM.PowerMgmt on each of the side's idle guests, granted per guest by terraform/lib.tf), read by curl from a header
 # file sops renders, never from a command line, over tls verified against the proxmox root ca (site.json).
 #
-# Each proxy listens on loopback at a port its own deployment fixes: a guest's services from portBase + vmid x
-# portsPerGuest on, in name order; an app's at its published port, unique in the lab already. Adding a service
-# renumbers no other deployment's proxy, so no unrelated socket restarts.
+# Each proxy listens at its backend's own port on a loopback address of its deployment (a guest's from its vmid, the
+# apps' one): adding a service moves no other proxy, so no unrelated socket restarts.
 { config, lib, pkgs, inventory, site, ... }:
 let
   # -----------------------------------------------------------------------------
@@ -21,13 +20,12 @@ let
 
   cfg = config.homelab.onDemand;
   net = import ../net.nix { inherit lib inventory site; };
-  loopback = "127.0.0.1";
   authHeaderTemplate = "ondemand-proxmox-auth";
   tokenSecret = "proxmox-wake-token-${cfg.side}";
-  # vmids end below 300 and app ports start at 20100 (apps-catalog portRange): 21000..22999 holds every guest's slots
-  portBase = 20000;
-  # the most routes one guest serves (the arr guest has five)
-  portsPerGuest = 10;
+  # 127.0.0.0/8 is all local: a guest's proxies on 127.1.<vmid / 256>.<vmid % 256>, the apps' (ports unique) on one
+  guestLoopbackPrefix = "127.1";
+  octetSize = 256;
+  appLoopback = "127.2.0.1";
   metricsFile = "${config.homelab.textfileDir}/ondemand.prom";
 
   # silence from a saturated build counts as busy until this uptime; 21h stays clear of the next daily wakeAt
@@ -63,15 +61,16 @@ let
       stopAfter = svc.idleAfter;
       sleeps = true;
     };
-  active = lib.filterAttrs (_: svc: (targetOf svc).sleeps) cfg.services;
+  sleeping = lib.filterAttrs (_: svc: (targetOf svc).sleeps) cfg.services;
+  # routes to one backend port (two hosts, two paths) share one proxy, named after the first of them
+  active = lib.filterAttrs (name: svc: name == lib.head (lib.attrNames (lib.filterAttrs (_: s: listenOf s == listenOf svc) sleeping))) sleeping;
   # every service of a deployment names its wake time; one wake per deployment, under its first service's name
   firstServiceOf = key: lib.head (lib.attrNames (lib.filterAttrs (_: s: (targetOf s).key == key) active));
   scheduled = lib.filterAttrs (name: svc: svc.wakeAt != null && name == firstServiceOf (targetOf svc).key) active;
 
-  # a guest's service: its slot among the guest's services, in name order
-  slotOf = name: svc: lib.lists.findFirstIndex (n: n == name) null
-    (lib.attrNames (lib.filterAttrs (_: s: s.app == null && s.vmid == svc.vmid) cfg.services));
-  listenPortOf = name: svc: if svc.app != null then svc.targetPort else portBase + svc.vmid * portsPerGuest + slotOf name svc;
+  listenAddressOf = svc: if svc.app != null then appLoopback
+    else "${guestLoopbackPrefix}.${toString (svc.vmid / octetSize)}.${toString (lib.mod svc.vmid octetSize)}";
+  listenOf = svc: "${listenAddressOf svc}:${toString svc.targetPort}";
 
   # several routes can share one deployment
   siblingsBusy = svc: lib.concatStrings (lib.mapAttrsToList (n: s:
@@ -231,7 +230,7 @@ let
     '';
   };
 
-  serviceType = lib.types.submodule ({ name, config, ... }: {
+  serviceType = lib.types.submodule ({ config, ... }: {
     options = {
       vmid = lib.mkOption {
         type = lib.types.nullOr lib.types.int;
@@ -244,12 +243,12 @@ let
       idleAfter = lib.mkOption { type = lib.types.nullOr lib.types.str; default = null; description = "The app's idle.stopAfter."; };
 
       targetPort = lib.mkOption { type = lib.types.port; description = "Port on the deployment to forward to."; };
-      listenPort = lib.mkOption {
-        type = lib.types.port;
+      listenAddress = lib.mkOption {
+        type = lib.types.str;
         readOnly = true;
-        default = listenPortOf name config;
-        defaultText = "an app's published port; a guest's portBase + vmid x portsPerGuest + its slot among the guest's services";
-        description = "Local port of the activation proxy, fixed by its own deployment.";
+        default = listenAddressOf config;
+        defaultText = "127.1.<vmid / 256>.<vmid % 256> for a guest, 127.2.0.1 for an app";
+        description = "Loopback address of the activation proxy, which listens at targetPort: fixed by its own deployment.";
       };
       bootTimeout = lib.mkOption { type = lib.types.int; default = 180; description = "Seconds the deployment may take to answer the held client."; };
       busyPath = lib.mkOption {
@@ -310,7 +309,7 @@ in {
 
   config = lib.mkIf cfg.enable {
     homelab.onDemand.address = lib.mapAttrs (_: svc:
-      if (targetOf svc).sleeps then "${loopback}:${toString svc.listenPort}"
+      if (targetOf svc).sleeps then listenOf svc
       else "${(targetOf svc).ip}:${toString svc.targetPort}"
     ) cfg.services;
 
@@ -318,14 +317,10 @@ in {
     sops.templates.${authHeaderTemplate}.content = "Authorization: PVEAPIToken=${config.sops.placeholder.${tokenSecret}}\n";
 
     assertions =
-      [{
-        assertion = lib.allUnique (lib.mapAttrsToList (_: svc: svc.listenPort) cfg.services);
-        message = "homelab.onDemand.services: two services share a listenPort (two routes of an app on one published port?)";
-      }]
-      ++ (lib.mapAttrsToList (name: svc: {
-        assertion = if svc.app == null then svc.vmid != null && inventory ? ${toString svc.vmid} && slotOf name svc < portsPerGuest
+      (lib.mapAttrsToList (name: svc: {
+        assertion = if svc.app == null then svc.vmid != null && inventory ? ${toString svc.vmid}
           else svc.vmid == null && svc.manager != null && svc.host != null && svc.idleAfter != null;
-        message = "homelab.onDemand.services.${name}: either a vm of the inventory with at most ${toString portsPerGuest} services, or an app with manager, host and idleAfter";
+        message = "homelab.onDemand.services.${name}: either a vm of the inventory or an app with manager, host and idleAfter";
       }) cfg.services)
       ++ (lib.mapAttrsToList (id: vm: {
         assertion = vm.type != cfg.side || !vm.powered || vm.idle == null
@@ -339,7 +334,7 @@ in {
         description = "On-demand activation socket for ${name}";
         wantedBy = [ "sockets.target" ];
         socketConfig = {
-          ListenStream = "${loopback}:${toString svc.listenPort}";
+          ListenStream = listenOf svc;
           # one proxy for all connections
           Accept = false;
         };
