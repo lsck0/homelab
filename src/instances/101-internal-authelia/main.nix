@@ -192,8 +192,4 @@ in {
       totp.issuer = net.domain;
     };
   };
-
-  networking.firewall.allowedTCPPorts = [ portal.port ];
-  # regulation trusts X-Forwarded-For: a direct caller could name any address
-  homelab.ingressOnly.ports = [ portal.port ];
 }

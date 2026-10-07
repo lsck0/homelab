@@ -220,7 +220,7 @@ in {
   # every account lives in this sqlite file
   homelab.dbBackup.databases.lldap.sqlite = "${stateDir}/users.db";
 
-  # ldap for authelia on this host and the proxmox realm, the web ui through the ingress
-  networking.firewall.allowedTCPPorts = [ ldapPort httpPort ];
-  homelab.ingressOnly.ports = [ ldapPort httpPort ];
+  # ldap for authelia on this host and the proxmox realm (instance.nix grants); the web ui is the route's
+  networking.firewall.allowedTCPPorts = [ ldapPort ];
+  homelab.ingressOnly.ports = [ ldapPort ];
 }

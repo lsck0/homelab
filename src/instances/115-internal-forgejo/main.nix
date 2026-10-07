@@ -224,9 +224,8 @@ in {
     "d ${data} 0750 ${toString containerUid} ${toString containerUid} -"
   ];
 
-  networking.firewall.allowedTCPPorts = [ route.port sshPort ];
-  # the web login is behind authelia; git ssh stays open
-  homelab.ingressOnly.ports = [ route.port ];
+  # git ssh is open to the lab; the web port is the route's, guarded (modules/network.nix)
+  networking.firewall.allowedTCPPorts = [ sshPort ];
 
   # consistent copy for the snapshot, the live file may be mid-write
   homelab.dbBackup.databases.forgejo.sqlite = db;

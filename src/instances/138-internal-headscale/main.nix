@@ -140,10 +140,6 @@ in
     '';
   };
 
-  # headscale itself is reached by clients through the ingress, which relays their registration
-  networking.firewall.allowedTCPPorts = [ headscaleRoute.port headplaneRoute.port ];
-  homelab.ingressOnly.ports = [ headplaneRoute.port ];
-
   # consistent copy for the snapshot, the live file may be mid-write
   homelab.dbBackup.databases.headscale.sqlite = "${headscaleDir}/db.sqlite";
 }

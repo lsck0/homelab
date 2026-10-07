@@ -298,9 +298,4 @@ in {
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0750 1000 1000 -"
   ];
-
-  networking.firewall.allowedTCPPorts = [ routes.homepage.port ];
-
-  # no login but holds every api key
-  homelab.ingressOnly.ports = [ routes.homepage.port ];
 }
