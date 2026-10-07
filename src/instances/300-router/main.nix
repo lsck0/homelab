@@ -568,9 +568,10 @@ in {
     ];
   };
 
-  # wol-pc wakes luca-pc from the vpn
+  # wol-pc wakes luca-pc from the vpn; its mac is a device identity, kept out of the public repo
+  sops.secrets.workstation-mac = { };
   environment.etc."profile.d/wol.sh".text = ''
-    alias wol-pc='wakeonlan ${site.lan.workstationMac}'
+    alias wol-pc='wakeonlan "$(cat ${config.sops.secrets.workstation-mac.path})"'
   '';
 
   environment.systemPackages = with pkgs; [

@@ -12,5 +12,6 @@
   secrets = {
     protonvpn-private-key = "manual";
     wireguard-private-key = "manual"; # init.sh: wg genkey
+    workstation-mac = "manual"; # init.sh: the workstation's mac, for wol-pc
   };
 }

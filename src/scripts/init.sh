@@ -146,7 +146,7 @@ fi
 PROXMOX_CA=$(pve "cat /etc/pve/pve-root-ca.pem")
 # merged into what is there: keys this script does not ask for stay
 jq --arg node "$(pve hostname)" --arg domain "$DOMAIN" --arg ca "$PROXMOX_CA" --arg subnet "$LAN_SUBNET" --arg gateway "$LAN_GATEWAY" --arg router "$ROUTER" \
-  --arg proxmox "$TARGET_IP" --arg workstation "$WORKSTATION" --arg mac "$WORKSTATION_MAC" --arg inverter "$INVERTER" --arg notebook "$NOTEBOOK" \
+  --arg proxmox "$TARGET_IP" --arg workstation "$WORKSTATION" --arg inverter "$INVERTER" --arg notebook "$NOTEBOOK" \
   --arg timeZone "$TIME_ZONE" --arg repo "$REPO" --arg latitude "$LATITUDE" --arg longitude "$LONGITUDE" \
   --argjson gpu "$GPU_JSON" --argjson bulk "$BULK_JSON" '. * {
     node: $node,
@@ -155,8 +155,8 @@ jq --arg node "$(pve hostname)" --arg domain "$DOMAIN" --arg ca "$PROXMOX_CA" --
     repo: $repo,
     location: { latitude: ($latitude | tonumber), longitude: ($longitude | tonumber) },
     lan: { subnet: $subnet, gateway: $gateway, router: $router, proxmox: $proxmox, workstation: $workstation,
-           workstationMac: $mac, inverter: $inverter, notebook: $notebook }
-  } | .gpu = $gpu | .bulk = $bulk | .proxmoxCa = $ca' "$SITE" > "$SITE.new" && mv "$SITE.new" "$SITE"
+           inverter: $inverter, notebook: $notebook }
+  } | del(.lan.workstationMac) | .gpu = $gpu | .bulk = $bulk | .proxmoxCa = $ca' "$SITE" > "$SITE.new" && mv "$SITE.new" "$SITE"
 echo ">>> Wrote $SITE"
 
 # age key's source of truth is the dotfiles repo; src/secrets/admins.txt lists its public key
@@ -170,6 +170,8 @@ export SOPS_AGE_KEY_FILE="$AGE_KEY"
 
 echo ">>> Generating secrets..."
 "$SCRIPT_DIR/secrets-sync.sh" --apply
+# a device identity: the router's secret, not the public site.json
+secrets_set workstation-mac "$WORKSTATION_MAC"
 
 mkdir -p "$ROOT_DIR/images"
 if [ ! -f "$ROOT_DIR/images/nixos.img" ]; then
