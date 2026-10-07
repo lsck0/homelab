@@ -105,6 +105,17 @@ class Door(unittest.TestCase):
         self.startable = True
         self.assertEqual(self.ask("POST", "/redeploy/demo", TOKENS["demo"], now_s=NOW_S + 1), 202)
 
+    def test_a_start_that_cannot_run_or_hangs_is_no_start(self):
+        saved = api.subprocess.run
+        for error in (OSError("no systemctl"), api.subprocess.TimeoutExpired("systemctl", api.UNIT_START_TIMEOUT_S)):
+            def run(*args, error=error, **kwargs):
+                raise error
+            api.subprocess.run = run
+            try:
+                self.assertFalse(api.unit_start("app-builder@demo.service"))
+            finally:
+                api.subprocess.run = saved
+
     def test_no_payload(self):
         self.assertEqual(self.ask("POST", "/redeploy/demo", TOKENS["demo"], headers={"content-length": "12"}), 413)
         self.assertEqual(self.ask("POST", "/redeploy/demo", TOKENS["demo"], headers={"content-length": "x"}), 400)

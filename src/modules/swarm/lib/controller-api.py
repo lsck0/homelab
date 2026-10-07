@@ -31,6 +31,8 @@ import time
 
 HEAD_BYTES_MAX = 8192
 READ_TIMEOUT_S = 5
+# --no-block only queues the job; inside the unit's RuntimeMaxSec with the read
+UNIT_START_TIMEOUT_S = 3
 APP_NAME = re.compile(r"[a-z][a-z0-9-]*")
 PATH = re.compile(r"/(redeploy|wake|sleep|state)/([^/]+)")
 BEARER = "Bearer "
@@ -108,7 +110,11 @@ def request_read(conn):
 
 
 def unit_start(name):
-    return subprocess.run(["systemctl", "start", "--no-block", name], check=False).returncode == 0
+    try:
+        return subprocess.run(["systemctl", "start", "--no-block", name], check=False,
+                              timeout=UNIT_START_TIMEOUT_S).returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def main():
