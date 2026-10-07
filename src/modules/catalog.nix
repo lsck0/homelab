@@ -49,14 +49,9 @@ let
   # an app publishes a port for each http route by its zone, each l4 route by its protocol, and each exporter
   groups = [ "external" "internal" "metrics" "tcp" "udp" ];
 
-  # `{{homelab.<name>}}` in an app's env or override: lab endpoints an app may not hard-code; all telemetry
-  collector = inventory.${telemetry.collectorVmid};
-  labEndpoints = {
-    otlp-grpc = telemetry.urls.otlpGrpc;
-    otlp-http = telemetry.urls.otlpHttp;
-    # host:port, what a tcp forwarder (socat) wants
-    pyroscope = "${collector.ip}:${toString telemetry.ports.pyroscope}";
-  };
+  # `{{homelab.<name>}}` in an app's env or override: lab endpoints an app may not hard-code; all telemetry, at the
+  # relay on the task's own node
+  labEndpoints = telemetry.relayEndpoints;
 
   # -----------------------------------------------------------------------------
   # INTERNAL

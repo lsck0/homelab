@@ -58,7 +58,8 @@ let
 
   nfsPorts = [ ports.rpcbind ports.nfs ];
   torPorts = import ./tor-ports.nix;
-  appTelemetryPorts = with telemetry.ports; [ journalRemote otlpGrpc otlpHttp pyroscope loki ];
+  # the push doors only: no sender outside the internal zone reaches a query api
+  appTelemetryPorts = with telemetry.ports; [ journalRemote otlpGrpc otlpHttp pyroscope lokiPush ];
 
   # -------------------------------------------------------------------------------------------------------------
   # ROUTE BACKENDS
@@ -131,7 +132,7 @@ let
   # a grant's source as the router sees it (modules/lab `sourceOf` names them): the router itself crosses nothing
   endpointOf = from:
     if builtins.match "[0-9]+" from != null then host from
-    else if from == "proxmox" then house [ net.wan.proxmox ]
+    else if lib.elem from [ "proxmox" "workstation" ] then house [ net.wan.${from} ]
     else all from;
   reachesByDefault = network: zone: let r = networks.${network}.reaches; in r == "everything" || (lib.isList r && lib.elem zone r);
   # the router's part of a grant: each source network that does not reach the guest's zone by default
@@ -176,7 +177,7 @@ in
       why = "the edge relays the internal routes it publishes to the internal ingress";
     }
     {
-      from = host edge; to = host collector; tcp = [ telemetry.ports.loki ];
+      from = host edge; to = host collector; tcp = [ telemetry.ports.lokiPush ];
       why = "the edge's promtail pushes its access log";
     }
     {

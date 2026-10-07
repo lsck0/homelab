@@ -218,19 +218,18 @@ pkgs.testers.runNixOSTest {
                                                       "kind": 3, "startTimeUnixNano": str(now - 10**6), "endTimeUnixNano": str(now),
                                                       "attributes": attributes}]}]}]})
 
-    def push_spans(app, body, count):
-        """the body count times back to back from inside the app's task, with the tenant header render injected;
-        the http statuses"""
+    def push_spans(app, body, count, header=""):
+        """the body count times back to back from inside the app's task to its node's relay, which names the tenant
+        whatever header the task sends; the http statuses"""
         machine, cid = task_of(app)
         curl = ("curl -s -m ${toString requestTimeoutS} -o /dev/null -w '%{http_code}\\n' -X POST -H 'Content-Type: application/json' "
-                "-H \"''${OTEL_EXPORTER_OTLP_HEADERS%%=*}: ''${OTEL_EXPORTER_OTLP_HEADERS#*=}\" "
-                "--data-binary @- http://${collector}:${toString telemetry.ports.otlpHttp}/v1/traces")
+                f"{header} --data-binary @- ${telemetry.relayEndpoints.otlp-http}/v1/traces")
         command = f'body=$(cat); for i in $(seq {count}); do printf %s "$body" | {curl}; done'
         out = machine.succeed(f"docker exec -i {cid} sh -c {shlex.quote(command)} < {body_on(machine, body)}")
         return [int(code) for code in out.split()]
 
-    def push_span(app, body):
-        return push_spans(app, body, 1)[0]
+    def push_span(app, body, header=""):
+        return push_spans(app, body, 1, header)[0]
 
     def push_profile(app, size):
         """a folded profile of about size bytes from inside the app's task, every stack its own; the http status"""
@@ -240,8 +239,7 @@ pkgs.testers.runNixOSTest {
         lines = max(1, size // (len(pad) + 16))
         command = (f"now=$(date +%s); seq 1 {lines} | sed 's/.*/f&_{pad};g& 1/' | "
                    "curl -s -m ${toString requestTimeoutS} -o /dev/null -w '%{http_code}' -X POST --data-binary @- "
-                   "-H \"X-Scope-OrgID: ''${OTEL_EXPORTER_OTLP_HEADERS#*=}\" "
-                   f"\"http://${collector}:${toString telemetry.ports.pyroscope}/ingest?name={app}.cpu&from=$((now-10))&until=$now&format=folded\"")
+                   f"\"http://${telemetry.relayEndpoints.pyroscope}/ingest?name={app}.cpu&from=$((now-10))&until=$now&format=folded\"")
         return int(in_task(app, command))
 
 
@@ -277,9 +275,10 @@ pkgs.testers.runNixOSTest {
         world.wait_until_succeeds(f"[ \"$({edge_request('quiet', '198.51.100.1', '%{http_code}')})\" = 200 ]", timeout=240)
         quiet_answers("deployed")
 
-    with subtest("every capability is dropped and the tenant is injected"):
+    with subtest("every capability is dropped, and a task reaches its node's relay, never the collector"):
         assert in_task("noisy", "grep CapEff /proc/1/status").split()[1] == "0000000000000000"
-        assert in_task("quiet", "echo $OTEL_EXPORTER_OTLP_HEADERS").strip() == f"X-Scope-OrgID={TENANT['quiet']}"
+        direct = "curl -s -m 5 -o /dev/null -w '%{http_code}' -X POST ${telemetry.urls.otlpHttp}/v1/traces || true"
+        assert in_task("quiet", direct) == "000"
 
     with subtest("positive controls: both apps' metrics, lines, spans and profiles arrive"):
         vm_105.wait_until_succeeds(prom_has('up{job="app-quiet-web"} == 1'), timeout=180)
@@ -291,8 +290,12 @@ pkgs.testers.runNixOSTest {
             assert push_span(app, span(traces[app], app)) == 200
             vm_105.wait_until_succeeds(tempo_has(TENANT[app], traces[app]), timeout=120)
             assert push_profile(app, 64) == 200
-        # one tenant cannot read another's
+        # one tenant cannot read another's, nor write into it: the relay names the sender's own
         vm_105.fail(tempo_has(TENANT["noisy"], traces["quiet"]))
+        forged = rng.randbytes(16).hex()
+        assert push_span("quiet", span(forged, "quiet"), f"-H 'X-Scope-OrgID: {TENANT['noisy']}'") == 200
+        vm_105.wait_until_succeeds(tempo_has(TENANT["quiet"], forged), timeout=120)
+        vm_105.fail(tempo_has(TENANT["noisy"], forged))
 
     def flood_cpu():
         machine, cid, cgroup = cgroup_of("noisy")

@@ -57,6 +57,17 @@ let
   # docker's default bridge address, the same on every node (modules/app-telemetry.nix pins it): a task reaches its
   # own node's relay there whatever node it runs on
   relayAddress = "172.17.0.1";
+  relayBridge = "${relayAddress}/16";
+
+  # the only requests a push door (vm-105) or a relay (an app node) passes, by the port it listens on
+  pushPaths = {
+    lokiPush = [ "/loki/api/v1/push" ];
+    otlpHttp = [ "/v1/traces" ];
+    # tempo's otlp/grpc trace service
+    otlpGrpc = [ "/opentelemetry.proto.collector.trace.v1.TraceService/Export" ];
+    # the legacy ingest api (pyroscope-rs, the template's agent) and the connect push api (alloy)
+    pyroscope = [ "/ingest" "/push.v1.PusherService/Push" ];
+  };
 
   # a notification groups the alerts of one category: one header, one line per alert
   categories = {
@@ -127,7 +138,7 @@ let
     };
   };
 in {
-  inherit collectorVmid ports categories alertType probeType relayAddress;
+  inherit collectorVmid ports categories alertType probeType relayAddress relayBridge pushPaths;
 
   urls = {
     prometheus = urlOf ports.prometheus;

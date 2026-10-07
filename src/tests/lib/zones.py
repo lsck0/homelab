@@ -36,7 +36,8 @@ MANAGER = "10.100.0.140"
 EDGE = "10.200.0.200"
 
 NFS_PORTS = (111, 2049)
-LOKI = 3100
+# the push door; the query api (3100) is for named readers only
+LOKI_PUSH = 3102
 JOURNAL = 19532
 OTLP = 4317
 OTLP_HTTP = 4318
@@ -78,7 +79,7 @@ class ZoneOracle:
         tcp = proto == "tcp"
         return (
             (src == EDGE and dst == INGRESS and tcp and port == HTTPS)
-            or (src == EDGE and dst == COLLECTOR and tcp and port in (LOKI, OTLP_FRONTEND))
+            or (src == EDGE and dst == COLLECTOR and tcp and port in (LOKI_PUSH, OTLP_FRONTEND))
             or (src == EDGE and dst == MANAGER and tcp and port == CONTROLLER)
             or (dst == COLLECTOR and tcp and port == JOURNAL)
             or (src in self.nas_clients and dst == NAS and proto in ("tcp", "udp") and port in NFS_PORTS)
@@ -90,7 +91,7 @@ class ZoneOracle:
         tcp = proto == "tcp"
         return (
             (dst == INGRESS and tcp and port == HTTPS)
-            or (dst == COLLECTOR and tcp and port in (JOURNAL, OTLP, OTLP_HTTP, PYROSCOPE, LOKI))
+            or (dst == COLLECTOR and tcp and port in (JOURNAL, OTLP, OTLP_HTTP, PYROSCOPE, LOKI_PUSH))
             or (dst == MANAGER and ((tcp and port in SWARM_TCP) or (proto == "udp" and port in SWARM_UDP) or proto == "esp"))
             or (src == self.state_worker and dst == MANAGER and tcp and port == CONTROLLER)
             or (src in self.nas_clients and dst == NAS and proto in ("tcp", "udp") and port in NFS_PORTS)

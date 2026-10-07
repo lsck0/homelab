@@ -140,8 +140,9 @@ pkgs.testers.runNixOSTest {
             pid = c["State"]["Pid"]
             cgroup = machine.succeed(f"cut -d: -f3 /proc/{pid}/cgroup").strip()
             assert cgroup.startswith("/apps.slice/"), cgroup
-            tenant = "${telemetry.tenantHeader}=" + "${telemetry.tenantOf "APP"}".replace("APP", app)
-            assert any(e.endswith(tenant) for e in c["Config"]["Env"]), c["Config"]["Env"]
+            # the node's relay names the task's tenant by its address
+            tenant = "${telemetry.tenantOf "APP"}".replace("APP", app)
+            machine.wait_until_succeeds(f"grep -q ' {tenant};$' /run/app-relay/tenants.map", timeout=60)
 
         with subtest(f"{app}: answers through the edge"):
             world.wait_until_succeeds(f"[ \"$(curl -s -m ${toString requestTimeoutS} -o /dev/null -w '%{{http_code}}' --interface ${cloudflare} "

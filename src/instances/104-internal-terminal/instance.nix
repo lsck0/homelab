@@ -8,6 +8,7 @@ let
     anubis = "the trmnl cloud runs no proof of work";
     cloudflare = "the trmnl cloud fetches it directly";
     homepage = "a feed, no page";
+    accessLog = "the path carries the feed's token";
   };
 in {
   vm = {
