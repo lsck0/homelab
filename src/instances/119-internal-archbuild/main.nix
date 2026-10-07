@@ -26,6 +26,9 @@ let
   listScript = ./lib/archrepo-list.sh;
   containerBuild = "archbuild-build";
   containerPublish = "archbuild-publish";
+  # memory one compile job may take: c++ with lto peaks near 2 GiB; ninja ignores MAKEFLAGS and runs nproc + 2 jobs,
+  # which on the ballooned vm stalled the guest until the night died (wivrn-server), so the cpus follow the memory
+  buildJobMemoryKiB = 2 * 1024 * 1024;
   # podman rm grace before it kills a container
   containerStopTimeoutS = 30;
   # what both containers get of the run: the verified commit and the run id
@@ -92,7 +95,11 @@ in {
         ARCHBUILD_RUN_STARTED=$(date +%s)
         # an unsigned or foreign-signed head stops here: nothing builds, the published snapshot stays
         ARCHBUILD_COMMIT=$(${pkgs.bash}/bin/bash ${./lib/archrepo-fetch.sh} ${dotfilesSource} ${dotfilesRef} ${dotfilesDir} ${dotfilesSigningKey})
+        jobs=$(( $(awk '/^MemTotal:/ { print $2 }' /proc/meminfo) / ${toString buildJobMemoryKiB} ))
+        (( jobs > $(nproc) )) && jobs=$(nproc)
+        (( jobs < 1 )) && jobs=1
         podman run --rm --init --replace --pull=newer --name ${containerBuild} \
+          --cpuset-cpus "0-$(( jobs - 1 ))" \
           ${runEnv} \
           -v ${repoDir}:/repo:ro \
           -v ${dotfilesDir}:/dotfiles:ro \

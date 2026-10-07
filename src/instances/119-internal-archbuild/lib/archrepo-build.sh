@@ -124,9 +124,6 @@ BUILDER_UID=1000
 # soname bumps on a rolling distro break old builds without a version change
 FULL_REBUILD_DAYS=14
 SECONDS_PER_DAY=86400
-# memory one compile job may take: c++ with lto peaks near 2 GiB per job; at -j$(nproc) on the ballooned vm the
-# kernel killed cc1plus (wivrn-server) and with it the night
-BUILD_JOB_MEMORY_KIB=$((2 * 1024 * 1024))
 # per recipe, so one hung build cannot eat the night
 BUILD_TIMEOUT=3h
 FETCH_TIMEOUT=15m
@@ -353,13 +350,9 @@ setup_build() {
   [ ! -d "$SERVED_STATE_DIR" ] || cp -a "$SERVED_STATE_DIR/." "$STATE_DIR/"
   packager=$(gpg --show-keys --with-colons "$DOTFILES/$REPO_PUBLIC_KEY" | awk -F: '$1 == "uid" { print $10; exit }')
   [ -n "$packager" ] || { log "no key uid in $DOTFILES/$REPO_PUBLIC_KEY"; exit 1; }
-  local memory_kib jobs
-  memory_kib=$(awk '/^MemTotal:/ { print $2 }' /proc/meminfo)
-  jobs=$(( memory_kib / BUILD_JOB_MEMORY_KIB ))
-  (( jobs > $(nproc) )) && jobs=$(nproc)
-  (( jobs < 1 )) && jobs=1
+  # the container's cpuset is the memory budget (main.nix), so nproc is the job count make, ninja and cargo agree on
   cat > /etc/makepkg.conf.d/archbuild.conf <<EOF
-MAKEFLAGS="-j$jobs"
+MAKEFLAGS="-j$(nproc)"
 BUILDDIR=$CACHE/build
 OPTIONS=(strip docs !libtool !staticlibs emptydirs zipman purge !debug lto)
 PACKAGER="$packager"
