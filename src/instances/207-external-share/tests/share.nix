@@ -65,7 +65,6 @@ pkgs.testers.runNixOSTest {
 
   testScript = ''
     import json
-    import re
     account = json.loads('${builtins.toJSON account}')
     api = "http://127.0.0.1/api"
 
@@ -80,11 +79,10 @@ pkgs.testers.runNixOSTest {
         post("/auth/signUp", account)
 
     with subtest("the fork starts on the same data dir and the account signs in"):
-        # podman runs the image's healthcheck as transient units, which fail while the app starts; sync.sh ignores
-        # those, so does this switch, and nothing else
-        status, out = vm_207.execute("/run/booted-system/specialisation/upgraded/bin/switch-to-configuration test 2>&1")
-        failed = [u.strip() for line in re.findall(r"the following units failed: (.*)", out) for u in line.split(",")]
-        assert status == 0 or all(re.fullmatch(r"[0-9a-f]{64}-[0-9a-f]{1,16}\.service", u) for u in failed), out
+        # judged like sync.sh judges a deploy's switch
+        status, _ = vm_207.execute("/run/booted-system/specialisation/upgraded/bin/switch-to-configuration test > /tmp/switch.log 2>&1")
+        assert status == 0 or vm_207.succeed("${pkgs.bash}/bin/bash ${../../../scripts/lib/switch-failures.sh} < /tmp/switch.log") == "", \
+            vm_207.succeed("cat /tmp/switch.log")
         # the state podman's own probe keeps; `podman healthcheck run` here stops on the driver's tty (SIGTTOU) for good
         vm_207.wait_until_succeeds("podman inspect share --format '{{.State.Health.Status}}' | grep -qx healthy", timeout=300)
         vm_207.succeed("podman inspect share --format '{{.ImageName}}' | grep -q pingvin-share-x")
