@@ -41,8 +41,8 @@ pkgs.testers.runNixOSTest {
             "-b ou=groups,${realm.baseDn} cn=${realm.adminGroup} cn")
 
     with subtest("the certificate names the guest's address"):
-        vm_101.succeed("openssl x509 -in ${realm.certFile} -noout -ext subjectAltName | grep -qw 'IP Address:${realm.host}'")
         world.succeed(f"cat > /tmp/realm.pem <<'EOF'\n{vm_101.succeed('cat ${realm.certFile}')}EOF")
+        world.succeed("openssl x509 -in /tmp/realm.pem -noout -ext subjectAltName | grep -qw 'IP Address:${realm.host}'")
 
     with subtest("the realm's bind user reads the directory over ldaps, verified against that certificate"):
         status, out = ldaps_search("/tmp/realm.pem")

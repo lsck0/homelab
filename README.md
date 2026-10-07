@@ -133,7 +133,7 @@ agent), so it waits for vm-101's first deploy: on a fresh lab, and after vm-101 
 Every guest but the router is bound to its own address and mac (`ipfilter-net0`, macfilter), and the host drops
 what it does not name: ssh from the house lan, 8006 from `site.json` `lan.workstation` and `lan.router` (the lab
 reaches the host masqueraded as the router: the ingresses' wake and proxmox route, the homepage, Hermes), 9100 from
-the router, ping from the lan (`src/terraform/lib.tf` FIREWALL; the check `proxmox-firewall` holds lib.tf to it,
+the router, ping from the lan (`src/terraform/lib.tf` FIREWALL; the check `terraform-law` holds lib.tf to it,
 `sync.sh` fails while `pve-firewall status` is not `enabled/running`). Terraform turns it on last, after the guests'
 ipsets and the host rules exist.
 
@@ -186,10 +186,6 @@ Adding a secret: read it in a config (`sops.secrets.<name>`), declare it with it
 lists the kinds) in the reading guest's `instance.nix`, or in `src/secrets/shared.nix` when several read it, then
 `./sync.sh`. A generated one appears by itself, a `manual` one is added empty: fill it with `sops <its file>`.
 Moving a declaration moves the value. `src/scripts/secrets-sync.sh [--apply [--prune]]` runs the same step by hand.
-
-Moving from `src/secrets.json`, `src/host-keys.json` and `src/host-secrets/` (the layout before folders), once, with
-the dotfiles unlocked: `src/scripts/secrets-migrate.sh`, then `./sync.sh`. Host keys carry over, so the guests keep
-decrypting.
 
 Every ssh host key is pinned in `src/generated/known_hosts`: Proxmox's by `init.sh` after a console check, each
 guest's by `sync.sh`, which reads it through Proxmox from inside the guest. Any other key stops the run.

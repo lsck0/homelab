@@ -1,18 +1,21 @@
-# lab-wide: the proxmox firewall as terraform declares it (terraform/lib.tf FIREWALL)
-# lib.tf parsed by hcl2json, held to the law below: the datacenter firewall on with the host's input policy DROP,
+# lab-wide: terraform's declared state (terraform/main.tf, lib.tf FIREWALL)
+# both files parsed by hcl2json and held to the law below: tls to the api verified (no `insecure`), the state's
+# working copy outside the flake tree (no backend path), the datacenter firewall on with the host's input policy DROP,
 # every guest bound to its address and mac (the router's nics alone exempt), the api open to the workstation and the
 # router only, and no host rule accepting from everyone. Each mutation in `controls` must break the law.
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 let
   apiPort = "\${tostring(local.proxmox_api_port)}";
   apiSources = "\${local.site.lan.workstation},\${local.site.lan.router}";
 
-  law = pkgs.writeText "proxmox-firewall-law.jq" ''
+  law = pkgs.writeText "terraform-law.jq" ''
     .resource as $r
     | ($r.proxmox_virtual_environment_cluster_firewall.datacenter[0]) as $dc
     | ($r.proxmox_virtual_environment_firewall_options.guest[0]) as $guest
     | ($r.proxmox_virtual_environment_firewall_rules.host[0].rule) as $rules
     | [
+        (if .provider.proxmox[0] | has("insecure") then "the provider skips tls verification of the api" else empty end),
+        (if .terraform[0].backend.local[0] != {} then "the backend names a path: the state belongs outside the flake tree" else empty end),
         (if $dc.enabled != true then "the datacenter firewall is off: no guest's ip and mac filter applies" else empty end),
         (if $dc.input_policy != "DROP" then "the host's input policy is \($dc.input_policy), not DROP" else empty end),
         (if $dc.ebtables != true then "ebtables is off: no arp or mac filtering" else empty end),
@@ -30,6 +33,8 @@ let
   '';
 
   controls = [
+    ''.provider.proxmox[0].insecure = true''
+    ''.terraform[0].backend.local[0].path = "../generated/terraform/terraform.tfstate"''
     ''.resource.proxmox_virtual_environment_cluster_firewall.datacenter[0].enabled = false''
     ''.resource.proxmox_virtual_environment_cluster_firewall.datacenter[0].input_policy = "ACCEPT"''
     ''.resource.proxmox_virtual_environment_firewall_options.guest[0].ipfilter = false''
@@ -40,12 +45,14 @@ let
     ''del(.resource.proxmox_virtual_environment_firewall_rules.host[0].rule[0].source)''
   ];
 in
-pkgs.runCommand "proxmox-firewall" { nativeBuildInputs = [ pkgs.hcl2json pkgs.jq ]; } ''
+pkgs.runCommand "terraform-law" { nativeBuildInputs = [ pkgs.hcl2json pkgs.jq ]; } ''
+  hcl2json ${../terraform/main.tf} > main.json
   hcl2json ${../terraform/lib.tf} > lib.json
-  violations=$(jq -c -f ${law} lib.json)
-  [ "$violations" = "[]" ] || { echo "terraform/lib.tf breaks the firewall law:"; jq -r '.[]' <<<"$violations"; exit 1; }
-  ${pkgs.lib.concatImapStrings (i: mutation: ''
-    [[ "$(jq '${mutation}' lib.json | jq -c -f ${law})" == '["'* ]] || { echo "control ${toString i} passed the law"; exit 1; }
+  jq -s '.[0] * .[1]' main.json lib.json > terraform.json
+  violations=$(jq -c -f ${law} terraform.json)
+  [ "$violations" = "[]" ] || { echo "terraform breaks the law:"; jq -r '.[]' <<<"$violations"; exit 1; }
+  ${lib.concatImapStrings (i: mutation: ''
+    [[ "$(jq '${mutation}' terraform.json | jq -c -f ${law})" == '["'* ]] || { echo "control ${toString i} passed the law"; exit 1; }
   '') controls}
   touch $out
 ''
