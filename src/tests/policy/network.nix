@@ -3,7 +3,7 @@
 # Each law is stated as the policy, read off the rendered configuration, never recomputed the way the module
 # computes it: a chain in the order the defences must run, a rule the router must contain before another, an
 # address the dmz must never be trusted with.
-{ lib, configs, inventory, site, catalog, appsCatalog, ... }:
+{ lib, configs, inventory, site, catalog, appsCatalog, lab, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   internalIngress = configs."100-internal-traefik";
@@ -126,6 +126,17 @@ lawsOf {
   # no guest trusts the homepage, the prober or the agent with every guarded port; each trusts its own address
   "ingress guards" = lib.concatLists (lib.mapAttrsToList (name: config:
     map (s: "${name} trusts ${s} on every guarded port") (lib.intersectLists config.homelab.ingressOnly.trusted
-      (map net.hostSource (lib.remove config.homelab.vmid [ "103" "105" "114" ])))
+      (map net.hostSource (lib.remove config.homelab.vmid (with lab.roles; [ dashboard collector operator ]))))
   ) configs);
+
+  # the prober and the status dots check an http route through its ingress: a grant onto the backend's port passes
+  # by sso. Only a dashboard widget without a url of its own queries the backend
+  "probes through the ingress" = lib.concatLists (lib.mapAttrsToList (name: r: let
+    admitted = configs.${inventory.${toString r.vmid}.name}.homelab.ingressOnly.allowed.${toString r.port} or [ ];
+    hasWidget = lib.any (c: c.route == name && c.widget != null && c.widget.url == null) lab.homepage;
+  in
+    lib.optional (lib.elem (net.hostSource lab.roles.collector) admitted) "${name}: the prober reaches port ${toString r.port} past the ingress"
+    ++ lib.optional (lib.elem (net.hostSource lab.roles.dashboard) admitted && !hasWidget)
+      "${name}: the dashboard reaches port ${toString r.port} past the ingress, with no widget querying it"
+  ) (lib.filterAttrs (_: r: r.vmid != null) (catalog.internal // catalog.external)));
 }

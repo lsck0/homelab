@@ -36,6 +36,8 @@ let
     inventory = network "inventory" (facts // { inventory = inventory // { "206" = inventory."206" // { idle = "30m"; type = "apps"; }; }; });
     ingress-guards = network "ingress guards" (tamper "121-internal-paperless" [ "homelab" "ingressOnly" "trusted" ]
       [ "${inventory."114".ip}/32" ]);
+    probes-through-ingress = network "probes through the ingress" (tamper "121-internal-paperless" [ "homelab" "ingressOnly" "allowed" ]
+      { ${toString facts.lab.routes.paperless.port} = [ "${inventory.${facts.lab.roles.collector}.ip}/32" ]; });
 
     published-unguarded = { file = "apps"; marker = "is not in homelab.ingressOnly.ports";
       tampered = tamper "250-apps-swarm" [ "homelab" "ingressOnly" "ports" ] [ ]; };
