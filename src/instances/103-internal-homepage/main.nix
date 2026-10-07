@@ -27,7 +27,6 @@ let
   proxmoxCa = site.proxmoxCa or null;
   proxmoxCaFile = pkgs.writeText "pve-root-ca.pem" proxmoxCa;
   proxmoxCaPath = "/etc/homepage/pve-root-ca.pem";
-  proxmoxApi = "${net.wan.proxmox}:${toString net.ports.proxmoxApi}";
 
   # dashboard groups in display order; cards come from the instances (instance.nix `homepage`) and, for Swarm, the apps
   layout = [
@@ -119,24 +118,18 @@ let
     (lib.filterAttrs (k: v: k != "name" && v != null && v != "") c));
   groupYaml = g: "- ${g.name}:\n" + lib.concatMapStrings cardYaml g.cards;
 
-  # the lab's frame: what is no route of its own; layout of its own in settingsYaml
-  fritzbox = "http://${net.wan.gateway}";
+  # the lab's frame (modules/infra.nix) with its widgets by card name; layout of its own in settingsYaml
+  frame = import ../../modules/infra.nix { inherit net; };
+  frameWidgets = {
+    FritzBox = { type = "fritzbox"; url = frame.fritzbox; };
+    Proxmox = if proxmoxCa == null then null else {
+      type = "proxmox"; url = "https://${frame.proxmoxApi}";
+      username = key "proxmox-user"; password = key "proxmox-pass"; node = site.node;
+    };
+  };
   infra = {
     name = "Infra";
-    cards = [
-      { name = "Cloudflare"; icon = "cloudflare"; href = "https://dash.cloudflare.com"; }
-      { name = "FritzBox"; icon = "mdi-router-wireless"; href = fritzbox; ping = fritzbox; widget = { type = "fritzbox"; url = fritzbox; }; }
-      { name = "Proxmox"; icon = "proxmox"; href = hostUrl "proxmox"; ping = "http://${proxmoxApi}";
-        widget = if proxmoxCa == null then null else {
-          type = "proxmox"; url = "https://${proxmoxApi}";
-          username = key "proxmox-user"; password = key "proxmox-pass"; node = site.node;
-        }; }
-      { name = "Router"; icon = "nixos"; ping = "http://${net.zones.internal.routerIp}"; }
-      { name = "Traefik"; icon = "traefik"; href = hostUrl "traefik"; ping = "http://${net.ipOf net.zones.internal.ingress}";
-        description = "Internal ingress"; }
-      { name = "Traefik DMZ"; icon = "traefik"; ping = "http://${net.ipOf net.zones.external.ingress}"; description = "Public ingress"; }
-      { name = "Terminal"; icon = "mdi-tablet-dashboard"; href = "https://trmnl.com/dashboard"; }
-    ];
+    cards = map (c: c // { widget = frameWidgets.${c.name} or null; }) frame.cards;
   };
 
   servicesYaml = pkgs.writeText "services.yaml" (lib.concatMapStrings groupYaml ([ infra ] ++ groups));

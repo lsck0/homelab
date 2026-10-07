@@ -2,9 +2,10 @@
 
 Usage: homelab.py <config.json> <out.json>   (run by nix at build time, see 105-internal-grafana.nix)
 
-Config keys: nodeJob (the node-exporter scrape job), guestsExpectedUp (the `up` series of every guest meant to
-run, the same expression as the instance_down alert), edgeHost and ssoHost (promtail `host` of the public ingress
-and of authelia), nasVm and hostVm (`vm` label of the nas guest and the proxmox host).
+Config keys: uid (the board's, modules/telemetry.nix homelabDashboardUid), nodeJob (the node-exporter scrape job),
+guestsExpectedUp (the `up` series of every guest meant to run, the same expression as the instance_down alert),
+edgeHost and ssoHost (promtail `host` of the public ingress and of authelia), nasVm and hostVm (`vm` label of the
+nas guest and the proxmox host).
 """
 import json
 import sys
@@ -171,7 +172,7 @@ variables = [
      "includeAll": True, "multi": True, "allValue": ".*", "current": {"text": "All", "value": "$__all"}, "sort": 1},
 ]
 
-board = dashboard("Homelab", "homelab", [overview, traffic_section, access, system, log_section], tags=("homelab",),
+board = dashboard("Homelab", config["uid"], [overview, traffic_section, access, system, log_section], tags=("homelab",),
                   variables=variables)
 
 if __name__ == "__main__":

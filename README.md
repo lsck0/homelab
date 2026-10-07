@@ -48,8 +48,8 @@ src/
                             secrets two or more guests read, or the operator alone)
   terraform/                main.tf, lib.tf: the guests from `nix eval .#lab.terraform`; its connection vars
   generated/                what the scripts write: site.json and known_hosts (init.sh, sync.sh), zones.json (the
-                            zones, edited by hand too), nodes/<vmid>-apps-swarm/ (the workers' keys), terraform/
-                            (the state's working copy; the nas holds the original)
+                            zones, edited by hand too), lab.json (sync.sh, for desktop clients), nodes/<vmid>-apps-swarm/
+                            (the workers' keys), terraform/ (the state's working copy; the nas holds the original)
   scripts/                  the workstation's tools: init, deinit, pve-install, secrets-*, sops-encrypt, stack
   tests/                    the harness (lib/, stubs/, policy/ the lab's laws) and the tests of the whole lab
 ```
@@ -112,6 +112,12 @@ sudo src/scripts/setup-dns.sh         # workstation: resolve *.lsck0.dev through
 src/scripts/init.sh --pin <proxmox-ip>   # (re)pin proxmox's ssh host key
 src/scripts/deinit.sh [--yes] [proxmox-ip]   # tear the lab down again
 ```
+
+Desktop clients (the bar's homelab widget and the ntfy notifier in the owner's dotfiles) read
+`src/generated/lab.json` and nothing else of this repo: the guests, the routes, the infra cards, the monitoring
+endpoints and the ntfy server with its topics. `src/modules/lab-export.nix` defines it and documents its schema;
+sync.sh rewrites it on every run (`nix eval --json ./src#lab.export`). It is public like the rest of the repo and holds
+no secret; `schema` changes only when a key changes meaning or goes away.
 
 ## Secrets
 

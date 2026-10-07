@@ -32,7 +32,8 @@
 #   /dotfiles    the verified arch-dotfiles checkout, read-only
 #   /outbox      build writes it, publish reads it read-only
 #   /cache       build only: pacman cache, sources, cargo and go caches, the staging db
-#   /public      build only: the builder's status page, logs/<base>.log, status.json
+#   /public      the builder's status page: build writes logs/<base>.log and status.json, the host tees the
+#                whole run into build.log; read-only for publish, which pushes the logs to the mirror
 #   /run/signing.asc, /run/push-key   publish only
 #
 # The list is archrepo-list.sh's: the packages.txt of every module plus the EXTRA_PACKAGES of every
@@ -86,6 +87,13 @@ CACHE=/cache
 STAGE_DB=$CACHE/db/$REPO.db.tar.gz
 DB_FILES=("$REPO.db.tar.gz" "$REPO.files.tar.gz")
 PUBLIC=/public
+# status.txt names them relative to itself, so the mirror serves them beside it
+LOGS_NAME=logs
+BUILD_LOG_NAME=build.log
+PUBLIC_LOGS=$PUBLIC/$LOGS_NAME
+BUILD_LOG=$PUBLIC/$BUILD_LOG_NAME
+# a log above it is a runaway build, not something to read: it stays on vm-119 and off the mirror's 64 GiB disk
+LOG_PUSH_SIZE_MAX=64M
 DOTFILES=/dotfiles
 OUTBOX=/outbox
 OUTBOX_POOL=$OUTBOX/pool
@@ -331,7 +339,7 @@ setup_build() {
   id "$BUILDER" >/dev/null 2>&1 || useradd -m -u "$BUILDER_UID" "$BUILDER"
   # regenerated every run; a stale recipe would linger as a base that is no longer wanted
   rm -rf "$CACHE/build" "$CACHE/out" "$CACHE/recipes"
-  mkdir -p "$CACHE"/{pacman,src,build,aur,recipes,out,stage,cargo,go} "$PUBLIC/logs"
+  mkdir -p "$CACHE"/{pacman,src,build,aur,recipes,out,stage,cargo,go} "$PUBLIC_LOGS"
   chown "$BUILDER:" "$CACHE"/{src,build,recipes,out,cargo,go}
   # a killed run's proposal must never be read as this run's
   find "$OUTBOX" -mindepth 1 -delete
@@ -565,10 +573,23 @@ is_current() {
   names_resolve "${names[@]}"
 }
 
+# the depends and makedepends of a recipe dir, minus the names and provides its own packages give: a split base's
+# meta package depends on its siblings (apparmor.d on apparmor.d-base), which only this build produces
+build_deps_wanted() {
+  local dir=$1 name dep
+  declare -A own=()
+  for name in $(srcinfo_get "$dir/.SRCINFO" pkgname) $(srcinfo_get "$dir/.SRCINFO" provides | sed 's/[<>=].*//'); do
+    own[$name]=1
+  done
+  { srcinfo_get "$dir/.SRCINFO" depends; srcinfo_get "$dir/.SRCINFO" makedepends; } | sort -u | while read -r dep; do
+    [ -n "${own[${dep%%[<>=]*}]:-}" ] || echo "$dep"
+  done
+}
+
 # what makepkg -s would install, installed by root: the build user gets no pacman of its own
 build_deps_install() {
   local dir=$1 wanted=() missing=()
-  mapfile -t wanted < <({ srcinfo_get "$dir/.SRCINFO" depends; srcinfo_get "$dir/.SRCINFO" makedepends; } | sort -u)
+  mapfile -t wanted < <(build_deps_wanted "$dir")
   (( ${#wanted[@]} > 0 )) || return 0
   # -T prints the unsatisfied ones and exits 127 when there are any
   mapfile -t missing < <(pacman -T "${wanted[@]}")
@@ -641,7 +662,7 @@ restage() {
 }
 
 build_base() {
-  local base=$1 dir=$CACHE/recipes/$1 log=$PUBLIC/logs/$1.log out=$CACHE/out/$1 key build package file files=() pkgnames=()
+  local base=$1 dir=$CACHE/recipes/$1 log=$PUBLIC_LOGS/$1.log out=$CACHE/out/$1 key build package file files=() pkgnames=()
   : > "$log"
   # per base: recipes name different tarballs alike (tree-sitter-json-0.24.8.tar.gz from github and pypi)
   install -d -o "$BUILDER" "$CACHE/src/$base"
@@ -664,12 +685,12 @@ build_base() {
   install -d -o "$BUILDER" "$out" || { fail "$base" "creating $out failed"; return 1; }
   if ! build_deps_install "$dir" >> "$log" 2>&1; then
     remove_build_deps
-    fail "$base" "installing the build dependencies failed, logs/$base.log"
+    fail "$base" "installing the build dependencies failed, $LOGS_NAME/$base.log"
     return 1
   fi
   if ! (cd "$dir" && timeout -k "$BUILD_KILL_AFTER" "$BUILD_TIMEOUT" "${AS_BUILDER[@]}" SRCDEST="$CACHE/src/$base" PKGDEST="$out" makepkg -fc --noconfirm --nocheck) >> "$log" 2>&1; then
     remove_build_deps
-    fail "$base" "build failed, logs/$base.log"
+    fail "$base" "build failed, $LOGS_NAME/$base.log"
     return 1
   fi
   remove_build_deps
@@ -731,8 +752,8 @@ snapshot_official() {
     cp "/var/lib/pacman/sync/$repo.db" "$OUTBOX_SYNC/" || { held_back="copying the $repo db failed"; return 1; }
   done
   if ! pacman --dbpath "$root" -Sp --noconfirm --print-format '%r %n %f' "${targets[@]}" \
-    > "$CACHE/closure.txt" 2> "$PUBLIC/logs/snapshot.log"; then
-    held_back="the set does not resolve against today's repos, logs/snapshot.log"
+    > "$CACHE/closure.txt" 2> "$PUBLIC_LOGS/snapshot.log"; then
+    held_back="the set does not resolve against today's repos, $LOGS_NAME/snapshot.log"
     return 1
   fi
   official_names=()
@@ -748,8 +769,8 @@ snapshot_official() {
   cachedirs=(--cachedir "$OUTBOX_POOL" --cachedir "$CACHE/pacman")
   # a first run has no pool yet, and this container cannot create it
   [ ! -d "$REPO_DIR" ] || cachedirs+=(--cachedir "$REPO_DIR")
-  if ! pacman --dbpath "$root" -Swdd --noconfirm "${cachedirs[@]}" "${new[@]}" >> "$PUBLIC/logs/snapshot.log" 2>&1; then
-    held_back="downloading the official packages failed, logs/snapshot.log"
+  if ! pacman --dbpath "$root" -Swdd --noconfirm "${cachedirs[@]}" "${new[@]}" >> "$PUBLIC_LOGS/snapshot.log" 2>&1; then
+    held_back="downloading the official packages failed, $LOGS_NAME/snapshot.log"
     return 1
   fi
   new=()
@@ -1187,16 +1208,29 @@ write_status() {
 # -H: the dated snapshots are hardlinks of the pool there too; pacman -Sw --cachedir leaves download-* dirs
 push_rsync() { rsync -aH --exclude 'download-*' --exclude '/.state/' -e "$PUSH_SSH" "$@"; }
 
-# mirror to the always-on dmz host: packages and snapshot dirs, then the dbs and current, then the
-# status, then deletions; a failure fails the unit, the mirror keeps its last whole copy
+# the build container wrote them: regular *.log files only, never a link, which here could reach the keys
+push_logs() {
+  local only_logs=(--no-links --no-devices --no-specials --max-size="$LOG_PUSH_SIZE_MAX")
+  if [ ! -d "$PUBLIC_LOGS" ] || [ -L "$PUBLIC_LOGS" ]; then
+    log "$PUBLIC_LOGS is not a directory, the base logs stay on vm-119"
+  else
+    push_rsync "${only_logs[@]}" --delete --exclude '*/' --include '*.log' --exclude '*' "$PUBLIC_LOGS/" "$PUSH_TARGET/$LOGS_NAME/" \
+      || return 1
+  fi
+  push_rsync "${only_logs[@]}" "$BUILD_LOG" "$PUSH_TARGET/"
+}
+
+# mirror to the always-on dmz host: packages and snapshot dirs, then the dbs and current, then the logs
+# the status names, then the status, then deletions; a failure fails the unit, the mirror keeps its last whole copy
 push() {
   [ -n "$PUSH_TARGET" ] && [ -f "$PUSH_KEY_FILE" ] || return 0
   [ -f "$REPO_DIR/$REPO.db" ] || return 0
   log "pushing the repo to $PUSH_TARGET"
   if push_rsync --exclude "$REPO.db*" --exclude "$REPO.files*" --exclude '/current' --exclude '/status.*' "$SERVED/" "$PUSH_TARGET/" \
     && push_rsync --delay-updates --exclude '/status.*' "$SERVED/" "$PUSH_TARGET/" \
+    && push_logs \
     && push_rsync "$SERVED/status.txt" "$SERVED/status.json" "$PUSH_TARGET/" \
-    && push_rsync --delete "$SERVED/" "$PUSH_TARGET/"; then
+    && push_rsync --delete --exclude "/$LOGS_NAME/" --exclude "/$BUILD_LOG_NAME" "$SERVED/" "$PUSH_TARGET/"; then
     return 0
   fi
   log "push to $PUSH_TARGET failed, the dmz mirror keeps its last copy"
@@ -1269,7 +1303,7 @@ publish_main() {
   (( ! push_failed ))
 }
 
-# tests/archrepo-list.nix sources it for the completeness gate alone
+# tests/archrepo-list.nix and tests/archrepo-build.nix source it for single steps
 [[ ${BASH_SOURCE[0]} == "$0" ]] || return 0
 case ${1:-} in
   build) build_main ;;

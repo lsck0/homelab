@@ -50,6 +50,8 @@ fi
 SITE="$SRC/generated/site.json"
 # the guests, collected by nix from src/instances/ and src/apps/swarm.nix (modules/lab); filled below
 INVENTORY=""
+# the desktop clients' interface (modules/lab-export.nix), written below and committed with the generation
+LAB_EXPORT="$SRC/generated/lab.json"
 ROUTER_WAN_IP=$(jq -r .lan.router "$SITE")
 DEPLOY_FAILURE=0
 # instance name -> built toplevel, filled once the batch build is done
@@ -122,6 +124,12 @@ trap cleanup EXIT
 INVENTORY=$(mktemp --suffix=.inventory.json); CLEANUP_FILES+=("$INVENTORY")
 nix eval "${NIX_FEATURES[@]}" --json --no-warn-dirty "$SRC#lab.inventory" > "$INVENTORY" \
   || { echo "ERROR: the lab's instances do not evaluate (nix eval .#lab.inventory)."; exit 1; }
+# beside it, so the rename below is atomic: a reader never sees half a file, a failed eval keeps the old one
+LAB_EXPORT_NEW=$(mktemp "$LAB_EXPORT.XXXXXX"); CLEANUP_FILES+=("$LAB_EXPORT_NEW")
+nix eval "${NIX_FEATURES[@]}" --json --no-warn-dirty "$SRC#lab.export" | jq . > "$LAB_EXPORT_NEW" \
+  || { echo "ERROR: the desktop clients' export does not evaluate (nix eval .#lab.export)."; exit 1; }
+chmod 644 "$LAB_EXPORT_NEW"
+mv "$LAB_EXPORT_NEW" "$LAB_EXPORT"
 
 echo ">>> SYNCING HARDWARE + OS..."
 

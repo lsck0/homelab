@@ -832,6 +832,7 @@ let
     PYTHONPATH=${./lib/dashboards} ${dashboardPython}/bin/python3 ${script} "$configPath" $out
   '';
   homelabDashboard = dashboard "homelab" ./lib/dashboards/homelab.py {
+    uid = telemetry.homelabDashboardUid;
     inherit nodeJob guestsExpectedUp edgeHost;
     ssoHost = "vm-101";
     nasVm = vmName (guest "109");

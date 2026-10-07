@@ -87,6 +87,9 @@ in {
   # the browsers' otlp path on every app's own origin, which the ingresses route to the frontend intake as it is
   frontendPath = "/otlp";
 
+  # the lab's overview board: vm-105 builds it (lib/dashboards/homelab.py), the desktop clients open it (lab.export)
+  homelabDashboardUid = "homelab";
+
   # the boards an app ships: the deploy controller writes them to this nas share, vm-105 provisions them read-only
   appDashboardsShare = "app-dashboards";
   appDashboardsDir = "dashboards";

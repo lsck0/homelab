@@ -9,7 +9,7 @@ let
   outboxDir = "/var/lib/archbuild/outbox";
   # the verified arch-dotfiles checkout, written by the host only, read-only in both containers
   dotfilesDir = "/var/lib/archbuild/dotfiles";
-  # the status page: build.log, logs/<base>.log, status.{txt,json}
+  # the status page: build.log, logs/<base>.log, status.{txt,json}; publish pushes the logs to the mirror
   publicDir = "/var/lib/archbuild/public";
   # flag the busy endpoint answers from, the on-demand reaper leaves the vm up while it exists
   busyFlag = "/run/archbuild.busy";
@@ -105,6 +105,7 @@ in {
           -v ${repoDir}:/repo \
           -v ${dotfilesDir}:/dotfiles:ro \
           -v ${outboxDir}:/outbox:ro \
+          -v ${publicDir}:/public:ro \
           -v ${config.sops.secrets.archrepo-signing-key.path}:/run/signing.asc:ro \
           -v ${config.sops.secrets.archrepo-push-key.path}:/run/push-key:ro \
           -v ${buildScript}:/build.sh:ro \

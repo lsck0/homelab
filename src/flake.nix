@@ -108,8 +108,9 @@
       }).config.system.build.tarball;
     };
 
-    # the collected facts: terraform reads `lab.terraform` (lib.tf), scripts the inventory (`nix eval .#lab.inventory`)
-    inherit lab;
+    # the collected facts: terraform reads `lab.terraform` (lib.tf), scripts the inventory (`nix eval .#lab.inventory`),
+    # sync.sh writes `lab.export` to generated/lab.json, the desktop clients' interface (modules/lab-export.nix)
+    lab = lab // { export = import ./modules/lab-export.nix { inherit lib lab; }; };
 
     # one configuration per instance folder (its main.nix) and per generated swarm node (modules/swarm alone);
     # the hostname comes from the folder, so a host cannot claim another's

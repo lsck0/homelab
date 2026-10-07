@@ -30,6 +30,9 @@ Two separate things:
 - Start a build now: `vm start 119`, wait for ssh, then `ssh 10.100.0.119 systemctl start --no-block archbuild.service`.
 - Watch it: `ssh 10.100.0.119 journalctl -fu archbuild` or `curl -s http://10.100.0.119/status.txt`.
   Per-package logs: `http://10.100.0.119/logs/<pkgbase>.log`. Whole run: `/build.log`.
+- After each publish the mirror has the same beside its status: `https://mirror.lsck0.dev/status.txt`,
+  `/logs/<pkgbase>.log` (the `logs/...` paths status.txt names) and `/build.log` up to the push itself. A run whose
+  build container died before its outbox pushes nothing; its logs are only on vm-119 (`/var/lib/archbuild/public/`).
 - Completeness gate: `status.json`/`status.txt` carry `missing` (listed names the served snapshot does not
   provide) and `held_back` (why the night was not published). A night that would lose a listed name the served
   snapshot provides is held back; a name never served only shows in `missing`. Metrics on vm-119:

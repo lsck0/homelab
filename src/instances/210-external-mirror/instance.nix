@@ -9,6 +9,8 @@
   services = {
     mirror = {
       port = 80;
+      # a read-only file server: pacman only fetches
+      methods = [ "GET" "HEAD" ];
       homepage = {
         group = "Dev";
         icon = "arch-linux";
@@ -23,6 +25,7 @@
         sso = "public pacman mirror";
         anubis = "pacman clients run no proof of work";
         cloudflare = "pacman pulls large binaries, not through the proxy";
+        waf = "crs rule 920440 refuses the .db extension, and the repo database is lsck0.db";
       };
     };
   };

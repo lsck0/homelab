@@ -10,7 +10,7 @@ let
     grafana = { password = "ntfy-grafana-password"; role = "user";
                 access = { ${topics.alerts} = "write-only"; ${topics.heartbeat} = "write-only"; }; };
     hermes = { password = "ntfy-hermes-password"; role = "user"; access = { ${topics.hermes} = "read-write"; }; };
-    desktop = { password = null; role = "user"; access = { ${topics.alerts} = "read-only"; }; };
+    desktop = { password = null; role = "user"; access = lib.genAttrs ntfy.desktopTopics (_: "read-only"); };
     # the heartbeat check below; its token is made here and never leaves the host
     heartbeat = { password = null; role = "user";
                   access = { ${topics.heartbeat} = "read-only"; ${topics.alerts} = "write-only"; }; };
@@ -18,6 +18,7 @@ let
   secretUsers = lib.filterAttrs (_: u: u.password != null) users;
 
   stateDir = "/var/lib/ntfy-sh";
+  authFile = "${stateDir}/user.db";
   authUnit = "ntfy-auth";
   authDir = "/var/lib/${authUnit}";
   authEnv = "/run/${authUnit}/auth.env";
@@ -86,7 +87,7 @@ in {
       listen-http = ":${toString route.port}";
       # only the zone's ingress reaches the port (the guard, modules/network.nix), its x-forwarded-for is the visitor's
       behind-proxy = true;
-      auth-file = "${stateDir}/user.db";
+      auth-file = authFile;
       auth-default-access = "deny-all";
       cache-file = "${stateDir}/cache.db";
       attachment-cache-dir = "${stateDir}/attachments";
@@ -100,18 +101,24 @@ in {
     };
   };
 
+  # before the server, so nothing writes the user database meanwhile; as the server's user, so no file it makes is root's
   systemd.services.ntfy-users-prune = {
     description = "Remove ntfy accounts that are not provisioned";
-    after = [ "ntfy-sh.service" ];
-    requires = [ "ntfy-sh.service" ];
+    before = [ "ntfy-sh.service" ];
     partOf = [ "ntfy-sh.service" ];
     wantedBy = [ "ntfy-sh.service" ];
     path = [ pkgs.ntfy-sh pkgs.gawk ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      inherit (config.systemd.services.ntfy-sh.serviceConfig) User DynamicUser StateDirectory;
+    };
     script = ''
       set -euo pipefail
-      # "user <name> (role: ..., tier: ...[, server config])"; * is the anonymous user
-      for name in $(ntfy user list 2>&1 | awk '$1 == "user" && $2 != "*" && !/server config\)$/ { print $2 }'); do
+      # the first start: no user database yet, no account to remove
+      [ -e ${authFile} ] || exit 0
+      listing=$(ntfy user list)
+      for name in $(awk -v declared=${lib.escapeShellArg (toString (lib.attrNames users))} -f ${./lib/users-prune.awk} <<<"$listing"); do
         ntfy user remove "$name"
         echo "removed account $name, it is not in 203-external-ntfy/main.nix"
       done

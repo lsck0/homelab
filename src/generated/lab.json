@@ -1,0 +1,688 @@
+{
+  "domain": "lsck0.dev",
+  "guests": {
+    "100": {
+      "enabled": "true",
+      "ip": "10.100.0.100",
+      "name": "100-internal-traefik",
+      "zone": "internal"
+    },
+    "101": {
+      "enabled": "true",
+      "ip": "10.100.0.101",
+      "name": "101-internal-authelia",
+      "zone": "internal"
+    },
+    "103": {
+      "enabled": "true",
+      "ip": "10.100.0.103",
+      "name": "103-internal-homepage",
+      "zone": "internal"
+    },
+    "104": {
+      "enabled": "true",
+      "ip": "10.100.0.104",
+      "name": "104-internal-terminal",
+      "zone": "internal"
+    },
+    "105": {
+      "enabled": "true",
+      "ip": "10.100.0.105",
+      "name": "105-internal-grafana",
+      "zone": "internal"
+    },
+    "109": {
+      "enabled": "true",
+      "ip": "10.100.0.109",
+      "name": "109-internal-nas",
+      "zone": "internal"
+    },
+    "110": {
+      "enabled": "true",
+      "ip": "10.100.0.110",
+      "name": "110-internal-cache",
+      "zone": "internal"
+    },
+    "112": {
+      "enabled": "true",
+      "ip": "10.100.0.112",
+      "name": "112-internal-qbittorrent",
+      "zone": "internal"
+    },
+    "114": {
+      "enabled": "true",
+      "ip": "10.100.0.114",
+      "name": "114-internal-hermes",
+      "zone": "internal"
+    },
+    "115": {
+      "enabled": "true",
+      "ip": "10.100.0.115",
+      "name": "115-internal-forgejo",
+      "zone": "internal"
+    },
+    "117": {
+      "enabled": "true",
+      "ip": "10.100.0.117",
+      "name": "117-internal-github-runner",
+      "zone": "internal"
+    },
+    "118": {
+      "enabled": "true",
+      "ip": "10.100.0.118",
+      "name": "118-internal-registry",
+      "zone": "internal"
+    },
+    "119": {
+      "enabled": "onDemand",
+      "ip": "10.100.0.119",
+      "name": "119-internal-archbuild",
+      "zone": "internal"
+    },
+    "121": {
+      "enabled": "true",
+      "ip": "10.100.0.121",
+      "name": "121-internal-paperless",
+      "zone": "internal"
+    },
+    "124": {
+      "enabled": "onDemand",
+      "ip": "10.100.0.124",
+      "name": "124-internal-firefly",
+      "zone": "internal"
+    },
+    "125": {
+      "enabled": "true",
+      "ip": "10.100.0.125",
+      "name": "125-internal-homeassistant",
+      "zone": "internal"
+    },
+    "126": {
+      "enabled": "false",
+      "ip": "10.100.0.126",
+      "name": "126-internal-huginn",
+      "zone": "internal"
+    },
+    "128": {
+      "enabled": "onDemand",
+      "ip": "10.100.0.128",
+      "name": "128-internal-jellyseerr",
+      "zone": "internal"
+    },
+    "130": {
+      "enabled": "true",
+      "ip": "10.100.0.130",
+      "name": "130-internal-arr",
+      "zone": "internal"
+    },
+    "134": {
+      "enabled": "true",
+      "ip": "10.100.0.134",
+      "name": "134-internal-jellyfin",
+      "zone": "internal"
+    },
+    "136": {
+      "enabled": "onDemand",
+      "ip": "10.100.0.136",
+      "name": "136-internal-navidrome",
+      "zone": "internal"
+    },
+    "138": {
+      "enabled": "true",
+      "ip": "10.100.0.138",
+      "name": "138-internal-headscale",
+      "zone": "internal"
+    },
+    "140": {
+      "enabled": "true",
+      "ip": "10.100.0.140",
+      "name": "140-internal-swarm",
+      "zone": "internal"
+    },
+    "200": {
+      "enabled": "true",
+      "ip": "10.200.0.200",
+      "name": "200-external-traefik",
+      "zone": "external"
+    },
+    "203": {
+      "enabled": "true",
+      "ip": "10.200.0.203",
+      "name": "203-external-ntfy",
+      "zone": "external"
+    },
+    "204": {
+      "enabled": "onDemand",
+      "ip": "10.200.0.204",
+      "name": "204-external-searxng",
+      "zone": "external"
+    },
+    "206": {
+      "enabled": "onDemand",
+      "ip": "10.200.0.206",
+      "name": "206-external-privatebin",
+      "zone": "external"
+    },
+    "207": {
+      "enabled": "onDemand",
+      "ip": "10.200.0.207",
+      "name": "207-external-share",
+      "zone": "external"
+    },
+    "208": {
+      "enabled": "false",
+      "ip": "10.200.0.208",
+      "name": "208-external-minecraft",
+      "zone": "external"
+    },
+    "210": {
+      "enabled": "true",
+      "ip": "10.200.0.210",
+      "name": "210-external-mirror",
+      "zone": "external"
+    },
+    "250": {
+      "enabled": "true",
+      "ip": "10.250.0.250",
+      "name": "250-apps-swarm",
+      "zone": "apps"
+    },
+    "251": {
+      "enabled": "true",
+      "ip": "10.250.0.251",
+      "name": "251-apps-swarm",
+      "zone": "apps"
+    },
+    "252": {
+      "enabled": "true",
+      "ip": "10.250.0.252",
+      "name": "252-apps-swarm",
+      "zone": "apps"
+    },
+    "300": {
+      "enabled": "true",
+      "ip": "192.168.178.29",
+      "name": "luca-router",
+      "zone": "router"
+    }
+  },
+  "infra": [
+    {
+      "href": "https://dash.cloudflare.com",
+      "name": "Cloudflare",
+      "ping": null
+    },
+    {
+      "href": "http://192.168.178.1",
+      "name": "FritzBox",
+      "ping": "http://192.168.178.1"
+    },
+    {
+      "href": "https://proxmox.lsck0.dev",
+      "name": "Proxmox",
+      "ping": "http://192.168.178.200:8006"
+    },
+    {
+      "href": null,
+      "name": "Router",
+      "ping": "http://10.100.0.1"
+    },
+    {
+      "href": "https://traefik.lsck0.dev",
+      "name": "Traefik",
+      "ping": "http://10.100.0.100"
+    },
+    {
+      "href": null,
+      "name": "Traefik DMZ",
+      "ping": "http://10.200.0.200"
+    },
+    {
+      "href": "https://trmnl.com/dashboard",
+      "name": "Terminal",
+      "ping": null
+    }
+  ],
+  "monitoring": {
+    "accessLog": "vm-200",
+    "dashboard": "/d/homelab",
+    "grafana": "https://grafana.lsck0.dev",
+    "loki": "http://10.100.0.105:3100",
+    "prometheus": "http://10.100.0.105:9090"
+  },
+  "ntfy": {
+    "desktop": [
+      "homelab-alerts"
+    ],
+    "topics": {
+      "alerts": "homelab-alerts",
+      "heartbeat": "homelab-heartbeat",
+      "hermes": "homelab-hermes"
+    },
+    "url": "https://ntfy.lsck0.dev"
+  },
+  "proxmox": {
+    "ip": "192.168.178.200",
+    "url": "https://proxmox.lsck0.dev"
+  },
+  "routes": {
+    "archbuild": {
+      "app": null,
+      "health": null,
+      "host": "archbuild.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 119,
+      "zone": "internal"
+    },
+    "attic": {
+      "app": null,
+      "health": null,
+      "host": "attic.lsck0.dev",
+      "path": "/",
+      "port": 8080,
+      "protocol": "http",
+      "vmid": 110,
+      "zone": "internal"
+    },
+    "authelia": {
+      "app": null,
+      "health": null,
+      "host": "auth.lsck0.dev",
+      "path": "/",
+      "port": 9091,
+      "protocol": "http",
+      "vmid": 101,
+      "zone": "internal"
+    },
+    "bazarr": {
+      "app": null,
+      "health": null,
+      "host": "bazarr.lsck0.dev",
+      "path": "/",
+      "port": 6767,
+      "protocol": "http",
+      "vmid": 130,
+      "zone": "internal"
+    },
+    "calendar": {
+      "app": null,
+      "health": null,
+      "host": "cal.lsck0.dev",
+      "path": "/",
+      "port": 8081,
+      "protocol": "http",
+      "vmid": 104,
+      "zone": "internal"
+    },
+    "deploy": {
+      "app": null,
+      "health": null,
+      "host": "deploy.lsck0.dev",
+      "path": "/redeploy",
+      "port": 8095,
+      "protocol": "http",
+      "vmid": 140,
+      "zone": "external"
+    },
+    "fints": {
+      "app": null,
+      "health": null,
+      "host": "fints.lsck0.dev",
+      "path": "/",
+      "port": 8090,
+      "protocol": "http",
+      "vmid": 124,
+      "zone": "internal"
+    },
+    "firefly": {
+      "app": null,
+      "health": "/health",
+      "host": "firefly.lsck0.dev",
+      "path": "/",
+      "port": 8080,
+      "protocol": "http",
+      "vmid": 124,
+      "zone": "internal"
+    },
+    "forgejo": {
+      "app": null,
+      "health": null,
+      "host": "git.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 115,
+      "zone": "internal"
+    },
+    "grafana": {
+      "app": null,
+      "health": null,
+      "host": "grafana.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 105,
+      "zone": "internal"
+    },
+    "headplane": {
+      "app": null,
+      "health": "/admin/healthz",
+      "host": "hs-ui.lsck0.dev",
+      "path": "/",
+      "port": 3000,
+      "protocol": "http",
+      "vmid": 138,
+      "zone": "internal"
+    },
+    "headscale": {
+      "app": null,
+      "health": "/health",
+      "host": "hs.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 138,
+      "zone": "internal"
+    },
+    "hello": {
+      "app": "hello",
+      "health": "/",
+      "host": "hello.lsck0.dev",
+      "path": "/",
+      "port": 20100,
+      "protocol": "http",
+      "vmid": null,
+      "zone": "external"
+    },
+    "homeassistant": {
+      "app": null,
+      "health": null,
+      "host": "hass.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 125,
+      "zone": "internal"
+    },
+    "homepage": {
+      "app": null,
+      "health": null,
+      "host": "homelab.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 103,
+      "zone": "internal"
+    },
+    "huginn": {
+      "app": null,
+      "health": null,
+      "host": "huginn.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 126,
+      "zone": "internal"
+    },
+    "jellyfin": {
+      "app": null,
+      "health": null,
+      "host": "jellyfin.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 134,
+      "zone": "internal"
+    },
+    "jellyseerr": {
+      "app": null,
+      "health": null,
+      "host": "requests.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 128,
+      "zone": "internal"
+    },
+    "kopia": {
+      "app": null,
+      "health": null,
+      "host": "backup.lsck0.dev",
+      "path": "/",
+      "port": 51515,
+      "protocol": "http",
+      "vmid": 109,
+      "zone": "internal"
+    },
+    "lidarr": {
+      "app": null,
+      "health": null,
+      "host": "lidarr.lsck0.dev",
+      "path": "/",
+      "port": 8686,
+      "protocol": "http",
+      "vmid": 130,
+      "zone": "internal"
+    },
+    "lldap": {
+      "app": null,
+      "health": null,
+      "host": "lldap.lsck0.dev",
+      "path": "/",
+      "port": 17170,
+      "protocol": "http",
+      "vmid": 101,
+      "zone": "internal"
+    },
+    "minecraft": {
+      "app": null,
+      "health": null,
+      "host": "mc.lsck0.dev",
+      "path": "/",
+      "port": 25565,
+      "protocol": "tcp",
+      "vmid": 208,
+      "zone": "external"
+    },
+    "mirror": {
+      "app": null,
+      "health": null,
+      "host": "mirror.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 210,
+      "zone": "external"
+    },
+    "nas": {
+      "app": null,
+      "health": null,
+      "host": "nas.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 109,
+      "zone": "internal"
+    },
+    "navidrome": {
+      "app": null,
+      "health": null,
+      "host": "music.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 136,
+      "zone": "internal"
+    },
+    "ntfy": {
+      "app": null,
+      "health": null,
+      "host": "ntfy.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 203,
+      "zone": "external"
+    },
+    "paperless": {
+      "app": null,
+      "health": null,
+      "host": "paperless.lsck0.dev",
+      "path": "/",
+      "port": 8080,
+      "protocol": "http",
+      "vmid": 121,
+      "zone": "internal"
+    },
+    "paperless-ai": {
+      "app": null,
+      "health": null,
+      "host": "paperless-ai.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 121,
+      "zone": "internal"
+    },
+    "privatebin": {
+      "app": null,
+      "health": null,
+      "host": "paste.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 206,
+      "zone": "external"
+    },
+    "prowlarr": {
+      "app": null,
+      "health": null,
+      "host": "prowlarr.lsck0.dev",
+      "path": "/",
+      "port": 9696,
+      "protocol": "http",
+      "vmid": 130,
+      "zone": "internal"
+    },
+    "qbittorrent": {
+      "app": null,
+      "health": null,
+      "host": "torrent.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 112,
+      "zone": "internal"
+    },
+    "radarr": {
+      "app": null,
+      "health": null,
+      "host": "radarr.lsck0.dev",
+      "path": "/",
+      "port": 7878,
+      "protocol": "http",
+      "vmid": 130,
+      "zone": "internal"
+    },
+    "registry-api": {
+      "app": null,
+      "health": null,
+      "host": "registry.lsck0.dev",
+      "path": "/",
+      "port": 5000,
+      "protocol": "http",
+      "vmid": 118,
+      "zone": "internal"
+    },
+    "registry-push": {
+      "app": null,
+      "health": null,
+      "host": "registry.lsck0.dev",
+      "path": "/",
+      "port": 5000,
+      "protocol": "http",
+      "vmid": 118,
+      "zone": "internal"
+    },
+    "registry-ui": {
+      "app": null,
+      "health": null,
+      "host": "registry-ui.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 118,
+      "zone": "internal"
+    },
+    "searxng": {
+      "app": null,
+      "health": null,
+      "host": "search.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 204,
+      "zone": "external"
+    },
+    "share": {
+      "app": null,
+      "health": null,
+      "host": "share.lsck0.dev",
+      "path": "/",
+      "port": 80,
+      "protocol": "http",
+      "vmid": 207,
+      "zone": "external"
+    },
+    "sonarr": {
+      "app": null,
+      "health": null,
+      "host": "sonarr.lsck0.dev",
+      "path": "/",
+      "port": 8989,
+      "protocol": "http",
+      "vmid": 130,
+      "zone": "internal"
+    },
+    "syncthing": {
+      "app": null,
+      "health": null,
+      "host": "sync.lsck0.dev",
+      "path": "/",
+      "port": 8384,
+      "protocol": "http",
+      "vmid": 109,
+      "zone": "internal"
+    },
+    "terminal": {
+      "app": null,
+      "health": null,
+      "host": "terminal.lsck0.dev",
+      "path": "/",
+      "port": 8081,
+      "protocol": "http",
+      "vmid": 104,
+      "zone": "internal"
+    }
+  },
+  "schema": 1,
+  "zones": {
+    "apps": {
+      "ingress": null,
+      "router": "10.250.0.1",
+      "subnet": "10.250.0.0/24"
+    },
+    "external": {
+      "ingress": 200,
+      "router": "10.200.0.1",
+      "subnet": "10.200.0.0/24"
+    },
+    "internal": {
+      "ingress": 100,
+      "router": "10.100.0.1",
+      "subnet": "10.100.0.0/24"
+    }
+  }
+}
