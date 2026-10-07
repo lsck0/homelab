@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # converge the Proxmox VE host to what the lab declares; every run of init.sh and sync.sh runs it, reruns change
-# nothing
+# nothing. deinit.sh runs its teardown.
 #
 # lib/proxmox.sh (proxmox_converge) prepends its inputs on stdin, out of argv:
 #   PROXMOX_IP            the host's lan address (site.json), which its api certificate must name
@@ -8,30 +8,34 @@
 #   WAKE_ZONES            the zones whose ingress wakes onDemand guests (terraform/lib.tf grants each its guests)
 #   GPU_IDS               the passthrough gpu's functions (site.json), empty for none
 #   BULK_DISK             the disk the bulk pool is created on; init.sh asks it once, empty keeps the pool as it is
-#   NAS_ID                the nas guest, whose hookscript wakes the bulk pool around its start and stop
-#   LLDAP_HOST LLDAP_PORT LLDAP_BASE_DN LLDAP_CA   lldap's ldaps listener and the CA its certificate chains to
-#   LLDAP_BIND_PASSWORD   lldap's read-only proxmox-bind user
+#   LLDAP_ID LLDAP_KIND LLDAP_CERT_FILE   lldap's guest and its ldaps certificate inside it, which the realm pins
+#   LLDAP_HOST LLDAP_PORT LLDAP_BASE_DN LLDAP_ADMIN_GROUP   its ldaps listener and the group granted Administrator
+#   LLDAP_BIND_USER LLDAP_BIND_PASSWORD   the realm's read-only bind user
 #   ROOT_PASSWORD         root@pam's own password (proxmox-root-pass)
 #   ROOT_KEYS             the ssh keys root takes, one per line
-# An api token is created only when missing, its secret written once to TOKEN_DIR/<role> as "<token id>=<secret>"
-# for lib/proxmox.sh to store and delete; an existing token is never rotated.
+#   TOKEN_DIR             where a new api token's secret is left as "<token id>=<secret>", one file per role, for
+#                         lib/proxmox.sh to store and delete; an existing token is never rotated
+#   TEMPLATES             the golden image and the lxc template sync.sh uploads (teardown removes them)
+#   ACTION                converge (default), or teardown: what converge set up goes, the guests with it (deinit.sh)
 #
 # The lab owns the host: the pve realm's users, the pools, the bridges past vmbr0 and the roles are exactly the
 # declared ones, so leftovers of earlier layouts go on the next run. The body is one function, parsed whole before
 # it runs: the script arrives on stdin, and a command reading stdin must not eat the rest of it.
 set -euo pipefail
 
-: "${PROXMOX_IP:?}" "${ZONE_BRIDGES:?}" "${WAKE_ZONES:?}" "${NAS_ID:?}" "${ROOT_PASSWORD:?}" "${ROOT_KEYS:?}"
-: "${LLDAP_HOST:?}" "${LLDAP_PORT:?}" "${LLDAP_BASE_DN:?}" "${LLDAP_CA:?}" "${LLDAP_BIND_PASSWORD:?}"
-GPU_IDS="${GPU_IDS:-}"
-BULK_DISK="${BULK_DISK:-}"
+ACTION="${ACTION:-converge}"
+: "${TOKEN_DIR:?}" "${TEMPLATES:?}"
 
 # -----------------------------------------------------------------------------
 # CONSTANTS
 # -----------------------------------------------------------------------------
-TOKEN_DIR=/root/homelab-tokens
 PACKAGES=(prometheus-node-exporter prometheus-node-exporter-collectors smartmontools nvme-cli jq)
-OSSEC_BUILD_PACKAGES=(build-essential libevent-dev libpcre2-dev libz-dev libssl-dev libsystemd-dev wget ca-certificates)
+OSSEC_BUILD_PACKAGES=(build-essential libevent-dev libpcre2-dev libz-dev libssl-dev libsystemd-dev ca-certificates)
+# a mirror or github that does not answer: each try ends after this, then curl or apt tries again
+DOWNLOAD_CONNECT_TIMEOUT_S=10
+DOWNLOAD_TIMEOUT_S=300
+DOWNLOAD_RETRIES=4
+AGENT_TIMEOUT_S=10
 # debian's textfile directory: its collector timers write there, and so do the gauges below
 TEXTFILE_DIR=/var/lib/prometheus/node-exporter
 TEXTFILE_INTERVAL_MIN=5
@@ -44,25 +48,20 @@ WAKE_PRIVILEGES=VM.Audit,VM.PowerMgmt
 REALM=lldap
 REALM_PASSWORD_FILE=/etc/pve/priv/realm/$REALM.pw
 REALM_CA_FILE=/etc/pve/priv/realm/$REALM-ca.pem
-# read-only (lldap_strict_readonly): the realm sync reads users and groups and never writes
-REALM_BIND_USER=proxmox-bind
-# the lldap group granted datacentre admin; the realm sync names it <group>-<realm>
-REALM_ADMIN_GROUP=admins
 REALM_SYNC_SCHEDULE=hourly
 # a realm login asks for a totp code too; root@pam sets each user's key (README, "Proxmox login")
 REALM_TFA=type=oath
 API_CERT=/etc/pve/local/pve-ssl.pem
-# bulk (hdd) stays disabled in proxmox: pvestatd polls enabled storages every 10s, which keeps the disk spinning;
-# the nas guest's hookscript enables it only around its own start and stop
-BULK_HOOK_NAME=homelab-bulk.sh
-BULK_HOOK=/var/lib/vz/snippets/$BULK_HOOK_NAME
 # of the bulk disk, the thin pool takes this much; the rest keeps full thin metadata from wedging the pool
 BULK_POOL_EXTENTS=99%FREE
 OSSEC_VERSION=3.8.0
 # sha256 of github's source archive of that tag, checked before anything of it runs as root
 OSSEC_SHA256=bd857a2dd7d0559ef59b4a9ec276f3a8ade6830f8aed257e8f4a62106cfe5f38
+OSSEC_URL=https://github.com/ossec/ossec-hids/archive/refs/tags/$OSSEC_VERSION.tar.gz
 OSSEC_DIR=/var/ossec
 OSSEC_CONTROL=$OSSEC_DIR/bin/ossec-control
+# written after install.sh succeeded: a half install from an interrupted run has none and is built again
+OSSEC_INSTALLED=$OSSEC_DIR/.homelab-installed
 
 # -----------------------------------------------------------------------------
 # INTERNAL
@@ -119,10 +118,11 @@ WantedBy=timers.target
 UNIT
 }
 
-# unit_restart <unit>: after its drop-in changed
-unit_restart() {
-  systemctl daemon-reload
-  systemctl restart "$1"
+apt_install() {
+  local options=(-o "Acquire::Retries=$DOWNLOAD_RETRIES" -o "Acquire::http::Timeout=$DOWNLOAD_CONNECT_TIMEOUT_S"
+    -o "Acquire::https::Timeout=$DOWNLOAD_CONNECT_TIMEOUT_S")
+  DEBIAN_FRONTEND=noninteractive apt-get "${options[@]}" update >/dev/null \
+    && DEBIAN_FRONTEND=noninteractive apt-get "${options[@]}" install -y "$@" </dev/null >/dev/null
 }
 
 # the first sample now, not one interval after a change
@@ -150,8 +150,7 @@ apt_converge() {
   for p in "${PACKAGES[@]}"; do dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q '^install ok installed$' || missing+=("$p"); done
   [ "${#missing[@]}" = 0 ] && return 0
   echo ">>> Proxmox: installing ${missing[*]}"
-  DEBIAN_FRONTEND=noninteractive apt-get update >/dev/null
-  DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing[@]}" </dev/null >/dev/null
+  apt_install "${missing[@]}" || { echo "ERROR: the debian or proxmox mirror unavailable: ${missing[*]} not installed." >&2; exit 1; }
 }
 
 bridges_converge() {
@@ -268,18 +267,36 @@ users_converge() {
   done
 }
 
-# lldap over ldaps verified against its CA, a totp code on top of the password, and a sync job proxmox runs itself,
-# so the realm needs no lldap at deploy time
+# guest_file_read <vmid> <kind> <path>: the file, read by the hypervisor from inside the guest, never over the network
+guest_file_read() {
+  local pulled
+  if [ "$2" = lxc ]; then
+    pulled=$(mktemp)
+    pct pull "$1" "$3" "$pulled" && cat "$pulled"
+    rm -f "$pulled"
+  else
+    qm guest exec "$1" --timeout "$AGENT_TIMEOUT_S" -- cat "$3" | jq -er 'select(.exitcode == 0) | ."out-data"'
+  fi
+}
+
+# lldap over ldaps pinned to the certificate its guest made, a totp code on top of the password, and a sync job
+# proxmox runs itself, so the realm needs no lldap at deploy time
 realm_converge() {
-  local mode=(add "$REALM" --type ldap) group="$REALM_ADMIN_GROUP-$REALM" job=()
+  local mode=(add "$REALM" --type ldap) group="$LLDAP_ADMIN_GROUP-$REALM" job=() cert
+  # absent before terraform made the guest and before its first deploy; the next run configures the realm
+  if ! cert=$(guest_file_read "$LLDAP_ID" "$LLDAP_KIND" "$LLDAP_CERT_FILE" 2>/dev/null) \
+    || ! openssl x509 -noout <<<"$cert" 2>/dev/null; then
+    echo ">>> Proxmox: vm-$LLDAP_ID serves no ldaps certificate yet; the lldap realm is left as it is until the next run"
+    return 0
+  fi
   install -d -m 700 /etc/pve/priv/realm
   printf '%s' "$LLDAP_BIND_PASSWORD" | file_converge "$REALM_PASSWORD_FILE" 600
-  printf '%s\n' "$LLDAP_CA" | file_converge "$REALM_CA_FILE" 600
+  printf '%s\n' "$cert" | file_converge "$REALM_CA_FILE" 600
   # the type is fixed at creation, modify refuses it
   pveum realm list --output-format json | json_has realm "$REALM" && mode=(modify "$REALM")
   pveum realm "${mode[@]}" \
     --server1 "$LLDAP_HOST" --port "$LLDAP_PORT" --mode ldaps --verify 1 --capath "$REALM_CA_FILE" \
-    --base_dn "ou=people,$LLDAP_BASE_DN" --user_attr uid --bind_dn "uid=$REALM_BIND_USER,ou=people,$LLDAP_BASE_DN" \
+    --base_dn "ou=people,$LLDAP_BASE_DN" --user_attr uid --bind_dn "uid=$LLDAP_BIND_USER,ou=people,$LLDAP_BASE_DN" \
     --group_dn "ou=groups,$LLDAP_BASE_DN" --group_name_attr cn --group_classes groupOfUniqueNames \
     --sync-defaults-options "enable-new=1,scope=both" --tfa "$REALM_TFA" --comment "lldap (single sign-on account store)"
   # the sync fills the group it would create; it exists before the first sync so the acl can name it
@@ -312,7 +329,6 @@ api_cert_converge() {
 # -----------------------------------------------------------------------------
 
 bulk_converge() {
-  local pv rejects
   if [ -n "$BULK_DISK" ] && ! vgs bulk >/dev/null 2>&1; then
     [ -b "$BULK_DISK" ] || { echo "ERROR: the bulk disk $BULK_DISK is not present." >&2; exit 1; }
     # never wipe a disk holding a filesystem
@@ -323,42 +339,8 @@ bulk_converge() {
     lvcreate --type thin-pool -l "$BULK_POOL_EXTENTS" -Zn --thinpool data bulk
   fi
   vgs bulk >/dev/null 2>&1 || return 0
+  # spinning the hdd down by disabling the storage around the nas's runs is an open owner decision (Handoff 6)
   pvesm status --storage bulk >/dev/null 2>&1 || pvesm add lvmthin bulk --vgname bulk --thinpool data --content images
-
-  grep -A3 "^dir: local$" /etc/pve/storage.cfg | grep -q snippets || pvesm set local --content backup,vztmpl,iso,snippets
-  install -d /var/lib/vz/snippets
-  file_converge "$BULK_HOOK" 755 <<'HOOK'
-#!/bin/sh
-case "$2" in
-  pre-start|pre-stop) pvesm set bulk --disable 0 ;;
-  post-start|post-stop) pvesm set bulk --disable 1 ;;
-esac
-exit 0
-HOOK
-  # onboot start checks the storage before the hookscript runs, so host boot enables bulk for the autostart
-  install -d /etc/systemd/system/pve-guests.service.d
-  printf '[Service]\nExecStartPre=/usr/sbin/pvesm set bulk --disable 0\n' \
-    | file_converge /etc/systemd/system/pve-guests.service.d/homelab-bulk.conf 644 systemctl daemon-reload
-  # disabled or not, pvestatd's lvm scans for local-lvm read every pv label, the hdd's too: its own lvm config
-  # rejects every name of the bulk pv, rebuilt from the real one each run
-  pv=$(pvs --noheadings -o pv_name,vg_name | awk '$2 == "bulk" { print $1 }')
-  rejects=$(for n in "$pv" /dev/disk/by-id/*; do
-    if [ "$(readlink -f "$n")" = "$(readlink -f "$pv")" ]; then printf ',"r|^%s$|"' "$n"; fi
-  done)
-  rm -rf /etc/lvm-pvestatd.new && cp -a /etc/lvm /etc/lvm-pvestatd.new
-  sed -i "s#^\(\s*global_filter=\[.*\)\]#\1$rejects]#" /etc/lvm-pvestatd.new/lvm.conf
-  LVM_SYSTEM_DIR=/etc/lvm-pvestatd.new vgs pve >/dev/null
-  rm -rf /etc/lvm-pvestatd && mv /etc/lvm-pvestatd.new /etc/lvm-pvestatd
-  install -d /etc/systemd/system/pvestatd.service.d
-  printf '[Service]\nEnvironment=LVM_SYSTEM_DIR=/etc/lvm-pvestatd\n' \
-    | file_converge /etc/systemd/system/pvestatd.service.d/homelab-no-hdd.conf 644 unit_restart pvestatd
-
-  # terraform creates the nas guest after the first run; the run after it hooks the guest. A running guest keeps
-  # the pool as its hookscript's pre-start left it until it stops.
-  qm status "$NAS_ID" >/dev/null 2>&1 || return 0
-  qm config "$NAS_ID" | grep -qx "hookscript: local:snippets/$BULK_HOOK_NAME" \
-    || qm set "$NAS_ID" --hookscript "local:snippets/$BULK_HOOK_NAME" >/dev/null
-  if [ "$(qm status "$NAS_ID" | cut -d' ' -f2)" = running ]; then pvesm set bulk --disable 1; fi
 }
 
 # -----------------------------------------------------------------------------
@@ -419,27 +401,44 @@ SMARTD
     | file_converge /etc/smartd.conf 644 systemctl restart smartd
 }
 
-# host intrusion detection, built from the pinned source; the binary marks a finished install, so a half one from an
-# interrupted run is removed and built again. The install prefix is compiled in, so it cannot be staged elsewhere.
-ossec_converge() {
-  local tmp
-  if [ ! -x "$OSSEC_CONTROL" ]; then
-    echo ">>> Proxmox: building OSSEC $OSSEC_VERSION"
-    rm -rf "$OSSEC_DIR"
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends "${OSSEC_BUILD_PACKAGES[@]}" </dev/null >/dev/null
-    tmp=$(mktemp -d)
-    wget -qO "$tmp/ossec.tar.gz" "https://github.com/ossec/ossec-hids/archive/refs/tags/$OSSEC_VERSION.tar.gz"
-    echo "$OSSEC_SHA256  $tmp/ossec.tar.gz" | sha256sum --check --quiet
-    tar -xzf "$tmp/ossec.tar.gz" -C "$tmp"
-    # install.sh is interactive; USER_* answers it
-    (
-      cd "$tmp/ossec-hids-$OSSEC_VERSION"
-      USER_LANGUAGE=en USER_NO_STOP=y USER_INSTALL_TYPE=local USER_DIR="$OSSEC_DIR" \
-      USER_ENABLE_ACTIVE_RESPONSE=n USER_ENABLE_SYSCHECK=y USER_ENABLE_ROOTCHECK=y \
-      USER_ENABLE_EMAIL=n USER_ENABLE_SYSLOG=y \
-      ./install.sh </dev/null
-    )
+# ossec_build: the pinned source, downloaded and checked before the old install goes; the prefix is compiled in, so
+# the install cannot be staged elsewhere and the marker says it finished. Returns 1 when a mirror is unavailable.
+ossec_build() {
+  local tmp rc=0
+  tmp=$(mktemp -d)
+  if ! curl -fsSL --connect-timeout "$DOWNLOAD_CONNECT_TIMEOUT_S" --max-time "$DOWNLOAD_TIMEOUT_S" \
+      --retry "$DOWNLOAD_RETRIES" --retry-all-errors -o "$tmp/ossec.tar.gz" "$OSSEC_URL"; then
+    echo ">>> Proxmox: github unavailable, OSSEC $OSSEC_VERSION not built; the next run retries"
     rm -rf "$tmp"
+    return 1
+  fi
+  echo "$OSSEC_SHA256  $tmp/ossec.tar.gz" | sha256sum --check --quiet
+  if ! apt_install "${OSSEC_BUILD_PACKAGES[@]}"; then
+    echo ">>> Proxmox: the debian mirror unavailable, OSSEC $OSSEC_VERSION not built; the next run retries"
+    rm -rf "$tmp"
+    return 1
+  fi
+  tar -xzf "$tmp/ossec.tar.gz" -C "$tmp"
+  if systemctl is-active --quiet ossec; then systemctl stop ossec; fi
+  rm -rf "$OSSEC_DIR"
+  # install.sh is interactive; USER_* answers it
+  (
+    cd "$tmp/ossec-hids-$OSSEC_VERSION"
+    USER_LANGUAGE=en USER_NO_STOP=y USER_INSTALL_TYPE=local USER_DIR="$OSSEC_DIR" \
+    USER_ENABLE_ACTIVE_RESPONSE=n USER_ENABLE_SYSCHECK=y USER_ENABLE_ROOTCHECK=y \
+    USER_ENABLE_EMAIL=n USER_ENABLE_SYSLOG=y \
+    ./install.sh </dev/null
+  ) || rc=$?
+  rm -rf "$tmp"
+  [ "$rc" = 0 ] || { echo "ERROR: OSSEC's install.sh failed ($rc); the next run builds it again." >&2; exit 1; }
+  echo "$OSSEC_VERSION" > "$OSSEC_INSTALLED"
+}
+
+# host intrusion detection
+ossec_converge() {
+  if [ "$(cat "$OSSEC_INSTALLED" 2>/dev/null)" != "$OSSEC_VERSION" ]; then
+    echo ">>> Proxmox: building OSSEC $OSSEC_VERSION"
+    ossec_build || return 0
   fi
 
   # realtime where the kernel supports it
@@ -516,8 +515,12 @@ METRICS
 # FUNCTIONS
 # -----------------------------------------------------------------------------
 
-main() {
-  command -v pveversion >/dev/null || { echo "ERROR: install Proxmox VE first, then rerun init.sh." >&2; exit 1; }
+converge() {
+  : "${PROXMOX_IP:?}" "${ZONE_BRIDGES:?}" "${WAKE_ZONES:?}" "${ROOT_PASSWORD:?}" "${ROOT_KEYS:?}"
+  : "${LLDAP_ID:?}" "${LLDAP_KIND:?}" "${LLDAP_CERT_FILE:?}" "${LLDAP_HOST:?}" "${LLDAP_PORT:?}" "${LLDAP_BASE_DN:?}"
+  : "${LLDAP_ADMIN_GROUP:?}" "${LLDAP_BIND_USER:?}" "${LLDAP_BIND_PASSWORD:?}"
+  GPU_IDS="${GPU_IDS:-}"
+  BULK_DISK="${BULK_DISK:-}"
   apt_converge
   bridges_converge
   gpu_converge
@@ -530,6 +533,51 @@ main() {
   exporter_converge
   ossec_converge
   echo ">>> Proxmox $(pveversion) converged."
+}
+
+# every guest and what converge made, except what the host keeps working without the lab: OSSEC, the bulk pool, gpu
+# passthrough, apt sources, root's password and keys, the power, module and smartd settings
+teardown() {
+  local id user pool group bridge bridges
+  for id in $(qm list | awk 'NR > 1 { print $1 }'); do
+    if [ "$(qm status "$id" | cut -d' ' -f2)" = running ]; then qm stop "$id" --skiplock 1 >/dev/null; fi
+    qm destroy "$id" --destroy-unreferenced-disks 1 --purge 1 >/dev/null
+  done
+  for id in $(pct list | awk 'NR > 1 { print $1 }'); do
+    if [ "$(pct status "$id" | cut -d' ' -f2)" = running ]; then pct stop "$id" >/dev/null; fi
+    pct destroy "$id" --purge 1 --destroy-unreferenced-disks 1 >/dev/null
+  done
+  # shellcheck disable=SC2086 # one path per word
+  rm -f $TEMPLATES
+  rm -rf "$TOKEN_DIR"
+
+  # deleting a user deletes its tokens and acl entries
+  for user in $(pveum user list --output-format json | jq -r '.[].userid | select(endswith("@pve"))'); do pveum user delete "$user"; done
+  for pool in $(pveum pool list --output-format json | jq -r '.[].poolid'); do pveum pool delete "$pool"; done
+  if pveum role list --output-format json | json_has roleid "$WAKE_ROLE"; then pveum role delete "$WAKE_ROLE"; fi
+  if pvesh get /cluster/jobs/realm-sync --output-format json | json_has id "$REALM"; then pvesh delete "/cluster/jobs/realm-sync/$REALM"; fi
+  if pveum realm list --output-format json | json_has realm "$REALM"; then pveum realm delete "$REALM"; fi
+  for group in $(pveum group list --output-format json | jq -r --arg suffix "-$REALM" '.[].groupid | select(endswith($suffix))'); do
+    pveum group delete "$group"
+  done
+  rm -f "$REALM_PASSWORD_FILE" "$REALM_CA_FILE"
+
+  DEBIAN_FRONTEND=noninteractive apt-get purge -y prometheus-node-exporter </dev/null >/dev/null
+  DEBIAN_FRONTEND=noninteractive apt-get autoremove -y </dev/null >/dev/null
+
+  mapfile -t bridges < <(sed -n 's/^auto \(vmbr[1-9][0-9]*\)$/\1/p' /etc/network/interfaces)
+  for bridge in "${bridges[@]}"; do sed -i "/^auto $bridge\$/,/^\$/d" /etc/network/interfaces; done
+  ifreload -a
+  echo ">>> Proxmox: torn down; guests left: $(qm list | awk 'NR > 1' | wc -l) vms, $(pct list | awk 'NR > 1' | wc -l) containers"
+}
+
+main() {
+  command -v pveversion >/dev/null || { echo "ERROR: install Proxmox VE first, then rerun init.sh." >&2; exit 1; }
+  case "$ACTION" in
+    converge) converge ;;
+    teardown) teardown ;;
+    *) echo "ERROR: ACTION is converge or teardown, not $ACTION" >&2; exit 1 ;;
+  esac
 }
 
 main

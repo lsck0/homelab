@@ -3,13 +3,18 @@
 # Passwords reach lldap_set_password through its environment (LLDAP_USER_PASSWORD), never its command line, and the
 # admin session the helpers open is logged out (its tokens blacklisted) when the script exits, so the token that
 # does sit on a command line for a moment is dead afterwards.
-{ config, lib, pkgs, retry, inventory, site, catalog, ... }:
+{ config, lib, pkgs, retry, inventory, site, catalog, lab, ... }:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   routes = catalog.internal;
+  # authelia's, on loopback; the realm gets ldaps
   ldapPort = 3890;
+  realm = (import ../../../modules/lab-export.nix { inherit lib lab; }).ldap;
+  ldapsKeyFile = "${stateDir}/ldaps-key.pem";
+  ldapsCertDays = 3650;
+  ldapsRenewBeforeS = 30 * 86400;
   httpPort = routes.lldap.port;
-  stateDir = "/var/lib/lldap";
+  stateDir = dirOf realm.certFile;
   adminUser = "luca";
   guestUser = "guest";
   apiInputs = [ pkgs.curl pkgs.jq pkgs.lldap pkgs.coreutils pkgs.gnugrep ];
@@ -25,8 +30,7 @@ let
   readonlyGroup = "lldap_strict_readonly";
   bindUsers = {
     authelia-bind = "lldap-authelia-bind-password";
-    # the proxmox realm's sync (scripts/pve-install.sh)
-    proxmox-bind = "lldap-proxmox-bind-password";
+    ${realm.bindUser} = "lldap-proxmox-bind-password";
   };
 
   # admin session helpers for lab-user and the bootstrap; set -e callers stop on any failure
@@ -142,8 +146,15 @@ in {
 
   services.lldap = {
     enable = true;
-    silenceForceUserPassResetWarning = true;
     settings = {
+      # the admin's password is lldap-admin-password alone, rotated by changing the secret
+      force_ldap_user_pass_reset = "always";
+      ldaps_options = {
+        enabled = true;
+        port = realm.port;
+        cert_file = realm.certFile;
+        key_file = ldapsKeyFile;
+      };
       ldap_base_dn = net.domainDn;
       ldap_host = "0.0.0.0";
       ldap_port = ldapPort;
@@ -159,9 +170,18 @@ in {
     };
   };
 
+  # the realm pins the certificate (scripts/pve-install.sh): a new one only for a new address or near its expiry
   systemd.services.lldap.preStart = lib.mkBefore ''
     [ -s ${stateDir}/server_key ] || ${pkgs.coreutils}/bin/base64 -d ${config.sops.secrets.lldap-server-key.path} > ${stateDir}/server_key
+    cert_current() {
+      [ -s ${ldapsKeyFile} ] && [ -s ${realm.certFile} ] \
+        && openssl x509 -in ${realm.certFile} -noout -checkend ${toString ldapsRenewBeforeS} >/dev/null \
+        && openssl x509 -in ${realm.certFile} -noout -ext subjectAltName | grep -qw "IP Address:${realm.host}"
+    }
+    cert_current || openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days ${toString ldapsCertDays} \
+      -subj "/CN=${realm.host}" -addext "subjectAltName=IP:${realm.host}" -keyout ${ldapsKeyFile} -out ${realm.certFile}
   '';
+  systemd.services.lldap.path = [ pkgs.openssl pkgs.gnugrep ];
 
   systemd.services.lldap-bootstrap = {
     description = "Seed lldap groups and users";
@@ -220,7 +240,6 @@ in {
   # every account lives in this sqlite file
   homelab.dbBackup.databases.lldap.sqlite = "${stateDir}/users.db";
 
-  # ldap for authelia on this host and the proxmox realm, the web ui through the ingress
-  networking.firewall.allowedTCPPorts = [ ldapPort httpPort ];
-  homelab.ingressOnly.ports = [ ldapPort httpPort ];
+  networking.firewall.allowedTCPPorts = [ realm.port httpPort ];
+  homelab.ingressOnly.ports = [ realm.port httpPort ];
 }

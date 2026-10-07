@@ -51,6 +51,8 @@ let
     http = 80;
     rpcbind = 111;
     https = 443;
+    # lldap's default; 636 would need a privileged bind
+    ldaps = 6360;
     nfs = 2049;
     swarmManager = 2377;
     vxlan = 4789;

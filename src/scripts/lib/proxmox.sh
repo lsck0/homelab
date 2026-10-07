@@ -12,6 +12,7 @@
 #   proxmox_ssh_init <ip> <port> <password>   # PROXMOX_SSH (array); exits 1 unless the host key is pinned
 #   proxmox_ca_write <file>           # the cluster CA (site.json) that the api's certificate chains to
 #   proxmox_converge <lab export> <bulk disk>   # scripts/pve-install.sh on the host, then the new tokens stored
+#   proxmox_teardown <ip>             # its teardown: every guest and what the converge set up
 
 # every host key of the lab: Proxmox's pinned by init.sh --pin, the guests' written by sync.sh
 LAB_KNOWN_HOSTS="$SRC/generated/known_hosts"
@@ -26,6 +27,9 @@ PROXMOX_SSH_ALIVE_INTERVAL_S=15
 PROXMOX_SSH_ALIVE_COUNT=4
 # pve-install.sh leaves the secret of each api token it had to create here, one file per role
 PROXMOX_TOKEN_DIR=/root/homelab-tokens
+# sync.sh uploads them; terraform's nixos_image_id and nixos_lxc_template name them in proxmox's storage
+PROXMOX_IMAGE=/var/lib/vz/template/iso/nixos.img
+PROXMOX_LXC_TEMPLATE=/var/lib/vz/template/cache/nixos-homelab.tar.xz
 PROXMOX_TFVARS=""
 
 proxmox_tfvars_load() {
@@ -88,32 +92,49 @@ proxmox_token_store() {
   echo ">>> Proxmox: stored the new $role api token"
 }
 
+# proxmox_install_run <host> <NAME=value>...: scripts/pve-install.sh on the host, its inputs on stdin ahead of it
+proxmox_install_run() {
+  local host=$1 input
+  shift
+  {
+    for input in "TOKEN_DIR=$PROXMOX_TOKEN_DIR" "TEMPLATES=$PROXMOX_IMAGE $PROXMOX_LXC_TEMPLATE" "$@"; do
+      printf '%s=%q\n' "${input%%=*}" "${input#*=}"
+    done
+    cat "$SRC/scripts/pve-install.sh"
+  } | "${PROXMOX_SSH[@]}" "$host" "bash -s"
+}
+
+proxmox_teardown() {
+  proxmox_install_run "$PROXMOX_SSH_USER@$1" ACTION=teardown || { echo "ERROR: the Proxmox host was not torn down (above)." >&2; exit 1; }
+}
+
 proxmox_converge() {
   local export=$1 bulk_disk=$2 host ldap bind_password root_password stored=() role value
   host="$PROXMOX_SSH_USER@$(jq -r .lan.proxmox "$LAB_SITE")"
-  ldap=$(jq -ce '.ldap | select(.host and .port and .baseDn and .ca)' "$export") \
+  ldap=$(jq -ce '.ldap | select(.vmid and .kind and .host and .port and .certFile and .baseDn and .adminGroup and .bindUser)' "$export") \
     || { echo "ERROR: the lab export names no ldaps listener for the realm (modules/lab-export.nix, ldap)." >&2; exit 1; }
   bind_password=$(secrets_get lldap-proxmox-bind-password)
   root_password=$(secrets_get proxmox-root-pass)
   [ -n "$bind_password" ] && [ -n "$root_password" ] \
     || { echo "ERROR: lldap-proxmox-bind-password or proxmox-root-pass is empty: run src/scripts/secrets-sync.sh --apply." >&2; exit 1; }
-  {
-    printf '%s=%q\n' \
-      PROXMOX_IP "$(jq -r .lan.proxmox "$LAB_SITE")" \
-      ZONE_BRIDGES "$(jq -r '[.[].bridge] | join(" ")' "$LAB_ZONES")" \
-      WAKE_ZONES "$(jq -r '[.zones | to_entries[] | select(.value.ingress != null) | .key] | join(" ")' "$export")" \
-      GPU_IDS "$(jq -r '.gpu.functionIds // [] | join(",")' "$LAB_SITE")" \
-      BULK_DISK "$bulk_disk" \
-      NAS_ID "$(jq -r .routes.nas.vmid "$export")" \
-      LLDAP_HOST "$(jq -r .host <<<"$ldap")" \
-      LLDAP_PORT "$(jq -r .port <<<"$ldap")" \
-      LLDAP_BASE_DN "$(jq -r .baseDn <<<"$ldap")" \
-      LLDAP_CA "$(jq -r .ca <<<"$ldap")" \
-      LLDAP_BIND_PASSWORD "$bind_password" \
-      ROOT_PASSWORD "$root_password" \
-      ROOT_KEYS "$(cat "$SRC"/lab/keys/*.pub)"
-    cat "$SRC/scripts/pve-install.sh"
-  } | "${PROXMOX_SSH[@]}" "$host" "bash -s" || { echo "ERROR: the Proxmox host did not converge (above)." >&2; exit 1; }
+  proxmox_install_run "$host" \
+    "PROXMOX_IP=$(jq -r .lan.proxmox "$LAB_SITE")" \
+    "ZONE_BRIDGES=$(jq -r '[.[].bridge] | join(" ")' "$LAB_ZONES")" \
+    "WAKE_ZONES=$(jq -r '[.zones | to_entries[] | select(.value.ingress != null) | .key] | join(" ")' "$export")" \
+    "GPU_IDS=$(jq -r '.gpu.functionIds // [] | join(",")' "$LAB_SITE")" \
+    "BULK_DISK=$bulk_disk" \
+    "LLDAP_ID=$(jq -r .vmid <<<"$ldap")" \
+    "LLDAP_KIND=$(jq -r .kind <<<"$ldap")" \
+    "LLDAP_CERT_FILE=$(jq -r .certFile <<<"$ldap")" \
+    "LLDAP_HOST=$(jq -r .host <<<"$ldap")" \
+    "LLDAP_PORT=$(jq -r .port <<<"$ldap")" \
+    "LLDAP_BASE_DN=$(jq -r .baseDn <<<"$ldap")" \
+    "LLDAP_ADMIN_GROUP=$(jq -r .adminGroup <<<"$ldap")" \
+    "LLDAP_BIND_USER=$(jq -r .bindUser <<<"$ldap")" \
+    "LLDAP_BIND_PASSWORD=$bind_password" \
+    "ROOT_PASSWORD=$root_password" \
+    "ROOT_KEYS=$(cat "$SRC"/lab/keys/*.pub)" \
+    || { echo "ERROR: the Proxmox host did not converge (above)." >&2; exit 1; }
 
   while read -r role value; do
     proxmox_token_store "$role" "$value"
