@@ -35,6 +35,7 @@
 #   /public      the builder's status page: build writes logs/<base>.log and status.json, the host tees the
 #                whole run into build.log; read-only for publish, which pushes the logs to the mirror
 #   /run/signing.asc, /run/push-key   publish only
+#   /upstream, /run/archbuild.unavailable   modules/upstream's run, and where night_skip names the upstream
 #
 # The list is archrepo-list.sh's: the packages.txt of every module plus the EXTRA_PACKAGES of every
 # platforms/*.sh. Entries in core, extra or multilib are copied, everything else is built:
@@ -55,14 +56,17 @@
 #
 # Completeness: arch-dotfiles' install.sh no longer builds what the mirror lacks, so every listed name must
 # stay installable from the served snapshot. A failed base keeps its last build staged while that still
-# resolves; a night whose db would still lose a listed name the served db provides is held back, so a
-# client never misses a package once served, for COMPLETENESS_HOLD_DAYS after the served snapshot at most:
-# a name whose source is gone for good (deleted from the aur) would otherwise freeze every official update,
-# security fixes included. A listed name the served db lacks, never provided or lost after the hold, does
-# not hold the night back: the night publishes without it and it shows at once in status.{txt,json}
-# `missing` and in vm-119's homelab_archrepo_missing_packages. Rejected: publishing with the lost name's
-# served build carried over, since no closure was resolved for it and drop_unresolvable drops exactly the
-# builds that no longer resolve.
+# resolves, a base whose source is gone from the aur too (source_gone), so its closure resolves with the
+# rest and the official updates still publish. A night whose db would still lose a listed name the served
+# db provides is held back, so a client never misses a package once served, for COMPLETENESS_HOLD_DAYS after
+# the served snapshot at most: a lost name whose last build no longer resolves would otherwise freeze every
+# official update, security fixes included. A listed name the served db lacks, never provided or lost after
+# the hold, does not hold the night back: the night publishes without it and it shows at once in
+# status.{txt,json} `missing` and in vm-119's homelab_archrepo_missing_packages.
+#
+# Outages: every call to the aur, the official mirrors and github goes through modules/upstream
+# (upstream_call), which retries it; while the service stays down the night ends with UNAVAILABLE before
+# anything is proposed or published, the served snapshot stays and the host records "<name> unavailable".
 set -euo pipefail
 shopt -s nullglob
 
@@ -87,6 +91,11 @@ SNAPSHOT_KEEP_DAYS=7
 CACHE=/cache
 # the staging db, rebuilt from the served one every run
 STAGE_DB=$CACHE/db/$REPO.db.tar.gz
+# the builder's pacman installs staged packages from here: a link per staged file into the outbox or the served pool
+STAGE_LINKS=$CACHE/stage-links
+# the last aur rpc answer, and the "name base" lines resolve reads from it
+HTTP_BODY=$CACHE/aur-answer.json
+AUR_FOUND=$CACHE/aur-found.txt
 DB_FILES=("$REPO.db.tar.gz" "$REPO.files.tar.gz")
 PUBLIC=/public
 # status.txt names them relative to itself, so the mirror serves them beside it
@@ -130,11 +139,15 @@ FULL_REBUILD_DAYS=14
 SECONDS_PER_DAY=86400
 # per recipe, so one hung build cannot eat the night
 BUILD_TIMEOUT=3h
-FETCH_TIMEOUT=15m
+FETCH_TIMEOUT_S=900
 BUILD_KILL_AFTER=5m
 FETCH_KILL_AFTER=1m
 HTTP_TIMEOUT_S=60
-HTTP_RETRIES=3
+# modules/upstream's run, mounted by the host: retries a call to a third party and exits UNAVAILABLE while it is down
+UPSTREAM=/upstream
+UNAVAILABLE=75
+# the host reads the upstream that ended the night from here (main.nix)
+UNAVAILABLE_FILE=/run/archbuild.unavailable
 # where a recipe's validpgpkeys come from; makepkg's source check fails a build whose key is missing
 KEYSERVER=hkps://keyserver.ubuntu.com
 KEY_FETCH_TIMEOUT=2m
@@ -212,7 +225,23 @@ fail() {
   log "FAIL $1: $2"
 }
 
-http() { curl -fsSL --max-time "$HTTP_TIMEOUT_S" --retry "$HTTP_RETRIES" -A "$USER_AGENT" "$@"; }
+# an outage of a third party skips the whole night: nothing is proposed or published, the served snapshot stays
+night_skip() {
+  log "$1 unavailable, skipping the night"
+  echo "$1" > "$UNAVAILABLE_FILE"
+  exit "$UNAVAILABLE"
+}
+
+# <upstream> <command...> through modules/upstream, never in a subshell: night_skip must end the run
+upstream_call() {
+  local status=0
+  bash "$UPSTREAM" "$@" || status=$?
+  (( status != UNAVAILABLE )) || night_skip "$1"
+  return "$status"
+}
+
+# <url> [curl args...] from the aur into HTTP_BODY, which every retry rewrites whole
+aur_get() { upstream_call aur curl -fsSL --max-time "$HTTP_TIMEOUT_S" -A "$USER_AGENT" -o "$HTTP_BODY" "$@"; }
 
 # a command prefix, not a function: timeout runs it
 AS_BUILDER=(sudo -u "$BUILDER" -H env CARGO_HOME="$CACHE/cargo"
@@ -329,10 +358,32 @@ pacman_setup_official() {
 
 # -----------------------------------------------------------------------------
 # BUILD: SETUP
+# one link per staged file into the pool that holds it, the outbox's own build before the served copy: the
+# builder's pacman reads one server, which holds every file the staged db names; a name without a file stops the run
+stage_links_sync() {
+  local name file
+  mkdir -p "$STAGE_LINKS"
+  for name in "${!db_file[@]}"; do
+    file=${db_file[$name]}
+    # a file name is one content wherever it lies: a link that still resolves stays
+    if [ -e "$STAGE_LINKS/$file" ]; then
+      continue
+    elif [ -f "$OUTBOX_POOL/$file" ]; then
+      ln -sfn "$OUTBOX_POOL/$file" "$STAGE_LINKS/$file"
+    elif [ -f "$REPO_DIR/$file" ]; then
+      ln -sfn "$REPO_DIR/$file" "$STAGE_LINKS/$file"
+    else
+      log "the staged db names $file for $name, which neither $OUTBOX_POOL nor $REPO_DIR holds"
+      exit 1
+    fi
+  done
+}
+
 # the builder's pacman reads the staging db, so later builds and the resolve checks see what is staged
 db_sync_local() {
   cp "$STAGE_DB" "/var/lib/pacman/sync/$REPO.db" || return 1
-  load_db_index
+  load_db_index || return 1
+  stage_links_sync
 }
 
 # the served db is the truth, the staging copy is rebuilt from it every run; a first run starts empty
@@ -345,7 +396,7 @@ setup_build() {
   local packager
   id "$BUILDER" >/dev/null 2>&1 || useradd -m -u "$BUILDER_UID" "$BUILDER"
   # regenerated every run; a stale recipe would linger as a base that is no longer wanted
-  rm -rf "$CACHE/build" "$CACHE/out" "$CACHE/recipes"
+  rm -rf "$CACHE/build" "$CACHE/out" "$CACHE/recipes" "$STAGE_LINKS"
   mkdir -p "$CACHE"/{pacman,src,build,aur,recipes,out,stage,cargo,go} "$PUBLIC_LOGS"
   chown "$BUILDER:" "$CACHE"/{src,build,recipes,out,cargo,go}
   # a killed run's proposal must never be read as this run's
@@ -357,8 +408,8 @@ setup_build() {
   [ ! -d "$SERVED_STATE_DIR" ] || cp -a "$SERVED_STATE_DIR/." "$STATE_DIR/"
   packager=$(gpg --show-keys --with-colons "$DOTFILES/$REPO_PUBLIC_KEY" | awk -F: '$1 == "uid" { print $10; exit }')
   [ -n "$packager" ] || { log "no key uid in $DOTFILES/$REPO_PUBLIC_KEY"; exit 1; }
-  # main.nix sizes the jobs to the container's memory limit and its cpuset to them, so cargo and go agree
-  : "${ARCHBUILD_JOBS:?compile jobs within the build container memory limit}"
+  # main.nix sizes the jobs to the balloon floor and the cpuset to them, so cargo and go agree
+  : "${ARCHBUILD_JOBS:?compile jobs within the balloon floor}"
   cat > /etc/makepkg.conf.d/archbuild.conf <<EOF
 MAKEFLAGS="-j$ARCHBUILD_JOBS"
 BUILDDIR=$CACHE/build
@@ -375,7 +426,7 @@ setup_build_pacman() {
   # the image strips docs and locales, a build dependency must install whole
   sed -i -e '/^NoExtract/d' -e "s|^#\?CacheDir.*|CacheDir = $CACHE/pacman/|" /etc/pacman.conf
   # the only sync of the run: builds and the snapshot resolve against one state of the official repos
-  pacman -Syu --noconfirm --needed git jq expac >/dev/null
+  upstream_call archlinux pacman -Syu --noconfirm --needed git jq expac >/dev/null
   # added after the sync, which would look for a served db: db_sync_local installs the staging one.
   # After the official repos, so the staged copies of official packages never shadow today's versions;
   # SigLevel Never, since the staged packages are this container's own unsigned builds, publish checks them
@@ -383,8 +434,7 @@ setup_build_pacman() {
 
 [$REPO]
 SigLevel = Never
-Server = file://$OUTBOX_POOL
-Server = file://$REPO_DIR
+Server = file://$STAGE_LINKS
 EOF
   db_sync_local
   git config --global --add safe.directory '*'
@@ -406,15 +456,12 @@ load_repo_index() {
 
 # -----------------------------------------------------------------------------
 # BUILD: RECIPES
+# a fetch into a kept repo, so a retried attempt starts over cleanly
 recipe_aur() {
   local base=$1 dir=$2 clone=$CACHE/aur/$1
-  if [ -d "$clone/.git" ]; then
-    timeout "$FETCH_TIMEOUT" git -C "$clone" fetch -q origin master || return 1
-    git -C "$clone" reset -q --hard FETCH_HEAD || return 1
-  else
-    rm -rf "$clone"
-    timeout "$FETCH_TIMEOUT" git clone -q "$AUR_URL/$base.git" "$clone" || return 1
-  fi
+  [ -d "$clone/.git" ] || { rm -rf "$clone"; git init -q "$clone"; } || return 1
+  UPSTREAM_TIMEOUT_S=$FETCH_TIMEOUT_S upstream_call aur git -C "$clone" fetch -q "$AUR_URL/$base.git" master || return 1
+  git -C "$clone" reset -q --hard FETCH_HEAD || return 1
   git -C "$clone" archive HEAD | tar -x -C "$dir"
 }
 
@@ -489,21 +536,43 @@ read_lists() {
   done <<<"$list"
 }
 
-# prints "name base" for every name the aur has
+# "name base" into AUR_FOUND for every name the aur has
 aur_bases() {
   local names_batch=("$@") i name args
+  : > "$AUR_FOUND"
   for (( i = 0; i < ${#names_batch[@]}; i += RPC_BATCH )); do
     args=()
     for name in "${names_batch[@]:i:RPC_BATCH}"; do
       args+=(--data-urlencode "arg[]=$name")
     done
-    http "$AUR_URL/rpc/v5/info" "${args[@]}" | jq -r '.results[] | "\(.Name) \(.PackageBase)"' || return 1
+    aur_get "$AUR_URL/rpc/v5/info" "${args[@]}" || return 1
+    jq -r '.results[] | "\(.Name) \(.PackageBase)"' "$HTTP_BODY" >> "$AUR_FOUND" || return 1
   done
 }
 
+# "name base" into AUR_FOUND for the base providing name, nothing when none does
 aur_base_providing() {
-  http "$AUR_URL/rpc/v5/search/$(jq -rn --arg n "$1" '$n | @uri')?by=provides" \
-    | jq -r --arg n "$1" '[.results[] | select(.Name == $n)] + (.results | sort_by(-.NumVotes)) | .[0].PackageBase // empty'
+  aur_get "$AUR_URL/rpc/v5/search/$(jq -rn --arg n "$1" '$n | @uri')?by=provides" || return 1
+  jq -r --arg n "$1" '[.results[] | select(.Name == $n)] + (.results | sort_by(-.NumVotes))
+    | .[0].PackageBase // empty | "\($n) \(.)"' "$HTTP_BODY" > "$AUR_FOUND"
+}
+
+# a name the aur answered it lacks: the served base carrying it keeps its last build while that still resolves
+# (a failed base, drop_unresolvable), so one deleted aur package does not freeze the official updates
+source_gone() {
+  local name=$1 path base carried
+  for path in "$STATE_DIR"/*; do
+    base=$(basename "$path")
+    # a base of this night still exists and only stopped building the name
+    [ -z "${kind[$base]:-}" ] && [[ " $(state_get "$base" names) " == *" $name "* ]] || continue
+    kind[$base]=gone
+    bases+=("$base")
+    names[$base]=$(state_get "$base" names)
+    for carried in ${names[$base]}; do provider[$carried]=$base; done
+    fail "$base" "gone from the aur, its last build stays while it resolves"
+    return 0
+  done
+  [ -z "${listed[$name]:-}" ] || fail "$name" "not in the aur"
 }
 
 unsatisfied_deps() {
@@ -517,7 +586,7 @@ unsatisfied_deps() {
 
 # listed aur names plus every dependency neither the repos nor another base satisfies
 resolve() {
-  local round pending name base lines new remote
+  local round pending name base new remote
   declare -A found
   mapfile -t pending < <({ printf '%s\n' "${aur_wanted[@]}"; unsatisfied_deps "${bases[@]}"; } | sort -u | sed '/^$/d')
   for (( round = 0; round < RESOLVE_ROUNDS_MAX && ${#pending[@]} > 0; round++ )); do
@@ -534,20 +603,21 @@ resolve() {
     pending=("${remote[@]}")
     found=()
     if (( ${#pending[@]} > 0 )); then
-      lines=$(aur_bases "${pending[@]}") || { log "aur rpc failed"; resolve_complete=0; return 0; }
+      aur_bases "${pending[@]}" || { log "aur rpc failed"; resolve_complete=0; return 0; }
       while read -r name base; do
         [ -n "$name" ] && found[$name]=$base
-      done <<<"$lines"
+      done < "$AUR_FOUND"
     fi
     for name in "${pending[@]}"; do
       looked_up[$name]=1
       base=${found[$name]:-}
       if [ -z "$base" ] && [ -z "${listed[$name]:-}" ]; then
-        base=$(aur_base_providing "$name") || { log "aur search for $name failed"; resolve_complete=0; continue; }
+        aur_base_providing "$name" || { log "aur search for $name failed"; resolve_complete=0; continue; }
+        read -r _ base < "$AUR_FOUND" || base=
       fi
-      # the rpc answered, so a listed name missing from it is gone for good and must not block pruning
+      # the rpc answered, so a name missing from it is gone for good and must not block pruning
       if [ -z "$base" ]; then
-        [ -z "${listed[$name]:-}" ] || fail "$name" "not in the aur"
+        source_gone "$name"
         continue
       fi
       [ -n "${kind[$base]:-}" ] || { add_base "$base" aur; new+=("$base"); }
@@ -618,7 +688,7 @@ build_deps_install() {
   # -T prints the unsatisfied ones and exits 127 when there are any
   mapfile -t missing < <(pacman -T "${wanted[@]}")
   (( ${#missing[@]} > 0 )) || return 0
-  pacman -S --noconfirm --needed --asdeps "${missing[@]}"
+  upstream_call archlinux pacman -S --noconfirm --needed --asdeps "${missing[@]}"
 }
 
 remove_build_deps() {
@@ -692,7 +762,7 @@ build_base() {
   install -d -o "$BUILDER" "$CACHE/src/$base"
   # pkgver() writes upstream's head into the PKGBUILD, which moves the key
   if is_vcs "$dir"; then
-    (cd "$dir" && timeout -k "$FETCH_KILL_AFTER" "$FETCH_TIMEOUT" "${AS_BUILDER[@]}" SRCDEST="$CACHE/src/$base" makepkg -od --noprepare --skipinteg --noconfirm) >> "$log" 2>&1 \
+    (cd "$dir" && timeout -k "$FETCH_KILL_AFTER" "${FETCH_TIMEOUT_S}s" "${AS_BUILDER[@]}" SRCDEST="$CACHE/src/$base" makepkg -od --noprepare --skipinteg --noconfirm) >> "$log" 2>&1 \
       || log "$base: upstream version check failed, building from the recipe as is"
   fi
   key=$(recipe_key "$dir") || { fail "$base" "hashing the recipe failed"; return 1; }
@@ -793,7 +863,7 @@ snapshot_official() {
   cachedirs=(--cachedir "$OUTBOX_POOL" --cachedir "$CACHE/pacman")
   # a first run has no pool yet, and this container cannot create it
   [ ! -d "$REPO_DIR" ] || cachedirs+=(--cachedir "$REPO_DIR")
-  if ! pacman --dbpath "$root" -Swdd --noconfirm "${cachedirs[@]}" "${new[@]}" >> "$PUBLIC_LOGS/snapshot.log" 2>&1; then
+  if ! upstream_call archlinux pacman --dbpath "$root" -Swdd --noconfirm "${cachedirs[@]}" "${new[@]}" >> "$PUBLIC_LOGS/snapshot.log" 2>&1; then
     held_back="downloading the official packages failed, $LOGS_NAME/snapshot.log"
     return 1
   fi
@@ -887,7 +957,7 @@ setup_key() {
 setup_publish_pacman() {
   local name
   pacman_setup_official
-  pacman -Syu --noconfirm --needed jq rsync openssh >/dev/null
+  upstream_call archlinux pacman -Syu --noconfirm --needed jq rsync openssh >/dev/null
   while read -r name; do official_name[$name]=1; done < <(pacman -Slq "${OFFICIAL_REPOS[@]}")
   (( ${#official_name[@]} > 0 )) || { log "no official package names"; exit 1; }
 }
@@ -1055,7 +1125,7 @@ assemble() {
   done < "$WORK/official.txt"
   # pacman checks every file against its db entry and arch's keyring, the pool's and the outbox's copies
   # included, and fetches what neither holds; a .sig next to a file says nothing, pacman may have put arch's there
-  if ! pacman --dbpath "$root" -Swdd --noconfirm --cachedir "$REPO_DIR" --cachedir "$OUTBOX_POOL" "${download[@]}" \
+  if ! upstream_call archlinux pacman --dbpath "$root" -Swdd --noconfirm --cachedir "$REPO_DIR" --cachedir "$OUTBOX_POOL" "${download[@]}" \
     > "$WORK/download.log" 2>&1; then
     cat "$WORK/download.log"
     held_back="downloading or checking the official packages failed"
