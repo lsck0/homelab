@@ -157,12 +157,15 @@ pkgs.testers.runNixOSTest {
         # positive control: a non-ephemeral user keeps its images
         vm_117.succeed("${asUser "ci"} env DOCKER_HOST=${dockerHost users.ci} docker image inspect labprobe:test")
 
-    with subtest("the runners' state root is traversable whoever made it, and boot clears dropped runners"):
-        vm_117.succeed("chown 994:993 /var/lib/github-runner && chmod 0750 /var/lib/github-runner")
-        vm_117.succeed("mkdir /var/lib/github-runner/dropped-1")
-        vm_117.succeed("systemd-tmpfiles --create --remove --boot --prefix=/var/lib/github-runner")
+    with subtest("the runners' state root is traversable whoever made it, and activation drops undeclared runners"):
+        vm_117.succeed("chown 994:993 /var/lib/github-runner && chmod 0700 /var/lib/github-runner")
+        vm_117.succeed("mkdir -p /var/lib/github-runner/dropped-1 /var/lib/github-runner/nyangine")
+        # what a switch runs: activation, then systemd-tmpfiles-resetup
+        vm_117.succeed("/run/current-system/activate")
+        vm_117.succeed("systemd-tmpfiles --create --remove --prefix=/var/lib/github-runner")
         vm_117.succeed("runuser -u ${ghUser} -- test -x /var/lib/github-runner")
         vm_117.fail("test -e /var/lib/github-runner/dropped-1")
+        vm_117.succeed("test -d /var/lib/github-runner/nyangine")
 
     def loop_successes(user, dst, port):
         """Connections that got through while the firewall restarted ten times."""
