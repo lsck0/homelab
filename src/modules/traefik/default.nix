@@ -248,13 +248,23 @@ let
       crowdsecMode = "live";
       crowdsecLapiScheme = "http";
       crowdsecLapiHost = "${loopback}:${toString crowdsecLapiPort}";
-      crowdsecLapiKeyFile = config.sops.secrets.crowdsec-bouncer-key.path;
+      crowdsecLapiKeyFile = bouncerKeyFile;
       crowdsecAppsecEnabled = appsec;
       crowdsecAppsecHost = "${loopback}:${toString appsecPort}";
       # the same hops client-ip walks, so a ban lands on the client client-ip names
       forwardedHeadersTrustedIPs = trustedHops;
     };
   };
+
+  bouncerName = "traefik-bouncer";
+  # cscli makes the key; beside crowdsec's database, so a wiped database takes its key along
+  bouncerKeyFile = "${crowdsecDir}/data/${bouncerName}.key";
+
+  # a start never fetches or upgrades a rule
+  crowdsecHub = import ./lib/crowdsec-hub.nix { inherit pkgs; };
+  # the owner's choice: the community api (CAPI) gets each ban's attacker ip, scenario and time, and returns the
+  # community blocklist; an outage keeps the last decisions
+  crowdsecCommunity = true;
 
   # the waf bouncer, and an ip-reputation-only one for routes whose `off.waf` says why
   bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable {
@@ -678,10 +688,11 @@ in {
         "${loopback}:${toString crowdsecLapiPort}:${toString crowdsecLapiContainerPort}"
         "${loopback}:${toString appsecPort}:${toString appsecPort}"
       ];
-      environment.COLLECTIONS = lib.concatStringsSep " " [
-        "crowdsecurity/traefik" "crowdsecurity/http-cve" "crowdsecurity/appsec-virtual-patching"
-        "crowdsecurity/appsec-generic-rules" "crowdsecurity/appsec-crs-inband"
-      ];
+      environment = {
+        COLLECTIONS = lib.concatStringsSep " " crowdsecHub.collections;
+        NO_HUB_UPGRADE = "true";
+        DISABLE_ONLINE_API = lib.boolToString (!crowdsecCommunity);
+      };
     };
 
     # the house's public address rotates; crowdsec must never ban it
@@ -690,7 +701,8 @@ in {
       after = [ "podman-crowdsec.service" ];
       requires = [ "podman-crowdsec.service" ];
       wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.podman pkgs.curl pkgs.coreutils pkgs.diffutils pkgs.python3 ];
+      path = [ pkgs.podman pkgs.getent pkgs.coreutils pkgs.diffutils ];
+      environment.PUBLIC_HOST = net.fqdn net.wan.publicHost;
       # no restart: the timer retries, faster retries restart crowdsec
       serviceConfig.Type = "oneshot";
       script = "exec ${pkgs.bash}/bin/bash ${./lib/crowdsec-home-whitelist.sh}";
@@ -735,8 +747,10 @@ in {
     systemd.services.crowdsec-register-bouncer = lib.mkIf cfg.crowdsecBouncer.enable {
       description = "Register the Traefik bouncer with CrowdSec";
       after = [ "podman-crowdsec.service" ];
-      wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.podman pkgs.coreutils pkgs.jq ];
+      # traefik reads the key at start; once it exists this returns at once
+      before = [ "traefik.service" ];
+      wantedBy = [ "traefik.service" ];
+      path = [ pkgs.podman pkgs.coreutils pkgs.jq pkgs.systemd ];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -744,14 +758,17 @@ in {
         RestartSec = 15;
       };
       script = ''
-        KEY=$(cat ${config.sops.secrets.crowdsec-bouncer-key.path})
+        [ -s ${bouncerKeyFile} ] && exit 0
         ${retry} 60 5 podman exec crowdsec cscli lapi status
-        if podman exec crowdsec cscli bouncers list -o json 2>/dev/null \
-             | jq -e '.[]|select(.name=="traefik-bouncer")' >/dev/null; then
-          echo "bouncer already registered"
-        else
-          podman exec crowdsec cscli bouncers add traefik-bouncer -k "$KEY"
+        if podman exec crowdsec cscli bouncers list -o json | jq -e '.[] | select(.name == "${bouncerName}")' >/dev/null; then
+          podman exec crowdsec cscli bouncers delete ${bouncerName}
         fi
+        # cscli makes the key and prints it: never on an argv
+        key=$(podman exec crowdsec cscli bouncers add ${bouncerName} -o raw)
+        install -m 0440 -g traefik /dev/null ${bouncerKeyFile}.tmp
+        printf '%s' "$key" > ${bouncerKeyFile}.tmp
+        mv ${bouncerKeyFile}.tmp ${bouncerKeyFile}
+        systemctl try-restart --no-block traefik.service
       '';
     };
 
@@ -774,6 +791,10 @@ in {
         install -m 0644 ${traefikAcquis} ${crowdsecDir}/config/acquis.d/traefik.yaml
         install -m 0644 ${appsecAcquis} ${crowdsecDir}/config/acquis.d/appsec.yaml
         install -m 0644 ${crsConfig} ${crowdsecDir}/config/appsec-configs/homelab-crs.yaml
+        rm -rf ${crowdsecDir}/config/hub
+        cp -r --no-preserve=mode ${crowdsecHub.hub} ${crowdsecDir}/config/hub
+        # the image's entrypoint refreshes only an index older than a day
+        touch ${crowdsecDir}/config/hub/.index.json
         ${lib.optionalString (cfg.crowdsecBouncer.whitelistCidrs != [ ]) ''
           install -d -m 0755 ${crowdsecDir}/config/parsers/s02-enrich
           install -m 0644 ${whitelistParser} ${crowdsecDir}/config/parsers/s02-enrich/homelab-whitelist.yaml
@@ -919,8 +940,6 @@ in {
 
     sops.secrets = {
       cloudflare-token = { };
-      # the bouncer plugin reads it inside traefik
-      crowdsec-bouncer-key = lib.mkIf cfg.crowdsecBouncer.enable { owner = "traefik"; };
     } // lib.genAttrs basicAuthSecrets (_: { restartUnits = [ "traefik-basic-auth.service" "traefik.service" ]; })
       // lib.optionalAttrs (anubisRoutes != { }) { anubis-ed25519-key = { group = "anubis"; mode = "0440"; }; };
     systemd.services.traefik-basic-auth = lib.mkIf (basicAuthRoutes != { }) {
