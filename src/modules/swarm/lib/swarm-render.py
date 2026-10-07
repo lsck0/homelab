@@ -20,7 +20,7 @@ and every env_file already inlined. This adds the homelab and enforces its polic
 - every overlay network is encrypted (ipsec between nodes); stateful services are pinned to the state node, one
   task, stopped before replaced and before rolled back; a failed update rolls back
 - every named volume belongs to a stateful service and is declared in the catalog `volumes` (backed up or not)
-- logging stays on the daemon's driver (modules/app-telemetry.nix), so every line reaches loki with its task name
+- logging stays on the daemon's driver (modules/app-telemetry), so every line reaches loki with its task name
 - every capability is dropped; a service gets back only what it names in cap_add from CAPS_ALLOWED
 - allowed: the keys listed below, nothing else. Refused: privileged settings, host namespaces, devices, host
   paths, the docker socket, an image that is not this app's own digest-pinned build or a digest-pinned catalog

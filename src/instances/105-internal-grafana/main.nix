@@ -2,7 +2,7 @@
 #
 # Doors: senders reach nginx, never a store. A push door takes one path per signal and sets the tenant from the
 # sender's address: every lab host writes the lab's, an app node only the tenants of the apps its cluster runs (its
-# relay names them, modules/app-telemetry.nix). The query doors serve reads to their grants only. The stores listen on
+# relay names them, modules/app-telemetry). The query doors serve reads to their grants only. The stores listen on
 # loopback, where grafana, the alert rules and the frontend intake reach them.
 { config, pkgs, lib, inventory, nasMountRo, site, catalog, lab, upstream, ... }:
 let
@@ -73,15 +73,6 @@ let
   ];
   # [.]: a literal dot that needs no backslash, which systemd's ExecStart and a promql string would each unescape
   monitoringUnitsRegex = "(${lib.concatStringsSep "|" monitoringUnits})[.]service";
-
-  # each push door's body cap: the largest burst its store admits from one tenant
-  pushBodyBytes = {
-    loki = lib.max limits.lab.logBurstBytes (limits.tenant.logBurstLines * limits.tenant.logLineBytes);
-    otlp = limits.tenant.traceBurstBytes;
-    pyroscope = limits.tenant.profileBurstBytes;
-  };
-  # tempo's otlp/grpc trace service, the only rpc the grpc door passes
-  otlpGrpcExport = "/opentelemetry.proto.collector.trace.v1.TraceService/Export";
 
   # the browser attributes kept: a route and a status explain a slow or failed request, the rest could be a person
   frontendSpanAttributes = [
@@ -187,7 +178,7 @@ let
       ];
     }
     {
-      # each node's log shipper: what it dropped per app above the app's budget (modules/app-telemetry.nix)
+      # each node's log shipper: what it dropped per app above the app's budget (modules/app-telemetry)
       job_name = config.homelab.appTelemetry.shipperJob;
       scrape_interval = appScrapeInterval;
       static_configs = map (node: { targets = [ "${node.ip}:${toString ports.promtail}" ]; labels.vm = vmName node; }) appNodes;
@@ -521,24 +512,13 @@ let
     }
     map $http_x_scope_orgid $read_tenant { "" ${telemetry.labTenant}; default $http_x_scope_orgid; }
   '';
-  # one door per signal: its paths to the store on loopback, with the sender's tenant; anything else 404s
-  pushDoor = { port, body, local, paths, grpc ? false }: {
-    listen = [{ addr = "0.0.0.0"; inherit port; }];
-    # grpc is http/2; in clear text nginx takes it by prior knowledge, which is what grpc clients send
-    extraConfig = "client_max_body_size ${toString body};" + lib.optionalString grpc "\nhttp2 on;";
-    locations = { "/".return = "404"; } // lib.genAttrs (map (path: "= ${path}") paths) (_: {
-      extraConfig = ''
-        limit_except POST { deny all; }
-        if ($push_tenant = "") { return 403; }
-      '' + (if grpc then ''
-        grpc_set_header ${telemetry.tenantHeader} $push_tenant;
-        grpc_pass grpc://${loopback}:${toString local};
-      '' else ''
-        proxy_set_header ${telemetry.tenantHeader} $push_tenant;
-        proxy_pass http://${loopback}:${toString local};
-      '');
-    });
-  };
+  # one door per signal: its paths to the store on loopback, with the sender's tenant
+  pushDoors = lib.mapAttrs' (name: door: lib.nameValuePair "${name}-push" (telemetry.doorVirtualHost {
+    inherit door;
+    address = "0.0.0.0";
+    tenant = "$push_tenant";
+    upstream = "${loopback}:${toString door.local}";
+  })) telemetry.pushDoors;
 in {
   homelab.textfiles = [ spotPriceFile alertsExportFile ];
 
@@ -839,7 +819,7 @@ in {
   services.nginx = {
     enable = true;
     appendHttpConfig = pushTenantMap;
-    virtualHosts = {
+    virtualHosts = pushDoors // {
       # reads only: no reader may forge a backup timestamp or a meter reading
       prometheus-read = {
         listen = [{ addr = "0.0.0.0"; port = ports.prometheus; }];
@@ -865,16 +845,6 @@ in {
             proxy_set_header ${telemetry.tenantHeader} $read_tenant;
           '';
         };
-      };
-      loki-push = pushDoor { port = ports.lokiPush; body = pushBodyBytes.loki; local = ports.lokiLocal; paths = [ "/loki/api/v1/push" ]; };
-      otlp-http = pushDoor { port = ports.otlpHttp; body = pushBodyBytes.otlp; local = ports.otlpHttpLocal; paths = [ "/v1/traces" ]; };
-      otlp-grpc = pushDoor { port = ports.otlpGrpc; body = pushBodyBytes.otlp; local = ports.otlpGrpcLocal; paths = [ otlpGrpcExport ]; grpc = true; };
-      # the legacy ingest api (pyroscope-rs, the template's agent) and the connect push api (alloy)
-      pyroscope-push = pushDoor {
-        port = ports.pyroscope;
-        body = pushBodyBytes.pyroscope;
-        local = ports.pyroscopeLocal;
-        paths = [ "/ingest" "/push.v1.PusherService/Push" ];
       };
     };
   };

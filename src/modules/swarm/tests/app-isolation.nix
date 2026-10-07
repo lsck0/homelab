@@ -169,7 +169,7 @@ pkgs.testers.runNixOSTest {
                      "127.0.0.1:${toString telemetry.ports.grafana}/api/health"):
             vm_105.succeed(f"curl -sf -m 10 http://{path} >/dev/null")
         vm_105.succeed("curl -sf -m 10 -X POST -H 'Content-Type: application/json' -H 'X-Scope-OrgID: " + TENANT["quiet"] + "' "
-                       "-d '{}' http://127.0.0.1:${toString telemetry.ports.pyroscope}/querier.v1.QuerierService/LabelNames >/dev/null")
+                       "-d '{}' http://127.0.0.1:${toString telemetry.ports.pyroscopeLocal}/querier.v1.QuerierService/LabelNames >/dev/null")
 
     def task_of(app):
         """the worker machine running the app's task and the container's id there; a task the swarm replaces after a
@@ -218,13 +218,13 @@ pkgs.testers.runNixOSTest {
                                                       "kind": 3, "startTimeUnixNano": str(now - 10**6), "endTimeUnixNano": str(now),
                                                       "attributes": attributes}]}]}]})
 
-    def push_spans(app, body, count):
-        """the body count times back to back from inside the app's task, with the tenant header render injected;
-        the http statuses"""
+    def push_spans(app, body, count, claimed=None):
+        """the body count times back to back from inside the app's task to its node's relay, naming the `claimed`
+        tenant if given (the relay names the app's own); the http statuses"""
         machine, cid = task_of(app)
+        claim = f"-H 'X-Scope-OrgID: {claimed}' " if claimed else ""
         curl = ("curl -s -m ${toString requestTimeoutS} -o /dev/null -w '%{http_code}\\n' -X POST -H 'Content-Type: application/json' "
-                "-H \"''${OTEL_EXPORTER_OTLP_HEADERS%%=*}: ''${OTEL_EXPORTER_OTLP_HEADERS#*=}\" "
-                "--data-binary @- http://${collector}:${toString telemetry.ports.otlpHttp}/v1/traces")
+                f"{claim}--data-binary @- ${telemetry.relayEndpoints.otlp-http}/v1/traces")
         command = f'body=$(cat); for i in $(seq {count}); do printf %s "$body" | {curl}; done'
         out = machine.succeed(f"docker exec -i {cid} sh -c {shlex.quote(command)} < {body_on(machine, body)}")
         return [int(code) for code in out.split()]
@@ -240,8 +240,7 @@ pkgs.testers.runNixOSTest {
         lines = max(1, size // (len(pad) + 16))
         command = (f"now=$(date +%s); seq 1 {lines} | sed 's/.*/f&_{pad};g& 1/' | "
                    "curl -s -m ${toString requestTimeoutS} -o /dev/null -w '%{http_code}' -X POST --data-binary @- "
-                   "-H \"X-Scope-OrgID: ''${OTEL_EXPORTER_OTLP_HEADERS#*=}\" "
-                   f"\"http://${collector}:${toString telemetry.ports.pyroscope}/ingest?name={app}.cpu&from=$((now-10))&until=$now&format=folded\"")
+                   f"\"http://${telemetry.relayEndpoints.pyroscope}/ingest?name={app}.cpu&from=$((now-10))&until=$now&format=folded\"")
         return int(in_task(app, command))
 
 
@@ -277,9 +276,8 @@ pkgs.testers.runNixOSTest {
         world.wait_until_succeeds(f"[ \"$({edge_request('quiet', '198.51.100.1', '%{http_code}')})\" = 200 ]", timeout=240)
         quiet_answers("deployed")
 
-    with subtest("every capability is dropped and the tenant is injected"):
+    with subtest("every capability is dropped"):
         assert in_task("noisy", "grep CapEff /proc/1/status").split()[1] == "0000000000000000"
-        assert in_task("quiet", "echo $OTEL_EXPORTER_OTLP_HEADERS").strip() == f"X-Scope-OrgID={TENANT['quiet']}"
 
     with subtest("positive controls: both apps' metrics, lines, spans and profiles arrive"):
         vm_105.wait_until_succeeds(prom_has('up{job="app-quiet-web"} == 1'), timeout=180)
@@ -293,6 +291,19 @@ pkgs.testers.runNixOSTest {
             assert push_profile(app, 64) == 200
         # one tenant cannot read another's
         vm_105.fail(tempo_has(TENANT["noisy"], traces["quiet"]))
+
+    with subtest("the relay names the sender's tenant: a claimed one lands in the app's own, a non-app sender is refused"):
+        spoofed = rng.randbytes(16).hex()
+        assert push_spans("quiet", span(spoofed, "quiet"), 1, claimed=TENANT["noisy"]) == [200]
+        vm_105.wait_until_succeeds(tempo_has(TENANT["quiet"], spoofed), timeout=120)
+        vm_105.fail(tempo_has(TENANT["noisy"], spoofed))
+        machine, cid = task_of("quiet")
+        assert machine.succeed("curl -s -o /dev/null -w '%{http_code}' -X POST -d '{}' "
+                               "${telemetry.relayEndpoints.otlp-http}/v1/traces").strip() == "403"
+        # the containers reach vm-105 through the relay alone
+        _, code = machine.execute(f"docker exec {cid} curl -s -m 5 -o /dev/null -w '%{{http_code}}' -X POST "
+                                  "http://${collector}:${toString telemetry.ports.otlpHttp}/v1/traces")
+        assert code.strip() == "000", code
 
     def flood_cpu():
         machine, cid, cgroup = cgroup_of("noisy")

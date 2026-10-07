@@ -27,8 +27,8 @@
 # Delete the replacement once a docker release programs a changed port in place (the swarm test's catalog edit).
 #
 # Containers on a worker leave through the node's address. Without DOCKER-USER they would speak nfs to the nas as
-# the node, read its tokens, or call any lab service; they get the internet and, when an app has telemetry, the
-# collector. The chain is replaced in one iptables-restore transaction and never removed, so a firewall restart or
+# the node, read its tokens, or call any lab service; they get the internet, and their telemetry goes to the node's
+# relay (modules/app-telemetry), not across the router. The chain is replaced in one iptables-restore transaction and never removed, so a firewall restart or
 # stop opens no window. A worker advertises what it holds for apps (catalog admission) as generic resources, which
 # render reserves per task, and runs every container in apps.slice, capped at the same memory.
 #
@@ -430,17 +430,12 @@ let
     '';
   };
 
-  # DOCKER-USER (see the header): the internet and, with telemetry, the collector; replaced in one transaction
-  telemetryOn = lib.any telemetry.sendsSignals (lib.attrValues apps);
-  collector = inventory.${telemetry.collectorVmid};
-  telemetryPorts = with telemetry.ports; [ otlpGrpc otlpHttp pyroscope ];
+  # DOCKER-USER (see the header): the internet only, telemetry goes to the node's relay; replaced in one transaction
   dockerUserRules = pkgs.writeText "docker-user.rules" (lib.concatLines ([
     "*filter"
     ":DOCKER-USER - [0:0]"
     "-A DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN"
-  ] ++ lib.optional telemetryOn
-    "-A DOCKER-USER -i docker_gwbridge -d ${collector.ip}/32 -p tcp -m multiport --dports ${lib.concatMapStringsSep "," toString telemetryPorts} -j RETURN"
-  ++ map (range: "-A DOCKER-USER -i docker_gwbridge -d ${range} -j DROP") privateRanges
+  ] ++ map (range: "-A DOCKER-USER -i docker_gwbridge -d ${range} -j DROP") privateRanges
   ++ [
     "-A DOCKER-USER -j RETURN"
     "COMMIT"
@@ -521,7 +516,7 @@ let
     '';
   };
 in {
-  imports = [ ../app-telemetry.nix ];
+  imports = [ ../app-telemetry ];
 
   options.homelab.swarm = {
     deployKey = lib.mkOption {
@@ -752,7 +747,7 @@ in {
         iptables-restore --noflush < ${dockerUserRules}
       '';
 
-      # container logs and metrics per app (modules/app-telemetry.nix)
+      # container logs and metrics per app (modules/app-telemetry)
       homelab.appTelemetry.enable = true;
 
       # what the worker holds for apps: the scheduler places reservations against it, the slice caps the containers

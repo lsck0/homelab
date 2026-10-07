@@ -1,10 +1,10 @@
 # Where the lab's telemetry goes, how it is labeled, and the shape of an alert, defined once for every host.
 #
-# collector, ports, urls: vm-105 collects metrics, logs, traces and profiles. Senders address its doors (urls), which
-# set the tenant from the sender's address and serve nothing else; the stores listen on loopback (the *Local ports and
-# tempo), where only vm-105 itself queries them. Readers get the query doors (prometheus, loki), each guarded to its
-# named readers. The apps' containers never reach vm-105: they send to the relay on their own node
-# (modules/app-telemetry.nix), which names the app's tenant.
+# collector, ports, urls: vm-105 collects metrics, logs, traces and profiles. Senders address its push doors
+# (pushDoors, rendered by doorVirtualHost), which set the tenant from the sender's address and serve nothing else; the
+# stores listen on loopback (the *Local ports and tempo), where only vm-105 itself queries them. Readers get the query
+# doors (prometheus, loki), each guarded to its named readers. The apps' containers never reach vm-105: they send to
+# the relay on their own node (modules/app-telemetry), the same doors, naming the tenant of the container's stack.
 #
 # vmName: the readable `vm` label of a guest, "router" for the router. The short name of "134-internal-jellyfin" is
 # "jellyfin"; when two guests share it, the zone tells them apart (traefik-internal, traefik-external), and when they
@@ -12,7 +12,7 @@
 # vm-104's stats-sync names guests by it, so Grafana and the TRMNL panel agree.
 #
 # swarmTaskPatterns: swarm names a task's container <stack>_<service>.<slot>.<task id>. The regexes cut the task id
-# (a new one per deploy and restart) and derive service and stack, for modules/base (promtail), modules/app-telemetry.nix
+# (a new one per deploy and restart) and derive service and stack, for modules/base (promtail), modules/app-telemetry
 # and the cadvisor scrape on vm-105.
 #
 # alertType: one Grafana rule, query A thresholded by C. An instance declares the rules over its own metrics as
@@ -54,9 +54,32 @@ let
     promtail = 9080;
   };
 
-  # docker's default bridge address, the same on every node (modules/app-telemetry.nix pins it): a task reaches its
+  # docker's default bridge address, the same on every node (modules/app-telemetry pins it): a task reaches its
   # own node's relay there whatever node it runs on
   relayAddress = "172.17.0.1";
+  relayPrefixLength = 16;
+
+  tenantHeader = "X-Scope-OrgID";
+  limits = import ./limits { inherit lib; };
+
+  # each door: the paths it passes to its store, the largest burst the store admits from one tenant
+  pushDoors = {
+    loki = {
+      port = ports.lokiPush; local = ports.lokiLocal; grpc = false; paths = [ "/loki/api/v1/push" ];
+      bodyBytes = lib.max limits.lab.logBurstBytes (limits.tenant.logBurstLines * limits.tenant.logLineBytes);
+    };
+    otlpHttp = { port = ports.otlpHttp; local = ports.otlpHttpLocal; grpc = false; paths = [ "/v1/traces" ]; bodyBytes = limits.tenant.traceBurstBytes; };
+    # tempo's otlp/grpc trace service, the only rpc the door passes
+    otlpGrpc = {
+      port = ports.otlpGrpc; local = ports.otlpGrpcLocal; grpc = true; bodyBytes = limits.tenant.traceBurstBytes;
+      paths = [ "/opentelemetry.proto.collector.trace.v1.TraceService/Export" ];
+    };
+    # the legacy ingest api (pyroscope-rs, the template's agent) and the connect push api (alloy)
+    pyroscope = {
+      port = ports.pyroscope; local = ports.pyroscopeLocal; grpc = false; bodyBytes = limits.tenant.profileBurstBytes;
+      paths = [ "/ingest" "/push.v1.PusherService/Push" ];
+    };
+  };
 
   # a notification groups the alerts of one category: one header, one line per alert
   categories = {
@@ -127,7 +150,27 @@ let
     };
   };
 in {
-  inherit collectorVmid ports categories alertType probeType relayAddress;
+  inherit collectorVmid ports categories alertType probeType relayAddress relayPrefixLength pushDoors tenantHeader;
+
+  # a push door as an nginx virtual host: its paths to `upstream` (host:port) with the tenant nginx variable `tenant`
+  # names, a request naming none refused, anything else 404
+  doorVirtualHost = { door, address, tenant, upstream }: {
+    listen = [{ addr = address; inherit (door) port; }];
+    # grpc is http/2; in clear text nginx takes it by prior knowledge, which is what grpc clients send
+    extraConfig = "client_max_body_size ${toString door.bodyBytes};" + lib.optionalString door.grpc "\nhttp2 on;";
+    locations = { "/".return = "404"; } // lib.genAttrs (map (path: "= ${path}") door.paths) (_: {
+      extraConfig = ''
+        limit_except POST { deny all; }
+        if (${tenant} = "") { return 403; }
+      '' + (if door.grpc then ''
+        grpc_set_header ${tenantHeader} ${tenant};
+        grpc_pass grpc://${upstream};
+      '' else ''
+        proxy_set_header ${tenantHeader} ${tenant};
+        proxy_pass http://${upstream};
+      '');
+    });
+  };
 
   urls = {
     prometheus = urlOf ports.prometheus;
@@ -172,7 +215,6 @@ in {
   stackLabel = "com.docker.stack.namespace";
 
   # the prefix keeps the apps apart from the lab's own tenant
-  tenantHeader = "X-Scope-OrgID";
   tenantOf = app: "app-${app}";
   # an app sending traces or profiles: its containers reach the relay, and its tenant exists on vm-105
   sendsSignals = a: a.off.traces == null || a.off.profiles == null;

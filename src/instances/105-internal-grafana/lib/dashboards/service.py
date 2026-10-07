@@ -75,7 +75,7 @@ WEB_VITAL_LABEL = "web_vital_name"
 # browser log records the sdk marks as errors (loki keeps severity_text as structured metadata)
 BROWSER_ERRORS = "(?i)error|fatal"
 WEB_VITAL_QUANTILE = 0.75
-# promtail's limit stage counts its drops per value of its by_label_name (modules/app-telemetry.nix)
+# promtail's limit stage counts its drops per value of its by_label_name (modules/app-telemetry)
 LOG_DROPS = "logentry_dropped_lines_by_label_total"
 # tempo and pyroscope count per tenant what they receive and refuse
 TRACE_BYTES = "tempo_distributor_bytes_received_total"
