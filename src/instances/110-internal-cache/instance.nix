@@ -1,5 +1,5 @@
 # build caches: attic (nix) + sccache redis
-{ net, ... }: {
+{ config, ... }: {
   vm = {
     bootPhase = "dev";
     # 63 MiB peak over 7d; redis caps itself at 256mb
@@ -8,13 +8,16 @@
   };
 
   grants = [
-    { from = [ "117" ]; tcp = [ net.ports.redis ]; why = "the forgejo runner's ci jobs share sccache (SCCACHE_REDIS)"; }
+    { from = [ "117" ]; tcp = [ config.services.sccache.port ]; why = "the forgejo runner's ci jobs share sccache (SCCACHE_REDIS)"; }
   ];
 
-  # sccache speaks redis, not http, and no route serves it
-  probes.sccache = { port = net.ports.redis; protocol = "tcp"; };
-
   services = {
+    # sccache speaks redis: a lab-only tcp service at redis's own port
+    sccache = {
+      protocol = "tcp";
+      port = 6379;
+      off.homepage = "no web ui";
+    };
     attic = {
       port = 8080;
       off = {

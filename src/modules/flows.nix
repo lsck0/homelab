@@ -71,6 +71,12 @@ let
   backendIdsOf = r: lib.filter running (if r.vmid != null then [ (toString r.vmid) ] else (clusterOf r.app).workerIds);
 
   httpRoutes = lib.attrValues (catalog.internal // catalog.external);
+  l4Backends = lib.filter (b: b.addresses != [ ]) (map (r: {
+    proto = r.protocol; port = r.publicPort; targetPort = r.port;
+    addresses = map net.ipOf (backendIdsOf r);
+    inherit (r) host srv off;
+    why = "${r.protocol} ${net.fqdn r.host}";
+  }) (lib.attrValues catalog.l4));
   # every guest app tasks run on: the shared swarm's workers and each guest-placed app's own guest
   appNodeIds = lib.unique (lib.concatMap (c: c.workerIds) (lib.attrValues catalog.clusters));
   # the app guests outside the apps zone, by zone: their telemetry crosses the router like the workers'
@@ -114,12 +120,8 @@ let
     why = "vm-105 scrapes ${key}'s exporters";
   }) (lib.filterAttrs (_: s: s.vmid != null && s.on.metrics && s.metrics != { }) catalog.services);
 
-  # the prober's checks of a guest's own ports: what an instance probes (instance.nix `probes`), a lab-only tcp route
-  probeGrants = lib.mapAttrsToList (name: p: {
-    from = [ collector ]; to = toString p.vmid; tcp = [ p.port ];
-    why = "vm-105 probes ${name}";
-  }) lab.probes
-  ++ map (r: {
+  # the prober connects to a lab-only tcp route at its guest; an http route it checks through the ingress
+  probeGrants = map (r: {
     from = [ collector ]; to = toString r.vmid; tcp = [ r.port ];
     why = "vm-105 probes the lab-only tcp route ${r.host}";
   }) (lib.filter (r: r.vmid != null && r.protocol == "tcp" && r.publicPort == null && r.off.probe == null) (lib.attrValues catalog.l4));
@@ -279,12 +281,9 @@ in
       host = null; srv = null; why = "every public route";
       off = { inflightLimit = "the edge limits every client itself"; accessLog = "traefik logs every request"; };
     }
-  ]
-  # every tcp and udp route (an instance service's or an app's) to every guest answering it, while one runs
-  ++ lib.filter (f: f.addresses != [ ]) (map (r: {
-    proto = r.protocol; port = r.publicPort; targetPort = r.port;
-    addresses = map net.ipOf (backendIdsOf r);
-    inherit (r) host srv off;
-    why = "${r.protocol} ${net.fqdn r.host}";
-  }) (lib.attrValues catalog.l4));
+  ] ++ lib.filter (b: b.port != null) l4Backends;
+
+  # every tcp and udp route (an instance service's or an app's) at every guest answering it, while one runs; the
+  # router names it inside the lab at these, and forwards it from the house when it has a publicPort
+  inherit l4Backends;
 }

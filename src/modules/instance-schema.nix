@@ -71,8 +71,8 @@ let
   serviceType = types.submodule ({ name, config, ... }: {
     config = {
       off.frontend = lib.mkDefault "a nixos service's own ui sends no browser telemetry";
-      # the probers check the backend itself, not the sso portal in front of it
-      health = lib.mkDefault config.path;
+      # the probers check the backend itself, not the sso portal in front of it; a tcp or udp service has no path
+      health = lib.mkDefault (if config.protocol == "http" then config.path else null);
     };
     options = service.exposureOptions { inherit name zone; features = service.protectionFeatures ++ service.telemetryFeatures; } // {
       homepage = mkOption {
@@ -215,11 +215,6 @@ in {
       type = types.attrsOf telemetry.alertType;
       default = { };
       description = "Grafana rule uid -> a rule over this guest's own metrics or logs (modules/telemetry.nix alertType); vm-105 provisions it.";
-    };
-    probes = mkOption {
-      type = types.attrsOf telemetry.probeType;
-      default = { };
-      description = "Name -> a port of this guest vm-105 probes besides its routes (a tcp service no route serves).";
     };
     roles = mkOption {
       type = types.listOf (types.strMatching "[a-z][a-z0-9-]*");

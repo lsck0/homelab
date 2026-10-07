@@ -58,9 +58,7 @@ let
     swarmGossip = 7946;
     proxmoxApi = 8006;
     nodeExporter = 9100;
-    redis = 6379;
     traefikMetrics = 8082;
-    minecraft = 25565;
     wireguard = 51820;
   };
 

@@ -97,7 +97,7 @@ let
   installHosts = lib.attrNames (import ../../modules/install-hosts.nix);
   forwardHosts = lib.filter (h: h != null) (map (f: f.host) flows.portForwards);
   # names that skip the ingresses
-  directHosts = { smb = net.ipOf (toString lab.routes.nas.vmid); sccache = net.ipOf (toString lab.routes.attic.vmid); };
+  directHosts = { smb = net.ipOf (toString lab.routes.nas.vmid); };
 
   # proxied unless a route opts out; install lines, the wireguard endpoint and port forwards are raw by nature
   routeHosts = side: lib.mapAttrsToList (_: r: { inherit (r) host; proxied = r.off.cloudflare == null; }) catalog.${side};
@@ -111,8 +111,8 @@ let
     ++ map (h: { name = net.fqdn h; proxied = false; }) rawHosts));
 
   hostLines = ip: names: lib.concatMapStrings (h: "      ${ip} ${net.fqdn h}\n") names;
-  # the forwards a name leads to: inside the lab it resolves straight to the backend
-  hostForwards = lib.filter (f: f.host != null) flows.portForwards;
+  # a tcp or udp route's name: inside the lab it resolves straight to the backend
+  hostForwards = flows.l4Backends;
 
   # blocky on loopback, coredns' upstream for everything outside the lab domain
   blockyAddress = "127.0.0.1:5335";

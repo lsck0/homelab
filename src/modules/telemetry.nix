@@ -118,16 +118,8 @@ let
       description = mkOption { type = types.str; description = "What it means and the first command to run."; };
     };
   };
-
-  probeType = types.submodule {
-    options = {
-      port = mkOption { type = types.port; description = "The port on the guest's own address."; };
-      protocol = mkOption { type = types.enum [ "http" "tcp" ]; default = "http"; description = "http: any answer below 500 is up; tcp: a connect."; };
-      path = mkOption { type = types.strMatching "/.*"; default = "/"; description = "http: the path probed."; };
-    };
-  };
 in {
-  inherit collectorVmid ports categories alertType probeType relayAddress;
+  inherit collectorVmid ports categories alertType relayAddress;
 
   urls = {
     prometheus = urlOf ports.prometheus;

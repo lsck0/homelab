@@ -212,16 +212,9 @@ let
     vm = vmName node;
     target = "${node.ip}:${toString r.port}";
   }) (lib.filterAttrs (_: r: r.protocol == "tcp" && r.off.probe == null && (r.vmid == null || awake (guest r.vmid))) catalog.l4);
-  # what an instance probes besides its routes (instance.nix `probes`), at its own address
-  instanceProbes = lib.mapAttrsToList (name: p: {
-    inherit name;
-    inherit (p) protocol;
-    vm = vmName (guest p.vmid);
-    target = if p.protocol == "http" then "http://${(guest p.vmid).ip}:${toString p.port}${p.path}" else "${(guest p.vmid).ip}:${toString p.port}";
-  }) (lib.filterAttrs (_: p: awake (guest p.vmid)) lab.probes);
   # every third-party service the lab depends on (modules/upstream), one alert each
   upstreamJob = "upstream";
-  probesOf = protocol: lib.filter (p: p.protocol == protocol) instanceProbes ++ (if protocol == "http" then httpProbes else tcpProbes);
+  probesOf = protocol: if protocol == "http" then httpProbes else tcpProbes;
   probeJob = protocol: {
     job_name = "blackbox-${protocol}";
     metrics_path = "/probe";
@@ -477,10 +470,10 @@ let
   in {
     name = key;
     routes = boardRoutes "internal" (routesIn catalog.internal) ++ boardRoutes "external" (routesIn catalog.external);
-    forwards = if routesIn catalog.l4 == { } || router == null then null else {
+    forwards = if routesIn catalog.forwarded == { } || router == null then null else {
       host = router.name;
       loki = "loki";
-      routes = lib.mapAttrsToList (name: r: { inherit name; inherit (r) protocol; port = r.publicPort; }) (routesIn catalog.l4);
+      routes = lib.mapAttrsToList (name: r: { inherit name; inherit (r) protocol; port = r.publicPort; }) (routesIn catalog.forwarded);
     };
     deploys = app;
     idle = app && s.idle.stopAfter != null;

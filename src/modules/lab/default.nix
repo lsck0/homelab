@@ -25,7 +25,7 @@
 #                                 # its own token dir and those of the tokens it reads (lab.tokenReads."140")
 #   lab.nasClients."10.100.0.140" # the same of every powered guest, by address: what vm-109 exports
 #   lab.roles.collector           # "105": the vmid of the one instance declaring a role (instance.nix `roles`)
-#   lab.alerts.backup_stale       # an instance's own alert rule (instance.nix `alerts`) plus its vmid; lab.probes alike
+#   lab.alerts.backup_stale       # an instance's own alert rule (instance.nix `alerts`) plus its vmid
 #   lab.upstreams.aur             # { url; } a third-party service the lab depends on (src/lab/upstreams.nix, modules/upstream)
 #
 # problems: every broken lab-wide rule (zones.json against the instances, vmid ranges, vm shapes, duplicate names),
@@ -168,9 +168,6 @@ let
   # the router is named by its hostname in proxmox; every guest by its folder
   nameOf = i: if i.zone == routerZone then i.config.hostName else i.name;
 
-  # enabled: the tri-state string terraform and the scripts still compare, until they read powered and idle
-  enabledOf = i: if i.config.vm.power == "off" then "false" else if i.config.idle.stopAfter != null then "onDemand" else "true";
-
   inventory = lib.mapAttrs (_: i: let vm = i.config.vm; in addressOf i // {
     name = nameOf i;
     type = i.zone;
@@ -178,8 +175,6 @@ let
     inherit (vm) privileged features;
     powered = vm.power == "on";
     idle = i.config.idle.stopAfter;
-    enabled = enabledOf i;
-    cooldown = i.config.idle.stopAfter;
   }) instances;
 
   net = import ../net.nix { inherit lib inventory site; };
@@ -224,11 +219,9 @@ let
   secrets = lib.listToAttrs (map (e: lib.nameValuePair e.name { inherit (e) kind; vmid = idOf e.i; }) secretEntries);
   roleEntries = lib.concatMap (i: map (name: { inherit name i; }) i.config.roles) ordered;
   roles = lib.listToAttrs (map (e: lib.nameValuePair e.name e.i.id) roleEntries);
-  # an instance's own rules and probes, by grafana uid and probe name, each with the instance's vmid
-  ownedOf = field: lib.concatMap (i: lib.mapAttrsToList (name: v: { inherit name i v; }) i.config.${field}) ordered;
-  alertEntries = ownedOf "alerts";
-  probeEntries = ownedOf "probes";
-  withVmid = entries: lib.listToAttrs (map (e: lib.nameValuePair e.name (e.v // { vmid = idOf e.i; })) entries);
+  # an instance's own rules by grafana uid, each with the instance's vmid
+  alertEntries = lib.concatMap (i: lib.mapAttrsToList (name: v: { inherit name i v; }) i.config.alerts) ordered;
+  alerts = lib.listToAttrs (map (e: lib.nameValuePair e.name (e.v // { vmid = idOf e.i; })) alertEntries);
 
   # the tokens each guest reads: those its instance.nix names, and by role the dashboard every widget's token and
   # the operator every one
@@ -283,7 +276,7 @@ let
   bootLast = lib.mapAttrs (_: is: lib.foldl' lib.max 0 (map idOf is))
     (lib.groupBy (i: toString i.config.vm.bootOrder) (lib.filter (i: inventory.${i.id}.powered && inventory.${i.id}.idle == null) instanceList));
   terraformOf = id: i: let vm = i.config.vm; inv = inventory.${id}; in {
-    inherit (inv) name type enabled powered idle kind privileged features ip prefix gateway;
+    inherit (inv) name type powered idle kind privileged features ip prefix gateway;
     memory = vm.memoryMiB;
     balloon = vm.balloonMiB;
     inherit (vm) cores machine;
@@ -346,14 +339,11 @@ let
     ++ lib.concatMap (i: map (t: "src/${i.source}: tokenReads names ${t}, which no instance mints")
       (lib.filter (t: !(tokens ? ${t})) i.config.tokenReads)) instanceList
     ++ duplicates "alert" alertEntries
-    ++ duplicates "probe" probeEntries
     ++ map (p: "src/apps: ${p}") catalog.problems;
 
   result = {
     inherit site instances inventory appsCatalog catalog homepage oidc grants tokens tokenReads tokenShare egress secrets roles
-      shares nasClients problems;
-    alerts = withVmid alertEntries;
-    probes = withVmid probeEntries;
+      shares nasClients problems alerts;
     upstreams = import (root + "/lab/upstreams.nix");
     withApps = f: import ./. { inherit lib root; apps = folders: f (apps folders); };
     # zone: from: the address a grant's source stands for in a guard of that zone
