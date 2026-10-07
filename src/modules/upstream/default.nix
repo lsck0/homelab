@@ -33,12 +33,15 @@ let
       fi
       name=$1
       shift
-      case $name in
-        ${lib.concatStrings (lib.mapAttrsToList (n: u: ''
-          ${n}) url=${lib.escapeShellArg u.url} ;;
-        '') lab.upstreams)}
-        *) echo "upstream: no upstream $name in src/lab/upstreams.nix" >&2; exit 2 ;;
-      esac
+      # inline, not a store file: archbuild runs this script inside its containers
+      url=
+      while read -r upstream upstream_url; do
+        [ "$upstream" != "$name" ] || url=$upstream_url
+      done <<'UPSTREAMS'
+      ${lib.concatStrings (lib.mapAttrsToList (n: u: "${n} ${u.url}\n") lab.upstreams)}
+      UPSTREAMS
+      [ -n "$url" ] || { echo "upstream: no upstream $name in src/lab/upstreams.nix" >&2; exit 2; }
+      unavailable=${toString unavailable}
       attempts=''${UPSTREAM_ATTEMPTS:-${toString attempts}}
       backoff=''${UPSTREAM_BACKOFF_S:-${toString backoffS}}
       limit=''${UPSTREAM_TIMEOUT_S:-${toString attemptTimeoutS}}
@@ -69,7 +72,7 @@ let
         exit "$status"
       fi
       echo "$name unavailable ($url $answer), keeping the last state" >&2
-      exit ${toString unavailable}
+      exit "$unavailable"
     '';
   };
 in {
