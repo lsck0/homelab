@@ -345,7 +345,7 @@ let
     uid = telemetry.homelabDashboardUid;
     inherit nodeJob guestsExpectedUp edgeHost;
     ssoHost = "vm-${toString lab.routes.authelia.vmid}";
-    nasVm = vmName (guest lab.routes.nas.vmid);
+    nasVm = vmName (guest lab.roles.nas);
     hostVm = proxmoxVm;
   };
   # energy.py takes no config, every query is energy_model's

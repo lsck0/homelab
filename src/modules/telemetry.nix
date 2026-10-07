@@ -27,7 +27,9 @@ let
   # CONSTANTS
   # -----------------------------------------------------------------------------
 
-  collectorVmid = "105";
+  # the guest declaring the role (instance.nix `roles`); modules/lab refuses a role declared twice
+  collectorVmid = lib.findFirst (id: lib.elem "collector" inventory.${id}.roles)
+    (throw "modules/telemetry.nix: no guest declares the collector role") (lib.attrNames inventory);
 
   ports = {
     grafana = 80;

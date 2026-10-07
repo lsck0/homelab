@@ -97,7 +97,7 @@ let
   installHosts = lib.attrNames (import ../../modules/install-hosts.nix);
   forwardHosts = lib.filter (h: h != null) (map (f: f.host) flows.portForwards);
   # names that skip the ingresses
-  directHosts = { smb = net.ipOf (toString lab.routes.nas.vmid); };
+  directHosts = { smb = net.ipOf lab.roles.nas; };
 
   # proxied unless a route opts out; install lines, the wireguard endpoint and port forwards are raw by nature
   routeHosts = side: lib.mapAttrsToList (_: r: { inherit (r) host; proxied = r.off.cloudflare == null; }) catalog.${side};

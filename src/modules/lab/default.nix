@@ -13,7 +13,7 @@
 # that could go stale.
 #
 #   lab = import ./modules/lab { inherit lib; };
-#   lab.inventory."134"           # { name; type; kind; privileged; features; ip; prefix; gateway; powered; idle; }
+#   lab.inventory."134"           # { name; type; kind; privileged; features; ip; prefix; gateway; powered; idle; roles; }
 #                                 # powered: vm.power is on; idle: idle.stopAfter, null for a guest that never idles
 #   lab.instances."134"           # { id; zone; name; dir; main; source; config; }, config the evaluated instance.nix
 #   lab.routes.jellyfin           # an instance service's route with every field (modules/service.nix), plus vmid
@@ -175,6 +175,7 @@ let
     inherit (vm) privileged features;
     powered = vm.power == "on";
     idle = i.config.idle.stopAfter;
+    inherit (i.config) roles;
   }) instances;
 
   net = import ../net.nix { inherit lib inventory site; };
