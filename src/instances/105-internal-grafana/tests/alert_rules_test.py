@@ -200,7 +200,7 @@ tests += [
         ],
     },
     {
-        "name": "hardware: a thrashing guest, an nvme warning and a hot nvme page; a busy but healthy guest does not",
+        "name": "hardware: a thrashing guest, an nvme warning, a hot nvme and a fresh smartd warning page; a busy guest and an old warning do not",
         "interval": "1m",
         "input_series": [
             {"series": 'node_pressure_memory_stalled_seconds_total{vm="traefik-internal"}', "values": "0+30x30"},
@@ -208,6 +208,11 @@ tests += [
             {"series": 'nvme_critical_warning{vm="proxmox",device="nvme1n1"}', "values": "0 0 4x10"},
             {"series": 'nvme_temperature_celsius{vm="proxmox",device="nvme1n1"}', "values": "75x30"},
             {"series": 'nvme_temperature_celsius{vm="proxmox",device="nvme0n1"}', "values": "40x30"},
+            # promtool's clock starts at 0: a warning stamped at 60 s is fresh, one stamped a week before is not
+            {"series": 'homelab_smartd_warning_timestamp_seconds{vm="proxmox",device="/dev/nvme1",type="Temperature"}',
+             "values": "60x30"},
+            {"series": 'homelab_smartd_warning_timestamp_seconds{vm="proxmox",device="/dev/nvme0",type="ErrorCount"}',
+             "values": "-604800x30"},
         ],
         "alert_rule_test": [
             {"eval_time": "20m", "alertname": "memory_pressure", "exp_alerts": [expect("memory_pressure", vm="traefik-internal")]},
@@ -215,6 +220,8 @@ tests += [
              "exp_alerts": [expect("nvme_critical_warning", vm="proxmox", device="nvme1n1")]},
             {"eval_time": "20m", "alertname": "nvme_temperature",
              "exp_alerts": [expect("nvme_temperature", vm="proxmox", device="nvme1n1")]},
+            {"eval_time": "5m", "alertname": "smartd_warning",
+             "exp_alerts": [expect("smartd_warning", vm="proxmox", device="/dev/nvme1", type="Temperature")]},
         ],
     },
     {

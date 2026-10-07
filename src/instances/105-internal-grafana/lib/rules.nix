@@ -261,6 +261,17 @@ let
       summary = "{{ $labels.device }} on {{ $labels.vm }}: critical warning {{ $values.A.Value }}";
       description = "The drive raised a critical warning. Every guest disk and the local backup repository share this volume group: check the off-site copy, then `nvme smart-log /dev/{{ $labels.device }}` on the host.";
     };
+    smartd_warning = {
+      title = "Disk warning";
+      category = "storage";
+      # pve-install.sh's smartd hook stamps each warning; smartd repeats a standing one daily
+      expr = "time() - max by (vm, device, type) (homelab_smartd_warning_timestamp_seconds)";
+      op = "lt"; threshold = nightlyStaleSeconds;
+      for = "0m";
+      severity = "critical"; telegram = true;
+      summary = "{{ $labels.device }} on {{ $labels.vm }}: smartd warns ({{ $labels.type }})";
+      description = "smartd saw a failed self-test, a failing attribute or a new error log entry. Check the off-site copy, then `smartctl -a {{ $labels.device }}` on the host.";
+    };
     nvme_temperature = {
       title = "NVMe running hot";
       category = "storage";
