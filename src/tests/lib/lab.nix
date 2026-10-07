@@ -31,7 +31,7 @@
 # keyed on them run as in the lab; `nas = true` mounts them for real from a `nas` node, which exports exactly what
 # the test's guests mount (109-internal-nas/lib/nas-exports.nix over lib/nas-clients.nix, lib/nas-mounts.nix).
 #
-# testDefaults: what every vm test takes, `imports = [ lab.testDefaults ];` next to its name.
+# testDefaults: what every vm test takes; the flake extends each check with it.
 #
 # apps: a test's own app folders, the production ones passed through it (modules/lab withApps): every fact follows,
 # the workers its fixture apps need included. withApps does the same again (a specialisation's edited catalog).
@@ -73,7 +73,7 @@ let
 in rec {
   inherit (facts) inventory site nasClients;
   inherit pki labprobe vlans;
-  testDefaults.globalTimeout = globalTimeoutS;
+  testDefaults.globalTimeout = lib.mkDefault globalTimeoutS;
   secretValues = import ./secret-values.nix { inherit pkgs; };
   images = import ./images.nix { inherit pkgs; };
   # the typed apps and the catalog every node of the test reads (modules/lab, modules/catalog.nix)
