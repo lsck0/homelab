@@ -323,8 +323,23 @@ resource "proxmox_virtual_environment_firewall_options" "guest" {
   radv = false
 }
 
+# proxmox fills its `management` ipset with the host's local network and admits ssh and the api from it ahead of the
+# host rules (the nftables backend does so before them); a nomatch of the lan leaves both to the rules below
+resource "proxmox_virtual_environment_firewall_ipset" "management" {
+  name    = "management"
+  comment = "no implicit management sources: ssh and the api follow the host rules"
+  cidr {
+    name    = local.site.lan.subnet
+    nomatch = true
+  }
+}
+
 resource "proxmox_virtual_environment_cluster_firewall" "datacenter" {
-  depends_on = [proxmox_virtual_environment_firewall_options.guest, proxmox_virtual_environment_firewall_rules.host]
+  depends_on = [
+    proxmox_virtual_environment_firewall_options.guest,
+    proxmox_virtual_environment_firewall_rules.host,
+    proxmox_virtual_environment_firewall_ipset.management,
+  ]
 
   enabled = true
   # arp and mac filtering run in ebtables
@@ -333,7 +348,7 @@ resource "proxmox_virtual_environment_cluster_firewall" "datacenter" {
   output_policy = "ACCEPT"
 }
 
-# in order: proxmox's own management rules, which follow these, would admit the api from the whole lan
+# in order; proxmox's implicit management sources are emptied above (ipset management)
 resource "proxmox_virtual_environment_firewall_rules" "host" {
   rule {
     type    = "in"

@@ -523,7 +523,15 @@ fi
 tfstate_lock_release
 
 # the anti-spoofing every source-address guard of the lab relies on (terraform/lib.tf FIREWALL)
-"${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "pve-firewall status" | grep -qx 'Status: enabled/running' \
+# the nftables backend (host.fw `nftables: 1`) enforces through proxmox-firewall, and pve-firewall then always reports
+# pending changes
+# shellcheck disable=SC2016 # expanded on the host
+"${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" '
+  if grep -qs "^nftables: *1" "/etc/pve/nodes/$(hostname)/host.fw"; then
+    systemctl is-active -q proxmox-firewall && nft list table inet proxmox-firewall >/dev/null
+  else
+    pve-firewall status | grep -qx "Status: enabled/running"
+  fi' \
   || { echo "ERROR: the Proxmox firewall is not running: every guest can take a neighbour's address."; DEPLOY_FAILURE=1; }
 
 # what terraform's token may not set (root@pam only): lxc features (a change restarts the container) and lxc onboot

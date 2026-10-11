@@ -12,7 +12,11 @@ let
   lanSubnet = "\${local.site.lan.subnet}";
   apiSources = "\${join(\",\", concat(local.operators, [local.site.lan.router]))}";
   operators = [ "\${local.site.lan.workstation}" "\${local.site.lan.notebook}" ];
-  datacenterAfter = [ "\${proxmox_virtual_environment_firewall_options.guest}" "\${proxmox_virtual_environment_firewall_rules.host}" ];
+  datacenterAfter = [
+    "\${proxmox_virtual_environment_firewall_options.guest}"
+    "\${proxmox_virtual_environment_firewall_rules.host}"
+    "\${proxmox_virtual_environment_firewall_ipset.management}"
+  ];
 
   law = pkgs.writeText "terraform-law.jq" ''
     .resource as $r
@@ -20,6 +24,7 @@ let
     | ($r.proxmox_virtual_environment_firewall_options.guest[0]) as $guest
     | ($r.proxmox_virtual_environment_firewall_rules.host[0].rule) as $rules
     | ([.locals[] | select(has("operators")) | .operators][0]) as $operators
+    | ([$r.proxmox_virtual_environment_firewall_ipset.management[0].cidr[]? | select(.nomatch == true) | .name]) as $unmanaged
     | [
         (if .provider.proxmox[0] | has("insecure") then "the provider skips tls verification of the api" else empty end),
         (if .terraform[0].backend.local[0] != {} then "the backend names a path: the state belongs outside the flake tree" else empty end),
@@ -40,6 +45,8 @@ let
         (if ($rules | map(select(.dport == "${apiPort}")) | map({action, source}))
             != [{action: "ACCEPT", source: ${builtins.toJSON apiSources}}, {action: "DROP", source: null}]
           then "the api is not open to the operators and the router alone, then dropped" else empty end),
+        (if $unmanaged != ["${lanSubnet}"]
+          then "proxmox's implicit management set still admits ssh and the api from the whole lan" else empty end),
         ($rules[] | select(.action == "ACCEPT" and .source == null) | "a host rule accepts \(.proto) \(.dport) from everyone")
       ]
   '';
@@ -50,6 +57,7 @@ let
     ''.resource.proxmox_virtual_environment_cluster_firewall.datacenter[0].enabled = false''
     ''.resource.proxmox_virtual_environment_cluster_firewall.datacenter[0].input_policy = "ACCEPT"''
     ''.resource.proxmox_virtual_environment_cluster_firewall.datacenter[0].depends_on = []''
+    ''del(.resource.proxmox_virtual_environment_firewall_ipset.management)''
     ''.resource.proxmox_virtual_environment_firewall_options.guest[0].ipfilter = false''
     ''.resource.proxmox_virtual_environment_container.ct[0].network_interface[0].firewall = false''
     ''.resource.proxmox_virtual_environment_vm.vm[0].network_device[0].firewall = true''

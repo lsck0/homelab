@@ -150,8 +150,10 @@ Terraform (`src/terraform/lib.tf`, FIREWALL) keeps the datacenter firewall on: e
 its own address and mac (the router's nics are exempt), and the host drops input its rules do not name. It admits
 ssh from the house lan, the api and web ui (8006) from `lan.workstation`, `lan.notebook` and the router (the
 ingresses, the homepage, hermes and grafana reach it masqueraded as the router), node exporter from the router and
-ping from the lan. `sync.sh` refuses to run from any other address and fails while `pve-firewall status` is not
-`enabled/running`.
+ping from the lan; Proxmox's implicit `management` sources are emptied (ipset `management`, a nomatch of the lan),
+so its own rules admit nothing ahead of these. `sync.sh` refuses to run from any other address and fails while the
+firewall does not enforce: `pve-firewall status` `enabled/running`, or with the nftables backend (`nftables: 1` in the
+host's options) `proxmox-firewall` active with its table loaded.
 
 Turning it on the first time (the generation that brings it):
 
