@@ -29,10 +29,13 @@ Everything else with `terminal` on the host: `ssh 192.168.178.200 <cmd>`.
 - Console when SSH is dead: `qm guest exec <id> -- <cmd>` (QEMU guest agent) or `qm terminal <id>`.
 - Storage: `pvesm status`; disk health `smartctl -a /dev/sda` (also scraped: debian's smartmon and nvme collectors,
   textfile dir `/var/lib/prometheus/node-exporter`).
-- Firewall: the datacenter firewall binds every guest to its own address and mac (ipset `ipfilter-net0` per guest,
-  Terraform `src/terraform/lib.tf`); the host keeps ssh, 8006 and 9100 open by explicit rules. A guest that cannot talk at all
-  after an address change needs its ipset, which the next `sync.sh` writes. `pve-firewall status`,
-  `pve-firewall compile`.
+- Firewall (`src/terraform/lib.tf` FIREWALL, on; `sync.sh` fails while it is not running): every guest but the
+  router is bound to its own address and mac (ipset `ipfilter-net0` per guest); the host drops what it does not name:
+  ssh from the house lan, 8006 from the owner's workstation and notebook and the router (the ingresses, the homepage
+  and Hermes come through the router), 9100 from the router, ping. A guest that cannot talk after an address change
+  needs its ipset, which the next `sync.sh` writes. `pve-firewall status`, `pve-firewall compile`; the owner's
+  rollback is README "Proxmox firewall".
+- Login: the `lldap` realm over ldaps with a TOTP code; `root@pam` is the fallback (README "Proxmox login").
 - GPU mapping `gpu` = RTX 2060, 10de:1f08 at 0000:2b:00.0 (`lspci -nnk -s 2b:00.0` shows `vfio-pci`).
 
 ## Rules
