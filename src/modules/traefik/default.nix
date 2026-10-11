@@ -1,14 +1,14 @@
 # traefik with the lab's defences, for both ingresses (100-internal, 200-external)
 #
 # The routes an ingress serves (`routes`, modules/catalog.nix records of modules/service.nix) become its routers,
-# services and middlewares here, each feature on unless the route's `off` names it: client-ip (the real client into
-# X-Real-Ip, lib/traefik-clientip), the strip of client-sent identity and target headers, cloudflare-only, the
-# crowdsec bouncer with its AppSec waf and the core rule set, the per-client and per-route rate and in-flight
-# limits, the body limit, retries, the security headers, then sso, anubis, basic auth and the route's own headers.
-# A hand-written router gets the same chain and may name opt-outs in an `off` attribute of its own. Every quantity
-# that names a client reads X-Real-Ip, which client-ip sets from the socket peer and the X-Forwarded-For hops of
-# trustedProxies and Cloudflare only; the backend's X-Forwarded-For is that client alone. The probers check a route
-# at its health path through the ingress, past sso and anubis but nowhere else (probe routers below).
+# services and middlewares here, each feature on unless the route's `off` names it: cloudflare-only on the socket peer,
+# client-ip (the real client into X-Real-Ip, lib/traefik-clientip), the strip of client-sent identity and target
+# headers, the crowdsec bouncer with its AppSec waf and the core rule set, the per-client and per-route rate and
+# in-flight limits, the body limit, retries, the security headers, then sso, anubis, basic auth and the route's own
+# headers. A hand-written router gets the same chain and may name opt-outs in an `off` attribute of its own. Every
+# quantity that names a client reads X-Real-Ip, which client-ip sets from the socket peer and the X-Forwarded-For
+# hops of trustedProxies and Cloudflare only; the backend's X-Forwarded-For is that client alone. The probers check a
+# route at its health path through the ingress, past sso and anubis but nowhere else (probe routers below).
 { config, lib, pkgs, retry, inventory, site, lab, catalog, ... }:
 let
   cfg = config.homelab.traefik;
@@ -533,12 +533,13 @@ let
   limitsBody = r: on r "bodyLimit" && admitsBody r;
   splitsByBody = r: limitsBody r && admitsBodyless r;
 
-  # every websecure router's chain, ahead of its own middlewares; the strip runs before a router's own authelia sets
-  # the identity, cloudflare-only refuses a direct caller before the waf spends anything on it
+  # every websecure router's chain, ahead of its own middlewares; cloudflare-only judges the socket peer, before
+  # client-ip makes the resolved client the remote address, and refuses a direct caller before the waf spends anything
+  # on it; the strip runs before a router's own authelia sets the identity
   chainOf = name: r: withBody:
-    [ "client-ip" "strip-client-headers" ]
     # a route kept off the internet admits private sources only, cloudflare's included in none
-    ++ lib.optional (cfg.cloudflareOnly.enable && on r "cloudflare" && on r "internet") "cloudflare-only"
+    lib.optional (cfg.cloudflareOnly.enable && on r "cloudflare" && on r "internet") "cloudflare-only"
+    ++ [ "client-ip" "strip-client-headers" ]
     # scanners must reach the labyrinth, past the waf
     ++ lib.optional (cfg.crowdsecBouncer.enable && on r "crowdsec")
       (if on r "waf" && name != "honeypot-tls" then "crowdsec" else "crowdsec-noappsec")
