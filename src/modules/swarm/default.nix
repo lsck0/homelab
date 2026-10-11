@@ -182,7 +182,7 @@ let
   # swarm-deploy <app> <stack file>: render, deploy, check, keep; the one way a stack reaches the swarm
   swarmDeploy = pkgs.writeShellApplication {
     name = "swarm-deploy";
-    runtimeInputs = [ docker pkgs.coreutils pkgs.jq pkgs.util-linux ];
+    runtimeInputs = [ docker pkgs.coreutils pkgs.jq pkgs.util-linux pkgs.gnugrep ];
     text = ''
       app=$1 input=$2
       # the name becomes a path and a stack name
@@ -238,6 +238,13 @@ let
         if [ "$wanted" != "$running" ]; then
           say "replacing $service: its published ports change from '$running' to '$wanted'"
           docker service rm "$service" >/dev/null
+        fi
+      done
+      # a task left pending while no node could take it (a lab shutdown) outlives an unchanged spec: replace it
+      for service in $(docker stack services --format '{{.Name}}' "$app"); do
+        if docker service ps --filter desired-state=running --format '{{.CurrentState}}' "$service" | grep -q '^Pending'; then
+          say "rescheduling $service: a task of it is stuck pending"
+          docker service update --detach --force "$service" >/dev/null
         fi
       done
       started=$(date +%s)
@@ -423,8 +430,10 @@ let
         done
       }
       reconcile
-      docker events --filter type=node --format '{{.Action}} {{.Actor.Attributes.name}}' | while read -r event; do
-        echo "node event: $event"
+      docker events --filter type=node --format '{{.Action}} {{.Actor.Attributes.name}}' | while read -r action name; do
+        # the manager's own description moves with its balloon, an update every 20 s that changes no membership
+        [ "$name" = ${nodeName managerId} ] && continue
+        echo "node event: $action $name"
         reconcile
       done
     '';

@@ -1,8 +1,9 @@
 # the apps swarm end to end: a manager and two workers build the cluster from the inventory over the nas, the
 # manager deploys an app through swarm-apply, the workers serve it, the policy, the rollback check and the autolock
-# hold, a tcp and a udp route answer a client from anywhere on every worker (the router forwards to each, asserted
-# from flows.nix), and a catalog edit reaches the running app without a commit: a changed port and env roll out, a
-# disabled app's stack is removed.
+# hold, the reconcile follows the workers' events and not the manager's own, a task stuck pending is replaced by the
+# next converge, a tcp and a udp route answer a client from anywhere on every worker (the router forwards to each,
+# asserted from flows.nix), and a catalog edit reaches the running app without a commit: a changed port and env roll
+# out, a disabled app's stack is removed.
 # Lab guests at their real addresses on one flat network (tests/lib/lab.nix): the real modules mount the real
 # shares (homelab.nasMounts) from a test nas that exports them by the real rules (109-internal-nas's lib/nas-exports.nix). The
 # apps are the test's own, one app, so the production catalog can change without touching this test.
@@ -155,6 +156,12 @@ pkgs.testers.runNixOSTest {
         # nothing kept yet: converge has nothing to apply
         vm_140.wait_for_unit("swarm-converge-demo.service")
 
+    with subtest("the reconcile ignores the manager's own updates and follows a worker's"):
+        vm_140.succeed("docker node update --label-add homelab.probe=manager vm-140")
+        vm_140.succeed("docker node update --label-add homelab.probe=worker vm-251")
+        vm_140.wait_until_succeeds("journalctl -u swarm-reconcile | grep -q 'node event: update vm-251'", timeout=30)
+        vm_140.fail("journalctl -u swarm-reconcile | grep -q 'node event: update vm-140'")
+
     with subtest("an app deploys through swarm-apply, runs on the workers only, and is kept for converge"):
         v1 = push("${app "v1"}", "v1")
         stack(v1)
@@ -215,6 +222,22 @@ pkgs.testers.runNixOSTest {
         vm_140.succeed("docker info --format '{{.Swarm.LocalNodeState}}' | grep -qx active")
         vm_140.succeed("docker service ls --filter name=demo_web --format '{{.Name}}' | grep -qx demo_web")
         vm_140.wait_for_unit("swarm-converge-demo.service")
+        serves(${toString port}, "demo v2")
+
+    with subtest("a task stuck pending is replaced by the next converge, not waited on"):
+        def availability(value):
+            for worker in ("vm-250", "vm-251"):
+                vm_140.succeed(f"docker node update --availability {value} {worker}")
+        def forced():
+            return vm_140.succeed("docker service inspect demo_web --format '{{.Spec.TaskTemplate.ForceUpdate}}'").strip()
+        availability("drain")
+        vm_140.wait_until_succeeds("docker service ps demo_web --filter desired-state=running --format '{{.CurrentState}}' | grep -q ^Pending", timeout=60)
+        before = forced()
+        vm_140.succeed("systemctl restart --no-block swarm-converge-demo.service")
+        vm_140.wait_until_succeeds("journalctl -b -u swarm-converge-demo | grep -q 'rescheduling demo_web'", timeout=60)
+        availability("active")
+        vm_140.wait_until_succeeds("systemctl is-active swarm-converge-demo.service", timeout=300)
+        assert forced() != before, before
         serves(${toString port}, "demo v2")
 
     with subtest("a catalog edit reaches the running app without a commit"):
