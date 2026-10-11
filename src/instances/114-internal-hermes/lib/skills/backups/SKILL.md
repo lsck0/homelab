@@ -28,10 +28,11 @@ snapshot then carries them off the VM.
 To restore a database, restore the dump file and load it; do **not** restore
 the live data directory over a running service:
 
-- Postgres: `zstd -dc <dump>.sql.zst | psql -U postgres` (the dumps are taken
-  with `--clean --if-exists`, so they drop and recreate their own objects).
-- SQLite: `zstd -d <dump>.sqlite.zst -o <target>.sqlite3` with the service
-  stopped, then start it.
+- Postgres: `psql -U postgres < <dump>.sql` (the dumps are taken with
+  `--clean --if-exists`, so they drop and recreate their own objects).
+- SQLite: `cp <dump>.sqlite <target>.sqlite3` with the service stopped, then
+  start it.
+- Older dumps end in `.zst`: `zstd -d <dump>.zst` first.
 
 This is also the only copy of two things: the Authelia second-factor enrolments
 and the whole lldap directory both live on local disk, not on the NAS.
