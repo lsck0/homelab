@@ -36,7 +36,11 @@ pkgs.testers.runNixOSTest {
       wantedBy = [ "multi-user.target" ];
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; ExecStart = "${pkgs.coreutils}/bin/true"; };
     };
-    systemd.services."${name}-mirror".path = lib.mkBefore [ vanishingRsync ];
+    systemd.services."${name}-mirror" = {
+      path = lib.mkBefore [ vanishingRsync ];
+      # the script starts it more often in a few seconds than systemd's default start limit allows
+      startLimitIntervalSec = 0;
+    };
     specialisation.dropped.configuration.homelab.localState = lib.mkForce { };
     # the layout before localState: the app's state directory is the share itself
     specialisation.onShare.configuration = { nasMount, ... }: {
