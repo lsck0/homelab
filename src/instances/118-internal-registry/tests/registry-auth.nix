@@ -209,8 +209,8 @@ pkgs.testers.runNixOSTest {
             ("controller", "GET", "/v2/", "builder", 200, basic("builder", "${rotated}")),
         ])
 
-    def window_successes(machine, name, source=""):
-        """Requests from machine (from source, if given) that reached the backend while its firewall restarted, by status 200."""
+    def window_answers(machine, name, source=""):
+        """Requests from machine (from source, if given) that the backend answered while its firewall restarted."""
         interface = f"--interface {source}" if source else ""
         # the driver's shell exports errexit: without set +e the first refused attempt (curl exit 28) ends the loop
         machine.succeed(f"rm -f /tmp/window-{name}; (set +e; for i in $(seq 1 ${toString attempts}); do curl -s -m 0.3 -o /dev/null "
@@ -219,10 +219,11 @@ pkgs.testers.runNixOSTest {
         for _ in range(${toString restarts}):
             vm_118.succeed("systemctl reset-failed firewall; systemctl restart firewall")
         machine.wait_until_succeeds(f"[ $(wc -l < /tmp/window-{name}) -ge ${toString attempts} ]", timeout=180)
-        return machine.succeed(f"cat /tmp/window-{name}").split().count("200")
+        # curl writes 000 for a request nothing answered; the backend answers 401 without credentials
+        return len([code for code in machine.succeed(f"cat /tmp/window-{name}").split() if code != "000"])
 
     with subtest("a firewall restart on the backend opens no window"):
-        assert window_successes(world, "ciVm", SOURCES["ciVm"]) == 0, "the backend answered a pusher directly while its firewall restarted"
-        assert window_successes(vm_100, "ingress") > 0, "the positive control never got through"
+        assert window_answers(world, "ciVm", SOURCES["ciVm"]) == 0, "the backend answered a pusher directly while its firewall restarted"
+        assert window_answers(vm_100, "ingress") > 0, "the positive control never got through"
   '';
 }
