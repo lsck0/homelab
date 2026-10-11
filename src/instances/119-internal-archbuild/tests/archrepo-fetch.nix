@@ -8,6 +8,11 @@ let
   # arch-dotfiles bootstrap.sh SIGNING_KEY_FILE, the path the script reads the pinned key from
   keyFile = "configs/base/gnupg/luca-sandrock.pub.asc";
   ref = "master";
+  # a local fetch never meets the outage path; nothing listens on port 1
+  upstream = (import ../../../modules/upstream/default.nix {
+    inherit lib pkgs;
+    lab.upstreams.github.url = "http://127.0.0.1:1/";
+  })._module.args.upstream;
 in
 pkgs.runCommand "archrepo-fetch" { nativeBuildInputs = [ pkgs.git pkgs.gnupg pkgs.coreutils pkgs.gawk pkgs.gnugrep ]; } ''
   set -euo pipefail
@@ -36,7 +41,7 @@ pkgs.runCommand "archrepo-fetch" { nativeBuildInputs = [ pkgs.git pkgs.gnupg pkg
     git -C "$repo" commit -q -m "$message" "$@"
     git -C "$repo" rev-parse HEAD
   }
-  fetch() { bash ${../lib/archrepo-fetch.sh} "file://$repo" ${ref} "$PWD/checkout" "$owner"; }
+  fetch() { bash ${../lib/archrepo-fetch.sh} "file://$repo" ${ref} "$PWD/checkout" "$owner" ${upstream.run} github; }
 
   good=$(commit "signed by the owner's subkey" -S"$owner")
   [ "$(fetch)" = "$good" ] || fail "a head signed by the pinned key was not fetched"
@@ -67,5 +72,12 @@ pkgs.runCommand "archrepo-fetch" { nativeBuildInputs = [ pkgs.git pkgs.gnupg pkg
   if fetch 2>err; then fail "a head without ${keyFile} was accepted"; fi
   [ "$(git -C checkout rev-parse HEAD)" = "$good" ] || fail "a refused head moved the checkout"
   pass "a head without the key file is refused, the last good checkout stays"
+
+  status=0
+  UPSTREAM_BACKOFF_S=0 bash ${../lib/archrepo-fetch.sh} "file://$PWD/unreachable" ${ref} "$PWD/checkout" "$owner" \
+    ${upstream.run} github 2>err || status=$?
+  [ "$status" = ${toString upstream.unavailable} ] || fail "an outage exited $status: $(cat err)"
+  [ "$(git -C checkout rev-parse HEAD)" = "$good" ] || fail "an outage moved the checkout"
+  pass "github down: the fetch exits ${toString upstream.unavailable}, the last good checkout stays"
   touch $out
 ''

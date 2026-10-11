@@ -1,5 +1,5 @@
 # observability: prometheus, loki, tempo, pyroscope, grafana and the alerting
-{ telemetry, ... }: {
+{ net, telemetry, ... }: {
   roles = [ "collector" ];
 
   vm = {
@@ -26,7 +26,7 @@
       why = "the desktop bar's homelab widget reads the query api (lab.json monitoring), at home and on the road";
     }
     { from = [ "104" "operator" ]; tcp = [ telemetry.ports.loki ]; why = "stats-sync and hermes read logs"; }
-    { from = [ "200" ]; tcp = [ telemetry.ports.otlpFrontend ]; why = "the edge relays the browsers' frontend telemetry"; }
+    { from = [ net.zones.external.ingress ]; tcp = [ telemetry.ports.otlpFrontend ]; why = "the edge relays the browsers' frontend telemetry"; }
   ];
 
   services = {
@@ -55,9 +55,9 @@
 
   shares = {
     "data/app-dashboards".readOnly = true;
-    "data/grafana" = { };
-    "data/loki" = { };
-    "data/prometheus" = { };
-    "data/pyroscope" = { };
+    "data/grafana".localState = true;
+    "data/loki".localState = true;
+    "data/prometheus".localState = true;
+    "data/pyroscope".localState = true;
   };
 }

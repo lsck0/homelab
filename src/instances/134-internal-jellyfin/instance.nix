@@ -14,7 +14,7 @@ in {
     memoryMiB = 3072;
     balloonMiB = 0;
     cores = 4;
-    # ollama model 4.4G beside jellyfin
+    # ollama's model (modules/ollama.nix) beside jellyfin
     diskGiB = 24;
     machine = "q35";
     pci = lib.optional (site.gpu != null) "gpu";
@@ -62,11 +62,9 @@ in {
     };
   };
 
-  tokenReads = [ "jellyseerr-key" ];
-
   shares = {
     bulk = { };
     "data/janitorr" = { };
-    "data/jellyfin" = { };
+    "data/jellyfin".localState = true;
   };
 }

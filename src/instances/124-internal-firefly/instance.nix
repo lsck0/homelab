@@ -30,8 +30,8 @@
   };
 
   secrets = {
-    firefly-app-key = "manual"; # init.sh: base64: and 32 random bytes
-    firefly-db-password = "hex:24";
+    firefly-app-key = "guardsData:laravel-key"; # encrypts fields of firefly's db
+    firefly-db-password = "guardsData:hex:24"; # postgres keeps the password of its first start
   };
 
   shares = {

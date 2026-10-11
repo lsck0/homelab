@@ -211,7 +211,7 @@ let
     target = "${node.ip}:${toString r.port}";
   }) (lib.filterAttrs (_: r: r.protocol == "tcp" && r.off.probe == null && (r.vmid == null || awake (guest r.vmid))) catalog.l4);
   # every third-party service the lab depends on (modules/upstream), one alert each
-  upstreamJob = "upstream";
+  inherit (telemetry) upstreamJob;
   probesOf = protocol: if protocol == "http" then httpProbes else tcpProbes;
   probeJob = protocol: {
     job_name = "blackbox-${protocol}";
@@ -468,10 +468,10 @@ let
   in {
     name = key;
     routes = boardRoutes "internal" (routesIn catalog.internal) ++ boardRoutes "external" (routesIn catalog.external);
-    forwards = if routesIn catalog.l4 == { } || router == null then null else {
+    forwards = if routesIn catalog.forwarded == { } || router == null then null else {
       host = router.name;
       loki = "loki";
-      routes = lib.mapAttrsToList (name: r: { inherit name; inherit (r) protocol; port = r.publicPort; }) (routesIn catalog.l4);
+      routes = lib.mapAttrsToList (name: r: { inherit name; inherit (r) protocol; port = r.publicPort; }) (routesIn catalog.forwarded);
     };
     deploys = app;
     idle = app && s.idle.stopAfter != null;
@@ -1057,7 +1057,7 @@ in {
   };
 
   networking.firewall.allowedTCPPorts = with ports; [
-    grafana prometheus loki lokiPush otlpGrpc otlpHttp pyroscope journalRemote otlpFrontend
+    prometheus loki lokiPush otlpGrpc otlpHttp pyroscope journalRemote otlpFrontend
   ];
   # the query doors read every tenant: the grants only (grafana's own port is its route's). The push doors are open
   # to whoever the router lets through; their tenant map decides what a sender may write

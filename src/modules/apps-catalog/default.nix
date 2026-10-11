@@ -8,7 +8,7 @@
 #
 #   lab.withApps (apps: lib.recursiveUpdate apps { wat.enable = true; })    (tests/lib/lab.nix `apps`)
 #
-# The smallest app, src/apps/demo/app.nix, serves one public path:
+# The smallest app.nix serves one public path:
 #
 #   {
 #     enable = true;
@@ -26,12 +26,12 @@ let
   # -----------------------------------------------------------------------------
 
   # scripts/secrets-sync.sh knows these generators
-  secretGenerator = types.strMatching "hex:[1-9][0-9]*|garage-key-id";
+  secretGenerator = types.strMatching "(guardsData:)?(hex:[1-9][0-9]*|garage-key-id)";
   digestPinned = types.strMatching ".+@sha256:[0-9a-f]{64}";
   # a path inside the app's checkout: relative, never climbing out (the builder checks the resolved path too)
   repoPath = types.strMatching "([^/.][^/]*|\\.[^/.][^/]*)(/([^/.][^/]*|\\.[^/.][^/]*))*|\\.";
 
-  # one task's share of a worker unless the app asks for more, and the most it may ask (limits.nix: never more than a worker has)
+  # one task's share of a worker unless the app asks for more, and the most it may ask (modules/limits: never more than a worker has)
   taskDefaults = { memoryMiB = 512; cpus = 1.0; pids = 512; };
   taskMax = { memoryMiB = 2048; cpus = 2.0; pids = 4096; };
 
@@ -150,14 +150,15 @@ let
           Service -> KEY -> value, over the stack's own environment of that service only: a secret reaches the
           services that name it and no other. In a value, `{{name}}` is the sops secret <name> (see `secrets`),
           `{{homelab.otlp-grpc}}`, `{{homelab.otlp-http}}` and `{{homelab.pyroscope}}` (host:port) are the lab's
-          telemetry endpoints (they need `telemetry`), and `{{.Node.Hostname}}`-style templates are swarm's.
+          telemetry endpoints (they need `telemetry`), `{{homelab.origin-<route>}}` is a route's https origin, and
+          `{{.Node.Hostname}}`-style templates are swarm's.
         '';
       };
       secrets = mkOption {
         type = types.attrsOf secretGenerator;
         default = { };
         description = ''
-          Sops secret name -> its generator for scripts/secrets-sync.sh: "hex:<bytes>" or "garage-key-id".
+          Sops secret name -> its generator for scripts/secrets-sync.sh: "hex:<bytes>" or "garage-key-id", prefixed "guardsData:" when data or logins depend on it.
           Exactly the secrets `env` names.
         '';
       };

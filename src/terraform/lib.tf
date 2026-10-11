@@ -34,7 +34,6 @@ locals {
       idle        = i.idle
       kind        = i.kind
       privileged  = i.privileged
-      features    = i.features
       memory      = i.memory
       balloon     = i.balloon
       cores       = i.cores

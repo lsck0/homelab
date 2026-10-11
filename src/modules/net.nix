@@ -33,6 +33,8 @@ let
   wireguardSubnet = "10.0.0.0/24";
   # headscale's tailnet (instances/138-internal-headscale), rfc 6598 carrier-grade nat: never the internet either
   tailnet = "100.64.0.0/10";
+  # never the internet: what a stranger's process (ci jobs, swarm tasks) is refused, named exceptions in front
+  localRanges = privateRanges ++ [ tailnet ];
   # the internal ingress's own pages (its hand-written routers), relayed by the edge and named by the router's dns
   ingressPages = { dashboard = "traefik"; proxmox = "proxmox"; };
 
@@ -60,9 +62,7 @@ let
     # lldap's ldaps listener (instances/101-internal-authelia), which the proxmox realm binds to
     ldaps = 6360;
     nodeExporter = 9100;
-    redis = 6379;
     traefikMetrics = 8082;
-    minecraft = 25565;
     wireguard = 51820;
   };
 
@@ -95,7 +95,7 @@ let
   vmOf = id: inventory.${id} or (throw "net.nix: the inventory has no guest ${id}");
 in
 {
-  inherit domain privateRanges tailnet cloudflareRanges ports zones ingressPages;
+  inherit domain privateRanges tailnet localRanges cloudflareRanges ports zones ingressPages;
   cidrContains = cidr.contains;
   # the domain as an ldap base dn (authelia and its lldap, the proxmox realm)
   domainDn = lib.concatMapStringsSep "," (part: "dc=${part}") (lib.splitString "." domain);
@@ -117,6 +117,5 @@ in
   ipOf = id: (vmOf id).ip;
   hostSource = id: "${(vmOf id).ip}/32";
   zoneOf = id: zones.${(vmOf id).type} or (throw "net.nix: guest ${id} is in no zone (type ${(vmOf id).type})");
-  # host name under the lab domain
   fqdn = host: "${host}.${domain}";
 }

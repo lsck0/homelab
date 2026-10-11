@@ -18,7 +18,7 @@ let
 
   guest = id: databases: {
     imports = [ (lab.guest id { flat = true; nas = true; }) ];
-    environment.systemPackages = [ pkgs.sqlite pkgs.zstd ];
+    environment.systemPackages = [ pkgs.sqlite ];
     homelab.dbBackup.databases = databases;
   };
 
@@ -38,7 +38,7 @@ pkgs.testers.runNixOSTest {
   name = "db-backup";
 
   node.specialArgs = lab.specialArgs;
-  nodes.vm-109 = { imports = [ (lab.nas { flat = true; }) ]; environment.systemPackages = [ pkgs.sqlite pkgs.zstd ]; };
+  nodes.vm-109 = { imports = [ (lab.nas { flat = true; }) ]; environment.systemPackages = [ pkgs.sqlite ]; };
   nodes.vm-101 = guest "101" {
     app.sqlite = "/var/lib/app/db.sqlite";
     pg.command = "cat /var/lib/app/dump.sql";
@@ -52,11 +52,11 @@ pkgs.testers.runNixOSTest {
     DUMPS = "${dumps}"
 
     def latest(host, name):
-        return vm_109.succeed(f"ls -1t {DUMPS}/{host}/{name}/{name}-*.zst | head -1").strip()
+        return vm_109.succeed(f"ls -1t {DUMPS}/{host}/{name}/{name}-* | head -1").strip()
 
     def restored(path):
-        """a dump decompressed on the nas: (integrity_check, rows, unpaired rows)"""
-        vm_109.succeed(f"rm -f /tmp/r.sqlite && zstd -q -d {path} -o /tmp/r.sqlite")
+        """a dump on the nas: (integrity_check, rows, unpaired rows)"""
+        vm_109.succeed(f"cp {path} /tmp/r.sqlite")
         check = vm_109.succeed("sqlite3 /tmp/r.sqlite 'PRAGMA integrity_check'").strip()
         rows = int(vm_109.succeed("sqlite3 /tmp/r.sqlite 'SELECT count(*) FROM t'"))
         unpaired = int(vm_109.succeed("sqlite3 /tmp/r.sqlite 'SELECT count(*) FROM t a WHERE NOT EXISTS (SELECT 1 FROM t b WHERE b.id = -a.id)'"))
@@ -89,7 +89,7 @@ pkgs.testers.runNixOSTest {
     with subtest("a command's dump lands on the nas"):
         vm_101.succeed("echo 'CREATE TABLE x (y int);' > /var/lib/app/dump.sql")
         run(vm_101, "db-backup-pg")
-        assert "CREATE TABLE x" in vm_109.succeed(f"zstd -dc {latest('vm-101', 'pg')}")
+        assert "CREATE TABLE x" in vm_109.succeed(f"cat {latest('vm-101', 'pg')}")
 
     with subtest("five dumps under a concurrent writer: each restores whole, no unpaired row"):
         vm_101.succeed("systemd-run --unit=writer --setenv=PATH=$PATH bash -c 'for i in $(seq 1001 6000); do "
@@ -102,7 +102,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("an empty dump fails and leaves nothing"):
         vm_101.fail("systemctl start db-backup-empty")
-        vm_109.fail(f"ls {DUMPS}/vm-101/empty/empty-*.zst")
+        vm_109.fail(f"ls {DUMPS}/vm-101/empty/empty-*")
         assert vm_109.succeed(f"ls -A {DUMPS}/vm-101/empty") == "", "a temp file stayed behind"
         assert metric(vm_101, "empty") == ""
 
@@ -111,9 +111,9 @@ pkgs.testers.runNixOSTest {
         assert vm_109.succeed(f"ls -A {DUMPS}/vm-101/half") == "", "a partial dump or temp file stayed behind"
         assert metric(vm_101, "half") == ""
 
-    with subtest("retention keeps the newest ${toString dumpsKept}"):
+    with subtest("retention keeps the newest ${toString dumpsKept}, the compressed dumps of earlier versions included"):
         d = f"{DUMPS}/vm-101/app"
-        vm_109.succeed(f"rm -f {d}/*.zst")
+        vm_109.succeed(f"rm -f {d}/app-*")
         for i in range(16):
             vm_109.succeed(f"touch -d '{30 - i} days ago' {d}/app-old{i:02d}.sqlite.zst")
         run(vm_101, "db-backup-app")
@@ -124,7 +124,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("each host reaches its own dump dir only, which only root enters on the nas"):
         run(vm_206, "db-backup-paste")
-        vm_109.succeed(f"ls {DUMPS}/vm-206/paste/paste-*.zst")
+        vm_109.succeed(f"ls {DUMPS}/vm-206/paste/paste-*")
         vm_109.fail(f"ls {DUMPS}/vm-101/paste")
         for host in ("vm-101", "vm-206"):
             assert vm_109.succeed(f"stat -c '%a %U' {DUMPS}/{host}").strip() == "700 root"

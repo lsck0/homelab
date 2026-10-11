@@ -1,9 +1,10 @@
-{ config, lib, pkgs, inventory, nasPath, catalog, lab, instance, ... }:
+{ config, lib, pkgs, utils, inventory, nasPath, catalog, lab, instance, upstream, ... }:
 let
   inherit (instance.config) vm;
   route = catalog.internal.archbuild;
   # pushed to vm-210, which serves mirror.lsck0.dev
   repoDir = "/var/lib/archrepo";
+  repoAutomount = "${utils.escapeSystemdPath repoDir}.automount";
   # pacman cache, sources, cargo and go caches: what makes a nightly build incremental; the build container's alone
   cacheDir = "/var/lib/archbuild/cache";
   # the build container's proposal to the publish container: unsigned packages, staged db, state, report
@@ -16,7 +17,12 @@ let
   busyFlag = "/run/archbuild.busy";
   # a build started at the nightly wake stays fresh until the next one
   staleMinutes = 20 * 60;
-  # rolling like the distro, pulled per run so the in-container -Syu stays small; the build holds no secret
+  # the whole run's bound (TimeoutStartSec); the recipes get it less the snapshot downloads and the publish after them
+  runTimeoutS = 20 * 3600;
+  publishReserveS = 3 * 3600;
+  buildBudgetS = runTimeoutS - publishReserveS;
+  # rolling like the distro, pulled per run so the in-container -Syu stays small (--pull=newer keeps the present
+  # image through a registry outage); the build holds no secret
   buildImage = "docker.io/library/archlinux:base-devel";
   # the publish container holds the signing and push keys: a reviewed index digest of the same tag, bumped by hand
   publishImage = "${buildImage}@sha256:996c3a1d6b0d87b01242f6fcd8cfa3ad3eece1a67ab5c8f108e20af1d7b97bdd";
@@ -35,25 +41,42 @@ let
   buildJobMemoryMiB = 2048;
   # nginx, sshd, conmon, node-exporter and the kernel stay outside the build container's limit
   systemReserveMiB = 768;
-  # the balloon floor, not memoryMiB: the host may take the rest back mid-build
-  buildMemoryMiB = vm.balloonMiB - systemReserveMiB;
-  # make, ninja and cargo all run this many: more than the limit holds would only page or get killed
-  buildJobs = let jobs = lib.min vm.cores (buildMemoryMiB / buildJobMemoryMiB); in
+  # jobs from the balloon floor, which the host cannot take back mid-build
+  buildJobs = let jobs = lib.min vm.cores ((vm.balloonMiB - systemReserveMiB) / buildJobMemoryMiB); in
     assert lib.assertMsg (jobs >= 1) "the balloon floor (instance.nix) leaves no ${toString buildJobMemoryMiB} MiB compile job"; jobs;
+  # the limit is the ceiling: a build may use what the host leaves it, and a squeeze kills the build first
+  buildMemoryMiB = vm.memoryMiB - systemReserveMiB;
+  oomScoreAdjMax = 1000;
+  # the kernel never picks it
+  oomScoreAdjMin = -1000;
+  # the third parties a night needs, probed before it in this order (modules/upstream)
+  upstreams = [ "github" "aur" "archlinux" ];
+  # the upstream that ended the night, written by whichever step met the outage
+  unavailableFile = "/run/archbuild.unavailable";
   # podman rm grace before it kills a container
   containerStopTimeoutS = 30;
-  # what both containers get of the run: the verified commit and the run id
-  runEnv = "-e ARCHBUILD_SOURCE -e ARCHBUILD_REF -e ARCHBUILD_COMMIT -e ARCHBUILD_RUN_STARTED";
+  # podman's cleanup after the kill: conmon, the overlay, the memory of a 4 GiB build
+  containerRemoveSlackS = 60;
+  # status.json lies on the hard-mounted nas: a hung read must not hold the stop
+  metricsTimeoutS = 20;
+  # the whole stop path: the 2026-10-07 stop overran systemd's 90 s default inside podman rm
+  stopTimeoutS = metricsTimeoutS + containerStopTimeoutS + containerRemoveSlackS;
+  # what both containers get of the run: the verified commit, the run id and the outage primitive
+  runEnv = "-e ARCHBUILD_SOURCE -e ARCHBUILD_REF -e ARCHBUILD_COMMIT -e ARCHBUILD_RUN_STARTED -e ARCHBUILD_BUILD_BUDGET_S"
+    + " -v ${upstream.run}:/upstream:ro -v ${unavailableFile}:${unavailableFile}";
   # node-exporter's textfile collector (modules/base)
   metricsName = "archrepo";
   metricsFile = "${config.homelab.textfileDir}/${metricsName}.prom";
   # the served status after every run, a failed one included: what a client installing now lacks
   metricsWrite = pkgs.writeShellScript "archbuild-metrics" ''
     set -euo pipefail
-    ${pkgs.jq}/bin/jq -r '"# TYPE homelab_archrepo_missing_packages gauge",
+    ${pkgs.coreutils}/bin/timeout -k ${toString metricsTimeoutS} ${toString metricsTimeoutS} ${pkgs.jq}/bin/jq -r '"# TYPE homelab_archrepo_missing_packages gauge",
       "homelab_archrepo_missing_packages \(.missing // [] | length)",
       "# TYPE homelab_archrepo_held_back gauge",
-      "homelab_archrepo_held_back \(if .held_back then 1 else 0 end)"' ${repoDir}/status.json > ${metricsFile}.tmp
+      "homelab_archrepo_held_back \(if .held_back then 1 else 0 end)",
+      "# TYPE homelab_archrepo_unavailable gauge",
+      "homelab_archrepo_unavailable{upstream=\"\(.unavailable // "")\"} \(if .unavailable then 1 else 0 end)"' \
+      ${repoDir}/status.json > ${metricsFile}.tmp
     ${pkgs.coreutils}/bin/mv -f ${metricsFile}.tmp ${metricsFile}
   '';
 in {
@@ -73,39 +96,56 @@ in {
   systemd.services.archbuild = {
     description = "Snapshot and build every package arch-dotfiles lists into the lsck0 pacman repo";
     wants = [ "network-online.target" ];
-    after = [ "network-online.target" ];
-    path = [ pkgs.podman pkgs.coreutils pkgs.git pkgs.gnupg ];
+    # the automount, not the mount (RequiresMountsFor): an idle expiry or a restart of the mount would stop the build
+    requires = [ repoAutomount ];
+    after = [ "network-online.target" repoAutomount ];
+    path = [ pkgs.podman pkgs.coreutils pkgs.git pkgs.gnupg pkgs.jq pkgs.gnugrep ];
     # a deploy must not kill a running build
     restartIfChanged = false;
-    unitConfig.RequiresMountsFor = [ repoDir ];
     environment = {
       ARCHBUILD_SOURCE = dotfilesSource;
       ARCHBUILD_REF = dotfilesRef;
+      ARCHBUILD_BUILD_BUDGET_S = toString buildBudgetS;
       # relative: the key on vm-210 runs rrsync rooted at the repo
       ARCHBUILD_PUSH_TARGET = "archrepo@${inventory.${toString lab.routes.mirror.vmid}.ip}:.";
     };
     serviceConfig = {
       Type = "oneshot";
-      TimeoutStartSec = "20h";
+      TimeoutStartSec = runTimeoutS;
+      # a night skipped for an outage is no failure: the next one recovers
+      SuccessExitStatus = [ upstream.unavailable ];
       ExecStartPre = "${pkgs.coreutils}/bin/touch ${busyFlag}";
-      # conmon lives outside this unit's cgroup, a stop would leave the build running unflagged
+      # bounded steps, the metrics first: an overrun kills what is left, never the gauges
+      TimeoutStopSec = stopTimeoutS;
       ExecStopPost = [
-        "${pkgs.podman}/bin/podman rm -f -t ${toString containerStopTimeoutS} ${containerBuild} ${containerPublish}"
-        "${pkgs.coreutils}/bin/rm -f ${busyFlag}"
         # a first run has no status yet
         "-${metricsWrite}"
+        # conmon lives outside this unit's cgroup, a stop would leave the build running unflagged
+        "${pkgs.podman}/bin/podman rm --force --ignore --time ${toString containerStopTimeoutS} ${containerBuild} ${containerPublish}"
+        "${pkgs.coreutils}/bin/rm -f ${busyFlag}"
       ];
     };
     script = ''
       set -o pipefail
+      unavailable=${toString upstream.unavailable}
+      # <upstream> <status>: the status, naming the upstream when it was down
+      unavailable_note() {
+        [ "$2" -ne "$unavailable" ] || echo "$1" > ${unavailableFile}
+        return "$2"
+      }
       run() {
         set -e
         export ARCHBUILD_RUN_STARTED ARCHBUILD_COMMIT
         ARCHBUILD_RUN_STARTED=$(date +%s)
+        for name in ${toString upstreams}; do
+          ${upstream.run} "$name" || unavailable_note "$name" "$?"
+        done
         # an unsigned or foreign-signed head stops here: nothing builds, the published snapshot stays
-        ARCHBUILD_COMMIT=$(${pkgs.bash}/bin/bash ${./lib/archrepo-fetch.sh} ${dotfilesSource} ${dotfilesRef} ${dotfilesDir} ${dotfilesSigningKey})
+        ARCHBUILD_COMMIT=$(${pkgs.bash}/bin/bash ${./lib/archrepo-fetch.sh} ${dotfilesSource} ${dotfilesRef} ${dotfilesDir} \
+          ${dotfilesSigningKey} ${upstream.run} github) || unavailable_note github "$?"
         podman run --rm --init --replace --pull=newer --name ${containerBuild} \
-          --memory ${toString buildMemoryMiB}m --cpuset-cpus 0-${toString (buildJobs - 1)} \
+          --memory ${toString buildMemoryMiB}m --oom-score-adj ${toString oomScoreAdjMax} \
+          --cpuset-cpus 0-${toString (buildJobs - 1)} \
           ${runEnv} -e ARCHBUILD_JOBS=${toString buildJobs} \
           -v ${repoDir}:/repo:ro \
           -v ${dotfilesDir}:/dotfiles:ro \
@@ -127,13 +167,21 @@ in {
           -v ${buildScript}:/build.sh:ro \
           -v ${listScript}:/list.sh:ro \
           ${publishImage} bash /build.sh publish
-        # -P onto fresh names: the build container may have left links here
-        rm -f ${publicDir}/status.txt ${publicDir}/status.json
-        cp -P ${repoDir}/status.txt ${repoDir}/status.json ${publicDir}/
       }
       # the build container writes publicDir too, so the log is opened once, before it runs
       rm -f ${publicDir}/build.log
-      run 2>&1 | tee ${publicDir}/build.log
+      : > ${unavailableFile}
+      status=0
+      run 2>&1 | tee ${publicDir}/build.log || status=$?
+      if [ "$status" -eq "$unavailable" ]; then
+        bash ${./lib/archrepo-skip.sh} ${repoDir} "$(cat ${unavailableFile})" ${toString upstreams} || status=$?
+      fi
+      if [ "$status" -eq 0 ] || [ "$status" -eq "$unavailable" ]; then
+        # -P onto fresh names: the build container may have left links here
+        rm -f ${publicDir}/status.txt ${publicDir}/status.json
+        cp -P ${repoDir}/status.txt ${repoDir}/status.json ${publicDir}/
+      fi
+      exit "$status"
     '';
   };
 
@@ -154,6 +202,8 @@ in {
     timerConfig = { OnActiveSec = "3min"; OnUnitActiveSec = "1h"; };
   };
 
+  # the reaper reads the busy flag through it: a squeeze's oom takes the build, never the answer keeping the guest up
+  systemd.services.nginx.serviceConfig.OOMScoreAdjust = oomScoreAdjMin;
   services.nginx = {
     enable = true;
     virtualHosts.archbuild = {

@@ -41,7 +41,7 @@ repo_create() {
 # sync <repo> <unlocking key> <admin recipients> <plan> [args]: one run of the script under test
 sync() {
   local dir=$1 key=$2 admins=$3 plan=$4; shift 4
-  SOPS_AGE_KEY_FILE="$key" SECRETS_ADMIN_RECIPIENTS="$admins" DOTFILES="$T/no-dotfiles" \
+  SOPS_AGE_KEY_FILE="$key" SECRETS_ADMIN_RECIPIENTS="$admins" DOTFILES="${DOTFILES_DIR:-$T/no-dotfiles}" \
     "$dir/src/scripts/secrets-sync.sh" --plan "$P/$plan.json" "$@"
 }
 # dec <key file> <file>: the plaintext; fails when the key does not open it
@@ -112,7 +112,8 @@ ok "1 every file the plan lists, with its names, encrypted to the admins and its
 
 CAT=secrets/shared.sops.json
 [[ "$(value "$R" "$CAT" A1.key gen)" =~ ^[0-9a-f]{32}$ ]] || fail "gen (hex:16) is $(value "$R" "$CAT" A1.key gen)"
-[[ "$(value "$R" "$CAT" A1.key tok)" =~ ^tk_[a-z0-9]{29}$ ]] || fail "tok is no ntfy token"
+lk=$(value "$R" "$CAT" A1.key lk)
+[ "${lk#base64:}" != "$lk" ] && [ "$(printf '%s' "${lk#base64:}" | base64 -d | wc -c)" = 32 ] || fail "lk is no laravel key: $lk"
 [[ "$(value "$R" apps/x/secrets.sops.json A1.key x-app)" =~ ^GK[0-9a-f]{24}$ ]] || fail "x-app is no garage key id"
 [[ "$(value "$R" "$CAT" A1.key vault)" =~ ^[0-9a-f]{32}$ ]] || fail "vault (guardsData:hex:16) is $(value "$R" "$CAT" A1.key vault)"
 [ "$(value "$R" "$CAT" A1.key wg | base64 -d | wc -c)" = 32 ] || fail "wg is no 32-byte base64 wireguard key"
@@ -120,7 +121,7 @@ CAT=secrets/shared.sops.json
 grep -qF "add     man -> $CAT (empty, fill it: sops src/$CAT)" run1.log || fail "an empty manual secret is not reported"
 [ "$(value "$R" instances/100-internal-a/secrets.shared.sops.json A1.key shared)" = "$(value "$R" "$CAT" A1.key shared)" ] \
   || fail "a's shared copy differs from src/secrets/shared.sops.json"
-ok "2 values by kind (hex, wireguard, ntfy token, garage key id, guarded hex; manual and public empty), shared copies equal the source"
+ok "2 values by kind (hex, wireguard, laravel key, garage key id, guarded hex; manual and public empty), shared copies equal the source"
 
 for v in $(dec A1.key "$R/src/$CAT" | jq -r '.[] | select(length > 0)') tfvars-secret-value; do
   grep -rqF -- "$v" "$R" && fail "plaintext $v lies in the repo"
@@ -131,6 +132,18 @@ ok "3 no plaintext value and no host private key anywhere under the repo"
 [ "$(stat -c %a "$T/out.json")" = 600 ] || fail "--host-keys-out is not mode 0600"
 for c in $(plan_q base '.hosts | keys[]'); do [ "$(jq -r --arg c "$c" '.[$c]' "$T/out.json")" = "$(cat "$T/$c.key")" ] || fail "--host-keys-out's $c"; done
 ok "4 --host-keys-out maps every configuration to its key, mode 0600"
+
+D=$T/dotfiles/secrets
+mkdir -p "$D" && cp A1.key "$D/age.txt" && echo desk-v1 > "$D/desk"
+DOTFILES_DIR=$T/dotfiles sync "$R" A1.key "$A1 $A2" base --apply > dot1.log
+[ "$(value "$R" "$CAT" A1.key df)" = desk-v1 ] || fail "df was not copied from the dotfiles"
+echo desk-v2 > "$D/desk"
+DOTFILES_DIR=$T/dotfiles sync "$R" A1.key "$A1 $A2" base --apply > dot2.log
+[ "$(value "$R" "$CAT" A1.key df)" = desk-v2 ] || fail "df does not follow the dotfiles"
+[ "$(cat "$D/desk")" = desk-v2 ] || fail "the run wrote the dotfiles"
+sync "$R" A1.key "$A1 $A2" base --apply > dot3.log
+[ "$(value "$R" "$CAT" A1.key df)" = desk-v2 ] || fail "locked dotfiles lost df"
+ok "4b dotfiles: the lab copy follows the dotfiles' file, never the other way; locked dotfiles keep it"
 
 # -----------------------------------------------------------------------------
 # 5 to 8: idempotence, dry run, moves, prune, hosts leaving

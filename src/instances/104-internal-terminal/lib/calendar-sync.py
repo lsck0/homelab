@@ -1,8 +1,11 @@
 """Merge ICS feeds into one calendar and the TRMNL calendar views.
 
 Usage: calendar-sync.py <views-dir> <ics-dir>
-Env:   CALENDAR_SOURCES (file of NAME|URL lines), CALENDAR_UPLOAD_DIR (pushed .ics files), CALENDAR_TZ, and the
-       layout knobs below
+Env:   CALENDAR_SOURCES (file of NAME|URL lines), CALENDAR_UPLOAD_DIR (pushed .ics files), CALENDAR_COPY_DIR (each
+       source's last good answer), CALENDAR_TZ, and the layout knobs below
+
+A source that does not answer is read from its last good copy, so a calendar host's outage empties no day; a
+source with no answer for SOURCE_COPY_AGE_MAX_S fails the run, its views still written.
 
 Writes the week, day and month views (json, for TRMNL: titles, times and locations only) into <views-dir>, and
 every source merged into merged.ics into <ics-dir>, which 104-internal-terminal/main.nix publishes on a token TRMNL
@@ -12,7 +15,9 @@ never sees: the ics holds descriptions, attendees and meeting links.
 import copy
 import json
 import os
+import re
 import sys
+import time
 import urllib.request
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -24,6 +29,9 @@ from icalendar import Calendar
 FETCH_TIMEOUT_S = 30
 USER_AGENT = "homelab-calendar-sync/1"
 SECONDS_PER_MINUTE = 60
+SECONDS_PER_HOUR = 3600
+# a week without an answer is a source that moved or died, not an outage
+SOURCE_COPY_AGE_MAX_S = 7 * 24 * SECONDS_PER_HOUR
 MINUTES_PER_HOUR = 60
 MINUTES_PER_DAY = 1440
 DAYS_PER_WEEK = 7
@@ -120,15 +128,30 @@ def uploaded_sources(upload_dir):
     return found
 
 
-def load_calendars(sources):
-    """Fetch and parse every source. Returns [(name, Calendar)]."""
-    calendars = []
+def load_calendars(sources, copy_dir, now_s):
+    """Fetch and parse every source, else read its last good copy. Returns ([(name, Calendar)], [stale names])."""
+    calendars, stale = [], []
     for name, url in sources:
+        copy_path = os.path.join(copy_dir, re.sub(r"[^A-Za-z0-9_-]", "_", name) + ".ics")
         try:
-            calendars.append((name, Calendar.from_ical(fetch(url))))
+            raw = fetch(url)
+            calendars.append((name, Calendar.from_ical(raw)))
+            feed_io.file_write_atomic(copy_path, raw)
+            continue
         except Exception as err:  # noqa: BLE001 (one bad feed must not stop the rest)
-            feed_io.log(f"source {name}: {err}")
-    return calendars
+            failure = err
+        try:
+            age_s = now_s - os.path.getmtime(copy_path)
+            with open(copy_path, "rb") as handle:
+                calendars.append((name, Calendar.from_ical(handle.read())))
+        except (OSError, ValueError):
+            feed_io.log(f"source {name} unavailable ({failure}), no copy to read")
+            stale.append(name)
+            continue
+        feed_io.log(f"source {name} unavailable ({failure}), using its copy from {age_s / SECONDS_PER_HOUR:.0f}h ago")
+        if age_s > SOURCE_COPY_AGE_MAX_S:
+            stale.append(name)
+    return calendars, stale
 
 
 def merge(calendars):
@@ -458,21 +481,23 @@ def month_view(calendars, offset, today):
 
 
 def main():
-    if len(sys.argv) != 3 or "CALENDAR_SOURCES" not in os.environ:
+    if len(sys.argv) != 3 or "CALENDAR_SOURCES" not in os.environ or "CALENDAR_COPY_DIR" not in os.environ:
         feed_io.log(__doc__.split("\n\n")[1])
         return 2
     sources_file = os.environ["CALENDAR_SOURCES"]
+    copy_dir = os.environ["CALENDAR_COPY_DIR"]
     out_dir, ics_dir = sys.argv[1], sys.argv[2]
     today = datetime.now(LOCAL_TZ).date()
 
     os.makedirs(out_dir, exist_ok=True)
     os.makedirs(ics_dir, exist_ok=True)
+    os.makedirs(copy_dir, exist_ok=True)
 
     sources = read_sources(sources_file) + uploaded_sources(os.environ.get("CALENDAR_UPLOAD_DIR"))
     if not sources:
         feed_io.log("no calendar sources configured")
 
-    calendars = load_calendars(sources)
+    calendars, stale = load_calendars(sources, copy_dir, time.time())
     if sources and not calendars:
         feed_io.log("every source failed, keeping previous output")
         return 1
@@ -510,6 +535,9 @@ def main():
         weeks.append(f"{name}:{payload['total_events']}")
 
     feed_io.log(f"wrote {len(calendars)} sources; views {' '.join(weeks)}")
+    if stale:
+        feed_io.log(f"no answer for over {SOURCE_COPY_AGE_MAX_S // SECONDS_PER_HOUR}h: {' '.join(stale)}")
+        return 1
     return 0
 
 

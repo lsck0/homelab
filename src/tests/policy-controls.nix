@@ -13,7 +13,7 @@ let
   };
   # one config mounting one more share
   mounting = name: path: tamper name [ "homelab" "nasShares" ]
-    (configs.${name}.homelab.nasShares ++ [ { inherit path; readOnly = false; mode = null; } ]);
+    (configs.${name}.homelab.nasShares ++ [ { inherit path; readOnly = false; mode = null; localState = false; } ]);
   # the source tree without the files a predicate names
   srcWithout = name: drop: facts // { src = builtins.path { path = facts.src; inherit name; filter = path: _: !(drop path); }; };
   http = name: configs.${name}.services.traefik.dynamicConfigOptions.http;
@@ -50,6 +50,10 @@ let
     inventory = network "inventory" (facts // { inventory = inventory // { "206" = inventory."206" // { ip = poolStart; }; }; });
     ingress-guards = network "ingress guards" (tamper "121-internal-paperless" [ "homelab" "ingressOnly" "trusted" ]
       [ "${inventory.${facts.lab.roles.operator}.ip}/32" ]);
+    probes-through-ingress = network "probes through the ingress" (tamper "121-internal-paperless" [ "homelab" "ingressOnly" "allowed" ]
+      { ${toString catalog.internal.paperless.port} = [ "${inventory.${facts.lab.roles.collector}.ip}/32" ]; });
+    port-forwards = network "port forwards" (tamper "300-router" [ "networking" "nftables" "tables" "port-forwards" "content" ]
+      "tcp dport  dnat to ${inventory.${facts.lab.roles.collector}.ip}:${toString catalog.internal.paperless.port}");
 
     catalog = { file = "apps"; marker = "catalog: a control's problem";
       tampered = facts // { catalog = catalog // { problems = [ "a control's problem" ]; }; }; };
@@ -90,9 +94,15 @@ let
       tampered = tamper owner [ "services" "lldap" "enable" ] false; };
     realm-ldaps = { file = "sso"; marker = "proxmox realm: ";
       tampered = tamper owner [ "networking" "firewall" "allowedTCPPorts" ] [ 3890 ]; };
-
+    long-run-mount = { file = "mounts"; marker = "outlives deploys yet RequiresMountsFor";
+      tampered = tamper "119-internal-archbuild" [ "systemd" "services" "archbuild" "unitConfig" "RequiresMountsFor" ]
+        [ "/var/lib/archrepo" ]; };
+    image-pulled-at-start = { file = "images"; marker = "pulls 'always' at every start";
+      tampered = tamper "207-external-share" [ "virtualisation" "oci-containers" "containers" "share" "pull" ] "always"; };
     secret-readable = { file = "secrets"; marker = "is readable by others";
       tampered = tamper owner [ "sops" "secrets" "authelia-jwt-secret" "mode" ] "0444"; };
+    sqlite-on-nfs = { file = "secrets"; marker = "lies on the nas mount";
+      tampered = tamper "138-internal-headscale" [ "homelab" "nasMounts" "/var/lib/headscale" ] { }; };
     secret-source = { file = "secrets"; marker = "secret authelia-jwt-secret comes from";
       tampered = tamper owner [ "sops" "secrets" "authelia-jwt-secret" "sopsFile" ] ./policy-controls.nix; };
     secret-key-file = { file = "secrets"; marker = "sops reads its key from";

@@ -3,7 +3,7 @@
   vm = {
     bootPhase = "public";
     needs = [ "containers" ];
-    kind.lxc = "pending migration, see the restructure report";
+    kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";
     # podman needs keyctl; dmz, so never privileged
     features = "nesting=1,keyctl=1";
   };

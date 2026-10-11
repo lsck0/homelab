@@ -8,7 +8,8 @@
 #   trusted there already), and every source whose network the router would not let through gets its forward.
 # - forward: the network-wide exceptions across the router: one source, one destination, its ports.
 # - router: the router's own services and who may use them.
-# - portForwards: the house's public address forwarded: https to the edge, every tcp and udp route to its backend.
+# - portForwards: the house's public address forwarded: https to the edge, every tcp and udp route with a publicPort
+#   to its backend.
 #
 # instances/300-router/main.nix renders networks, forward, router and portForwards; modules/network.nix renders the
 # grants onto the guest it runs on. A grant onto one instance lives in its instance.nix (`grants`, collected by
@@ -92,10 +93,10 @@ let
     why = "the dashboard's ${c.widget.type} widget queries ${c.route}";
   }) (lib.filter (c: c.widget != null && c.widget.url == null) lab.homepage);
 
-  # each swarm's wakers (catalog.clusters), which modules/swarm admits in the controller itself
+  # who wakes an idle app on its cluster's controller (catalog.clusters `wakers`, which modules/swarm admits too)
   wakerGrants = lib.mapAttrsToList (name: c: {
-    from = c.wakers; to = c.managerId; tcp = [ catalog.swarm.controllerPort ];
-    why = "the ingresses wake an idle app of swarm ${name} for a request, its state worker for a nightly dump";
+    from = lib.remove c.managerId c.wakers; to = c.managerId; tcp = [ catalog.swarm.controllerPort ];
+    why = "the ingresses wake swarm ${name}'s idle apps for a request, its state worker for a nightly dump";
   }) catalog.clusters;
 
   ingressMetricsGrants = map (z: {
@@ -198,10 +199,6 @@ in
       why = "vm-105 scrapes the workers' log shippers for dropped lines";
     }
     {
-      from = host edge; to = host collector; tcp = [ telemetry.ports.otlpFrontend ];
-      why = "the edge relays the browsers' frontend telemetry";
-    }
-    {
       from = all "apps"; to = host swarmManager;
       tcp = [ ports.swarmManager ports.swarmGossip ]; udp = [ ports.swarmGossip ports.vxlan ]; esp = true;
       why = "the workers reach their manager (internal zone, by decision): control, gossip, the overlay and its ipsec";
@@ -274,11 +271,11 @@ in
       off = { inflightLimit = "the edge limits every client itself"; accessLog = "traefik logs every request"; };
     }
   ]
-  # every tcp and udp route (an instance service's or an app's) to every guest answering it, while one runs
+  # every forwarded tcp and udp route (an instance service's or an app's) to every guest answering it, while one runs
   ++ lib.filter (f: f.addresses != [ ]) (map (r: {
     proto = r.protocol; port = r.publicPort; targetPort = r.port;
     addresses = map net.ipOf (backendIdsOf r);
     inherit (r) host srv off;
     why = "${r.protocol} ${net.fqdn r.host}";
-  }) (lib.attrValues catalog.l4));
+  }) (lib.attrValues catalog.forwarded));
 }

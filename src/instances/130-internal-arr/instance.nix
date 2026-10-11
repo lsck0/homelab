@@ -41,10 +41,10 @@ in {
 
   shares = {
     bulk = { };
-    "data/bazarr" = { };
-    "data/lidarr" = { };
-    "data/prowlarr" = { };
-    "data/radarr" = { };
-    "data/sonarr" = { };
+    "data/bazarr".localState = true;
+    "data/lidarr".localState = true;
+    "data/prowlarr".localState = true;
+    "data/radarr".localState = true;
+    "data/sonarr".localState = true;
   };
 }

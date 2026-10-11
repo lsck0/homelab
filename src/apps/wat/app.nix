@@ -93,7 +93,7 @@ in
     postgresRoot.POSTGRES_ROOT_PASSWORD = "{{wat-postgres-root-password}}";
   in {
     server = otel // garageFiles // {
-      PUBLIC_URL = "https://wat.lsck0.dev";
+      PUBLIC_URL = "{{homelab.origin-wat}}";
       DEFAULT_USER_PASSWORD = "{{wat-default-user-password}}";
       DATABASE_URL = "postgres://admin:{{wat-postgres-password}}@postgres:5432/root";
     };
@@ -117,10 +117,11 @@ in
   };
   secrets = {
     wat-default-user-password = "hex:24";
-    wat-postgres-password = "hex:24";
-    wat-postgres-root-password = "hex:24";
+    # postgres keeps the passwords of its first start
+    wat-postgres-password = "guardsData:hex:24";
+    wat-postgres-root-password = "guardsData:hex:24";
     wat-pgweb-password = "hex:24";
-    wat-garage-rpc-secret = "hex:32";
+    wat-garage-rpc-secret = "guardsData:hex:32";
     wat-garage-root-key-id = "garage-key-id";
     wat-garage-root-secret = "hex:32";
     wat-garage-files-key-id = "garage-key-id";

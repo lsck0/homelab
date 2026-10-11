@@ -115,6 +115,11 @@ let
         default = null;
         description = "The share's mode on the nas, root's (tokens, db dumps); null: 0777, for services running as their own uid.";
       };
+      localState = mkOption {
+        type = types.bool;
+        default = false;
+        description = "The nas copy of the guest's homelab.localState <name>: nas-restore makes the guest take a restore of it.";
+      };
     };
   };
 

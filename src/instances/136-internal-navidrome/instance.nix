@@ -1,12 +1,18 @@
 # music streaming (Subsonic API)
-{ id, ... }: {
+{ id, config, ... }: {
   vm = {
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
-    kind.lxc = "pending migration, see the restructure report";
+    kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";
     privileged = true;
     features = "nesting=1,mount=nfs";
   };
+
+  grants = [ {
+    from = [ "internal" "lan" "wireguard" ];
+    tcp = [ config.services.navidrome.port ];
+    why = "its direct subsonic clients, not yet named: the lab, the house and the owner's devices";
+  } ];
 
   tokens = [ "navidrome-salt" "navidrome-token" "navidrome-user" ];
 
@@ -21,13 +27,12 @@
       host = "music";
       port = 80;
       homepage = { description = "Music"; group = "Media"; icon = "navidrome"; };
-      off.guard = "open to the lab until its direct clients are grants";
     };
   };
 
   shares = {
     "bulk/media/music".readOnly = true;
     "data/db-dumps/vm-${id}" = { mode = "0700"; };
-    "data/navidrome" = { };
+    "data/navidrome".localState = true;
   };
 }

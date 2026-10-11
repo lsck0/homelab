@@ -49,9 +49,12 @@ let
   # an app publishes a port for each http route by its zone, each l4 route by its protocol, and each exporter
   groups = [ "external" "internal" "metrics" "tcp" "udp" ];
 
-  # `{{homelab.<name>}}` in an app's env or override: lab endpoints an app may not hard-code; all telemetry, at the
-  # relay on the task's own node
-  labEndpoints = telemetry.relayEndpoints;
+  # `{{homelab.<name>}}` in an app's env or override: lab endpoints an app may not hard-code. Telemetry at the relay
+  # on the task's own node; origin-<route> where an app's route lives for its users
+  telemetryEndpoints = telemetry.relayEndpoints;
+  originEndpoints = lib.concatMapAttrs (_: a: lib.mapAttrs' (name: r: lib.nameValuePair "origin-${name}" "https://${net.fqdn r.host}") a.routes)
+    appsCatalog.apps;
+  labEndpoints = telemetryEndpoints // originEndpoints;
 
   # -----------------------------------------------------------------------------
   # INTERNAL
@@ -220,7 +223,7 @@ let
       unknownPlaceholders
     ++ map (n: "${where}: {{homelab.${n}}} is no lab endpoint; known: ${lib.concatStringsSep ", " (lib.attrNames labEndpoints)}")
       (lib.subtractLists (lib.attrNames labEndpoints) lab)
-    ++ lib.optional (lab != [ ] && a.off.traces != null && a.off.profiles != null)
+    ++ lib.optional (lib.intersectLists (lib.attrNames telemetryEndpoints) lab != [ ] && a.off.traces != null && a.off.profiles != null)
       "${where} names {{homelab.*}} telemetry endpoints with traces and profiles off: the workers would drop its traffic"
     ++ map (d: "${where}.dumps.${d}.service ${a.dumps.${d}.service} is not stateful: a dump runs on the state worker only")
       (lib.filter (d: !(lib.elem a.dumps.${d}.service a.stateful)) (lib.attrNames a.dumps))

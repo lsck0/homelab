@@ -1,4 +1,4 @@
-{ config, lib, pkgs, inventory, site, catalog, nasMount, nasMedia, retry, setupUnit, ... }:
+{ config, lib, pkgs, inventory, site, catalog, nasMedia, retry, setupUnit, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   route = catalog.internal.navidrome;
@@ -11,7 +11,8 @@ let
   # the subsonic api level hermes speaks (navidrome skill)
   subsonicApiVersion = "1.16.1";
 in {
-  homelab.nasMounts = nasMount stateDir "navidrome" // nasMedia musicDir "music";
+  homelab.nasMounts = nasMedia musicDir "music";
+  homelab.localState.navidrome = { path = stateDir; unit = "podman-navidrome"; sqlite = [ "navidrome.db" ]; };
 
   virtualisation.oci-containers.containers.navidrome = {
     image = "deluan/navidrome:0.64.0";
@@ -62,8 +63,6 @@ in {
       jq -j .subsonicToken <<<"$login" | token_write navidrome-token
     '';
   };
-
-  networking.firewall.allowedTCPPorts = [ route.port ];
 
   # consistent copy for the snapshot, the live file may be mid-write
   homelab.dbBackup.databases.navidrome.sqlite = "${stateDir}/navidrome.db";
