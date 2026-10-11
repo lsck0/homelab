@@ -13,8 +13,8 @@ metadata:
 
 # Minecraft (vm-208, 10.200.0.208, mc.lsck0.dev)
 
-Whether vm-208 runs at all is its state in AGENTS.md: `true` means always on, `false` means the owner
-switched it off (start it with `vm start 208` only when the owner asks for the server). While the VM
+Whether vm-208 runs at all is its power in AGENTS.md: `on`, or `off` when the owner switched it off
+(start it with `vm start 208` only when the owner asks for the server). While the VM
 runs, lazymc on it owns the public port 25565: it answers status pings itself, boots the server
 container on a real player login, and stops it after 30 minutes without players. Use `terminal` for all steps.
 

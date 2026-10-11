@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # converge the Proxmox VE host to what the lab declares; every run of init.sh and sync.sh runs it, reruns change
-# nothing
+# nothing. deinit.sh runs its teardown.
 #
-# lib/proxmox.sh (proxmox_converge) prepends its inputs on stdin, out of argv:
+# lib/proxmox.sh prepends its inputs on stdin, out of argv:
+#   ACTION                converge (proxmox_converge), or teardown (proxmox_teardown): every guest and what converge
+#                         set up go
+#   TOKEN_DIR             where a new api token's secret is left, one file per role
+#   TEMPLATES             the golden image and the lxc template sync.sh uploads
+# converge only:
 #   PROXMOX_IP            the host's lan address (site.json), which its api certificate must name
 #   ZONE_BRIDGES          every zone's bridge (zones.json); vmbr0 comes from the installer
 #   WAKE_ZONES            the zones whose ingress wakes onDemand guests (terraform/lib.tf grants each its guests)
@@ -11,7 +16,8 @@
 #   NAS_ID                the nas guest, whose hookscript wakes the bulk pool around its start and stop
 #   LLDAP_VMID LLDAP_HOST LLDAP_PORT   the guest running lldap and its ldaps listener
 #   LLDAP_BASE_DN LLDAP_ADMIN_GROUP    the directory, and its group that administers the datacentre
-#   LLDAP_BIND_PASSWORD   lldap's read-only proxmox-bind user
+#   LLDAP_CERT            lldap's self-signed ldaps certificate inside its guest, which the realm pins
+#   LLDAP_BIND_USER LLDAP_BIND_PASSWORD   the read-only user the realm binds as (lldap_strict_readonly)
 #   ROOT_PASSWORD         root@pam's own password (proxmox-root-pass)
 #   ROOT_KEYS             the ssh keys root takes, one per line
 # An api token is created only when missing, its secret written once to TOKEN_DIR/<role> as "<token id>=<secret>"
@@ -24,15 +30,13 @@
 # rest of it.
 set -euo pipefail
 
-: "${PROXMOX_IP:?}" "${ZONE_BRIDGES:?}" "${WAKE_ZONES:?}" "${NAS_ID:?}" "${ROOT_PASSWORD:?}" "${ROOT_KEYS:?}"
-: "${LLDAP_VMID:?}" "${LLDAP_HOST:?}" "${LLDAP_PORT:?}" "${LLDAP_BASE_DN:?}" "${LLDAP_ADMIN_GROUP:?}" "${LLDAP_BIND_PASSWORD:?}"
+: "${ACTION:?}" "${TOKEN_DIR:?}" "${TEMPLATES:?}"
 GPU_IDS="${GPU_IDS:-}"
 BULK_DISK="${BULK_DISK:-}"
 
 # -----------------------------------------------------------------------------
 # CONSTANTS
 # -----------------------------------------------------------------------------
-TOKEN_DIR=/root/homelab-tokens
 PACKAGES=(prometheus-node-exporter prometheus-node-exporter-collectors smartmontools nvme-cli jq)
 OSSEC_BUILD_PACKAGES=(build-essential libevent-dev libpcre2-dev libz-dev libssl-dev libsystemd-dev wget ca-certificates)
 # a mirror or github that does not answer costs a run at most this, per try
@@ -44,6 +48,9 @@ TEXTFILE_DIR=/var/lib/prometheus/node-exporter
 TEXTFILE_INTERVAL_MIN=5
 # hdparm -S units of 5 s: 10 minutes
 HDD_SPINDOWN_SETTING=120
+# smbios type 38 describes a bmc; without one debian's openipmi init script fails at every boot
+IPMI_DMI_ENTRY=/sys/firmware/dmi/entries/38-0
+IPMI_UNIT=openipmi.service
 # containers cannot load kernel modules: nfs for the privileged ones' mounts, overlay and br_netfilter for podman
 LXC_MODULES=(nfs nfsv4 overlay br_netfilter)
 WAKE_ROLE=HomelabWake
@@ -51,14 +58,14 @@ WAKE_PRIVILEGES=VM.Audit,VM.PowerMgmt
 REALM=lldap
 REALM_PASSWORD_FILE=/etc/pve/priv/realm/$REALM.pw
 REALM_CA_FILE=/etc/pve/priv/realm/$REALM-ca.pem
-# read-only (lldap_strict_readonly): the realm sync reads users and groups and never writes
-REALM_BIND_USER=proxmox-bind
 REALM_SYNC_SCHEDULE=hourly
 # a realm login asks for a totp code too; root@pam sets each user's key (README, "Proxmox login")
 REALM_TFA=type=oath
-# lldap's self-signed ldaps certificate, as instances/101-internal-authelia/lib/lldap.nix writes it in the guest
-LLDAP_CERT=/var/lib/lldap/ldaps-cert.pem
 GUEST_EXEC_TIMEOUT_S=10
+NETWORK_INTERFACES=/etc/network/interfaces
+HOSTS_FILE=/etc/hosts
+# a cluster's nodes are named in it, which this script does not own
+COROSYNC_CONF=/etc/pve/corosync.conf
 API_CERT=/etc/pve/local/pve-ssl.pem
 # an uploaded certificate (pvenode cert set, acme) that pveproxy serves instead of the cluster-signed one
 API_CUSTOM_CERT=/etc/pve/local/pveproxy-ssl.pem
@@ -187,18 +194,18 @@ apt_sources_converge() {
 bridges_converge() {
   local bridge changed=0 present
   for bridge in $ZONE_BRIDGES; do
-    grep -q "^auto $bridge\$" /etc/network/interfaces && continue
+    grep -q "^auto $bridge\$" "$NETWORK_INTERFACES" && continue
     printf '\nauto %s\niface %s inet manual\n    bridge-ports none\n    bridge-stp off\n    bridge-fd 0\n' "$bridge" "$bridge" \
-      >> /etc/network/interfaces
+      >> "$NETWORK_INTERFACES"
     changed=1
   done
-  mapfile -t present < <(sed -n 's/^auto \(vmbr[1-9][0-9]*\)$/\1/p' /etc/network/interfaces)
+  mapfile -t present < <(sed -n 's/^auto \(vmbr[1-9][0-9]*\)$/\1/p' "$NETWORK_INTERFACES")
   for bridge in "${present[@]}"; do
     [[ " $ZONE_BRIDGES " == *" $bridge "* ]] && continue
     # a guest still on it would lose its network: that guest is the drift to fix first
     [ -z "$(ls "/sys/class/net/$bridge/brif" 2>/dev/null)" ] \
       || { echo "ERROR: $bridge is no zone's bridge but guests are on it: $(ls "/sys/class/net/$bridge/brif")" >&2; exit 1; }
-    sed -i "/^auto $bridge\$/,/^\$/d" /etc/network/interfaces
+    sed -i "/^auto $bridge\$/,/^\$/d" "$NETWORK_INTERFACES"
     echo ">>> Proxmox: removed $bridge, no zone's bridge"
     changed=1
   done
@@ -247,6 +254,16 @@ power_converge() {
   echo "ACTION==\"add\", SUBSYSTEM==\"block\", KERNEL==\"sd[a-z]\", ATTR{queue/rotational}==\"1\", RUN+=\"/usr/sbin/hdparm -S $HDD_SPINDOWN_SETTING /dev/%k\"" \
     | file_converge /etc/udev/rules.d/69-homelab-hdd-spindown.rules 644 hdd_spindown_start
   printf '%s\n' "${LXC_MODULES[@]}" | file_converge /etc/modules-load.d/homelab-lxc.conf 644 modules_load
+}
+
+ipmi_converge() {
+  [ ! -e "$IPMI_DMI_ENTRY" ] || return 0
+  systemctl cat "$IPMI_UNIT" >/dev/null 2>&1 || return 0
+  if [ "$(systemctl is-enabled "$IPMI_UNIT" 2>/dev/null)" != masked ]; then
+    systemctl mask --now "$IPMI_UNIT"
+    echo ">>> Proxmox: masked $IPMI_UNIT, the host has no bmc"
+  fi
+  if systemctl -q is-failed "$IPMI_UNIT"; then systemctl reset-failed "$IPMI_UNIT"; fi
 }
 
 # root takes exactly the lab's root keys plus the node's own, which pve uses to reach itself
@@ -319,7 +336,7 @@ realm_converge() {
   pveum realm list --output-format json | json_has realm "$REALM" && mode=(modify "$REALM")
   pveum realm "${mode[@]}" \
     --server1 "$LLDAP_HOST" --port "$LLDAP_PORT" --mode ldaps --verify 1 --capath "$REALM_CA_FILE" \
-    --base_dn "ou=people,$LLDAP_BASE_DN" --user_attr uid --bind_dn "uid=$REALM_BIND_USER,ou=people,$LLDAP_BASE_DN" \
+    --base_dn "ou=people,$LLDAP_BASE_DN" --user_attr uid --bind_dn "uid=$LLDAP_BIND_USER,ou=people,$LLDAP_BASE_DN" \
     --group_dn "ou=groups,$LLDAP_BASE_DN" --group_name_attr cn --group_classes groupOfUniqueNames \
     --sync-defaults-options "enable-new=1,scope=both" --tfa "$REALM_TFA" --comment "lldap (single sign-on account store)"
   # the sync fills the group it would create; it exists before the first sync so the acl can name it
@@ -339,10 +356,16 @@ node_address() { getent ahostsv4 "$(hostname)" | awk 'NR == 1 { print $1 }'; }
 
 hosts_converge() {
   [ "$(node_address)" != "$PROXMOX_IP" ] || return 0
-  sed -i -E "/[[:space:]]$(hostname)([[:space:]]|\$)/ s/^[0-9.]+/$PROXMOX_IP/" /etc/hosts
+  [ ! -e "$COROSYNC_CONF" ] \
+    || { echo "ERROR: $(hostname) resolves to $(node_address), not $PROXMOX_IP, in a cluster: fix its address by hand." >&2; exit 1; }
+  [[ "$(ip -o -4 addr show)" == *" inet $PROXMOX_IP/"* ]] \
+    || { echo "ERROR: no interface of this host holds $PROXMOX_IP (site.json lan.proxmox)." >&2; exit 1; }
+  sed -i -E "/[[:space:]]$(hostname)([[:space:]]|\$)/ s/^[0-9.]+/$PROXMOX_IP/" "$HOSTS_FILE"
   [ "$(node_address)" = "$PROXMOX_IP" ] \
-    || { echo "ERROR: $(hostname) does not resolve to $PROXMOX_IP: give it a line in /etc/hosts." >&2; exit 1; }
-  echo ">>> Proxmox: /etc/hosts names $(hostname) at $PROXMOX_IP"
+    || { echo "ERROR: $(hostname) does not resolve to $PROXMOX_IP: give it a line in $HOSTS_FILE." >&2; exit 1; }
+  # pmxcfs resolves the node's address once, at its start; restarted, it reports the one pvecm signs below
+  systemctl restart pve-cluster
+  echo ">>> Proxmox: $HOSTS_FILE names $(hostname) at $PROXMOX_IP"
 }
 
 # clients verify the api against the cluster CA (site.json proxmoxCa) and by address: the node certificate must name
@@ -585,12 +608,15 @@ METRICS
 # FUNCTIONS
 # -----------------------------------------------------------------------------
 
-main() {
-  command -v pveversion >/dev/null || { echo "ERROR: install Proxmox VE first, then rerun init.sh." >&2; exit 1; }
+converge() {
+  : "${PROXMOX_IP:?}" "${ZONE_BRIDGES:?}" "${WAKE_ZONES:?}" "${NAS_ID:?}" "${ROOT_PASSWORD:?}" "${ROOT_KEYS:?}"
+  : "${LLDAP_VMID:?}" "${LLDAP_HOST:?}" "${LLDAP_PORT:?}" "${LLDAP_BASE_DN:?}" "${LLDAP_ADMIN_GROUP:?}" "${LLDAP_CERT:?}"
+  : "${LLDAP_BIND_USER:?}" "${LLDAP_BIND_PASSWORD:?}"
   apt_sources_converge
   bridges_converge
   gpu_converge
   power_converge
+  ipmi_converge
   root_converge
   users_converge
   realm_converge
@@ -604,6 +630,58 @@ main() {
   fi
   ossec_converge
   echo ">>> Proxmox $(pveversion) converged."
+}
+
+# every guest and what converge and terraform made on the host, except what it keeps working without the lab: OSSEC,
+# the bulk pool, gpu passthrough, apt sources, root's password and keys, the node's address and certificate, the
+# power, module and smartd settings. The datacenter firewall goes off with its rules, which a fresh terraform state
+# would add a second time.
+teardown() {
+  local id user pool group bridges bridge pos
+  for id in $(qm list | awk 'NR > 1 { print $1 }'); do
+    if [ "$(qm status "$id" | cut -d' ' -f2)" = running ]; then qm stop "$id" --skiplock 1 >/dev/null; fi
+    qm destroy "$id" --destroy-unreferenced-disks 1 --purge 1 >/dev/null
+  done
+  for id in $(pct list | awk 'NR > 1 { print $1 }'); do
+    if [ "$(pct status "$id" | cut -d' ' -f2)" = running ]; then pct stop "$id" >/dev/null; fi
+    pct destroy "$id" --purge 1 --destroy-unreferenced-disks 1 >/dev/null
+  done
+  # shellcheck disable=SC2086 # one path per word
+  rm -f $TEMPLATES
+  rm -rf "$TOKEN_DIR"
+
+  pvesh set /cluster/firewall/options --enable 0
+  for pos in $(pvesh get /cluster/firewall/rules --output-format json | jq -r '.[].pos' | sort -rn); do
+    pvesh delete "/cluster/firewall/rules/$pos"
+  done
+
+  # deleting a user deletes its tokens and acl entries
+  for user in $(pveum user list --output-format json | jq -r '.[].userid | select(endswith("@pve"))'); do pveum user delete "$user"; done
+  for pool in $(pveum pool list --output-format json | jq -r '.[].poolid'); do pveum pool delete "$pool"; done
+  if pveum role list --output-format json | json_has roleid "$WAKE_ROLE"; then pveum role delete "$WAKE_ROLE"; fi
+  if pvesh get /cluster/jobs/realm-sync --output-format json | json_has id "$REALM"; then pvesh delete "/cluster/jobs/realm-sync/$REALM"; fi
+  if pveum realm list --output-format json | json_has realm "$REALM"; then pveum realm delete "$REALM"; fi
+  for group in $(pveum group list --output-format json | jq -r --arg suffix "-$REALM" '.[].groupid | select(endswith($suffix))'); do
+    pveum group delete "$group"
+  done
+  rm -f "$REALM_PASSWORD_FILE" "$REALM_CA_FILE"
+
+  DEBIAN_FRONTEND=noninteractive apt-get purge -y prometheus-node-exporter </dev/null >/dev/null
+  DEBIAN_FRONTEND=noninteractive apt-get autoremove -y </dev/null >/dev/null
+
+  mapfile -t bridges < <(sed -n 's/^auto \(vmbr[1-9][0-9]*\)$/\1/p' "$NETWORK_INTERFACES")
+  for bridge in "${bridges[@]}"; do sed -i "/^auto $bridge\$/,/^\$/d" "$NETWORK_INTERFACES"; done
+  ifreload -a
+  echo ">>> Proxmox: torn down; left: $(qm list | awk 'NR > 1' | wc -l) vms, $(pct list | awk 'NR > 1' | wc -l) containers"
+}
+
+main() {
+  command -v pveversion >/dev/null || { echo "ERROR: install Proxmox VE first, then rerun init.sh." >&2; exit 1; }
+  case "$ACTION" in
+    converge) converge ;;
+    teardown) teardown ;;
+    *) echo "ERROR: ACTION is converge or teardown, not $ACTION" >&2; exit 1 ;;
+  esac
 }
 
 # piped in or run; tests/pve_install_test.sh sources it for its functions

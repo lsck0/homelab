@@ -8,7 +8,7 @@
 #
 #   lab.withApps (apps: lib.recursiveUpdate apps { wat.enable = true; })    (tests/lib/lab.nix `apps`)
 #
-# The smallest app, src/apps/demo/app.nix, serves one public path:
+# The smallest app.nix serves one public path:
 #
 #   {
 #     enable = true;
@@ -31,7 +31,7 @@ let
   # a path inside the app's checkout: relative, never climbing out (the builder checks the resolved path too)
   repoPath = types.strMatching "([^/.][^/]*|\\.[^/.][^/]*)(/([^/.][^/]*|\\.[^/.][^/]*))*|\\.";
 
-  # one task's share of a worker unless the app asks for more, and the most it may ask (limits.nix: never more than a worker has)
+  # one task's share of a worker unless the app asks for more, and the most it may ask (modules/limits: never more than a worker has)
   taskDefaults = { memoryMiB = 512; cpus = 1.0; pids = 512; };
   taskMax = { memoryMiB = 2048; cpus = 2.0; pids = 4096; };
 

@@ -39,7 +39,7 @@ let
   ) (lib.attrNames catalog);
 
   wiringLaws = name: config: let host = layout.hostOf config.networking.hostName; in
-    lib.optionals (host != null && migrated) (map (s: "${name}: secret ${s.key} comes from ${toString s.sopsFile}, not ${layout.fileOf host s.key}")
+    lib.optionals (host != null) (map (s: "${name}: secret ${s.key} comes from ${toString s.sopsFile}, not ${layout.fileOf host s.key}")
       (lib.filter (s: toString s.sopsFile != "${toString src}/${layout.fileOf host s.key}") (lib.attrValues config.sops.secrets)))
     ++ lib.optional (config.sops.age.keyFile != keyFile) "${name}: sops reads its key from ${toString config.sops.age.keyFile}, not ${keyFile}"
     ++ lib.optional (config.sops.age.sshKeyPaths != [ ] || config.sops.gnupg.sshKeyPaths != [ ])
@@ -76,10 +76,8 @@ let
     lib.optional ((rules.${file} or null) != wantRecipients file) ".sops.yaml has no rule for src/${file} to the admins and its readers"
   ) (lib.attrNames plan.files));
 
-  migrated = !(builtins.pathExists (src + "/secrets.json"));
   layoutLaws = map (p: "secrets layout: ${p}") plan.problems ++ placementLaws
-    ++ (if migrated then lib.concatMap fileLaws (lib.attrNames plan.files) ++ uniqueRecipients ++ ruleLaws
-        else [ "src/secrets.json: the secrets are not per folder yet: run src/scripts/secrets-migrate.sh" ]);
+    ++ lib.concatMap fileLaws (lib.attrNames plan.files) ++ uniqueRecipients ++ ruleLaws;
 
   # every string a unit runs or is handed: a placeholder there is never replaced
   unitStrings = unit: lib.filter builtins.isString (

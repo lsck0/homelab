@@ -5,7 +5,7 @@ let
 in {
   vm = {
     bootPhase = "public";
-    kind.lxc = "pending migration, see the restructure report";
+    kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";
   };
 
   grants = [
