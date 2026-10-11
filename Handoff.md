@@ -1,4 +1,4 @@
-# Handoff: homelab, state after Generation 448 (2026-10-07)
+# Handoff: homelab, review-2 round 3 ready to deploy (2026-10-11)
 
 This file is everything a fresh agent (for example a cloud agent working from the GitHub repo) needs to finish the
 open work. It is self-contained: the architecture, every user decision, the rules, the full review report and the
@@ -16,145 +16,95 @@ ordered task list are below. Paths are relative to the repo root (`homelab/`), t
 - **So:** do the code work, prove it with checks, open a pull request (or push a branch) and list the exact steps the
   owner runs (deploy, live checks, Proxmox, GitHub, secrets). Never fabricate live results.
 
-## 1. Where things stand
+## 1. Where things stand (2026-10-11, round 3)
 
-- **Live:** Generation 448 (commit `0d52be3` on `master`). The restructured lab runs: one folder per instance
-  (`src/instances/<vmid>-<zone>-<name>/`), a collector (`src/modules/lab`), per-folder sops secrets, swarm workers
-  vm-250..252 (joined, the `hello` app serves), deploy controller on vm-140, apps zone 10.250.0.0/24, host
-  firewalls restored on all guests after a migration glitch.
-- **Arch mirror:** fixed and complete (the owner resolved the last missing package). Builder: vm-119
-  (`src/instances/119-internal-archbuild`), mirror: vm-210 (`src/instances/210-external-mirror`), status at
-  `https://mirror.lsck0.dev/status.json`, logs at `https://mirror.lsck0.dev/logs/<name>.log`. The builder reads
-  arch-dotfiles' `configs/*/packages.txt` plus every platform's `EXTRA_PACKAGES`, uses local recipes from
-  `mirror/pkgbuilds/` first, drops a split package base's own siblings from its build deps, bounds build parallelism
-  by memory through the build container's cpuset (one cpu per 2 GiB), runs with `OOMPolicy=continue`, and holds a
-  night back rather than lose a served package.
-- **Live hot fix not yet in a generation:** vm-100 (internal ingress) had thrashed to a halt with a 512 MiB balloon
-  floor; the owner's session raised it live (`qm set 100 --balloon 1024`) and wrote `balloonMiB = 1024` into
-  `src/instances/100-internal-traefik/instance.nix`. That edit must survive into the next deploy.
-- **Review-2 fix round:** in progress on branch `review2-fixes`; the checkpoint below (section 1a) is what the branch
-  holds now, what is verified, what is open, and what the owner must do before deploying it.
+- **Live:** Generation 448 plus three hot fixes on `master` (archbuild local recipes, traefik body limit, the arch
+  mirror's `limitScale = 20`, deployed to vm-119 and vm-200 only).
+- **This branch:** every review-2 finding is fixed except the owner-rejected #3 and #16; #2, #4, #9, #20, #21 and
+  #69 have a repo side done and an owner side below. The round merged the cloud's branch with the seven local group
+  branches, the live survey's fixes (on-demand wake, the stuck hello task, the runner crash loop, the stale deploy
+  alert, janitorr's loop, the Home Assistant mirror, SearXNG's client address, Pingvin registration) and the vm-119
+  memory fix (one 3 GiB compile job inside a 3840 MiB floor).
+- **Checks:** every host evaluates, terraform validates, every eval-only check passes; `policy-eval` lists only the
+  "run src/scripts/secrets-sync.sh --apply" violations that step 3 below clears. VM test results: section 1b.
 
-## 1a. Checkpoint of the review-2 fix round (2026-10-07, branch `review2-fixes`)
+## 1a. Deploy runbook
 
-**Recommendation: do not deploy this checkpoint yet.** It is a consistent, evaluating base, but most review-2
-findings are still open and policy-eval fails on the memory budget (#1). Deploy when the round is finished; the
-steps below are written so that a local agent with lab access can do them then (or now, if the owner decides to).
+Run on the workstation (192.168.178.138), in `~/projects/homelab` on `master`, YubiKey plugged in. Every step is
+idempotent; stop at the first surprise.
 
-### What holds now (verified in the cloud, no lab access)
-- Every nixosConfiguration evaluates (32). Every eval-only check builds, except `policy-eval` (below).
-- `shellcheck` (now including every shell body embedded in nix) and `secrets-check` pass (git flake).
-- `terraform init -backend=false && terraform validate && terraform fmt -check` pass (terraform 1.14.0, providers
-  from a filesystem mirror; the lock file is unchanged).
-- VM test `harness-smoke` passes. New check `pve-install` (realm fail-closed, ldaps binding, apt/GitHub outage, tampered
-  archive) passes. Every other VM test evaluates; none of them has been run on this branch yet.
-- `policy-eval` reports only secrets files that do not hold exactly their declared names (clears with the secrets
-  steps below); the memory budget (#1) holds.
-
-### Finding status at this checkpoint
-| status | findings |
-|---|---|
-| fixed and verified by checks (telemetry group) | 7, 22, 25, 46, 58, 66, 76, 77, 92; 11 (plus a live cleanup below) |
-| partly (telemetry) | 20 (disk warnings page; mirroring the NVMe is hardware), 21 (direct ntfy, channel-failure alerts, off-site dead man's switch needs an account), 61 (no Unsplash/jsDelivr favicon; card icons still from jsDelivr until vendored with network) |
-| fixed and verified by checks (collector group) | 43, 48, 49, 50 (`enabled`/`cooldown` gone; lab.export still derives `enabled` for the desktop widget), 82, 88, 89, 90; 45 (two guests keep `off.guard` until their direct clients are known) |
-| fixed and verified by checks (host-tooling group) | 6, 33, 41, 52, 63, 64, 68, 78, 83, 84, 94; 93 partly (stale comments left in other groups' files) |
-| needs-owner (repo side done, lab steps below) | 2 (Proxmox firewall), 4 (lldap realm: ldaps + TOTP), 9 (pve certificate SAN) |
-| fixed and verified by checks | 28 (pinned hermes-agent reads `ANTHROPIC_TOKEN` as the OAuth token and scrubs it from every command; `CLAUDE_CODE_OAUTH_TOKEN` was not scrubbed, so the leak was real: switched), 42, 43, 47, 48, 49, 81, 85 |
-| rejected by the owner | 3; 16 (Hermes keeps root ssh everywhere; only its key comment was corrected to vm-114, and Hermes now checks host keys strictly against `src/generated/known_hosts`) |
-| fixed (owner's local session aacd5b8, kept over the collector's sizing) | 1: floors 25600 + lxc 3840 + reserve 2048 within the node's 32022 MiB; arc 0 (no zfs pool on the node, per the owner's session) |
-| partly done (draft finished to evaluate, not yet reviewed against the finding) | 5, 14, 15, 53 |
-| open (the draft may hold partial work in these areas; unreviewed) | every other finding |
-
-Main changes beyond the draft: the typed app catalog lives in `modules/lab` once (`lab.appsCatalog`, `lab.catalog`,
-`lab.withApps f` for fixture apps; `homelab.appsCatalog` is gone); swarm workers derive from the enabled apps'
-reservations (`modules/limits` `workerCountOf`); hosts and test guests get their instance record as `instance`; NAS
-shares are declared in instance.nix and checked by a policy law (`tests/policy/guests.nix`); every policy law has a
-positive control (`tests/policy-controls.nix`); the Hermes "observer" account of the draft is reverted (owner
-decision), keeping its strict known-hosts, `ANTHROPIC_TOKEN` and the declared skills tree; sync.sh's
-`terraform init` passes `-reconfigure` (the draft moved the state path to `~/.local/state/homelab/terraform`, and
-init on a workstation with an existing `.terraform` failed with "Backend configuration changed"); `DOTFILES_SECRETS`
-works again.
-
-### Owner / local agent steps, in order (only when deploying this branch)
-0. Read README "Proxmox host", "Proxmox firewall" and "Proxmox login" (new). Checks to run beforehand:
-   `src/generated/site.json` `lan.workstation` and `lan.notebook` are the real addresses (sync.sh now refuses to run
-   from any other machine, and 8006 admits only those two and the router).
-1. **Secrets: restore the values that moved from runtime tokens to sops** (guardsData: `secrets-sync` stops until each
-   is set; never generate new ones, the apps hold the live values). On the workstation, in the repo, for each line
-   (`<token dir>`: where the live token is, `<file>`: where the value goes):
+1. **Unlock the admin key** (sync.sh does it too): `~/projects/arch-dotfiles/scripts/yubikey.sh unlock`. Until the
+   dotfiles checkout is on the modules layout, export `DOTFILES_SECRETS=~/projects/arch-dotfiles/configs/secrets` for
+   every step below.
+2. **Restore the values that moved from runtime tokens to sops** (never generate them: the apps hold the live values;
+   all seven token files exist on the NAS, checked 2026-10-11):
    ```
-   # name                 token dir      file
-   # radarr-key           vm-130         src/secrets/shared.sops.json
-   # sonarr-key           vm-130         src/secrets/shared.sops.json
-   # lidarr-key           vm-130         src/secrets/shared.sops.json
-   # prowlarr-key         vm-130         src/secrets/shared.sops.json
-   # jellyfin-admin-pass  vm-134         src/secrets/shared.sops.json
-   # janitorr-pass        vm-134         src/instances/134-internal-jellyfin/secrets.sops.json
-   # navidrome-pass       vm-136         src/instances/136-internal-navidrome/secrets.sops.json
-   ssh root@10.100.0.109 cat /srv/nas/data/tokens/<token dir>/<name>.token | jq -Rc . \
-     | SOPS_AGE_KEY_FILE=secrets/age.txt sops set --value-stdin <file> '["<name>"]'
+   while read -r name dir file; do
+     ssh root@10.100.0.109 cat "/srv/nas/data/tokens/$dir/$name.token" | jq -Rc . \
+       | SOPS_AGE_KEY_FILE=secrets/age.txt sops set --value-stdin "$file" "[\"$name\"]"
+   done <<'LIST'
+   radarr-key vm-130 src/secrets/shared.sops.json
+   sonarr-key vm-130 src/secrets/shared.sops.json
+   lidarr-key vm-130 src/secrets/shared.sops.json
+   prowlarr-key vm-130 src/secrets/shared.sops.json
+   jellyfin-admin-pass vm-134 src/secrets/shared.sops.json
+   janitorr-pass vm-134 src/instances/134-internal-jellyfin/secrets.sops.json
+   navidrome-pass vm-136 src/instances/136-internal-navidrome/secrets.sops.json
+   LIST
    ```
-   (`--value-stdin` keeps the value off argv; `jq -Rc .` makes it the JSON string sops expects.) The two
-   `secrets.sops.json` files above are new and hold empty placeholders; the shared values live in
-   `src/secrets/shared.sops.json`.
-2. `src/scripts/init.sh` writes the new router secret `workstation-mac` (the workstation's MAC left the public
-   site.json, #63); then `src/scripts/secrets-sync.sh` (dry run), read it, then `--apply`: it moves `registry-push-password` from vm-100's
-   file to the shared file (value kept), generates the new `qbittorrent-pass` (vm-112 sets the web UI password from it at every start) and the
-   readers' shared copies, drops `proxmox-ca` (#53), and rewrites `.sops.yaml` (rules for 134/136 added, workers 251/252
-   removed). Run `--prune` (after reading what it would delete): it drops tfvars `proxmox_insecure`, since
-   terraform now verifies the Proxmox CA (#6).
-3. **Terraform plan check** (sync.sh prints it; nothing is applied without reading it): expected
-   - destroy vm-251 and vm-252 (stateless swarm workers; the derived worker count is 1 for the one enabled app);
-   - vm-105 disk 16 -> 80 GiB (grow, in place): prometheus, loki and pyroscope move to local disk through
-     `homelab.localState`, whose first seed copies the NAS copy (keep the share; the first start takes a while);
-   - the Proxmox firewall turns on with input policy DROP (#2, draft): host rules admit ssh from the house lan,
-     8006 only from the workstation (`site.json lan.workstation`) and the router, node exporter and ping. **Before
-     applying, check `src/generated/site.json` `lan.workstation` (192.168.178.138) is the workstation's real address**, and keep a
-     console (or `pve-firewall stop` over ssh) ready: a wrong address locks the API and web UI out;
-   - no `must be replaced` on any existing guest. The draft removed the `moved {}` block of the gpu mapping
-     (`gpu` -> `gpu[0]`): fine once a deploy applied it; if the plan wants to destroy `gpu` or create `gpu[0]`, stop.
-4. Deploy: `cd ~/projects/homelab && DOTFILES_SECRETS=~/projects/arch-dotfiles/configs/secrets ./sync.sh`
-   (the terraform state moves once to `~/.local/state/homelab/terraform`, a copy stays beside it as `.moved-from-src`).
-5. Proxmox host (sync.sh runs scripts/pve-install.sh, one idempotent converge, #41):
-   - it now deletes every `@pve` user the lab does not declare (terraform-prov, homepage, wake-<zone>) and every
-     empty pool: this revokes Hermes' old API token (section 5 step 3); move anything hand-made you want to keep to
-     `@pam` first. Non-empty pools are kept.
-   - the certificate is re-signed with 192.168.178.200 in its SAN (#9): check `openssl x509 -in
-     /etc/pve/local/pve-ssl.pem -noout -ext subjectAltName`, then on-demand wake works (vm-100/200 logs).
-   - lldap realm (#4): proxmox binds over ldaps (6360) to vm-101 with its certificate, read through the hypervisor;
-     the first sync after vm-101 created the certificate restores the realm's `admins` Administrator rights (the
-     sync before revokes them, fail closed). Give every realm user a TOTP key, as root on the host:
-     `key=$(head -c 20 /dev/urandom | base32); pveum user modify <user>@lldap --keys "$key"` and enroll `$key` in the
-     authenticator; a realm user without a key cannot log in.
-   - firewall (#2): `pve-firewall status` says enabled/running (sync.sh fails otherwise); locked out:
-     `ssh root@192.168.178.200 pve-firewall stop` from the house lan.
-   - `nix-collect-garbage` on the workstation drops the old terraform state copies from the store (#64).
-6. Live checks: section 3 below, plus `ssh root@10.100.0.140 docker node ls` (vm-250 Ready, 251/252 gone),
-   `ssh root@10.100.0.105 systemctl status prometheus-seed loki-seed` (seeded, not diverged), Hermes answers on
-   Telegram and `ssh root@<guest>` works from vm-114 (strict host keys), the *arr apps, Jellyfin, Janitorr, Navidrome
-   and the homepage widgets work with the restored keys.
+3. **Secrets layout:** `src/scripts/init.sh` (stores the workstation MAC as the router secret `workstation-mac` and
+   drops it from site.json), then `src/scripts/secrets-sync.sh` (dry run: read it), `--apply`, `--prune` (read what it
+   deletes first: tfvars `proxmox_insecure`, `crowdsec-bouncer-key`, the moved `ntfy-token`). Then
+   `nix build ./src#checks.x86_64-linux.policy-eval` passes.
+   Optional, any time: the off-site dead man's switch (healthchecks.io, 5 min period, 15 min grace):
+   `printf '"%s"' '<ping url>' | SOPS_AGE_KEY_FILE=secrets/age.txt sops set --value-stdin
+   src/instances/203-external-ntfy/secrets.sops.json '["deadman-ping-url"]'`. Left empty, vm-203 skips it silently.
+4. **Proxmox realm TOTP** (before the deploy: the realm requires it from then on; `root@pam` is unaffected), as root
+   on 192.168.178.200 for each lldap user who logs in to Proxmox:
+   `key=$(head -c 20 /dev/urandom | base32); pveum user modify <user>@lldap --keys "$key"; echo "$key"`, enroll the
+   key in the authenticator. Have the `root@pam` password at hand (`proxmox-root-pass` in `src/secrets/shared.sops.json`).
+5. **Pick the moment:** vm-119 idle (`curl -s -o /dev/null -w '%{http_code}' http://10.100.0.119/busy` gives 404 or
+   the guest is off). The provider reboots every vm whose memory or floor changes: 100, 101, 109, 115, 117, 119, 121, 125, 130, 140, 250
+   (checked against the live `qm config`, 2026-10-11); the lxcs 103, 104, 128, 136, 203, 204 shrink 768 -> 512 MiB
+   in place (their anonymous memory is under 130 MiB).
+6. **Deploy:** `./sync.sh`. Read the terraform plan before it applies; expected and nothing else:
+   - destroy vm-251 and vm-252 (stateless swarm workers; one worker fits the one enabled app);
+   - in place: memory of the guests in step 5; vm-105 disk 16 -> 80 GiB;
+   - the Proxmox firewall on (input DROP; ssh open to the house lan, 8006 from workstation, notebook and router);
+   - no `must be replaced`, no destroy of `gpu` / create of `gpu[0]` (stop if so).
+   On the Proxmox host the converge then re-signs pve-ssl.pem for 192.168.178.200 (rewrites /etc/hosts if it names
+   .2, restarts pve-cluster and pveproxy), deletes undeclared `@pve` users (Hermes' old token) and empty pools,
+   installs pvestatd's lvm filter for the bulk disk and restarts pvestatd once, masks openipmi.
+7. **If locked out of Proxmox:** `ssh root@192.168.178.200 pve-firewall stop` from any house machine (ssh stays open
+   to the lan); `pvesh set /cluster/firewall/options --enable 0` keeps it off until the next sync. Certificate:
+   restore /etc/hosts, `systemctl restart pve-cluster && pvecm updatecerts --force && systemctl restart pveproxy`.
+   Realm: as root@pam, `pveum realm modify lldap --tfa type=`.
+8. **Live checks** (the session that built this runs them if asked):
+   - every guest: `systemctl --failed` empty;
+   - `openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -ext subjectAltName` lists .200, `pve-firewall status` running,
+     `pvesm status` shows bulk disabled while vm-109 runs (the spin-down design);
+   - https://auth.lsck0.dev, https://hello.lsck0.dev, https://mirror.lsck0.dev/x86_64/lsck0.db answer from outside;
+   - `ssh root@10.100.0.140 docker node ls`: vm-250 Ready; hello serves;
+   - an on-demand site wakes (e.g. https://share.lsck0.dev) and is reaped after its idle time;
+   - seeds: `journalctl -u <name>-seed` on vm-115, 130, 105, 138 (and 136 when it wakes) says "seeded ... from the nas
+     copy"; on "diverged" stop and decide by hand;
+   - vm-117: `github-runner-nyangine` active, `/var/lib/node-exporter-textfile/app_builder.prom` gone;
+   - vm-207: registration closed; vm-134 janitorr not restarting; Home Assistant's state mirror fresh;
+   - a mirror build: `ssh root@10.100.0.119 systemctl start archbuild` (artcraft builds within the new floor).
+   - hello: `swarm-converge-hello` on vm-140 replaced the task stuck pending since 2026-10-08 (else
+     `systemctl restart swarm-converge-hello` there).
+9. **Afterwards:** turn off Cloudflare's NEL reporting for the zone (dashboard: Network, or `PATCH
+   /zones/<id>/settings/nel {"value":{"enabled":false}}`, #60); `nix-collect-garbage` on the workstation (old terraform state copies, #64); Cloudflare lost the
+   `*` record and the records of internet-off hosts (ddns, #56): check nothing you use from outside is among them.
+   Cleanup after confirming: `journalctl -u nas-data-orphans` on vm-109 lists the orphaned dirs to delete by hand,
+   plus the old acme.json on vm-100/200, the moved `.token` files under `/srv/nas/data/tokens/vm-{130,134,136}`,
+   `/srv/nas/data/minecraft/{rcon.env,lazymc.toml}`, `/var/lib/mosquitto` on vm-125. Proxmox host mail: clear the
+   queue (`postsuper -d ALL`) and fix or drop postfix's relay (smartd no longer needs it). Once every host has
+   deployed, delete `legacyTextfiles` in `src/modules/textfile`.
 
-### Still to do in the round (cloud side)
-- Groups host-tooling, telemetry and collector are merged; network-edge, swarm-apps, data-secrets and instances
-  not started (plan: section 2).
-- Telemetry owner steps: `ssh root@10.100.0.117 rm -f /var/lib/node-exporter-textfile/app_builder.prom` (#11); read
-  and clear the queued SMART mails on the Proxmox host (`mailq`, `postsuper -d ALL`, #20); create an off-site
-  dead man's switch check (healthchecks.io, 5 min period, 15 min grace) and put its ping URL in the new manual
-  secret `deadman-ping-url` of 203 before deploying (#21); the draft hand-edited `src/generated/site.json`
-  (dropped `notebookMac`, `bulk.disk`; added `location`): rerun `src/scripts/init.sh` to regenerate it.
-- Terraform plan additions from collector: vm-100 memory 1024->1536 (floor 1024), vm-200 same shape, vm-109 floor
-  2048->1536, vm-250 2560->1536: in-place only.
-- Not yet outage-tolerant (seen by host-tooling): nix has no connect timeout in sync.sh; router ddns (Cloudflare) and
-  ACME unreviewed; no Grafana alert on `homelab_ossec_up`. Stale comments to remove: net.nix `cidrContains`,
-  catalog.nix/service.nix `enabledOf`, 103 main.nix (builder on vm-117), secrets/shared.nix "set by sync.sh",
-  tests/policy/secrets.nix (names the deleted secrets-migrate.sh).
-- VM tests touched by host-tooling, not yet run: sso-access, share, router-zones.
-- New owner requirement for every group: everything that depends on a third-party service (AUR, GitHub, Cloudflare,
-  Let's Encrypt, Proton, Telegram, Anthropic, image registries, crowdsec hub, upstream DNS, feeds) survives its
-  outage: bounded timeouts, retry with backoff, keep the last good state, no bogus failures, self-recovery, one
-  distinct "<service> unavailable" alert. First known case: archbuild (vm-119) recorded 67 failures during an AUR
-  outage on 2026-10-07; it must retry, then skip the night as "AUR unavailable".
-- Run every touched VM test (one at a time), the final 7-dimension review, then update this section.
+## 1b. Verification of this branch
+
+See the commit that records it (section filled from the final gate).
 
 ## 2. The task: fix every confirmed review-2 finding except #3
 
@@ -200,32 +150,27 @@ Watch out for:
 
 ## 3. What the owner runs after the code is done
 
-```
-cd ~/projects/homelab && DOTFILES_SECRETS=~/projects/arch-dotfiles/configs/secrets ./sync.sh
-```
-(`DOTFILES_SECRETS` only until the local dotfiles checkout is on the modules layout.) If the change touched
-`src/terraform` or any instance's `vm` shape, read the terraform plan first: no `must be replaced` on an existing
-guest. Live checks after the deploy: `systemctl --failed` empty on every guest; `iptables -S nixos-fw` present;
-`https://auth.lsck0.dev`, `https://hello.lsck0.dev`, `https://mirror.lsck0.dev/x86_64/lsck0.db` answer;
-`ssh root@10.100.0.140 docker node ls` shows vm-250..252 Ready; on-demand wake works; ntfy desktop
-notifications and the Quickshell homelab widget work (both read `src/generated/lab.json`).
+Section 1a (the deploy runbook).
 
-## 4. Known live problems until the fix round is deployed
+## 4. Live problems this deploy fixes (survey of 2026-10-11)
 
-- On-demand wake and reap fail silently: the Proxmox certificate lacks 192.168.178.200 (#9).
-- `github-runner-nyangine` on vm-117 crash-loops (#12); the "app deploy failed" alert pages permanently from a stale
-  textfile on vm-117 (#11).
-- Pingvin Share (vm-207) allows open registration (#10).
-- SearXNG answered 429 to a single request (rate limit), not investigated.
+- On-demand wake and reap dead: pve-ssl.pem named 192.168.178.2, not .200 (#9); the reaper now fails loudly.
+- hello.lsck0.dev 503: a task pending since the 2026-10-08 shutdown; the converge now replaces it.
+- `github-runner-nyangine` on vm-117: 1070 restarts on a parent dir owned by an orphan uid (#12).
+- "App deploy failed" pages from vm-117's stale app_builder.prom (#11).
+- janitorr on vm-134 crash-loops calling a sleeping jellyseerr.
+- Home Assistant's state mirror stale: rsync exit 24 on a vanished file counted as failure.
+- SearXNG 429s: cloudflare-only judged the resolved client, the backend saw Cloudflare's address (#23).
+- Pingvin Share (vm-207) open registration (#10).
+- vm-119 builds of large rust crates oom killed (artcraft): one 3 GiB job inside a 3840 MiB floor.
 
 ## 5. Owner steps outside the repo (list them in your hand-back; you cannot do them)
 
 1. Move `~/projects/arch-dotfiles` to the modules layout (`git branch backup-pre-modules 4abb0d3 && git reset --hard
    origin/master && git submodule update --init secrets`, unlock `secrets/`); then `DOTFILES_SECRETS` is unneeded.
 2. Rotate the Claude OAuth token (`claude setup-token` into `secrets/claude-oauth-token` of the secrets submodule)
-   and the ntfy desktop token (`sops unset src/instances/203-external-ntfy/secrets.sops.json
-   '["ntfy-desktop-token"]'`, `secrets-sync.sh --apply`, commit the secrets submodule, sync): both appeared in
-   session output.
+   and the ntfy desktop token (write a new `tk_` plus 29 of `[a-z0-9]` into the dotfiles' `ntfy-desktop-token`, then
+   sync; it is a `dotfiles:` secret now): both appeared in session output.
 3. Rotate the lldap admin password; revoke Hermes' old Proxmox API token.
 4. GitHub: remove offline runners (homelab x2, arch-dotfiles, webapp-template); on lsck0/nyangine require approval
    for fork PR workflows; replace the runner PAT with a fine-grained token for nyangine only; store each app's
@@ -244,12 +189,11 @@ notifications and the Quickshell homelab widget work (both read `src/generated/l
 ## 6. Open decisions (the owner's; do not decide them)
 
 - Global time zone: hosts run UTC; switching to Europe/Berlin shifts every timer by 1 to 2 hours.
-- `sync.sh` Proxmox hookscript block: buggy, probably never ran; fixing it installs an LVM filter on the hypervisor
-  and restarts pvestatd.
 - Six LXCs pending VM migration: 103, 104, 128, 136, 203, 204 (each: back up, recreate, restore).
 - Visitor lists in the Quickshell widget: Loki is deliberately unreachable from the LAN; a read-only path would go
   through Grafana's datasource proxy.
-- vm-140 memory: 4 GiB for builds, 3 GiB if the host stays tight.
+- vm-140 memory: 3 GiB with a 1 GiB floor in this branch (the host budget); raise only by lowering another floor.
+- Decided 2026-10-11: the bulk disk keeps its spin-down; the converge installs pvestatd's lvm filter (runbook step 6).
 
 ## 7. Rules for any agent working on this repo
 
