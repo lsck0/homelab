@@ -1,4 +1,5 @@
-# kopia on the nas: init, snapshot, restore
+# kopia on the nas: init, snapshot, restore; a restore of a guest's local state copy (paperless, instance.nix
+# `shares`) is marked with a fresh generation for its seed (modules/local-state), any other share is not
 { pkgs, ... }:
 pkgs.testers.runNixOSTest {
   name = "kopia";
@@ -52,6 +53,15 @@ pkgs.testers.runNixOSTest {
         # other services untouched
         assert machine.succeed("cat /srv/nas/data/minecraft/world/level.dat").strip() == "CORRUPT"
 
+    with subtest("a local state copy's restore carries a new generation, marked restored"):
+        generation = machine.succeed("cat /srv/nas/data/paperless/.generation").strip()
+        assert generation and generation == machine.succeed("cat /srv/nas/data/paperless/.restored").strip()
+        machine.succeed("nas-restore service paperless --yes")
+        assert machine.succeed("cat /srv/nas/data/paperless/.generation").strip() != generation, "no fresh generation"
+        machine.succeed("nas-restore service minecraft --yes")
+        machine.fail("test -e /srv/nas/data/minecraft/.generation || test -e /srv/nas/data/minecraft/.restored")
+        machine.succeed("echo CORRUPT > /srv/nas/data/minecraft/world/level.dat")
+
     with subtest("restore an older snapshot by age"):
         machine.succeed("nas-restore service paperless 1 --yes")
         assert machine.succeed("cat /srv/nas/data/paperless/invoice.txt").strip() == "invoice-v1"
@@ -83,12 +93,14 @@ pkgs.testers.runNixOSTest {
         assert machine.succeed("cat /srv/nas/data/minecraft/world/level.dat").strip() == "CORRUPT"
 
     with subtest("freshness metric for the backup alert"):
+        machine.succeed("nas-restore now")
+        tree = int(machine.succeed("find /srv/nas -path /srv/nas/BACKUPS -prune -o -type f -print | wc -l"))
         machine.succeed("systemctl start kopia-metrics.service")
         prom = machine.succeed("cat /var/lib/node-exporter-textfile/nas_backup.prom")
         print(prom)
         assert 'homelab_backup_last_success_timestamp_seconds{type="daily"}' in prom
         files = int([l for l in prom.splitlines() if l.startswith("homelab_backup_snapshot_files ")][0].split()[1])
-        assert files == 3, f"snapshot file count {files} is not the tree total (3)"
+        assert files == tree, f"snapshot file count {files} is not the tree total ({tree})"
 
     with subtest("web UI answers"):
         machine.succeed("curl -sf http://127.0.0.1:51515/ | grep -qi kopia")

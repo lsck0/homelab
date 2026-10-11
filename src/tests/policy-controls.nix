@@ -13,7 +13,7 @@ let
   };
   # one config mounting one more share
   mounting = name: path: tamper name [ "homelab" "nasShares" ]
-    (configs.${name}.homelab.nasShares ++ [ { inherit path; readOnly = false; mode = null; } ]);
+    (configs.${name}.homelab.nasShares ++ [ { inherit path; readOnly = false; mode = null; localState = false; } ]);
   # the source tree without the files a predicate names
   srcWithout = name: drop: facts // { src = builtins.path { path = facts.src; inherit name; filter = path: _: !(drop path); }; };
   http = name: configs.${name}.services.traefik.dynamicConfigOptions.http;
@@ -93,6 +93,8 @@ let
 
     secret-readable = { file = "secrets"; marker = "is readable by others";
       tampered = tamper owner [ "sops" "secrets" "authelia-jwt-secret" "mode" ] "0444"; };
+    sqlite-on-nfs = { file = "secrets"; marker = "lies on the nas mount";
+      tampered = tamper "138-internal-headscale" [ "homelab" "nasMounts" "/var/lib/headscale" ] { }; };
     secret-source = { file = "secrets"; marker = "secret authelia-jwt-secret comes from";
       tampered = tamper owner [ "sops" "secrets" "authelia-jwt-secret" "sopsFile" ] ./policy-controls.nix; };
     secret-key-file = { file = "secrets"; marker = "sops reads its key from";

@@ -43,6 +43,6 @@
 
   shares = {
     "data/db-dumps/vm-${id}" = { mode = "0700"; };
-    "data/headscale" = { };
+    "data/headscale".localState = true;
   };
 }

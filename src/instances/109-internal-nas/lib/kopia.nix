@@ -20,7 +20,7 @@
 #
 # Verification: kopia-verify re-reads a share of the stored files every week and downloads a few repository blobs
 # back from proton drive, comparing them with the local ones; each part publishes its own freshness metric.
-{ config, lib, pkgs, catalog, site, ... }:
+{ config, lib, pkgs, catalog, site, inventory, nasClients, ... }:
 let
   protonDir = "/var/lib/proton-drive";
   protonDriveCli = pkgs.stdenv.mkDerivation rec {
@@ -74,6 +74,11 @@ let
   offsiteRoot = "/my-files/homelab-offsite";
   offsiteRepo = "${offsiteRoot}/BACKUPS/${baseNameOf repo}";
   manifest = "${protonDir}/offsite-manifest.txt";
+  # every guest's local state copy (modules/local-state), "<share name> <guest> <address>" per line
+  guestOf = ip: "vm-${lib.findFirst (id: inventory.${id}.ip == ip) null (lib.attrNames inventory)}";
+  localStates = pkgs.writeText "local-states" (lib.concatStrings (lib.concatLists (lib.mapAttrsToList (ip: shares:
+    map (s: "${lib.removePrefix "${source}/data/" s.path} ${guestOf ip} ${ip}\n") (lib.filter (s: s.localState) shares)
+  ) nasClients)));
   # metric_write <file> <name> <help> <value>: one gauge, renamed into place
   metricWrite = ''
     metric_write() {
@@ -90,7 +95,7 @@ let
     export KOPIA_CHECK_FOR_UPDATES=false
     export KOPIA_LOG_DIR=${logDir}
     export KOPIA_CACHE_DIRECTORY=${cacheDir}
-    export PATH="${lib.makeBinPath [ pkgs.kopia pkgs.jq pkgs.coreutils pkgs.curl pkgs.systemd ]}:$PATH"
+    export PATH="${lib.makeBinPath [ pkgs.kopia pkgs.jq pkgs.coreutils pkgs.curl pkgs.systemd pkgs.gawk ]}:$PATH"
   '';
 
   # `kopia` pre-connected, for humans and hermes
@@ -138,13 +143,15 @@ let
                fi
                kopia restore "$obj/data/$name" "${source}/data/$name" \
                  --overwrite-files --overwrite-directories --overwrite-symlinks --no-ignore-permission-errors
-               # a guest's local-state copy (modules/local-state): a new generation makes the guest take it
-               if [ -e "${source}/data/$name/.generation" ]; then
+               # a guest's local state copy: a new generation, marked restored, makes its seed replace the local copy
+               entry=$(awk -v n="$name" '$1 == n { print $2, $3 }' ${localStates})
+               if [ -n "$entry" ]; then
+                 read -r guest ip <<<"$entry"
                  gen=$(cat /proc/sys/kernel/random/uuid)
                  printf '%s\n' "$gen" > "${source}/data/$name/.generation"
                  printf '%s\n' "$gen" > "${source}/data/$name/.restored"
-                 echo ">>> $name is a guest's local state: it takes the restore at its next start or mirror,"
-                 echo ">>> or now: systemctl start $name-reseed on the guest that mounts data/$name"
+                 echo ">>> $name is $guest's local state: it takes the restore when the app starts, at its nightly"
+                 echo ">>> mirror, or now: ssh root@$ip systemctl start $name-reseed"
                fi
                echo ">>> done: ${source}/data/$name restored from $when" ;;
       restore) # restore <snapshot> <subpath> <target-dir>
