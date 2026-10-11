@@ -92,6 +92,12 @@ pkgs.testers.runNixOSTest {
         edge.wait_for_open_port(${toString deadmanPort})
         vm_203.succeed("systemctl start heartbeat-check.service")
         vm_203.succeed("${deadmanGauge 1}")
+        # no switch set up (the manual secret left empty): no gauge, so no alert for a url never given
+        secret = "${nodes.vm-203.sops.secrets.deadman-ping-url.path}"
+        vm_203.succeed(f"cp {secret} /root/deadman-url && truncate -s 0 {secret}")
+        vm_203.succeed("systemctl start heartbeat-check.service")
+        vm_203.fail("test -e ${nodes.vm-203.homelab.textfileDir}/deadman.prom")
+        vm_203.succeed(f"cp /root/deadman-url {secret}")
 
     with subtest("every account is provisioned; one made by hand is gone after the next start"):
         vm_203.succeed("NTFY_PASSWORD=x ntfy user add stale")
