@@ -65,8 +65,8 @@ BYTES_PER_KIB = 1024
 DECIMAL_BELOW = 10
 RATE_UNITS = ("B", "K", "M", "G")
 SIZE_UNITS = ("B", "KB", "MB", "GB", "TB")
-# traefik router name suffixes of one route: its tls, relay and block routers
-ROUTER_SUFFIXES = ("-tls", "-relay", "-block")
+# traefik router name suffixes of one route: its body half (stripped first), tls, relay and block routers
+ROUTER_SUFFIXES = ("-body", "-tls", "-relay", "-block")
 
 # raw user-agents are too many; bucket into families
 AGENT_FAMILY = (

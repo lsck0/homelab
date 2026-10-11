@@ -8,7 +8,7 @@
 #   4. nixos nat's own accepts, which the drops above must precede (lib.mkBefore; tests/policy/network.nix holds it)
 # Sources are bound to their interface before any of it (table antispoof), and proxmox binds a guest to its address
 # inside a zone (lib.tf FIREWALL).
-{ config, pkgs, lib, inventory, nasClients, site, catalog, lab, ... }:
+{ config, pkgs, lib, inventory, nasClients, site, catalog, lab, upstream, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   flows = import ../../modules/flows.nix { inherit lib net inventory catalog nasClients lab; };
@@ -100,13 +100,15 @@ let
   directHosts = { smb = net.ipOf lab.roles.nas; } // lib.mapAttrs' (_: r: lib.nameValuePair r.host (net.ipOf (toString r.vmid)))
     (lib.filterAttrs (_: r: r.vmid != null && r.publicPort == null) catalog.l4);
 
-  # proxied unless a route opts out; install lines, the wireguard endpoint and port forwards are raw by nature
-  routeHosts = side: lib.mapAttrsToList (_: r: { inherit (r) host; proxied = r.off.cloudflare == null; }) catalog.${side};
+  # public names: the routes the internet reaches, proxied unless one opts out; install lines, the wireguard
+  # endpoint and port forwards are raw by nature
+  routeHosts = side: map (r: { inherit (r) host; proxied = r.off.cloudflare == null; })
+    (lib.filter (r: r.off.internet == null) (lib.attrValues catalog.${side}));
   allRouteHosts = routeHosts "internal" ++ routeHosts "external"
     ++ map (host: { inherit host; proxied = true; }) internalExtraHosts;
   proxiedHosts = lib.unique (map (r: r.host) (lib.filter (r: r.proxied) allRouteHosts));
   rawHosts = lib.subtractLists proxiedHosts (lib.unique (map (r: r.host) (lib.filter (r: !r.proxied) allRouteHosts)
-    ++ installHosts ++ forwardHosts ++ [ "wg" "*" ]));
+    ++ installHosts ++ forwardHosts ++ [ net.wan.publicHost ]));
   ddnsRecords = pkgs.writeText "ddns-records.json" (builtins.toJSON (
     map (h: { name = net.fqdn h; proxied = true; }) proxiedHosts
     ++ map (h: { name = net.fqdn h; proxied = false; }) rawHosts));
@@ -114,6 +116,20 @@ let
   hostLines = ip: names: lib.concatMapStrings (h: "      ${ip} ${net.fqdn h}\n") names;
   # the forwards a name leads to: inside the lab it resolves straight to the backend
   hostForwards = lib.filter (f: f.host != null) flows.portForwards;
+
+  # the house's public address as the router learns it, a hosts line coredns serves as net.wan.publicHost
+  publicAddressFile = "/run/public-address/hosts";
+  publicAddressTimeoutS = 20;
+  # an answer coredns keeps serving while every upstream is down
+  dnsStaleS = 86400;
+
+  # blocky's lists, fetched to disk so a restart during an outage keeps the last ones
+  blocklistDir = "/var/lib/blocklists";
+  blocklists = {
+    stevenblack = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts";
+    hagezi-pro = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.txt";
+  };
+  blocklistTimeoutS = 120;
 
   # blocky on loopback, coredns' upstream for everything outside the lab domain
   blockyAddress = "127.0.0.1:5335";
@@ -459,12 +475,9 @@ in {
         { upstream = blockyUpstream; ips = [ "1.1.1.1" ]; }
       ];
       blocking = {
-        denylists.ads = [
-          "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"
-          "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.txt"
-        ];
+        # blocklists-fetch restarts blocky on a new list
+        denylists.ads = map (name: "${blocklistDir}/${name}") (lib.attrNames blocklists);
         clientGroupsBlock.default = [ "ads" ];
-        loading.downloads = { timeout = "60s"; attempts = 3; };
       };
       caching = { minTime = "5m"; maxTime = "30m"; prefetching = true; };
     };
@@ -476,7 +489,7 @@ in {
     enable = true;
     config = ''
       ${net.domain}:53 {
-        hosts {
+        hosts ${publicAddressFile} {
           # internal routes -> the internal ingress
     '' + hostLines (ingressIp "internal") (hostsOf "internal" ++ internalExtraHosts) + ''
           # public routes and port forwards -> the edge
@@ -511,7 +524,9 @@ in {
           policy sequential
           health_check 5s
         }
-        cache 300
+        cache 300 {
+          serve_stale ${toString dnsStaleS}s
+        }
       }
     '';
   };
@@ -520,28 +535,85 @@ in {
   sops.secrets.wireguard-private-key = { };
   sops.secrets.cloudflare-token = { };
 
-  # DDNS (CLOUDFLARE): every catalog host, proxied or raw as its route says (lib/ddns-cloudflare.sh)
-  systemd.services.ddns-cloudflare = {
-    description = "Point the ${net.domain} A records at the current public IP";
+  # PUBLIC ADDRESS: learned here once, served to the lab by coredns, pushed to cloudflare by ddns
+  systemd.tmpfiles.rules = [ "d ${dirOf publicAddressFile} 0755 root root -" "f ${publicAddressFile} 0644 root root -" "d ${blocklistDir} 0755 root root -" ];
+  systemd.services.public-address = {
+    description = "Learn the house's public address";
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
+    onSuccess = [ "ddns-cloudflare.service" ];
+    path = [ pkgs.curl pkgs.coreutils ];
+    # ipify down: the last address stays published
+    serviceConfig = { Type = "oneshot"; SuccessExitStatus = [ upstream.unavailable ]; };
+    script = ''
+      ip=$(${upstream.run} ipify curl -sSf --max-time ${toString publicAddressTimeoutS} ${lab.upstreams.ipify.url})
+      if ! [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+        echo "ipify answered no ipv4 address: '$ip'" >&2
+        exit 1
+      fi
+      printf '%s %s\n' "$ip" ${net.fqdn net.wan.publicHost} > ${publicAddressFile}.tmp
+      mv ${publicAddressFile}.tmp ${publicAddressFile}
+    '';
+  };
+  systemd.timers.public-address = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnBootSec = "1min"; OnUnitActiveSec = "5min"; };
+  };
+
+  # DDNS (CLOUDFLARE): every public host, proxied or raw as its route says (lib/ddns-cloudflare.sh)
+  systemd.services.ddns-cloudflare = {
+    description = "Point the ${net.domain} A records at the current public IP";
     path = [ pkgs.curl pkgs.jq pkgs.findutils pkgs.coreutils ];
     environment = {
       DDNS_RECORDS = ddnsRecords;
       DDNS_ZONE = net.domain;
       DDNS_TOKEN_FILE = config.sops.secrets.cloudflare-token.path;
+      DDNS_ADDRESS_FILE = publicAddressFile;
       DDNS_STATE_DIR = "/run/ddns-cloudflare";
     };
-    # /run starts empty, so every boot does a full sync
-    serviceConfig = { Type = "oneshot"; RuntimeDirectory = "ddns-cloudflare"; RuntimeDirectoryPreserve = true; };
-    script = "exec ${pkgs.bash}/bin/bash ${./lib/ddns-cloudflare.sh}";
-  };
-  systemd.timers.ddns-cloudflare = {
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnBootSec = "1min";
-      OnUnitActiveSec = "5min";
+    # /run starts empty, so every boot does a full sync; cloudflare down: the records keep the last address
+    serviceConfig = {
+      Type = "oneshot";
+      RuntimeDirectory = "ddns-cloudflare";
+      RuntimeDirectoryPreserve = true;
+      SuccessExitStatus = [ upstream.unavailable ];
     };
+    script = "exec ${upstream.run} cloudflare ${pkgs.bash}/bin/bash ${./lib/ddns-cloudflare.sh}";
+  };
+
+  # BLOCKLISTS: fetched to disk; a failed fetch keeps the last list
+  systemd.services.blocklists-fetch = {
+    description = "Fetch blocky's deny lists";
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    path = [ pkgs.curl pkgs.coreutils pkgs.diffutils pkgs.systemd ];
+    serviceConfig = { Type = "oneshot"; SuccessExitStatus = [ upstream.unavailable ]; };
+    script = ''
+      status=0
+      changed=0
+      # a failed fetch keeps the last list
+      for list in ${lib.escapeShellArgs (lib.mapAttrsToList (name: url: "${name}=${url}") blocklists)}; do
+        file=${blocklistDir}/''${list%%=*}
+        rc=0
+        ${upstream.run} githubusercontent curl -sSf --max-time ${toString blocklistTimeoutS} -o "$file.part" "''${list#*=}" || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          rm -f "$file.part"
+          status=$rc
+        elif cmp -s "$file.part" "$file"; then
+          rm -f "$file.part"
+        else
+          mv "$file.part" "$file"
+          changed=1
+        fi
+      done
+      # blocky reads its lists at start; coredns answers from its fallback for the moment it restarts
+      if [ "$changed" -eq 1 ]; then systemctl try-restart blocky.service; fi
+      exit "$status"
+    '';
+  };
+  systemd.timers.blocklists-fetch = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnBootSec = "2min"; OnCalendar = "daily"; RandomizedDelaySec = "1h"; Persistent = true; };
   };
 
   # WIREGUARD VPN (clients need DNS = 10.0.0.1)

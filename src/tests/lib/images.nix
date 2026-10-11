@@ -51,6 +51,7 @@ in {
       (pkgs.writeShellScriptBin "cscli" ''
         case "$*" in
           "bouncers list -o json") echo '[{"name": "traefik-bouncer"}]' ;;
+          "bouncers add traefik-bouncer -o raw") echo stub-bouncer-key ;;
           *) echo "crowdsec-stub: cscli $*" >&2 ;;
         esac
       '')

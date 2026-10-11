@@ -34,6 +34,8 @@ let
   bannedClient = "203.0.113.66";
   bodyLimit = 1024 * 1024;
   uploadLimit = wat.routes.wat-user-files.bodyLimitBytes;
+  # a few seconds per transfer, long enough to look at /tmp while it runs
+  transferRate = "1M";
 
   guest = vmid: instance: memory: {
     imports = [ (lab.guest vmid { flat = true; inherit instance; }) ../../../tests/lib/offline-traefik.nix ];
@@ -62,7 +64,11 @@ pkgs.testers.runNixOSTest {
     environment.systemPackages = [ pkgs.curl pkgs.python3 ];
   };
 
-  testScript = lab.driverPython + ''
+  testScript = { nodes, ... }: let
+    # past this a buffered body spills to a temp-multibuf file in traefik's /tmp
+    spillBytes = (lib.findFirst (m: m ? buffering) null
+      (lib.attrValues nodes.vm-200.services.traefik.dynamicConfigOptions.http.middlewares)).buffering.memRequestBodyBytes;
+  in lab.driverPython + ''
 
     EDGE, INTERNAL = "${ip "200"}", "${ip "100"}"
     CF, NET, LAN = "${outside.cloudflare}", "${outside.internet}", "${outside.lan}"
@@ -132,6 +138,32 @@ pkgs.testers.runNixOSTest {
         sizes = sorted(e["body_len"] for e in proxied)
         assert sizes == [${toString bodyLimit}, ${toString uploadLimit}], [(e["method"], e["path"], e["body_len"]) for e in proxied]
 
+    with subtest("a download streams past the body limit's buffer, a body method's answer spools to /tmp"):
+        spooled = "find /tmp -type f -name 'temp-multibuf-*' | grep -q ."
+
+        def transfer_start(name, args):
+            world.succeed(f"rm -f /tmp/{name}.status; (curl -s -o /tmp/{name} -w '%{{http_code}} %{{size_download}}' "
+                          f"--limit-rate ${transferRate} --interface {CF} --resolve ${watHost}.${net.domain}:443:{EDGE} "
+                          f"-H 'X-Forwarded-For: ${realClient}' {args} > /tmp/{name}.part; mv /tmp/{name}.part /tmp/{name}.status) "
+                          ">/dev/null 2>&1 &")
+
+        def transfer_wait(name):
+            world.wait_until_succeeds(f"[ -s /tmp/{name}.status ]", timeout=60)
+            return world.succeed(f"cat /tmp/{name}.status").split()
+
+        # positive control: the buffer spools a POST's answer past its memory to a named file while it streams (a
+        # request body it spools to a file it unlinks at once, which no name shows)
+        transfer_start("posted", f"-X POST --data-binary x {WAT}/api/blob")
+        vm_200.wait_until_succeeds(spooled, timeout=30)
+        assert transfer_wait("posted")[0] == "200"
+        vm_200.wait_until_fails(spooled, timeout=30)
+        transfer_start("blob", f"{WAT}/api/blob")
+        world.wait_until_succeeds("[ $(stat -c %s /tmp/blob 2>/dev/null || echo 0) -gt ${toString spillBytes} ]", timeout=30)
+        vm_200.fail(spooled)
+        status, size = transfer_wait("blob")
+        assert status == "200" and int(size) > ${toString spillBytes}, (status, size)
+        vm_200.fail(spooled)
+
     with subtest("methods a browser app does not use reach nothing, not even the internal ingress"):
         backend_reset()
         vm_100.succeed(": > /var/log/traefik/access.log")
@@ -166,8 +198,11 @@ pkgs.testers.runNixOSTest {
         assert get("/api/health")["status"] == 200
 
     with subtest("the app sees the client cloudflare saw, never a forged one"):
-        r = get("/api/x", headers={"X-Real-Ip": "6.6.6.6", "X-Forwarded-For": "1.2.3.4, ${realClient}"}, xff=None)
-        assert json.loads(r["body"])["headers"].get("x-real-ip") == "${realClient}", r["body"]
+        # straight and through anubis's hop: X-Forwarded-For is the client alone, what a backend trusting its ingress reads
+        for path in ("/api/x", "/page"):
+            r = get(path, headers={"X-Real-Ip": "6.6.6.6", "X-Forwarded-For": "1.2.3.4, ${realClient}"}, xff=None)
+            seen = json.loads(r["body"])["headers"]
+            assert seen.get("x-real-ip") == seen.get("x-forwarded-for") == "${realClient}", (path, seen)
 
     with subtest("the rate limit counts per client behind cloudflare"):
         # 20 connections of 20 requests each: one tls handshake per connection keeps the flood above the limit's

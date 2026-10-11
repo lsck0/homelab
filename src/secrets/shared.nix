@@ -17,7 +17,6 @@
 {
   attic-pull-token = "manual"; # atticadm make-token, read-only: every guest substitutes from the cache with it
   cloudflare-token = "manual";
-  crowdsec-bouncer-key = "hex:24";
   github-mirror-token = "manual";
   ntfy-grafana-password = "hex:24";
   ntfy-hermes-password = "hex:24";

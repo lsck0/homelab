@@ -6,6 +6,7 @@
 { lib, configs, lab, inventory, site, catalog, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
+  cidr = import ../../modules/cidr.nix { inherit lib; };
   internalIngress = configs."100-internal-traefik";
   edge = configs."200-external-traefik";
   authelia = configs."101-internal-authelia";
@@ -15,27 +16,28 @@ let
   websecure = config: lib.filterAttrs (_: r: lib.elem "websecure" (r.entryPoints or [ ])) (httpOf config).routers;
   lawsOf = laws: lib.concatLists (lib.mapAttrsToList (name: law: map (v: "${name}: ${v}") law) laws);
 
-  # the defences every public request passes, in order; `cloudflare-only` may sit after the strip. Each limit runs
-  # per client, then per route (one route's budget over all its clients, modules/limits `route`). The body limit
-  # buffers before the retry: a retry inside it would resend a consumed body, empty
+  # the defences every public request passes, in order; `cloudflare-only` may come first, on the socket peer. Each
+  # limit runs per client, then per route (one route's budget over all its clients, modules/limits `route`). The body
+  # limit buffers before the retry: a retry inside it would resend a consumed body, empty
   chainLaw = host: config: lib.concatLists (lib.mapAttrsToList (name: r:
     let
       m = r.middlewares or [ ];
       # padded, so a short chain fails the comparison instead of the evaluation
-      padded = m ++ lib.genList (_: "") 10;
-      rest = lib.drop (if lib.elemAt padded 2 == "cloudflare-only" then 3 else 2) padded;
+      chain = if lib.head (m ++ [ "" ]) == "cloudflare-only" then lib.tail m else m;
+      padded = chain ++ lib.genList (_: "") 10;
+      rest = lib.drop 2 padded;
       limits = [ "rate-limit" "route-rate-limit" "inflight-limit" "route-inflight-limit" ];
       # a route's limitScale names its set `<limit>-x<scale>` (modules/traefik)
       unscaled = n: let s = builtins.match "(.*)-x[0-9]+" n; in if s == null then n else lib.head s;
       afterLimits = lib.drop (lib.length limits + 1) rest;
       afterBody = if lib.hasPrefix "body-limit-" (lib.head afterLimits) then lib.tail afterLimits else afterLimits;
     in
-    lib.optional (lib.take 2 m != [ "client-ip" "strip-client-headers" ]
+    lib.optional (lib.take 2 chain != [ "client-ip" "strip-client-headers" ]
       || !(lib.hasPrefix "crowdsec" (lib.head rest))
       || map unscaled (lib.take (lib.length limits) (lib.tail rest)) != limits
       || lib.head afterBody != "retry-upstream"
       || !(lib.hasPrefix "secure-headers" (lib.elemAt afterBody 1)))
-      "${host} router ${name}: chain ${toString m} is not client-ip, strip-client-headers, [cloudflare-only], crowdsec*, ${toString limits}, [body-limit-*], retry-upstream, secure-headers*"
+      "${host} router ${name}: chain ${toString m} is not [cloudflare-only], client-ip, strip-client-headers, crowdsec*, ${toString limits}, [body-limit-*], retry-upstream, secure-headers*"
   ) (websecure config));
 
   ssoRoutes = lib.filterAttrs (_: r: r.off.sso == null) catalog.internal;
@@ -52,13 +54,55 @@ let
     (lib.range 0 (lib.length forwardLines - 1));
 
   transports = config: (httpOf config).serversTransports or { };
-  relays = lib.filterAttrs (name: _: lib.hasSuffix "-relay" name) (websecure edge);
+  relays = lib.filterAttrs (_: r: lib.hasSuffix "-relay" r.service) (websecure edge);
 
   metricsBlocks = lib.filterAttrs (name: _: lib.hasSuffix "-metrics-block" name) (httpOf edge).routers;
   appRouters = lib.filterAttrs (name: r: r ? service && lib.elem "websecure" (r.entryPoints or [ ]) && (r.priority or 0) < 1000
     && lib.any (a: lib.hasPrefix "${a}-" name || name == "${a}-tls") (lib.attrNames catalog.apps)) (httpOf edge).routers;
 
+  # the methods a rule admits: those of a top-level method-only conjunct; null (any) without one or with a top-level ||
+  depthOf = text: (lib.foldl' (s: c:
+    if c == "`" then s // { quoted = !s.quoted; }
+    else if s.quoted then s
+    else if c == "(" then s // { depth = s.depth + 1; }
+    else if c == ")" then s // { depth = s.depth - 1; }
+    else s) { depth = 0; quoted = false; } (lib.stringToCharacters text));
+  balanced = text: depthOf text == { depth = 0; quoted = false; };
+  topLevel = separator: text: lib.foldl' (acc: piece:
+    if acc.open == "" then (if balanced piece then acc // { parts = acc.parts ++ [ piece ]; } else acc // { open = piece; })
+    else let joined = acc.open + separator + piece; in
+      if balanced joined then { parts = acc.parts ++ [ joined ]; open = ""; } else acc // { open = joined; })
+    { parts = [ ]; open = ""; } (lib.splitString separator text);
+  methodClause = builtins.match "\\(?(Method\\(`[A-Z]+`\\)( \\|\\| Method\\(`[A-Z]+`\\))*)\\)?";
+  admittedMethods = rule: let
+    conjuncts = (topLevel " && " rule).parts;
+    clauses = lib.filter (c: methodClause c != null) conjuncts;
+  in
+    if lib.any (c: lib.length (topLevel " || " c).parts > 1) conjuncts || clauses == [ ] then null
+    else map lib.head (lib.filter lib.isList (builtins.split "Method\\(`([A-Z]+)`\\)" (lib.head clauses)));
+  buffering = config: lib.attrNames (lib.filterAttrs (_: m: m ? buffering) (httpOf config).middlewares);
+
   portForwardLines = lines router.networking.nftables.tables.port-forwards.content;
+
+  # a connection from one guest to another's port passes the router (same zone, a trusted network, or an accept of the
+  # three) and the target's guard (an unguarded port, or a trusted or granted source)
+  inSet = ip: text: lib.any (e: if lib.hasInfix "/" e then cidr.contains e ip else e == ip) (map lib.trim (lib.splitString "," text));
+  forwardAccepts = lib.filter (m: m != null) (map (builtins.match
+    "iifname \"([^\"]+)\" ip saddr \\{ ([^}]*) } ip daddr \\{ ([^}]*) } tcp dport \\{ ([^}]*) } accept") forwardLines);
+  routerPasses = from: to: port: let source = net.zoneOf from; in
+    source.name == (net.zoneOf to).name
+    || (lib.elem "iifname \"${source.interface}\" accept" forwardLines
+      && !(lib.any (l: lib.hasPrefix "iifname \"${source.interface}\"" l && lib.hasSuffix " drop" l) forwardLines))
+    || lib.any (m: lib.elemAt m 0 == source.interface && inSet (net.ipOf from) (lib.elemAt m 1)
+      && inSet (net.ipOf to) (lib.elemAt m 2) && inSet (toString port) (lib.elemAt m 3)) forwardAccepts;
+  configOf = id: lib.findFirst (c: c.homelab.vmid == id) (throw "no configuration has vmid ${id}") (lib.attrValues configs);
+  guardAdmits = from: to: port: let guard = (configOf to).homelab.ingressOnly; in
+    !(lib.elem port guard.ports) || lib.any (s: cidr.contains s (net.ipOf from)) (guard.trusted ++ guard.allowed.${toString port} or [ ]);
+  reach = from: to: port: lib.optional (!(routerPasses from to port)) "the router drops vm-${from} -> vm-${to}:${toString port}"
+    ++ lib.optional (!(guardAdmits from to port)) "vm-${to}'s guard drops vm-${from} on ${toString port}";
+  running = id: inventory.${id}.powered;
+  backendsOf = r: lib.filter running (if r.vmid != null then [ (toString r.vmid) ]
+    else (lib.findFirst (c: c.apps ? ${r.app}) null (lib.attrValues catalog.clusters)).workerIds);
 
   kea = router.services.kea.dhcp4.settings.subnet4;
   inPool = ip: pool: let bounds = map lib.trim (lib.splitString "-" pool.pool);
@@ -93,8 +137,28 @@ lawsOf {
   "tls verification" = lib.concatLists (lib.mapAttrsToList (host: config: lib.mapAttrsToList (name: _:
     "${host} transport ${name} skips verification") (lib.filterAttrs (_: t: t.insecureSkipVerify or false) (transports config)))
     { vm-100 = internalIngress; vm-200 = edge; })
-  ++ lib.concatLists (lib.mapAttrsToList (name: r: let t = (transports edge).${r.service} or null; host = lib.head (builtins.match "Host\\(`([^`]+)`\\)" r.rule); in
+  ++ lib.concatLists (lib.mapAttrsToList (name: r: let t = (transports edge).${r.service} or null; host = lib.head (builtins.match ".*Host\\(`([^`]+)`\\).*" r.rule); in
     lib.optional (t == null || t.serverName or null != host) "vm-200 relay ${name} does not verify the internal ingress as ${host}") relays);
+
+  # a buffering middleware spools whole responses to disk: no download passes one
+  "buffered downloads" = lib.concatLists (lib.mapAttrsToList (host: config: lib.concatLists (lib.mapAttrsToList (name: r: let
+      methods = admittedMethods r.rule;
+    in
+    lib.optional (lib.intersectLists (buffering config) (r.middlewares or [ ]) != [ ]
+      && (methods == null || lib.elem "GET" methods || lib.elem "HEAD" methods))
+      "${host} router ${name} admits GET or HEAD behind a buffering middleware"
+  ) (websecure config))) { vm-100 = internalIngress; vm-200 = edge; });
+
+  # an ingress reaches every running backend of its routes; a cluster's controller every one of its wakers
+  "reach" = lib.concatMap (r: lib.concatMap (b: reach net.zones.${r.zone}.ingress b r.port) (backendsOf r))
+    (lib.attrValues (catalog.internal // catalog.external))
+  ++ lib.concatLists (lib.mapAttrsToList (_: c:
+    lib.concatMap (w: reach w c.managerId catalog.swarm.controllerPort) (lib.filter running c.wakers)) catalog.clusters);
+
+  # a route kept off the internet answers no dmz neighbour through the edge
+  "internal only" = map (range: "vm-200 internal-only admits ${range}, which overlaps a dmz")
+    (lib.filter (range: lib.any (z: cidr.overlaps range net.zones.${z}.subnet) [ "external" "apps" ])
+      (httpOf edge).middlewares.internal-only.ipAllowList.sourceRange);
 
   # an unknown name gets a 404 at the edge, nothing travels inward for it
   "no catch-all" = lib.mapAttrsToList (name: _: "vm-200 router ${name} matches any host")

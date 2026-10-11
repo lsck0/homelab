@@ -13,7 +13,8 @@
   proton.url = "https://drive-api.proton.me";
   dockerhub.url = "https://registry-1.docker.io/v2/";
   ghcr.url = "https://ghcr.io/v2/";
-  crowdsec.url = "https://hub-data.crowdsec.net";
+  githubusercontent.url = "https://raw.githubusercontent.com/";
+  crowdsec.url = "https://api.crowdsec.net";
   keyserver.url = "https://keyserver.ubuntu.com";
   arxiv.url = "https://rss.arxiv.org";
   trmnl.url = "https://trmnl.com/api/plugin_settings";

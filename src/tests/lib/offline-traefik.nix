@@ -10,7 +10,7 @@
 #   The plugin's live mode caches its verdict per client address for a minute: ban an address before its first
 #   request, or use a fresh one. AppSec answers 403 to a request carrying X-Test-Attack: 1. The bouncer refuses
 #   everything until the stub listens: wait for /var/lib/crowdsec/data/stub-ready before the first request.
-# - the house whitelist job asks ipify for the public address: off.
+# - the house whitelist job, which needs the router's published address and a real cscli: off.
 { config, lib, pkgs, ... }:
 let
   pki = import ./pki.nix { inherit pkgs; };

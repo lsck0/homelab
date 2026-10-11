@@ -40,6 +40,14 @@ let
     apps-zone = network "apps zone" (tamper "100-internal-traefik" (traefik ++ [ "routers" "grafana-tls" "rule" ]) "Host(`grafana.lsck0.dev`)");
     tls-verification = network "tls verification" (tamper "200-external-traefik" (traefik ++ [ "serversTransports" "grafana-relay" ])
       { insecureSkipVerify = true; });
+    buffered-downloads = network "buffered downloads" (tamper "200-external-traefik" (traefik ++ [ "routers" "mirror-tls" "middlewares" ])
+      ((http "200-external-traefik").routers.mirror-tls.middlewares
+        ++ lib.take 1 (lib.attrNames (lib.filterAttrs (_: m: m ? buffering) (http "200-external-traefik").middlewares))));
+    internal-only = network "internal only" (tamper "200-external-traefik" (traefik ++ [ "middlewares" "internal-only" "ipAllowList" "sourceRange" ])
+      [ "10.0.0.0/8" ]);
+    reach = network "reach" (tamper "300-router" [ "networking" "firewall" "extraForwardRules" ]
+      (lib.concatStringsSep "\n" (lib.filter (l: !(lib.hasInfix "dport { ${toString facts.catalog.swarm.controllerPort} }" l))
+        (lib.splitString "\n" forwardRules))));
     no-catch-all = network "no catch-all" (tamper "200-external-traefik" (traefik ++ [ "routers" "catch-all" ])
       { rule = "HostRegexp(`.+`)"; service = "noop@internal"; });
     client-identity = network "client identity" (tamper "100-internal-traefik" (traefik ++ [ "middlewares" "client-ip" "plugin" "client-ip" "trustedIPs" ])
