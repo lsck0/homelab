@@ -138,7 +138,7 @@ pkgs.testers.runNixOSTest {
         sizes = sorted(e["body_len"] for e in proxied)
         assert sizes == [${toString bodyLimit}, ${toString uploadLimit}], [(e["method"], e["path"], e["body_len"]) for e in proxied]
 
-    with subtest("a download streams past the body limit's buffer, only an upload spools to /tmp"):
+    with subtest("a download streams past the body limit's buffer, a body method's answer spools to /tmp"):
         spooled = "find /tmp -type f -name 'temp-multibuf-*' | grep -q ."
 
         def transfer_start(name, args):
@@ -151,12 +151,12 @@ pkgs.testers.runNixOSTest {
             world.wait_until_succeeds(f"[ -s /tmp/{name}.status ]", timeout=60)
             return world.succeed(f"cat /tmp/{name}.status").split()
 
-        # positive control: a slow upload past the buffer spools while it lasts
-        world.succeed("head -c ${toString (4 * spillBytes)} /dev/zero > /tmp/slow-upload")
-        transfer_start("upload", f"--data-binary @/tmp/slow-upload {WAT}/user-files/u")
+        # positive control: the buffer spools a POST's answer past its memory to a named file while it streams (a
+        # request body it spools to a file it unlinks at once, which no name shows)
+        transfer_start("posted", f"-X POST --data-binary x {WAT}/api/blob")
         vm_200.wait_until_succeeds(spooled, timeout=30)
-        assert transfer_wait("upload")[0] == "200"
-        vm_200.fail(spooled)
+        assert transfer_wait("posted")[0] == "200"
+        vm_200.wait_until_fails(spooled, timeout=30)
         transfer_start("blob", f"{WAT}/api/blob")
         world.wait_until_succeeds("[ $(stat -c %s /tmp/blob 2>/dev/null || echo 0) -gt ${toString spillBytes} ]", timeout=30)
         vm_200.fail(spooled)
