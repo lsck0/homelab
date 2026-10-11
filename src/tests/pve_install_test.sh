@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # scripts/pve-install.sh's own decisions, with the Proxmox and Debian tools stubbed: the lldap realm fails closed
-# without the guest's certificate and binds over ldaps with it; the node's name moves to its lan address only on a
+# without the guest's certificate and binds over ldaps with it; bulk is an enabled storage and the spin-down scheme of
+# earlier runs goes; openipmi is masked only on a host without a bmc; the node's name moves to its lan address only on a
 # standalone host that holds it, and the api certificate is re-signed only when it does not name that address; an
 # unavailable package mirror or github leaves the host exporter and OSSEC for the next run instead of stopping the
 # converge.
@@ -15,7 +16,7 @@ called() { grep -qF -- "$1" "$CALLS" || fail "$2: no call '$1' in: $(cat "$CALLS
 not_called() { ! grep -qF -- "$1" "$CALLS" || fail "$2: unexpected call '$1'"; }
 
 ACTION=converge TOKEN_DIR=$T/tokens TEMPLATES="$T/nixos.img $T/nixos-homelab.tar.xz"
-PROXMOX_IP=192.168.178.200 ZONE_BRIDGES=vmbr1 WAKE_ZONES=internal NAS_ID=109 ROOT_PASSWORD=x ROOT_KEYS=key
+PROXMOX_IP=192.168.178.200 ZONE_BRIDGES=vmbr1 WAKE_ZONES=internal ROOT_PASSWORD=x ROOT_KEYS=key
 LLDAP_VMID=101 LLDAP_HOST=10.100.0.101 LLDAP_PORT=6360 LLDAP_BASE_DN=dc=lab LLDAP_ADMIN_GROUP=admins LLDAP_BIND_PASSWORD=y
 LLDAP_CERT=/var/lib/lldap/ldaps-cert.pem LLDAP_BIND_USER=proxmox-bind
 # shellcheck source=src/scripts/pve-install.sh
@@ -25,6 +26,12 @@ REALM_CA_FILE=$T/realm/lldap-ca.pem
 OSSEC_DIR=$T/ossec
 OSSEC_CONTROL=$OSSEC_DIR/bin/ossec-control
 NETWORK_INTERFACES=$T/interfaces
+QEMU_CONF_DIR=$T/qemu-server
+BULK_HOOK=$T/snippets/homelab-bulk.sh
+BULK_GUESTS_DROPIN=$T/pve-guests-homelab-bulk.conf
+BULK_PVESTATD_DROPIN=$T/pvestatd-homelab-no-hdd.conf
+BULK_PVESTATD_LVM=$T/lvm-pvestatd
+IPMI_DMI_ENTRY=$T/dmi-38-0
 HOSTS_FILE=$T/hosts
 COROSYNC_CONF=$T/corosync.conf
 API_CERT=$T/pve-ssl.pem
@@ -55,6 +62,8 @@ pvesh() {
   log pvesh "$@"
   case "$1 $2" in
     "get /cluster/firewall/rules") echo '[{"pos": 0}, {"pos": 1}, {"pos": 2}]' ;;
+    "get /storage") if [ "$BULK_DEFINED" = 1 ]; then echo '[{"storage": "local"}, {"storage": "bulk"}]'; else echo '[{"storage": "local"}]'; fi ;;
+    "get /storage/bulk") if [ "$BULK_DISABLED" = 1 ]; then echo '{"disable": 1}'; else echo '{}'; fi ;;
     "get "*) echo '[]' ;;
   esac
 }
@@ -71,7 +80,16 @@ getent() { awk -v n="$NODE" '{ for (i = 2; i <= NF; i++) if ($i == n) { print $1
 ip() { echo "2: vmbr0    inet $LOCAL_IP/24 brd 192.168.178.255 scope global vmbr0"; }
 openssl() { printf 'X509v3 Subject Alternative Name: \n    IP Address:127.0.0.1, DNS:localhost, IP Address:%s\n' "$CERT_IP"; }
 pvecm() { log pvecm "$@"; CERT_IP=$(getent); CERT_IP=${CERT_IP%% *}; }
-systemctl() { log systemctl "$@"; }
+# IPMI_STATE: what is-enabled prints for the openipmi unit; IPMI_FAILED 1 when it failed
+systemctl() {
+  log systemctl "$@"
+  case "$*" in
+    "is-enabled "*) echo "$IPMI_STATE" ;;
+    "-q is-failed "*) [ "$IPMI_FAILED" = 1 ] ;;
+  esac
+}
+vgs() { [ "$BULK_VG" = 1 ]; }
+pvesm() { log pvesm "$@"; }
 
 reset() { : > "$CALLS"; rm -rf "$T/realm" "$OSSEC_DIR"; GUEST=$1 ACL=${2:-0} MIRROR=${3:-up} GITHUB=${4:-up}; }
 
@@ -138,6 +156,55 @@ touch "$API_CUSTOM_CERT"
 if (api_cert_converge 2>"$T/err"); then fail "an uploaded certificate was kept"; fi
 grep -q "pvenode cert delete" "$T/err" || fail "an uploaded certificate: no error"
 not_called pvecm "an uploaded certificate: re-signed anyway"
+
+# -----------------------------------------------------------------------------
+# the bulk storage and the host's own units
+# -----------------------------------------------------------------------------
+# bulk_reset <vg> <defined> <disabled>: what lvm and the storage config hold; the spin-down scheme in place
+bulk_reset() {
+  : > "$CALLS"
+  BULK_VG=$1 BULK_DEFINED=$2 BULK_DISABLED=$3 BULK_DISK=""
+  mkdir -p "$QEMU_CONF_DIR" "$T/snippets" "$BULK_PVESTATD_LVM"
+  printf 'memory: 3072\nhookscript: local:snippets/homelab-bulk.sh\n' > "$QEMU_CONF_DIR/109.conf"
+  printf 'memory: 1024\n' > "$QEMU_CONF_DIR/100.conf"
+  touch "$BULK_HOOK" "$BULK_GUESTS_DROPIN" "$BULK_PVESTATD_DROPIN"
+}
+
+bulk_reset 1 1 1
+bulk_converge >/dev/null
+called "pvesm set bulk --disable 0" "disabled bulk: left disabled"
+not_called "pvesm add" "defined bulk: added again"
+called "qm set 109 --delete hookscript" "the nas keeps the spin-down hookscript"
+not_called "qm set 100" "a guest without the hookscript changed"
+called "systemctl restart pvestatd" "pvestatd keeps its hdd filter"
+for f in "$BULK_HOOK" "$BULK_GUESTS_DROPIN" "$BULK_PVESTATD_DROPIN" "$BULK_PVESTATD_LVM"; do
+  [ ! -e "$f" ] || fail "the spin-down scheme keeps $f"
+done
+: > "$CALLS"
+BULK_DISABLED=0
+printf 'memory: 3072\n' > "$QEMU_CONF_DIR/109.conf"
+bulk_converge >/dev/null
+! grep -v '^pvesh get ' "$CALLS" || fail "a converged bulk changed (above)"
+
+bulk_reset 1 0 0
+bulk_converge >/dev/null
+called "pvesm add lvmthin bulk --vgname bulk --thinpool data --content images" "a pool without a storage: not added"
+
+bulk_reset 0 0 0
+bulk_converge >/dev/null
+not_called "pvesm" "no bulk pool: a storage declared"
+called "qm set 109 --delete hookscript" "no bulk pool: the hookscript stays"
+
+: > "$CALLS"; rm -f "$IPMI_DMI_ENTRY"; IPMI_STATE=enabled IPMI_FAILED=1
+ipmi_converge >/dev/null
+called "systemctl mask --now openipmi.service" "no bmc: openipmi still starts"
+called "systemctl reset-failed openipmi.service" "no bmc: openipmi stays failed"
+: > "$CALLS"; IPMI_STATE=masked IPMI_FAILED=0
+ipmi_converge >/dev/null
+not_called "mask" "masked: masked again"
+: > "$CALLS"; touch "$IPMI_DMI_ENTRY"; IPMI_STATE=enabled
+ipmi_converge >/dev/null
+not_called "mask" "a bmc: openipmi masked"
 
 # -----------------------------------------------------------------------------
 # teardown

@@ -13,7 +13,6 @@
 #   WAKE_ZONES            the zones whose ingress wakes onDemand guests (terraform/lib.tf grants each its guests)
 #   GPU_IDS               the passthrough gpu's functions (site.json), empty for none
 #   BULK_DISK             the disk the bulk pool is created on; init.sh asks it once, empty keeps the pool as it is
-#   NAS_ID                the nas guest, whose hookscript wakes the bulk pool around its start and stop
 #   LLDAP_VMID LLDAP_HOST LLDAP_PORT   the guest running lldap and its ldaps listener
 #   LLDAP_BASE_DN LLDAP_ADMIN_GROUP    the directory, and its group that administers the datacentre
 #   LLDAP_CERT            lldap's self-signed ldaps certificate inside its guest, which the realm pins
@@ -48,6 +47,9 @@ TEXTFILE_DIR=/var/lib/prometheus/node-exporter
 TEXTFILE_INTERVAL_MIN=5
 # hdparm -S units of 5 s: 10 minutes
 HDD_SPINDOWN_SETTING=120
+# smbios type 38 describes a bmc; without one debian's openipmi init script fails at every boot
+IPMI_DMI_ENTRY=/sys/firmware/dmi/entries/38-0
+IPMI_UNIT=openipmi.service
 # containers cannot load kernel modules: nfs for the privileged ones' mounts, overlay and br_netfilter for podman
 LXC_MODULES=(nfs nfsv4 overlay br_netfilter)
 WAKE_ROLE=HomelabWake
@@ -66,10 +68,14 @@ COROSYNC_CONF=/etc/pve/corosync.conf
 API_CERT=/etc/pve/local/pve-ssl.pem
 # an uploaded certificate (pvenode cert set, acme) that pveproxy serves instead of the cluster-signed one
 API_CUSTOM_CERT=/etc/pve/local/pveproxy-ssl.pem
-# bulk (hdd) stays disabled in proxmox: pvestatd polls enabled storages every 10s, which keeps the disk spinning;
-# the nas guest's hookscript enables it only around its own start and stop
+BULK_STORAGE=bulk
+# the spin-down scheme of earlier runs, removed: a hookscript on the nas and two unit drop-ins
 BULK_HOOK_NAME=homelab-bulk.sh
 BULK_HOOK=/var/lib/vz/snippets/$BULK_HOOK_NAME
+BULK_GUESTS_DROPIN=/etc/systemd/system/pve-guests.service.d/homelab-bulk.conf
+BULK_PVESTATD_DROPIN=/etc/systemd/system/pvestatd.service.d/homelab-no-hdd.conf
+BULK_PVESTATD_LVM=/etc/lvm-pvestatd
+QEMU_CONF_DIR=/etc/pve/qemu-server
 # of the bulk disk, the thin pool takes this much; the rest keeps full thin metadata from wedging the pool
 BULK_POOL_EXTENTS=99%FREE
 OSSEC_VERSION=3.8.0
@@ -253,6 +259,16 @@ power_converge() {
   printf '%s\n' "${LXC_MODULES[@]}" | file_converge /etc/modules-load.d/homelab-lxc.conf 644 modules_load
 }
 
+ipmi_converge() {
+  [ ! -e "$IPMI_DMI_ENTRY" ] || return 0
+  systemctl cat "$IPMI_UNIT" >/dev/null 2>&1 || return 0
+  if [ "$(systemctl is-enabled "$IPMI_UNIT" 2>/dev/null)" != masked ]; then
+    systemctl mask --now "$IPMI_UNIT"
+    echo ">>> Proxmox: masked $IPMI_UNIT, the host has no bmc"
+  fi
+  if systemctl -q is-failed "$IPMI_UNIT"; then systemctl reset-failed "$IPMI_UNIT"; fi
+}
+
 # root takes exactly the lab's root keys plus the node's own, which pve uses to reach itself
 root_converge() {
   local keys_file
@@ -377,54 +393,45 @@ api_cert_converge() {
 # STORAGE
 # -----------------------------------------------------------------------------
 
+# the spin-down scheme kept bulk disabled outside the nas's start and stop, so proxmox refused the nas's disk to every
+# other operation and a missed hook left it so; bulk is an ordinary storage now, and the scheme's pieces go
+bulk_spindown_remove() {
+  local conf
+  for conf in "$QEMU_CONF_DIR"/*.conf; do
+    if grep -sqxF "hookscript: local:snippets/$BULK_HOOK_NAME" "$conf"; then
+      qm set "$(basename "$conf" .conf)" --delete hookscript >/dev/null
+      echo ">>> Proxmox: removed the bulk hookscript from vm-$(basename "$conf" .conf)"
+    fi
+  done
+  rm -f "$BULK_HOOK" "$BULK_GUESTS_DROPIN"
+  [ -e "$BULK_PVESTATD_DROPIN" ] || return 0
+  rm -f "$BULK_PVESTATD_DROPIN"
+  rm -rf "$BULK_PVESTATD_LVM"
+  unit_restart pvestatd
+}
+
+bulk_storage_converge() {
+  if ! pvesh get /storage --output-format json | json_has storage "$BULK_STORAGE"; then
+    pvesm add lvmthin "$BULK_STORAGE" --vgname "$BULK_STORAGE" --thinpool data --content images
+  fi
+  if [ "$(pvesh get "/storage/$BULK_STORAGE" --output-format json | jq -r '.disable // 0')" != 0 ]; then
+    pvesm set "$BULK_STORAGE" --disable 0
+    echo ">>> Proxmox: enabled the $BULK_STORAGE storage"
+  fi
+}
+
 bulk_converge() {
-  local pv rejects
-  if [ -n "$BULK_DISK" ] && ! vgs bulk >/dev/null 2>&1; then
+  if [ -n "$BULK_DISK" ] && ! vgs "$BULK_STORAGE" >/dev/null 2>&1; then
     [ -b "$BULK_DISK" ] || { echo "ERROR: the bulk disk $BULK_DISK is not present." >&2; exit 1; }
     # never wipe a disk holding a filesystem
     [ -z "$(lsblk -no FSTYPE "$BULK_DISK")" ] \
       || { echo "ERROR: $BULK_DISK holds a filesystem; clear it by hand once its contents are safe." >&2; exit 1; }
     pvcreate -ff -y "$BULK_DISK"
-    vgcreate bulk "$BULK_DISK"
-    lvcreate --type thin-pool -l "$BULK_POOL_EXTENTS" -Zn --thinpool data bulk
+    vgcreate "$BULK_STORAGE" "$BULK_DISK"
+    lvcreate --type thin-pool -l "$BULK_POOL_EXTENTS" -Zn --thinpool data "$BULK_STORAGE"
   fi
-  vgs bulk >/dev/null 2>&1 || return 0
-  pvesm status --storage bulk >/dev/null 2>&1 || pvesm add lvmthin bulk --vgname bulk --thinpool data --content images
-
-  grep -A3 "^dir: local$" /etc/pve/storage.cfg | grep -q snippets || pvesm set local --content backup,vztmpl,iso,snippets
-  install -d /var/lib/vz/snippets
-  file_converge "$BULK_HOOK" 755 <<'HOOK'
-#!/bin/sh
-case "$2" in
-  pre-start|pre-stop) pvesm set bulk --disable 0 ;;
-  post-start|post-stop) pvesm set bulk --disable 1 ;;
-esac
-exit 0
-HOOK
-  # onboot start checks the storage before the hookscript runs, so host boot enables bulk for the autostart
-  install -d /etc/systemd/system/pve-guests.service.d
-  printf '[Service]\nExecStartPre=/usr/sbin/pvesm set bulk --disable 0\n' \
-    | file_converge /etc/systemd/system/pve-guests.service.d/homelab-bulk.conf 644 systemctl daemon-reload
-  # disabled or not, pvestatd's lvm scans for local-lvm read every pv label, the hdd's too: its own lvm config
-  # rejects every name of the bulk pv, rebuilt from the real one each run
-  pv=$(pvs --noheadings -o pv_name,vg_name | awk '$2 == "bulk" { print $1 }')
-  rejects=$(for n in "$pv" /dev/disk/by-id/*; do
-    if [ "$(readlink -f "$n")" = "$(readlink -f "$pv")" ]; then printf ',"r|^%s$|"' "$n"; fi
-  done)
-  rm -rf /etc/lvm-pvestatd.new && cp -a /etc/lvm /etc/lvm-pvestatd.new
-  sed -i "s#^\(\s*global_filter=\[.*\)\]#\1$rejects]#" /etc/lvm-pvestatd.new/lvm.conf
-  LVM_SYSTEM_DIR=/etc/lvm-pvestatd.new vgs pve >/dev/null
-  rm -rf /etc/lvm-pvestatd && mv /etc/lvm-pvestatd.new /etc/lvm-pvestatd
-  install -d /etc/systemd/system/pvestatd.service.d
-  printf '[Service]\nEnvironment=LVM_SYSTEM_DIR=/etc/lvm-pvestatd\n' \
-    | file_converge /etc/systemd/system/pvestatd.service.d/homelab-no-hdd.conf 644 unit_restart pvestatd
-
-  # terraform creates the nas guest after the first run; the run after it hooks the guest. A running guest keeps
-  # the pool as its hookscript's pre-start left it until it stops.
-  qm status "$NAS_ID" >/dev/null 2>&1 || return 0
-  qm config "$NAS_ID" | grep -qx "hookscript: local:snippets/$BULK_HOOK_NAME" \
-    || qm set "$NAS_ID" --hookscript "local:snippets/$BULK_HOOK_NAME" >/dev/null
-  if [ "$(qm status "$NAS_ID" | cut -d' ' -f2)" = running ]; then pvesm set bulk --disable 1; fi
+  if vgs "$BULK_STORAGE" >/dev/null 2>&1; then bulk_storage_converge; fi
+  bulk_spindown_remove
 }
 
 # -----------------------------------------------------------------------------
@@ -596,13 +603,14 @@ METRICS
 # -----------------------------------------------------------------------------
 
 converge() {
-  : "${PROXMOX_IP:?}" "${ZONE_BRIDGES:?}" "${WAKE_ZONES:?}" "${NAS_ID:?}" "${ROOT_PASSWORD:?}" "${ROOT_KEYS:?}"
+  : "${PROXMOX_IP:?}" "${ZONE_BRIDGES:?}" "${WAKE_ZONES:?}" "${ROOT_PASSWORD:?}" "${ROOT_KEYS:?}"
   : "${LLDAP_VMID:?}" "${LLDAP_HOST:?}" "${LLDAP_PORT:?}" "${LLDAP_BASE_DN:?}" "${LLDAP_ADMIN_GROUP:?}" "${LLDAP_CERT:?}"
   : "${LLDAP_BIND_USER:?}" "${LLDAP_BIND_PASSWORD:?}"
   apt_sources_converge
   bridges_converge
   gpu_converge
   power_converge
+  ipmi_converge
   root_converge
   users_converge
   realm_converge

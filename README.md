@@ -127,10 +127,11 @@ no secret; `schema` changes only when a key changes meaning or goes away.
 ## Proxmox host
 
 `src/scripts/pve-install.sh` converges the host on every `init.sh` and `sync.sh` run: apt sources, the zone
-bridges, gpu passthrough, power settings, root's password (`proxmox-root-pass`) and ssh keys (`src/lab/keys/`), the
-lab's api users and tokens (created once, never rotated; undeclared `@pve` users and every pool are removed), the
-lldap realm, the api certificate, the bulk storage and its hookscript, the host exporter and OSSEC. While the package
-mirrors or github are unavailable, what needs them waits for the next run; everything else still converges.
+bridges, gpu passthrough, power settings, openipmi off without a bmc, root's password (`proxmox-root-pass`) and ssh
+keys (`src/lab/keys/`), the lab's api users and tokens (created once, never rotated; undeclared `@pve` users and every
+empty pool are removed), the lldap realm, the node's address and the api certificate naming it, the bulk storage
+(always enabled), the host exporter and OSSEC. While the package mirrors or github are unavailable, what needs them
+waits for the next run; everything else still converges. `src/scripts/deinit.sh` runs its teardown.
 
 ### Proxmox firewall
 

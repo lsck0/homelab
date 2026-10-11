@@ -426,12 +426,18 @@ PROXMOX_API_TOKEN_ID="$(proxmox_tfvar_read proxmox_api_token_id)"
 PROXMOX_API_TOKEN_SECRET="$(proxmox_tfvar_read proxmox_api_token_secret)"
 PROXMOX_NODE=$(jq -r .node "$LAB_SITE")
 PVE_API="https://$PROXMOX_SSH_HOST:$PVE_API_PORT/api2/json"
+# tls alone first: the ingresses' wake and reaper, their proxmox route and terraform all verify the host by its address
+curl -s --cacert "$PVE_CA_FILE" -o /dev/null "$PVE_API/version" || {
+  echo "ERROR: the Proxmox api certificate does not name $PROXMOX_SSH_HOST or does not chain to site.json's proxmoxCa,"
+  echo "       though pve-install.sh re-signs it: openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -ext subjectAltName"
+  exit 1
+}
 # a header file, out of argv
 PVE_AUTH_FILE=$(umask 077; mktemp); CLEANUP_FILES+=("$PVE_AUTH_FILE")
 printf 'Authorization: PVEAPIToken=%s=%s\n' "$PROXMOX_API_TOKEN_ID" "$PROXMOX_API_TOKEN_SECRET" > "$PVE_AUTH_FILE"
 unset PROXMOX_API_TOKEN_SECRET
 pve_api "$PVE_API/version" >/dev/null \
-  || { echo "ERROR: the Proxmox api refused the token, or its certificate does not chain to site.json's proxmoxCa."; exit 1; }
+  || { echo "ERROR: the Proxmox api refused the token."; exit 1; }
 
 # golden image
 if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f $PROXMOX_IMAGE" 2>/dev/null; then
