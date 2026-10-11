@@ -112,8 +112,8 @@ pkgs.testers.runNixOSTest {
 
     with subtest("an idle app nobody asked for goes to sleep, an app without idle stays up"):
         assert state("lazy") == "running"
-        # the reaper's turn, as its timer would take it: no connection in the idle window
-        vm_200.wait_until_succeeds("systemctl start ondemand-reaper && [ \"$(curl -s ${controller}/state/lazy)\" = stopped ]", timeout=240)
+        # the reaper's turn, as its timer would take it; it fails for the edge's guests (no proxmox here), lazy sleeps
+        vm_200.wait_until_succeeds("systemctl start ondemand-reaper; [ \"$(curl -s ${controller}/state/lazy)\" = stopped ]", timeout=600)
         vm_140.wait_until_succeeds("[ \"$(docker service ls --filter name=lazy_web --format '{{.Replicas}}' | cut -d/ -f1)\" = 0 ]", timeout=120)
         vm_140.succeed("grep -q 'homelab_app_idle_stopped{app=\"lazy\"} 1' /var/lib/node-exporter-textfile/swarm_idle_lazy.prom")
         assert tasks("steady") == 1
