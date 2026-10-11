@@ -117,7 +117,7 @@ pkgs.testers.runNixOSTest {
     ROUTER_WAN = "${routerWan}"
     HOUSE = json.loads('${builtins.toJSON house}')
     ZONES = json.loads('${builtins.toJSON zoneAddresses}')
-    POOL = (ipaddress.ip_address("${dhcpPool.first}"), ipaddress.ip_address("${dhcpPool.last}"))
+    POOL = (ipaddress.IPv4Address("${dhcpPool.first}"), ipaddress.IPv4Address("${dhcpPool.last}"))
     ORACLE = ZoneOracle(FACTS)
     # three high ports the policy never names, a fresh sample per seed
     TCP = sorted(set(${builtins.toJSON tcpPorts}) | set(rng.sample(range(30000, 60000), 3)))
@@ -229,7 +229,7 @@ pkgs.testers.runNixOSTest {
         apps.succeed("ip link set eth2 up")
         out = dmz.succeed("busybox udhcpc -i eth2 -n -q -t 5 -s ${leaseScript}")
         lease = re.search(r"lease (\S+) router (\S+) dns (\S+)", out)
-        assert lease and POOL[0] <= ipaddress.ip_address(lease.group(1)) <= POOL[1] and lease.group(2) == "10.200.0.1", out
+        assert lease and POOL[0] <= ipaddress.IPv4Address(lease.group(1)) <= POOL[1] and lease.group(2) == "10.200.0.1", out
         apps.fail("busybox udhcpc -i eth2 -n -q -t 3 -s ${leaseScript}")
 
     with subtest("vpn members never leave through the house, whichever piece of the exit is missing"):
