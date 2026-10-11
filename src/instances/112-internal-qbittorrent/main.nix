@@ -20,6 +20,11 @@ let
   # download only: finished torrents stop at once (ratio 0) for the arrs to import; upload slots serve queued ones
   activeDownloadsMax = 5;
   activeUploadsMax = 8;
+  # what a video, music or book release never needs and malware releases ship (a fake episode was one .exe):
+  # qbittorrent never writes a file matching these, so nothing runnable reaches the media share
+  excludedFileNames = map (extension: "*.${extension}") [
+    "exe" "scr" "bat" "cmd" "com" "pif" "lnk" "msi" "jar" "js" "vbs" "wsf" "hta" "ps1" "reg"
+  ];
 
   # router routes peer traffic, no proxy here
   prefs = pkgs.writeText "qbittorrent-prefs.json" (builtins.toJSON {
@@ -56,6 +61,8 @@ let
     max_seeding_time_enabled = true;
     max_seeding_time = 0;
     max_ratio_act = 0;
+    excluded_file_names_enabled = true;
+    excluded_file_names = lib.concatStringsSep "\n" excludedFileNames;
   });
 in {
   # egress: router holds the tunnel and killswitch; dns asks the provider through it, never from the home ip
@@ -117,6 +124,8 @@ in {
     description = "Configure qBittorrent: peer settings, save path, API whitelist, WebUI password";
     after = [ "podman-qbittorrent.service" "qbittorrent-disable-auth.service" ];
     path = [ pkgs.podman pkgs.jq pkgs.coreutils ];
+    # tests/downloads.nix reads the rendered preferences from here
+    environment.QBITTORRENT_PREFS = prefs;
     script = ''
       API="http://127.0.0.1:${toString route.port}/api/v2"
       # curl inside the container: its loopback is the one the webui lets in without a login
@@ -126,7 +135,7 @@ in {
       printf ${webUiUser} | token_write qbittorrent-user
 
       # the preferences carry the password: on stdin, not on argv
-      jq -cj --rawfile p ${config.sops.secrets.qbittorrent-pass.path} '. + { web_ui_username: "${webUiUser}", web_ui_password: $p }' ${prefs} \
+      jq -cj --rawfile p ${config.sops.secrets.qbittorrent-pass.path} '. + { web_ui_username: "${webUiUser}", web_ui_password: $p }' "$QBITTORRENT_PREFS" \
         | podman exec -i qbittorrent curl -fsS -X POST "$API/app/setPreferences" --data-urlencode json@-
       echo "qBittorrent configured: direct peer traffic, DHT/PEX/LSD on, ${toString activeDownloadsMax} active downloads"
     '';
