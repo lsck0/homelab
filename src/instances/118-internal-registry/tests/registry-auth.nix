@@ -197,9 +197,13 @@ pkgs.testers.runNixOSTest {
             assert all(line.split(":", 1)[1].startswith("$2y$") for line in lines), lines
 
     with subtest("a rotated password replaces the old one"):
+        # both checks hold the users: the ingress's basic auth and the backend's own htpasswd
         vm_100.succeed("printf %s ${rotated} > /run/secrets/registry-builder-password")
         vm_100.succeed("systemctl restart traefik-basic-auth traefik")
+        vm_118.succeed("printf %s ${rotated} > /run/secrets/registry-builder-password")
+        vm_118.succeed("systemctl restart registry-auth")
         vm_100.wait_for_open_port(443)
+        vm_118.wait_for_open_port(${toString backendPorts.api})
         expect([
             ("controller", "GET", "/v2/", "builder", 401),
             ("controller", "GET", "/v2/", "builder", 200, basic("builder", "${rotated}")),
