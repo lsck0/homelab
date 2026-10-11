@@ -6,19 +6,20 @@
 #
 # No secret reaches a command line: passwords go to ldappasswd in files, the session token to curl in a header file,
 # both in a private directory removed with the session, whose tokens are blacklisted when the script exits.
-{ config, lib, pkgs, retry, inventory, site, catalog, instance, ... }:
+{ config, lib, pkgs, retry, inventory, site, catalog, instance, lab, ... }:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   routes = catalog.internal;
   ldapPort = 3890;
+  realm = (import ../../../modules/lab-export.nix { inherit lib lab; }).ldap;
   ldaps = {
     inherit (net.ports) ldaps;
-    # the path scripts/pve-install.sh reads (LLDAP_CERT)
-    cert = "${stateDir}/ldaps-cert.pem";
+    # the realm reads it from inside the guest
+    cert = realm.certFile;
     key = "${stateDir}/ldaps-key.pem";
     address = inventory.${instance.id}.ip;
     validDays = 3650;
-    # renewed this long before it expires, or when the address changed; the next sync hands it to the realm
+    # renewed this long before it expires, when the address changed or the key is lost; the next sync hands it to the realm
     renewSeconds = 30 * 24 * 3600;
   };
   httpPort = routes.lldap.port;
@@ -40,8 +41,7 @@ let
   readonlyGroup = "lldap_strict_readonly";
   bindUsers = {
     authelia-bind = "lldap-authelia-bind-password";
-    # the proxmox realm's sync (scripts/pve-install.sh)
-    proxmox-bind = "lldap-proxmox-bind-password";
+    ${realm.bindUser} = "lldap-proxmox-bind-password";
   };
 
   # admin session helpers for lab-user and the bootstrap; set -e callers stop on any failure
@@ -162,8 +162,9 @@ in {
 
   services.lldap = {
     enable = true;
-    silenceForceUserPassResetWarning = true;
     settings = {
+      # the admin's password is lldap-admin-password alone, rotated by changing the secret
+      force_ldap_user_pass_reset = "always";
       ldap_base_dn = net.domainDn;
       ldap_host = "0.0.0.0";
       ldap_port = ldapPort;
@@ -187,7 +188,7 @@ in {
 
   systemd.services.lldap.preStart = lib.mkBefore ''
     [ -s ${stateDir}/server_key ] || ${pkgs.coreutils}/bin/base64 -d ${config.sops.secrets.lldap-server-key.path} > ${stateDir}/server_key
-    if ! ${openssl} x509 -in ${ldaps.cert} -noout -checkend ${toString ldaps.renewSeconds} >/dev/null 2>&1 \
+    if [ ! -s ${ldaps.key} ] || ! ${openssl} x509 -in ${ldaps.cert} -noout -checkend ${toString ldaps.renewSeconds} >/dev/null 2>&1 \
        || ! ${openssl} x509 -in ${ldaps.cert} -noout -checkip ${ldaps.address} | ${pkgs.gnugrep}/bin/grep -q 'does match'; then
       (umask 077; ${openssl} req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days ${toString ldaps.validDays} \
         -subj /CN=${ldaps.address} -addext subjectAltName=IP:${ldaps.address} -keyout ${ldaps.key} -out ${ldaps.cert})

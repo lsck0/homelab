@@ -3,7 +3,7 @@
   vm = {
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
-    kind.lxc = "pending migration, see the restructure report";
+    kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";
     privileged = true;
     features = "nesting=1,mount=nfs";
   };
@@ -33,6 +33,6 @@
   shares = {
     "bulk/media/music".readOnly = true;
     "data/db-dumps/vm-${id}" = { mode = "0700"; };
-    "data/navidrome" = { };
+    "data/navidrome".localState = true;
   };
 }

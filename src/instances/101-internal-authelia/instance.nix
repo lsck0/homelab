@@ -38,7 +38,7 @@
     authelia-oidc-hmac = "hex:32";
     authelia-oidc-issuer-key = "manual"; # openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:4096
     authelia-session-secret = "hex:32";
-    authelia-storage-key = "hex:32";
+    authelia-storage-key = "guardsData:hex:32"; # encrypts the second-factor enrolments in its db
     lldap-admin-password = "hex:24";
     lldap-authelia-bind-password = "hex:24"; # lldap user authelia-bind, read-only (lldap_strict_readonly)
     lldap-guest-password = "hex:24";

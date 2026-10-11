@@ -5,7 +5,7 @@
 # src/secrets/shared.sops.json (`sops src/secrets/shared.sops.json`); src/scripts/secrets-sync.sh adds a missing one by its kind:
 #   "hex:<bytes>"          that many random bytes as hex
 #   "wireguard"            a wireguard private key: 32 random bytes as base64, clamped by wireguard
-#   "ntfy-token"           tk_ and 29 of [a-z0-9], the only shape ntfy accepts
+#   "laravel-key"          a laravel APP_KEY: base64: and 32 random bytes as base64
 #   "garage-key-id"        GK and 12 random bytes as hex (apps)
 #   "guardsData:<kind>"    a key that data or logins depend on (a backup repository, an encrypted db, an app login
 #                          set once): generated as <kind> only on secrets-sync.sh --generate-guarded, a missing one
@@ -38,7 +38,7 @@
   telegram-chat-id = "public"; # hermes-secrets.sh: the owner's telegram user id
 
   # read by no guest
-  proxmox-root-pass = "hex:24"; # proxmox root@pam, set by sync.sh; its own, shared with no guest
+  proxmox-root-pass = "hex:24"; # proxmox root@pam, set by scripts/pve-install.sh; its own, shared with no guest
   # the proton account: restoring the off-site backup signs in with it (README, Recovery)
   proton-username = "public";
   proton-password = "manual";

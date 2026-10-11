@@ -73,6 +73,8 @@ SSH_PROBE_TIMEOUT_S=3
 # a switch still running after this hangs (a hard nfs mount, a unit that never settles): the deploy fails and the run
 # goes on to release the state lock and the reaper; half an hour leaves room for the image pulls a switch waits on
 SWITCH_TIMEOUT_S=1800
+# a closure copy over the lan, gigabytes at worst; a stalled one fails its deploy instead of holding the run
+COPY_TIMEOUT_S=1800
 # after the router's own deploy: 2.5 minutes for the bastion, then 1 for the internal zone behind it
 ROUTER_WAIT_ATTEMPTS=30
 INGRESS_WAIT_ATTEMPTS=12
@@ -86,6 +88,11 @@ PVE_API_PORT=8006
 # a fetch or push github does not answer within this gives up; the next run catches up
 GIT_TIMEOUT_S=60
 NIX_FEATURES=(--extra-experimental-features "nix-command flakes")
+# a substituter or github that does not answer: each connection try ends after this (nix makes download-attempts of
+# them), then the path builds locally or the evaluation fails; every nix of the run, terraform's too, and the daemon
+# takes the setting from any user
+NIX_CONNECT_TIMEOUT_S=15
+export NIX_CONFIG="${NIX_CONFIG:+$NIX_CONFIG$'\n'}connect-timeout = $NIX_CONNECT_TIMEOUT_S"
 
 REAPER_PAUSE_FILE=/run/ondemand-reaper-pause-until
 # outlives any sync, expires on its own if the trap never runs
@@ -289,37 +296,17 @@ host_age_key_of() {
   printf '%s\n' "$host_key"
 }
 
-# host_age_key_push <name> <ip>: this host's own age key, written ahead of the identities the key file holds when it
-# differs, so the running system and the next boot still decrypt until a switch takes it; prints "changed" if it did
-host_age_key_push() {
-  host_age_key_of "$1" | lab_ssh "root@$2" \
-    "install -d -m 700 ${HOST_AGE_KEY_PATH%/*} && umask 077 && cat > $HOST_AGE_KEY_PATH.new \
-     && if cmp -s $HOST_AGE_KEY_PATH.new $HOST_AGE_KEY_PATH; then rm $HOST_AGE_KEY_PATH.new; \
-        else { cat $HOST_AGE_KEY_PATH.new; grep -vxF -f $HOST_AGE_KEY_PATH.new $HOST_AGE_KEY_PATH || true; } \
-               > $HOST_AGE_KEY_PATH.both && mv $HOST_AGE_KEY_PATH.both $HOST_AGE_KEY_PATH \
-             && rm $HOST_AGE_KEY_PATH.new && echo changed; fi"
+# host_age_key_run <push|settle> <name> <ip>: scripts/lib/host-age-key.sh on the guest with its own key
+host_age_key_run() {
+  local key
+  key=$(host_age_key_of "$2") || return 1
+  lab_ssh "root@$3" "bash -c $(printf %q "$(cat "$SRC/scripts/lib/host-age-key.sh")") host-age-key $1 $HOST_AGE_KEY_PATH" <<<"$key"
 }
 
-# host_age_key_settle <name> <ip>: after a switch that decrypted with it, the key file holds this host's key alone
-host_age_key_settle() {
-  host_age_key_of "$1" | lab_ssh "root@$2" \
-    "umask 077 && cat > $HOST_AGE_KEY_PATH.new && mv $HOST_AGE_KEY_PATH.new $HOST_AGE_KEY_PATH"
-}
-
-# switch_failures_real <ip> <switch output>: the units the switch named as failed that the configuration declares;
-# a transient unit (podman's healthcheck runs, systemd-run) is no configuration's and fails mid-restart by design;
-# one systemd already collected is not found any more, which no declared unit ever is
+# switch_failures_real <ip> <switch output>: what failed the switch beyond undeclared units (scripts/lib/switch-failures.sh)
 switch_failures_real() {
-  local units
-  units=$(sed -n 's/^warning: the following units failed: //p' "$2" | tr ',' ' ')
-  [ -n "$units" ] || { echo "the switch itself"; return 0; }
-  # shellcheck disable=SC2086 # one word per unit
   lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@$1" \
-    "for u in $units; do
-       if [ \"\$(systemctl show -P Transient \"\$u\")\" = no ] && [ \"\$(systemctl show -P LoadState \"\$u\")\" != not-found ]; then
-         echo \"\$u\"
-       fi
-     done"
+    "bash -c $(printf %q "$(cat "$SRC/scripts/lib/switch-failures.sh")")" < "$2"
 }
 
 deploy_nixos() {
@@ -339,7 +326,7 @@ deploy_nixos() {
 
   # before the up-to-date check: a lost or stale key on an unchanged host is repaired, then re-activated
   local key_state current
-  key_state=$(host_age_key_push "$name" "$ip") || return 1
+  key_state=$(host_age_key_run push "$name" "$ip") || return 1
   # unreadable means deploy anyway
   current=$(lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@${ip}" "readlink -f /run/current-system" 2>/dev/null || true)
   if [ "$current" = "$toplevel" ] && [ "$key_state" != changed ]; then
@@ -348,8 +335,8 @@ deploy_nixos() {
   [ "$key_state" = changed ] && echo ">>> $name: age key replaced, re-activating to decrypt its secrets"
 
   # closures are local builds, no sigs
-  nix copy "${NIX_FEATURES[@]}" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
-    || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
+  timeout "$COPY_TIMEOUT_S" nix copy "${NIX_FEATURES[@]}" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
+    || { echo "ERROR: $name: the closure did not copy."; return 1; }
 
   # switch in place, no reboot
   local out rc=0 failed
@@ -365,7 +352,7 @@ deploy_nixos() {
     echo ">>> $name: only transient units failed during the switch."
   fi
   rm -f "$out"
-  [ "$key_state" != changed ] || host_age_key_settle "$name" "$ip" || return 1
+  [ "$key_state" != changed ] || host_age_key_run settle "$name" "$ip" || return 1
   echo ">>> $name deployed."
 
   # a terraform disk bump grows the disk, not the partition (GROW_REBOOT_SLACK_BYTES); an lxc has no /dev/sda, reads 0
@@ -439,28 +426,33 @@ PROXMOX_API_TOKEN_ID="$(proxmox_tfvar_read proxmox_api_token_id)"
 PROXMOX_API_TOKEN_SECRET="$(proxmox_tfvar_read proxmox_api_token_secret)"
 PROXMOX_NODE=$(jq -r .node "$LAB_SITE")
 PVE_API="https://$PROXMOX_SSH_HOST:$PVE_API_PORT/api2/json"
+# tls alone first: the ingresses' wake and reaper, their proxmox route and terraform all verify the host by its address
+curl -s --cacert "$PVE_CA_FILE" -o /dev/null "$PVE_API/version" || {
+  echo "ERROR: the Proxmox api certificate does not name $PROXMOX_SSH_HOST or does not chain to site.json's proxmoxCa,"
+  echo "       though pve-install.sh re-signs it: openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -ext subjectAltName"
+  exit 1
+}
 # a header file, out of argv
 PVE_AUTH_FILE=$(umask 077; mktemp); CLEANUP_FILES+=("$PVE_AUTH_FILE")
 printf 'Authorization: PVEAPIToken=%s=%s\n' "$PROXMOX_API_TOKEN_ID" "$PROXMOX_API_TOKEN_SECRET" > "$PVE_AUTH_FILE"
 unset PROXMOX_API_TOKEN_SECRET
 pve_api "$PVE_API/version" >/dev/null \
-  || { echo "ERROR: the Proxmox api refused the token, or its certificate does not chain to site.json's proxmoxCa."; exit 1; }
+  || { echo "ERROR: the Proxmox api refused the token."; exit 1; }
 
 # golden image
-if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
+if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f $PROXMOX_IMAGE" 2>/dev/null; then
   [ -f "$ROOT_DIR/images/nixos.img" ] || { echo "ERROR: Golden image missing. Run: sudo nix build ./src#cloud-image"; exit 1; }
   echo ">>> Uploading golden image..."
   scp -P "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS" -o StrictHostKeyChecking=yes "$ROOT_DIR/images/nixos.img" \
-    "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:/var/lib/vz/template/iso/nixos.img"
+    "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:$PROXMOX_IMAGE"
 fi
 
 # lxc template; only seeds new containers, so upload once
-LXC_TEMPLATE=/var/lib/vz/template/cache/nixos-homelab.tar.xz
-if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f $LXC_TEMPLATE" 2>/dev/null; then
+if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f $PROXMOX_LXC_TEMPLATE" 2>/dev/null; then
   echo ">>> Building and uploading the LXC template..."
   tarball=$(nix build "$SRC#lxc-template" "${NIX_FEATURES[@]}" --no-link --print-out-paths)
   scp -P "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS" -o StrictHostKeyChecking=yes "$tarball"/tarball/*.tar.xz \
-    "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:$LXC_TEMPLATE"
+    "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:$PROXMOX_LXC_TEMPLATE"
 fi
 
 # -----------------------------------------------------------------------------
@@ -527,6 +519,8 @@ if [ "${TF_STATE_OFFLINE:-0}" != 1 ]; then
   [ -n "${TFSTATE_LOCK_PID:-}" ] || host_keys_learn "$NAS_ID"
   tfstate_push || DEPLOY_FAILURE=1
 fi
+# the state is settled: a deploy that hangs below never holds another sync's apply
+tfstate_lock_release
 
 # the anti-spoofing every source-address guard of the lab relies on (terraform/lib.tf FIREWALL)
 "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "pve-firewall status" | grep -qx 'Status: enabled/running' \

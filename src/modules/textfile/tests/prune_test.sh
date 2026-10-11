@@ -10,17 +10,28 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 put() { for name in "$@"; do echo "x 1" > "$D/$name.prom"; done; }
 has() { [ -e "$D/$1.prom" ] || fail "$2: $1.prom is gone"; }
 gone() { [ ! -e "$D/$1.prom" ] || fail "$2: $1.prom is still there"; }
-activate() { bash "$PRUNE" "$D" "$@" > /dev/null; }
+# the names hosts wrote before they kept a record
+LEGACY="app_builder legacy_*"
+activate() { bash "$PRUNE" "$D" "$LEGACY" "$@" > /dev/null; }
 
-# a host's first generation with the primitive: what nobody ever declared survives, a forgotten writer loses nothing
+# a host's first generation with the primitive: a legacy file no unit writes now goes, a declared one stays, what
+# nobody ever declared survives (a forgotten writer loses nothing)
 mkdir -p "$D"
-put app_builder ondemand
+put app_builder legacy_x ondemand forgotten
 activate ondemand
-has app_builder "never declared"
+gone app_builder "legacy, not declared here"
+gone legacy_x "legacy pattern, not declared here"
 has ondemand "declared"
+has forgotten "never declared"
+
+# the legacy names count for the first record only: from then on a host's own record decides
+put app_builder
+activate ondemand
+has app_builder "written after the first activation"
 
 # the builder moved away: the name its old generation recorded goes, the others stay
 activate app_builder ondemand
+has app_builder "declared"
 activate ondemand
 gone app_builder "undeclared after being declared"
 has ondemand "still declared"

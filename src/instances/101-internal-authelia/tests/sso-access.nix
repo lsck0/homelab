@@ -1,7 +1,8 @@
 # who reaches which internal route, through the real internal ingress (100-internal-traefik.nix) and the real
 # authelia with lldap (101-internal-authelia.nix): anonymous, first factor only, and three users each with a second
 # factor, the own-login routes, the login redirect, regulation, the login rate limit, oidc's policy, the read-only
-# bind user, the guarded portal port, the probers' health path, and the apps zone refused
+# bind user, the guarded portal port, the probers' health path, the apps zone refused, and the proxmox realm's ldaps:
+# verified against the certificate the guest made for itself, from proxmox's address alone, never in plain ldap
 #
 # The oracle is the table below, the policy as stated: admins everywhere, a user where their app-<route> group
 # says, own-login routes without forwardauth and without any identity header reaching them.
@@ -38,6 +39,8 @@ let
   # 25 bytes each, base32 of sha256("homelab-test/totp-<user>"): authelia refuses a secret of 20 bytes or less
   totpSecrets = { luca = "SAB4DI6V2SGFPRIURUPZ3GBYSCR3PBTRZMJGJT3B"; guest = "NRP6ALV5Q6A5YNERCN7ARIWL3D64HKDAX7YRJURF"; dbuser = "EKVYFAJFL2ILTUGLLOAI3TTXW6BSKY3LDX5MRHE6"; };
   dbuserPassword = "dbuser-test-password";
+  realm = (import ../../../modules/lab-export.nix { inherit lib; inherit (specialArgs) lab; }).ldap;
+  ldapTimeoutS = 5;
 
   # page -> the expected status for anon, guest after the first factor only, guest, dbuser, luca. A first factor
   # names the user: authelia sends it on to the second factor where a rule admits the user, and refuses it elsewhere.
@@ -78,14 +81,14 @@ pkgs.testers.runNixOSTest {
   # the gateways of the flat lab, the house lan's clients, and proxmox's api
   nodes.world = {
     imports = [ (lab.multi { addresses = [ "10.100.0.1/8" "10.250.0.1/8" "${net.wan.proxmox}/24" ] ++ map (a: "${a}/24") (lib.attrValues clients); }) ];
-    environment.systemPackages = [ pkgs.curl pkgs.python3 pkgs.netcat ];
+    environment.systemPackages = [ pkgs.curl pkgs.python3 pkgs.netcat pkgs.openldap pkgs.openssl ];
     systemd.services.fake-proxmox = {
       wantedBy = [ "multi-user.target" ];
       serviceConfig.ExecStart = "${echoBackend}/bin/echo-backend --tls-port ${toString net.ports.proxmoxApi} --cert ${proxmoxPki}/cert.pem --key ${proxmoxPki}/key.pem --log /run/echo/proxmox.jsonl";
     };
   };
 
-  testScript = lab.driverPython + ''
+  testScript = { nodes, ... }: lab.driverPython + ''
     import base64
     import hashlib
     import hmac
@@ -208,6 +211,39 @@ pkgs.testers.runNixOSTest {
         for source in ("${ip "115"}", "${ip "103"}", "${ip "105"}"):
             backends.fail(f"nc -z -w 2 -s {source} ${ip "101"} ${toString routes.authelia.port}")
         world.fail("nc -z -w 2 -s ${clients.anon} ${ip "101"} ${toString routes.authelia.port}")
+
+    with subtest("the proxmox realm reads lldap over ldaps from proxmox's address, verified against the guest's own certificate"):
+        world.succeed(f"cat > /tmp/realm.pem <<'EOF'\n{vm_101.succeed('cat ${realm.certFile}')}EOF")
+        world.succeed("openssl x509 -in /tmp/realm.pem -noout -ext subjectAltName | grep -qw 'IP Address:${realm.host}'")
+        world.succeed(f"printf %s '{secret('lldap-proxmox-bind-password')}' > /tmp/realm.pw")
+        # what the hypervisor sends from: its own lan address
+        world.succeed("ip route replace ${realm.host}/32 dev eth1 src ${net.wan.proxmox}")
+
+        def realm_search(ca):
+            return world.execute(
+                f"LDAPTLS_CACERT={ca} LDAPTLS_REQCERT=demand ldapsearch -o nettimeout=${toString ldapTimeoutS} -LLL "
+                "-H ldaps://${realm.host}:${toString realm.port} -D uid=${realm.bindUser},ou=people,${realm.baseDn} -y /tmp/realm.pw "
+                "-b ou=groups,${realm.baseDn} cn=${realm.adminGroup} cn")
+
+        status, out = realm_search("/tmp/realm.pem")
+        assert status == 0 and "cn: ${realm.adminGroup}" in out, out
+        # verification is on: a certificate for the same address from anyone else is refused
+        world.succeed("openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj /CN=other "
+                      "-addext subjectAltName=IP:${realm.host} -keyout /tmp/other.key -out /tmp/other.pem")
+        status, out = realm_search("/tmp/other.pem")
+        assert status != 0, out
+        world.fail("nc -z -w ${toString ldapTimeoutS} -s ${net.wan.proxmox} ${realm.host} ${toString nodes.vm-101.services.lldap.settings.ldap_port}")
+        world.fail("nc -z -w ${toString ldapTimeoutS} -s ${clients.anon} ${realm.host} ${toString realm.port}")
+        world.succeed("ip route del ${realm.host}/32")
+
+    with subtest("a lost ldaps key makes a new certificate, which the realm's old pin refuses"):
+        vm_101.succeed("rm ${dirOf realm.certFile}/ldaps-key.pem")
+        vm_101.succeed("systemctl restart lldap.service")
+        vm_101.wait_for_open_port(${toString realm.port})
+        world.succeed("ip route replace ${realm.host}/32 dev eth1 src ${net.wan.proxmox}")
+        status, out = realm_search("/tmp/realm.pem")
+        assert status != 0, out
+        world.succeed("ip route del ${realm.host}/32")
 
     with subtest("the probers reach a route's health path past sso, and nothing else of it"):
         def probe(src, path, method="GET"):

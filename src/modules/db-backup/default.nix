@@ -35,7 +35,7 @@ let
       suffix = lib.mkOption {
         type = lib.types.strMatching "[a-z0-9]+";
         default = "sql";
-        description = "What `command` writes, the dump file's extension before .zst: sql, or tar for a volume archive.";
+        description = "What `command` writes, the dump file's extension: sql, or tar for a volume archive.";
       };
 
       path = lib.mkOption {
@@ -52,9 +52,9 @@ let
     out=${dir}/${name}
     mkdir -p "$out"
     stamp=$(date +%Y-%m-%dT%H%M)
-    # dump and compressed copy are temp files until complete: a failed or interrupted run leaves no partial dump
+    # a temp file until complete: a failed or interrupted run leaves no partial dump
     tmp=$(mktemp -p "$out" .${name}.XXXXXX)
-    trap 'rm -f "$tmp" "$tmp.zst"' EXIT
+    trap 'rm -f "$tmp"' EXIT
     ${if db.sqlite != null then ''
       if [ ! -s ${lib.escapeShellArg db.sqlite} ]; then
         echo "${name}: ${db.sqlite} does not exist yet, nothing to dump"
@@ -68,9 +68,11 @@ let
       [ -s "$tmp" ] || { echo "${name}: dump was empty"; exit 1; }
       ext=${db.suffix}
     ''}
-    zstd -q -19 -o "$tmp.zst" "$tmp"
-    mv "$tmp.zst" "$out/${name}-$stamp.$ext.zst"
-    ls -1t "$out"/${name}-*.zst 2>/dev/null | tail -n +${toString (keep + 1)} | xargs -r rm -f
+    # plain: kopia compresses and deduplicates, a compressed dump would defeat both
+    mv "$tmp" "$out/${name}-$stamp.$ext"
+    # the .zst dumps of earlier versions age out with the plain ones
+    find "$out" -maxdepth 1 -name '${name}-*' -printf '%T@ %p\n' | sort -rn | tail -n +${toString (keep + 1)} | cut -d' ' -f2- \
+      | xargs -r -d '\n' rm -f
     echo "${name}: dumped to $out"
     # grafana's backup alert watches this
     d=${config.homelab.textfileDir}
@@ -108,7 +110,7 @@ in {
       wants = [ "network-online.target" ];
       # lxc guests mount the nas at boot, not on access
       unitConfig.RequiresMountsFor = [ dir ];
-      path = [ pkgs.sqlite pkgs.zstd pkgs.coreutils pkgs.findutils ] ++ db.path;
+      path = [ pkgs.sqlite pkgs.coreutils pkgs.findutils ] ++ db.path;
       serviceConfig = { Type = "oneshot"; };
       script = script name db;
     }) cfg.databases;

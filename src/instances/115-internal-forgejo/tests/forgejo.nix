@@ -1,7 +1,7 @@
 # vm-115's forge as it ships (../main.nix), from the image it ran before to the one it runs
 # now: the bootstrap units on a fresh forge, tokens written to the guest's own token dir (the link stays a link), a
-# rejected token minted again, the upgrade keeping the old database and the forge's data, and every setup unit
-# converging again on the new version. Images are pinned here and fetched at build time, nothing pulls at run time.
+# rejected token minted again, the upgrade keeping the old database (root's, the newest copy only) and the forge's
+# data, and every setup unit converging again on the new version. Images are pinned here and fetched at build time, nothing pulls at run time.
 { pkgs, lib, inputs, specialArgs, ... }:
 let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
@@ -119,6 +119,8 @@ pkgs.testers.runNixOSTest {
         vm_115.succeed(
             f"curl -sf -X POST -H 'Authorization: token {hermes}' -H 'Content-Type: application/json' "
             "-d '{\"name\":\"keep\",\"auto_init\":true}' http://127.0.0.1/api/v1/user/repos")
+        # the copy an earlier upgrade kept, which the next one replaces
+        vm_115.succeed("echo older > /var/lib/forgejo/gitea/gitea.db.before-0.0.0")
 
     with subtest("a rejected token is minted again into the own dir, the link stays a link"):
         vm_115.succeed("printf bogus > ${own}/forgejo-key.token")
@@ -137,6 +139,8 @@ pkgs.testers.runNixOSTest {
         assert version.startswith("${lib.last (lib.splitString ":" current.name)}"), version
         kept = "/var/lib/forgejo/gitea/gitea.db.before-${lib.last (lib.splitString ":" current.name)}"
         assert "keep" in vm_115.succeed(f"sqlite3 {kept} 'select name from repository'")
+        assert vm_115.succeed(f"stat -c '%a %U' {kept}").strip() == "600 root"
+        vm_115.fail("test -e /var/lib/forgejo/gitea/gitea.db.before-0.0.0")
         vm_115.succeed(f"curl -sf -H 'Authorization: token {hermes}' http://127.0.0.1/api/v1/repos/hermes-bot/keep")
         # tokens minted before the upgrade still open the forge
         assert api_user(hermes) == "200"

@@ -169,7 +169,10 @@ fi
 export SOPS_AGE_KEY_FILE="$AGE_KEY"
 
 echo ">>> Generating secrets..."
-"$SCRIPT_DIR/secrets-sync.sh" --apply
+# a repo without the shared values never deployed, so nothing is guarded yet; later a missing guarded value stops here
+GUARDED=()
+[ -f "$SRC/$SECRETS_CATALOG_FILE" ] || GUARDED=(--generate-guarded)
+"$SCRIPT_DIR/secrets-sync.sh" --apply "${GUARDED[@]}"
 # a device identity: the router's secret, not the public site.json
 secrets_set workstation-mac "$WORKSTATION_MAC"
 

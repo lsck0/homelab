@@ -16,12 +16,15 @@ in {
     ../modules/local-state
     ../modules/tokens
     ../modules/textfile
+    ../modules/upstream
   ];
 
   _module.args = {
     # network.nix and the catalog read the inventory; a test may pass its own
     inventory = lib.mkDefault facts.inventory;
     lab = lib.mkDefault facts;
+    # what vm-109 exports; a test nas computes its own
+    nasClients = lib.mkDefault facts.nasClients;
     # what modules/base hands every host: the lab's catalog (modules/catalog.nix)
     catalog = lib.mkDefault facts.catalog;
     # static host facts, the same file the flake hands every host

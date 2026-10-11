@@ -45,7 +45,7 @@ src/
   modules/                  the platform: what two or more guests use
     <name>.nix              a module of one file
     <name>/                 a module of more: default.nix, lib/ (its scripts and templates), tests/
-  apps/swarm.nix            the swarm: manager, builder, worker count and shape
+  apps/swarm.nix            the shared swarm: state worker, ports, worker shape (manager and builder: vm-140)
   apps/<name>/app.nix       an app: repo, branch and the same service properties; secrets.sops.json its secrets
   lab/keys/                 the ssh public keys authorized everywhere (hand-written)
   secrets/                  admins.txt (the admins' age recipients), shared.nix and shared.sops.json (the
@@ -127,10 +127,22 @@ no secret; `schema` changes only when a key changes meaning or goes away.
 ## Proxmox host
 
 `src/scripts/pve-install.sh` converges the host on every `init.sh` and `sync.sh` run: apt sources, the zone
-bridges, gpu passthrough, power settings, root's password (`proxmox-root-pass`) and ssh keys (`src/lab/keys/`), the
-lab's api users and tokens (created once, never rotated; undeclared `@pve` users and every pool are removed), the
-lldap realm, the api certificate, the bulk storage and its hookscript, the host exporter and OSSEC. While the package
-mirrors or github are unavailable, what needs them waits for the next run; everything else still converges.
+bridges, gpu passthrough, power settings, openipmi off without a bmc, root's password (`proxmox-root-pass`) and ssh
+keys (`src/lab/keys/`), the lab's api users and tokens (created once, never rotated; undeclared `@pve` users and every
+empty pool are removed), the lldap realm, the node's address and the api certificate naming it, the bulk storage
+and its hookscript, the host exporter and OSSEC. While the package mirrors or github are unavailable, what needs them
+waits for the next run; everything else still converges. `src/scripts/deinit.sh` runs its teardown.
+
+The bulk storage (the hdd's lvm-thin pool, vm-109's media disk) stays disabled in Proxmox except while vm-109 starts
+or stops (its hookscript), and pvestatd runs with its own lvm config (`/etc/lvm-pvestatd`) that rejects the hdd, so
+nothing but the nas wakes the disk. Proxmox refuses every operation on a disabled storage, so a resize (a terraform
+`diskGiB` change of vm-109's bulk disk too), a snapshot or a backup of vm-109's bulk disk needs it enabled by hand
+for that operation, as root on the host, whether the nas runs or not:
+
+```sh
+pvesm set bulk --disable 0    # then the resize, snapshot or backup, or ./sync.sh with the disk change
+pvesm set bulk --disable 1    # spun down again; the next converge does it too while vm-109 runs
+```
 
 ### Proxmox firewall
 
@@ -153,6 +165,12 @@ Turning it on the first time (the generation that brings it):
 4. A guest that cannot talk any more: `pve-firewall stop` on the host, then compare the guest's address with its
    ipset (`pvesh get /nodes/<node>/qemu/<vmid>/firewall/ipset/ipfilter-net0`); see Recovery.
 
+Rollback: `ssh root@<proxmox> pve-firewall stop` (ssh stays open to the whole house lan) lifts every rule until the
+host reboots; `pvesh set /cluster/firewall/options --enable 0` keeps it off across reboots until the next `sync.sh`
+turns it on again. Without ssh: the host's console, the same commands. `src/tests/terraform-law.nix` fails the build
+while the declared firewall is off, admits the api from anyone but the operators and the router, or closes ssh to
+the lan.
+
 ### Proxmox login
 
 The `lldap` realm binds to lldap over ldaps (vm-101, port 6360), verified against the certificate the guest made for
@@ -165,7 +183,11 @@ head -c 20 /dev/urandom | base32                     # the key; add it to an aut
 pveum user modify <user>@lldap --keys <base32 key>   # on the Proxmox host, as root
 ```
 
-A realm user without a key cannot log in. root@pam keeps its own password (`proxmox-root-pass`).
+Set the key of every realm user who logs in before the deploy that turns the realm's TOTP on: the key can be set
+any time, and a realm user without one cannot log in. root@pam is outside the realm and keeps its own password
+(`proxmox-root-pass`, `sops -d src/secrets/shared.sops.json`), the way back in. lldap's own `admin` takes its password
+from `lldap-admin-password` at every start: rotate it with `sops unset
+src/instances/101-internal-authelia/secrets.sops.json '["lldap-admin-password"]'`, then `./sync.sh` generates a new one.
 
 ## Secrets
 
@@ -185,6 +207,8 @@ Adding a secret: read it in a config (`sops.secrets.<name>`), declare it with it
 lists the kinds) in the reading guest's `instance.nix`, or in `src/secrets/shared.nix` when several read it, then
 `./sync.sh`. A generated one appears by itself, a `manual` one is added empty: fill it with `sops <its file>`.
 Moving a declaration moves the value. `src/scripts/secrets-sync.sh [--apply [--prune]]` runs the same step by hand.
+A `guardsData:` secret (a key that stored data or logins depend on) is never generated once the lab is deployed: a
+missing one stops the run until its value is restored, or, for one that guards nothing yet, `--generate-guarded`.
 
 Every ssh host key is pinned in `src/generated/known_hosts`: Proxmox's by `init.sh` after a console check, each
 guest's by `sync.sh`, which reads it through Proxmox from inside the guest. Any other key stops the run.
@@ -207,7 +231,9 @@ the old key still opens all of them in the public history. Inside `nix develop .
 6. Change every secret value, since the old key reads them in history. Before anything else, change the two that
    guard stored data where they are used: `kopia-password` with `kopia-nas repository change-password` on vm-109,
    `authelia-storage-key` with `authelia storage encryption change-key` on vm-101. Generated ones: delete the line
-   with `sops <its file>`, and `src/scripts/secrets-sync.sh --apply` makes a new one. External ones (cloudflare,
+   with `sops <its file>`, and `src/scripts/secrets-sync.sh --apply` makes a new one (a `guardsData:` one only with
+   `--generate-guarded`, once whatever it guards accepts the new value). A `dotfiles:` one: change its file in the
+   dotfiles' secrets. External ones (cloudflare,
    github, telegram, attic, proton, trmnl tokens and keys): issue new ones at the provider, revoke the old, put the
    new ones in with `sops <its file>`.
 7. `./sync.sh`: it pushes the new host keys, re-activates each guest with them, and commits.
@@ -218,6 +244,9 @@ the old key still opens all of them in the public history. Inside `nix develop .
   key that must be renewed: delete the guest's `age.sops` and `age.pub`, then `./sync.sh`.
 - A guest was recreated: `sync.sh` reads its new ssh host key through Proxmox. Proxmox reinstalled:
   `src/scripts/init.sh --pin <proxmox-ip>` after comparing the fingerprint on its console.
+- A service's data is broken: `ssh root@10.100.0.109 nas-restore service <share> <snapshot id or date> --yes` restores
+  `/srv/nas/data/<share>` in place. A service whose state lives on its guest's disk (`homelab.localState`) takes the
+  restore at the app's next start; nas-restore prints the guest and the command that makes it take it now.
 - The lab is gone, the nas with it: the off-site copy is the kopia repository on Proton Drive. Sign in with the
   proton account of `src/secrets/shared.sops.json` (`proton-drive auth login`), `proton-drive filesystem download
   /my-files/homelab-offsite/BACKUPS/kopia <dir>`, then `kopia repository connect filesystem --path <dir>` with

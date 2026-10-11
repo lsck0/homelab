@@ -31,7 +31,7 @@ let
   keyName = "age.sops";
   # the kinds scripts/secrets-sync.sh generates a value of, adds empty (manual, public), or copies from the dotfiles;
   # guardsData:<generated kind> is generated only on --generate-guarded (src/secrets/shared.nix)
-  generatedKindPattern = "hex:[1-9][0-9]*|wireguard|ntfy-token|garage-key-id";
+  generatedKindPattern = "hex:[1-9][0-9]*|wireguard|laravel-key|garage-key-id";
   kindPattern = "(guardsData:)?(${generatedKindPattern})|manual|public|dotfiles:[A-Za-z0-9._-]+";
   # terraform's connection variables (terraform/main.tf), written by scripts/lib/proxmox.sh, read by no guest
   tfvars = {
