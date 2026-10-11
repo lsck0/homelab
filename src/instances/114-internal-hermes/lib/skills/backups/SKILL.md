@@ -1,7 +1,7 @@
 ---
 name: backups
 description: Restore or inspect NAS backups with Kopia.
-version: 1.1.0
+version: 1.2.0
 author: homelab
 license: MIT
 platforms: [linux]
@@ -28,10 +28,11 @@ snapshot then carries them off the VM.
 To restore a database, restore the dump file and load it; do **not** restore
 the live data directory over a running service:
 
-- Postgres: `zstd -dc <dump>.sql.zst | psql -U postgres` (the dumps are taken
-  with `--clean --if-exists`, so they drop and recreate their own objects).
-- SQLite: `zstd -d <dump>.sqlite.zst -o <target>.sqlite3` with the service
-  stopped, then start it.
+- Postgres: `psql -U postgres < <dump>.sql` (the dumps are taken with
+  `--clean --if-exists`, so they drop and recreate their own objects).
+- SQLite: `cp <dump>.sqlite <target>.sqlite3` with the service stopped, then
+  start it.
+- Older dumps end in `.zst`: `zstd -d <dump>.zst` first.
 
 This is also the only copy of two things: the Authelia second-factor enrolments
 and the whole lldap directory both live on local disk, not on the NAS.
@@ -65,6 +66,11 @@ All commands run on vm-109 with `terminal`: `ssh 10.100.0.109 nas-restore ...`
 4. Stop the VM that writes the data: `vm stop <id>`.
 5. Restore in place: `ssh 10.100.0.109 nas-restore service <name> <snapshot-id|YYYY-MM-DD> --yes`
 6. Start the VM: `vm start <id>` and check the service (`podman ps`, logs, HTTP).
+   A service whose state lives on its VM's own disk (`homelab.localState`) takes the restored copy when the app
+   starts; nas-restore prints which VM it is and the command that makes it take the copy now
+   (`ssh <ip> systemctl start <name>-reseed`), for a VM that was not stopped. Check `ssh <ip> journalctl -u
+   <name>-seed -n 5` says "replaced ... with the restored nas copy". The nightly mirror never overwrites a restore.
+   A seed that says "diverged" stops the app: report it to the owner, never pick a copy yourself.
 7. Report which snapshot (id, date/time) was restored, and the id of the
    safety snapshot if you took one.
 

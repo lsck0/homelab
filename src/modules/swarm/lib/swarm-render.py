@@ -10,12 +10,13 @@ and every env_file already inlined. This adds the homelab and enforces its polic
 - services the catalog `exclude`s are dropped, with every depends_on pointing at them; the catalog `override`
   is merged next, then each service's catalog `env` (secrets resolved by sops) over that service's environment
 - ports are the homelab's: the app's own are dropped, the catalog's `published` (routes and exporters) are published
+  with their transport (tcp, or udp for a udp route)
 - limits are the homelab's: the catalog `resources` of a service, else the catalog's task defaults; memory is
   reserved at its limit, cpu at `cpusReserved`, both also as the generic resources each worker advertises for apps
   (modules/swarm), so swarm never places more on a worker than it holds beside its own services
 - the app's tasks (each service's task times its replicas) fit the app's catalog `reservation`; replicas of a
-  stateless service spread over the workers, at most `replicasPerNodeMax` on one
-- a telemetry app's services carry its tenant (OTEL_EXPORTER_OTLP_HEADERS), so its spans meet its own limits
+  stateless service spread over the workers, at most `replicasPerNodeMax` on one; each service carries its
+  replicas as the label `replicasLabel`, which an idle app's wake scales it back to
 - every overlay network is encrypted (ipsec between nodes); stateful services are pinned to the state node, one
   task, stopped before replaced and before rolled back; a failed update rolls back
 - every named volume belongs to a stateful service and is declared in the catalog `volumes` (backed up or not)
@@ -82,9 +83,6 @@ CAPS_DROPPED = ["ALL"]
 STOPPED_ARGUMENT = "stopped"
 MEBIBYTE_SUFFIX = "M"
 MILLIS_PER_CPU = 1000
-# the otlp exporters' standard header variable: `key=value[,key=value]`
-OTLP_HEADERS = "OTEL_EXPORTER_OTLP_HEADERS"
-OTLP_HEADER_SEPARATOR = ","
 
 
 # -----------------------------------------------------------------------------
@@ -175,6 +173,7 @@ def env_file_parse(path):
 
 
 def environment_to_dict(env, where):
+    """A compose `environment` or `labels`, a map or a list of KEY=value, as a map of strings."""
     if env is None:
         return {}
     if isinstance(env, dict):
@@ -185,7 +184,7 @@ def environment_to_dict(env, where):
             key, _, value = str(item).partition("=")
             out[key] = value
         return out
-    refuse(where, "environment is neither a map nor a list")
+    refuse(where, "neither a map nor a list")
     return {}
 
 
@@ -240,15 +239,6 @@ def resources_render(task, generic):
             ],
         },
     }
-
-
-def tenant_render(name, env, header, tenant):
-    """The app's tenant in the otlp exporter headers; an app naming a tenant itself could write into another's."""
-    headers = env.get(OTLP_HEADERS, "")
-    names = [h.partition("=")[0].strip().lower() for h in headers.split(OTLP_HEADER_SEPARATOR) if h.strip()]
-    if header.lower() in names:
-        refuse(f"{name}.environment.{OTLP_HEADERS}", f"sets {header}: the homelab sets the app's tenant")
-    env[OTLP_HEADERS] = OTLP_HEADER_SEPARATOR.join(([headers] if headers.strip() else []) + [f"{header}={tenant}"])
 
 
 def reservation_check(app, spec, services):
@@ -311,6 +301,9 @@ def deploy_render(name, svc, stateful, task, catalog):
     deploy["update_config"] = update
     if rollback:
         deploy["rollback_config"] = rollback
+    labels = environment_to_dict(deploy.get("labels"), f"{name}.deploy.labels")
+    labels[catalog["replicasLabel"]] = str(deploy["replicas"])
+    deploy["labels"] = labels
     return deploy
 
 
@@ -340,8 +333,6 @@ def service_render(app, name, svc, spec, catalog, env, published, declared_volum
 
     merged = environment_to_dict(svc.get("environment"), f"{name}.environment")
     merged.update(env.get(name, {}))
-    if spec["tenant"] is not None:
-        tenant_render(name, merged, catalog["tenantHeader"], spec["tenant"])
     if merged:
         svc["environment"] = merged
     for key in SERVICE_KEYS_DROPPED:
@@ -353,8 +344,8 @@ def service_render(app, name, svc, spec, catalog, env, published, declared_volum
     if caps:
         svc["cap_add"] = sorted(caps)
     svc["ports"] = [
-        {"target": target, "published": port, "protocol": "tcp", "mode": "ingress"}
-        for target, port in sorted(published.get(name, ()))
+        {"target": target, "published": port, "protocol": protocol, "mode": "ingress"}
+        for target, port, protocol in sorted(published.get(name, ()))
     ]
     svc["deploy"] = deploy_render(name, svc, stateful, spec["tasks"][name], catalog)
     return used
@@ -442,7 +433,7 @@ def render(app, catalog, env, stack):
 
     published = {}
     for entry in spec["published"]:
-        published.setdefault(entry["service"], set()).add((entry["targetPort"], entry["port"]))
+        published.setdefault(entry["service"], set()).add((entry["targetPort"], entry["port"], entry["protocol"]))
     for what, names in (("publishes", published), ("lists as stateful", spec["stateful"]),
                         ("sets env for", env), ("sets resources for", spec["resources"])):
         missing = set(names) - set(services)

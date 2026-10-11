@@ -1,12 +1,12 @@
 """The Grafana boards 105-internal-grafana.nix provisions, as built: layout, queries and the metrics they read.
 
-Usage: dashboards_test.py <out dir> <feeds dir> <spot-price.py> <board.json>...   (<feeds dir>: 104's tests/feeds.nix $out)
+Usage: dashboards_test.py <out dir> <exporters dir> <spot-price.py> <board.json>...   (<exporters dir>: tests/exporters.nix $out)
 
 Checks every board: panels inside the 24 columns and never overlapping, refIds unique within a panel. Writes
 <out dir>/queries.json, every PromQL query as a recording rule with Grafana's macros filled in, which
 tests/dashboards.nix hands to `promtool check rules`, the offline PromQL parser. On the energy board, every metric
 of the house's families (fronius_, hass_, energy_, homelab_energy_) must be one a producer in this repo writes:
-the inverter exporter (its exposition of every fixture in 104-internal-terminal/tests/feeds_test.py), the spot price export,
+the inverter exporter (its exposition of every fixture in tests/exporters_test.py), the spot price export,
 energy-sync's period gauges, the home assistant inputs.
 """
 import json
@@ -14,7 +14,7 @@ import os
 import re
 import sys
 
-OUT, FEEDS, SPOT_PRICE, BOARDS = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
+OUT, EXPORTERS, SPOT_PRICE, BOARDS = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
 GRID_COLUMNS = 24
 # Grafana's macros and the boards' variables, as a query would see them
 MACROS = {"$__range_s": "3600", "$__range": "1h", "$__rate_interval": "1m", "$__interval": "1m", "$vm": ".*",
@@ -32,8 +32,8 @@ def producers():
     """Every metric name of the house's families something in this repo writes."""
     import energy_model as em
     names = set()
-    for exposition in (f for f in os.listdir(FEEDS) if f.startswith("fronius-")):
-        with open(os.path.join(FEEDS, exposition)) as handle:
+    for exposition in (f for f in os.listdir(EXPORTERS) if f.startswith("fronius-")):
+        with open(os.path.join(EXPORTERS, exposition)) as handle:
             names |= {line.split("{")[0].split(" ")[0] for line in handle if line.strip() and not line.startswith("#")}
     with open(SPOT_PRICE) as handle:
         names |= set(re.findall(r"(energy_spot_price_[a-z_]+)", handle.read()))

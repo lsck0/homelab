@@ -16,16 +16,15 @@
 #   - src/scripts holds the workstation's tools: a script that nix code names runs on a host, and one that serves a
 #     single instance belongs in its folder
 #   - a test lives with what it tests: one in an owner's tests/ that names files of exactly one other owner belongs
-#     there; a test's own files sit beside the test that names them; every test in src/tests says why it is
-#     lab-wide in its first lines (`# lab-wide: <reason>`)
+#     there, and an instance's test may run another's host but never tests its lib/; a test's own files sit beside
+#     the test that names them; every test in src/tests says why it is lab-wide in its first lines (`# lab-wide: <why>`)
 #   - an instance folder holds main.nix and instance.nix, a module folder default.nix, lib/ and tests/ only
-{ lib, ... }:
+{ lib, src, ... }:
 let
   # -------------------------------------------------------------------------------------------------------------
   # CONSTANTS
   # -------------------------------------------------------------------------------------------------------------
 
-  src = ../..;
   topAllowed = [ "flake.nix" "flake.lock" "apps" "generated" "instances" "lab" "modules" "scripts" "secrets" "terraform" "tests" ];
   moduleFolderAllowed = [ "default.nix" "lib" "tests" ];
   # src/tests: the harness folders beside the lab-wide tests
@@ -172,6 +171,8 @@ let
   isScript = path: lib.hasPrefix "#!" (builtins.readFile (src + "/${path}"));
   instanceFolders = lib.filter (f: (builtins.readDir (src + "/instances")).${f} == "directory") (entriesOf "instances");
   # a test reaches its host by path or by configuration name (inputs.self.nixosConfigurations."<folder>")
+  # an instance's or app's own code (a script, a template): a test of another owner may run its host, never test it
+  libOfFolder = path: builtins.match "(instances|apps)/[^/]+/lib/.+" path != null;
   hostsNamedIn = path: map (f: "instances/${f}") (lib.filter (f: lib.hasInfix "\"${f}\"" (codeOf path)) instanceFolders);
   labWideLaws = lib.concatMap (path: let head = lib.take labWideLines (lib.splitString "\n" (builtins.readFile (src + "/${path}"))); in
     lib.optional (path != "tests/${sharedStubs}" && !(namedBeside path) && !(lib.any (lib.hasPrefix labWideMark) head))
@@ -189,6 +190,9 @@ let
       "src/${path} is named by no test beside it: it belongs beside the test that runs it"
     ++ lib.optional (r != null && lib.hasSuffix ".nix" path && !(lib.elem owner reached) && lib.length targets == 1)
       "src/${path} tests ${lib.head targets} alone: move it into src/${lib.head targets}/tests/"
+    ++ map (t: "src/${path} tests ${t}: its cases belong in src/${ownerOf t}/tests/")
+      (lib.filter (t: kindOf owner == "instances" && ownerOf t != owner && libOfFolder t)
+        (lib.optionals (r != null) r.refs))
   ) (lib.filter (path: ownerOf path != "lab" && builtins.match "[^/]+/[^/]+/tests/[^/]+" path != null) testFiles);
 
   folderLaws = lib.concatMap (folder: let files = builtins.readDir (src + "/instances/${folder}"); in

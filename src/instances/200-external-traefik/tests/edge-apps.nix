@@ -5,18 +5,22 @@
 #
 # The fixture is the real `wat` app (src/apps/wat), enabled for this test (every edge feature: anubis on /, a direct
 # /api with its metrics on the same port, an upload path without the waf and a 100 MiB limit, an internal route).
-# `appnodes` serves its ports on two of the three swarm workers' addresses (the third is absent: the health check
-# must drop it), the terminal's feed (vm-104) and authelia's forwardauth (vm-101, lib/authelia_stub.py: no session
+# Its reservation here needs three swarm workers (modules/limits workerCountOf); `appnodes` serves its ports on
+# two of their addresses (the third is absent: the health check must drop it), the terminal's feed (vm-104) and authelia's forwardauth (vm-101, lib/authelia_stub.py: no session
 # here, every gated host is sent to the portal); `world` owns the flat lab's gateways and the outside clients.
 { pkgs, lib, specialArgs, ... }:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
+  lab = import ../../../tests/lib/lab.nix {
+    inherit pkgs lib specialArgs;
+    # its reservation needs three workers beside hello's (modules/limits workerCountOf)
+    apps = apps: lib.recursiveUpdate apps { wat = { enable = true; reservation.memoryMiB = 1024; }; };
+  };
   net = import ../../../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
   ip = id: lab.inventory.${id}.ip;
-  appsCatalog = lib.recursiveUpdate lab.appsCatalog { apps.wat.enable = true; };
   # the internal routes (the instances') the edge relays, and the fixture app as src/apps/wat states it
   internalRoutes = lab.routes.internal;
-  wat = appsCatalog.apps.wat;
+  wat = assert lib.assertMsg (lib.length lab.appsCatalog.swarm.workers == 3) "edge-apps: the fixture needs three workers";
+    lab.appsCatalog.apps.wat;
   # an app's routes answer at its name unless a route names another host (modules/apps-catalog)
   watHost = "wat";
   echoBackend = pkgs.writers.writePython3Bin "echo-backend" { flakeIgnore = [ "E501" ]; } (builtins.readFile ../../../tests/lib/echo_backend.py);
@@ -30,10 +34,11 @@ let
   bannedClient = "203.0.113.66";
   bodyLimit = 1024 * 1024;
   uploadLimit = wat.routes.wat-user-files.bodyLimitBytes;
+  # a few seconds per transfer, long enough to look at /tmp while it runs
+  transferRate = "1M";
 
   guest = vmid: instance: memory: {
     imports = [ (lab.guest vmid { flat = true; inherit instance; }) ../../../tests/lib/offline-traefik.nix ];
-    homelab.appsCatalog = appsCatalog;
     virtualisation.memorySize = memory;
   };
 in
@@ -59,7 +64,11 @@ pkgs.testers.runNixOSTest {
     environment.systemPackages = [ pkgs.curl pkgs.python3 ];
   };
 
-  testScript = lab.driverPython + ''
+  testScript = { nodes, ... }: let
+    # past this a buffered body spills to a temp-multibuf file in traefik's /tmp
+    spillBytes = (lib.findFirst (m: m ? buffering) null
+      (lib.attrValues nodes.vm-200.services.traefik.dynamicConfigOptions.http.middlewares)).buffering.memRequestBodyBytes;
+  in lab.driverPython + ''
 
     EDGE, INTERNAL = "${ip "200"}", "${ip "100"}"
     CF, NET, LAN = "${outside.cloudflare}", "${outside.internet}", "${outside.lan}"
@@ -129,6 +138,32 @@ pkgs.testers.runNixOSTest {
         sizes = sorted(e["body_len"] for e in proxied)
         assert sizes == [${toString bodyLimit}, ${toString uploadLimit}], [(e["method"], e["path"], e["body_len"]) for e in proxied]
 
+    with subtest("a download streams past the body limit's buffer, a body method's answer spools to /tmp"):
+        spooled = "find /tmp -type f -name 'temp-multibuf-*' | grep -q ."
+
+        def transfer_start(name, args):
+            world.succeed(f"rm -f /tmp/{name}.status; (curl -s -o /tmp/{name} -w '%{{http_code}} %{{size_download}}' "
+                          f"--limit-rate ${transferRate} --interface {CF} --resolve ${watHost}.${net.domain}:443:{EDGE} "
+                          f"-H 'X-Forwarded-For: ${realClient}' {args} > /tmp/{name}.part; mv /tmp/{name}.part /tmp/{name}.status) "
+                          ">/dev/null 2>&1 &")
+
+        def transfer_wait(name):
+            world.wait_until_succeeds(f"[ -s /tmp/{name}.status ]", timeout=60)
+            return world.succeed(f"cat /tmp/{name}.status").split()
+
+        # positive control: the buffer spools a POST's answer past its memory to a named file while it streams (a
+        # request body it spools to a file it unlinks at once, which no name shows)
+        transfer_start("posted", f"-X POST --data-binary x {WAT}/api/blob")
+        vm_200.wait_until_succeeds(spooled, timeout=30)
+        assert transfer_wait("posted")[0] == "200"
+        vm_200.wait_until_fails(spooled, timeout=30)
+        transfer_start("blob", f"{WAT}/api/blob")
+        world.wait_until_succeeds("[ $(stat -c %s /tmp/blob 2>/dev/null || echo 0) -gt ${toString spillBytes} ]", timeout=30)
+        vm_200.fail(spooled)
+        status, size = transfer_wait("blob")
+        assert status == "200" and int(size) > ${toString spillBytes}, (status, size)
+        vm_200.fail(spooled)
+
     with subtest("methods a browser app does not use reach nothing, not even the internal ingress"):
         backend_reset()
         vm_100.succeed(": > /var/log/traefik/access.log")
@@ -163,8 +198,11 @@ pkgs.testers.runNixOSTest {
         assert get("/api/health")["status"] == 200
 
     with subtest("the app sees the client cloudflare saw, never a forged one"):
-        r = get("/api/x", headers={"X-Real-Ip": "6.6.6.6", "X-Forwarded-For": "1.2.3.4, ${realClient}"}, xff=None)
-        assert json.loads(r["body"])["headers"].get("x-real-ip") == "${realClient}", r["body"]
+        # straight and through anubis's hop: X-Forwarded-For is the client alone, what a backend trusting its ingress reads
+        for path in ("/api/x", "/page"):
+            r = get(path, headers={"X-Real-Ip": "6.6.6.6", "X-Forwarded-For": "1.2.3.4, ${realClient}"}, xff=None)
+            seen = json.loads(r["body"])["headers"]
+            assert seen.get("x-real-ip") == seen.get("x-forwarded-for") == "${realClient}", (path, seen)
 
     with subtest("the rate limit counts per client behind cloudflare"):
         # 20 connections of 20 requests each: one tls handshake per connection keeps the flood above the limit's

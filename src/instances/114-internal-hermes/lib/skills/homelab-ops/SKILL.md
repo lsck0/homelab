@@ -14,15 +14,15 @@ metadata:
 # Homelab operations
 
 You have root on every VM and on the Proxmox host. Read `AGENTS.md` in your
-working directory first: it has the VM inventory (addresses, enabled state) and
+working directory first: it has the VM inventory (addresses, power) and
 wins over any address or state a skill mentions.
 
 ## Tools (run with `terminal`)
 
 - `vm list`: every VM with power state.
 - `vm start <id>`: start a VM and wait until SSH answers. Use this before
-  talking to a VM whose AGENTS.md state is `onDemand`; it powers off again by
-  itself after its cooldown.
+  talking to a VM whose AGENTS.md power is `idle after <time>`; it powers off
+  again by itself after that long.
 - `vm stop <id>` / `vm reboot <id>`.
 - `ssh <ip> <command>`: root on any VM (10.100.0.<id> internal, 10.200.0.<id> external,
   10.250.0.<id> apps zone) and on the router (10.100.0.1). `ssh 192.168.178.200` is the Proxmox host (`qm`, `pct`, `pvesh`).

@@ -6,7 +6,7 @@ let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   configs = lib.mapAttrs (_: system: system.config) inputs.self.nixosConfigurations;
   hermes = configs."114-internal-hermes";
-  routerName = "luca-router";
+  routerName = (lib.findSingle (v: v.type == "router") null null (lib.attrValues inventory)).name;
 
   # what a line run on each host may name
   hosts = lib.mapAttrsToList (_: config: {
@@ -18,11 +18,8 @@ let
     tools = lib.filter (lib.hasPrefix "lab-") (map lib.getName config.environment.systemPackages);
   }) configs;
 
-  # <name>/SKILL.md, exactly the files hermes gets
-  skillsPrefix = "skills/homelab/";
-  skills = pkgs.linkFarm "hermes-skills-tree" (lib.mapAttrsToList
-    (target: file: { name = lib.removePrefix skillsPrefix target; path = file; })
-    (lib.filterAttrs (target: _: lib.hasPrefix skillsPrefix target) hermes.services.hermes-agent.hermesHomeFiles));
+  # <name>/SKILL.md, exactly the tree hermes reads (skills.external_dirs)
+  skills = "${lib.head hermes.services.hermes-agent.settings.skills.external_dirs}/homelab";
 
   facts = pkgs.writeText "hermes-skills-facts.json" (builtins.toJSON {
     inherit hosts;
@@ -31,7 +28,8 @@ let
       tools = map lib.getName (lib.filter (p: lib.hasPrefix "lab-" (lib.getName p) || lib.elem (lib.getName p) [ "pve" "vm" "mc" ])
         hermes.services.hermes-agent.extraPackages);
     };
-    tokens = hermes.homelab.tokens.all;
+    # what `lab-token <name>` answers
+    tokens = (lib.findSingle (p: lib.getName p == "lab-token") null null hermes.services.hermes-agent.extraPackages).names;
     # the router answers ssh on its address in every zone too
     inherit routerName;
     routerAddresses = map (z: z.routerIp) (lib.attrValues net.zones);

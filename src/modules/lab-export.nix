@@ -7,9 +7,11 @@
 #
 #   schema       1
 #   domain       the lab's domain
+#   router       the router's address on the house lan
 #   zones        <zone> -> { subnet; router; ingress; }  the router's address in the zone, the ingress's vmid or null
-#   guests       <vmid> -> { name; zone; ip; enabled; }  name <vmid>-<zone>-<service> (the router: its hostname),
-#                zone also "router", enabled "true" | "false" | "onDemand"
+#   guests       <vmid> -> { name; zone; ip; powered; idle; enabled; }  name <vmid>-<zone>-<service> (the router: its
+#                hostname), zone also "router", powered a bool, idle its stop delay ("30m") or null; enabled the
+#                two as "false" | "onDemand" | "true", which the bar's homelab widget still reads
 #   routes       <route> -> { host; path; zone; protocol; vmid; app; port; health; }  host the fqdn, zone internal or
 #                external, vmid (an instance's) or app (a swarm app's), port the backend's, health null for none
 #   infra        [{ name; href; ping; }]  the lab's frame (modules/infra.nix) in display order, null where none
@@ -17,24 +19,16 @@
 #   monitoring   { prometheus; loki; grafana; dashboard; accessLog; }  the query apis, grafana's url, the overview
 #                board's path on it, the promtail `host` of the public ingress's access log
 #   ntfy         { url; topics; desktop; }  the server, its topics by role, the topics the desktop token reads
+#   ldap         { baseDn; adminGroup; vmid; host; port; certFile; bindUser; }  the directory the proxmox realm binds to
+#                over ldaps, the guest serving it, its self-signed certificate inside the guest, which the realm pins,
+#                and the read-only user the realm binds as
 { lib, lab }:
 let
-  inherit (lab) inventory site;
+  inherit (lab) inventory site catalog;
   net = import ./net.nix { inherit lib inventory site; };
   telemetry = import ./telemetry.nix { inherit lib inventory; };
   infra = import ./infra.nix { inherit net; };
   ntfy = import ./ntfy.nix;
-
-  # the catalog every host sees (modules/apps-catalog), evaluated alone: the apps' routes with their ports resolved
-  catalog = (lib.evalModules {
-    modules = [
-      ./apps-catalog
-      {
-        options.assertions = lib.mkOption { type = lib.types.listOf lib.types.unspecified; default = [ ]; };
-        config._module.args = { inherit inventory site lab; };
-      }
-    ];
-  })._module.args.catalog;
 
   urlOf = host: "https://${net.fqdn host}";
   routeOf = r: {
@@ -42,10 +36,10 @@ let
     inherit (r) path zone protocol vmid app port health;
   };
 in
-assert lib.assertMsg (catalog.problems == [ ]) "lab.export: the app catalog breaks its rules:\n${lib.concatLines catalog.problems}";
 {
   schema = 1;
   inherit (site) domain;
+  inherit (site.lan) router;
 
   zones = lib.mapAttrs (_: z: {
     inherit (z) subnet;
@@ -54,8 +48,9 @@ assert lib.assertMsg (catalog.problems == [ ]) "lab.export: the app catalog brea
   }) net.zones;
 
   guests = lib.mapAttrs (_: g: {
-    inherit (g) name ip enabled;
+    inherit (g) name ip powered idle;
     zone = g.type;
+    enabled = if !g.powered then "false" else if g.idle != null then "onDemand" else "true";
   }) inventory;
 
   routes = lib.mapAttrs (_: routeOf) (catalog.internal // catalog.external // catalog.l4);
@@ -78,5 +73,15 @@ assert lib.assertMsg (catalog.problems == [ ]) "lab.export: the app catalog brea
     url = urlOf catalog.external.ntfy.host;
     inherit (ntfy) topics;
     desktop = ntfy.desktopTopics;
+  };
+
+  ldap = {
+    baseDn = net.domainDn;
+    adminGroup = catalog.access.admins;
+    vmid = catalog.internal.lldap.vmid;
+    host = inventory.${toString catalog.internal.lldap.vmid}.ip;
+    port = net.ports.ldaps;
+    certFile = "/var/lib/lldap/ldaps-cert.pem";
+    bindUser = "proxmox-bind";
   };
 }

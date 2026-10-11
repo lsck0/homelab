@@ -32,7 +32,7 @@ through pull requests, and the owner merges and syncs.
     `lab/` collects every folder, `service.nix` and `instance-schema.nix` type them, `catalog.nix` every route;
     traefik, flows, network, on-demand, swarm derive from them.
   - `src/apps/<name>/app.nix` one folder per app (repo, branch, routes, idle, placement); `src/apps/swarm.nix` the
-    swarm (manager, builder, worker count and shape).
+    shared swarm (state worker, ports, worker shape; manager and builder are vm-140's roles).
   - `src/terraform/` terraform, which reads the guests from nix (`nix eval .#lab.terraform`).
   - `src/generated/` what scripts write: `site.json` (the machine and the house), `known_hosts`, `zones.json` (the
     zones: bridge, subnet, vmid range), the swarm workers' keys, terraform's state copy.

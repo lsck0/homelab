@@ -1,10 +1,10 @@
 # prowlarr: indexer manager, indexer traffic through tor, flaresolverr beside it
-{ config, pkgs, inventory, catalog, hostIp, retry, setupUnit, site, ... }:
+{ config, pkgs, inventory, catalog, hostIp, retry, setupUnit, site, instance, ... }:
 let
   route = catalog.internal.prowlarr;
   # the router's tor socks port isolated per destination, at the router's address in this guest's zone
   torSocksIsolatedPort = (import ../../../modules/tor-ports.nix).socksIsolated;
-  torHost = inventory."130".gateway;
+  torHost = inventory.${instance.id}.gateway;
   # podman's default bridge gateway: prowlarr's container reaches flaresolverr's published port there
   podmanBridgeGateway = "10.88.0.1";
   flaresolverrPort = 8191;
@@ -17,16 +17,13 @@ in {
   # indexer traffic leaves through tor
   systemd.services.prowlarr-tor-proxy = setupUnit {
     description = "Send Prowlarr's indexer traffic through Tor";
-    # setup exports the key read below
-    after = [ "podman-prowlarr.service" "prowlarr-setup.service" ];
-    wants = [ "prowlarr-setup.service" ];
+    after = [ "podman-prowlarr.service" ];
     path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
     serviceConfig.PrivateTmp = true;
     script = ''
       API=http://127.0.0.1:${toString route.port}/api/v1
       # the key in a header file, not on argv
-      key=$(token_read prowlarr-key)
-      printf 'X-Api-Key: %s\n' "$key" > /tmp/key.header
+      printf 'X-Api-Key: %s\n' "$(cat ${config.sops.secrets.prowlarr-key.path})" > /tmp/key.header
       ${retry} 60 2 curl -fsS -H @/tmp/key.header "$API/config/host" -o /tmp/host.json
 
       # allowedHosts in the same write or prowlarr refuses

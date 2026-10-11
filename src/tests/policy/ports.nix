@@ -7,7 +7,7 @@
 { lib, appsCatalog, ... }:
 let
   groups = [ "routes" "metrics" ];
-  enabled = lib.filterAttrs (_: a: a.enable or false) appsCatalog.apps;
+  enabled = lib.filterAttrs (_: a: a.enable) appsCatalog.apps;
 
   # every published port of every enabled app as { port, owner, where }
   uses = lib.concatLists (lib.mapAttrsToList (app: a: lib.concatMap (group:

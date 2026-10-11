@@ -5,7 +5,8 @@ instances/200-external-traefik/tests/edge-apps.nix.
 
 The portal host is bypass (200); a request carrying the session cookie is a user's (200 with Remote-User alice,
 Remote-Groups users); anything else is sent to the portal (302). Every call appends the X-Forwarded-Host it
-was asked about to <log-dir>/forward-auth-hosts and the X-Real-Ip to <log-dir>/forward-auth-clients, one per line.
+was asked about to <log-dir>/forward-auth-hosts and the X-Forwarded-For, whose first entry authelia takes for the
+client (its logs and its ip regulation), to <log-dir>/forward-auth-clients, one per line.
 """
 
 import argparse
@@ -22,7 +23,7 @@ def handler_for(portal, session, log_dir):
         def do_GET(self):
             host = self.headers.get("X-Forwarded-Host", "")
             self.log_append("forward-auth-hosts", host)
-            self.log_append("forward-auth-clients", self.headers.get("X-Real-Ip", ""))
+            self.log_append("forward-auth-clients", self.headers.get("X-Forwarded-For", ""))
             if host == portal:
                 self.send_response(200)
             elif session in self.headers.get("Cookie", ""):

@@ -3,7 +3,7 @@
   vm = {
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
-    kind.lxc = "pending migration, see the restructure report";
+    kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";
     # nfs mounts need a privileged container
     privileged = true;
     features = "nesting=1,mount=nfs";
@@ -16,5 +16,12 @@
   secrets = {
     proxmox-user = "public"; # init.sh: homepage@pve!homepage
     proxmox-pass = "manual"; # init.sh: the homepage api token
+  };
+
+  # reads every widget's token (modules/lab)
+  roles = [ "dashboard" ];
+
+  shares = {
+    "data/homepage" = { };
   };
 }

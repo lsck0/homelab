@@ -36,7 +36,7 @@ let
 
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
-            body = "user=%s host=%s client=%s\n" % (self.headers.get("Remote-User", "-"), self.headers.get("X-Forwarded-Host", "-"), self.headers.get("X-Real-Ip", "-"))
+            body = "user=%s host=%s client=%s xff=%s\n" % (self.headers.get("Remote-User", "-"), self.headers.get("X-Forwarded-Host", "-"), self.headers.get("X-Real-Ip", "-"), self.headers.get("X-Forwarded-For", "-"))
             self.send_response(200)
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
@@ -187,12 +187,13 @@ pkgs.testers.runNixOSTest {
             assert status == "200" and "evil.example" not in body, body
 
     with subtest("a direct client is its own client, whatever it claims"):
-        expect(get(client, "${edgeIp}", "${ownHost}", "X-Real-Ip: 6.6.6.6", "X-Forwarded-For: 7.7.7.7"), "200", "client=${clientIp}")
-        expect(get(client, "${internalIp}", "${ownHost}", "X-Real-Ip: 6.6.6.6", "X-Forwarded-For: 7.7.7.7"), "200", "client=${clientIp}")
+        expect(get(client, "${edgeIp}", "${ownHost}", "X-Real-Ip: 6.6.6.6", "X-Forwarded-For: 7.7.7.7"), "200", "client=${clientIp} xff=${clientIp}\n")
+        expect(get(client, "${internalIp}", "${ownHost}", "X-Real-Ip: 6.6.6.6", "X-Forwarded-For: 7.7.7.7"), "200", "client=${clientIp} xff=${clientIp}\n")
 
     with subtest("through cloudflare and the relay, the backend and authelia see cloudflare's client"):
+        # X-Forwarded-For is the client alone: a backend trusting its ingress needs no list of the hops before it
         expect(get(cf, "${edgeIp}", "${ownHost}", "X-Real-Ip: 6.6.6.6", "X-Forwarded-For: 1.2.3.4, ${realClient}", src="${cloudflareAddress}"),
-               "200", "client=${realClient}")
+               "200", "client=${realClient} xff=${realClient}\n")
         get(cf, "${edgeIp}", "${gatedHost}", "X-Forwarded-For: ${realClient}", src="${cloudflareAddress}")
         auth.succeed("grep -qx '${realClient}' /tmp/forward-auth-clients")
         # positive control: a lan source claiming cloudflare's hops is believed by nobody

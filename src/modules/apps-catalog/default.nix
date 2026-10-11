@@ -1,12 +1,14 @@
 # the app catalog's schema: what an app's src/apps/<name>/app.nix (and src/apps/swarm.nix) may say, typed once
 #
-# modules/lab collects the app folders into `lab.appsCatalog`; this file types it. Routes, cards and telemetry
-# share modules/service.nix with the instances. Lab-wide rules (unique routes, hosts and ports, every secret
-# reference generated) are modules/catalog.nix's `problems`, asserted on every host. A test enables a fixture app:
+# modules/lab evaluates this module over the app folders and src/apps/swarm.nix: `lab.appsCatalog` is the typed
+# result, `lab.catalog` (modules/catalog.nix) the lab-wide view over it that every host gets as the argument
+# `catalog`. Routes, cards and telemetry share modules/service.nix with the instances. Lab-wide rules (unique
+# routes, hosts and ports, every secret reference generated) are modules/catalog.nix's `problems`, which stop the
+# flake's evaluation. A test with a fixture app hands its hosts another catalog:
 #
-#   homelab.appsCatalog = lib.recursiveUpdate lab.appsCatalog { apps.wat.enable = true; };
+#   lab.withApps (apps: lib.recursiveUpdate apps { wat.enable = true; })    (tests/lib/lab.nix `apps`)
 #
-# The smallest app, src/apps/demo/app.nix, serves one public path:
+# The smallest app.nix serves one public path:
 #
 #   {
 #     enable = true;
@@ -14,24 +16,22 @@
 #     branch = "master";
 #     routes.demo = { service = "web"; targetPort = 8000; port = 20130; off.sso = "public"; };
 #   }
-{ config, lib, inventory, site, lab, ... }:
+{ config, lib, telemetry, ... }:
 let
   inherit (lib) mkOption types;
-  cfg = config.homelab.appsCatalog;
+  cfg = config;
 
   # -----------------------------------------------------------------------------
   # CONSTANTS
   # -----------------------------------------------------------------------------
 
-  # compose service names; a stack's services become swarm services <app>_<service>
-  serviceName = types.strMatching "[A-Za-z0-9][A-Za-z0-9_.-]*";
   # scripts/secrets-sync.sh knows these generators
-  secretGenerator = types.strMatching "hex:[1-9][0-9]*|garage-key-id";
+  secretGenerator = types.strMatching "(guardsData:)?(hex:[1-9][0-9]*|garage-key-id)";
   digestPinned = types.strMatching ".+@sha256:[0-9a-f]{64}";
   # a path inside the app's checkout: relative, never climbing out (the builder checks the resolved path too)
   repoPath = types.strMatching "([^/.][^/]*|\\.[^/.][^/]*)(/([^/.][^/]*|\\.[^/.][^/]*))*|\\.";
 
-  # one task's share of a worker unless the app asks for more, and the most it may ask (limits.nix: never more than a worker has)
+  # one task's share of a worker unless the app asks for more, and the most it may ask (modules/limits: never more than a worker has)
   taskDefaults = { memoryMiB = 512; cpus = 1.0; pids = 512; };
   taskMax = { memoryMiB = 2048; cpus = 2.0; pids = 4096; };
 
@@ -40,6 +40,7 @@ let
   # -----------------------------------------------------------------------------
 
   service = import ../service.nix { inherit lib; };
+  inherit (service) serviceName;
 
   metricsType = types.submodule {
     options = service.swarmBackend // {
@@ -149,14 +150,15 @@ let
           Service -> KEY -> value, over the stack's own environment of that service only: a secret reaches the
           services that name it and no other. In a value, `{{name}}` is the sops secret <name> (see `secrets`),
           `{{homelab.otlp-grpc}}`, `{{homelab.otlp-http}}` and `{{homelab.pyroscope}}` (host:port) are the lab's
-          telemetry endpoints (they need `telemetry`), and `{{.Node.Hostname}}`-style templates are swarm's.
+          telemetry endpoints (they need `telemetry`), `{{homelab.origin-<route>}}` is a route's https origin, and
+          `{{.Node.Hostname}}`-style templates are swarm's.
         '';
       };
       secrets = mkOption {
         type = types.attrsOf secretGenerator;
         default = { };
         description = ''
-          Sops secret name -> its generator for scripts/secrets-sync.sh: "hex:<bytes>" or "garage-key-id".
+          Sops secret name -> its generator for scripts/secrets-sync.sh: "hex:<bytes>" or "garage-key-id", prefixed "guardsData:" when data or logins depend on it.
           Exactly the secrets `env` names.
         '';
       };
@@ -166,12 +168,22 @@ let
         description = "Service -> its tasks' limits, at most `swarm.taskMax`; unlisted services get `swarm.taskDefaults`. The stack's own limits are replaced.";
       };
       reservation = {
-        memoryMiB = mkOption { type = types.ints.positive; default = 1024; description = "Memory the app's tasks hold together, replicas counted."; };
+        memoryMiB = mkOption {
+          type = types.ints.positive;
+          default = cfg.swarm.taskDefaults.memoryMiB;
+          defaultText = "swarm.taskDefaults.memoryMiB: one task";
+          description = "Memory the app's tasks hold together, replicas counted.";
+        };
         cpus = mkOption { type = types.number; default = 0.5; description = "Cores the app's tasks reserve together, 0.1 per task."; };
       };
       override = mkOption { type = types.attrs; default = { }; description = "A compose overlay merged last, as nix attrs; the policy still applies to the result."; };
       images = mkOption { type = types.listOf digestPinned; default = [ ]; description = "Public images the stack may run besides its own builds, each pinned by digest."; };
       metrics = mkOption { type = types.attrsOf metricsType; default = { }; description = "Name -> an exporter scraped every 15s by vm-105, never routed."; };
+      alerts = mkOption {
+        type = types.attrsOf telemetry.alertType;
+        default = { };
+        description = "Name -> a rule over the app's own metrics or logs (modules/telemetry.nix alertType); its Grafana uid is app_<app>_<name>.";
+      };
       homepage = mkOption {
         type = service.cardType { inherit name; group = "Swarm"; icon = "mdi-docker"; description = "${config.repo}@${config.branch}"; };
         default = { };
@@ -201,46 +213,29 @@ let
       };
     };
   });
-
-  catalogType = types.submodule {
-    options = {
-      apps = mkOption {
-        type = types.attrsOf appType;
-        default = { };
-        description = "App name ([a-z][a-z0-9-]*) -> a GitHub repo and a branch, everything else derived.";
-      };
-      swarm = {
-        manager = mkOption { type = types.ints.positive; description = "Vmid of the swarm manager, a guest of the internal zone."; };
-        state = mkOption { type = types.ints.positive; description = "Vmid of the worker holding every stateful service's volumes; moving it moves no data."; };
-        workers = mkOption { type = types.listOf types.ints.positive; description = "Vmids of the shared swarm's workers (apps/swarm.nix `nodes`); an app's own guest is not one."; };
-        portRange = {
-          first = mkOption { type = types.port; default = 20100; description = "First port an app may publish."; };
-          last = mkOption { type = types.port; default = 20999; description = "Last port an app may publish."; };
-        };
-        taskDefaults = mkOption { type = resourcesType taskDefaults; default = { }; description = "Limits of a task whose service `resources` does not list."; };
-        taskMax = mkOption { type = resourcesType taskMax; default = { }; description = "The most an app's `resources` may grant one task."; };
-      };
-      builder = mkOption {
-        type = types.ints.positive;
-        description = "Vmid of the guest that builds and deploys the apps (140-internal-swarm/lib/app-builder.nix); the manager's forced command accepts its address only.";
-      };
-      cadvisorPort = mkOption { type = types.port; description = "Per-worker container metrics, scraped on every worker; outside the app range."; };
-      controllerPort = mkOption { type = types.port; description = "The managers' controller (redeploys, an idle app's wake and sleep)."; };
-    };
-  };
-
-  catalog = import ../catalog.nix { inherit inventory lib site; appsCatalog = cfg; inherit lab; };
 in {
-  options.homelab.appsCatalog = mkOption {
-    type = catalogType;
-    default = lab.appsCatalog;
-    defaultText = lib.literalExpression "lab.appsCatalog";
-    description = "The app catalog (src/apps/) every consumer of apps reads, normalized by the schema above.";
-  };
-
-  config = {
-    _module.args.catalog = catalog;
-    # the lab-wide rules: every host refuses a catalog that breaks them, naming both sides of a collision
-    assertions = map (problem: { assertion = false; message = "src/apps: ${problem}"; }) catalog.problems;
+  options = {
+    apps = mkOption {
+      type = types.attrsOf appType;
+      default = { };
+      description = "App name ([a-z][a-z0-9-]*) -> a GitHub repo and a branch, everything else derived.";
+    };
+    swarm = {
+      manager = mkOption { type = types.ints.positive; description = "Vmid of the swarm manager, a guest of the internal zone."; };
+      state = mkOption { type = types.ints.positive; description = "Vmid of the worker holding every stateful service's volumes; moving it moves no data."; };
+      workers = mkOption { type = types.listOf types.ints.positive; description = "Vmids of the shared swarm's workers (apps/swarm.nix `nodes`); an app's own guest is not one."; };
+      portRange = {
+        first = mkOption { type = types.port; default = 20100; description = "First port an app may publish."; };
+        last = mkOption { type = types.port; default = 20999; description = "Last port an app may publish."; };
+      };
+      taskDefaults = mkOption { type = resourcesType taskDefaults; default = { }; description = "Limits of a task whose service `resources` does not list."; };
+      taskMax = mkOption { type = resourcesType taskMax; default = { }; description = "The most an app's `resources` may grant one task."; };
+    };
+    builder = mkOption {
+      type = types.ints.positive;
+      description = "Vmid of the guest that builds and deploys the apps (140-internal-swarm/lib/app-builder.nix); the manager's forced command accepts its address only.";
+    };
+    cadvisorPort = mkOption { type = types.port; description = "Per-worker container metrics, scraped on every worker; outside the app range."; };
+    controllerPort = mkOption { type = types.port; description = "The managers' controller (redeploys, an idle app's wake and sleep)."; };
   };
 }

@@ -7,7 +7,7 @@
 # /archlinux of the repo's vhost, so lsck0 keeps /x86_64 and its authority over overridden and aur packages (clients
 # list it first). Symlinks stay enabled: the package files are relative links into the shared pool/ and rsync's
 # --safe-links already bars any escape, so disable_symlinks would 404 every package.
-{ config, lib, pkgs, inventory, site, catalog, ... }:
+{ config, lib, pkgs, inventory, site, catalog, upstream, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   routes = catalog.internal;
@@ -30,7 +30,8 @@ let
   syncthingDiscoveryPort = 21027;
 
   mirrorDir = "${bulk}/archmirror";
-  # tier 1, german, rsync-enabled; the trailing slash is the module root, already laid out as $repo/os/$arch
+  # tier 1, german, rsync-enabled; the trailing slash is the module root, already laid out as $repo/os/$arch; its
+  # https side is the outage probe, src/lab/upstreams.nix archmirror
   mirrorUpstream = "rsync://ftp.halifax.rwth-aachen.de/archlinux/";
   # 1 GbE nas; cap the pull so a sync never starves live nfs serving or the nightly archbuild writes
   mirrorBwlimitKBps = 60 * 1024;
@@ -45,12 +46,10 @@ let
     "create mask" = "0664";
     "directory mask" = "0775";
   };
-
-  tokenDirOf = id: "/srv/nas/data/tokens/vm-${toString id}";
 in {
   imports = [ ./lib/kopia.nix ./lib/nas-exports.nix ];
 
-  networking.hostName = "vm-109";
+  homelab.textfiles = [ "media_quota" ];
 
   # hdd; media and torrents share a fs for hardlinks
   fileSystems.${bulk} = {
@@ -273,26 +272,6 @@ in {
     };
   };
 
-  # a token an app minted once (an admin password it was set up with) must move from the old shared dir, a fresh one
-  # would not log in; what stays behind belongs to no registered producer (modules/tokens)
-  systemd.services.lab-tokens-migrate = {
-    description = "Move tokens from the shared homepage-tokens dir into their producers' dirs";
-    wantedBy = [ "multi-user.target" ];
-    before = [ "nfs-server.service" ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
-    script = ''
-      old=/srv/nas/data/homepage-tokens
-      [ -d "$old" ] || exit 0
-      ${lib.concatStrings (lib.mapAttrsToList (name: id: ''
-        if [ -e "$old/${name}.token" ] && [ ! -e ${tokenDirOf id}/${name}.token ]; then
-          ${pkgs.coreutils}/bin/install -d -m 0777 ${tokenDirOf id}
-          ${pkgs.coreutils}/bin/mv -n "$old/${name}.token" ${tokenDirOf id}/
-          echo "moved ${name} to vm-${toString id}"
-        fi
-      '') config.homelab.tokens.producers)}
-    '';
-  };
-
   # official repos update a few times a day, so hourly caps the lag; flock drops a tick the slow first sync overlaps
   systemd.services.archmirror-sync = {
     description = "Sync the full official Arch mirror (core/extra/multilib, x86_64) from a tier-1 upstream";
@@ -304,21 +283,21 @@ in {
       ARCHMIRROR_UPSTREAM = mirrorUpstream;
       ARCHMIRROR_TARGET = mirrorDir;
       ARCHMIRROR_BWLIMIT_KBPS = toString mirrorBwlimitKBps;
+      ARCHMIRROR_PROBE = pkgs.writeShellScript "archmirror-probe" "exec ${upstream.run} archmirror";
     };
     serviceConfig = {
       Type = "oneshot";
-      ExecStart = "${pkgs.util-linux}/bin/flock -n ${mirrorLock} ${lib.getExe mirrorSync}";
+      SuccessExitStatus = [ upstream.unavailable ];
+      # a tick the running sync holds the lock against is skipped, not failed
+      ExecStart = "${pkgs.util-linux}/bin/flock --nonblock --conflict-exit-code 0 ${mirrorLock} ${lib.getExe mirrorSync}";
       # behind live nfs serving and the nightly archbuild
       IOSchedulingClass = "idle";
       Nice = 19;
     };
   };
 
-  networking.firewall.allowedTCPPorts = [ routes.nas.port archrepoPort routes.syncthing.port syncthingSyncPort ];
+  networking.firewall.allowedTCPPorts = [ archrepoPort syncthingSyncPort ];
   networking.firewall.allowedUDPPorts = [ syncthingSyncPort syncthingDiscoveryPort ];
-
-  # authelia is the only gate of filebrowser and the syncthing gui
-  homelab.ingressOnly.ports = [ routes.nas.port routes.syncthing.port ];
 
   # hot page cache is the point here (nfs serving, tsdb, streams)
   homelab.dropCaches = false;

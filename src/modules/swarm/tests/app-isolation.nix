@@ -9,7 +9,7 @@
 # boards and datasources each app gets. The seed picks the flood order and the flooding clients' addresses.
 { pkgs, lib, specialArgs, seed ? 7, ... }:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
+  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: apps; };
   net = import ../../net.nix { inherit lib; inherit (specialArgs) inventory site; };
   telemetry = import ../../telemetry.nix { inherit lib; inherit (lab) inventory; };
   limits = import ../../limits { inherit lib; };
@@ -22,6 +22,9 @@ let
   # -----------------------------------------------------------------------------
 
   workers = [ "250" "251" ];
+  # what each worker advertises and caps its apps to, from the worker shape (modules/limits)
+  workerShape = lab.specialArgs.lab.instances."250".config.vm;
+  allocatableMiB = (limits.allocatableOf workerShape).memoryMiB;
   registryAddress = ip "100";
   collector = ip telemetry.collectorVmid;
   edge = ip "200";
@@ -37,6 +40,8 @@ let
   requestFlood = { count = 2000; concurrency = 64; };
   # the noisy app's spans: three times its burst, back to back, which no refill keeps up with
   spanFlood = rec { bytes = 600000; count = 3 * limits.tenant.traceBurstBytes / bytes; };
+  # the noisy app's browser beacons: each well within the intake's body cap, three times its burst in all
+  beaconFlood = rec { bytes = limits.frontend.bodyBytes / 2; count = 3 * limits.tenant.traceBurstBytes / bytes; };
   # the noisy app's exporter: more series than one scrape may hold
   bigSeries = limits.tenant.scrapeSamples + 1000;
 
@@ -62,10 +67,9 @@ let
     metrics.web = { service = "web"; targetPort = 8000; port = ports.${name} + 1; path = metricsPath; };
     resources.web = task;
   };
-  catalog = lab.appsCatalog // { apps = { quiet = appOf "quiet" "/metrics.txt"; noisy = appOf "noisy" "/big.txt"; }; };
+  apps = { quiet = appOf "quiet" "/metrics.txt"; noisy = appOf "noisy" "/big.txt"; };
 
   common = { lib, ... }: {
-    homelab.appsCatalog = catalog;
     networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
     environment.systemPackages = [ pkgs.curl pkgs.jq ];
   };
@@ -91,9 +95,9 @@ pkgs.testers.runNixOSTest {
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
   };
   nodes.vm-140 = swarmNode "140" 1536;
-  # the production worker shape: its memory is what the worker advertises and caps
-  nodes.vm-250 = swarmNode "250" 2560;
-  nodes.vm-251 = swarmNode "251" 2560;
+  # the production worker's cores: a task's cpu flood meets its own limit, never the apps slice's share of one core
+  nodes.vm-250 = { imports = [ (swarmNode "250" 2560) ]; virtualisation.cores = workerShape.cores; };
+  nodes.vm-251 = { imports = [ (swarmNode "251" 2560) ]; virtualisation.cores = workerShape.cores; };
   nodes.vm-105 = {
     imports = [ (lab.guest telemetry.collectorVmid { flat = true; nas = true; instance = ../../../instances/105-internal-grafana/main.nix; }) common ];
     virtualisation.memorySize = 3072;
@@ -170,7 +174,7 @@ pkgs.testers.runNixOSTest {
                      "127.0.0.1:${toString telemetry.ports.grafana}/api/health"):
             vm_105.succeed(f"curl -sf -m 10 http://{path} >/dev/null")
         vm_105.succeed("curl -sf -m 10 -X POST -H 'Content-Type: application/json' -H 'X-Scope-OrgID: " + TENANT["quiet"] + "' "
-                       "-d '{}' http://127.0.0.1:${toString telemetry.ports.pyroscope}/querier.v1.QuerierService/LabelNames >/dev/null")
+                       "-d '{}' http://127.0.0.1:${toString telemetry.ports.pyroscopeLocal}/querier.v1.QuerierService/LabelNames >/dev/null")
 
     def task_of(app):
         """the worker machine running the app's task and the container's id there; a task the swarm replaces after a
@@ -219,19 +223,18 @@ pkgs.testers.runNixOSTest {
                                                       "kind": 3, "startTimeUnixNano": str(now - 10**6), "endTimeUnixNano": str(now),
                                                       "attributes": attributes}]}]}]})
 
-    def push_spans(app, body, count):
-        """the body count times back to back from inside the app's task, with the tenant header render injected;
-        the http statuses"""
+    def push_spans(app, body, count, header=""):
+        """the body count times back to back from inside the app's task to its node's relay, which names the tenant
+        whatever header the task sends; the http statuses"""
         machine, cid = task_of(app)
         curl = ("curl -s -m ${toString requestTimeoutS} -o /dev/null -w '%{http_code}\\n' -X POST -H 'Content-Type: application/json' "
-                "-H \"''${OTEL_EXPORTER_OTLP_HEADERS%%=*}: ''${OTEL_EXPORTER_OTLP_HEADERS#*=}\" "
-                "--data-binary @- http://${collector}:${toString telemetry.ports.otlpHttp}/v1/traces")
+                f"{header} --data-binary @- ${telemetry.relayEndpoints.otlp-http}/v1/traces")
         command = f'body=$(cat); for i in $(seq {count}); do printf %s "$body" | {curl}; done'
         out = machine.succeed(f"docker exec -i {cid} sh -c {shlex.quote(command)} < {body_on(machine, body)}")
         return [int(code) for code in out.split()]
 
-    def push_span(app, body):
-        return push_spans(app, body, 1)[0]
+    def push_span(app, body, header=""):
+        return push_spans(app, body, 1, header)[0]
 
     def push_profile(app, size):
         """a folded profile of about size bytes from inside the app's task, every stack its own; the http status"""
@@ -241,8 +244,7 @@ pkgs.testers.runNixOSTest {
         lines = max(1, size // (len(pad) + 16))
         command = (f"now=$(date +%s); seq 1 {lines} | sed 's/.*/f&_{pad};g& 1/' | "
                    "curl -s -m ${toString requestTimeoutS} -o /dev/null -w '%{http_code}' -X POST --data-binary @- "
-                   "-H \"X-Scope-OrgID: ''${OTEL_EXPORTER_OTLP_HEADERS#*=}\" "
-                   f"\"http://${collector}:${toString telemetry.ports.pyroscope}/ingest?name={app}.cpu&from=$((now-10))&until=$now&format=folded\"")
+                   f"\"http://${telemetry.relayEndpoints.pyroscope}/ingest?name={app}.cpu&from=$((now-10))&until=$now&format=folded\"")
         return int(in_task(app, command))
 
 
@@ -251,14 +253,16 @@ pkgs.testers.runNixOSTest {
     registry.wait_for_open_port(443)
     vm_140.wait_until_succeeds("[ $(docker node ls -q | wc -l) = 3 ]", timeout=300)
     vm_200.wait_for_unit("traefik.service")
+    # the bouncer refuses every client until the crowdsec stub listens (tests/lib/offline-traefik.nix)
+    vm_200.wait_for_file("/var/lib/crowdsec/data/stub-ready")
     vm_105.wait_for_unit("grafana.service")
 
     with subtest("each worker advertises what it holds for apps, and caps its containers to it"):
         for name, machine in WORKERS.items():
             vm_140.wait_until_succeeds(f"docker node inspect {name} --format '{{{{.Status.State}}}}' | grep -qx ready", timeout=240)
             resources = vm_140.succeed(f"docker node inspect {name} --format '{{{{json .Description.Resources.GenericResources}}}}'")
-            assert '"HOMELAB_MEMORY_MIB","Value":2048' in resources.replace(" ", ""), resources
-            assert machine.succeed("systemctl show -p MemoryMax --value apps.slice").strip() == str(2048 * 1024 * 1024)
+            assert '"HOMELAB_MEMORY_MIB","Value":${toString allocatableMiB}' in resources.replace(" ", ""), resources
+            assert machine.succeed("systemctl show -p MemoryMax --value apps.slice").strip() == str(${toString allocatableMiB} * 1024 * 1024)
 
     with subtest("both apps deploy within their reservations; a stack beyond its reservation is refused"):
         vm_140.succeed("docker load -i ${image}")
@@ -268,8 +272,9 @@ pkgs.testers.runNixOSTest {
             digest = vm_140.succeed(f"docker image inspect --format '{{{{range .RepoDigests}}}}{{{{println .}}}}{{{{end}}}}' {ref}:v1 | grep -F {ref}@").strip()
             web = {"image": digest, "healthcheck": {"test": ["CMD", "curl", "-f", "http://localhost:8000/"], "interval": "2s"}}
             vm_140.succeed(f"echo {shlex.quote(json.dumps({'services': {'web': web}}))} > /tmp/{app}.json")
-            # five tasks of ${toString task.memoryMiB} MiB are more than the default reservation holds
-            big = dict(web, deploy={"replicas": 5})
+            # three tasks of ${toString task.memoryMiB} MiB are more than the default reservation holds, and within the
+            # two workers' replica bound
+            big = dict(web, deploy={"replicas": 3})
             vm_140.succeed(f"echo {shlex.quote(json.dumps({'services': {'web': big}}))} > /tmp/{app}-big.json")
         refusal = vm_140.fail("swarm-apply noisy < /tmp/noisy-big.json 2>&1")
         assert "reservation.memoryMiB" in refusal, refusal
@@ -278,9 +283,10 @@ pkgs.testers.runNixOSTest {
         world.wait_until_succeeds(f"[ \"$({edge_request('quiet', '198.51.100.1', '%{http_code}')})\" = 200 ]", timeout=240)
         quiet_answers("deployed")
 
-    with subtest("every capability is dropped and the tenant is injected"):
+    with subtest("every capability is dropped, and a task reaches its node's relay, never the collector"):
         assert in_task("noisy", "grep CapEff /proc/1/status").split()[1] == "0000000000000000"
-        assert in_task("quiet", "echo $OTEL_EXPORTER_OTLP_HEADERS").strip() == f"X-Scope-OrgID={TENANT['quiet']}"
+        direct = "curl -s -m 5 -o /dev/null -w '%{http_code}' -X POST ${telemetry.urls.otlpHttp}/v1/traces || true"
+        assert in_task("quiet", direct) == "000"
 
     with subtest("positive controls: both apps' metrics, lines, spans and profiles arrive"):
         vm_105.wait_until_succeeds(prom_has('up{job="app-quiet-web"} == 1'), timeout=180)
@@ -292,8 +298,12 @@ pkgs.testers.runNixOSTest {
             assert push_span(app, span(traces[app], app)) == 200
             vm_105.wait_until_succeeds(tempo_has(TENANT[app], traces[app]), timeout=120)
             assert push_profile(app, 64) == 200
-        # one tenant cannot read another's
+        # one tenant cannot read another's, nor write into it: the relay names the sender's own
         vm_105.fail(tempo_has(TENANT["noisy"], traces["quiet"]))
+        forged = rng.randbytes(16).hex()
+        assert push_span("quiet", span(forged, "quiet"), f"-H 'X-Scope-OrgID: {TENANT['noisy']}'") == 200
+        vm_105.wait_until_succeeds(tempo_has(TENANT["quiet"], forged), timeout=120)
+        vm_105.fail(tempo_has(TENANT["noisy"], forged))
 
     def flood_cpu():
         machine, cid, cgroup = cgroup_of("noisy")
@@ -405,22 +415,26 @@ pkgs.testers.runNixOSTest {
                                                     "http.request.header.cookie": "session=secret-cookie"})
         intake = "http://${collector}:${toString telemetry.ports.otlpFrontend}${telemetry.frontendPath}/v1/traces"
 
-        def send(tenant, body):
-            return int(vm_200.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -X POST -H 'Content-Type: application/json' "
-                                      f"-H 'X-Scope-OrgID: {tenant}' --data-binary @{body_on(vm_200, body)} {intake}"))
+        def send(tenant, body, count=1):
+            """the body count times back to back to the intake, as the edge relays it; the http statuses"""
+            curl = (f"curl -s -o /dev/null -w '%{{http_code}}\\n' -X POST -H 'Content-Type: application/json' "
+                    f"-H 'X-Scope-OrgID: {tenant}' --data-binary @{body_on(vm_200, body)} {intake}")
+            return [int(code) for code in vm_200.succeed(f"for i in $(seq {count}); do {curl}; done").split()]
 
-        assert send(TENANT["quiet"], beacon) == 200
+        assert send(TENANT["quiet"], beacon) == [200]
         assert push_span("quiet", span(trace_id, "quiet")) == 200
         vm_105.wait_until_succeeds(f"{tempo_has(TENANT['quiet'], trace_id)} | grep -q quiet-browser", timeout=120)
         trace = vm_105.succeed(tempo_has(TENANT["quiet"], trace_id))
         assert "secret" not in trace and '"quiet"' in trace, trace
         world.fail(f"curl -sf -m 5 -X POST {intake}")
+        # the intake refuses a beacon over its body cap at the door
+        [code] = send(TENANT["noisy"], span(rng.randbytes(16).hex(), "noisy-browser", {"url.path": "x" * ${toString limits.frontend.bodyBytes}}))
+        assert 400 <= code < 500, f"the intake answered {code} to a beacon over its body cap"
         # the intake accepts and batches; noisy's tenant refuses what is over its budget, quiet's beacon still lands
-        big = span(rng.randbytes(16).hex(), "noisy-browser", {"url.path": "x" * 400000})
-        for _ in range(12):
-            send(TENANT["noisy"], big)
+        big = span(rng.randbytes(16).hex(), "noisy-browser", {"url.path": "x" * ${toString beaconFlood.bytes}})
+        assert set(send(TENANT["noisy"], big, ${toString beaconFlood.count})) == {200}
         late = rng.randbytes(16).hex()
-        assert send(TENANT["quiet"], span(late, "quiet-browser")) == 200
+        assert send(TENANT["quiet"], span(late, "quiet-browser")) == [200]
         vm_105.wait_until_succeeds(tempo_has(TENANT["quiet"], late), timeout=120)
         vm_105.wait_until_succeeds(prom_has(f'sum(tempo_discarded_spans_total{{tenant="{TENANT["noisy"]}"}}) > 0'), timeout=180)
 

@@ -1,9 +1,17 @@
 # Tailscale control server (VPN mesh) + Headplane UI; internal, not dmz: it controls mesh membership
-{ ... }: {
+{ id, config, ... }: {
   vm = {
     bootPhase = "network";
     needs = [ "containers" "nfs" ];
+    # headscale and headplane use under 300 MiB; the rest of the floor builds packages on vm-119
+    balloonMiB = 512;
   };
+
+  grants = [ {
+    from = [ "internal" "lan" "wireguard" ];
+    tcp = [ config.services.headscale.port ];
+    why = "its direct tailscale clients, not yet named: the lab, the house and the owner's devices";
+  } ];
 
   tokens = [ "headplane-key" ];
 
@@ -33,11 +41,15 @@
         tokenAuthMethod = "client_secret_basic";
       };
       off = {
-        guard = "open to the lab until its direct clients are grants";
         sso = "tailscale clients cannot log in to authelia";
         anubis = "tailscale clients run no proof of work";
         waf = "tailscale's control protocol the rules misread";
       };
     };
+  };
+
+  shares = {
+    "data/db-dumps/vm-${id}" = { mode = "0700"; };
+    "data/headscale".localState = true;
   };
 }

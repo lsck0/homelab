@@ -15,4 +15,8 @@
       off = { sso = "public file sharing"; cloudflare = "anubis fronts it at the edge"; bodyLimit = "file uploads"; };
     };
   };
+
+  shares = {
+    "data/share" = { };
+  };
 }

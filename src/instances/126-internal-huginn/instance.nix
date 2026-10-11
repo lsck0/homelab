@@ -1,5 +1,5 @@
 # automation agents / scraping
-{ ... }: {
+{ id, ... }: {
   vm = {
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
@@ -14,5 +14,11 @@
 
   services = {
     huginn = { port = 80; homepage = { icon = "huginn"; }; };
+  };
+
+  shares = {
+    "data/db-dumps/vm-${id}" = { mode = "0700"; };
+    "data/huginn" = { };
+    "data/huginn-db" = { };
   };
 }

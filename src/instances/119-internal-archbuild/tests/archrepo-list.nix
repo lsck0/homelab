@@ -1,7 +1,7 @@
 # vm-119's package list (lib/archrepo-list.sh) against a fixture arch-dotfiles tree in the modules layout: the
-# packages.txt of every module, comments, blanks and trailing whitespace dropped, duplicates across modules and
-# platforms merged, every platform's EXTRA_PACKAGES joined; nested packages.txt, flatpacks.txt and nixpkgs.txt left
-# out. A bad name, an unreadable manifest, a platform file that does not source, an empty set and an old-layout
+# packages.txt of every module and the packages.native.txt beside it, comments, blanks and trailing whitespace dropped,
+# duplicates across modules and platforms merged, every platform's EXTRA_PACKAGES joined; nested manifests,
+# flatpacks.txt and nixpkgs.txt left out. A bad name, an unreadable manifest, a platform file that does not source, an empty set and an old-layout
 # checkout each fail the whole list and print nothing: the build prunes what the list misses.
 #
 # Then the completeness gate as tables: which listed names a sync db does not provide (a name, a provides with its
@@ -31,8 +31,11 @@ pkgs.runCommand "archrepo-list" {
   trailing-space   ${"\t"}
   shared                            # also in desktop
   EOF
+  # the hardware-only half, beside the module's packages.txt
+  printf '%s\n' native-only shared > "$good/configs/base/packages.native.txt"
   # a config dir inside a module, not a module of its own
   echo nested-not-a-module > "$good/configs/base/btop/packages.txt"
+  echo nested-native > "$good/configs/base/btop/packages.native.txt"
   printf '%s\n' shared desktop-only '${"\t"}# an indented comment' > "$good/configs/desktop/packages.txt"
   echo org.example.FlatpakOnly > "$good/configs/desktop/flatpacks.txt"
   printf '%s\n' rust extra-dup > "$good/configs/programming/packages.txt"
@@ -45,9 +48,10 @@ pkgs.runCommand "archrepo-list" {
   echo 'pkgname=local-recipe' > "$good/mirror/pkgbuilds/local-recipe/PKGBUILD"
 
   bash ${list} "$good" > got
-  printf '%s\n' base base-devel desktop-only extra-dup libc++ notebook-extra pc-extra rust shared trailing-space > want
+  printf '%s\n' base base-devel desktop-only extra-dup libc++ native-only notebook-extra pc-extra rust shared trailing-space \
+    > want
   diff -u want got || fail "the list of the good tree"
-  pass "every module's packages.txt and every platform's EXTRA_PACKAGES, sorted and unique"
+  pass "every module's packages.txt and packages.native.txt and every platform's EXTRA_PACKAGES, sorted and unique"
 
   # <tree> <stderr fragment> <case>: refused, nothing printed, the reason named
   expect_fail() {
@@ -80,12 +84,17 @@ pkgs.runCommand "archrepo-list" {
   ln -s missing.txt "$tree/configs/desktop/packages.txt"
   expect_fail "$tree" "cannot read $tree/configs/desktop/packages.txt" "an unreadable manifest is refused"
 
+  tree=$(variant dangling-native)
+  rm "$tree/configs/base/packages.native.txt"
+  ln -s missing.txt "$tree/configs/base/packages.native.txt"
+  expect_fail "$tree" "cannot read $tree/configs/base/packages.native.txt" "an unreadable native manifest is refused"
+
   tree=$(variant syntax)
   echo 'EXTRA_PACKAGES=(' >> "$tree/platforms/pc.sh"
   expect_fail "$tree" "cannot source $tree/platforms/pc.sh" "a platform file that does not source is refused"
 
   tree=$(variant empty)
-  for file in "$tree"/configs/*/packages.txt; do echo '# nothing yet' > "$file"; done
+  for file in "$tree"/configs/*/packages.txt "$tree"/configs/*/packages.native.txt; do echo '# nothing yet' > "$file"; done
   rm "$tree/platforms/pc.sh" "$tree/platforms/notebook.sh"
   expect_fail "$tree" "no package names in $tree" "an empty set is refused"
 
@@ -98,7 +107,7 @@ pkgs.runCommand "archrepo-list" {
   expect_fail "$old" "no configs/<module>/packages.txt in $old" "an old-layout checkout is refused, not read as extras alone"
 
   # ---- the completeness gate ----
-  all="base base-devel desktop-only extra-dup libc++ notebook-extra pc-extra rust shared trailing-space"
+  all="base base-devel desktop-only extra-dup libc++ native-only notebook-extra pc-extra rust shared trailing-space"
   # <name>...: the good tree's list without them, space separated
   all_but() { local name; for name in $all; do [[ " $* " == *" $name "* ]] || printf '%s ' "$name"; done; }
   # <section> <comma separated values>: one desc section, nothing for no values
@@ -145,7 +154,7 @@ pkgs.runCommand "archrepo-list" {
     # not served or proposed: the sourced script declares those
     local case_name=$1 served_entries=$2 proposed_entries=$3 lost_names=$4 want_missing=$5
     (
-      export ARCHBUILD_COMMIT=test ARCHBUILD_RUN_STARTED=0
+      export ARCHBUILD_COMMIT=test ARCHBUILD_RUN_STARTED=0 ARCHBUILD_BUILD_BUDGET_S=0
       # shellcheck source=/dev/null
       source ${build}
       LIST_SCRIPT=${list} DOTFILES=$good WORK=$PWD/work REPO_DIR=$PWD/served

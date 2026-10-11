@@ -1,5 +1,5 @@
 # Firefly III personal finance
-{ config, ... }: {
+{ id, config, ... }: {
   vm = {
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
@@ -7,7 +7,7 @@
   };
 
   grants = [
-    { from = [ "114" ]; tcp = [ config.services.firefly.port ]; why = "hermes' firefly skill calls the api"; }
+    { from = [ "operator" ]; tcp = [ config.services.firefly.port ]; why = "hermes' firefly skill calls the api"; }
   ];
 
   tokens = [ "firefly-token" ];
@@ -30,7 +30,12 @@
   };
 
   secrets = {
-    firefly-app-key = "manual"; # init.sh: base64: and 32 random bytes
-    firefly-db-password = "hex:24";
+    firefly-app-key = "guardsData:laravel-key"; # encrypts fields of firefly's db
+    firefly-db-password = "guardsData:hex:24"; # postgres keeps the password of its first start
+  };
+
+  shares = {
+    "data/db-dumps/vm-${id}" = { mode = "0700"; };
+    "data/firefly" = { };
   };
 }

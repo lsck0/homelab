@@ -10,10 +10,9 @@ terraform {
       version = "2.3.5"
     }
   }
-  # the working copy sync.sh pulls from and pushes to the nas (scripts/lib/tfstate.sh); relative to src/terraform
-  backend "local" {
-    path = "../generated/terraform/terraform.tfstate"
-  }
+  # the working copy sync.sh pulls from and pushes to the nas (scripts/lib/tfstate.sh); its path, outside the flake
+  # tree, comes from sync.sh's `terraform init -backend-config`
+  backend "local" {}
 }
 
 # the lab's source tree: the flake, the facts init.sh writes (generated/) and the ssh keys (lab/keys)
@@ -24,7 +23,8 @@ locals {
 # -----------------------------------------------------------------------------
 # SITE: the machine and the house network, written by scripts/init.sh to src/generated/site.json
 locals {
-  site = jsondecode(file("${local.src}/generated/site.json"))
+  site             = jsondecode(file("${local.src}/generated/site.json"))
+  proxmox_api_port = 8006
 }
 
 # -----------------------------------------------------------------------------
@@ -33,10 +33,6 @@ variable "proxmox_api_token_id" { type = string }
 variable "proxmox_api_token_secret" {
   type      = string
   sensitive = true
-}
-variable "proxmox_insecure" {
-  type    = bool
-  default = false
 }
 variable "proxmox_datastore" {
   type    = string
@@ -79,31 +75,15 @@ locals {
   zones = jsondecode(file("${local.src}/generated/zones.json"))
 }
 
-# -----------------------------------------------------------------------------
-# PROXMOX FIREWALL: anti-spoofing, see lib.tf FIREWALL and the README for the activation order
-variable "proxmox_firewall" {
-  description = "Turn the datacenter firewall on, which activates the per-guest ip and mac filters terraform keeps in place."
-  type        = bool
-  default     = false
-}
-variable "proxmox_host_input_policy" {
-  description = "Policy for traffic to the proxmox host itself once the firewall is on; the host rules in lib.tf keep ssh, the api and the scrape open."
-  type        = string
-  default     = "ACCEPT"
-  validation {
-    condition     = contains(["ACCEPT", "DROP"], var.proxmox_host_input_policy)
-    error_message = "proxmox_host_input_policy must be ACCEPT or DROP."
-  }
-}
-
+# tls verified against the cluster CA: sync.sh points SSL_CERT_FILE at site.json's proxmoxCa, and the node
+# certificate names the host's address (scripts/pve-install.sh)
 provider "proxmox" {
-  endpoint  = "https://${local.site.lan.proxmox}:8006/api2/json"
+  endpoint  = "https://${local.site.lan.proxmox}:${local.proxmox_api_port}/api2/json"
   api_token = "${var.proxmox_api_token_id}=${var.proxmox_api_token_secret}"
-  insecure  = var.proxmox_insecure
 
   ssh {
     # provider imports new vm disks over ssh, with the deploy key sync.sh loads into the agent: a password would be
-    # a second copy of root's, which sync.sh rotates (proxmox-root-pass)
+    # a second copy of root's, which scripts/pve-install.sh sets (proxmox-root-pass)
     agent    = true
     username = var.proxmox_ssh_user
     node {

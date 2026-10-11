@@ -4,10 +4,10 @@
 # Every lab node with its real instance: vm-100 (internal ingress: the registry's push and pull routes), vm-118 (the
 # registry), vm-140 (the deploy controller: the shared swarm's manager and the builder, as appbuild on its rootless
 # docker), vm-250 and vm-251 (workers), vm-200 (the edge: the apps' public routes and the controller's redeploy
-# route), vm-109 (the nas exports their shares). The facts are a fixture tree collected by modules/lab (as in
-# modules/swarm/tests/app-placement.nix): the real src, whose `hello` (lsck0/homelab, watching its own folder) runs on the shared
-# swarm, plus `own` (lsck0/own) placed on its own guest vm-220, a swarm of one the builder deploys to over its forced
-# command. `world` is everything outside: the gateways, github.com and api.github.com (git over smart http and the
+# route), vm-109 (the nas exports their shares). The facts are the real lab's plus one app (tests/lib/lab.nix `apps`,
+# as in modules/swarm/tests/app-placement.nix): `hello` (lsck0/homelab, watching its own folder) runs on the shared
+# swarm, reserving here what two workers hold, plus `own` (lsck0/own) placed on its own guest vm-220, a swarm of one
+# the builder deploys to over its forced command. `world` is everything outside: the gateways, github.com and api.github.com (git over smart http and the
 # commits api, from bare repos, with the test ca's certificate), cloudflare, the dashboard's and the workstation's
 # addresses. Nothing in app-builder.py changes for the test; the test only shortens the builder's backoff (a module
 # input) and pins the guest's host key.
@@ -15,9 +15,9 @@
 # The fixture images are built FROM scratch around a static busybox httpd, so `docker build --pull` needs no
 # registry; hello's real one (alpine plus apk) cannot build offline, which is accepted here.
 #
-# Faults: the registry down, the guest's manager partitioned, the controller partitioned from its workers, the
-# worker running the task crashed (the seed picks it), a worker rejoining, an image whose task dies (the swarm rolls
-# back), the builder killed mid-build.
+# Faults: the registry down, github down (an upstream outage: skipped, nothing fails), the guest's manager
+# partitioned, the controller partitioned from its workers, the worker running the task crashed (the seed picks it), a
+# worker rejoining, an image whose task dies (the swarm rolls back), the builder killed mid-build.
 { pkgs, lib, specialArgs, seed ? 1, ... }:
 let
   # -----------------------------------------------------------------------------
@@ -55,16 +55,12 @@ let
   # INTERNAL
   # -----------------------------------------------------------------------------
 
-  tree = pkgs.runCommand "lab-pipeline" { } ''
-    cp -r ${../../..} $out
-    chmod -R u+w $out/apps
-    mkdir -p $out/apps/own
-    cp ${pkgs.writeText "app.nix" (lib.generators.toPretty { } ownApp)} $out/apps/own/app.nix
-  '';
-  collected = import ../../../modules/lab { inherit lib; root = tree; };
-  facts = specialArgs // { inherit (collected) inventory site; lab = collected; };
-  lab = assert lib.assertMsg (collected.problems == [ ]) (lib.concatLines collected.problems);
-    import ../../../tests/lib/lab.nix { inherit pkgs lib; specialArgs = facts; };
+  lab = import ../../../tests/lib/lab.nix {
+    inherit pkgs lib specialArgs;
+    # more than one worker holds beside a deploy's surge: the shared swarm gets two (modules/limits workerCountOf)
+    apps = folders: lib.recursiveUpdate folders { hello.reservation.memoryMiB = 768; } // { own = ownApp; };
+  };
+  collected = lab.specialArgs.lab;
   net = import ../../../modules/net.nix { inherit lib; inherit (collected) inventory site; };
   ip = id: collected.inventory.${id}.ip;
 
@@ -86,7 +82,8 @@ let
   guest = ip placedId;
   homepage = ip "103";
   workstation = lab.site.lan.workstation;
-  workers = { "250" = ip "250"; "251" = ip "251"; };
+  workers = assert lib.assertMsg (lab.appsCatalog.swarm.workers == [ 250 251 ]) "app-pipeline: the fixture needs two workers";
+    { "250" = ip "250"; "251" = ip "251"; };
   stateDir = "/var/lib/app-builder";
 
   # the guest's host key, pinned on the builder like production's (homelab.appBuilder.knownHosts)
@@ -219,6 +216,8 @@ pkgs.testers.runNixOSTest {
     systemd.timers.app-builder.wantedBy = lib.mkForce [ ];
     # its runs follow each other faster than systemd's start limit (5 in 10s) allows a unit
     systemd.services.app-builder.startLimitIntervalSec = 0;
+    # modules/upstream's retries without their backoff: an outage is decided in seconds
+    systemd.services.app-builder.environment.UPSTREAM_BACKOFF_S = "0";
     networking.hosts.${githubAddress} = [ "github.com" "api.github.com" ];
     homelab.appBuilder = { inherit knownHosts backoff; };
   };
@@ -314,6 +313,9 @@ pkgs.testers.runNixOSTest {
         vm_100.wait_for_unit("traefik.service")
         vm_100.wait_for_open_port(443)
         vm_200.wait_for_unit("traefik.service")
+        # the bouncer refuses every client until the crowdsec stub listens (tests/lib/offline-traefik.nix)
+        for ingress in (vm_100, vm_200):
+            ingress.wait_for_file("/var/lib/crowdsec/data/stub-ready")
         vm_140.wait_for_file("/run/user/${toString nodes.vm-140.homelab.rootlessDocker.appbuild.uid}/docker.sock", timeout=120)
 
     with subtest("a commit is built, parked by its content and deployed: locally on the shared swarm, over ssh on the guest"):
@@ -338,8 +340,9 @@ pkgs.testers.runNixOSTest {
         own_serves("own v1")
         assert deploy_ok("hello") and deploy_ok("own")
 
-    with subtest("the published port answers the edge and the dashboard only"):
-        world.succeed("curl -sf -m 5 --interface ${homepage} http://${workers."250"}:${toString helloPort}/")
+    with subtest("the published port answers the edge only, the dashboard's status dots go through it"):
+        vm_200.succeed("curl -sf -m 5 http://${workers."250"}:${toString helloPort}/")
+        world.fail("curl -sf -m 5 --interface ${homepage} http://${workers."250"}:${toString helloPort}/")
         world.fail("curl -sf -m 5 --interface ${workstation} http://${workers."250"}:${toString helloPort}/")
         vm_140.fail("curl -sf -m 5 http://${workers."250"}:${toString helloPort}/")
 
@@ -428,6 +431,8 @@ pkgs.testers.runNixOSTest {
         assert redeploy("hello", "wrong") == "401"
         # a fresh builder: nothing local to build from, the registry holds the same content
         vm_140.succeed(f"{APPBUILD_DOCKER} image prune -af")
+        # the redeploy runs the normal look (review 2 #74): it finds this commit, ahead of the poll
+        commit("hello", {"${watched}/NOTES.md": "notes for ci\n"}, "ci notes")
         since = vm_140.succeed("date +%s").strip()
         assert redeploy("hello", token) == "202"
         assert redeploy("hello", token) == "429"
@@ -437,16 +442,31 @@ pkgs.testers.runNixOSTest {
         assert deploy_ok("hello")
 
     with subtest("the registry down: the deploy fails, the old version serves, the retry after the backoff lands"):
+        live = state("hello")["sha"]
         vm_118.succeed("systemctl stop podman-registry")
         sha_d = commit("hello", {"${context}/www/index.html": "v3\n"}, "v3")
         hello_state = build(ok=False)["hello"]
-        assert hello_state["sha"] == sha_c and hello_state["failure"]["sha"] == sha_d, hello_state
+        assert hello_state["sha"] == live and hello_state["failure"]["sha"] == sha_d, hello_state
         serves("v2")
         vm_118.succeed("systemctl start podman-registry")
         vm_118.wait_for_open_port(5000)
         time.sleep(${toString backoff.maxS})  # the backoff is the claim: wall time is what the builder waits on
         assert build()["hello"]["sha"] == sha_d
         serves("v3")
+
+    with subtest("github down: every app is skipped as github unavailable, nothing fails, the next look lands"):
+        before = {app: state(app) for app in REPOS}
+        sha_o = commit("hello", {"${context}/www/index.html": "v3b\n"}, "during the outage")
+        world.succeed("systemctl stop nginx")
+        since = vm_140.succeed("date +%s").strip()
+        assert build() == before
+        vm_140.succeed(f"journalctl -u app-builder --since @{since} | grep -q 'hello: skipped: github unavailable'")
+        assert deploy_ok("hello")
+        serves("v3")
+        world.succeed("systemctl start nginx")
+        world.wait_for_unit("nginx.service")
+        assert build()["hello"]["sha"] == sha_o
+        serves("v3b")
 
     with subtest("the guest's manager partitioned: its app fails fast, the shared swarm's app lands, the retry lands"):
         vm_${placedId}.block()

@@ -52,14 +52,14 @@ PROPERTY_SETTINGS = settings(derandomize=True, database=None, max_examples=400, 
 
 def catalog_of():
     return {"registry": REGISTRY, "replicasMax": REPLICAS_MAX, "replicasPerNodeMax": 2, "servicesMax": 32,
-            "taskDefaults": TASK_DEFAULTS, "genericResources": GENERIC, "tenantHeader": "X-Scope-OrgID",
+            "taskDefaults": TASK_DEFAULTS, "genericResources": GENERIC, "replicasLabel": "homelab.replicas",
             "stackBytesMax": 1024 * 1024, "apps": {APP: {
                 "exclude": ["grafana"], "stateful": ["db"], "volumes": {"data": {"backup": True}},
                 "override": {}, "images": [PUBLIC],
-                "published": [{"service": "web", "targetPort": 8000, "port": 20100},
-                              {"service": "worker", "targetPort": 9100, "port": 20101}],
+                "published": [{"service": "web", "targetPort": 8000, "port": 20100, "protocol": "tcp"},
+                              {"service": "worker", "targetPort": 9100, "port": 20101, "protocol": "udp"}],
                 "resources": {"web": {"memoryMiB": 1024, "cpus": 2.0, "pids": 256, "cpuMillis": 250}},
-                "reservation": {"memoryMiB": 1024 * 64, "cpuMillis": 1000 * 64}, "tenant": None}}}
+                "reservation": {"memoryMiB": 1024 * 64, "cpuMillis": 1000 * 64}}}}
 
 
 # -----------------------------------------------------------------------------
@@ -156,17 +156,18 @@ class RenderLaws(unittest.TestCase):
         spec = catalog_of()["apps"][APP]
         published = {}
         for p in spec["published"]:
-            published.setdefault(p["service"], set()).add((p["targetPort"], p["port"]))
+            published.setdefault(p["service"], set()).add((p["targetPort"], p["port"], p["protocol"]))
         self.assertNotIn("grafana", out["services"])
         for name, svc in out["services"].items():
             self.assertLessEqual(set(svc), render_module.SERVICE_KEYS - render_module.SERVICE_KEYS_DROPPED | {"ports"})
             image = svc["image"]
             self.assertTrue(image in spec["images"] or (image.startswith(f"{REGISTRY}/{APP}/") and "@sha256:" in image))
-            self.assertEqual({(p["target"], p["published"]) for p in svc["ports"]}, published.get(name, set()))
+            self.assertEqual({(p["target"], p["published"], p["protocol"]) for p in svc["ports"]}, published.get(name, set()))
             deploy = svc["deploy"]
             self.assertLessEqual(set(deploy), render_module.DEPLOY_KEYS)
             self.assertEqual(deploy["restart_policy"]["condition"], "any")
             self.assertEqual(deploy["update_config"]["failure_action"], "rollback")
+            self.assertEqual(deploy["labels"]["homelab.replicas"], str(deploy["replicas"]))
             limits = spec["resources"].get(name, TASK_DEFAULTS)
             self.assertEqual(deploy["resources"], render_module.resources_render(limits, GENERIC))
             for vol in svc.get("volumes", []):

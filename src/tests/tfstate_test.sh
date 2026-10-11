@@ -79,7 +79,13 @@ nas_is() { [ "$(jq -c .applies "$NAS/state")" = "$1" ] || fail "case $cases: nas
 S10=$(state L 10 '["a"]'); S11=$(state L 11 '["a","b"]'); S11c=$(state L 11 '["a","c"]'); S12=$(state L 12 '["a","b","d"]')
 
 setup - - none;        expect_stop "First deploy of an empty lab" tfstate_pull; echo "ok: no state anywhere stops"
-setup - - none;        TF_STATE_FRESH=1 expect_ok tfstate_pull >/dev/null; echo "ok: TF_STATE_FRESH=1 starts empty"
+setup - "$S10" local; expect_ok tfstate_set_aside >/dev/null
+[ ! -e "$TFSTATE_LOCAL" ] && [ ! -e "$TFSTATE_LOCAL.synced" ] || fail "set aside left the working copy in place"
+aside=$(ls "$TFSTATE_LOCAL".*.backup); [ "$(jq -c .applies "$aside")" = '["a"]' ] && [ -f "$aside.synced" ] \
+  || fail "set aside lost the copy or its agreement"
+expect_ok tfstate_set_aside >/dev/null; [ "$(ls "$TFSTATE_LOCAL".*.backup)" = "$aside" ] || fail "a second set aside touched the first"
+expect_stop "First deploy of an empty lab" tfstate_pull
+echo "ok: a fresh start sets the copy aside whole, keeps it, and then finds no state"
 setup - "$S10" none;   expect_ok tfstate_pull >/dev/null; local_is '["a"]'; echo "ok: no nas state keeps the local copy"
 setup "$S10" - none;   expect_ok tfstate_pull >/dev/null; local_is '["a"]'; echo "ok: a missing local copy takes the nas"
 setup "$S10" "$S10" none; expect_ok tfstate_pull >/dev/null; [ "$(tfstate_synced_get)" = "$(tfstate_hash "$NAS/state")" ] \

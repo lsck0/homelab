@@ -16,8 +16,8 @@ ADMIN=$(age-keygen -y "$T/admin.key")
 age-keygen -o "$T/host.key" 2>/dev/null
 HOST=$(age-keygen -y "$T/host.key")
 export SOPS_AGE_KEY_FILE="$T/admin.key"
-# the public kind, which the guard otherwise reads from the flake
-export SECRETS_PUBLIC_NAMES=proxmox-user
+TFVARS=src/terraform/terraform.tfvars.sops.json
+TOKEN_SECRET=0b5e2f1c-7d4a-4e9b-a3c6-1f8d2e7b9a40
 
 # fixture values: a generated secret, an identifier (public), a multi-line key, one too short to scan
 LLDAP=4f2c9a7e1b3d5f60a8c2e4b6d8f0a1c3e5b7d9f1a3c5e7b9
@@ -34,7 +34,7 @@ SHORT=abc
 # -----------------------------------------------------------------------------
 B=$T/base
 H=src/instances/1-internal-x
-mkdir -p "$B/$H" "$B/src/secrets"
+mkdir -p "$B/$H" "$B/src/secrets" "$B/src/terraform"
 cp -r "$FIXTURE/.githooks" "$B/"
 cp -r "$FIXTURE/src/scripts" "$B/src/"
 chmod -R u+w "$B"
@@ -47,7 +47,18 @@ creation_rules:
     age: $ADMIN
   - path_regex: $H/secrets\.sops\.json$
     age: $ADMIN,$HOST
+  - path_regex: src/terraform/terraform\.tfvars\.sops\.json$
+    age: $ADMIN
 EOF
+# what the guard otherwise evaluates from the flake: where each secret lives and its kind
+jq -n --arg h "${H#src/}/secrets.sops.json" --arg tf "${TFVARS#src/}" '{
+  "app-deploy-key": {kind: "manual", file: "secrets/shared.sops.json"},
+  "proxmox-user": {kind: "public", file: "secrets/shared.sops.json"},
+  "short-one": {kind: "manual", file: "secrets/shared.sops.json"},
+  "lldap-admin-password": {kind: "hex:24", file: $h},
+  "proxmox_api_token_secret": {kind: "manual", file: $tf},
+  "proxmox_datastore": {kind: "public", file: $tf}}' > "$T/declared.json"
+export SECRETS_DECLARED="$T/declared.json"
 jq -n --arg header "$PEM_HEADER" --arg body "$PEM_BODY" --arg s "$SHORT" \
   --arg begin "$(armor BEGIN 'OPENSSH PRIVATE KEY')" --arg end "$(armor END 'OPENSSH PRIVATE KEY')" '{
   "app-deploy-key": "\($begin)\n\($header)\n\($body)\n\($end)\n",
@@ -55,6 +66,7 @@ jq -n --arg header "$PEM_HEADER" --arg body "$PEM_BODY" --arg s "$SHORT" \
   "short-one": $s}' | "$B/src/scripts/sops-encrypt.sh" "$B/src/secrets/shared.sops.json"
 echo '{"lldap-admin-password": "'"$LLDAP"'"}' | "$B/src/scripts/sops-encrypt.sh" "$B/$H/secrets.sops.json"
 grep AGE-SECRET-KEY "$T/host.key" | "$B/src/scripts/sops-encrypt.sh" "$B/$H/age.sops"
+jq -n --arg t "$TOKEN_SECRET" '{proxmox_api_token_secret: $t, proxmox_datastore: "local-lvm"}' | "$B/src/scripts/sops-encrypt.sh" "$B/$TFVARS"
 echo "hello" > "$B/README.md"
 git -C "$B" init -q
 git -C "$B" config user.name t && git -C "$B" config user.email t@t
@@ -156,6 +168,10 @@ pem_header() { printf 'any ed25519 key starts %s\n' "$PEM_HEADER" > format.txt; 
 check "the format header every key shares" accepted - pem_header
 public_value() { echo 'user = "homepage@pve!homepage"' > init.conf; git add init.conf; }
 check "a public value (an id) in code" accepted - public_value
+tfvars_secret() { printf 'token = %s\n' "$TOKEN_SECRET" > main.tf; git add main.tf; }
+check "the proxmox api token from the terraform vars" refused "main.tf contains the value of proxmox_api_token_secret" tfvars_secret
+tfvars_public() { echo 'datastore = "local-lvm"' > main.tf; git add main.tf; }
+check "a public terraform var in code" accepted - tfvars_public
 short_value() { echo "abc def" > short.txt; git add short.txt; }
 check "a value below the scan length" accepted - short_value
 value_without_key() { printf 'password: %s\n' "$LLDAP" > notes.txt; git add notes.txt; }

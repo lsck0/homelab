@@ -1,5 +1,6 @@
-"""stack.sh over the real instance files: every phase and state touches only that phase's guest files, and status then
-reports the wanted state for each of them. Run by tests/stack.nix: stack_test.py <dir with src/>."""
+"""stack.sh over the real instance files: every phase and state touches only that phase's guest files, and status, read
+from the collector again, then reports the wanted state for each of them. Run by tests/stack.nix:
+stack_test.py <dir with src/>."""
 
 import re
 import shutil
@@ -22,7 +23,7 @@ def guest_files(src):
 
 def status_name(file):
     """the name stack.sh's status prints for a guest file."""
-    return "swarm" if file == "apps/swarm.nix" else Path(file).parent.name
+    return file if file == "apps/swarm.nix" else Path(file).parent.name
 
 
 def stack(root, *args):

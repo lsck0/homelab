@@ -33,6 +33,8 @@ let
   wireguardSubnet = "10.0.0.0/24";
   # headscale's tailnet (instances/138-internal-headscale), rfc 6598 carrier-grade nat: never the internet either
   tailnet = "100.64.0.0/10";
+  # never the internet: what a stranger's process (ci jobs, swarm tasks) is refused, named exceptions in front
+  localRanges = privateRanges ++ [ tailnet ];
   # the internal ingress's own pages (its hand-written routers), relayed by the edge and named by the router's dns
   ingressPages = { dashboard = "traefik"; proxmox = "proxmox"; };
 
@@ -57,10 +59,10 @@ let
     mdns = 5353;
     swarmGossip = 7946;
     proxmoxApi = 8006;
+    # lldap's ldaps listener (instances/101-internal-authelia), which the proxmox realm binds to
+    ldaps = 6360;
     nodeExporter = 9100;
-    redis = 6379;
     traefikMetrics = 8082;
-    minecraft = 25565;
     wireguard = 51820;
   };
 
@@ -75,6 +77,7 @@ let
     inherit (z) bridge subnet;
     prefix = cidr.prefix z.subnet;
     routerIp = cidr.host z.subnet routerHost;
+    routerNic = z.router_nic;
     interface = "ens${toString (nicPciSlotFirst + z.router_nic)}";
     # the vmid of the zone's ingress, a string like inventory keys; null: the zone publishes nothing itself
     ingress = if z.ingress == null then null else toString z.ingress;
@@ -84,7 +87,7 @@ let
     };
     # guests meant to run in the zone, by address
     hosts = lib.sort (a: b: cidr.ipToInt a < cidr.ipToInt b) (map (v: v.ip)
-      (lib.filter (v: v.type == name && v.enabled != "false") (lib.attrValues inventory)));
+      (lib.filter (v: v.type == name && v.powered) (lib.attrValues inventory)));
   };
 
   zones = lib.mapAttrs zoneOfRaw (lib.importJSON ../generated/zones.json);
@@ -92,7 +95,7 @@ let
   vmOf = id: inventory.${id} or (throw "net.nix: the inventory has no guest ${id}");
 in
 {
-  inherit domain privateRanges tailnet cloudflareRanges ports zones ingressPages;
+  inherit domain privateRanges tailnet localRanges cloudflareRanges ports zones ingressPages;
   cidrContains = cidr.contains;
   # the domain as an ldap base dn (authelia and its lldap, the proxmox realm)
   domainDn = lib.concatMapStringsSep "," (part: "dc=${part}") (lib.splitString "." domain);
@@ -108,12 +111,13 @@ in
     interface = "ens${toString nicPciSlotFirst}";
     inherit (site.lan) subnet gateway workstation proxmox;
     address = site.lan.router;
+    # the house's public address by name, the wireguard endpoint; the router serves it to the lab as it learns it
+    publicHost = "wg";
   };
 
   # a guest's address, and the same as a one-host source for a firewall or an allow list
   ipOf = id: (vmOf id).ip;
   hostSource = id: "${(vmOf id).ip}/32";
   zoneOf = id: zones.${(vmOf id).type} or (throw "net.nix: guest ${id} is in no zone (type ${(vmOf id).type})");
-  # host name under the lab domain
   fqdn = host: "${host}.${domain}";
 }

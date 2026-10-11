@@ -1,5 +1,5 @@
 # Minecraft server; lazymc sleeps/wakes the server per real player logins
-{ net, ... }: {
+{ config, ... }: {
   vm = {
     bootPhase = "public";
     needs = [ "containers" "nfs" ];
@@ -14,11 +14,20 @@
   services.minecraft = {
     host = "mc";
     protocol = "tcp";
-    port = net.ports.minecraft;
-    publicPort = net.ports.minecraft;
+    # the protocol's default: clients without the srv record dial it
+    port = 25565;
+    publicPort = config.services.minecraft.port;
     srv = "_minecraft._tcp";
-    off = { homepage = "a game server, no page"; probe = "lazymc answers the protocol, not http"; };
+    off = { homepage = "a game server, no page"; };
   };
 
-  secrets = { minecraft-rcon-password = "hex:24"; };
+  shares = {
+    "data/minecraft" = { };
+    "data/minecraft-modpacks" = { };
+  };
+
+  secrets = {
+    minecraft-rcon-password = "hex:24";
+    minecraft-cf-api-key = "manual"; # console.curseforge.com, for curseforge modpacks; empty is fine without them
+  };
 }

@@ -1,8 +1,8 @@
-# lab-wide: scripts/secrets-sync.sh and secrets-migrate.sh, the workstation's secrets tools
-# secrets-sync.sh and secrets-migrate.sh in the sandbox, over plans modules/secrets.nix makes of a small fake lab:
-# placement, isolation, idempotence, moves, prune, hosts leaving, the admin-key rotation, atomicity under injected
-# sops failures, the one-time migration, and one run over the real plan (secrets_sync_test.sh says what each numbered
-# assertion claims). Throwaway age keys, no network; `seed` draws the injected faults and the sampled pairs.
+# lab-wide: scripts/secrets-sync.sh, the workstation's secrets tool
+# secrets-sync.sh in the sandbox, over plans modules/secrets.nix makes of a small fake lab: placement, isolation, kinds,
+# guarded secrets, idempotence, moves, prune, hosts leaving, the admin-key rotation, atomicity under injected sops
+# failures, and one run over the real plan (secrets_sync_test.sh says what each numbered assertion claims). Throwaway
+# age keys, no network; `seed` draws the injected faults and the sampled pairs.
 { pkgs, lib, inputs, seed ? 1, ... }:
 let
   system = pkgs.stdenv.hostPlatform.system;
@@ -12,7 +12,8 @@ let
     instance = { inherit id name; dir = if lib.hasSuffix "-apps-swarm" name then null else "fixture"; config = { inherit hostName secrets; }; };
     config.sops.secrets = lib.genAttrs reads (key: { inherit key; });
   };
-  planOf = { guests, catalog, apps ? { x.secrets.x-app = "garage-key-id"; } }:
+  # an app as modules/apps-catalog types it, its fields all present
+  planOf = { guests, catalog, apps ? { x = { secrets.x-app = "garage-key-id"; placement = null; }; } }:
     let
       layout = import ../modules/secrets.nix {
         inherit lib catalog;
@@ -25,11 +26,14 @@ let
       };
     in builtins.toJSON (layout.planOf (lib.listToAttrs (map (g: lib.nameValuePair g.instance.name g.config) guests)));
 
-  catalog = { shared = "hex:16"; gen = "hex:16"; tok = "ntfy-token"; pub = "public"; man = "manual"; };
+  catalog = {
+    shared = "hex:16"; gen = "hex:16"; lk = "laravel-key"; pub = "public"; man = "manual"; vault = "guardsData:hex:16"; wg = "wireguard";
+    df = "dotfiles:desk";
+  };
   a = own: guest { id = "100"; name = "100-internal-a"; secrets = { a-own = "hex:16"; } // own; reads = [ "a-own" "shared" "gen" ]; };
   b = reads: guest { id = "101"; name = "101-internal-b"; reads = [ "shared" "b-oidc-secret" "x-app" "app-x-redeploy-token" ] ++ reads; };
   node = guest { id = "250"; name = "250-apps-swarm"; reads = [ "shared" ]; };
-  router = guest { id = "300"; name = "300-router"; hostName = "luca-router"; secrets = { r-own = "manual"; }; reads = [ "r-own" "tok" "b-oidc-secret" ]; };
+  router = guest { id = "300"; name = "300-router"; hostName = "luca-router"; secrets = { r-own = "manual"; }; reads = [ "r-own" "lk" "b-oidc-secret" ]; };
 
   plans = pkgs.linkFarm "secrets-sync-plans" (lib.mapAttrsToList (name: text: { name = "${name}.json"; path = pkgs.writeText name text; }) {
     base = planOf { guests = [ (a { }) (b [ ]) node router ]; inherit catalog; };
@@ -39,6 +43,8 @@ let
     minus = planOf { guests = [ (a { }) router ]; inherit catalog; };
     # man no longer declared: unused, or pruned
     unman = planOf { guests = [ (a { }) (b [ ]) node router ]; catalog = removeAttrs catalog [ "man" ]; };
+    # the guarded vault renamed: a missing guarded secret after the first deploy
+    renamed = planOf { guests = [ (a { }) (b [ ]) node router ]; catalog = removeAttrs catalog [ "vault" ] // { vault2 = "guardsData:hex:16"; }; };
     # b reads a secret nothing declares
     problem = planOf { guests = [ (a { }) (b [ "nope" ]) node router ]; inherit catalog; };
     real = builtins.toJSON inputs.self.legacyPackages.${system}.secrets.plan;
@@ -49,7 +55,7 @@ let
     cp -r ${lib.fileset.toSource {
       root = ../.;
       fileset = lib.fileset.unions [
-        ../scripts/secrets-sync.sh ../scripts/secrets-migrate.sh ../scripts/sops-encrypt.sh
+        ../scripts/secrets-sync.sh ../scripts/sops-encrypt.sh
         ../scripts/lib/tools.sh ../scripts/lib/secrets.sh
       ];
     }} $out

@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# sourced by sync.sh: terraform's state between the workstation and the nas
+# sourced by sync.sh and deinit.sh: terraform's state between the workstation and the nas
 #
 # The nas holds the authoritative state (/srv/nas/terraform/terraform.tfstate, which kopia snapshots); a sync works
 # on a local copy. A sync holds the nas lock from before its pull to its exit, so the pulls, applies and pushes of two
@@ -17,10 +17,14 @@
 #   tfstate_remote_read <out>   copy the nas state to <out>; 0 done, 1 nas unreachable, 2 no state on the nas yet
 #   tfstate_remote_write <in>   replace the nas state with <in> atomically; non-zero on failure
 #   tfstate_remote_lock         hold the nas lock: print "locked" once held (or "busy"), keep it until stdin closes
-# and sets TFSTATE_LOCAL (the working copy). Every function prints why it stops and returns 1; none exits.
+# TFSTATE_LOCAL is the working copy, outside every source tree (a test points it elsewhere). Every function prints
+# why it stops and returns 1; none exits.
 #
 #   tfstate_lock_acquire && tfstate_pull && terraform apply ... && tfstate_push; tfstate_lock_release
+#   tfstate_set_aside       the working copy of a lab that is gone moves aside, before a fresh start
 
+TFSTATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/homelab/terraform"
+TFSTATE_LOCAL="$TFSTATE_DIR/terraform.tfstate"
 # how long the nas may take to answer the lock request
 TFSTATE_LOCK_TIMEOUT_S=30
 
@@ -70,7 +74,17 @@ tfstate_lock_release() {
 # PULL AND PUSH
 # -----------------------------------------------------------------------------
 
-# tfstate_pull: makes $TFSTATE_LOCAL current. TF_STATE_FRESH=1 allows starting without any state (first deploy)
+# kept beside it under the time it moved, with the agreement it held; nothing is deleted
+tfstate_set_aside() {
+  local aside
+  [ -f "$TFSTATE_LOCAL" ] || { rm -f "$TFSTATE_LOCAL.synced"; return 0; }
+  aside="$TFSTATE_LOCAL.$(date +%Y%m%dT%H%M%S.%N).backup"
+  mv "$TFSTATE_LOCAL" "$aside"
+  [ ! -f "$TFSTATE_LOCAL.synced" ] || mv "$TFSTATE_LOCAL.synced" "$aside.synced"
+  echo ">>> Terraform state: the local copy is set aside as $aside"
+}
+
+# tfstate_pull: makes $TFSTATE_LOCAL current
 tfstate_pull() {
   local remote rc=0 l_lin l_ser r_lin r_ser synced
   remote=$(mktemp --suffix=.tfstate)
@@ -80,7 +94,6 @@ tfstate_pull() {
     1) rm -f "$remote"; echo "ERROR: the nas does not answer; terraform state not pulled."; return 1 ;;
     2) rm -f "$remote"
        if [ -f "$TFSTATE_LOCAL" ]; then echo ">>> Terraform state: none on the nas yet, the local copy goes up after the apply."; return 0; fi
-       if [ "${TF_STATE_FRESH:-0}" = 1 ]; then echo ">>> Terraform state: starting empty (TF_STATE_FRESH=1)."; return 0; fi
        echo "ERROR: no terraform state, neither on the nas nor in $TFSTATE_LOCAL."
        echo "       First deploy of an empty lab: rerun with TF_STATE_FRESH=1."
        return 1 ;;

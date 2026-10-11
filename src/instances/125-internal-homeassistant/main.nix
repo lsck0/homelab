@@ -10,8 +10,6 @@ let
   # the onboarding api's client: home assistant's own frontend at the address the setup calls
   onboardingClientId = "${local}/";
   longLivedTokenLifespanDays = 3650;
-  # mqtt bus for home assistant, zigbee2mqtt, esphome
-  mqttPort = 1883;
 
   # login through authelia oidc; the release zip, not the git tag: only it carries the built style.css
   oidcAuth = pkgs.fetchzip {
@@ -105,12 +103,9 @@ let
     asyncio.run(main())
   '';
 in {
-  networking.hostName = "vm-125";
-
   # the recorder's sqlite wal dies of SIGBUS on nfs; local, the nas keeps a nightly copy
   homelab.localState.homeassistant = {
     path = stateDir;
-    share = "homeassistant";
     unit = "podman-homeassistant";
     sqlite = [ "home-assistant_v2.db" ];
     exclude = [ ".cache" "home-assistant.log*" ];
@@ -162,7 +157,7 @@ in {
   systemd.services.hass-homepage-token = setupUnit {
     description = "Generate Home Assistant token for Homepage";
     after = [ "podman-homeassistant.service" ];
-    path = [ pkgs.curl pkgs.coreutils pkgs.jq (pkgs.python3.withPackages (ps: [ ps.websockets ])) ];
+    path = [ pkgs.curl pkgs.coreutils pkgs.jq pkgs.openssl (pkgs.python3.withPackages (ps: [ ps.websockets ])) ];
     script = ''
       [ -s ${tokensDir}/hass-key.token ] && exit 0
       # any http answer means it is up, a 401 included
@@ -173,9 +168,9 @@ in {
         exit 1
       fi
 
-      token_secret_ensure hass-pass
-      auth_code=$(jq -cn --rawfile p ${tokensDir}/hass-pass.token \
-          '{client_id: "${onboardingClientId}", name: "Admin", username: "admin", password: $p, language: "en"}' \
+      # the onboarding admin's password is never needed again: auth_providers allows oidc only
+      auth_code=$(openssl rand -hex 16 | jq -cR \
+          '{client_id: "${onboardingClientId}", name: "Admin", username: "admin", password: ., language: "en"}' \
         | curl -sf -X POST ${local}/api/onboarding/users -H "Content-Type: application/json" -d @- \
         | jq -er .auth_code)
       access_token=$(curl -sf -X POST ${local}/auth/token \
@@ -194,19 +189,4 @@ in {
       ACCESS_TOKEN=$access_token python3 ${longLivedToken} | token_write hass-key
     '';
   };
-
-  # anonymous, so only the guest itself reaches it: a lan device needs a password user here and the port opened
-  services.mosquitto = {
-    enable = true;
-    listeners = [{
-      address = "0.0.0.0";
-      port = mqttPort;
-      settings.allow_anonymous = true;
-      omitPasswordAuth = true;
-      acl = [ "topic readwrite #" ];
-    }];
-  };
-
-  networking.firewall.allowedTCPPorts = [ route.port ];
-  homelab.ingressOnly.ports = [ route.port ];
 }

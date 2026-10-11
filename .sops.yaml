@@ -13,14 +13,6 @@ creation_rules:
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
   - path_regex: src/generated/nodes/250-apps-swarm/secrets\.shared\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1yu4cmtzf8yf5lks30glkqhmrc74dsfml2vw44telf85zqfa274ys5a66rf
-  - path_regex: src/generated/nodes/251-apps-swarm/age\.sops$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/generated/nodes/251-apps-swarm/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1c80qf9u9qrx5zxvf5lrzlarhe20qekrvl689unpu4m9xhfdetscsgex7x2
-  - path_regex: src/generated/nodes/252-apps-swarm/age\.sops$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/generated/nodes/252-apps-swarm/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age12uc322mnsq8s7wfa8wqcldxyf5u5f2vsfn37s7ems5tajrkhm44qh7r888
   - path_regex: src/instances/100-internal-traefik/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
   - path_regex: src/instances/100-internal-traefik/secrets\.shared\.sops\.json$
@@ -121,9 +113,13 @@ creation_rules:
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
   - path_regex: src/instances/134-internal-jellyfin/secrets\.shared\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1xpqjxte284tg4ngmght00wmrah5wcuxsqm3c5yamcrdusjsjx98sn7ussp
+  - path_regex: src/instances/134-internal-jellyfin/secrets\.sops\.json$
+    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1xpqjxte284tg4ngmght00wmrah5wcuxsqm3c5yamcrdusjsjx98sn7ussp
   - path_regex: src/instances/136-internal-navidrome/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
   - path_regex: src/instances/136-internal-navidrome/secrets\.shared\.sops\.json$
+    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1my3m3349ueeh6e366zlu3a05f84xme3yjdq939sh42hsup94kv2qsnqvpz
+  - path_regex: src/instances/136-internal-navidrome/secrets\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1my3m3349ueeh6e366zlu3a05f84xme3yjdq939sh42hsup94kv2qsnqvpz
   - path_regex: src/instances/138-internal-headscale/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80

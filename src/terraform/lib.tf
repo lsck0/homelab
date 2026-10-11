@@ -30,10 +30,10 @@ locals {
     for id, i in local.instances : id => {
       name        = i.name
       type        = i.type
-      enabled     = i.enabled
+      powered     = i.powered
+      idle        = i.idle
       kind        = i.kind
       privileged  = i.privileged
-      features    = i.features
       memory      = i.memory
       balloon     = i.balloon
       cores       = i.cores
@@ -56,12 +56,11 @@ locals {
       gateway = i.gateway
 
       # the zone's ingress wakes its onDemand guests as this proxmox user (scripts/pve-install.sh creates it)
-      wake_user = i.enabled == "onDemand" ? "wake-${i.type}@pve" : null
+      wake_user = i.powered && i.idle != null ? "wake-${i.type}@pve" : null
     }
   }
 }
 
-# the passthrough gpu from site.json, if the machine has one
 # a wake user and its privsep token may power exactly their zone's onDemand guests: one acl per guest, not a pool,
 # since the provider recreates a container whose pool changes
 locals {
@@ -80,6 +79,7 @@ resource "proxmox_virtual_environment_acl" "wake" {
   propagate = false
 }
 
+# the passthrough gpu from site.json, if the machine has one
 resource "proxmox_virtual_environment_hardware_mapping_pci" "gpu" {
   count = local.site.gpu == null ? 0 : 1
   name  = "gpu"
@@ -93,12 +93,6 @@ resource "proxmox_virtual_environment_hardware_mapping_pci" "gpu" {
   }]
 }
 
-# the mapping became optional; keeps the existing one instead of recreating it under vm-134
-moved {
-  from = proxmox_virtual_environment_hardware_mapping_pci.gpu
-  to   = proxmox_virtual_environment_hardware_mapping_pci.gpu[0]
-}
-
 resource "proxmox_virtual_environment_vm" "vm" {
   for_each = { for id, v in local.vms : id => v if v.kind == "vm" }
 
@@ -108,10 +102,10 @@ resource "proxmox_virtual_environment_vm" "vm" {
   name      = each.value.name
   node_name = local.site.node
   vm_id     = tonumber(each.key)
-  # ondemand vms start once so the first deploy reaches them
-  started = each.value.enabled != "false"
-  # ondemand vms stay off at host boot
-  on_boot = each.value.enabled == "true"
+  # idling vms start once so the first deploy reaches them
+  started = each.value.powered
+  # idling vms stay off at host boot
+  on_boot = each.value.powered && each.value.idle == null
   machine = each.value.machine
 
   startup {
@@ -135,7 +129,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
       initialization[0].user_account,
       mac_addresses,
       disk[0].file_id,
-      # sync.sh sets it as root (vm-109 bulk storage); the api token may not
+      # scripts/pve-install.sh sets it as root (the nas's bulk storage); the api token may not
       hook_script_file_id,
     ]
   }
@@ -223,8 +217,8 @@ resource "proxmox_virtual_environment_container" "ct" {
   node_name     = local.site.node
   vm_id         = tonumber(each.key)
   unprivileged  = !each.value.privileged
-  started       = each.value.enabled != "false"
-  start_on_boot = each.value.enabled == "true"
+  started       = each.value.powered
+  start_on_boot = each.value.powered && each.value.idle == null
 
   startup {
     order    = each.value.boot_order
@@ -277,20 +271,23 @@ resource "proxmox_virtual_environment_container" "ct" {
 }
 
 # -----------------------------------------------------------------------------
-# FIREWALL: proxmox binds every guest to its own address and mac
+# FIREWALL: proxmox binds every guest to its own address and mac, and the host takes only its own traffic
 #
 # Zones are shared bridges, and the router, the nas exports and every ingress guard authorize by source address. A
 # root guest could take any address of its subnet (a static change, a gratuitous arp) and inherit that host's
 # rights: the edge's api access, a nas client's export. ipfilter drops every packet and arp reply a guest's nic sends
 # from another address, macfilter every frame from another mac. Filtering itself stays with the router and the guests:
-# both policies are ACCEPT, proxmox only checks who is speaking.
+# both guest policies are ACCEPT, proxmox only checks who is speaking.
 #
-# Inert until var.proxmox_firewall turns the datacenter firewall on (README, "Proxmox firewall"): apply with it off,
-# check the guests' options, then turn it on. The host keeps its own rules below, so a DROP input policy never locks
-# out ssh or the api.
+# The host drops what its rules do not name. Lab traffic reaches it masqueraded as the router's lan address
+# (instances/300-router), so the router stands for the ingresses' wake and proxmox route, the homepage and grafana.
+# The datacenter switch comes last: no guest is filtered before its ipset exists, and the host rules exist before
+# the DROP policy does. sync.sh fails while the firewall is not running (README, "Proxmox firewall").
 locals {
   # the router forwards every source it routes, no address filter fits it (its nics carry firewall = false)
   firewalled = { for id, v in local.vms : id => v if v.type != "router" }
+  # the owner's machines, dhcp-reserved in the fritzbox; sync.sh refuses to run from any other address
+  operators = [local.site.lan.workstation, local.site.lan.notebook]
 }
 
 resource "proxmox_virtual_environment_firewall_ipset" "ipfilter" {
@@ -327,18 +324,16 @@ resource "proxmox_virtual_environment_firewall_options" "guest" {
 }
 
 resource "proxmox_virtual_environment_cluster_firewall" "datacenter" {
-  # the per-guest options above exist first, so turning this on never filters a guest without its ipset
   depends_on = [proxmox_virtual_environment_firewall_options.guest, proxmox_virtual_environment_firewall_rules.host]
 
-  enabled = var.proxmox_firewall
+  enabled = true
   # arp and mac filtering run in ebtables
   ebtables      = true
-  input_policy  = var.proxmox_host_input_policy
+  input_policy  = "DROP"
   output_policy = "ACCEPT"
 }
 
-# the host's own access, explicit, so a DROP input policy keeps it; lab traffic reaches the host masqueraded as the
-# router's lan address (300-router.nix nat), which is inside the lan subnet
+# in order: proxmox's own management rules, which follow these, would admit the api from the whole lan
 resource "proxmox_virtual_environment_firewall_rules" "host" {
   rule {
     type    = "in"
@@ -346,15 +341,22 @@ resource "proxmox_virtual_environment_firewall_rules" "host" {
     proto   = "tcp"
     dport   = "22"
     source  = local.site.lan.subnet
-    comment = "ssh from the house lan: the workstation, sync.sh, init.sh"
+    comment = "ssh from the house lan: sync.sh, init.sh, hermes through the router; keys only"
   }
   rule {
     type    = "in"
     action  = "ACCEPT"
     proto   = "tcp"
-    dport   = "8006"
-    source  = local.site.lan.subnet
-    comment = "api and web ui: the house lan, terraform, the ingresses' wake and proxmox route via the router"
+    dport   = tostring(local.proxmox_api_port)
+    source  = join(",", concat(local.operators, [local.site.lan.router]))
+    comment = "api and web ui: the owner's machines (terraform, sync.sh) and the router (the ingresses, homepage)"
+  }
+  rule {
+    type    = "in"
+    action  = "DROP"
+    proto   = "tcp"
+    dport   = tostring(local.proxmox_api_port)
+    comment = "the api from anywhere else"
   }
   rule {
     type    = "in"
@@ -363,5 +365,12 @@ resource "proxmox_virtual_environment_firewall_rules" "host" {
     dport   = "9100"
     source  = local.site.lan.router
     comment = "node exporter, scraped by vm-105 through the router"
+  }
+  rule {
+    type    = "in"
+    action  = "ACCEPT"
+    proto   = "icmp"
+    source  = local.site.lan.subnet
+    comment = "ping: the homepage's and the prober's reachability checks"
   }
 }

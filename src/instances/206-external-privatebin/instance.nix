@@ -19,4 +19,8 @@
       };
     };
   };
+
+  shares = {
+    "data/privatebin" = { };
+  };
 }

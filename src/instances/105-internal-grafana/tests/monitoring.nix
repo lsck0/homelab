@@ -1,5 +1,5 @@
-# vm-105, the real instance at its real address, among three lab guests: the ingress (vm-100), a guest the ingress
-# guard admits but grafana must not trust (vm-103, the dashboard), and a guest to watch (vm-121). Checks that every
+# vm-105, the real instance at its real address, among three lab guests: the ingress (vm-100), a reader of the query
+# api whom the guard keeps off grafana (vm-103, the dashboard), and a guest to watch (vm-121). Checks that every
 # provisioned rule evaluates, the boards are there, only the ingress may name a grafana user, prometheus is read-only
 # from other hosts, the watchdog beats, and a guest going down pages through both contact points and resolves.
 { pkgs, lib, specialArgs, ... }:
@@ -16,6 +16,8 @@ let
   rules = "${localApi}/prometheus/grafana/api/v1/rules";
   # what the notifier holds: alerts past their `for`, the ones that page
   activeAlerts = "${localApi}/alertmanager/grafana/api/v2/alerts?active=true";
+  # a request the guard drops gets no answer at all; this is ample on the test's one bridge
+  droppedTimeoutS = 5;
 in
 pkgs.testers.runNixOSTest {
   name = "monitoring";
@@ -77,9 +79,11 @@ pkgs.testers.runNixOSTest {
     with subtest("only the ingress and vm-105 itself may name the grafana user"):
         vm_100.succeed("curl -sf -H 'Remote-User: admin' ${grafanaApi}/user | grep -q '\"login\":\"admin\"'")
         vm_105.succeed("curl -sf -H 'Remote-User: admin' ${localApi}/user | grep -q '\"login\":\"admin\"'")
-        # vm-103 passes the ingress guard (its status dots; positive control: it gets an answer), but its header is no login
-        status = vm_103.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Remote-User: admin' ${grafanaApi}/user").strip()
+        # vm-105's own address passes the guard but not grafana's proxy whitelist: there the header is no login
+        status = vm_105.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Remote-User: admin' ${grafanaApi}/user").strip()
         assert status == "401", status
+        # any other guest never reaches grafana: the dashboard's status dots go through the ingress
+        vm_103.fail("curl -s -m ${toString droppedTimeoutS} -H 'Remote-User: admin' ${grafanaApi}/user")
 
     with subtest("prometheus answers queries to other hosts and takes writes on loopback only"):
         vm_103.succeed("curl -sf '${prometheus}/api/v1/query?query=up' | grep -q success")

@@ -13,7 +13,7 @@
 # src/scripts/secrets-sync.sh writes the files from `planOf`; modules/base points every secret at its file.
 #
 #   secrets = import ./secrets.nix { inherit lib lab; };
-#   secrets.declared.kopia-password     # { kind = "hex:24"; file = "instances/109-internal-nas/secrets.sops.json"; home = ...; }
+#   secrets.declared.kopia-password     # { kind = "guardsData:hex:24"; file = "instances/109-internal-nas/secrets.sops.json"; home = ...; }
 #   secrets.fileOf host "attic-pull-token"   # "instances/109-internal-nas/secrets.shared.sops.json" (paths relative to src/)
 #   secrets.planOf configs              # what secrets-sync.sh converges to, and the problems that stop it
 #   (import ./secrets.nix { inherit lib; }).kindPattern   # the kinds alone, for a schema (no `lab` needed)
@@ -29,8 +29,18 @@ let
   ownName = "secrets.sops.json";
   sharedName = "secrets.shared.sops.json";
   keyName = "age.sops";
-  # the kinds scripts/secrets-sync.sh generates a value of, adds empty (manual, public), or copies from the dotfiles
-  kindPattern = "hex:[1-9][0-9]*|ntfy-token|garage-key-id|manual|public|dotfiles:[A-Za-z0-9._-]+";
+  # the kinds scripts/secrets-sync.sh generates a value of, adds empty (manual, public), or copies from the dotfiles;
+  # guardsData:<generated kind> is generated only on --generate-guarded (src/secrets/shared.nix)
+  generatedKindPattern = "hex:[1-9][0-9]*|wireguard|laravel-key|garage-key-id";
+  kindPattern = "(guardsData:)?(${generatedKindPattern})|manual|public|dotfiles:[A-Za-z0-9._-]+";
+  # terraform's connection variables (terraform/main.tf), written by scripts/lib/proxmox.sh, read by no guest
+  tfvars = {
+    proxmox_api_token_id = "public";
+    proxmox_api_token_secret = "manual";
+    proxmox_datastore = "public";
+    proxmox_ssh_port = "public";
+    proxmox_ssh_user = "public";
+  };
   # the token a ci job posts to deploy.<domain>/redeploy/<app> with (modules/swarm)
   deployTokenKind = "hex:32";
   oidcSecretKind = "hex:24";
@@ -41,7 +51,7 @@ let
 
   instanceList = lib.attrValues lab.instances;
   guestApps = lib.listToAttrs (lib.concatLists (lib.mapAttrsToList (app: a:
-    lib.optional ((a.placement or null) != null) (lib.nameValuePair (toString a.placement.vmid) app)) lab.appsCatalog.apps));
+    lib.optional (a.placement != null) (lib.nameValuePair (toString a.placement.vmid) app)) lab.appsCatalog.apps));
   homeOf = i:
     if i.dir != null then "instances/${i.name}"
     else if guestApps ? ${i.id} then "apps/${guestApps.${i.id}}"
@@ -51,8 +61,9 @@ let
   entries =
     lib.concatMap (i: entriesOf { file = "${homeOf i}/${ownName}"; home = homeOf i; } i.config.secrets) instanceList
     ++ lib.concatLists (lib.mapAttrsToList (app: a: entriesOf { file = "apps/${app}/${ownName}"; }
-      ((a.secrets or { }) // { "app-${app}-redeploy-token" = deployTokenKind; })) lab.appsCatalog.apps)
+      (a.secrets // { "app-${app}-redeploy-token" = deployTokenKind; })) lab.appsCatalog.apps)
     ++ entriesOf { file = catalogFile; } catalog
+    ++ entriesOf { file = tfvarsFile; } tfvars
     ++ map (c: { name = c.secret; kind = oidcSecretKind; file = catalogFile; home = null; }) lab.oidc;
   byName = lib.groupBy (e: e.name) entries;
   declared = lib.mapAttrs (_: es: removeAttrs (lib.head es) [ "name" ]) byName;
@@ -97,7 +108,6 @@ let
       }) hosts;
       # every sops file -> the configurations that read it, besides the admins
       files = lib.genAttrs (lib.unique (map (d: d.file) (lib.attrValues declared))) (_: [ ])
-        // { ${tfvarsFile} = [ ]; }
         // lib.mapAttrs' (_: h: lib.nameValuePair "${h.home}/${keyName}" [ ]) hosts
         // lib.mapAttrs (_: es: lib.unique (map (e: e.reader) es)) (lib.groupBy (e: e.file) readEntries);
       inherit problems;

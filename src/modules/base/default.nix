@@ -15,14 +15,13 @@ let
   # which file each secret comes from (modules/secrets.nix); null on the install images, which have no key
   secrets = import ../secrets.nix { inherit lib lab; };
   host = secrets.hostOf config.networking.hostName;
-  # the layout before per-folder files, kept until src/scripts/secrets-migrate.sh deletes it: delete both with it
-  legacyFile = ../../host-secrets + "/${config.networking.hostName}.json";
-  sopsFileOf = key: if builtins.pathExists legacyFile then legacyFile else ../.. + "/${secrets.fileOf host key}";
   # the golden image and lxc template boot as "nixos"; they have no key, the first deploy brings host and secrets
   isInstallImage = config.networking.hostName == "nixos";
+
+  # a path segment or query value of 32+ token characters is a secret in the url (feed tokens, share links)
+  urlSecretPattern = "[/=]([A-Za-z0-9_-]{32,})";
 in {
   imports = [
-    ../apps-catalog
     ../db-backup
     ../swarm
     ../local-state
@@ -32,13 +31,14 @@ in {
     ../on-demand
     ../retry.nix
     ../tokens
-    ../textfile.nix
+    ../textfile
+    ../upstream
   ];
 
   # every secret from the file the layout puts it in: its folder's, its app's, or its own copy of the shared ones
   options.sops.secrets = lib.mkOption {
     type = lib.types.attrsOf (lib.types.submodule ({ config, ... }: {
-      config.sopsFile = lib.mkIf (host != null) (lib.mkDefault (sopsFileOf config.key));
+      config.sopsFile = lib.mkIf (host != null) (lib.mkDefault (../.. + "/${secrets.fileOf host config.key}"));
     }));
   };
 
@@ -49,6 +49,8 @@ in {
   };
 
   config = {
+    _module.args.catalog = lib.mkDefault lab.catalog;
+
     sops = {
       # the host's own key, pushed by sync.sh; it opens this host's files and nothing else
       age.keyFile = "/var/lib/sops-nix/key.txt";
@@ -130,6 +132,7 @@ in {
             };
           }];
           pipeline_stages = [
+            { replace = { expression = urlSecretPattern; replace = "<redacted>"; }; }
             { json.expressions = {
                 country = "\"request_Cf-Ipcountry\"";
                 status = "DownstreamStatus";

@@ -1,5 +1,5 @@
 # hermes: the owner's telegram agent, root on every guest and the proxmox host, with the lab's tools and skills
-{ config, lib, pkgs, inputs, inventory, nasPath, site, catalog, lab, retry, ... }:
+{ config, lib, pkgs, inputs, inventory, nasPath, site, catalog, lab, retry, upstream, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   ntfy = import ../../modules/ntfy.nix;
@@ -20,7 +20,11 @@ let
 
   # root on every guest (the router's lan side included), on the router's zone legs and on the proxmox host
   guests = lib.filter (v: v.type != "router") (lib.attrValues inventory);
-  rootHosts = lib.unique (map (v: v.ip) (lib.attrValues inventory) ++ map (v: v.gateway) guests ++ [ site.lan.proxmox ]);
+  router = lib.findSingle (v: v.type == "router") null null (lib.attrValues inventory);
+  routerLegs = lib.unique (map (v: v.gateway) guests);
+  rootHosts = lib.unique (map (v: v.ip) (lib.attrValues inventory) ++ routerLegs ++ [ site.lan.proxmox ]);
+  # every host key of the lab, the proxmox host's included, checked strictly: no trust on first use
+  knownHosts = ../../generated/known_hosts;
 
   # pve <get|create|set|delete> <api path> [--<param> <value>...]: the proxmox api as json through pvesh over root
   # ssh, so this vm holds no api token and pins no tls
@@ -56,14 +60,22 @@ let
     esac
   '';
 
+  # the api keys the skills call (`lab-token <name>`): a lab token an app minted, or a sops secret the lab chose
+  apiSecrets = [ "jellyfin-admin-pass" "lidarr-key" "prowlarr-key" "radarr-key" "sonarr-key" ];
   labToken = pkgs.writeShellScriptBin "lab-token" ''
-    if [ -z "''${1:-}" ]; then cd ${tokensDir} && ls *.token | sed 's/\.token$//'; exit 0; fi
+    if [ -z "''${1:-}" ]; then
+      for token in ${tokensDir}/*.token; do [ ! -e "$token" ] || basename "$token" .token; done | cat - <(printf '%s\n' ${toString apiSecrets}) | sort
+      exit 0
+    fi
+    for secret in ${toString (map (name: config.sops.secrets.${name}.path) apiSecrets)}; do
+      [ "''${secret##*/}" != "$1" ] || exec cat "$secret"
+    done
     exec cat "${tokensDir}/$1.token"
-  '';
+  '' // { names = config.homelab.tokens.reads ++ apiSecrets; };
 
   # mc <command...>: rcon through vm-208
   mc = pkgs.writeShellScriptBin "mc" ''
-    exec ${pkgs.openssh}/bin/ssh ${net.ipOf "208"} mc-rcon "$@"
+    exec ${pkgs.openssh}/bin/ssh ${net.ipOf (toString lab.routes.minecraft.vmid)} mc-rcon "$@"
   '';
 
   # lab-notify [-t <title>] [-p <priority>] [-g <tags>] [-c <click url>] <message...>: a push to the owner as ntfy user
@@ -94,7 +106,7 @@ let
     text = builtins.readFile ./lib/github-app-token.sh;
   };
   labGithubToken = pkgs.writeShellScriptBin "lab-github-token" ''
-    exec ${githubAppToken}/bin/github-app-token ${toString githubApp.id} ${config.sops.secrets.hermes-github-app-key.path} ${githubRepo}
+    exec ${upstream.run} github ${githubAppToken}/bin/github-app-token ${toString githubApp.id} ${config.sops.secrets.hermes-github-app-key.path} ${githubRepo}
   '';
   gitCredential = pkgs.writeShellScript "git-credential-lab-github" ''
     [ "''${1:-}" = get ] || exit 0
@@ -109,16 +121,17 @@ let
     branch=$(git symbolic-ref --short HEAD)
     [[ "$branch" =~ ^hermes/[a-z0-9._-]+$ ]] || { echo "lab-pr: branch must be hermes/<topic> (lowercase), not $branch" >&2; exit 1; }
     [ -z "$(git status --porcelain)" ] || { echo "lab-pr: commit or discard your changes first" >&2; exit 1; }
-    git fetch -q origin master
+    ${upstream.run} github git fetch -q origin master
     [ "$(git rev-list --count origin/master..HEAD)" -gt 0 ] || { echo "lab-pr: no commits on top of master" >&2; exit 1; }
     # drop github's pr hint noise
-    git push -q --force-with-lease -u origin HEAD 2>&1 | { grep -v '^remote:' || true; } >&2
+    ${upstream.run} github git push -q --force-with-lease -u origin HEAD 2>&1 | { grep -v '^remote:' || true; } >&2
 
     token=$(lab-github-token)
-    gh() { curl -sf -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$@"; }
+    gh() { ${upstream.run} github curl -sf -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$@"; }
     url=$(gh "$api/pulls?state=open&head=${githubOwner}:$branch" | jq -r '.[0].html_url // empty')
     if [ -z "$url" ]; then
-      body=$(printf '%s\n\n---\nOpened by Hermes (vm-114). Deploy after merging with `./sync.sh`.\n' \
+      # shellcheck disable=SC2016 # markdown backticks, not a command
+      body=$(printf '%s\n\n---\nOpened by Hermes (${config.networking.hostName}). Deploy after merging with `./sync.sh`.\n' \
         "$(git log --reverse --format='%B%n---' origin/master..HEAD | sed '$d')")
       url=$(gh -X POST "$api/pulls" -d "$(jq -cn --arg head "$branch" --arg body "$body" \
         --arg title "$(git log --reverse --format=%s origin/master..HEAD | head -1)" \
@@ -130,20 +143,21 @@ let
   urlOf = id: lib.concatStringsSep ", " (lib.concatLists (lib.mapAttrsToList (_: side:
     lib.mapAttrsToList (_: r: "https://${net.fqdn r.host}") (lib.filterAttrs (_: r: r.vmid != null && toString r.vmid == id) side)
   ) { inherit (catalog) internal external; }));
+  powerOf = v: if !v.powered then "off" else if v.idle != null then "idle after ${v.idle}" else "on";
   inventoryTable = lib.concatStringsSep "\n" (lib.mapAttrsToList (id: v:
-    "| ${id} | ${v.name} | ${v.ip} | ${v.enabled}${lib.optionalString (v.enabled == "onDemand") " (${v.cooldown})"} | ${urlOf id} |"
+    "| ${id} | ${v.name} | ${v.ip} | ${powerOf v} | ${urlOf id} |"
   ) inventory);
 
   agentsMd = ''
     # Homelab
 
     You are Hermes, the operator of this homelab. The owner talks to you on
-    Telegram. You run on vm-114 (${net.ipOf "114"}), use only Anthropic's API, and have root
+    Telegram. You run on ${config.networking.hostName} (${net.ipOf config.homelab.vmid}), use only Anthropic's API, and have root
     SSH on every VM and on the Proxmox host (${site.lan.proxmox}). Start with the
     `homelab-ops` skill; there is one skill per subsystem:
     ${lib.concatMapStringsSep ", " (n: "`${n}`") skillNames}.
 
-    The owner's own skills are under `skills/luca`:
+    The owner's own skills are in the category `luca`:
     ${lib.concatMapStringsSep ", " (n: "`${n}`") lucaSkillNames}.
 
     ## Which model to use
@@ -169,12 +183,13 @@ let
 
     ## VMs
 
-    enabled: true = always on, onDemand = boots on first request and powers off
-    after the cooldown (start it with `vm start <id>` before using its API),
-    false = stopped/not deployed. This table is generated from the inventory and
-    wins over anything a skill says about a VM's state or address.
+    power: on = always on; idle after <time> = boots on the first request to
+    one of its urls (or `vm start <id>` before using its API) and powers off
+    after that long without one; off = stopped, not deployed. This table is
+    generated from the inventory and wins over anything a skill says about a
+    VM's state or address.
 
-    | id | name | ip | enabled | urls |
+    | id | name | ip | power | urls |
     |---|---|---|---|---|
     ${inventoryTable}
   '';
@@ -196,10 +211,18 @@ let
   lucaSkillNames = lib.attrNames (lib.filterAttrs
     (n: t: t == "directory" && builtins.pathExists "${lucaSkillsDir}/${n}/SKILL.md")
     (builtins.readDir lucaSkillsDir));
+
+  # every declared skill as one read-only tree (skills.external_dirs): a skill dropped here is gone on the next
+  # deploy, and the skills hermes writes itself stay in its own skills dir
+  skillsTree = pkgs.linkFarm "hermes-skills" (
+    lib.mapAttrsToList (name: file: { name = "homelab/${name}/SKILL.md"; path = file; }) skills
+    ++ map (name: { name = "luca/${name}/SKILL.md"; path = "${lucaSkillsDir}/${name}/SKILL.md"; }) lucaSkillNames);
+  # the copies earlier deploys installed would shadow skillsTree; they are root's, what hermes writes is its own
+  skillsCopiesRemove = pkgs.writeShellScript "hermes-skills-copies-remove" ''
+    ${pkgs.findutils}/bin/find ${stateDir}/.hermes/skills -mindepth 1 -maxdepth 1 -user root -exec ${pkgs.coreutils}/bin/rm -rf {} +
+  '';
 in {
   imports = [ inputs.hermes-agent.nixosModules.default ];
-
-  networking.hostName = "vm-114";
 
   sops.secrets = {
     hermes-ssh-key = { owner = "hermes"; mode = "0400"; };
@@ -208,7 +231,7 @@ in {
     telegram-bot-token = {};
     telegram-chat-id = {};
     ntfy-hermes-password = {};
-  };
+  } // lib.genAttrs apiSecrets (_: { owner = "hermes"; mode = "0400"; });
   sops.templates."hermes-ntfy.netrc" = {
     owner = "hermes";
     mode = "0400";
@@ -227,27 +250,29 @@ in {
   sops.templates."hermes.env" = {
     owner = "hermes";
     content = ''
-      # a claude subscription token (`claude setup-token`); hermes reads it as an oauth credential, not an api key
-      CLAUDE_CODE_OAUTH_TOKEN=${config.sops.placeholder.hermes-claude-token}
+      # a claude subscription token (`claude setup-token`): hermes reads ANTHROPIC_TOKEN as an oauth credential and,
+      # unlike CLAUDE_CODE_OAUTH_TOKEN, strips it from every command it runs (tools/environments/local_env_policy.py)
+      ANTHROPIC_TOKEN=${config.sops.placeholder.hermes-claude-token}
       TELEGRAM_BOT_TOKEN=${config.sops.placeholder.telegram-bot-token}
       TELEGRAM_ALLOWED_USERS=${config.sops.placeholder.telegram-chat-id}
       TELEGRAM_HOME_CHANNEL=${config.sops.placeholder.telegram-chat-id}
     '';
   };
 
-  # root everywhere by the owner's choice, so every token too
-  homelab.tokens.reads = config.homelab.tokens.all;
-
   # /srv/sync is the owner's ~/Sync
   homelab.nasMounts = nasPath "/srv/sync" "syncthing/sync"
     // nasPath "/srv/media" "bulk/media";
 
   programs.ssh.extraConfig = ''
+    # one router, one host key, whichever zone leg answers
+    Host ${lib.concatStringsSep " " routerLegs}
+      HostKeyAlias ${router.ip}
     Host ${lib.concatStringsSep " " rootHosts}
       User root
       IdentityFile ${sshKey}
       IdentitiesOnly yes
-      StrictHostKeyChecking accept-new
+      StrictHostKeyChecking yes
+      UserKnownHostsFile ${knownHosts}
   '';
 
   programs.git = {
@@ -282,6 +307,7 @@ in {
         backend = "local";
         timeout = 900;
       };
+      skills.external_dirs = [ "${skillsTree}" ];
     };
 
     extraPackages = with pkgs; [
@@ -294,13 +320,14 @@ in {
 
     workingDirectory = "${stateDir}/workspace";
     documents."AGENTS.md" = agentsMd;
-    hermesHomeFiles = lib.mapAttrs' (name: file: lib.nameValuePair "skills/homelab/${name}/SKILL.md" file) skills
-      // lib.genAttrs' lucaSkillNames
-      (name: lib.nameValuePair "skills/luca/${name}/SKILL.md" "${lucaSkillsDir}/${name}/SKILL.md");
   };
 
-  # the parent, not the automounts: the hardened unit still starts without the nas
-  systemd.services.hermes-agent.serviceConfig.ReadWritePaths = [ "/srv" ];
+  systemd.services.hermes-agent.serviceConfig = {
+    # the parent, not the automounts: the hardened unit still starts without the nas
+    ReadWritePaths = [ "/srv" ];
+    # "-": a fresh home has no skills dir yet
+    ExecStartPre = [ "-+${skillsCopiesRemove}" ];
+  };
 
   # the agent never deploys and holds no admin key: removes the copies an earlier deploy path left
   systemd.tmpfiles.rules = [

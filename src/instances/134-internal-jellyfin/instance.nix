@@ -1,5 +1,12 @@
 # media streaming + Janitorr (deletes media unwatched for months)
-{ lib, site, ... }: {
+{ lib, site, ... }:
+let
+  port = 80;
+  ollama = import ../../modules/ollama.nix;
+in {
+  # ollama on the site's gpu (modules/ollama.nix)
+  roles = [ "llm" ];
+
   vm = {
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
@@ -7,21 +14,26 @@
     memoryMiB = 3072;
     balloonMiB = 0;
     cores = 4;
-    # ollama model 4.4G beside jellyfin
+    # ollama's model (modules/ollama.nix) beside jellyfin
     diskGiB = 24;
     machine = "q35";
     pci = lib.optional (site.gpu != null) "gpu";
   };
 
   # one api key per consumer, so a leaked one is revoked alone
-  tokens = [
-    "jellyfin-key-homepage" "jellyfin-key-hermes" "jellyfin-key-arr" "jellyfin-key-janitorr"
-    "jellyfin-admin-pass" "janitorr-pass"
+  tokens = [ "jellyfin-key-homepage" "jellyfin-key-hermes" "jellyfin-key-arr" "jellyfin-key-janitorr" ];
+
+  # janitorr's own jellyfin user, set once by the setup
+  secrets = { janitorr-pass = "guardsData:hex:16"; };
+
+  grants = [
+    { from = [ "operator" "128" "130" ]; tcp = [ port ]; why = "hermes, jellyseerr and the arrs' notifications call its api directly"; }
+    { from = [ "121" ]; tcp = [ ollama.port ]; why = "paperless-ai asks the local llm"; }
   ];
 
   services = {
     jellyfin = {
-      port = 80;
+      inherit port;
       loginPaths = [ "/Users/AuthenticateByName" ];
       loginRedirect = { path = "/"; to = "/sso/OID/start/authelia"; };
       frames = "sameorigin";
@@ -43,11 +55,16 @@
         tokenAuthMethod = "client_secret_post";
       };
       off = {
-        guard = "open to the lab until its direct clients are grants";
         sso = "logs in itself through authelia oidc (sso plugin); apps use quick connect";
         anubis = "the jellyfin apps run no proof of work";
         bodyLimit = "image and plugin uploads";
       };
     };
+  };
+
+  shares = {
+    bulk = { };
+    "data/janitorr" = { };
+    "data/jellyfin".localState = true;
   };
 }

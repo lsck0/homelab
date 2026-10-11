@@ -8,12 +8,13 @@ let
     anubis = "the trmnl cloud runs no proof of work";
     cloudflare = "the trmnl cloud fetches it directly";
     homepage = "a feed, no page";
+    accessLog = "the path carries the feed's token";
   };
 in {
   vm = {
     bootPhase = "apps";
     needs = [ "nfs" ];
-    kind.lxc = "pending migration, see the restructure report";
+    kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";
     privileged = true;
     features = "nesting=1,mount=nfs";
   };
@@ -28,5 +29,9 @@ in {
     calendar-upload-token = "hex:24"; # unguessable url segment of the calendar feed
     terminal-token = "hex:32";
     trmnl-api-key = "manual";
+  };
+
+  shares = {
+    "data/calendar" = { };
   };
 }

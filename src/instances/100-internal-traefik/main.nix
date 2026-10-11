@@ -53,9 +53,7 @@ in {
       servers = [{ url = "https://${net.wan.proxmox}:${toString net.ports.proxmoxApi}"; }];
       serversTransport = "proxmox";
     };
-    # proxmox's own certificate, issued by its root ca for the host's address
-    serversTransports.proxmox.rootCAs = [ config.sops.secrets.proxmox-ca.path ];
+    # proxmox's own certificate, issued by its root ca (site.json) for the host's address
+    serversTransports.proxmox.rootCAs = [ config.homelab.onDemand.caFile ];
   };
-
-  sops.secrets.proxmox-ca.owner = "traefik";
 }

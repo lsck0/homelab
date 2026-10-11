@@ -51,15 +51,12 @@ let
 in {
   imports = [ ./lib/paperless-ai.nix ];
 
-  networking.hostName = "vm-121";
-
   # documents stay plain files on the nas, the inbox is the smb documents share
   homelab.nasMounts = nasMount mediaDir "paperless/media" // nasPath consumeDir "documents/inbox";
 
   # db and index local, the nas keeps a nightly copy
   homelab.localState.paperless = {
     path = "/var/lib/paperless";
-    share = "paperless";
     unit = "paperless-scheduler";
     sqlite = [ "db.sqlite3" ];
     # the beat schedule and logs regenerate
@@ -121,9 +118,4 @@ in {
       " | tail -1 | token_write paperless-key
     '';
   };
-
-  networking.firewall.allowedTCPPorts = [ route.port ];
-
-  # paperless trusts Remote-User, so ingress only
-  homelab.ingressOnly.ports = [ route.port ];
 }

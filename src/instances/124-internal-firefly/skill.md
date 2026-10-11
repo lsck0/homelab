@@ -13,7 +13,7 @@ metadata:
 
 # Firefly III (vm-124, http://10.100.0.124:8080, https://firefly.lsck0.dev)
 
-When AGENTS.md lists vm-124 as `onDemand`, `vm start 124` first, then wait for it to answer.
+When AGENTS.md lists vm-124 as `idle after`, it answers during its 05:00 wake or once the owner starts it.
 
 Headers:
 `Authorization: Bearer $(lab-token firefly-token)`, `Accept: application/json`,

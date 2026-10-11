@@ -3,7 +3,7 @@
 # git.lsck0.dev is the owner's forge: only the owner pushes, its mirrors follow branches the owner merged. Its
 # jobs are trusted with the shared compile cache (sccache on vm-110) and the registry, as user `ci`, and with
 # nothing else; the github runners, which take strangers' pull requests, are other users without either.
-{ config, lib, pkgs, retry, inventory, site, catalog, ... }:
+{ config, lib, pkgs, retry, inventory, site, catalog, lab, ... }:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
 
@@ -19,7 +19,7 @@ let
   forge = "git.${catalog.domain}";
   instance = "https://${forge}";
   name = "${config.networking.hostName}-runner";
-  sccache = { host = "sccache.${catalog.domain}"; ip = net.ipOf "110"; port = net.ports.redis; };
+  sccache = let r = lab.routes.sccache; in { host = net.fqdn r.host; ip = net.ipOf (toString r.vmid); inherit (r) port; };
   inherit (config.homelab.tokens) dir;
 
   # the job container image per label, pinned: an upstream tag push never changes what jobs run; changing them
@@ -95,14 +95,11 @@ in {
   # lab names without cloudflare; the ingress, not the services: traefik terminates https and gates pushes
   networking.hosts = hosts;
 
-  # forgejo (vm-115) mints the one-use registration token
-  homelab.tokens.reads = [ "forgejo-runner" ];
-
   sops.secrets.sccache-redis-pass = { };
   # the cache url carries a password, so it comes from sops, not the nix store; ci alone reads it
   sops.templates."sccache-redis.env" = {
     owner = user;
-    content = "SCCACHE_REDIS=redis://:${config.sops.placeholder.sccache-redis-pass}@${sccache.host}\n";
+    content = "SCCACHE_REDIS=redis://:${config.sops.placeholder.sccache-redis-pass}@${sccache.host}:${toString sccache.port}\n";
   };
 
   systemd.services.forgejo-runner = {

@@ -2,6 +2,7 @@ package clientip
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -29,8 +30,11 @@ func TestClient(t *testing.T) {
 	config.TrustedIPs = []string{"104.16.0.0/13", "10.200.0.200/32"}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var got string
-			next := http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) { got = req.Header.Get(headerRealIP) })
+			var got, remote string
+			var forwarded []string
+			next := http.HandlerFunc(func(_ http.ResponseWriter, req *http.Request) {
+				got, remote, forwarded = req.Header.Get(headerRealIP), req.RemoteAddr, req.Header.Values(headerForwardedFor)
+			})
 			handler, err := New(context.Background(), next, config, "client-ip")
 			if err != nil {
 				t.Fatal(err)
@@ -46,6 +50,13 @@ func TestClient(t *testing.T) {
 			handler.ServeHTTP(httptest.NewRecorder(), req)
 			if got != tc.want {
 				t.Fatalf("X-Real-Ip = %q, want %q", got, tc.want)
+			}
+			// the proxy appends the remote address to X-Forwarded-For: the backend sees the client alone
+			if host, _, err := net.SplitHostPort(remote); err != nil || host != tc.want {
+				t.Fatalf("remote address = %q, want the client %q", remote, tc.want)
+			}
+			if len(forwarded) != 0 {
+				t.Fatalf("X-Forwarded-For = %q, want none", forwarded)
 			}
 		})
 	}

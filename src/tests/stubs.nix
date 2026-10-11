@@ -11,19 +11,22 @@ in {
     ./stubs/sops.nix
     ./stubs/nas.nix
     ./stubs/platform.nix
-    ../modules/apps-catalog
     ../modules/network.nix
     ../modules/db-backup
     ../modules/local-state
     ../modules/tokens
-    ../modules/textfile.nix
+    ../modules/textfile
+    ../modules/upstream
   ];
 
   _module.args = {
     # network.nix and the catalog read the inventory; a test may pass its own
     inventory = lib.mkDefault facts.inventory;
-    # apps-catalog.nix's default catalog
     lab = lib.mkDefault facts;
+    # what vm-109 exports; a test nas computes its own
+    nasClients = lib.mkDefault facts.nasClients;
+    # what modules/base hands every host: the lab's catalog (modules/catalog.nix)
+    catalog = lib.mkDefault facts.catalog;
     # static host facts, the same file the flake hands every host
     site = lib.importJSON ../generated/site.json;
   };

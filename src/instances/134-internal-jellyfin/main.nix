@@ -17,7 +17,10 @@ let
   ollama = import ../../modules/ollama.nix;
 
   route = catalog.internal.jellyfin;
-  urlOf = name: let r = catalog.internal.${name}; in "http://${net.ipOf (toString r.vmid)}:${toString r.port}";
+  # janitorr's start fails on a client it cannot reach: none of them may sleep (idle), or it crash-loops meanwhile
+  urlOf = name: let r = catalog.internal.${name}; vmid = toString r.vmid; in
+    assert lib.assertMsg (inventory.${vmid}.idle == null) "janitorr calls ${name} directly, but vm-${vmid} sleeps when idle";
+    "http://${net.ipOf vmid}:${toString r.port}";
   publicUrl = "https://${net.fqdn route.host}";
   autheliaUrl = "https://${net.fqdn catalog.internal.authelia.host}";
   # the internal ingress, jellyfin's only trusted proxy: without it redirect_uri is http:// and authelia rejects it
@@ -44,8 +47,15 @@ let
   # the setup waits for ready at most twice (start, the one restart) and talks to the api in between
   setupTimeoutS = 2 * readyTimeoutS + 300;
 
-  ssoManifest = "https://raw.githubusercontent.com/9p4/jellyfin-plugin-sso/manifest-release/manifest.json";
-  ssoPackage = "SSO Authentication";
+  # the version installed live: a bump runs the plugin's own migrations, so it is a deliberate change here
+  ssoVersion = "4.0.0.4";
+  ssoPlugin = pkgs.fetchzip {
+    url = "https://github.com/9p4/jellyfin-plugin-sso/releases/download/v${ssoVersion}/sso-authentication_${ssoVersion}.zip";
+    hash = "sha256-MJTyE6CeVLk7mlugauJ/F6bpi1kYwNtzNmQeH3+CFeQ=";
+    stripRoot = false;
+  };
+  pluginsDir = "${stateDir}/config/plugins";
+  ssoDir = "${pluginsDir}/SSO Authentication_${ssoVersion}";
   # login is for app-jellyfin members; admins among them get jellyfin's admin flag on top, never a way in alone
   ssoConfig = {
     SamlConfigs = { };
@@ -136,11 +146,9 @@ let
         leaving-soon-type: MOVIES_AND_TV
       emby:
         enabled: false
+      # it sleeps (idle); its own media availability sync drops what janitorr deleted
       jellyseerr:
-        enabled: true
-        url: "${urlOf "jellyseerr"}"
-        api-key: "@JELLYSEERR@"
-        match-server: false
+        enabled: false
       jellystat:
         enabled: false
       streamystats:
@@ -168,7 +176,7 @@ let
   # readable): the session token in a header file, the passwords through jq --rawfile
   jellyfinApi = ''
     J=http://127.0.0.1:${toString route.port}
-    ADMIN_PASS_FILE=${T}/jellyfin-admin-pass.token
+    ADMIN_PASS_FILE=${config.sops.secrets.jellyfin-admin-pass.path}
     AUTH_HEADER=$RUNTIME_DIRECTORY/auth.header
     # jellyfin 12 only accepts the Authorization header, the client fields identify the setup's session
     CLIENT_HEADER='Authorization: MediaBrowser Client="homelab", Device="setup", DeviceId="homelab-setup", Version="1.0"'
@@ -234,11 +242,6 @@ let
     }
   '';
 in {
-  networking.hostName = "vm-134";
-
-  # janitorr cleans up through the arrs and jellyseerr
-  homelab.tokens.reads = [ "radarr-key" "sonarr-key" "jellyseerr-key" ];
-
   # nvidia driver and cuda are unfree
   nixpkgs.config.allowUnfree = gpu;
   services.xserver.videoDrivers = lib.optional gpu "nvidia";
@@ -274,7 +277,6 @@ in {
   # jellyfin db local, the nas keeps a nightly copy
   homelab.localState.jellyfin = {
     path = stateDir;
-    share = "jellyfin";
     unit = "podman-jellyfin";
     sqlite = [ "config/data/*.db" ];
   };
@@ -330,7 +332,7 @@ in {
     description = "Set up Jellyfin (admin, API keys, libraries, janitorr, network, Authelia SSO)";
     partOf = [ "podman-jellyfin.service" ];
     after = [ "podman-jellyfin.service" ];
-    path = [ pkgs.curl pkgs.jq pkgs.coreutils ];
+    path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.diffutils pkgs.findutils ];
     serviceConfig = {
       RuntimeDirectory = "jellyfin-setup";
       RuntimeDirectoryMode = "0700";
@@ -338,7 +340,6 @@ in {
     };
     script = ''
       ${jellyfinApi}
-      token_secret_ensure jellyfin-admin-pass
       jellyfin_wait_ready
 
       # -- admin: the first start runs the wizard with the generated password
@@ -410,10 +411,9 @@ in {
       done
 
       # -- janitorr deletes through a user of its own: content deletion, no admin
-      token_secret_ensure janitorr-pass
       janitorr_id=$(api "$J/Users" | jq -r 'first(.[] | select(.Name == "janitorr")) | .Id')
       if [ -z "$janitorr_id" ]; then
-        janitorr_id=$(jq -cn --rawfile p ${T}/janitorr-pass.token '{Name: "janitorr", Password: $p}' \
+        janitorr_id=$(jq -cn --rawfile p ${config.sops.secrets.janitorr-pass.path} '{Name: "janitorr", Password: $p}' \
           | api -X POST "$J/Users/New" -d @- | jq -er .Id)
         echo "user janitorr created"
       fi
@@ -457,16 +457,19 @@ in {
         restart_needed "ldap plugin removed"
       fi
 
-      # -- authelia sso: repository and plugin; the install request returns once the files are in place
-      if ! api "$J/Repositories" | jq -e --arg u ${ssoManifest} 'any(.[]; .Url == $u)' >/dev/null; then
-        api "$J/Repositories" | jq -c --arg u ${ssoManifest} '. + [{Name: "jellyfin-plugin-sso", Url: $u, Enabled: true}]' \
-          | api -X POST "$J/Repositories" -d @-
-        echo "sso plugin repository added"
+      # -- plugins come from the store alone: no repository, so nothing installs or updates behind this unit
+      if ! api "$J/Repositories" | jq -e 'length == 0' >/dev/null; then
+        api -X POST "$J/Repositories" -d '[]'
+        echo "plugin repositories removed"
       fi
-      if [ -z "$(plugin_find "$plugins" '^SSO')" ]; then
-        api -X POST "$J/Packages/Installed/${lib.escapeURL ssoPackage}"
-        restart_needed "sso plugin installed"
-      fi
+      # authelia sso, the pinned build; jellyfin rewrites meta.json, so only the assemblies are compared
+      for dll in ${ssoPlugin}/*.dll; do
+        cmp -s "$dll" "${ssoDir}/''${dll##*/}" && continue
+        find ${pluginsDir} -maxdepth 1 -name 'SSO Authentication_*' -exec rm -rf {} +
+        install -D -m 0644 -t "${ssoDir}" ${ssoPlugin}/*
+        restart_needed "sso plugin ${ssoVersion} installed"
+        break
+      done
 
       # -- the one restart
       if [ -n "$RESTART_REASONS" ]; then
@@ -485,26 +488,27 @@ in {
     '';
   };
 
-  sops.secrets.jellyfin-oidc-secret = {};
+  sops.secrets = lib.genAttrs [ "jellyfin-oidc-secret" "jellyfin-admin-pass" "janitorr-pass" "radarr-key" "sonarr-key" ] (_: { });
 
-  # render janitorr's configs from the exported api keys
+  # render janitorr's configs from the api keys
   systemd.services.janitorr-config = setupUnit {
-    description = "Render Janitorr configuration from exported API keys";
+    description = "Render Janitorr configuration from the API keys";
     after = [ "jellyfin-setup.service" ];
     wants = [ "jellyfin-setup.service" ];
     before = [ "podman-janitorr.service" "podman-janitorr-stats.service" ];
     wantedBy = [ "podman-janitorr.service" "podman-janitorr-stats.service" ];
     path = [ pkgs.coreutils ];
     script = ''
-      # token_read checks each value is a token, so none carries a yaml quote or a second line
-      radarr=$(token_read radarr-key) && sonarr=$(token_read sonarr-key) && jellyseerr=$(token_read jellyseerr-key) \
-        && jellyfin=$(token_read jellyfin-key-janitorr) && janitorr=$(token_read janitorr-pass) \
-        || { echo "waiting for the arr, jellyseerr and jellyfin keys"; exit 1; }
+      # token_read checks each value is a token, so none carries a yaml quote or a second line; the secrets are hex
+      radarr=$(cat ${config.sops.secrets.radarr-key.path})
+      sonarr=$(cat ${config.sops.secrets.sonarr-key.path})
+      janitorr=$(cat ${config.sops.secrets.janitorr-pass.path})
+      jellyfin=$(token_read jellyfin-key-janitorr) || { echo "waiting for the jellyfin key"; exit 1; }
       render() { # <template> <target>; substituted in the shell, so no key passes through argv
         local text
         text=$(cat "$1")
         text=''${text//@RADARR@/$radarr}; text=''${text//@SONARR@/$sonarr}; text=''${text//@JELLYFIN@/$jellyfin}
-        text=''${text//@JELLYSEERR@/$jellyseerr}; text=''${text//@JANITORR_PASS@/$janitorr}
+        text=''${text//@JANITORR_PASS@/$janitorr}
         (umask 077; printf '%s\n' "$text" > "$2.tmp")
         chown ${uid}:${uid} "$2.tmp"; mv "$2.tmp" "$2"
       }
@@ -513,10 +517,9 @@ in {
     '';
   };
 
-  networking.firewall.allowedTCPPorts = [ route.port ollama.port ];
-
+  # ollama is no route: its port and guard are here, its client a grant in instance.nix
+  networking.firewall.allowedTCPPorts = [ ollama.port ];
   homelab.ingressOnly.ports = [ ollama.port ];
-  homelab.ingressOnly.portSources.${toString ollama.port} = map (id: net.hostSource (toString id)) ollama.clients;
 
   # vfio pins all ram, so dropped caches return nothing to the host
   homelab.dropCaches = false;

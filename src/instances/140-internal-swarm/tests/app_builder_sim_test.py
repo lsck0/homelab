@@ -5,7 +5,8 @@ Usage: app_builder_sim_test.py <path to app-builder.py> [seed ...]
 The builder's boundary (the forge, git, the registry, the manager's forced command, the clock, its own state
 writes) is replaced by a simulated world that one seed drives: which commits land and which paths they touch,
 when the catalog's build settings change, which calls fail (forge 5xx, a lost checkout, a refused login, a
-registry 5xx, an ssh timeout, a manager refusal, a deploy the manager took whose answer was lost) and where the
+registry 5xx, an ssh timeout, a manager refusal, a deploy the manager took whose answer was lost, the forge or a
+public registry down for a whole run) and where the
 process crashes between two of its writes. Everything above the boundary is the real code. After every
 simulated run the invariants are checked; a failing seed is a complete, replayable bug report:
 
@@ -15,9 +16,15 @@ I1 an app's recorded sha is a commit whose stack, with exactly that commit's ima
 I2 a run that finds the newest watched commit deployed, with the same catalog entry, builds and deploys nothing
 I3 once faults stop, a run after the backoff cap brings every app to its newest commit (liveness)
 I4 metrics.prom is a complete file that agrees with the states after every finished run
-I5 an app named on the command line is rebuilt even when unchanged; an unknown name exits 2 and touches nothing
+I5 a run for one named app (its ci's /redeploy) looks at that app as the timer would and leaves the others alone;
+   an unknown name exits 2 and touches nothing
 I6 an app none of whose calls failed in a run is deployed by it, whatever the others did
-I7 a forced redeploy of the deployed commit builds nothing: the registry holds its content
+I7 a forgotten app (app-builder-redeploy) is deployed again, and its deployed commit builds nothing: the registry
+   holds its content
+I8 after baseRefreshS a changed base image rebuilds and deploys the app though its branch stood still; an unchanged
+   base deploys the same images and builds nothing
+I9 an upstream down for a whole run fails no app on its account: the forge down changes no state at all, a registry
+   down deploys nothing
 """
 import contextlib
 import io
@@ -52,7 +59,13 @@ CRASH_PROBABILITY = 0.1
 BACKOFF = {"baseS": 300, "maxS": 3600}
 # simulated seconds between two timer runs
 RUN_INTERVAL_S = 60
-FAULTS = ("forge", "api", "checkout", "login", "registry", "ssh-timeout", "refused", "answer-lost")
+# longer than a seed's whole run, so only I8 sees a refresh
+BASE_REFRESH_S = 10 ** 6
+BASE_IMAGE = "base:1"
+FAULTS = ("forge", "api", "checkout", "login", "registry", "ssh-timeout", "refused", "answer-lost", "outage")
+# chance per run that one upstream is down for all of it, while the seed's faulty phase lasts
+OUTAGE_PROBABILITY = 0.15
+UPSTREAMS = ("github", "dockerhub")
 
 
 # the real functions the simulation wraps, taken once: every seed installs its world over these
@@ -86,6 +99,9 @@ class World:
         # what the registry holds: content tag -> digest, filled by pushes, read by the content lookup
         self.registry = {}
         self.builds = 0
+        self.base_digest = "sha256:" + "1" * 64
+        # the upstreams down for the current run
+        self.down = set()
 
     def commit(self, app, touched=None):
         self.counter += 1
@@ -111,6 +127,14 @@ class World:
         FIRED[kind] += 1
         return True
 
+    def outage(self, app, upstream):
+        """True when the upstream is down this run; counted per app like a fault."""
+        if upstream not in self.down:
+            return False
+        self.calls.setdefault(app, []).append("outage")
+        FIRED["outage"] += 1
+        return True
+
 
 def catalog_of(world):
     apps = {
@@ -122,7 +146,9 @@ def catalog_of(world):
     return {"registry": REGISTRY, "registryUser": "builder", "registryPasswordFile": "/dev/null",
             "deployKeyFile": "/dev/null", "github": "https://forge.test", "githubApi": "https://api.forge.test",
             "manager": {"address": "10.0.0.1", "knownHosts": "/dev/null"}, "timeouts": {}, "backoff": BACKOFF,
-            "buildParallelism": 2,
+            "buildParallelism": 2, "baseRefreshS": BASE_REFRESH_S,
+            "upstreams": {"retry": {"attempts": 2, "backoffS": 1, "probeTimeoutS": 1}, "unavailable": 75,
+                          "registries": {"docker.io": "dockerhub"}},
             "apps": apps, "loggedIn": False}
 
 
@@ -137,13 +163,13 @@ def app_of_repo(repo):
 def world_install(world):
     def branch_head(ctx, repo, branch):
         app = app_of_repo(repo)
-        if world.fault(app, "forge") or world.head(app) is None:
+        if world.outage(app, "github") or world.fault(app, "forge") or world.head(app) is None:
             raise builder.BuildError("forge 5xx")
         return world.head(app)
 
     def branch_last_change(ctx, repo, branch, paths):
         app = app_of_repo(repo)
-        if world.fault(app, "api"):
+        if world.outage(app, "github") or world.fault(app, "api"):
             raise builder.BuildError("api 5xx")
         sha = world.newest_touching(app, paths)
         if sha is None:
@@ -152,12 +178,12 @@ def world_install(world):
 
     def repo_checkout(ctx, repo, sha, into):
         app = app_of_repo(repo)
-        if world.fault(app, "checkout"):
+        if world.outage(app, "github") or world.fault(app, "checkout"):
             raise builder.BuildError("fetch failed")
         with open(os.path.join(into, "compose.yaml"), "w", encoding="utf-8") as f:
             yaml.safe_dump({"services": {"web": {"build": ".", "environment": {"COMMIT": sha}}}}, f)
         with open(os.path.join(into, "Dockerfile"), "w", encoding="utf-8") as f:
-            f.write("FROM scratch\nARG GIT_COMMIT\n")
+            f.write(f"FROM {BASE_IMAGE}\nARG GIT_COMMIT\n")
         return "2026-01-01T00:00:00Z"
 
     def registry_login(ctx):
@@ -169,6 +195,12 @@ def world_install(world):
         # a commit's tree differs from every other commit's: the checkout's root is the only context here
         with open(os.path.join(repo_dir, "compose.yaml"), encoding="utf-8") as f:
             return f"{path}:{yaml.safe_load(f)['services']['web']['environment']['COMMIT']}"
+
+    def image_base_digest(ctx, image):
+        assert image == BASE_IMAGE, image
+        if world.outage(ctx["building"], "dockerhub") or world.fault(ctx["building"], "registry"):
+            raise builder.BuildError("the base image's registry 5xx")
+        return world.base_digest
 
     def registry_digest(ctx, app, name, tag):
         if world.fault(app, "registry"):
@@ -190,6 +222,9 @@ def world_install(world):
 
     def stack_deploy(ctx, app, manager, stack):
         web = stack["services"]["web"]
+        # the workers pull the stack's public images: the manager answers "unavailable"
+        if world.outage(app, "dockerhub"):
+            raise builder.UpstreamUnavailable(builder.STACK_REGISTRY)
         if world.fault(app, "ssh-timeout"):
             raise builder.BuildError("ssh took longer than the bound")
         if world.fault(app, "refused"):
@@ -222,12 +257,15 @@ def world_install(world):
     builder.git_object = git_object
     builder.dashboards_publish = lambda ctx, app, repo_dir, patterns: None
     builder.registry_digest = registry_digest
+    builder.image_base_digest = image_base_digest
     builder.image_build_push = image_build_push
     builder.stack_deploy = stack_deploy
     builder.image_mark_live = image_mark_live
     builder.app_build_deploy = app_build_deploy
     builder.file_write_atomic = file_write_atomic
     builder.time_now = lambda: world.clock
+    builder.time_sleep = lambda seconds: None
+    builder.upstream_reachable = lambda ctx, name: name not in world.down
     builder.log = lambda app, message: None
 
 
@@ -264,6 +302,9 @@ def run_once(world, state_dir, only=None):
     """One builder run; the states before it, and whether it finished (no crash)."""
     world.calls = {}
     world.writes_until_crash = None
+    world.down = set()
+    if world.faulty and world.rng.random() < OUTAGE_PROBABILITY:
+        world.down = {world.rng.choice(UPSTREAMS)}
     if world.faulty and world.rng.random() < CRASH_PROBABILITY:
         world.writes_until_crash = world.rng.randint(0, 3)
     catalog = catalog_of(world)
@@ -286,12 +327,16 @@ def check_run(world, state_dir, catalog, before, deploys_before, finished, only,
     for app, spec_ in catalog["apps"].items():
         new = [a for a in world.accepted[deploys_before:] if a[0] == app]
         prior = before[app]
+        if "github" in world.down:
+            assert states[app] == prior, f"{where}: I9 the forge down changed {app}: {prior} -> {states[app]}"
+        if world.down:
+            assert not new, f"{where}: I9 {app} deployed while {world.down} was down"
+            others = set(world.calls.get(app, [])) - {"outage"}
+            new_failure = states[app]["failure"] is not None and states[app]["failure"] != prior["failure"]
+            assert others or not new_failure, f"{where}: I9 {app} failed on the outage alone: {states[app]}"
         target = target_of(world, app, spec_)
-        if only == app:
-            assert new or app in world.calls, f"{where}: I5 forced {app} was not deployed"
-            continue
-        if only is not None:
-            assert states[app] == prior, f"{where}: I5 a forced run of {only} changed {app}"
+        if only is not None and only != app:
+            assert states[app] == prior and not new, f"{where}: I5 a run for {only} changed {app}"
             continue
         if prior["sha"] == target and prior["build_hash"] == spec_["hash"]:
             assert not new, f"{where}: I2 {app} redeployed {target}, already live"
@@ -356,9 +401,20 @@ def seed_run(seed):
             assert state["sha"] == target and state["failure"] is None, f"seed {seed}: I3 {app} stuck at {state}"
             assert (app, target, image) in world.accepted, f"seed {seed}: I3 the manager never took {app} {target}"
         builds = world.builds
+        os.remove(os.path.join(state_dir, "hello" + builder.STATE_SUFFIX))
         catalog, before, deploys_before, finished = run_once(world, state_dir, "hello")
         assert finished and world.builds == builds and len(world.accepted) == deploys_before + 1, \
             f"seed {seed}: I7 a redeploy of hello's live commit built {world.builds - builds} images"
+        for changed in (False, True):
+            world.clock += BASE_REFRESH_S
+            if changed:
+                world.base_digest = "sha256:" + "2" * 64
+            builds = world.builds
+            catalog, before, deploys_before, finished = run_once(world, state_dir)
+            assert finished and world.builds == builds + (len(catalog["apps"]) if changed else 0), \
+                f"seed {seed}: I8 base changed {changed}: {world.builds - builds} builds"
+            assert len(world.accepted) == deploys_before + len(catalog["apps"]), \
+                f"seed {seed}: I8 base changed {changed}: not every app was looked at again"
 
 
 def main():

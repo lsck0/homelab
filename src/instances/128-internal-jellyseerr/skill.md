@@ -20,7 +20,7 @@ adding media straight to Radarr/Sonarr without a request, use the `media` skill.
 
 Token `lab-token jellyseerr-key`, header `X-Api-Key: <token>`. Base `/api/v1`.
 Published on port 80, so call `http://10.100.0.128/api/v1/...`. When AGENTS.md lists vm-128
-as `onDemand`, `vm start 128` first, then wait for it to answer. People log in to its web UI
+as `idle after`, it answers once a request through its url woke it or the owner started it. People log in to its web UI
 with Jellyfin Quick Connect (skill `jellyfin`).
 
 - Find something: `GET /api/v1/search?query=<text>`: results carry `id` (TMDB id)

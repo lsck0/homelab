@@ -6,8 +6,8 @@
 # (unique hosts, ports, tokens, vmids) are modules/lab's and modules/catalog.nix's.
 #
 # instance.nix is a module over this schema with the arguments id (the vmid, a string), zone, site (site.json), net
-# (modules/net.nix over the collected inventory), telemetry (modules/telemetry.nix) and swarmManagers (the vmids of
-# every enabled swarm's manager, modules/lab). The smallest:
+# (modules/net.nix over the collected inventory), telemetry (modules/telemetry.nix), roles (lab.roles: role -> vmid),
+# swarmManagers (the vmids of every enabled swarm's manager) and grantSourceNames (modules/lab). The smallest:
 #
 #   # what the guest is for, in one line
 #   { ... }: {
@@ -18,7 +18,7 @@
 # Guest kind: a vm when it is the router, sits outside the internal zone (strangers' traffic wants a vm's isolation),
 # passes a device through, takes extra disks, or `needs` what an unprivileged container cannot give (its own
 # container runtime, nfs); an unprivileged lxc otherwise. `vm.kind.<kind> = "<why>"` overrides the rule.
-{ lib, config, id, zone, ... }:
+{ lib, config, id, zone, telemetry, grantSourceNames, ... }:
 let
   inherit (lib) mkOption types;
   service = import ./service.nix { inherit lib; };
@@ -29,10 +29,12 @@ let
 
   # host boot starts the lab phase by phase: storage first, the public side last (proxmox startup order)
   bootPhases = [ "nas" "network" "dev" "apps" "media" "public" ];
-  # plain vm working set measured 445-600 MiB
-  memoryDefaultMiB = 768;
+  # plain vm working set measured 445-600 MiB; an lxc runs no kernel of its own
+  memoryDefaultMiB = { vm = 768; lxc = 512; };
   # at 384 MiB a vm drops ssh
   balloonFloorMiB = 512;
+  # the lab's own path (router, ingresses, sso) and the public side, unless idle: squeezed, every route stalls
+  unballoonedPhases = [ "network" "public" ];
   # proxmox's own cpu weight
   cpuUnitsDefault = 100;
   diskDefaultGiB = 8;
@@ -64,8 +66,12 @@ let
     };
   };
 
-  serviceType = types.submodule ({ name, ... }: {
-    config.off.frontend = lib.mkDefault "a nixos service's own ui sends no browser telemetry";
+  serviceType = types.submodule ({ name, config, ... }: {
+    config = {
+      off.frontend = lib.mkDefault "a nixos service's own ui sends no browser telemetry";
+      # the probers check the backend itself, not the sso portal in front of it
+      health = lib.mkDefault config.path;
+    };
     options = service.exposureOptions { inherit name zone; features = service.protectionFeatures ++ service.telemetryFeatures; } // {
       homepage = mkOption {
         type = service.cardType { inherit name; group = "Apps"; icon = "mdi-web"; description = ""; };
@@ -92,9 +98,28 @@ let
 
   grantType = types.submodule {
     options = {
-      from = mkOption { type = types.nonEmptyListOf vmidString; description = "Guests (vmids) that may connect."; };
+      from = mkOption {
+        type = types.nonEmptyListOf (types.either vmidString (types.enum grantSourceNames));
+        description = "Who may connect: guests by vmid or role, or ${lib.concatStringsSep ", " grantSourceNames} (modules/lab `sourceOf`).";
+      };
       tcp = mkOption { type = types.nonEmptyListOf types.port; description = "Guarded ports of this guest they may reach."; };
       why = mkOption { type = why; description = "Why the grant exists."; };
+    };
+  };
+
+  shareType = types.submodule {
+    options = {
+      readOnly = mkOption { type = types.bool; default = false; description = "vm-109 exports it read-only to this guest."; };
+      mode = mkOption {
+        type = types.nullOr (types.strMatching "0[0-7]{3}");
+        default = null;
+        description = "The share's mode on the nas, root's (tokens, db dumps); null: 0777, for services running as their own uid.";
+      };
+      localState = mkOption {
+        type = types.bool;
+        default = false;
+        description = "The nas copy of the guest's homelab.localState <name>: nas-restore makes the guest take a restore of it.";
+      };
     };
   };
 
@@ -146,12 +171,13 @@ in {
         default = lib.lists.findFirstIndex (phase: phase == config.vm.bootPhase) null bootPhases + 1;
         description = "The proxmox startup order of bootPhase.";
       };
-      memoryMiB = mkOption { type = types.ints.positive; default = memoryDefaultMiB; description = "Memory ceiling."; };
+      memoryMiB = mkOption { type = types.ints.positive; default = memoryDefaultMiB.${config.vm.guestKind}; description = "Memory ceiling (an lxc's limit)."; };
       balloonMiB = mkOption {
         type = types.ints.unsigned;
-        default = lib.max balloonFloorMiB (config.vm.memoryMiB / 2);
-        defaultText = lib.literalExpression "max ${toString balloonFloorMiB} (memoryMiB / 2)";
-        description = "Balloon floor (vm), 0: no balloon.";
+        default = if lib.elem config.vm.bootPhase unballoonedPhases && config.idle.stopAfter == null then config.vm.memoryMiB
+          else lib.max balloonFloorMiB (config.vm.memoryMiB / 2);
+        defaultText = lib.literalExpression "memoryMiB in boot phases ${toString unballoonedPhases} unless idle, else max ${toString balloonFloorMiB} (memoryMiB / 2)";
+        description = "Balloon floor (vm), 0: no balloon; tests/policy/guests.nix holds the floors to the node's memory.";
       };
       cores = mkOption { type = types.ints.positive; default = 2; description = "CPU cores."; };
       cpuUnits = mkOption { type = types.ints.positive; default = cpuUnitsDefault; description = "Proxmox cpu weight."; };
@@ -181,12 +207,32 @@ in {
     grants = mkOption {
       type = types.listOf grantType;
       default = [ ];
-      description = "Who may reach which of this guest's guarded ports (homelab.ingressOnly), besides its zone's ingress.";
+      description = "Who may reach which of this guest's guarded ports (homelab.ingressOnly), besides its zone's ingress: every source but those is one.";
+    };
+    shares = mkOption {
+      type = types.attrsOf shareType;
+      default = { };
+      description = "Nas paths below /srv/nas this guest mounts (\"data/<share>\", \"bulk/media\"), token dirs aside (`tokens`, `tokenReads`): vm-109 exports exactly these to it, the router opens nfs to it (lab.nasClients); modules/nas.nix holds its mounts to them.";
+    };
+    alerts = mkOption {
+      type = types.attrsOf telemetry.alertType;
+      default = { };
+      description = "Grafana rule uid -> a rule over this guest's own metrics or logs (modules/telemetry.nix alertType); vm-105 provisions it.";
+    };
+    roles = mkOption {
+      type = types.listOf (types.strMatching "[a-z][a-z0-9-]*");
+      default = [ ];
+      description = "Lab-wide roles this guest holds (\"collector\", \"nas\"; \"dashboard\" reads every widget's token, \"operator\" every token); one guest per role (lab.roles), a grant's source by name.";
     };
     tokens = mkOption {
       type = types.listOf (types.strMatching "[a-z0-9-]+");
       default = [ ];
       description = "Lab tokens this guest mints into its own nas token dir (modules/tokens); others read them.";
+    };
+    tokenReads = mkOption {
+      type = types.listOf (types.strMatching "[a-z0-9-]+");
+      default = [ ];
+      description = "Lab tokens of other guests this one reads; vm-109 exports their minters' dirs to it read-only (lab.nasClients).";
     };
     egress = mkOption {
       type = types.nullOr (types.submodule {

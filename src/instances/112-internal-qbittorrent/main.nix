@@ -1,5 +1,5 @@
 # qbittorrent: the arrs' download client, peers through the router's vpn exit
-{ config, pkgs, lib, inventory, catalog, nasMount, nasPath, retry, setupUnit, site, ... }:
+{ config, pkgs, lib, inventory, catalog, instance, lab, nasMount, nasPath, retry, setupUnit, site, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   route = catalog.internal.qbittorrent;
@@ -13,12 +13,18 @@ let
   webUiUser = "admin";
   peerPorts = "1024:65535";
 
-  # webui api without login: the router (protonvpn-port sets the leased port), ingress, terminal, hermes, the arrs
-  apiClients = [ "${(net.zoneOf "112").routerIp}/32" ] ++ map net.hostSource [ "100" "104" "114" "130" ];
+  # the webui skips its own login for the ingress and every source instance.nix grants the port
+  apiClients = [ (net.hostSource net.zones.${instance.zone}.ingress) ]
+    ++ map (lab.sourceOf instance.zone) (lib.concatMap (g: g.from) (lib.filter (g: g.to == instance.id) lab.grants));
 
   # download only: finished torrents stop at once (ratio 0) for the arrs to import; upload slots serve queued ones
   activeDownloadsMax = 5;
   activeUploadsMax = 8;
+  # what a video, music or book release never needs and malware releases ship (a fake episode was one .exe):
+  # qbittorrent never writes a file matching these, so nothing runnable reaches the media share
+  excludedFileNames = map (extension: "*.${extension}") [
+    "exe" "scr" "bat" "cmd" "com" "pif" "lnk" "msi" "jar" "js" "vbs" "wsf" "hta" "ps1" "reg"
+  ];
 
   # router routes peer traffic, no proxy here
   prefs = pkgs.writeText "qbittorrent-prefs.json" (builtins.toJSON {
@@ -55,10 +61,10 @@ let
     max_seeding_time_enabled = true;
     max_seeding_time = 0;
     max_ratio_act = 0;
+    excluded_file_names_enabled = true;
+    excluded_file_names = lib.concatStringsSep "\n" excludedFileNames;
   });
 in {
-  networking.hostName = "vm-112";
-
   # egress: router holds the tunnel and killswitch; dns asks the provider through it, never from the home ip
   networking.nameservers = lib.mkForce [ config.homelab.egress.vpn.gateway ];
 
@@ -112,21 +118,24 @@ in {
     '';
   };
 
+  sops.secrets.qbittorrent-pass = { };
+
   systemd.services.qbittorrent-settings = setupUnit {
     description = "Configure qBittorrent: peer settings, save path, API whitelist, WebUI password";
     after = [ "podman-qbittorrent.service" "qbittorrent-disable-auth.service" ];
-    path = [ pkgs.podman pkgs.jq pkgs.openssl pkgs.coreutils ];
+    path = [ pkgs.podman pkgs.jq pkgs.coreutils ];
+    # tests/downloads.nix reads the rendered preferences from here
+    environment.QBITTORRENT_PREFS = prefs;
     script = ''
       API="http://127.0.0.1:${toString route.port}/api/v2"
       # curl inside the container: its loopback is the one the webui lets in without a login
       ${retry} 60 2 podman exec qbittorrent curl -fsS "$API/app/version"
 
       # webui login for clients off the whitelist
-      token_secret_ensure qbittorrent-pass
       printf ${webUiUser} | token_write qbittorrent-user
 
       # the preferences carry the password: on stdin, not on argv
-      jq -cj --rawfile p ${config.homelab.tokens.dir}/qbittorrent-pass.token '. + { web_ui_username: "${webUiUser}", web_ui_password: $p }' ${prefs} \
+      jq -cj --rawfile p ${config.sops.secrets.qbittorrent-pass.path} '. + { web_ui_username: "${webUiUser}", web_ui_password: $p }' "$QBITTORRENT_PREFS" \
         | podman exec -i qbittorrent curl -fsS -X POST "$API/app/setPreferences" --data-urlencode json@-
       echo "qBittorrent configured: direct peer traffic, DHT/PEX/LSD on, ${toString activeDownloadsMax} active downloads"
     '';
@@ -138,8 +147,6 @@ in {
     "d ${configDir} 0750 ${appId} ${appId} -"
     "d ${incompleteDir} 0750 ${appId} ${appId} -"
   ];
-
-  networking.firewall.allowedTCPPorts = [ route.port ];
 
   # leased port changes, so match on public source; iptables host, extraInputRules would be nftables-only
   networking.firewall.extraCommands = ''
@@ -159,10 +166,4 @@ in {
 
   # uid 1000 in the container binds the webui port
   boot.kernel.sysctl."net.ipv4.ip_unprivileged_port_start" = route.port;
-
-  # whitelisted api clients skip the login
-  homelab.ingressOnly = {
-    ports = [ route.port ];
-    portSources.${toString route.port} = apiClients;
-  };
 }

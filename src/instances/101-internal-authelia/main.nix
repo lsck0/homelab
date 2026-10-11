@@ -42,8 +42,6 @@ let
 in {
   imports = [ ./lib/lldap.nix ];
 
-  networking.hostName = "vm-101";
-
   # authelia session store
   services.redis.servers.authelia = {
     enable = true;
@@ -90,7 +88,7 @@ in {
 
     settings = {
       theme = "dark";
-      # every caller is the internal ingress or a granted prober (homelab.ingressOnly below, modules/flows.nix)
+      # every caller is the internal ingress (homelab.ingressOnly below)
       server.address = "tcp://0.0.0.0:${toString portal.port}/";
       log.level = "info";
       log.format = "text";
@@ -180,7 +178,10 @@ in {
         filesystem.filename = "${stateDir}/notification.txt";
       };
 
+      # by client address, never by user: the admin's name is public, and three wrong passwords from anyone would lock
+      # him out; the address is the client the ingress resolved, the only entry of X-Forwarded-For (modules/traefik)
       regulation = {
+        modes = [ "ip" ];
         max_retries = 3;
         find_time = "2m";
         ban_time = "5m";
@@ -189,9 +190,4 @@ in {
       totp.issuer = net.domain;
     };
   };
-
-  networking.firewall.allowedTCPPorts = [ portal.port ];
-  # regulation counts per user: a lan device calling the portal directly could lock the admin out unseen by the
-  # ingress's crowdsec and limits
-  homelab.ingressOnly.ports = [ portal.port ];
 }

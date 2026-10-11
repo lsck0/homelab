@@ -5,12 +5,16 @@
     needs = [ "containers" "nfs" ];
     # large python process, squeezed it stalls: 739 MiB peak over 7d, so the floor stays above it
     memoryMiB = 1536;
-    balloonMiB = 1024;
+    balloonMiB = 768;
     # image alone does not fit in 8 GiB
     diskGiB = 16;
   };
 
-  tokens = [ "hass-key" "hass-pass" ];
+  tokens = [ "hass-key" ];
+
+  shares = {
+    "data/homeassistant".localState = true;
+  };
 
   services = {
     homeassistant = {

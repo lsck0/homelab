@@ -6,10 +6,10 @@
 # (lib/controller-api.py) is the only way the state worker wakes an app.
 { pkgs, lib, specialArgs, ... }:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
+  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: apps; };
   registryAddress = lab.inventory."100".ip;
   manager = lab.inventory."140".ip;
-  controllerPort = lab.appsCatalog.controllerPort;
+  inherit (lab.appsCatalog) controllerPort;
 
   image = pkgs.dockerTools.buildLayeredImage {
     name = "fixture";
@@ -24,23 +24,23 @@ let
     routes.${name} = { inherit port; off.sso = "the fixture is public"; };
     stateful = [ "web" ];
     volumes.data.backup = true;
+    # both apps and a deploy's surge on the one worker (modules/limits workerCountOf)
+    resources.web.memoryMiB = 128;
+    reservation.memoryMiB = 256;
   } extra;
-  catalog = lab.appsCatalog // {
-    apps = {
-      keep = appOf "keep" 20160 { };
-      sleepy = appOf "sleepy" 20170 {
-        volumes.data.backup = lib.mkForce false;
-        dumps.page = { service = "web"; command = "cat /data/index.html"; };
-        idle.stopAfter = "30m";
-      };
+  apps = {
+    keep = appOf "keep" 20160 { };
+    sleepy = appOf "sleepy" 20170 {
+      volumes.data.backup = lib.mkForce false;
+      dumps.page = { service = "web"; command = "cat /data/index.html"; };
+      idle.stopAfter = "30m";
     };
   };
 
   node = vmid: {
     imports = [ (lab.guest vmid { flat = true; nas = true; }) ];
-    homelab.appsCatalog = catalog;
     networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
-    environment.systemPackages = [ pkgs.curl pkgs.zstd ];
+    environment.systemPackages = [ pkgs.curl ];
     virtualisation.memorySize = 2048;
     virtualisation.diskSize = 4096;
     services.journald.upload.enable = lib.mkForce false;
@@ -94,13 +94,17 @@ pkgs.testers.runNixOSTest {
 
     with subtest("a volume archived by the state worker restores into its volume"):
         vm_250.succeed("systemctl start db-backup-keep-volume-data")
-        vm_250.succeed("ls /var/backup/db/keep-volume-data/*.tar.zst")
+        vm_250.succeed("ls /var/backup/db/keep-volume-data/*.tar")
         vm_250.succeed(f"docker exec {task('keep')} sh -c 'echo lost > /data/index.html'")
         # positive control of the refusal below: the volume is in use while the task runs
         refusal = vm_250.fail("swarm-volume-restore keep data 2>&1")
         assert "in use" in refusal, refusal
         vm_140.succeed("docker service scale --detach keep_web=0")
         vm_250.wait_until_succeeds("[ -z \"$(docker ps -q --filter volume=keep_data)\" ]", timeout=60)
+        # a truncated archive is refused before the volume is touched
+        vm_250.succeed("head -c 64 $(ls -1 /var/backup/db/keep-volume-data/*.tar | tail -n1) > /tmp/truncated.tar")
+        vm_250.fail("swarm-volume-restore keep data /tmp/truncated.tar")
+        assert vm_250.succeed("cat $(docker volume inspect -f '{{.Mountpoint}}' keep_data)/index.html").strip() == "lost"
         vm_250.succeed("swarm-volume-restore keep data")
         vm_140.succeed("docker service scale --detach keep_web=1")
         vm_250.wait_until_succeeds("[ -n \"$(docker ps -q --filter label=com.docker.swarm.service.name=keep_web)\" ]", timeout=120)
@@ -112,7 +116,7 @@ pkgs.testers.runNixOSTest {
         assert vm_250.succeed("curl -sf http://${manager}:${toString controllerPort}/state/sleepy").strip() == "stopped"
         vm_140.succeed("grep -q 'homelab_app_idle_stopped{app=\"sleepy\"} 1' /var/lib/node-exporter-textfile/swarm_idle_sleepy.prom")
         vm_250.succeed("systemctl start db-backup-sleepy-page")
-        dump = vm_250.succeed("zstd -dc $(ls -1 /var/backup/db/sleepy-page/*.zst | tail -n1)").strip()
+        dump = vm_250.succeed("cat $(ls -1 /var/backup/db/sleepy-page/*.sql | tail -n1)").strip()
         assert dump == "sleepy-v1", dump
         assert vm_250.succeed("curl -sf http://${manager}:${toString controllerPort}/state/sleepy").strip() == "running"
 

@@ -1,4 +1,4 @@
-{ config, lib, pkgs, inventory, catalog, site, ... }:
+{ config, lib, pkgs, inventory, catalog, site, lab, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   route = catalog.external.searxng;
@@ -26,7 +26,7 @@ let
   # the edge's traefik -> anubis -> socket proxy reaches us from its own ip, the client in xff
   ingressIp = net.ipOf net.zones.external.ingress;
   # hermes reads format=json directly, past the 4 per hour api cap
-  hermesIp = inventory."114".ip;
+  hermesIp = inventory.${lab.roles.operator}.ip;
 
   stateDir = "/var/lib/searxng";
   secret = "${stateDir}/secret";

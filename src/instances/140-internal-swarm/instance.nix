@@ -1,11 +1,13 @@
 # the deploy controller: the apps swarm's manager (drained of tasks) and the app builder
 { ... }: {
+  roles = [ "swarm-manager" "app-builder" ];
+
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
-    # raft and the deploys beside appbuild's rootless docker and buildkit, the builds 117 used to run
-    memoryMiB = 4096;
-    balloonMiB = 2048;
+    # the floor holds the manager; a build takes what the host has free
+    memoryMiB = 3072;
+    balloonMiB = 1024;
     cores = 4;
     # images, the buildkit cache and the raft
     diskGiB = 40;
@@ -26,10 +28,16 @@
       anubis = "ci jobs run no proof of work";
       homepage = "an endpoint, no page";
       probe = "POST only; socket activated, idle costs nothing";
+      cloudflare = "a ci bearer token is nobody else's to decrypt";
     };
   };
 
   secrets = {
-    app-deploy-key = "manual"; # ssh-keygen -t ed25519; public half in modules/swarm
+    app-deploy-key = "manual"; # ssh-keygen -t ed25519; the public half is app-deploy-key.pub here
+  };
+
+  shares = {
+    "data/app-dashboards" = { };
+    "data/swarm-manager" = { };
   };
 }

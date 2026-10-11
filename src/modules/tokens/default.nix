@@ -2,23 +2,19 @@
 #
 # A token is minted by the app that owns it (an *arr's api key, home assistant's long-lived token), so it cannot
 # live in sops. Each producer writes only its own directory, exported read-write to it alone and owned by root on
-# the nas (only the producer's root writes it), and a consumer mounts read-only exactly the producers it lists in
-# homelab.tokens.reads. vm-109 derives the exports from these mounts, so the registry below is the policy.
-#
-# A producer writes through ownDir (a temp file, then a rename into place, so a reader never sees half a token) and
-# declares what it writes in its instance.nix (`tokens`); modules/lab collects those into the registry below.
+# the nas (only the producer's root writes it), and a consumer mounts read-only exactly the producers of the tokens
+# it reads. A producer declares what it writes in its instance.nix (`tokens`), a consumer what it reads
+# (`tokenReads`, or a role, modules/lab); the collector derives both the registry below and vm-109's exports from
+# them. A producer writes through ownDir: a temp file, then a rename into place, so a reader never sees half a token.
 #
 # Limit: the nas tells clients apart by source address alone. The guarantee holds only while a guest cannot take
 # another's address on the bridge, which Proxmox's per-NIC ip filter (terraform, lib.tf) has to enforce.
-{ config, lib, nasMount, nasMountRo, lab, ... }:
+{ config, lib, nasMount, nasMountRo, lab, instance, ... }:
 let
   cfg = config.homelab.tokens;
 
   # token -> vmid of the guest that mints it: every instance.nix's `tokens`
   producers = lab.tokens;
-
-  # only the producer's root writes its dir; readers need to enter it
-  ownShareMode = "0755";
 
   ownId = if config.homelab.vmid == null then null else lib.toInt config.homelab.vmid;
 
@@ -27,14 +23,15 @@ let
   hostDir = id: "${mountRoot}/vm-${toString id}";
   mountRoot = "/var/lib/lab-tokens.d";
   readIds = lib.unique (map (name: producers.${name}) cfg.reads);
-  shareOf = id: "tokens/vm-${toString id}";
+  shareOf = id: lib.removePrefix "data/" (lab.tokenShare.pathOf id);
   tokenName = lib.types.enum (lib.attrNames producers);
 in {
   options.homelab.tokens = {
     reads = lib.mkOption {
       type = lib.types.listOf tokenName;
-      default = [ ];
-      description = "Tokens this host reads. Its own tokens (those it mints, see `producers`) are always there.";
+      default = if instance == null then [ ] else lab.tokenReads.${instance.id};
+      defaultText = lib.literalExpression "lab.tokenReads.<vmid>";
+      description = "Tokens this host reads besides its own: its instance.nix `tokenReads` and its roles' (modules/lab).";
     };
 
     all = lib.mkOption {
@@ -79,7 +76,7 @@ in {
   config = lib.mkIf (touched != [ ]) {
     homelab.nasMounts = lib.mkMerge (
       lib.optional (mints != [ ])
-        (lib.mapAttrs (_: m: m // { shareMode = ownShareMode; }) (nasMount (hostDir ownId) (shareOf ownId)))
+        (lib.mapAttrs (_: m: m // { shareMode = lab.tokenShare.mode; }) (nasMount (hostDir ownId) (shareOf ownId)))
       ++ map (id: nasMountRo (hostDir id) (shareOf id)) (lib.remove ownId readIds)
     );
 

@@ -56,15 +56,6 @@ def get(path, token, accept="application/vnd.github+json"):
         return json.loads(r.read() or "null")
 
 
-def safe(path, token, default, **kw):
-    """A section that cannot be fetched leaves a hole, not an empty panel."""
-    try:
-        return get(path, token, **kw)
-    except (urllib.error.URLError, ValueError, TimeoutError) as e:
-        print(f"github: {path.split('?')[0]} failed: {e}", file=sys.stderr)
-        return default
-
-
 def ago(iso, now):
     """Compact age: 4m, 3h, 2d. The panel is read across a room."""
     if not iso:
@@ -85,9 +76,8 @@ def commits(token, days):
     since = (datetime.now(timezone.utc) - timedelta(days=days)).strftime("%Y-%m-%d")
     q = urllib.parse.quote(f"author:{USER} author-date:>={since}", safe=":>=")
     # commit search needs its own Accept header, else 415
-    r = safe(f"search/commits?q={q}&per_page=1", token, {},
-             accept="application/vnd.github.cloak-preview+json")
-    return r.get("total_count", 0)
+    r = get(f"search/commits?q={q}&per_page=1", token, accept="application/vnd.github.cloak-preview+json")
+    return (r or {}).get("total_count", 0)
 
 
 def public(repository, include_private):
@@ -179,18 +169,22 @@ def main():
         print("the GitHub token is empty", file=sys.stderr)
         return 1
 
-    repos = safe(f"user/repos?per_page={PAGE_SIZE_MAX}&affiliation=owner&sort=pushed", token, [])
-    notes = safe(f"notifications?per_page={PAGE_SIZE_MAX}", token, [])
-
     def search(kind):
         # the search sees private issues too; is:public keeps them out unless included
         visibility = "" if INCLUDE_PRIVATE else " is:public"
         q = urllib.parse.quote(f"is:open is:{kind} involves:{USER}{visibility}")
-        return safe(f"search/issues?q={q}&per_page={WORK_ROWS}", token, {})
+        return get(f"search/issues?q={q}&per_page={WORK_ROWS}", token)
 
-    payload = payload_build(repos, notes, search("issue"), search("pr"),
-                            commits(token, COMMITS_SHORT_DAYS), commits(token, COMMITS_LONG_DAYS),
-                            datetime.now(timezone.utc))
+    # a failed call keeps the last github.json; the unit's upstream wrapper retries and tells an outage apart
+    try:
+        payload = payload_build(get(f"user/repos?per_page={PAGE_SIZE_MAX}&affiliation=owner&sort=pushed", token),
+                                get(f"notifications?per_page={PAGE_SIZE_MAX}", token),
+                                search("issue"), search("pr"),
+                                commits(token, COMMITS_SHORT_DAYS), commits(token, COMMITS_LONG_DAYS),
+                                datetime.now(timezone.utc))
+    except (urllib.error.URLError, ValueError, TimeoutError) as e:
+        print(f"github: {e}, keeping the last github.json", file=sys.stderr)
+        return 1
     os.makedirs(out, exist_ok=True)
     feed_io.file_write_atomic(os.path.join(out, "github.json"), json.dumps(payload))
     print(f"github: {payload['commits7']} commits/7d, {payload['repos']} repos, "

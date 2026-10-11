@@ -21,28 +21,39 @@
 #     '';
 #   }
 #
-# Routed tests put each zone on its own vlan and boot `router`; vlans follow terraform's router_zones order:
-# 1 the house lan and wan (ens18), 2 internal (ens19), 3 dmz (ens20), 4 apps (ens21). Flat tests (`flat = true`)
+# Routed tests put each zone on its own vlan and boot `router`; vlans follow the router's nics (zones.json router_nic):
+# 1 the house lan and wan (proxmox net0), each zone's the number of its router leg plus one. Flat tests (`flat = true`)
 # put every node on vlan 1 with a /8, so all lab subnets are on-link; a guest answers anything else through its
 # gateway, so a `multi` node owning the outside addresses (192.168.178.138/24, ...) must also own the gateways
 # (10.100.0.1/8, ...). The test driver names machines by hostname: vm-121 is `vm_121` in the script.
 #
 # nas: a guest's nas mounts bind-mount directories of its own disk by default (lib/nas-local.nix), so the units
 # keyed on them run as in the lab; `nas = true` mounts them for real from a `nas` node, which exports exactly what
-# the test's guests mount (109-internal-nas/lib/nas-exports.nix over modules/nas-clients.nix, lib/nas-mounts.nix).
-{ pkgs, lib, specialArgs }:
+# the test's guests mount (109-internal-nas/lib/nas-exports.nix over lib/nas-clients.nix, lib/nas-mounts.nix).
+#
+# testDefaults: what every vm test takes; the flake extends each check with it.
+#
+# apps: a test's own app folders, the production ones passed through it (modules/lab withApps): every fact follows,
+# the workers its fixture apps need included. withApps does the same again (a specialisation's edited catalog).
+{ pkgs, lib, specialArgs, apps ? null }:
 let
   # the flake's, under another name: the attribute set below exports its own specialArgs
-  facts = specialArgs;
+  facts = if apps == null then specialArgs else let collected = specialArgs.lab.withApps apps; in
+    assert lib.assertMsg (collected.problems == [ ]) "the test's apps break the lab's rules:\n${lib.concatLines collected.problems}";
+    specialArgs // { lab = collected; inherit (collected) inventory site nasClients; };
   inherit (facts) inventory;
 
   pki = import ./pki.nix { inherit pkgs; };
   labprobe = import ./labprobe.nix { inherit pkgs; };
 
-  vlans = { lan = 1; internal = 2; dmz = 3; apps = 4; };
-  # the zone vlan of an inventory guest type
-  vlanOfType = { internal = vlans.internal; external = vlans.dmz; apps = vlans.apps; };
+  net = import ../../modules/net.nix { inherit lib; inherit (facts) inventory site; };
+
+  # proxmox's net0 is the router's wan
+  wanVlan = 1;
+  vlans = { lan = wanVlan; } // lib.mapAttrs (_: z: z.routerNic + wanVlan) net.zones;
   nasId = "109";
+  # the slowest test runs about 10 min (monitoring, 615 s); a hang ends at three times that, not at the driver's hour
+  globalTimeoutS = 1800;
 
   # what every lab node shares, whatever it runs
   node = {
@@ -62,16 +73,14 @@ let
 in rec {
   inherit (facts) inventory site nasClients;
   inherit pki labprobe vlans;
+  testDefaults.globalTimeout = lib.mkDefault globalTimeoutS;
   secretValues = import ./secret-values.nix { inherit pkgs; };
   images = import ./images.nix { inherit pkgs; };
-  # what homelab.appsCatalog defaults to; a test enabling a fixture app sets the option to a variant of it
-  appsCatalog = facts.lab.appsCatalog;
+  # the typed apps and the catalog every node of the test reads (modules/lab, modules/catalog.nix)
+  inherit (facts.lab) appsCatalog catalog withApps;
   # the instances' routes by zone ({ internal; external; }, every field) and vpn egress members (modules/lab)
   routes = lib.genAttrs [ "internal" "external" ] (zone: lib.filterAttrs (_: r: r.zone == zone) facts.lab.routes);
   inherit (facts.lab) egress;
-  # the typed catalog every host reads (modules/catalog.nix), as the router's configuration holds it
-  catalog = facts.inputs.self.nixosConfigurations."300-router"._module.args.catalog;
-
   # runNixOSTest's node.specialArgs: the hosts' facts. nasClients stays out: the router takes the lab's real one
   # (below), a test nas computes its own from the test's nodes, and a special arg could not be overridden
   specialArgs = { inherit (facts) inputs inventory site lab; };
@@ -85,14 +94,15 @@ in rec {
   ];
 
   # the inventory guest <vmid> through the real network.nix, at its address on the test nic eth1
-  guest = vmid: { flat ? false, vlan ? (if flat then vlans.lan else vlanOfType.${inventory.${vmid}.type}),
+  guest = vmid: { flat ? false, vlan ? (if flat then vlans.lan else vlans.${inventory.${vmid}.type}),
                   instance ? null, nas ? false }:
     let vm = inventory.${vmid}; in { config, ... }: {
       imports = production ++ [ node testNic (if nas then ./nas-mounts.nix else ./nas-local.nix) ]
         ++ lib.optional (instance != null) instance;
       # a secret its service parses holds a real-format value (secret-values.nix); a test may set its own
       testing.secretValues = lib.mapAttrs (_: lib.mkDefault) (lib.intersectAttrs config.sops.secrets (removeAttrs secretValues [ "public" ]));
-      networking.hostName = "vm-${vmid}";
+      # its hostname, address and own services, as on the lab host (modules/network.nix)
+      _module.args.instance = facts.lab.instances.${vmid};
       virtualisation.vlans = [ vlan ];
       # network.nix addresses eth0, the driver's own nic
       networking.interfaces.eth0.ipv4.addresses = lib.mkForce [ ];
@@ -121,19 +131,15 @@ in rec {
     imports = production ++ [ node ../../instances/300-router/main.nix ./offline-router.nix ];
     _module.args.nasClients = facts.nasClients;
     virtualisation.vlans = lib.mkForce [ ];
-    virtualisation.interfaces = {
-      ens18.vlan = vlans.lan;
-      ens19.vlan = vlans.internal;
-      ens20.vlan = vlans.dmz;
-      ens21.vlan = vlans.apps;
-    };
+    virtualisation.interfaces = { ${net.wan.interface}.vlan = vlans.lan; }
+      // lib.mapAttrs' (name: z: lib.nameValuePair z.interface { vlan = vlans.${name}; }) net.zones;
   };
 
   # the nas at 10.100.0.109, exporting exactly what the test's guests mount, by the real export rules
   nas = { flat ? false, vlan ? (if flat then vlans.lan else vlans.internal) }: { nodes, ... }: {
     imports = [ (guest nasId { inherit flat vlan; }) ../../instances/109-internal-nas/lib/nas-exports.nix ];
     homelab.nasExports.enable = true;
-    _module.args.nasClients = import ../../modules/nas-clients.nix {
+    _module.args.nasClients = import ./nas-clients.nix {
       inherit lib inventory;
       configs = lib.filterAttrs (_: config: config.networking.hostName != "vm-${nasId}") nodes;
     };

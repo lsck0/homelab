@@ -93,7 +93,7 @@ in
     postgresRoot.POSTGRES_ROOT_PASSWORD = "{{wat-postgres-root-password}}";
   in {
     server = otel // garageFiles // {
-      PUBLIC_URL = "https://wat.lsck0.dev";
+      PUBLIC_URL = "{{homelab.origin-wat}}";
       DEFAULT_USER_PASSWORD = "{{wat-default-user-password}}";
       DATABASE_URL = "postgres://admin:{{wat-postgres-password}}@postgres:5432/root";
     };
@@ -117,10 +117,11 @@ in
   };
   secrets = {
     wat-default-user-password = "hex:24";
-    wat-postgres-password = "hex:24";
-    wat-postgres-root-password = "hex:24";
+    # postgres keeps the passwords of its first start
+    wat-postgres-password = "guardsData:hex:24";
+    wat-postgres-root-password = "guardsData:hex:24";
     wat-pgweb-password = "hex:24";
-    wat-garage-rpc-secret = "hex:32";
+    wat-garage-rpc-secret = "guardsData:hex:32";
     wat-garage-root-key-id = "garage-key-id";
     wat-garage-root-secret = "hex:32";
     wat-garage-files-key-id = "garage-key-id";
@@ -131,6 +132,21 @@ in
   override.services.pyroscope = {
     image = socat;
     command = [ "TCP-LISTEN:4040,fork,reuseaddr" "TCP:{{homelab.pyroscope}}" ];
+  };
+  # the postgres service's wal-g loop pushes a base backup into garage nightly
+  alerts.walg_stale = let staleSeconds = 26 * 3600; in {
+    title = "wat WAL-G backup stale";
+    category = "backups";
+    datasource = "loki";
+    rangeSeconds = staleSeconds;
+    expr = "sum(count_over_time({swarm_service=\"wat_postgres\"} |= \"Backup completed successfully\" [${toString staleSeconds}s]))";
+    op = "lt"; threshold = 1;
+    for = "30m";
+    # no success line in the window is no series at all
+    noData = "Alerting";
+    severity = "critical"; telegram = true;
+    summary = "wat postgres: no WAL-G base backup in over 26h";
+    description = "The stack's wal-g loop has not logged a successful backup-push. Its log: {swarm_service=\"wat_postgres\"} in Loki.";
   };
   metrics = {
     server = { service = "server"; targetPort = 80; port = serverPort; path = "/api/metrics"; };

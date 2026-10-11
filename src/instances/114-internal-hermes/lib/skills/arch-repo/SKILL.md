@@ -27,7 +27,7 @@ Two separate things:
 - The VM is woken at 03:00 by the internal traefik. `archbuild-if-stale.timer` starts a build when
   the last finished one is older than 20h. While a build runs, `/busy` answers 200 and the
   on-demand reaper leaves the VM up.
-- Start a build now: `vm start 119`, wait for ssh, then `ssh 10.100.0.119 systemctl start --no-block archbuild.service`.
+- Start a build now: `vm start 119`, then `ssh 10.100.0.119 systemctl start --no-block archbuild.service`.
 - Watch it: `ssh 10.100.0.119 journalctl -fu archbuild` or `curl -s http://10.100.0.119/status.txt`.
   Per-package logs: `http://10.100.0.119/logs/<pkgbase>.log`. Whole run: `/build.log`.
 - After each publish the mirror has the same beside its status: `https://mirror.lsck0.dev/status.txt`,
@@ -40,6 +40,15 @@ Two separate things:
   `src/instances/119-internal-archbuild/lib/archrepo-list.sh <arch-dotfiles checkout> <lsck0.db>`: it prints
   the missing names, nothing when complete.
 - Never stop it mid-publish. A deploy does not restart it (`restartIfChanged = false`).
+- Outages: the AUR, the Arch mirrors and GitHub are probed before a night and every call to them is retried
+  (modules/upstream). While one stays down the night is skipped, not failed: nothing is published,
+  `status.json` gets `unavailable: <name>` and `skipped`, `status.txt` a `skipped:` line, vm-119 exports
+  `homelab_archrepo_unavailable{upstream}`; the next night recovers by itself. Grafana's "Upstream unavailable"
+  alert names the service. While the keyserver is down only the recipes with validpgpkeys wait (failed,
+  "deferred to the next night"), the rest of the night publishes.
+- A recipe starts only while its whole bound (3h build, kill grace, fetch) still fits the night's budget (the
+  unit's 20h less 3h for the snapshot and publish); a later one shows as failed "deferred to the next night" and
+  keeps its last build.
 - Output lands on the NAS at `/srv/nas/bulk/archrepo` (vm-109 serves it on :8090 for the LAN), and is
   pushed with rsync to vm-210 (`mirror.lsck0.dev`, public, plain http, signed packages).
 

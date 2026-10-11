@@ -1,10 +1,12 @@
 # vm-207's file share (instances/207-external-share/main.nix) from archived Pingvin Share to the Pingvin Share X image it
-# ships now: an account made on the old image signs in on the new one, so the data dir and its sqlite carry over.
+# ships now: an account made on the old image signs in on the new one, so the data dir and its sqlite carry over, and
+# the declared config.yaml closes sign up.
 # Images are pinned here and fetched at build time, nothing pulls at run time.
 { pkgs, lib, inputs, specialArgs, ... }:
 let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
-  shipped = inputs.self.nixosConfigurations."207-external-share".config.virtualisation.oci-containers.containers.share.image;
+  shippedContainer = inputs.self.nixosConfigurations."207-external-share".config.virtualisation.oci-containers.containers.share;
+  shipped = shippedContainer.image;
 
   imageOf = { name, tag, imageDigest, hash }: {
     name = "${name}:${tag}";
@@ -33,6 +35,11 @@ let
   };
   imageOverride = lib.mkOverride 40;
   account = { email = "owner@example.org"; username = "owner"; password = "kept-across-the-upgrade"; };
+  declared = {
+    "security.allowRegistration" = "false";
+    "share.maxExpiration" = "30 days";
+    "general.appUrl" = "https://${lab.catalog.external.share.host}.${lab.site.domain}";
+  };
 in
 assert lib.assertMsg (current.name == shipped) "tests/share.nix pins ${current.name}, 207 ships ${shipped}: bump the pin";
 pkgs.testers.runNixOSTest {
@@ -46,16 +53,18 @@ pkgs.testers.runNixOSTest {
     virtualisation.oci-containers.containers.share = {
       image = lib.mkForce before.name;
       imageFile = lib.mkForce before.file;
+      # the archived image crashes on a config.yaml without initUser; the declared one is the fork's
+      volumes = lib.mkForce (lib.filter (v: !lib.hasInfix "config.yaml" v) shippedContainer.volumes);
     };
     specialisation.upgraded.configuration.virtualisation.oci-containers.containers.share = {
       image = imageOverride current.name;
       imageFile = imageOverride current.file;
+      volumes = imageOverride shippedContainer.volumes;
     };
   };
 
   testScript = ''
     import json
-    import re
     account = json.loads('${builtins.toJSON account}')
     api = "http://127.0.0.1/api"
 
@@ -70,11 +79,11 @@ pkgs.testers.runNixOSTest {
         post("/auth/signUp", account)
 
     with subtest("the fork starts on the same data dir and the account signs in"):
-        # podman runs the image's healthcheck as transient units, which fail while the app starts; sync.sh ignores
-        # those, so does this switch, and nothing else
-        status, out = vm_207.execute("/run/booted-system/specialisation/upgraded/bin/switch-to-configuration test 2>&1")
-        failed = [u.strip() for line in re.findall(r"the following units failed: (.*)", out) for u in line.split(",")]
-        assert status == 0 or all(re.fullmatch(r"[0-9a-f]{64}-[0-9a-f]+\.service", u) for u in failed), out
+        # podman runs the image's healthcheck as transient units, which fail while the app starts: judged like sync.sh
+        # judges a deploy's switch
+        status, _ = vm_207.execute("/run/booted-system/specialisation/upgraded/bin/switch-to-configuration test > /tmp/switch.log 2>&1")
+        assert status == 0 or vm_207.succeed("${pkgs.bash}/bin/bash ${../../../scripts/lib/switch-failures.sh} < /tmp/switch.log") == "", \
+            vm_207.succeed("cat /tmp/switch.log")
         # the state podman's own probe keeps; `podman healthcheck run` here stops on the driver's tty (SIGTTOU) for good
         vm_207.wait_until_succeeds("podman inspect share --format '{{.State.Health.Status}}' | grep -qx healthy", timeout=300)
         vm_207.succeed("podman inspect share --format '{{.ImageName}}' | grep -q pingvin-share-x")
@@ -83,5 +92,12 @@ pkgs.testers.runNixOSTest {
         post("/auth/signIn", {"email": account["email"], "password": account["password"]})
         me = json.loads(vm_207.succeed(f"curl -sf -b /tmp/jar {api}/users/me"))
         assert me["username"] == account["username"] and me["isAdmin"], me
+
+    with subtest("the declared config holds: no sign up, finite expiry, the public url"):
+        configs = {c["key"]: c["value"] for c in json.loads(vm_207.succeed(f"curl -sf {api}/configs"))}
+        expected = json.loads('${builtins.toJSON declared}')
+        assert all(configs[k] == v for k, v in expected.items()), configs
+        stranger = {"email": "stranger@example.org", "username": "stranger", "password": "not-welcome-here"}
+        vm_207.fail(f"curl -sf -H 'Content-Type: application/json' -d '{json.dumps(stranger)}' {api}/auth/signUp")
   '';
 }

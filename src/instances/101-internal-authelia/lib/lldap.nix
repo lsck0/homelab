@@ -1,18 +1,34 @@
 # lldap: the lab's single account store; authelia and the proxmox realm read it through read-only bind users
 #
-# Passwords reach lldap_set_password through its environment (LLDAP_USER_PASSWORD), never its command line, and the
-# admin session the helpers open is logged out (its tokens blacklisted) when the script exits, so the token that
-# does sit on a command line for a moment is dead afterwards.
-{ config, lib, pkgs, retry, inventory, site, catalog, ... }:
+# Authelia binds over loopback. The proxmox realm binds over ldaps only: its certificate is self-signed for this
+# guest's address, and the hypervisor reads it from inside the guest (scripts/pve-install.sh), the same channel that
+# vouches for every guest's ssh host key, so no password crosses the network in clear and no CA is needed.
+#
+# No secret reaches a command line: passwords go to ldappasswd in files, the session token to curl in a header file,
+# both in a private directory removed with the session, whose tokens are blacklisted when the script exits.
+{ config, lib, pkgs, retry, inventory, site, catalog, instance, lab, ... }:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   routes = catalog.internal;
   ldapPort = 3890;
+  realm = (import ../../../modules/lab-export.nix { inherit lib lab; }).ldap;
+  ldaps = {
+    inherit (net.ports) ldaps;
+    # the realm reads it from inside the guest
+    cert = realm.certFile;
+    key = "${stateDir}/ldaps-key.pem";
+    address = inventory.${instance.id}.ip;
+    validDays = 3650;
+    # renewed this long before it expires, when the address changed or the key is lost; the next sync hands it to the realm
+    renewSeconds = 30 * 24 * 3600;
+  };
   httpPort = routes.lldap.port;
   stateDir = "/var/lib/lldap";
   adminUser = "luca";
   guestUser = "guest";
-  apiInputs = [ pkgs.curl pkgs.jq pkgs.lldap pkgs.coreutils pkgs.gnugrep ];
+  openssl = lib.getExe pkgs.openssl;
+  adminPassword = config.sops.secrets.lldap-admin-password.path;
+  apiInputs = [ pkgs.curl pkgs.jq pkgs.openldap pkgs.coreutils pkgs.gnugrep ];
 
   # every group authelia admits, forwardauth and oidc (modules/catalog.nix access)
   inherit (catalog.access) admins;
@@ -25,8 +41,7 @@ let
   readonlyGroup = "lldap_strict_readonly";
   bindUsers = {
     authelia-bind = "lldap-authelia-bind-password";
-    # the proxmox realm's sync (scripts/pve-install.sh)
-    proxmox-bind = "lldap-proxmox-bind-password";
+    ${realm.bindUser} = "lldap-proxmox-bind-password";
   };
 
   # admin session helpers for lab-user and the bootstrap; set -e callers stop on any failure
@@ -34,27 +49,33 @@ let
     URL=http://127.0.0.1:${toString httpPort}
     # the login body from a file on stdin: the admin password never reaches an argv
     lldap_login() {
-      JAR=$(mktemp)
+      SESSION=$(mktemp -d)
       trap lldap_logout EXIT
-      TOKEN=$(jq -cn --rawfile p ${config.sops.secrets.lldap-admin-password.path} '{username:"admin", password:($p|rtrimstr("\n"))}' \
-        | curl -sf -c "$JAR" -X POST "$URL/auth/simple/login" -H 'Content-Type: application/json' --data-binary @- \
+      local token
+      token=$(jq -cn --rawfile p ${adminPassword} '{username:"admin", password:($p|rtrimstr("\n"))}' \
+        | curl -sf -c "$SESSION/jar" -X POST "$URL/auth/simple/login" -H 'Content-Type: application/json' --data-binary @- \
         | jq -r .token)
-      [ -n "$TOKEN" ] && [ "$TOKEN" != null ] || { echo "lldap admin login failed" >&2; return 1; }
+      [ -n "$token" ] && [ "$token" != null ] || { echo "lldap admin login failed" >&2; return 1; }
+      printf 'Authorization: Bearer %s\n' "$token" > "$SESSION/auth"
+      printf '%s' "$(cat ${adminPassword})" > "$SESSION/bind"
     }
-    # blacklists every token of the session, the one lldap_set_password saw on its command line included
+    # blacklists every token of the session
     lldap_logout() {
-      [ -n "''${JAR:-}" ] || return 0
-      curl -sf -b "$JAR" -o /dev/null "$URL/auth/logout" || echo "lldap logout failed" >&2
-      rm -f "$JAR"
+      [ -n "''${SESSION:-}" ] || return 0
+      curl -sf -b "$SESSION/jar" -o /dev/null "$URL/auth/logout" || echo "lldap logout failed" >&2
+      rm -rf "$SESSION"
     }
-    # user, password file
+    # user, password
     password_set() {
-      LLDAP_USER_PASSWORD=$(cat "$2") lldap_set_password --base-url "$URL" --token "$TOKEN" --username "$1" >/dev/null
+      printf '%s' "$2" > "$SESSION/new"
+      ldappasswd -H ldap://127.0.0.1:${toString ldapPort} -x -D "$(user_dn admin)" -y "$SESSION/bind" -T "$SESSION/new" "$(user_dn "$1")" >/dev/null
+      rm -f "$SESSION/new"
     }
+    user_dn() { echo "uid=$1,ou=people,${net.domainDn}"; }
     # graphql answers 200 with an errors array, so check it
     gql() {
       local out
-      out=$(curl -sf -X POST "$URL/api/graphql" -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d "$1")
+      out=$(curl -sf -X POST "$URL/api/graphql" -H @"$SESSION/auth" -H 'Content-Type: application/json' -d "$1")
       if echo "$out" | jq -e .errors >/dev/null; then echo "$out" | jq -r '.errors[].message' >&2; return 1; fi
       echo "$out"
     }
@@ -93,13 +114,12 @@ let
       # shellcheck disable=SC1091
       source ${lldapApi}
       lldap_login
-      # the password into the environment of lldap_set_password alone
       ask_and_set() {
         local a b
         read -rsp "password for $1: " a; echo >&2
         read -rsp "again: " b; echo >&2
         [ -n "$a" ] && [ "$a" = "$b" ] || { echo "passwords empty or different" >&2; exit 1; }
-        LLDAP_USER_PASSWORD=$a lldap_set_password --base-url "$URL" --token "$TOKEN" --username "$1" >/dev/null
+        password_set "$1" "$a"
       }
       [ $# -gt 0 ] || usage
       cmd=$1; shift
@@ -142,11 +162,18 @@ in {
 
   services.lldap = {
     enable = true;
-    silenceForceUserPassResetWarning = true;
     settings = {
+      # the admin's password is lldap-admin-password alone, rotated by changing the secret
+      force_ldap_user_pass_reset = "always";
       ldap_base_dn = net.domainDn;
       ldap_host = "0.0.0.0";
       ldap_port = ldapPort;
+      ldaps_options = {
+        enabled = true;
+        port = ldaps.ldaps;
+        cert_file = ldaps.cert;
+        key_file = ldaps.key;
+      };
       http_host = "0.0.0.0";
       http_port = httpPort;
       http_url = "https://${net.fqdn routes.lldap.host}";
@@ -161,6 +188,11 @@ in {
 
   systemd.services.lldap.preStart = lib.mkBefore ''
     [ -s ${stateDir}/server_key ] || ${pkgs.coreutils}/bin/base64 -d ${config.sops.secrets.lldap-server-key.path} > ${stateDir}/server_key
+    if [ ! -s ${ldaps.key} ] || ! ${openssl} x509 -in ${ldaps.cert} -noout -checkend ${toString ldaps.renewSeconds} >/dev/null 2>&1 \
+       || ! ${openssl} x509 -in ${ldaps.cert} -noout -checkip ${ldaps.address} | ${pkgs.gnugrep}/bin/grep -q 'does match'; then
+      (umask 077; ${openssl} req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days ${toString ldaps.validDays} \
+        -subj /CN=${ldaps.address} -addext subjectAltName=IP:${ldaps.address} -keyout ${ldaps.key} -out ${ldaps.cert})
+    fi
   '';
 
   systemd.services.lldap-bootstrap = {
@@ -198,10 +230,10 @@ in {
       '') (lib.attrNames bindUsers)}
 
       # passwords via opaque, from the secret files
-      password_set ${adminUser} ${config.sops.secrets.authelia-admin-pass.path}
-      password_set ${guestUser} ${config.sops.secrets.lldap-guest-password.path}
+      password_set ${adminUser} "$(cat ${config.sops.secrets.authelia-admin-pass.path})"
+      password_set ${guestUser} "$(cat ${config.sops.secrets.lldap-guest-password.path})"
       ${lib.concatStrings (lib.mapAttrsToList (user: secret: ''
-        password_set ${user} ${config.sops.secrets.${secret}.path}
+        password_set ${user} "$(cat ${config.sops.secrets.${secret}.path})"
         join ${user} ${readonlyGroup}
       '') bindUsers)}
 
@@ -220,11 +252,7 @@ in {
   # every account lives in this sqlite file
   homelab.dbBackup.databases.lldap.sqlite = "${stateDir}/users.db";
 
-  # ldap for authelia on this host and the proxmox realm, the web ui through the ingress
-  networking.firewall.allowedTCPPorts = [ ldapPort httpPort ];
-  homelab.ingressOnly = {
-    ports = [ ldapPort httpPort ];
-    # the proxmox realm's sync (scripts/pve-install.sh)
-    portSources.${toString ldapPort} = [ "${net.wan.proxmox}/32" ];
-  };
+  # ldaps for the proxmox realm (instance.nix grants); the web ui is the route's, plain ldap authelia's over loopback
+  networking.firewall.allowedTCPPorts = [ ldaps.ldaps ];
+  homelab.ingressOnly.ports = [ ldaps.ldaps ];
 }

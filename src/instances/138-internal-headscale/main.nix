@@ -1,4 +1,4 @@
-{ config, lib, pkgs, nasMount, retry, inventory, site, catalog, lab, ... }:
+{ config, lib, pkgs, retry, inventory, site, catalog, lab, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   headscaleRoute = catalog.internal.headscale;
@@ -31,9 +31,7 @@ let
   });
 in
 {
-  networking.hostName = "vm-138";
-
-  homelab.nasMounts = nasMount headscaleDir "headscale";
+  homelab.localState.headscale = { path = headscaleDir; unit = "headscale"; sqlite = [ "db.sqlite" ]; };
 
   services.headscale = {
     enable = true;
@@ -139,10 +137,6 @@ in
       systemctl --no-block try-restart headplane-secret.service podman-headplane.service
     '';
   };
-
-  # headscale itself is reached by clients through the ingress, which relays their registration
-  networking.firewall.allowedTCPPorts = [ headscaleRoute.port headplaneRoute.port ];
-  homelab.ingressOnly.ports = [ headplaneRoute.port ];
 
   # consistent copy for the snapshot, the live file may be mid-write
   homelab.dbBackup.databases.headscale.sqlite = "${headscaleDir}/db.sqlite";

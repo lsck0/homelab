@@ -1,12 +1,12 @@
 # paperless-ai: llm tagging for paperless
-{ config, lib, pkgs, inventory, hostIp, catalog, ... }:
+{ config, lib, pkgs, inventory, hostIp, catalog, lab, ... }:
 let
   port = catalog.internal.paperless-ai.port;
   containerPort = 3000;
   stateDir = "/var/lib/paperless-ai";
-  # the local ollama on vm-134's gpu; documents stay in the lab
+  # the local ollama on the llm role's gpu; documents stay in the lab
   ollama = import ../../../modules/ollama.nix;
-  llmUrl = "http://${inventory.${toString ollama.vmid}.ip}:${toString ollama.port}";
+  llmUrl = "http://${inventory.${lab.roles.llm}.ip}:${toString ollama.port}";
   # its own superuser, ../main.nix says why
   apiUser = "paperless-ai";
   prompt = lib.concatStringsSep " " [
@@ -20,7 +20,6 @@ in {
   # its sqlite runs in wal mode, which nfs breaks; local, the nas keeps a nightly copy
   homelab.localState.paperless-ai = {
     path = stateDir;
-    share = "paperless-ai";
     unit = "podman-paperless-ai";
     sqlite = [ "documents.db" ];
     # paperless-ai-config rewrites it, with the api token, on every start
@@ -105,10 +104,6 @@ in {
     "d ${stateDir} 0700 root root -"
     "Z ${stateDir} - root root -"
   ];
-
-  networking.firewall.allowedTCPPorts = [ port ];
-  # its /setup page asks for no login and the container holds the paperless api token
-  homelab.ingressOnly.ports = [ port ];
 
   # consistent copy for the snapshot, the live file may be mid-write
   homelab.dbBackup.databases.paperless-ai.sqlite = "${stateDir}/documents.db";

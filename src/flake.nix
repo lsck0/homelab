@@ -1,7 +1,7 @@
 # the lab: one nixos configuration per instance folder and swarm node, the collected facts (`lab`), the checks
 #
 # Checks: every src/tests/<name>.nix but the shared stand-ins (the lab-wide tests), every
-# src/instances/<name>/tests/<test>.nix and every src/modules/<name>/tests/<test>.nix (a test lives with what it tests)
+# src/{instances,modules,apps}/<name>/tests/<test>.nix (a test lives with what it tests)
 # is a check named by its file; adding a test is adding its file. A test is a function of
 # { pkgs, lib, inputs, specialArgs, ... } (specialArgs: the hosts' own, the lab's facts) returning a derivation; a
 # seeded one also takes `seed` with a default and lists past failing seeds in passthru.regressionSeeds, and its check
@@ -34,13 +34,8 @@
     lab = let collected = import ./modules/lab { inherit lib; }; in
       assert lib.assertMsg (collected.problems == [ ]) "the lab's instances break its rules:\n${lib.concatLines collected.problems}";
       collected;
-    inherit (lab) inventory site;
-    # every running guest's nas mounts by address: vm-109 exports exactly these, the router opens nfs to them
-    nasClients = import ./modules/nas-clients.nix {
-      inherit lib inventory;
-      configs = lib.mapAttrs (_: sys: sys.config) (removeAttrs self.nixosConfigurations [ "109-internal-nas" ]);
-    };
-    specialArgs = { inherit inputs inventory nasClients site lab; };
+    # every host's facts; each host also gets its own instance record as `instance` (modules/network.nix)
+    specialArgs = { inherit inputs lab; inherit (lab) inventory site nasClients; };
 
     common = {
       imports = [
@@ -56,13 +51,16 @@
     folderTests = dir: map (folder: testsIn (dir + "/${folder}/tests"))
       (lib.attrNames (lib.filterAttrs (folder: kind: kind == "directory" && builtins.pathExists (dir + "/${folder}/tests"))
         (builtins.readDir dir)));
-    testSets = [ (removeAttrs (testsIn ./tests) [ "stubs" ]) ] ++ folderTests ./instances ++ folderTests ./modules;
+    testSets = [ (removeAttrs (testsIn ./tests) [ "stubs" ]) ] ++ folderTests ./instances ++ folderTests ./modules ++ folderTests ./apps;
     testNamesTwice = lib.attrNames (lib.filterAttrs (_: names: lib.length names > 1)
       (lib.groupBy (name: name) (lib.concatMap lib.attrNames testSets)));
     testFiles = assert lib.assertMsg (testNamesTwice == [ ]) "two tests share a name, which names their check: ${toString testNamesTwice}";
       lib.mergeAttrsList testSets;
     testNames = lib.attrNames testFiles;
-    testOf = name: args: import testFiles.${name} ({ inherit pkgs lib inputs specialArgs; } // args);
+    testDefaults = (import ./tests/lib/lab.nix { inherit pkgs lib specialArgs; }).testDefaults;
+    # a vm test (one with `extend`) gets the lab's bounds; an eval-only check is a plain derivation
+    testOf = name: args: let test = import testFiles.${name} ({ inherit pkgs lib inputs specialArgs; } // args); in
+      if test ? extend then test.extend { modules = [ testDefaults ]; } else test;
     testIsSeeded = name: (builtins.functionArgs (import testFiles.${name})) ? seed;
     # seeds are 16 bit: enough schedules to sample from, few enough to list as attribute names
     seedMax = 65535;
@@ -92,7 +90,7 @@
       packages = (with pkgs; [
         # sops encrypts to the admin YubiKey recipient only through its plugin
         sops age age-plugin-yubikey jq openssl
-        openssh sshpass git curl gh python3 wireguard-tools shellcheck
+        openssh sshpass git curl gh python3 wireguard-tools shellcheck iproute2
       ]) ++ [ pkgsUnfree.terraform ];
     };
 
@@ -112,12 +110,12 @@
     # sync.sh writes `lab.export` to generated/lab.json, the desktop clients' interface (modules/lab-export.nix)
     lab = lab // { export = import ./modules/lab-export.nix { inherit lib lab; }; };
 
-    # one configuration per instance folder (its main.nix) and per generated swarm node (modules/swarm alone);
-    # the hostname comes from the folder, so a host cannot claim another's
+    # one configuration per instance folder (its main.nix) and per generated swarm node (modules/swarm alone); the
+    # hostname comes from the instance record, so a host cannot claim another's
     nixosConfigurations = lib.mapAttrs (_: host: lib.nixosSystem {
-      inherit system specialArgs;
-      modules = [ common ./modules/platform-${host.kind}.nix { networking.hostName = host.hostName; } ]
-        ++ lib.optional (host.main != null) host.main;
+      inherit system;
+      specialArgs = specialArgs // { instance = host; };
+      modules = [ common ./modules/platform-${host.config.vm.guestKind}.nix ] ++ lib.optional (host.main != null) host.main;
     }) lab.hosts;
   };
 }

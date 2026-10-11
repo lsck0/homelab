@@ -2,10 +2,12 @@
 
 Usage: app_builder_test.py <path to app-builder.py>
 """
+import contextlib
 import importlib.util
 import os
 import sys
 import tempfile
+import types
 import unittest
 
 import yaml
@@ -16,6 +18,23 @@ builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)
 
 HINT = {"context": ".", "dockerfile": "Dockerfile", "target": None, "args": {}}
+# modules/upstream's exit status for an outage
+UNAVAILABLE = 75
+UPSTREAMS = {"retry": {"attempts": 3, "backoffS": 5, "probeTimeoutS": 1}, "unavailable": UNAVAILABLE,
+             "registries": {"docker.io": "dockerhub", "ghcr.io": "ghcr"}}
+
+
+@contextlib.contextmanager
+def patched(**fakes):
+    """The builder's functions replaced by fakes for the block."""
+    saved = {name: getattr(builder, name) for name in fakes}
+    for name, fake in fakes.items():
+        setattr(builder, name, fake)
+    try:
+        yield
+    finally:
+        for name, real in saved.items():
+            setattr(builder, name, real)
 
 
 def write(root, path, text):
@@ -189,7 +208,7 @@ class Parallel(unittest.TestCase):
         for name, fake in fakes.items():
             setattr(builder, name, fake)
         try:
-            ctx = {"registry": "r", "loggedIn": False, "buildParallelism": parallelism}
+            ctx = {"registry": "r", "loggedIn": False, "buildParallelism": parallelism, "upstreams": UPSTREAMS}
             spec_ = {"repo": "o/a", "stack": None, "build": {}, "exclude": [], "dashboards": [], "manager": None}
             facts = builder.app_build_deploy(ctx, "a", spec_, "c" * 40)
         finally:
@@ -199,14 +218,53 @@ class Parallel(unittest.TestCase):
         self.assertEqual((facts["built"], facts["reused"]), (len(services), 0))
 
 
+class Locks(unittest.TestCase):
+    """Each app's turn holds its own lock: a busy app delays nobody else."""
+
+    def run_builder(self, state_dir, only):
+        ran = []
+        saved = builder.app_run
+        builder.app_run = lambda ctx, app, spec_, state: ran.append(app) or state
+        try:
+            code = builder.builder_run({}, {"a": {}, "b": {}}, state_dir, only)
+        finally:
+            builder.app_run = saved
+        return code, ran
+
+    def test_the_timer_run_leaves_a_busy_app_to_the_run_at_it(self):
+        with tempfile.TemporaryDirectory() as state_dir:
+            held = builder.app_lock(state_dir, "a", wait=True)
+            try:
+                self.assertIsNone(builder.app_lock(state_dir, "a", wait=False))
+                code, ran = self.run_builder(state_dir, None)
+            finally:
+                held.close()
+            self.assertEqual((code, ran), (0, ["b"]))
+            # positive control: free again, the timer's run takes both
+            self.assertEqual(self.run_builder(state_dir, None), (0, ["a", "b"]))
+
+    def test_a_run_for_one_app_looks_at_it_alone(self):
+        with tempfile.TemporaryDirectory() as state_dir:
+            self.assertEqual(self.run_builder(state_dir, "b"), (0, ["b"]))
+
+
 class Deploy(unittest.TestCase):
-    def deploy(self, manager):
+    def deploy(self, manager, status=0):
+        """The calls stack_deploy makes when the manager's swarm-deploy exits with `status`."""
         calls = []
+
+        def run(args, timeout_s, **kw):
+            calls.append((args, kw.get("input")))
+            if args[0] == "ssh" and status != 0:
+                raise builder.BuildError("ssh failed", status)
+            return types.SimpleNamespace(stdout=f"{status}\n")
+
         saved = builder.process_run
-        builder.process_run = lambda args, timeout_s, **kw: calls.append((args, kw.get("input")))
+        builder.process_run = run
         try:
             with tempfile.TemporaryDirectory() as inbox:
                 ctx = {"inbox": inbox, "deployUnit": "swarm-deploy@", "deployKeyFile": "/k",
+                       "upstreams": UPSTREAMS,
                        "timeouts": {"deployS": 1, "sshConnectS": 1, "sshAliveIntervalS": 1, "sshAliveCountMax": 1}}
                 builder.stack_deploy(ctx, "demo", manager, {"services": {"web": {"image": "x"}}})
                 kept = sorted(os.listdir(inbox))
@@ -219,7 +277,8 @@ class Deploy(unittest.TestCase):
 
     def test_this_hosts_swarm_takes_the_stack_through_its_unit(self):
         calls, kept = self.deploy(None)
-        self.assertEqual(calls, [(["systemctl", "start", "swarm-deploy@demo.service"], None)])
+        self.assertEqual(calls, [(["systemctl", "start", "swarm-deploy@demo.service"], None),
+                                 (["systemctl", "show", "-P", "ExecMainStatus", "swarm-deploy@demo.service"], None)])
         self.assertIn("image: x", kept)
 
     def test_a_guest_swarm_takes_it_over_its_forced_command(self):
@@ -229,6 +288,72 @@ class Deploy(unittest.TestCase):
         self.assertEqual((args[0], args[-2:]), ("ssh", ["root@10.100.0.170", "demo"]))
         self.assertIn("image: x", stdin)
 
+    def test_a_manager_answering_unavailable_is_an_outage_and_any_other_status_a_failure(self):
+        for manager in (None, {"address": "10.100.0.170", "knownHosts": "/kh"}):
+            with self.subTest(manager=manager), self.assertRaises(builder.UpstreamUnavailable):
+                self.deploy(manager, UNAVAILABLE)
+        with self.assertRaises(builder.BuildError):
+            self.deploy({"address": "10.100.0.170", "knownHosts": "/kh"}, 1)
+
+
+class Upstreams(unittest.TestCase):
+    """modules/upstream's contract in python: retried, then the probe decides between an outage and a failure."""
+
+    def setUp(self):
+        self.down = set()
+        self.slept = []
+        self.patch = patched(upstream_reachable=lambda ctx, name: name not in self.down, time_sleep=self.slept.append)
+        self.patch.__enter__()
+        self.ctx = {"registry": "r", "upstreams": UPSTREAMS}
+
+    def tearDown(self):
+        self.patch.__exit__(None, None, None)
+
+    def call(self, failures):
+        """upstream_call over a call failing its first `failures` times; how often it ran."""
+        ran = []
+
+        def call():
+            ran.append(1)
+            if len(ran) <= failures:
+                raise builder.BuildError("down")
+            return "ok"
+
+        return builder.upstream_call(self.ctx, "github", call), len(ran)
+
+    def test_a_blip_is_retried_with_a_doubling_backoff(self):
+        self.assertEqual(self.call(2), ("ok", 3))
+        self.assertEqual(self.slept, [5, 10])
+
+    def test_after_the_last_attempt_the_probe_decides(self):
+        with self.assertRaises(builder.BuildError) as own:
+            self.call(3)
+        self.assertNotIsInstance(own.exception, builder.UpstreamUnavailable)
+        self.down.add("github")
+        with self.assertRaises(builder.UpstreamUnavailable) as outage:
+            self.call(3)
+        self.assertEqual(outage.exception.name, "github")
+
+    def test_an_image_names_its_registry_by_dockers_rule(self):
+        for image, name in [("alpine:3", "dockerhub"), ("alpine/socat:1", "dockerhub"), ("docker.io/library/redis", "dockerhub"),
+                            ("ghcr.io/o/i:1", "ghcr"), ("registry.lsck0.dev/a/web@sha256:0", None), ("localhost:5000/x", None)]:
+            with self.subTest(image=image):
+                self.assertEqual(builder.image_upstream(self.ctx, image), name)
+
+    def test_a_failed_build_is_an_outage_while_what_it_fetches_from_is_down(self):
+        def build_fails(*args):
+            raise builder.BuildError("build failed")
+
+        with tempfile.TemporaryDirectory() as repo, patched(image_build_push=build_fails, content_key=lambda *a: "k",
+                                                            registry_digest=lambda *a: None, log=lambda *a: None):
+            write(repo, "Dockerfile", "FROM alpine:3\n")
+            build = {"dockerfile": os.path.join(repo, "Dockerfile"), "args": {}}
+            for down, raised in ((set(), builder.BuildError), ({"dockerhub"}, builder.UpstreamUnavailable),
+                                 ({"github"}, builder.UpstreamUnavailable)):
+                self.down = down
+                with self.subTest(down=down), self.assertRaises(raised):
+                    builder.service_image(self.ctx, "a", "web", build, repo, {}, {})
+
 
 class ContentKey(unittest.TestCase):
     """The key that decides between a build and a reuse, over a real git checkout."""
@@ -236,7 +361,10 @@ class ContentKey(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.repo = self.tmp.name
-        self.ctx = {"timeouts": {"gitS": 30}}
+        self.ctx = {"timeouts": {"gitS": 30}, "upstreams": UPSTREAMS}
+        self.bases = {"debian:13": "sha256:" + "d" * 64}
+        self.saved = builder.image_base_digest
+        builder.image_base_digest = lambda ctx, image: self.bases[image]
         self.git("init", "-q")
         write(self.repo, "web/Dockerfile", "FROM scratch\nCOPY . /\n")
         write(self.repo, "web/index.html", "v1")
@@ -244,6 +372,7 @@ class ContentKey(unittest.TestCase):
         self.commit()
 
     def tearDown(self):
+        builder.image_base_digest = self.saved
         self.tmp.cleanup()
 
     def git(self, *args):
@@ -281,6 +410,45 @@ class ContentKey(unittest.TestCase):
         self.commit()
         declared = self.key()
         self.assertNotEqual(self.key(args={"GIT_COMMIT": "c2"}), declared)
+
+    def test_a_new_base_image_digest_changes_it(self):
+        write(self.repo, "web/Dockerfile", "FROM debian:13\nCOPY . /\n")
+        self.commit()
+        before = self.key()
+        self.assertEqual(self.key(), before)
+        self.bases["debian:13"] = "sha256:" + "e" * 64
+        self.assertNotEqual(self.key(), before)
+
+
+class Bases(unittest.TestCase):
+    """dockerfile_bases: the images a dockerfile's stages start from, table by table."""
+
+    CASES = [
+        ("FROM scratch\n", {}, []),
+        ("FROM debian:13 AS build\nFROM build\nFROM --platform=linux/amd64 alpine:3\n", {}, ["debian:13", "alpine:3"]),
+        ("ARG BASE=debian:13\nFROM ${BASE}\n", {}, ["debian:13"]),
+        ("ARG BASE=debian:13\nFROM $BASE\n", {"BASE": "alpine:3"}, ["alpine:3"]),
+        ("from node:24 as deps\nfrom deps as run\n", {}, ["node:24"]),
+        ("FROM redis@sha256:" + "f" * 64 + "\n", {}, ["redis@sha256:" + "f" * 64]),
+    ]
+
+    def bases(self, text, args):
+        with tempfile.TemporaryDirectory() as tmp:
+            write(tmp, "Dockerfile", text)
+            return builder.dockerfile_bases(os.path.join(tmp, "Dockerfile"), args)
+
+    def test_cases(self):
+        for text, args, expected in self.CASES:
+            with self.subTest(text=text):
+                self.assertEqual(self.bases(text, args), expected)
+
+    def test_an_argument_without_a_value_is_an_operating_error(self):
+        for text in ("FROM ${BASE}\n", "FROM debian:13\nARG LATE=x\nFROM ${LATE}\n"):
+            with self.subTest(text=text), self.assertRaises(builder.BuildError):
+                self.bases(text, {})
+
+    def test_a_pinned_base_is_its_own_digest(self):
+        self.assertEqual(builder.image_base_digest({}, "redis@sha256:" + "f" * 64), "sha256:" + "f" * 64)
 
 
 if __name__ == "__main__":

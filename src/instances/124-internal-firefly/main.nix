@@ -18,8 +18,7 @@ let
   dataDir = "/var/lib/firefly";
   db = "firefly";
   # the bank import runs at the vm's daily wake
-  importAt = lab.instances."124".config.idle.wakeAt;
-  uiPorts = [ route.port fintsRoute.port ];
+  importAt = lab.instances.${config.homelab.vmid}.config.idle.wakeAt;
   fintsImage = "docker.io/benkl/firefly-iii-fints-importer@sha256:9912f29e7c56587fbee2fceb146efe8f9f6ec924d5569f72aa7336b5c26e2a8e";
   fintsDir = "/var/lib/firefly-fints";
   fintsConfig = "${fintsDir}/homelab.json";
@@ -66,8 +65,6 @@ let
 
     ${retry} 60 5 curl -sf ${local}/health'';
 in {
-  networking.hostName = "vm-124";
-
   homelab.nasMounts = nasMount dataDir "firefly";
 
   sops.secrets.firefly-app-key = {};
@@ -302,11 +299,6 @@ in {
     "d ${fintsDir} 0700 root root -"
   ];
 
-  # the importer ui is behind traefik and authelia like firefly, never raw on the lan
-  networking.firewall.allowedTCPPorts = uiPorts;
-  homelab.ingressOnly = {
-    ports = uiPorts;
-    # no container here uses the default bridge, and the importer must never pass the Remote-Email guard
-    trustContainers = false;
-  };
+  # no container here uses the default bridge, and the importer must never pass the Remote-Email guard
+  homelab.ingressOnly.trustContainers = false;
 }
