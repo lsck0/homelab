@@ -104,6 +104,22 @@ let
   backendsOf = r: lib.filter running (if r.vmid != null then [ (toString r.vmid) ]
     else (lib.findFirst (c: c.apps ? ${r.app}) null (lib.attrValues catalog.clusters)).workerIds);
 
+  # an egress member's rule over every destination outside the private ranges: `ip saddr { members }<through> ip
+  # daddr != { private ranges } <action>`, through naming the interface it is restricted to, empty for none
+  egressRules = lib.filter (m: m != null) (map (builtins.match "ip saddr \\{ ([^}]*) }(.*) ip daddr != \\{ ([^}]*) } (.*)")
+    (lines (router.networking.nftables.tables.egress.content or "")));
+  internetOnly = text: lib.sort lib.lessThan (map lib.trim (lib.splitString "," text)) == lib.sort lib.lessThan net.privateRanges;
+  egressRule = ip: through: action: lib.any (m: inSet ip (lib.elemAt m 0) && lib.elemAt m 1 == through
+    && internetOnly (lib.elemAt m 2) && builtins.match action (lib.elemAt m 3) != null) egressRules;
+  torListeners = name: map (l: if lib.isAttrs l then l else { port = l; }) (lib.toList router.services.tor.settings.${name});
+  torTransPorts = lib.concatMapStringsSep "|" (l: toString l.port) (torListeners "TransPort");
+  torDnsPorts = map (l: "${l.addr}:${toString l.port}") (torListeners "DNSPort");
+  # where coredns sends a client's names: the forward of the server block whose view names its address
+  resolverOf = ip: let
+    block = lib.findFirst (b: lib.hasInfix "'${ip}/32'" b) "" (lib.splitString ".:53 {" router.services.coredns.config);
+    forwards = lib.filter (lib.hasPrefix "forward . ") (map lib.trim (lib.splitString "\n" block));
+  in if forwards == [ ] then null else lib.elemAt (lib.splitString " " (lib.head forwards)) 2;
+
   kea = router.services.kea.dhcp4.settings.subnet4;
   inPool = ip: pool: let bounds = map lib.trim (lib.splitString "-" pool.pool);
     toInt = a: lib.foldl' (acc: o: acc * 256 + lib.toInt o) 0 (lib.splitString "." a); in
@@ -185,6 +201,19 @@ lawsOf {
   # the router's drops come before nixos nat's blanket accept toward the wan
   "router order" = lib.optional (natAccept == null) "the nat module's accept is missing from the forward rules"
     ++ lib.optional (natAccept != null && natAccept < lastDrop) "a drop of the router's forward policy comes after nat's accept";
+
+  # an egress member's internet traffic leaves through its exit or not at all: a vpn member's never through the
+  # house, a tor member's through no interface, its tcp into tor's TransPort and its names to tor's DNSPort
+  "egress killswitch" = lib.concatLists (lib.mapAttrsToList (id: e: let ip = net.ipOf id; in
+    if e.via == "vpn" then lib.optional (!(egressRule ip " oifname \"${net.wan.interface}\"" "counter drop"))
+      "vm-${id} (vpn) may leave through the house: no drop of its internet traffic toward the wan"
+    else lib.optional (!(egressRule ip "" "counter drop"))
+      "vm-${id} (tor) has a direct internet path: no drop of its internet traffic through every interface"
+    ++ lib.optional (!(egressRule ip "" "meta l4proto tcp (counter )?redirect to :(${torTransPorts})"))
+      "vm-${id} (tor): its internet tcp is not redirected into tor's TransPort"
+    ++ lib.optional (!(lib.elem (resolverOf ip) torDnsPorts))
+      "vm-${id} (tor): its names are not resolved by tor's DNSPort"
+  ) lab.egress);
 
   # the router's rendered lease pools, against every static address
   "inventory" = lib.concatLists (lib.mapAttrsToList (id: v:

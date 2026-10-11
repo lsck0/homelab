@@ -58,6 +58,8 @@ let
 
   nfsPorts = [ ports.rpcbind ports.nfs ];
   torPorts = import ./tor-ports.nix;
+  # the guests whose internet traffic leaves through the router's tor (instance.nix `egress`), by zone
+  torMembersByZone = lib.groupBy (id: (net.zoneOf id).name) (lib.attrNames (lib.filterAttrs (_: e: e.via == "tor") lab.egress));
   # the push doors only: no sender outside the internal zone reaches a query api
   appTelemetryPorts = with telemetry.ports; [ journalRemote otlpGrpc otlpHttp pyroscope lokiPush ];
 
@@ -258,7 +260,11 @@ in
       from = all "apps"; tcp = [ ports.dns ]; udp = [ ports.dns ];
       why = "dns for the workers; their addresses are static, no dhcp";
     }
-  ];
+  ]
+  ++ lib.mapAttrsToList (zone: ids: {
+    from = hosts ids; tcp = [ torPorts.trans ];
+    why = "the tor egress members in ${zone}: their internet tcp, redirected into tor's transparent port";
+  }) torMembersByZone;
 
   # -------------------------------------------------------------------------------------------------------------
   # PORT FORWARDS: the house's public address, forwarded

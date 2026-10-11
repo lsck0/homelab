@@ -34,7 +34,7 @@ let
     nasClients = lib.attrNames lab.nasClients;
     # the edge's way to the workers: the public http routes of the shared swarm's apps
     appsPorts = lib.unique (map (r: r.port) (lib.filter (r: r.app != null) (lib.attrValues lab.catalog.external)));
-    vpnMembers = map (e: ip (toString e.vmid)) (lib.attrValues lab.egress);
+    vpnMembers = map (e: ip (toString e.vmid)) (lib.filter (e: e.via == "vpn") (lib.attrValues lab.egress));
     appsNodes = zoneAddresses.apps;
     stateWorker = ip lab.catalog.swarm.stateId;
   };

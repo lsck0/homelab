@@ -149,6 +149,18 @@ tests = [
         ],
     },
     {
+        "name": "upstream: the router's tor without a circuit for 15 minutes is tor unavailable, back with one",
+        "interval": "5m",
+        "input_series": [
+            {"series": f'homelab_tor_circuit_established{{{NODE},vm="router"}}', "values": "1x3 0x6 1x3"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "30m", "alertname": "tor_unavailable", "exp_alerts": []},
+            {"eval_time": "40m", "alertname": "tor_unavailable", "exp_alerts": [expect("tor_unavailable")]},
+            {"eval_time": "65m", "alertname": "tor_unavailable", "exp_alerts": []},
+        ],
+    },
+    {
         "name": "storage: a linear decline is forecast, every thin pool names its volume group",
         "interval": "1m",
         "input_series": [

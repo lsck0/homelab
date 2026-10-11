@@ -327,7 +327,10 @@ let
       "${where}: idle needs a zone whose ingress wakes it; ${i.zone} has none"
     # a static address inside the zone's lease pool flaps with whatever the dhcp server leased it to
     ++ lib.optional (pool != null && lib.toInt i.id >= pool.first && lib.toInt i.id <= pool.last)
-      "${where}: vm-${i.id}'s address lies in zone ${i.zone}'s dhcp pool ${toString pool.first}..${toString pool.last}";
+      "${where}: vm-${i.id}'s address lies in zone ${i.zone}'s dhcp pool ${toString pool.first}..${toString pool.last}"
+    # tor has no forwarded port: nothing on the internet can open a connection to a tor member
+    ++ lib.optional (i.config.egress != null && i.config.egress.via != "vpn" && i.config.egress.inbound)
+      "${where}: egress.inbound is the vpn exit's forwarded port; ${i.config.egress.via} has none";
 
   problems = lib.filter (p: p != null) (map folderProblemOf allFolders)
     ++ zoneProblems
