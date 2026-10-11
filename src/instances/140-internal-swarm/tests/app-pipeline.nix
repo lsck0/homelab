@@ -432,6 +432,8 @@ pkgs.testers.runNixOSTest {
         assert redeploy("hello", "wrong") == "401"
         # a fresh builder: nothing local to build from, the registry holds the same content
         vm_140.succeed(f"{APPBUILD_DOCKER} image prune -af")
+        # the redeploy runs the normal look (review 2 #74): it finds this commit, ahead of the poll
+        commit("hello", {"${watched}/NOTES.md": "notes for ci\n"}, "ci notes")
         since = vm_140.succeed("date +%s").strip()
         assert redeploy("hello", token) == "202"
         assert redeploy("hello", token) == "429"
