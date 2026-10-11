@@ -40,6 +40,14 @@ Two separate things:
   `src/instances/119-internal-archbuild/lib/archrepo-list.sh <arch-dotfiles checkout> <lsck0.db>`: it prints
   the missing names, nothing when complete.
 - Never stop it mid-publish. A deploy does not restart it (`restartIfChanged = false`).
+- Outages: the AUR, the Arch mirrors, GitHub and the keyserver are probed before a night and every call to them is
+  retried (modules/upstream). While one stays down the night is skipped, not failed: nothing is published,
+  `status.json` gets `unavailable: <name>` and `skipped`, `status.txt` a `skipped:` line, vm-119 exports
+  `homelab_archrepo_unavailable{upstream}`; the next night recovers by itself. Grafana's "Upstream unavailable"
+  alert names the service.
+- A recipe starts only while its whole bound (3h build, kill grace, fetch) still fits the night's budget (the
+  unit's 20h less 3h for the snapshot and publish); a later one shows as failed "deferred to the next night" and
+  keeps its last build.
 - Output lands on the NAS at `/srv/nas/bulk/archrepo` (vm-109 serves it on :8090 for the LAN), and is
   pushed with rsync to vm-210 (`mirror.lsck0.dev`, public, plain http, signed packages).
 
