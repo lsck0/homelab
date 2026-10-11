@@ -260,8 +260,8 @@ let
   # cscli makes the key; beside crowdsec's database, so a wiped database takes its key along
   bouncerKeyFile = "${crowdsecDir}/data/${bouncerName}.key";
 
-  # a start never fetches or upgrades a rule
-  crowdsecHub = import ./lib/crowdsec-hub.nix { inherit pkgs; };
+  # a start never fetches or upgrades a rule or its data
+  crowdsecHub = import ./lib/crowdsec-hub.nix { inherit pkgs lib; };
   # the owner's choice: the community api (CAPI) gets each ban's attacker ip, scenario and time, and returns the
   # community blocklist; an outage keeps the last decisions
   crowdsecCommunity = true;
@@ -799,6 +799,7 @@ in {
         cp -r --no-preserve=mode ${crowdsecHub.hub} ${crowdsecDir}/config/hub
         # the image's entrypoint refreshes only an index older than a day
         touch ${crowdsecDir}/config/hub/.index.json
+        cp -r --no-preserve=mode ${crowdsecHub.data}/. ${crowdsecDir}/data/
         ${lib.optionalString (cfg.crowdsecBouncer.whitelistCidrs != [ ]) ''
           install -d -m 0755 ${crowdsecDir}/config/parsers/s02-enrich
           install -m 0644 ${whitelistParser} ${crowdsecDir}/config/parsers/s02-enrich/homelab-whitelist.yaml
