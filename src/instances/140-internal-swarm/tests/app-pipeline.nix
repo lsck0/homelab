@@ -443,10 +443,11 @@ pkgs.testers.runNixOSTest {
         assert deploy_ok("hello")
 
     with subtest("the registry down: the deploy fails, the old version serves, the retry after the backoff lands"):
+        live = state("hello")["sha"]
         vm_118.succeed("systemctl stop podman-registry")
         sha_d = commit("hello", {"${context}/www/index.html": "v3\n"}, "v3")
         hello_state = build(ok=False)["hello"]
-        assert hello_state["sha"] == sha_c and hello_state["failure"]["sha"] == sha_d, hello_state
+        assert hello_state["sha"] == live and hello_state["failure"]["sha"] == sha_d, hello_state
         serves("v2")
         vm_118.succeed("systemctl start podman-registry")
         vm_118.wait_for_open_port(5000)
