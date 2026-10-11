@@ -154,6 +154,12 @@ Turning it on the first time (the generation that brings it):
 4. A guest that cannot talk any more: `pve-firewall stop` on the host, then compare the guest's address with its
    ipset (`pvesh get /nodes/<node>/qemu/<vmid>/firewall/ipset/ipfilter-net0`); see Recovery.
 
+Rollback: `ssh root@<proxmox> pve-firewall stop` (ssh stays open to the whole house lan) lifts every rule until the
+host reboots; `pvesh set /cluster/firewall/options --enable 0` keeps it off across reboots until the next `sync.sh`
+turns it on again. Without ssh: the host's console, the same commands. `src/tests/terraform-law.nix` fails the build
+while the declared firewall is off, admits the api from anyone but the operators and the router, or closes ssh to
+the lan.
+
 ### Proxmox login
 
 The `lldap` realm binds to lldap over ldaps (vm-101, port 6360), verified against the certificate the guest made for
@@ -166,7 +172,11 @@ head -c 20 /dev/urandom | base32                     # the key; add it to an aut
 pveum user modify <user>@lldap --keys <base32 key>   # on the Proxmox host, as root
 ```
 
-A realm user without a key cannot log in. root@pam keeps its own password (`proxmox-root-pass`).
+Set the key of every realm user who logs in before the deploy that turns the realm's TOTP on: the key can be set
+any time, and a realm user without one cannot log in. root@pam is outside the realm and keeps its own password
+(`proxmox-root-pass`, `sops -d src/secrets/shared.sops.json`), the way back in. lldap's own `admin` takes its password
+from `lldap-admin-password` at every start: rotate it with `sops unset
+src/instances/101-internal-authelia/secrets.sops.json '["lldap-admin-password"]'`, then `./sync.sh` generates a new one.
 
 ## Secrets
 
