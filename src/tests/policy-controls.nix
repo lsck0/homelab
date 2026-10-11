@@ -34,7 +34,7 @@ let
   network = law: tampered: { file = "network"; marker = "${law}: "; inherit tampered; };
   controls = {
     defence-chain = network "defence chain" (tamper "200-external-traefik" (traefik ++ [ "routers" "share-tls" ])
-      (edgeRouter // { middlewares = lib.tail edgeRouter.middlewares; }));
+      (edgeRouter // { middlewares = lib.remove "client-ip" edgeRouter.middlewares; }));
     sso-routes = network "sso routes" (tamper "100-internal-traefik" (traefik ++ [ "routers" "grafana-tls" "middlewares" ])
       (lib.remove "authelia" (http "100-internal-traefik").routers.grafana-tls.middlewares));
     apps-zone = network "apps zone" (tamper "100-internal-traefik" (traefik ++ [ "routers" "grafana-tls" "rule" ]) "Host(`grafana.lsck0.dev`)");

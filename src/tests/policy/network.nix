@@ -15,25 +15,26 @@ let
   websecure = config: lib.filterAttrs (_: r: lib.elem "websecure" (r.entryPoints or [ ])) (httpOf config).routers;
   lawsOf = laws: lib.concatLists (lib.mapAttrsToList (name: law: map (v: "${name}: ${v}") law) laws);
 
-  # the defences every public request passes, in order; `cloudflare-only` may sit after the strip. Each limit runs
-  # per client, then per route (one route's budget over all its clients, modules/limits `route`). The body limit
-  # buffers before the retry: a retry inside it would resend a consumed body, empty
+  # the defences every public request passes, in order; `cloudflare-only` may lead, since it judges the socket peer
+  # that client-ip replaces. Each limit runs per client, then per route (one route's budget over all its clients,
+  # modules/limits `route`). The body limit buffers before the retry: a retry inside it would resend a consumed body
   chainLaw = host: config: lib.concatLists (lib.mapAttrsToList (name: r:
     let
       m = r.middlewares or [ ];
       # padded, so a short chain fails the comparison instead of the evaluation
       padded = m ++ lib.genList (_: "") 10;
-      rest = lib.drop (if lib.elemAt padded 2 == "cloudflare-only" then 3 else 2) padded;
+      chain = if lib.head padded == "cloudflare-only" then lib.tail padded else padded;
+      rest = lib.drop 2 chain;
       limits = [ "rate-limit" "route-rate-limit" "inflight-limit" "route-inflight-limit" ];
       afterLimits = lib.drop (lib.length limits + 1) rest;
       afterBody = if lib.hasPrefix "body-limit-" (lib.head afterLimits) then lib.tail afterLimits else afterLimits;
     in
-    lib.optional (lib.take 2 m != [ "client-ip" "strip-client-headers" ]
+    lib.optional (lib.take 2 chain != [ "client-ip" "strip-client-headers" ]
       || !(lib.hasPrefix "crowdsec" (lib.head rest))
       || lib.take (lib.length limits) (lib.tail rest) != limits
       || lib.head afterBody != "retry-upstream"
       || !(lib.hasPrefix "secure-headers" (lib.elemAt afterBody 1)))
-      "${host} router ${name}: chain ${toString m} is not client-ip, strip-client-headers, [cloudflare-only], crowdsec*, ${toString limits}, [body-limit-*], retry-upstream, secure-headers*"
+      "${host} router ${name}: chain ${toString m} is not [cloudflare-only], client-ip, strip-client-headers, crowdsec*, ${toString limits}, [body-limit-*], retry-upstream, secure-headers*"
   ) (websecure config));
 
   ssoRoutes = lib.filterAttrs (_: r: r.off.sso == null) catalog.internal;

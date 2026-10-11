@@ -510,11 +510,12 @@ let
   limitsBody = r: on r "bodyLimit" && lib.any (m: lib.elem m methodsWithBody) (r.methods or methodsWithBody);
 
   # every websecure router's chain, ahead of its own middlewares; the strip runs before a router's own authelia sets
-  # the identity, cloudflare-only refuses a direct caller before the waf spends anything on it
+  # the identity, cloudflare-only refuses a direct caller by its socket peer, before client-ip makes the client the
+  # remote address and before the waf spends anything on it
   chainOf = name: r:
-    [ "client-ip" "strip-client-headers" ]
     # a route kept off the internet admits private sources only, cloudflare's included in none
-    ++ lib.optional (cfg.cloudflareOnly.enable && on r "cloudflare" && on r "internet") "cloudflare-only"
+    lib.optional (cfg.cloudflareOnly.enable && on r "cloudflare" && on r "internet") "cloudflare-only"
+    ++ [ "client-ip" "strip-client-headers" ]
     # scanners must reach the labyrinth, past the waf
     ++ lib.optional (cfg.crowdsecBouncer.enable && on r "crowdsec")
       (if on r "waf" && name != "honeypot-tls" then "crowdsec" else "crowdsec-noappsec")
