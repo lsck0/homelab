@@ -230,12 +230,13 @@ pkgs.testers.runNixOSTest {
                 vm_140.succeed(f"docker node update --availability {value} {worker}")
         def forced():
             return vm_140.succeed("docker service inspect demo_web --format '{{.Spec.TaskTemplate.ForceUpdate}}'").strip()
+        # the swarm leaves a task pending when no node could take it, also once the nodes are back (vm-140, 2026-10-08)
         availability("drain")
         vm_140.wait_until_succeeds("docker service ps demo_web --filter desired-state=running --format '{{.CurrentState}}' | grep -q ^Pending", timeout=60)
+        availability("active")
         before = forced()
         vm_140.succeed("systemctl restart --no-block swarm-converge-demo.service")
         vm_140.wait_until_succeeds("journalctl -b -u swarm-converge-demo | grep -q 'rescheduling demo_web'", timeout=60)
-        availability("active")
         vm_140.wait_until_succeeds("systemctl is-active swarm-converge-demo.service", timeout=300)
         assert forced() != before, before
         serves(${toString port}, "demo v2")
