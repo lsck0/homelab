@@ -65,6 +65,8 @@ pkgs.testers.runNixOSTest {
     imports = [ (lab.guest "200" { flat = true; instance = ../../../instances/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
     virtualisation.memorySize = 1536;
     services.journald.upload.enable = lib.mkForce false;
+    # the test runs the reaper itself: its own timer would put lazy to sleep before the test looks
+    systemd.timers.ondemand-reaper.wantedBy = lib.mkForce [ ];
   };
   nodes.world = {
     imports = [ (lab.multi { addresses = [ "10.100.0.1/8" "10.200.0.1/8" "10.250.0.1/8" "${cloudflare}/13" ]; }) ];
