@@ -41,6 +41,9 @@ let
   mirrorAt = "01:15";
   nasDir = name: "/srv/${name}-nas";
   generationFile = ".generation";
+  # rsync's "some files vanished before they could be transferred": the app replaced a file (home assistant's
+  # .storage/*.new renames) while the mirror copied the rest, which is complete
+  rsyncVanishedStatus = 24;
   # nas-restore (109-internal-nas lib/kopia.nix) writes the generation it made here
   restoredFile = ".restored";
   excludes = s: lib.concatMapStringsSep " " (e: "--exclude ${lib.escapeShellArg e}") (s.exclude ++ [ generationFile restoredFile ]);
@@ -130,7 +133,10 @@ in {
             echo "${name}: generation ''${local_gen:-none} here, ''${nas_gen:-none} on the nas: not mirroring (${name}-seed says why)"
             exit 1
           fi
-          rsync -a --delete ${excludes s} ${lib.concatMapStringsSep " " (f: "--exclude ${lib.escapeShellArg f}") (lib.concatMap sqliteFilesOf s.sqlite)} ${s.path}/ ${nasDir name}/
+          status=0
+          rsync -a --delete ${excludes s} ${lib.concatMapStringsSep " " (f: "--exclude ${lib.escapeShellArg f}") (lib.concatMap sqliteFilesOf s.sqlite)} ${s.path}/ ${nasDir name}/ \
+            || status=$?
+          if [ "$status" != 0 ] && [ "$status" != ${toString rsyncVanishedStatus} ]; then exit "$status"; fi
           for db in ${lib.concatMapStringsSep " " (g: "${s.path}/${g}") s.sqlite}; do
             [ -f "$db" ] || continue
             copy=${nasDir name}/''${db#${s.path}/}

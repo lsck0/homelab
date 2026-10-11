@@ -110,7 +110,8 @@ pkgs.testers.runNixOSTest {
         machine.fail("test -e /var/lib/node-exporter-textfile/backup_verify_offsite.prom")
 
     with subtest("web UI answers"):
-        machine.succeed("curl -sf http://127.0.0.1:51515/ | grep -qi kopia")
+        machine.fail("curl -sf http://127.0.0.1:51515/")
+        machine.succeed("curl -sf -u \"kopia:$(cat /run/secrets/kopia-server-password)\" http://127.0.0.1:51515/ | grep -qi kopia")
 
     with subtest("init is idempotent"):
         machine.succeed("systemctl restart kopia-init.service kopia-server.service")

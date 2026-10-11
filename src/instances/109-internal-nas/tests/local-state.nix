@@ -11,6 +11,11 @@ let
   local = "/var/lib/demo";
   nasCopy = "/srv/${name}-nas";
   share = "/srv/nas/data/${name}";
+  # rsync as shipped, ending as when the app replaced a file mid-copy (exit 24) while /tmp/vanish exists
+  vanishingRsync = pkgs.writeShellScriptBin "rsync" ''
+    ${pkgs.rsync}/bin/rsync "$@" || exit $?
+    if [ -e /tmp/vanish ]; then exit 24; fi
+  '';
 in
 pkgs.testers.runNixOSTest {
   name = "local-state";
@@ -31,6 +36,7 @@ pkgs.testers.runNixOSTest {
       wantedBy = [ "multi-user.target" ];
       serviceConfig = { Type = "oneshot"; RemainAfterExit = true; ExecStart = "${pkgs.coreutils}/bin/true"; };
     };
+    systemd.services."${name}-mirror".path = lib.mkBefore [ vanishingRsync ];
     specialisation.dropped.configuration.homelab.localState = lib.mkForce { };
     # the layout before localState: the app's state directory is the share itself
     specialisation.onShare.configuration = { nasMount, ... }: {
@@ -63,6 +69,12 @@ pkgs.testers.runNixOSTest {
     with subtest("the mirror copies local data to the nas"):
         vm_121.succeed("echo v1 > ${local}/state.txt && systemctl start ${name}-mirror")
         assert vm_109.succeed("cat ${share}/state.txt").strip() == "v1"
+
+    with subtest("a file the app replaces mid-copy does not fail the mirror"):
+        vm_121.succeed("echo v1b > ${local}/state.txt && touch /tmp/vanish && systemctl start ${name}-mirror && rm /tmp/vanish")
+        assert vm_109.succeed("cat ${share}/state.txt").strip() == "v1b"
+        vm_121.succeed("grep -q 'state=\"${name}\"' /var/lib/node-exporter-textfile/local_state_${name}.prom")
+        vm_121.succeed("echo v1 > ${local}/state.txt && systemctl start ${name}-mirror")
 
     with subtest("a kopia restore reaches the guest; the mirror reseeds instead of overwriting it"):
         vm_109.succeed("nas-restore now")
