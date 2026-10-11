@@ -55,14 +55,15 @@ Ports and addresses are defined once in `src/modules/telemetry.nix`; rules, cont
   Silence: `POST localhost/api/alertmanager/grafana/api/v2/silences` (same way) with matchers, startsAt, endsAt,
   createdBy, comment.
 - The `watchdog` rule fires on purpose, always: it posts to ntfy topic `homelab-heartbeat` every 5 minutes, and
-  vm-203 alerts on `homelab-alerts` when that stops (vm-105 down, alerting stalled, Prometheus down). Never
+  vm-203 alerts on `homelab-alerts` when that stops (vm-105 down, alerting stalled, Prometheus down), and pings
+  the off-site dead man's switch while it arrives, which pages the owner when the whole lab is down. Never
   silence it.
-- Tempo (traces) OTLP at 10.100.0.105:4317/4318 and Pyroscope (profiles) at :4040, 14 days, one tenant per app:
-  every request carries `X-Scope-OrgID: app-<app>` (the swarm injects it into the app's containers as
-  `OTEL_EXPORTER_OTLP_HEADERS`), each tenant 1 MiB/s (burst 4 MiB) of each; above that, 429 for that app alone.
-  Datasources "Tempo <app>", "Pyroscope <app>", "Loki <app>". Span metrics (`traces_spanmetrics_*`,
-  `traces_service_graph_*`, label `tenant`) land in Prometheus.
-  Read one trace: `curl -s -H 'X-Scope-OrgID: app-wat' http://10.100.0.105:3200/api/traces/<id>`.
+- Tempo (traces) OTLP at 10.100.0.105:4317/4318 and Pyroscope (profiles) at :4040, push only, 14 days, one tenant
+  per app: an app's containers send to their node's relay (172.17.0.1, same ports), which names the tenant
+  `app-<app>` from the sending container's address, whatever the app claims; each tenant 1 MiB/s (burst 4 MiB) of
+  each, above that 429 for that app alone. Datasources "Tempo <app>", "Pyroscope <app>", "Loki <app>". Span metrics
+  (`traces_spanmetrics_*`, `traces_service_graph_*`, label `tenant`) land in Prometheus.
+  Read one trace, on vm-105: `curl -s -H 'X-Scope-OrgID: app-wat' http://127.0.0.1:3200/api/traces/<id>`.
 - Browsers: `<host>/otlp/` on each app's own origin reaches the frontend intake (:4319, from the ingresses only),
   which keeps allow-listed attributes (no cookies, query strings or form data) and files them under the app's
   tenant: traces to Tempo, logs to Loki, metrics (label `tenant`) to Prometheus.
@@ -71,8 +72,10 @@ Ports and addresses are defined once in `src/modules/telemetry.nix`; rules, cont
   (builder), `app_swarm_deploy_failed` (manager), `app_postgres_down`, `app_redis_down`, `app_<app>_walg_stale`;
   an app asleep (idle) is not down. Builds: `archrepo_missing`, `archrepo_held_back` (vm-119's nightly repo). Disk: `disk_full` (90%, every ext4 data fs),
   `disk_critical` (95%, telegram), `disk_fill_predicted`, `thinpool_*` (Proxmox thin pools, per `vg`),
-  `disk_health` and `nvme_wear` (Proxmox SMART and NVMe collectors). Monitoring: `monitoring_unit_down`,
-  `logs_not_arriving`, `promtail_dropping`.
+  `disk_health`, `smartd_warning`, `nvme_wear`, `nvme_critical_warning`, `nvme_temperature` (Proxmox SMART and NVMe
+  collectors). Monitoring: `monitoring_unit_down`, `logs_not_arriving`, `promtail_dropping`, `notifications_failing`
+  (a channel), `deadman_unavailable` (the off-site switch), `ossec_down` (the host's intrusion detection).
+  Third parties: `upstream_unavailable` per service of `src/lab/upstreams.nix`; its callers keep their last state.
 
 When the owner asks "is everything ok": query `up == 0`, active alerts, disk
 space below 10 %, backup age, then summarise in a few lines.
