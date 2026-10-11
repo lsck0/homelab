@@ -12,4 +12,6 @@
   dockerhub.url = "https://registry-1.docker.io/v2/";
   ghcr.url = "https://ghcr.io/v2/";
   crowdsec.url = "https://hub-data.crowdsec.net";
+  arxiv.url = "https://rss.arxiv.org";
+  trmnl.url = "https://trmnl.com/api/plugin_settings";
 }
