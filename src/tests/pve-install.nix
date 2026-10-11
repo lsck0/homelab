@@ -5,7 +5,7 @@
 # the converge. No network.
 { pkgs, ... }:
 pkgs.runCommand "pve-install" {
-  nativeBuildInputs = with pkgs; [ bash jq coreutils gnugrep diffutils ];
+  nativeBuildInputs = with pkgs; [ bash jq coreutils gnugrep diffutils lvm2 ];
 } ''
   bash ${./pve_install_test.sh} ${../scripts/pve-install.sh}
   touch $out

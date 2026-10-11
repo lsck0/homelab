@@ -73,6 +73,12 @@ API_CUSTOM_CERT=/etc/pve/local/pveproxy-ssl.pem
 # the nas guest's hookscript enables it only around its own start and stop
 BULK_HOOK_NAME=homelab-bulk.sh
 BULK_HOOK=/var/lib/vz/snippets/$BULK_HOOK_NAME
+# pvestatd's own lvm view (LVM_SYSTEM_DIR), which never reads the bulk disk's labels
+PVESTATD_LVM_DIR=/etc/lvm-pvestatd
+PVESTATD_DROPIN_DIR=/etc/systemd/system/pvestatd.service.d
+DISK_BY_ID_DIR=/dev/disk/by-id
+# pve-manager's own global_filter: zfs zvols and ceph rbds are never pvs
+PVE_LVM_REJECTS=('r|/dev/zd.*|' 'r|/dev/rbd.*|')
 # of the bulk disk, the thin pool takes this much; the rest keeps full thin metadata from wedging the pool
 BULK_POOL_EXTENTS=99%FREE
 OSSEC_VERSION=3.8.0
@@ -390,8 +396,52 @@ api_cert_converge() {
 # STORAGE
 # -----------------------------------------------------------------------------
 
+# pvestatd_lvm_render <name>...: pvestatd's lvm.conf, rejecting every name of the bulk pv; written whole, never an edit
+# of the host's lvm.conf, whose layout pve-manager owns
+pvestatd_lvm_render() {
+  local rejects=("${PVE_LVM_REJECTS[@]}") name list
+  for name in "$@"; do rejects+=("r|^$name\$|"); done
+  printf -v list '"%s", ' "${rejects[@]}"
+  echo "# scripts/pve-install.sh: pvestatd's lvm view, which never reads the bulk disk"
+  echo "devices {"
+  echo "  global_filter = [ ${list%, } ]"
+  echo "}"
+}
+
+# pvestatd_lvm_check <dir> <bulk pv>: lvm under that config reads a filter rejecting the pv, still sees the pve group
+# and sees no bulk pv
+pvestatd_lvm_check() {
+  local filter groups
+  filter=$(LVM_SYSTEM_DIR=$1 lvmconfig devices/global_filter) \
+    || { echo "ERROR: lvm cannot read pvestatd's config $1/lvm.conf." >&2; return 1; }
+  [[ "$filter" == *"\"r|^$2\$|\""* ]] \
+    || { echo "ERROR: pvestatd's lvm filter does not reject $2: $filter" >&2; return 1; }
+  groups=$(LVM_SYSTEM_DIR=$1 pvs --noheadings -o vg_name | tr -d ' ')
+  grep -qx pve <<<"$groups" || { echo "ERROR: under pvestatd's lvm config the pve volume group is gone." >&2; return 1; }
+  ! grep -qx bulk <<<"$groups" || { echo "ERROR: pvestatd's lvm config does not reject the bulk pv." >&2; return 1; }
+}
+
+# disabled or not, pvestatd's lvm scans for local-lvm read every pv label, the hdd's too: it runs with its own lvm
+# config, rebuilt from the bulk pv's names on every run and checked before it replaces the last one
+pvestatd_lvm_converge() {
+  local pv names=() name new=$PVESTATD_LVM_DIR.new
+  pv=$(pvs --noheadings -o pv_name,vg_name | awk '$2 == "bulk" { print $1 }')
+  [ -n "$pv" ] || { echo "ERROR: the bulk volume group has no pv." >&2; exit 1; }
+  for name in "$pv" "$DISK_BY_ID_DIR"/*; do
+    if [ "$(readlink -f "$name")" = "$(readlink -f "$pv")" ]; then names+=("$name"); fi
+  done
+  rm -rf "$new"
+  install -d -m 755 "$new"
+  pvestatd_lvm_render "${names[@]}" > "$new/lvm.conf"
+  pvestatd_lvm_check "$new" "$pv" || { rm -rf "$new"; exit 1; }
+  if cmp -s "$new/lvm.conf" "$PVESTATD_LVM_DIR/lvm.conf"; then rm -rf "$new"
+  else rm -rf "$PVESTATD_LVM_DIR" && mv "$new" "$PVESTATD_LVM_DIR"; fi
+  install -d "$PVESTATD_DROPIN_DIR"
+  printf '[Service]\nEnvironment=LVM_SYSTEM_DIR=%s\n' "$PVESTATD_LVM_DIR" \
+    | file_converge "$PVESTATD_DROPIN_DIR/homelab-no-hdd.conf" 644 unit_restart pvestatd
+}
+
 bulk_converge() {
-  local pv rejects
   if [ -n "$BULK_DISK" ] && ! vgs bulk >/dev/null 2>&1; then
     [ -b "$BULK_DISK" ] || { echo "ERROR: the bulk disk $BULK_DISK is not present." >&2; exit 1; }
     # never wipe a disk holding a filesystem
@@ -418,19 +468,7 @@ HOOK
   install -d /etc/systemd/system/pve-guests.service.d
   printf '[Service]\nExecStartPre=/usr/sbin/pvesm set bulk --disable 0\n' \
     | file_converge /etc/systemd/system/pve-guests.service.d/homelab-bulk.conf 644 systemctl daemon-reload
-  # disabled or not, pvestatd's lvm scans for local-lvm read every pv label, the hdd's too: its own lvm config
-  # rejects every name of the bulk pv, rebuilt from the real one each run
-  pv=$(pvs --noheadings -o pv_name,vg_name | awk '$2 == "bulk" { print $1 }')
-  rejects=$(for n in "$pv" /dev/disk/by-id/*; do
-    if [ "$(readlink -f "$n")" = "$(readlink -f "$pv")" ]; then printf ',"r|^%s$|"' "$n"; fi
-  done)
-  rm -rf /etc/lvm-pvestatd.new && cp -a /etc/lvm /etc/lvm-pvestatd.new
-  sed -i "s#^\(\s*global_filter=\[.*\)\]#\1$rejects]#" /etc/lvm-pvestatd.new/lvm.conf
-  LVM_SYSTEM_DIR=/etc/lvm-pvestatd.new vgs pve >/dev/null
-  rm -rf /etc/lvm-pvestatd && mv /etc/lvm-pvestatd.new /etc/lvm-pvestatd
-  install -d /etc/systemd/system/pvestatd.service.d
-  printf '[Service]\nEnvironment=LVM_SYSTEM_DIR=/etc/lvm-pvestatd\n' \
-    | file_converge /etc/systemd/system/pvestatd.service.d/homelab-no-hdd.conf 644 unit_restart pvestatd
+  pvestatd_lvm_converge
 
   # terraform creates the nas guest after the first run; the run after it hooks the guest. A running guest keeps
   # the pool as its hookscript's pre-start left it until it stops.
