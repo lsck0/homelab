@@ -248,6 +248,30 @@ tests += [
         ],
     },
     {
+        "name": "alert path: telegram's outage is its upstream alert alone, its failed deliveries add none",
+        "interval": "1m",
+        "input_series": [
+            {"series": 'grafana_alerting_notifications_failed_total{integration="telegram",component="grafana"}', "values": "0+1x40"},
+            {"series": 'probe_success{job="upstream",upstream="telegram",instance="https://api.telegram.org"}', "values": "0x40"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "30m", "alertname": "notifications_failing", "exp_alerts": []},
+            {"eval_time": "30m", "alertname": "upstream_unavailable",
+             "exp_alerts": [expect("upstream_unavailable", job="upstream", upstream="telegram", instance="https://api.telegram.org")]},
+        ],
+    },
+    {
+        "name": "intrusion detection: ossec down on the host pages after three runs, a running one does not",
+        "interval": "5m",
+        "input_series": [
+            {"series": 'homelab_ossec_up{vm="proxmox"}', "values": "1 1 0 0 0 0 0"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "15m", "alertname": "ossec_down", "exp_alerts": []},
+            {"eval_time": "30m", "alertname": "ossec_down", "exp_alerts": [expect("ossec_down", vm="proxmox")]},
+        ],
+    },
+    {
         "name": "disks: a smartd warning pages while smartd repeats it, and ends a day after the last one",
         "interval": "1h",
         "input_series": [
