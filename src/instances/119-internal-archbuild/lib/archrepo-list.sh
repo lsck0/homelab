@@ -4,7 +4,8 @@
 # usage: archrepo-list.sh <dotfiles dir> [<sync db>]
 #
 # The snapshot serves every machine, so the list is the union over all of them: the packages.txt of every module
-# (arch-dotfiles scripts/lib/platform.sh platform_groups_all: a module is a configs/<module>/ with one) plus the
+# (arch-dotfiles scripts/lib/platform.sh platform_groups_all: a module is a configs/<module>/ with one) and the
+# packages.native.txt beside it (the hardware-only half platform_packages reads on every form factor but wsl), plus the
 # EXTRA_PACKAGES of every platforms/*.sh. A manifest is read like install.sh read_manifest does: one name per line,
 # `#` comments, trailing whitespace and blank lines dropped. flatpacks.txt and nixpkgs.txt are not pacman packages.
 # Prints the names sorted and unique, one per line.
@@ -24,6 +25,7 @@ DOTFILES=${1:?arch-dotfiles checkout}
 DB=${2:-}
 MODULES=configs
 MANIFEST=packages.txt
+NATIVE_MANIFEST=packages.native.txt
 PLATFORMS=platforms
 # makepkg's pkgname rule: alphanumerics and @._+-, not starting with a hyphen or a dot
 NAME_PATTERN='^[a-z0-9@_+][a-z0-9@._+-]*$'
@@ -63,6 +65,11 @@ db_provided() {
 names=()
 manifests=("$DOTFILES/$MODULES"/*/"$MANIFEST")
 (( ${#manifests[@]} > 0 )) || die "no $MODULES/<module>/$MANIFEST in $DOTFILES"
+for file in "${manifests[@]}"; do
+  native=${file%/*}/$NATIVE_MANIFEST
+  # a dangling link counts, so it fails as unreadable instead of dropping its names
+  if [ -e "$native" ] || [ -L "$native" ]; then manifests+=("$native"); fi
+done
 for file in "${manifests[@]}"; do
   entries=$(manifest_read "$file") || die "cannot read $file"
   names_add "$file" "$entries"
