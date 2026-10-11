@@ -6,7 +6,11 @@ let
   stateDir = "/var/lib/homepage";
   containerPort = 3000;
   # read-only behind nginx on vm-105: the widgets only query
-  prometheus = (import ../../modules/telemetry.nix { inherit lib inventory; }).urls.prometheus;
+  telemetry = import ../../modules/telemetry.nix { inherit lib inventory; };
+  inherit (telemetry.urls) prometheus;
+  # only the builder's own deploy metric counts, as in vm-105's alert
+  builderVm = telemetry.vmName catalog.builder;
+  icons = import ./lib/icons.nix { inherit lib pkgs; };
   hostUrl = host: "https://${net.fqdn host}";
   urlOf = route: hostUrl routes.${route}.host;
 
@@ -87,7 +91,7 @@ let
       { label = "Nodes"; query = "count(up{job=\"${cadvisorJob}\"} == 1) or vector(0)"; format.suffix = "/${toString nodeCount}"; }
       { label = "Tasks"; query = "count(container_last_seen${everyApp}) or vector(0)"; }
       { label = "Memory"; query = "sum(container_memory_working_set_bytes${everyApp})"; format.type = "bytes"; }
-      { label = "Failed deploys"; query = "count(homelab_app_deploy_ok == 0) or vector(0)"; }
+      { label = "Failed deploys"; query = "count(homelab_app_deploy_ok{vm=\"${builderVm}\"} == 0) or vector(0)"; }
     ];
   };
 
@@ -111,14 +115,14 @@ let
       label = "Healthy"; query = "sum(traefik_service_server_up{service=\"${r.name}@file\"})"; format.suffix = "/${toString nodeCount}";
     } ++ [
       { label = "Memory"; query = "sum(container_memory_working_set_bytes${own})"; format.type = "bytes"; }
-      # the builder's textfile metric on vm-117 (instances/140-internal-swarm/lib/app-builder.nix)
-      { label = "Deployed"; query = "time() - homelab_app_deploy_last_success_timestamp_seconds{app=\"${app}\"}"; format.type = "duration"; }
+      # the builder's textfile metric (instances/140-internal-swarm/lib/app-builder.nix)
+      { label = "Deployed"; query = "time() - homelab_app_deploy_last_success_timestamp_seconds{vm=\"${builderVm}\",app=\"${app}\"}"; format.type = "duration"; }
     ]);
   };
 
   # json is yaml: names, urls and queries need no escaping by hand
   cardYaml = c: "    - ${builtins.toJSON c.name}:\n" + lib.concatStrings (lib.mapAttrsToList (k: v: "        ${k}: ${builtins.toJSON v}\n")
-    (lib.filterAttrs (k: v: k != "name" && v != null && v != "") c));
+    (lib.filterAttrs (k: v: k != "name" && v != null && v != "") (c // { icon = icons.src c.icon; })));
   groupYaml = g: "- ${g.name}:\n" + lib.concatMapStrings cardYaml g.cards;
 
   # the lab's frame (modules/infra.nix) with its widgets by card name; layout of its own in settingsYaml
@@ -134,9 +138,24 @@ let
 
   servicesYaml = pkgs.writeText "services.yaml" (lib.concatMapStrings groupYaml ([ infra ] ++ groups));
 
-  # no favicon or background url: the image's own favicon, nothing a visit fetches from a third party
+  infraIcon = "mdi-server";
+  iconDir = icons.dir (lib.unique ([ infraIcon ] ++ map (g: g.icon) groups ++ lib.concatMap (g: map (c: c.icon) g.cards) ([ infra ] ++ groups)));
+
+  # served by homepage itself, like its favicon and the icons: a visit loads nothing from a third party
+  background = pkgs.fetchurl {
+    name = "homepage-background.jpg";
+    url = "https://images.unsplash.com/photo-1506318137071-a8e063b4bec0?w=2560";
+    hash = "sha256-mm2VyHSwZSqPtFYZP4TA84kSbVpIilu1GPZnJy61jvU=";
+  };
+  backgroundPath = "/images/background.jpg";
+
   settingsYaml = pkgs.writeText "settings.yaml" (''
     title: Homelab
+    background:
+      image: ${backgroundPath}
+      blur: md
+      brightness: 50
+      saturate: 60
     theme: dark
     color: slate
     cardBlur: xl
@@ -151,12 +170,12 @@ let
       hideVisitURL: true
     layout:
       Infra:
-        icon: mdi-server
+        icon: ${icons.src infraIcon}
         style: row
         columns: 5
   '' + lib.concatMapStrings (g: lib.concatMapStrings (l: "  " + l + "\n") [
     "${g.name}:"
-    "  icon: ${g.icon}"
+    "  icon: ${icons.src g.icon}"
     "  style: row"
     "  columns: ${toString g.columns}"
   ]) groups);
@@ -279,6 +298,8 @@ in {
     ports = [ "${toString routes.homepage.port}:${toString containerPort}" ];
     volumes = [
       "${stateDir}:/app/config"
+      "${iconDir}:/app/public${icons.publicPath}:ro"
+      "${background}:/app/public${backgroundPath}:ro"
     ] ++ lib.optional (proxmoxCa != null) "${proxmoxCaFile}:${proxmoxCaPath}:ro";
     environment = {
       HOMEPAGE_ALLOWED_HOSTS = publicHost;
