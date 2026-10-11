@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # fetch arch-dotfiles at <ref> into <dir> and print the commit, only when it is signed by the pinned key
 #
-# usage: archrepo-fetch.sh <source> <ref> <dir> <primary key fingerprint>
+# usage: archrepo-fetch.sh <source> <ref> <dir> <primary key fingerprint> <upstream run> <upstream>
 #
 # Runs on the vm-119 host before any container (archbuild.service): the build trusts the module manifests,
 # the platform files it sources, mirror/pkgbuilds and mirror/overrides.conf of this commit, and everything
@@ -20,9 +20,12 @@ SOURCE=${1:?git url of arch-dotfiles}
 REF=${2:?branch to build}
 DIR=${3:?checkout directory}
 FINGERPRINT=${4:?primary key fingerprint the commit must be signed by}
+# modules/upstream: the fetch is retried, an outage of the source's host exits 75 and the night skips
+UPSTREAM=${5:?modules/upstream run}
+UPSTREAM_NAME=${6:?the upstream serving the source}
 # arch-dotfiles bootstrap.sh SIGNING_KEY_FILE
 KEY_FILE=configs/base/gnupg/luca-sandrock.pub.asc
-FETCH_TIMEOUT=15m
+FETCH_TIMEOUT_S=900
 # a v4 fingerprint as gpg prints it
 FINGERPRINT_PATTERN='^[0-9A-F]{40}$'
 
@@ -30,7 +33,7 @@ FINGERPRINT_PATTERN='^[0-9A-F]{40}$'
 # MAIN
 [[ $FINGERPRINT =~ $FINGERPRINT_PATTERN ]] || { echo "fetch: '$FINGERPRINT' is not a v4 fingerprint" >&2; exit 1; }
 [ -d "$DIR/.git" ] || { rm -rf "$DIR"; git init -q "$DIR"; }
-timeout "$FETCH_TIMEOUT" git -C "$DIR" fetch -q --depth 1 "$SOURCE" "$REF"
+UPSTREAM_TIMEOUT_S=$FETCH_TIMEOUT_S "$UPSTREAM" "$UPSTREAM_NAME" git -C "$DIR" fetch -q --depth 1 "$SOURCE" "$REF"
 commit=$(git -C "$DIR" rev-parse --verify 'FETCH_HEAD^{commit}')
 
 gnupg_home=$(mktemp -d)

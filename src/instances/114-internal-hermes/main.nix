@@ -1,5 +1,5 @@
 # hermes: the owner's telegram agent, root on every guest and the proxmox host, with the lab's tools and skills
-{ config, lib, pkgs, inputs, inventory, nasPath, site, catalog, lab, retry, ... }:
+{ config, lib, pkgs, inputs, inventory, nasPath, site, catalog, lab, retry, upstream, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   ntfy = import ../../modules/ntfy.nix;
@@ -106,7 +106,7 @@ let
     text = builtins.readFile ./lib/github-app-token.sh;
   };
   labGithubToken = pkgs.writeShellScriptBin "lab-github-token" ''
-    exec ${githubAppToken}/bin/github-app-token ${toString githubApp.id} ${config.sops.secrets.hermes-github-app-key.path} ${githubRepo}
+    exec ${upstream.run} github ${githubAppToken}/bin/github-app-token ${toString githubApp.id} ${config.sops.secrets.hermes-github-app-key.path} ${githubRepo}
   '';
   gitCredential = pkgs.writeShellScript "git-credential-lab-github" ''
     [ "''${1:-}" = get ] || exit 0
@@ -121,13 +121,13 @@ let
     branch=$(git symbolic-ref --short HEAD)
     [[ "$branch" =~ ^hermes/[a-z0-9._-]+$ ]] || { echo "lab-pr: branch must be hermes/<topic> (lowercase), not $branch" >&2; exit 1; }
     [ -z "$(git status --porcelain)" ] || { echo "lab-pr: commit or discard your changes first" >&2; exit 1; }
-    git fetch -q origin master
+    ${upstream.run} github git fetch -q origin master
     [ "$(git rev-list --count origin/master..HEAD)" -gt 0 ] || { echo "lab-pr: no commits on top of master" >&2; exit 1; }
     # drop github's pr hint noise
-    git push -q --force-with-lease -u origin HEAD 2>&1 | { grep -v '^remote:' || true; } >&2
+    ${upstream.run} github git push -q --force-with-lease -u origin HEAD 2>&1 | { grep -v '^remote:' || true; } >&2
 
     token=$(lab-github-token)
-    gh() { curl -sf -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$@"; }
+    gh() { ${upstream.run} github curl -sf -H "Authorization: Bearer $token" -H "Accept: application/vnd.github+json" "$@"; }
     url=$(gh "$api/pulls?state=open&head=${githubOwner}:$branch" | jq -r '.[0].html_url // empty')
     if [ -z "$url" ]; then
       # shellcheck disable=SC2016 # markdown backticks, not a command

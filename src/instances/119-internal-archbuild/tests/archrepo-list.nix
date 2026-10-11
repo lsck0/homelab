@@ -145,7 +145,7 @@ pkgs.runCommand "archrepo-list" {
     # not served or proposed: the sourced script declares those
     local case_name=$1 served_entries=$2 proposed_entries=$3 lost_names=$4 want_missing=$5
     (
-      export ARCHBUILD_COMMIT=test ARCHBUILD_RUN_STARTED=0
+      export ARCHBUILD_COMMIT=test ARCHBUILD_RUN_STARTED=0 ARCHBUILD_BUILD_BUDGET_S=0
       # shellcheck source=/dev/null
       source ${build}
       LIST_SCRIPT=${list} DOTFILES=$good WORK=$PWD/work REPO_DIR=$PWD/served

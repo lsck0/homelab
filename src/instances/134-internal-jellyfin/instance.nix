@@ -62,8 +62,6 @@ in {
     };
   };
 
-  tokenReads = [ "jellyseerr-key" ];
-
   shares = {
     bulk = { };
     "data/janitorr" = { };
