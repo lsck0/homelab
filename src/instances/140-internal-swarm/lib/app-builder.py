@@ -10,8 +10,10 @@ answered, inline every env_file the stack reads from the repo, and hand the stac
 host's through swarm-deploy@<app>, a guest's own over its forced command: modules/swarm), which adds the homelab's
 ports, secrets, limits and policy, rolls it out and fails the deploy when the swarm rolled it back. A deployed
 build is also tagged `latest`, which the registry's prune keeps. A failed app is retried with backoff (the same
-commit and catalog entry no sooner than `backoff`); the others go on. With an app: the same look at that app alone,
-now (its ci's /redeploy). Each app's turn holds that app's lock: a run finding an app busy in another leaves it to
+commit and catalog entry no sooner than `backoff`); the others go on. GitHub and the image registries are
+upstreams (modules/upstream's contract): a call is retried, and when the upstream's probe says it is down the app is
+skipped as "<name> unavailable", no failure counted, its deploy kept running. With an app: the same look at that
+app alone, now (its ci's /redeploy). Each app's turn holds that app's lock: a run finding an app busy in another leaves it to
 that one, a run for one app waits for it.
 
 State per app in <state-dir>/<app>.json, written after every attempt:
@@ -95,8 +97,33 @@ DOTENV_COMMENT = "#"
 DOTENV_EXPORT = "export "
 
 
+GITHUB = "github"
+# what a deploy the manager answered "unavailable" for waits on; its journal names which (modules/swarm swarm-deploy)
+STACK_REGISTRY = "an image registry of the stack"
+# modules/upstream's overrides, honoured here as there (tests shorten the retries)
+ENV_ATTEMPTS = "UPSTREAM_ATTEMPTS"
+ENV_BACKOFF_S = "UPSTREAM_BACKOFF_S"
+# an upstream's probe answering below this is up: the request may have been wrong, the service is there
+HTTP_SERVER_ERROR = 500
+# docker's reference rule: a first component like these names a registry, else the image is docker hub's
+DOCKER_HUB = "docker.io"
+LOCALHOST = "localhost"
+
+
 class BuildError(Exception):
     """An operating error of one app's build or deploy: the app fails this run, the others go on."""
+
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
+
+class UpstreamUnavailable(Exception):
+    """A third party the app needs is down: the app is skipped this run, its running deploy and state kept."""
+
+    def __init__(self, name):
+        super().__init__(f"{name} unavailable")
+        self.name = name
 
 
 # -----------------------------------------------------------------------------
@@ -107,13 +134,28 @@ def process_run(args, timeout_s, **kwargs):
     try:
         return subprocess.run(args, check=True, text=True, timeout=timeout_s, **kwargs)
     except subprocess.CalledProcessError as e:
-        raise BuildError(f"{args[0]} {args[1]} failed with {e.returncode}") from e
+        raise BuildError(f"{args[0]} {args[1]} failed with {e.returncode}", e.returncode) from e
     except subprocess.TimeoutExpired as e:
         raise BuildError(f"{args[0]} {args[1]} took longer than {timeout_s}s") from e
 
 
 def time_now():
     return int(time.time())
+
+
+def time_sleep(seconds):
+    time.sleep(seconds)
+
+
+def upstream_reachable(ctx, name):
+    """The upstream's probe (src/lab/upstreams.nix) answers below 500 within its bound."""
+    try:
+        with urllib.request.urlopen(ctx["upstreams"]["urls"][name], timeout=ctx["upstreams"]["retry"]["probeTimeoutS"]):
+            return True
+    except urllib.error.HTTPError as e:
+        return e.code < HTTP_SERVER_ERROR
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
 
 
 def branch_head(ctx, repo, branch):
@@ -260,19 +302,69 @@ def stack_deploy(ctx, app, manager, stack):
     through its forced command over ssh. Either way the same swarm-deploy on the manager does the work.
     """
     timeouts = ctx["timeouts"]
+    unavailable = ctx["upstreams"]["unavailable"]
     text = yaml.safe_dump(stack, sort_keys=True)
     if manager is None:
         file_write_atomic(os.path.join(ctx["inbox"], f"{app}.yaml"), text)
-        process_run(["systemctl", "start", ctx["deployUnit"] + app + ".service"], timeouts["deployS"])
+        unit = ctx["deployUnit"] + app + ".service"
+        # the unit counts the manager's "unavailable" as a success: its status tells
+        process_run(["systemctl", "start", unit], timeouts["deployS"])
+        status = process_run(["systemctl", "show", "-P", "ExecMainStatus", unit], timeouts["deployS"],
+                             capture_output=True).stdout.strip()
+        if status == str(unavailable):
+            raise UpstreamUnavailable(STACK_REGISTRY)
         return
-    process_run(["ssh", "-i", ctx["deployKeyFile"], "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
-                 "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={manager['knownHosts']}",
-                 "-o", "GlobalKnownHostsFile=/dev/null",
-                 "-o", f"ConnectTimeout={timeouts['sshConnectS']}",
-                 "-o", f"ServerAliveInterval={timeouts['sshAliveIntervalS']}",
-                 "-o", f"ServerAliveCountMax={timeouts['sshAliveCountMax']}",
-                 f"root@{manager['address']}", app],
-                timeouts["deployS"], input=text)
+    try:
+        process_run(["ssh", "-i", ctx["deployKeyFile"], "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
+                     "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={manager['knownHosts']}",
+                     "-o", "GlobalKnownHostsFile=/dev/null",
+                     "-o", f"ConnectTimeout={timeouts['sshConnectS']}",
+                     "-o", f"ServerAliveInterval={timeouts['sshAliveIntervalS']}",
+                     "-o", f"ServerAliveCountMax={timeouts['sshAliveCountMax']}",
+                     f"root@{manager['address']}", app],
+                    timeouts["deployS"], input=text)
+    except BuildError as e:
+        if e.status == unavailable:
+            raise UpstreamUnavailable(STACK_REGISTRY) from e
+        raise
+
+
+# -----------------------------------------------------------------------------
+# UPSTREAMS: modules/upstream's contract, for the calls leaving the lab
+# -----------------------------------------------------------------------------
+
+def upstream_error(ctx, names, error):
+    """What a failed call raises: the outage of the first named upstream whose probe says down, else its own error."""
+    for name in names:
+        if name is not None and not upstream_reachable(ctx, name):
+            return UpstreamUnavailable(name)
+    return error
+
+
+def upstream_call(ctx, name, call):
+    """call() retried with a doubling backoff; a last failure is the upstream's outage when its probe says down."""
+    retry = ctx["upstreams"]["retry"]
+    attempts = int(os.environ.get(ENV_ATTEMPTS, retry["attempts"]))
+    delay_s = int(os.environ.get(ENV_BACKOFF_S, retry["backoffS"]))
+    assert attempts >= 1, attempts
+    for _ in range(attempts - 1):
+        try:
+            return call()
+        except BuildError:
+            time_sleep(delay_s)
+            delay_s *= 2
+    try:
+        return call()
+    except BuildError as e:
+        error = upstream_error(ctx, [name], e)
+    raise error
+
+
+def image_upstream(ctx, image):
+    """The upstream (src/lab/upstreams.nix) an image is pulled from; None for any other registry (the lab's own)."""
+    first, slash, _ = image.partition("/")
+    host = first if slash and ("." in first or ":" in first or first == LOCALHOST) else DOCKER_HUB
+    return ctx["upstreams"]["registries"].get(host)
 
 
 # -----------------------------------------------------------------------------
@@ -436,7 +528,10 @@ def content_key(ctx, repo_dir, build, args):
     """What the image is made of: the context's git tree, the dockerfile, the target, the args it reads, its bases."""
     read = {k: v for k, v in args.items() if k not in METADATA_ARGS or dockerfile_declares(build["dockerfile"], k)}
     context = os.path.relpath(build["context"], repo_dir)
-    bases = sorted((image, image_base_digest(ctx, image)) for image in set(dockerfile_bases(build["dockerfile"], args)))
+    bases = []
+    for image in sorted(set(dockerfile_bases(build["dockerfile"], args))):
+        digest = upstream_call(ctx, image_upstream(ctx, image), lambda image=image: image_base_digest(ctx, image))
+        bases.append((image, digest))
     parts = [git_object(ctx, repo_dir, "" if context == os.curdir else context),
              git_object(ctx, repo_dir, os.path.relpath(build["dockerfile"], repo_dir)), build["target"], sorted(read.items()),
              bases]
@@ -451,13 +546,19 @@ def service_image(ctx, app, name, build, repo_dir, metadata, labels):
     if digest is not None:
         return f"{ctx['registry']}/{app}/{name}@{digest}", False
     log(app, f"building {name}")
-    return image_build_push(ctx, app, name, build, tag, labels, args), True
+    try:
+        return image_build_push(ctx, app, name, build, tag, labels, args), True
+    except BuildError as e:
+        # too long to retry: a failed build is an outage when what it fetches from (bases, the forge) is down
+        bases = [image_upstream(ctx, image) for image in dockerfile_bases(build["dockerfile"], args)]
+        error = upstream_error(ctx, [GITHUB, *bases], e)
+    raise error
 
 
 def app_build_deploy(ctx, app, spec, sha):
     """Build what changed, deploy the stack, tag it live; the deploy's facts for the state."""
     with tempfile.TemporaryDirectory(prefix=f"app-{app}-") as repo_dir:
-        created = repo_checkout(ctx, spec["repo"], sha, repo_dir)
+        created = upstream_call(ctx, GITHUB, lambda: repo_checkout(ctx, spec["repo"], sha, repo_dir))
         stack, stack_dir = stack_load(spec, repo_dir)
         services = stack.get("services") or {}
         for name in spec["exclude"]:
@@ -594,7 +695,7 @@ def app_run(ctx, app, spec, state):
     head = None
     target = None
     try:
-        head = branch_head(ctx, spec["repo"], spec["branch"])
+        head = upstream_call(ctx, GITHUB, lambda: branch_head(ctx, spec["repo"], spec["branch"]))
         if head == state["head"] and build_hash == state["build_hash"] and failure is None and fresh:
             return state
         if (failure is not None and head == failure["head"] and build_hash == failure["build_hash"]
@@ -602,10 +703,17 @@ def app_run(ctx, app, spec, state):
             log(app, f"failed {failure['count']} times at {sha_short(failure['sha'])}, next try at {failure['retry_at']}")
             return state
         # an app inside a busy repo follows its own paths, not every commit of the branch
-        target = branch_last_change(ctx, spec["repo"], spec["branch"], spec["watch"]) if spec["watch"] else head
+        if spec["watch"]:
+            target = upstream_call(ctx, GITHUB, lambda: branch_last_change(ctx, spec["repo"], spec["branch"], spec["watch"]))
+        else:
+            target = head
         if target == state["sha"] and build_hash == state["build_hash"] and fresh:
             return dict(state, head=head, failure=None)
         facts = app_build_deploy(ctx, app, spec, target)
+    except UpstreamUnavailable as e:
+        # nothing of the app failed: no failure count, no backoff, the running deploy stays; the next look retries
+        log(app, f"skipped: {e}, {sha_short(state['sha'])} keeps running")
+        return state
     except BuildError as e:
         log(app, f"failed: {e}")
         same = failure is not None and failure["sha"] == target and failure["build_hash"] == build_hash

@@ -66,6 +66,21 @@ let
       exit "$unavailable"
     '';
   };
+  # an image registry's host -> its upstream name
+  registries = lib.mapAttrs' (name: u: lib.nameValuePair u.registry name) (lib.filterAttrs (_: u: u ? registry) lab.upstreams);
+  dockerHub = "docker.io";
+  # docker's reference rule: a first component with a dot or a colon, or localhost, is a registry, else docker hub
+  registryOf = image: let
+    parts = lib.splitString "/" image;
+    first = lib.head parts;
+  in if lib.length parts > 1 && (lib.hasInfix "." first || lib.hasInfix ":" first || first == "localhost") then first else dockerHub;
 in {
-  _module.args.upstream = { run = lib.getExe run; inherit unavailable; };
+  # retry and probeTimeoutS: for callers implementing the same contract (instances/140-internal-swarm/lib/app-builder.py)
+  _module.args.upstream = {
+    run = lib.getExe run;
+    inherit unavailable registries;
+    retry = { inherit attempts backoffS probeTimeoutS; };
+    # the upstream an image is pulled from, null when it is none of lab/upstreams.nix (the lab's own registry)
+    ofImage = image: registries.${registryOf image} or null;
+  };
 }

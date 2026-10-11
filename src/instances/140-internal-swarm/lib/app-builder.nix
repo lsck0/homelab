@@ -14,7 +14,7 @@
 #   systemctl start app-builder@<app>        look at one app now, what its ci's /redeploy does
 #   app-builder-redeploy <app>               forget the app's state, then deploy it again whatever it was
 #   journalctl -u app-builder -u 'app-builder@*'
-{ config, lib, pkgs, catalog, inventory, lab, ... }:
+{ config, lib, pkgs, catalog, inventory, lab, upstream, ... }:
 let
   # -----------------------------------------------------------------------------
   # CONSTANTS
@@ -31,8 +31,9 @@ let
   baseRefreshS = 24 * 60 * 60;
   textfileName = "app_builder";
   textfile = "${config.homelab.textfileDir}/${textfileName}.prom";
-  # rust nightly and node builds; the ci users cap their own share
-  memoryMaxMiB = 3 * 1024;
+  vm = lab.instances.${builderId}.config.vm;
+  # the balloon floor holds the manager (instance.nix); builds get the rest when the host has it free
+  memoryMaxMiB = vm.memoryMiB - vm.balloonMiB;
   # the peak of one cold rust or node build: builds run side by side only as far as both cores and memory hold
   buildMemoryMiB = 1024;
   github = "https://github.com";
@@ -82,11 +83,16 @@ let
     inherit registryUser github githubApi timeouts;
     inherit (cfg) backoff;
     inherit baseRefreshS;
+    # github and the image registries (lib/app-builder.py UPSTREAMS)
+    upstreams = {
+      urls = lib.mapAttrs (_: u: u.url) lab.upstreams;
+      inherit (upstream) registries retry unavailable;
+    };
     registryPasswordFile = config.sops.secrets.registry-builder-password.path;
     deployKeyFile = config.sops.secrets.app-deploy-key.path;
     inherit inbox;
     deployUnit = config.homelab.swarm.deployUnit;
-    buildParallelism = lib.max 1 (lib.min lab.instances.${builderId}.config.vm.cores (memoryMaxMiB / buildMemoryMiB));
+    buildParallelism = lib.min vm.cores (memoryMaxMiB / buildMemoryMiB);
     dashboardsImport = "${dashboardsImport}";
     dashboardsDir = config.homelab.swarm.appDashboardsDir;
     apps = lib.mapAttrs (_: a: buildInputsOf a // {
@@ -97,9 +103,13 @@ let
     }) catalog.apps;
   });
 
-  # the longest one app may take: every git call, every watched path, every image, the deploy
-  appTimeoutS = a: gitCallsPerApp * timeouts.gitS + lib.length a.watch * timeouts.apiS + timeouts.loginS
-    + lib.length (lib.attrNames a.build) * (timeouts.buildS + 3 * timeouts.pushS) + timeouts.deployS;
+  # an upstream call at its worst: every attempt at its bound, the doubling backoffs between them, the probe
+  backoffsS = (lib.foldl' (acc: _: { sumS = acc.sumS + acc.delayS; delayS = acc.delayS * 2; })
+    { sumS = 0; delayS = upstream.retry.backoffS; } (lib.range 2 upstream.retry.attempts)).sumS;
+  retriedS = boundS: upstream.retry.attempts * boundS + backoffsS + upstream.retry.probeTimeoutS;
+  # the longest one app may take: every git call, every watched path, every image (its base's pull retried), the deploy
+  appTimeoutS = a: retriedS (gitCallsPerApp * timeouts.gitS + lib.length a.watch * timeouts.apiS) + timeouts.loginS
+    + lib.length (lib.attrNames a.build) * (retriedS timeouts.pushS + timeouts.buildS + 2 * timeouts.pushS) + timeouts.deployS;
   appTimeouts = map appTimeoutS (lib.attrValues catalog.apps);
   runTimeoutS = lib.foldl' (sum: t: sum + t) runOverheadS appTimeouts;
 
@@ -166,10 +176,16 @@ in {
   config = {
     homelab.textfiles = [ textfileName ];
 
-    assertions = [{
-      assertion = config.homelab.vmid == builderId;
-      message = "the app builder runs on vm-${builderId} (the role app-builder), the address the managers' forced command accepts";
-    }];
+    assertions = [
+      {
+        assertion = config.homelab.vmid == builderId;
+        message = "the app builder runs on vm-${builderId} (the role app-builder), the address the managers' forced command accepts";
+      }
+      {
+        assertion = vm.balloonMiB > 0 && memoryMaxMiB >= buildMemoryMiB;
+        message = "vm-${builderId}: memoryMiB ${toString vm.memoryMiB} above its balloon floor ${toString vm.balloonMiB} must hold one build (${toString buildMemoryMiB} MiB)";
+      }
+    ];
 
     homelab.rootlessDocker.${user} = {
       inherit uid;

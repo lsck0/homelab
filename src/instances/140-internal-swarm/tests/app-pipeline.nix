@@ -15,9 +15,9 @@
 # The fixture images are built FROM scratch around a static busybox httpd, so `docker build --pull` needs no
 # registry; hello's real one (alpine plus apk) cannot build offline, which is accepted here.
 #
-# Faults: the registry down, the guest's manager partitioned, the controller partitioned from its workers, the
-# worker running the task crashed (the seed picks it), a worker rejoining, an image whose task dies (the swarm rolls
-# back), the builder killed mid-build.
+# Faults: the registry down, github down (an upstream outage: skipped, nothing fails), the guest's manager
+# partitioned, the controller partitioned from its workers, the worker running the task crashed (the seed picks it), a
+# worker rejoining, an image whose task dies (the swarm rolls back), the builder killed mid-build.
 { pkgs, lib, specialArgs, seed ? 1, ... }:
 let
   # -----------------------------------------------------------------------------
@@ -216,6 +216,8 @@ pkgs.testers.runNixOSTest {
     systemd.timers.app-builder.wantedBy = lib.mkForce [ ];
     # its runs follow each other faster than systemd's start limit (5 in 10s) allows a unit
     systemd.services.app-builder.startLimitIntervalSec = 0;
+    # modules/upstream's retries without their backoff: an outage is decided in seconds
+    systemd.services.app-builder.environment.UPSTREAM_BACKOFF_S = "0";
     networking.hosts.${githubAddress} = [ "github.com" "api.github.com" ];
     homelab.appBuilder = { inherit knownHosts backoff; };
   };
@@ -311,6 +313,9 @@ pkgs.testers.runNixOSTest {
         vm_100.wait_for_unit("traefik.service")
         vm_100.wait_for_open_port(443)
         vm_200.wait_for_unit("traefik.service")
+        # the bouncer refuses every client until the crowdsec stub listens (tests/lib/offline-traefik.nix)
+        for ingress in (vm_100, vm_200):
+            ingress.wait_for_file("/var/lib/crowdsec/data/stub-ready")
         vm_140.wait_for_file("/run/user/${toString nodes.vm-140.homelab.rootlessDocker.appbuild.uid}/docker.sock", timeout=120)
 
     with subtest("a commit is built, parked by its content and deployed: locally on the shared swarm, over ssh on the guest"):
@@ -426,6 +431,8 @@ pkgs.testers.runNixOSTest {
         assert redeploy("hello", "wrong") == "401"
         # a fresh builder: nothing local to build from, the registry holds the same content
         vm_140.succeed(f"{APPBUILD_DOCKER} image prune -af")
+        # the redeploy runs the normal look (review 2 #74): it finds this commit, ahead of the poll
+        commit("hello", {"${watched}/NOTES.md": "notes for ci\n"}, "ci notes")
         since = vm_140.succeed("date +%s").strip()
         assert redeploy("hello", token) == "202"
         assert redeploy("hello", token) == "429"
@@ -435,16 +442,31 @@ pkgs.testers.runNixOSTest {
         assert deploy_ok("hello")
 
     with subtest("the registry down: the deploy fails, the old version serves, the retry after the backoff lands"):
+        live = state("hello")["sha"]
         vm_118.succeed("systemctl stop podman-registry")
         sha_d = commit("hello", {"${context}/www/index.html": "v3\n"}, "v3")
         hello_state = build(ok=False)["hello"]
-        assert hello_state["sha"] == sha_c and hello_state["failure"]["sha"] == sha_d, hello_state
+        assert hello_state["sha"] == live and hello_state["failure"]["sha"] == sha_d, hello_state
         serves("v2")
         vm_118.succeed("systemctl start podman-registry")
         vm_118.wait_for_open_port(5000)
         time.sleep(${toString backoff.maxS})  # the backoff is the claim: wall time is what the builder waits on
         assert build()["hello"]["sha"] == sha_d
         serves("v3")
+
+    with subtest("github down: every app is skipped as github unavailable, nothing fails, the next look lands"):
+        before = {app: state(app) for app in REPOS}
+        sha_o = commit("hello", {"${context}/www/index.html": "v3b\n"}, "during the outage")
+        world.succeed("systemctl stop nginx")
+        since = vm_140.succeed("date +%s").strip()
+        assert build() == before
+        vm_140.succeed(f"journalctl -u app-builder --since @{since} | grep -q 'hello: skipped: github unavailable'")
+        assert deploy_ok("hello")
+        serves("v3")
+        world.succeed("systemctl start nginx")
+        world.wait_for_unit("nginx.service")
+        assert build()["hello"]["sha"] == sha_o
+        serves("v3b")
 
     with subtest("the guest's manager partitioned: its app fails fast, the shared swarm's app lands, the retry lands"):
         vm_${placedId}.block()

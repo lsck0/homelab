@@ -28,6 +28,9 @@ let
     repo = "lsck0/${name}";
     branch = "master";
     routes.${name} = { inherit port; health = "/"; off = { sso = "the fixture is public"; anubis = "no browser here"; }; };
+    # both apps and a deploy's surge on the one worker (modules/limits workerCountOf)
+    resources.web.memoryMiB = 128;
+    reservation.memoryMiB = 256;
   } extra;
   apps = { lazy = appOf "lazy" 20180 { idle.stopAfter = idleWindow; }; steady = appOf "steady" 20190 { }; };
   common = {
@@ -62,6 +65,8 @@ pkgs.testers.runNixOSTest {
     imports = [ (lab.guest "200" { flat = true; instance = ../../../instances/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
     virtualisation.memorySize = 1536;
     services.journald.upload.enable = lib.mkForce false;
+    # the test runs the reaper itself: its own timer would put lazy to sleep before the test looks
+    systemd.timers.ondemand-reaper.wantedBy = lib.mkForce [ ];
   };
   nodes.world = {
     imports = [ (lab.multi { addresses = [ "10.100.0.1/8" "10.200.0.1/8" "10.250.0.1/8" "${cloudflare}/13" ]; }) ];
@@ -98,6 +103,8 @@ pkgs.testers.runNixOSTest {
     registry.wait_for_open_port(443)
     vm_140.wait_until_succeeds("[ $(docker node ls -q | wc -l) = 2 ]", timeout=300)
     vm_200.wait_for_unit("traefik.service")
+    # the bouncer refuses every client until the crowdsec stub listens (tests/lib/offline-traefik.nix)
+    vm_200.wait_for_file("/var/lib/crowdsec/data/stub-ready")
     vm_140.succeed("docker load -i ${image}")
     for app in ("lazy", "steady"):
         deploy(app)
@@ -105,8 +112,9 @@ pkgs.testers.runNixOSTest {
 
     with subtest("an idle app nobody asked for goes to sleep, an app without idle stays up"):
         assert state("lazy") == "running"
-        # the reaper's turn, as its timer would take it: no connection in the idle window
-        vm_200.wait_until_succeeds("systemctl start ondemand-reaper && [ \"$(curl -s ${controller}/state/lazy)\" = stopped ]", timeout=240)
+        # the reaper's turn, as its timer would take it; it fails for the edge's guests (no proxmox here), lazy sleeps
+        vm_200.execute("systemctl start ondemand-reaper")
+        vm_200.wait_until_succeeds("[ \"$(curl -s ${controller}/state/lazy)\" = stopped ]", timeout=60)
         vm_140.wait_until_succeeds("[ \"$(docker service ls --filter name=lazy_web --format '{{.Replicas}}' | cut -d/ -f1)\" = 0 ]", timeout=120)
         vm_140.succeed("grep -q 'homelab_app_idle_stopped{app=\"lazy\"} 1' /var/lib/node-exporter-textfile/swarm_idle_lazy.prom")
         assert tasks("steady") == 1

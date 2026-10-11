@@ -10,12 +10,15 @@
 # One step deploys, swarm-deploy <app> <stack>: render through lib/swarm-render.py (the homelab's ports, env,
 # limits, encryption, policy), `docker stack deploy`, fail when a service rolled back, keep the stack, write the
 # result for prometheus. It holds the app's own lock, then the swarm's one rollout slot (modules/limits admits a
-# single deploy's surge). Its callers:
+# single deploy's surge). A deploy that fails while a registry of the stack's public images is down (modules/upstream)
+# exits "unavailable": no failed deploy, the running version stays, the caller tries again later. Its callers:
 #   swarm-apply <app> < stack.yaml      the builder: through swarm-deploy@<app> on its own host, over the forced
 #                                       command on a guest's manager; by hand on any manager
 #   swarm-converge-<app>                the catalog applied to the kept stack: on every switch that changes the app's
 #                                       catalog entry or secrets, and at boot; one unit per app, so one app's failure
-#                                       or edit touches no other
+#                                       or edit touches no other; a failed one is tried again (swarm-converge-retry)
+# A task left pending while no node could take it (a lab shutdown) stays pending once the nodes are back and an
+# unchanged spec creates no new one: each deploy force-updates such a service first.
 #   swarm-prune                         removes the stacks of apps that left the catalog; volumes stay
 # An idle app sleeps and wakes by scaling its services (to 0, and back to the replicas each carries as a label)
 # under its own lock only; a deploy of a sleeping app keeps it asleep. Nothing here polls.
@@ -34,7 +37,7 @@
 #
 # Rejected: deploying from the builder alone. A deploy happened only on a new app commit, so a port, env or secret
 # changed in the catalog never reached the stack, and a disabled app kept running unguarded.
-{ config, lib, pkgs, inventory, site, nasMount, retry, catalog, lab, ... }:
+{ config, lib, pkgs, inventory, site, nasMount, retry, catalog, lab, upstream, ... }:
 let
   # -----------------------------------------------------------------------------
   # CONSTANTS
@@ -72,6 +75,12 @@ let
   # images of past deploys; volumes are never pruned
   imageKeep = "72h";
   restartDelayS = { cluster = 15; reconcile = 10; };
+  # a converge that failed for anything but a policy refusal (an outage, workers still booting) marks its app here;
+  # swarm-converge-retry runs it again this often
+  convergePendingDir = "/run/swarm-converge-pending";
+  convergeRetry = "15min";
+  # swarm-deploy's answer to a stack its policy refuses or an app not in the catalog: nothing to retry until either changes
+  deployRefused = 2;
 
   tokens = config.homelab.tokens.dir;
   inherit (config.homelab) textfileDir;
@@ -139,6 +148,8 @@ let
   transportOf = { http = "tcp"; tcp = "tcp"; udp = "udp"; };
   appSpecOf = name: a: {
     inherit (a) exclude stateful override images;
+    # the upstreams the workers pull the catalog's public images from (swarm-deploy outage_exit)
+    upstreams = lib.unique (lib.filter (name: name != null) (map upstream.ofImage a.images));
     published = lib.unique (map (r: { inherit (r) service targetPort port; protocol = transportOf.${r.protocol}; }) (lib.attrValues a.routes)
       ++ map (m: { inherit (m) service targetPort port; protocol = "tcp"; }) (lib.attrValues a.metrics));
     resources = lib.mapAttrs (service: _: admission.taskOf name service) a.resources;
@@ -176,11 +187,12 @@ let
   # swarm-deploy <app> <stack file>: render, deploy, check, keep; the one way a stack reaches the swarm
   swarmDeploy = pkgs.writeShellApplication {
     name = "swarm-deploy";
-    runtimeInputs = [ docker pkgs.coreutils pkgs.jq pkgs.util-linux ];
+    runtimeInputs = [ docker pkgs.coreutils pkgs.jq pkgs.util-linux pkgs.gnugrep ];
     text = ''
       app=$1 input=$2
+      refused=${toString deployRefused}
       # the name becomes a path and a stack name
-      [[ "$app" =~ ${appNamePattern} ]] || { echo "swarm-deploy: '$app' is no app name" >&2; exit 2; }
+      [[ "$app" =~ ${appNamePattern} ]] || { echo "swarm-deploy: '$app' is no app name" >&2; exit "$refused"; }
       catalog=/etc/${appCatalogDir}/"$app".json
       metrics=${textfileDir}/swarm_app_$app.prom
       # to the caller (the builder's journal) and to this manager's own, tagged swarm-deploy
@@ -190,7 +202,16 @@ let
           "$app" "$1" "$app" "$(date +%s)" > "$metrics.tmp"
         mv "$metrics.tmp" "$metrics"
       }
-      [ -f "$catalog" ] || { say "$app is not an enabled app" >&2; exit 2; }
+      unavailable=${toString upstream.unavailable}
+      outage_exit() {
+        for upstream in $(jq -r --arg app "$app" '.apps[$app].upstreams[]' "$catalog"); do
+          if ! ${upstream.run} "$upstream"; then
+            say "$upstream unavailable: $app keeps its running version" >&2
+            exit "$unavailable"
+          fi
+        done
+      }
+      [ -f "$catalog" ] || { say "$app is not an enabled app" >&2; exit "$refused"; }
       ${appLock}
       exec 9>${deployLock}
       flock 9
@@ -204,7 +225,7 @@ let
       if ! ${render} "$app" "$catalog" ${envDir}/swarm-app-"$app".env "''${mode[@]}" < "$work/input.yaml" > "$work/stack.yaml"; then
         # a policy refusal: render said why, nothing changed on the swarm
         report 0
-        exit 2
+        exit "$refused"
       fi
       say "deploying $app"
       export DOCKER_CONFIG=${dockerConfigDir}
@@ -225,10 +246,20 @@ let
           docker service rm "$service" >/dev/null
         fi
       done
+      # only while a node takes tasks: a task forced while none does is just as stuck (the converge retries later)
+      if docker node ls --format '{{.Status}} {{.Availability}}' | grep -qx 'Ready Active'; then
+        for service in $(docker stack services --format '{{.Name}}' "$app"); do
+          if docker service ps --filter desired-state=running --format '{{.CurrentState}}' "$service" | grep -q '^Pending'; then
+            say "rescheduling $service: a task of it is stuck pending"
+            docker service update --detach --force "$service" >/dev/null
+          fi
+        done
+      fi
       started=$(date +%s)
       # the swarm rolls a service back when its new tasks fail their healthchecks (update_config failure_action)
       if ! timeout ${toString deployTimeoutS} docker stack deploy --detach=false --prune --resolve-image always \
           --with-registry-auth -c "$work/stack.yaml" "$app"; then
+        outage_exit
         report 0
         say "$app did not converge within ${toString deployTimeoutS}s" >&2
         exit 1
@@ -244,6 +275,7 @@ let
         esac
       done
       if [ -n "$rolled_back" ]; then
+        outage_exit
         report 0
         say "$app rolled back:$rolled_back; the previous version keeps running" >&2
         exit 1
@@ -271,10 +303,17 @@ let
 
   swarmConverge = pkgs.writeShellApplication {
     name = "swarm-converge";
+    runtimeInputs = [ pkgs.coreutils ];
     text = ''
       app=$1
       if [ -f ${stackDir}/"$app".yaml ]; then
-        exec ${lib.getExe swarmDeploy} "$app" ${stackDir}/"$app".yaml
+        status=0
+        ${lib.getExe swarmDeploy} "$app" ${stackDir}/"$app".yaml || status=$?
+        case "$status" in
+          0|${toString deployRefused}) rm -f ${convergePendingDir}/"$app" ;;
+          *) touch ${convergePendingDir}/"$app" ;;
+        esac
+        exit "$status"
       fi
       echo "swarm-converge: $app has no stack yet; the builder deploys its first commit"
     '';
@@ -398,8 +437,10 @@ let
         done
       }
       reconcile
-      docker events --filter type=node --format '{{.Action}} {{.Actor.Attributes.name}}' | while read -r event; do
-        echo "node event: $event"
+      docker events --filter type=node --format '{{.Action}} {{.Actor.Attributes.name}}' | while read -r action name; do
+        # the manager's own description moves with its balloon, an update every 20 s that changes no membership
+        [ "$name" = ${nodeName managerId} ] && continue
+        echo "node event: $action $name"
         reconcile
       done
     '';
@@ -503,15 +544,17 @@ let
       fi
       dir=$(docker volume inspect --format '{{.Mountpoint}}' "$app"_"$volume")
       staged=$(mktemp -d "$(dirname "$dir")/restore.XXXXXX")
-      trap 'rm -rf "$staged" "$staged.previous"' EXIT
+      trap 'rm -rf "$staged"' EXIT
       case "$archive" in
         *.zst)
           zstd -tq "$archive"
           zstd -dc "$archive" | tar -C "$staged" -xf - ;;
         *) tar -C "$staged" -xf "$archive" ;;
       esac
+      # the old data goes only once the new is in place
       mv "$dir" "$staged.previous"
       mv "$staged" "$dir"
+      rm -rf "$staged.previous"
       echo "swarm-volume-restore: $app's volume $volume restored from $archive"
     '';
   };
@@ -627,6 +670,18 @@ in {
           serviceConfig = { Type = "oneshot"; RemainAfterExit = true; ExecStart = lib.getExe swarmPrune; };
         };
 
+        swarm-converge-retry = {
+          description = "Apply the catalog again to the apps whose converge failed";
+          serviceConfig.Type = "oneshot";
+          script = ''
+            for marker in ${convergePendingDir}/*; do
+              [ -e "$marker" ] || continue
+              app=$(basename "$marker")
+              systemctl restart --no-block "${convergeUnitOf ""}$app.service"
+            done
+          '';
+        };
+
         # the local builder's deploys, from its inbox
         "${deployUnit}" = lib.mkIf (config.homelab.swarm.deployInbox != null) {
           description = "Deploy the app %i from the builder's inbox";
@@ -635,6 +690,8 @@ in {
             ExecStart = "${lib.getExe swarmApply} %i";
             StandardInput = "file:${config.homelab.swarm.deployInbox}/%i.yaml";
             TimeoutStartSec = deployTimeoutS;
+            # the builder reads it from ExecMainStatus and retries on its next look
+            SuccessExitStatus = [ upstream.unavailable ];
           };
         };
 
@@ -674,6 +731,8 @@ in {
           Type = "oneshot";
           RemainAfterExit = true;
           ExecStart = "${lib.getExe swarmConverge} ${name}";
+          # an upstream outage: swarm-converge-retry runs it again
+          SuccessExitStatus = [ upstream.unavailable ];
           # every app's deploy may hold the rollout slot before this one's
           TimeoutStartSec = deployTimeoutS * (lib.length (lib.attrNames apps) + 1);
         };
@@ -685,9 +744,15 @@ in {
         "d ${stackDir} 0700 root root -"
         "d ${dockerConfigDir} 0700 root root -"
         "d ${appLockDir} 0700 root root -"
+        "d ${convergePendingDir} 0700 root root -"
         "d ${stoppedDir} 0755 root root -"
         "d ${controllerState} 0700 ${controllerUser} ${controllerUser} -"
       ];
+
+      systemd.timers.swarm-converge-retry = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = { OnBootSec = convergeRetry; OnUnitInactiveSec = convergeRetry; };
+      };
 
       users.users.${controllerUser} = { isSystemUser = true; group = controllerUser; };
       users.groups.${controllerUser} = { };
