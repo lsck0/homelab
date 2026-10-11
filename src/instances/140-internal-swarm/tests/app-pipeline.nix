@@ -313,6 +313,9 @@ pkgs.testers.runNixOSTest {
         vm_100.wait_for_unit("traefik.service")
         vm_100.wait_for_open_port(443)
         vm_200.wait_for_unit("traefik.service")
+        # the bouncer refuses every client until the crowdsec stub listens (tests/lib/offline-traefik.nix)
+        for ingress in (vm_100, vm_200):
+            ingress.wait_for_file("/var/lib/crowdsec/data/stub-ready")
         vm_140.wait_for_file("/run/user/${toString nodes.vm-140.homelab.rootlessDocker.appbuild.uid}/docker.sock", timeout=120)
 
     with subtest("a commit is built, parked by its content and deployed: locally on the shared swarm, over ssh on the guest"):

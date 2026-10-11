@@ -101,6 +101,8 @@ pkgs.testers.runNixOSTest {
     registry.wait_for_open_port(443)
     vm_140.wait_until_succeeds("[ $(docker node ls -q | wc -l) = 2 ]", timeout=300)
     vm_200.wait_for_unit("traefik.service")
+    # the bouncer refuses every client until the crowdsec stub listens (tests/lib/offline-traefik.nix)
+    vm_200.wait_for_file("/var/lib/crowdsec/data/stub-ready")
     vm_140.succeed("docker load -i ${image}")
     for app in ("lazy", "steady"):
         deploy(app)
