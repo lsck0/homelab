@@ -150,11 +150,16 @@ in {
       if auth | curl -sSf -H @- "${local}/${topics.heartbeat}/json?poll=1&since=${toString heartbeatWindowMin}m" \
         | grep -q '"event":"message"'; then
         rm -f "$alerted"
+        metrics=${config.homelab.textfileDir}/${deadmanTextfile}.prom
+        # no switch set up yet (an empty manual secret): no gauge, so no deadman_unavailable for a url never given
+        if [ -z "$(cat ${config.sops.secrets.deadman-ping-url.path})" ]; then
+          rm -f "$metrics"
+          exit 0
+        fi
         # the switch being down costs its gauge (vm-105's deadman_unavailable), never this check
         ok=1
         curl -fsS -m ${toString deadmanTimeoutS} --retry ${toString deadmanRetries} --retry-all-errors -o /dev/null \
           -K ${config.sops.templates.${deadmanCurl}.path} || ok=0
-        metrics=${config.homelab.textfileDir}/${deadmanTextfile}.prom
         printf '# TYPE homelab_deadman_ping_ok gauge\nhomelab_deadman_ping_ok %s\n' "$ok" > "$metrics.tmp"
         mv "$metrics.tmp" "$metrics"
         exit 0
