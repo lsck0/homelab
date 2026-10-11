@@ -35,6 +35,7 @@ let
       attempts=''${UPSTREAM_ATTEMPTS:-${toString attempts}}
       backoff=''${UPSTREAM_BACKOFF_S:-${toString backoffS}}
       limit=''${UPSTREAM_TIMEOUT_S:-${toString attemptTimeoutS}}
+      unavailable=${toString unavailable}
 
       answer=
       reachable() {
@@ -62,7 +63,7 @@ let
         exit "$status"
       fi
       echo "$name unavailable ($url $answer), keeping the last state" >&2
-      exit ${toString unavailable}
+      exit "$unavailable"
     '';
   };
   # an image registry's host -> its upstream name
