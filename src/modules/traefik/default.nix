@@ -431,7 +431,7 @@ let
     rule = "${fqdnRule r} && Path(`${r.health}`) && ${anyOf "Method" probeMethods} && ${anyOf "ClientIP" probeSources}";
     service = name;
     entryPoints = [ "websecure" ];
-    route = r // { off = r.off // { accessLog = "a probe every few seconds would bury the clients' requests"; }; };
+    route = r // { methods = probeMethods; off = r.off // { accessLog = "a probe every few seconds would bury the clients' requests"; }; };
   }) probeRoutes;
 
   # an instance route to its guest (or its on-demand proxy), an app route to every node of its cluster, health-checked
@@ -476,13 +476,15 @@ let
   # one intake per host, named after its first route
   frontendRoutes = lib.listToAttrs (map (e: lib.nameValuePair e.value.host e) (lib.reverseList
     (lib.filter (e: frontendOn e.value) (lib.attrsToList cfg.routes))));
+  frontendMethods = [ "POST" ];
   frontendRouters = lib.mapAttrs' (host: e: lib.nameValuePair "${e.name}-otlp" {
-    rule = "Host(`${net.fqdn host}`) && PathPrefix(`${telemetry.frontendPath}`) && Method(`POST`)";
+    rule = "Host(`${net.fqdn host}`) && PathPrefix(`${telemetry.frontendPath}`) && ${anyOf "Method" frontendMethods}";
     service = "frontend-intake";
     entryPoints = [ "websecure" ];
     middlewares = lib.optional (on e.value "sso") "authelia" ++ [ "${e.name}-otlp-tenant" ];
     route = e.value // {
       off = e.value.off // { anubis = "browser beacons run no proof of work"; };
+      methods = frontendMethods;
       bodyLimitBytes = frontendBodyBytes;
     };
   }) frontendRoutes;
@@ -519,6 +521,7 @@ let
   bodyRouterSuffix = "-body";
   # vulcand/oxy's multibuffer files
   spoolFilePattern = "temp-multibuf-*";
+  spoolMetricName = "traefik_spool";
   # a hand-written router names no methods: it admits every one
   methodsOf = r: r.methods or null;
   admitsBody = r: methodsOf r == null || lib.any (m: lib.elem m bodyMethods) (methodsOf r);
@@ -725,11 +728,12 @@ in {
       serviceConfig.Type = "oneshot";
       script = ''
         bytes=$(find /tmp -type f -name '${spoolFilePattern}' -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }')
-        d=${config.homelab.textfileDir}
-        printf '# TYPE homelab_traefik_spool_bytes gauge\nhomelab_traefik_spool_bytes %s\n' "$bytes" > $d/traefik_spool.prom.tmp
-        mv $d/traefik_spool.prom.tmp $d/traefik_spool.prom
+        metric=${config.homelab.textfileDir}/${spoolMetricName}.prom
+        printf '# TYPE homelab_traefik_spool_bytes gauge\nhomelab_traefik_spool_bytes %s\n' "$bytes" > "$metric.tmp"
+        mv "$metric.tmp" "$metric"
       '';
     };
+    homelab.textfiles = [ spoolMetricName ];
     systemd.timers.traefik-spool-metric = {
       wantedBy = [ "timers.target" ];
       timerConfig = { OnBootSec = "5min"; OnUnitActiveSec = "5min"; };

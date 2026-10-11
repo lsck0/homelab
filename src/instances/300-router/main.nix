@@ -475,7 +475,7 @@ in {
         { upstream = blockyUpstream; ips = [ "1.1.1.1" ]; }
       ];
       blocking = {
-        # blocky rereads the files every refreshPeriod (4h)
+        # blocklists-fetch restarts blocky on a new list
         denylists.ads = map (name: "${blocklistDir}/${name}") (lib.attrNames blocklists);
         clientGroupsBlock.default = [ "ads" ];
       };
@@ -586,15 +586,26 @@ in {
     description = "Fetch blocky's deny lists";
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
-    path = [ pkgs.curl pkgs.coreutils ];
+    path = [ pkgs.curl pkgs.coreutils pkgs.diffutils pkgs.systemd ];
     serviceConfig = { Type = "oneshot"; SuccessExitStatus = [ upstream.unavailable ]; };
     script = ''
       status=0
+      changed=0
     '' + lib.concatStrings (lib.mapAttrsToList (name: url: ''
       rc=0
       ${upstream.run} githubusercontent curl -sSf --max-time ${toString blocklistTimeoutS} -o ${blocklistDir}/${name}.part ${url} || rc=$?
-      if [ "$rc" -eq 0 ]; then mv ${blocklistDir}/${name}.part ${blocklistDir}/${name}; else rm -f ${blocklistDir}/${name}.part; status=$rc; fi
+      if [ "$rc" -ne 0 ]; then
+        rm -f ${blocklistDir}/${name}.part
+        status=$rc
+      elif cmp -s ${blocklistDir}/${name}.part ${blocklistDir}/${name}; then
+        rm -f ${blocklistDir}/${name}.part
+      else
+        mv ${blocklistDir}/${name}.part ${blocklistDir}/${name}
+        changed=1
+      fi
     '') blocklists) + ''
+      # blocky reads its lists at start; coredns answers from its fallback for the moment it restarts
+      if [ "$changed" -eq 1 ]; then systemctl try-restart blocky.service; fi
       exit "$status"
     '';
   };
