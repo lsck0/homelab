@@ -55,11 +55,11 @@ pkgs.testers.runNixOSTest {
 
     with subtest("a local state copy's restore carries a new generation, marked restored"):
         generation = machine.succeed("cat /srv/nas/data/paperless/.generation").strip()
-        assert generation and generation == machine.succeed("cat /srv/nas/data/paperless/.restored").strip()
+        assert generation.startswith("restored-") and len(generation) > len("restored-"), generation
         machine.succeed("nas-restore service paperless --yes")
         assert machine.succeed("cat /srv/nas/data/paperless/.generation").strip() != generation, "no fresh generation"
         machine.succeed("nas-restore service minecraft --yes")
-        machine.fail("test -e /srv/nas/data/minecraft/.generation || test -e /srv/nas/data/minecraft/.restored")
+        machine.fail("test -e /srv/nas/data/minecraft/.generation")
         machine.succeed("echo CORRUPT > /srv/nas/data/minecraft/world/level.dat")
 
     with subtest("restore an older snapshot by age"):

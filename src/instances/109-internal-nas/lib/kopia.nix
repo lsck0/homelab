@@ -145,13 +145,12 @@ let
                fi
                kopia restore "$obj/data/$name" "${source}/data/$name" \
                  --overwrite-files --overwrite-directories --overwrite-symlinks --no-ignore-permission-errors
-               # a guest's local state copy: a new generation, marked restored, makes its seed replace the local copy
+               # a guest's local state copy: a new generation marked restored makes its seed replace the local copy
                entry=$(awk -v n="$name" '$1 == n { print $2, $3 }' ${localStates})
                if [ -n "$entry" ]; then
                  read -r guest ip <<<"$entry"
-                 gen=$(cat /proc/sys/kernel/random/uuid)
-                 printf '%s\n' "$gen" > "${source}/data/$name/.generation"
-                 printf '%s\n' "$gen" > "${source}/data/$name/.restored"
+                 # modules/local-state's restored mark, written in place
+                 printf 'restored-%s\n' "$(cat /proc/sys/kernel/random/uuid)" > "${source}/data/$name/.generation"
                  echo ">>> $name is $guest's local state: it takes the restore when the app starts, at its nightly"
                  echo ">>> mirror, or now: ssh root@$ip systemctl start $name-reseed"
                fi

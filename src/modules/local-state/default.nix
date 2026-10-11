@@ -4,9 +4,10 @@
 #
 # Both copies carry a generation id (.generation). The seed fills a disk holding no file from the share, adopts local
 # data when the share has no id yet (localState added to a service with data), and does nothing while the ids match.
-# A share with an id the guest does not know was either restored (nas-restore writes a new id, and the same id into
-# .restored): the seed then replaces the local copy with it; or it diverged (a lost local id, a second writer): the
-# seed refuses and a human decides. The mirror runs only while the ids match, so it never overwrites a restore; it
+# A share with an id the guest does not know was either restored (nas-restore writes a new id marked restored-): the
+# seed then replaces the local copy with it and drops the mark; or it diverged (a lost local id, a second writer): the
+# seed refuses and a human decides. One file, rewritten in place: the guest's nfs client revalidates an open file,
+# but trusts a cached "no such file" for its attribute timeout. The mirror runs only while the ids match, so it never overwrites a restore; it
 # starts `<name>-reseed` (a restart of the app, so the seed runs) when it finds one. Its share is marked localState
 # (instance.nix `shares`), which tells nas-restore to write the ids and name the guest.
 { config, lib, pkgs, nasMount, ... }:
@@ -44,18 +45,17 @@ let
   # rsync's "some files vanished before they could be transferred": the app replaced a file (home assistant's
   # .storage/*.new renames) while the mirror copied the rest, which is complete
   rsyncVanishedStatus = 24;
-  # nas-restore (109-internal-nas lib/kopia.nix) writes the generation it made here
-  restoredFile = ".restored";
-  excludes = s: lib.concatMapStringsSep " " (e: "--exclude ${lib.escapeShellArg e}") (s.exclude ++ [ generationFile restoredFile ]);
+  # nas-restore (109-internal-nas lib/kopia.nix) marks the generation it writes with this
+  restoredPrefix = "restored-";
+  excludes = s: lib.concatMapStringsSep " " (e: "--exclude ${lib.escapeShellArg e}") (s.exclude ++ [ generationFile ]);
   # a database and its journals, copied by the backup api instead; a sibling like gitea.db.before-<tag> is plain data
   sqliteFilesOf = glob: map (suffix: "${glob}${suffix}") [ "" "-wal" "-shm" "-journal" ];
 
-  # the ids of both copies and of a pending restore, empty where none is written
+  # the ids of both copies, empty where none is written
   generationsRead = local: nas: ''
     generation_of() { if [ -f "$1" ]; then cat "$1"; fi; }
     local_gen=$(generation_of ${local}/${generationFile})
     nas_gen=$(generation_of ${nas}/${generationFile})
-    restored=$(generation_of ${nas}/${restoredFile})
   '';
 
   reconcile = name: s: let local = s.path; nas = nasDir name; in pkgs.writeShellScript "${name}-reconcile" ''
@@ -65,10 +65,11 @@ let
     # the nas share itself, still mounted from before localState: copying it onto itself would destroy it
     if mountpoint -q ${local}; then echo "${name}: ${local} is a mount, not the guest's disk; unmount it" >&2; exit 1; fi
     ${generationsRead local nas}
+    # the local id first: a crash between the writes leaves the mark, and the next seed copies again
     from_nas() {
       rsync -a --delete ${excludes s} ${nas}/ ${local}/
-      printf '%s\n' "$nas_gen" > ${local}/${generationFile}
-      rm -f ${nas}/${restoredFile}
+      printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${local}/${generationFile}
+      printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${nas}/${generationFile}
     }
     if [ -n "$local_gen" ] && [ "$local_gen" = "$nas_gen" ]; then
       exit 0
@@ -80,7 +81,7 @@ let
       if [ -z "$local_gen" ]; then local_gen=$(cat /proc/sys/kernel/random/uuid); printf '%s\n' "$local_gen" > ${local}/${generationFile}; fi
       printf '%s\n' "$local_gen" > ${nas}/${generationFile}
       echo "${name}: the nas copy has no generation: keeping the local data, the next mirror replaces the nas copy"
-    elif [ "$restored" = "$nas_gen" ]; then
+    elif [ "$nas_gen" != "''${nas_gen#${restoredPrefix}}" ]; then
       from_nas
       echo "${name}: replaced ${local} with the restored nas copy"
     else
@@ -126,7 +127,7 @@ in {
         script = ''
           ${generationsRead s.path (nasDir name)}
           if [ -z "$local_gen" ] || [ "$local_gen" != "$nas_gen" ]; then
-            if [ -n "$nas_gen" ] && [ "$restored" = "$nas_gen" ]; then
+            if [ "$nas_gen" != "''${nas_gen#${restoredPrefix}}" ]; then
               echo "${name}: the nas copy was restored, reseeding"
               exec systemctl start --no-block ${name}-reseed.service
             fi

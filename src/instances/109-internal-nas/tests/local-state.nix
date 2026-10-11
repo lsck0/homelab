@@ -84,14 +84,14 @@ pkgs.testers.runNixOSTest {
         out = vm_109.succeed(f"nas-restore service ${name} {good} --yes")
         assert "vm-121's local state" in out and "systemctl start ${name}-reseed" in out, out
         assert vm_109.succeed("cat ${share}/state.txt").strip() == "v1"
-        restored = vm_109.succeed("cat ${share}/.restored").strip()
-        assert restored == vm_109.succeed("cat ${share}/.generation").strip(), "the restore is not marked"
+        marked = vm_109.succeed("cat ${share}/.generation").strip()
+        assert marked.startswith("restored-"), f"the restore is not marked: {marked}"
+        restored = marked.removeprefix("restored-")
         vm_121.succeed("systemctl start ${name}-mirror")
         vm_121.wait_until_succeeds("[ \"$(cat ${local}/state.txt)\" = v1 ]", timeout=60)
         vm_121.wait_until_succeeds("journalctl -u ${name}-seed --no-pager | grep -q 'replaced ${local} with the restored nas copy'", timeout=30)
         assert vm_109.succeed("cat ${share}/state.txt").strip() == "v1", "the mirror overwrote the restore"
-        assert generations() == (restored, restored)
-        vm_109.fail("test -e ${share}/.restored")
+        assert generations() == (restored, restored), "the mark stayed, or the ids differ"
         vm_121.succeed("systemctl is-active demo")
 
     with subtest("the app starting takes a restore too"):
