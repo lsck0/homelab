@@ -50,7 +50,7 @@ let
   # the kernel never picks it
   oomScoreAdjMin = -1000;
   # the third parties a night needs, probed before it in this order (modules/upstream)
-  upstreams = [ "github" "aur" "archlinux" "keyserver" ];
+  upstreams = [ "github" "aur" "archlinux" ];
   # the upstream that ended the night, written by whichever step met the outage
   unavailableFile = "/run/archbuild.unavailable";
   # podman rm grace before it kills a container

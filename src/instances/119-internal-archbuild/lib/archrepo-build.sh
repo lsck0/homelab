@@ -64,9 +64,10 @@
 # the hold, does not hold the night back: the night publishes without it and it shows at once in
 # status.{txt,json} `missing` and in vm-119's homelab_archrepo_missing_packages.
 #
-# Outages: every call to the aur, the official mirrors, the keyserver and github goes through modules/upstream
-# (upstream_call), which retries it; while the service stays down the night ends with UNAVAILABLE before
-# anything is proposed or published, the served snapshot stays and the host records "<name> unavailable".
+# Outages: every call to the aur, the official mirrors and github goes through modules/upstream (upstream_call),
+# which retries it; while the service stays down the night ends with UNAVAILABLE before anything is proposed or
+# published, the served snapshot stays and the host records "<name> unavailable". The keyserver only serves the
+# recipes with validpgpkeys: while it is down those wait like a failure, the rest of the night publishes.
 #
 # Time: main.nix bounds the run (TimeoutStartSec) and gives the recipes a budget inside it; a recipe that could
 # end past the budget is deferred like a failure (its base keeps its last build), so the snapshot and the publish
@@ -756,6 +757,18 @@ stage_add() {
 # a recipe that would end past the budget waits for the next night, its base keeping its last build like a failed one
 recipe_time_left() { (( $(date +%s) + RECIPE_BOUND_S <= BUILD_DEADLINE )); }
 
+# a recipe's validpgpkeys into the builder's keyring; only the bases with keys need the keyserver, so its outage
+# defers them (status 1) and the rest of the night publishes; a key it lacks is makepkg's failure to report
+keys_fetch() {
+  local base=$1 dir=$2 log=$3 keys=() status=0
+  mapfile -t keys < <(srcinfo_get "$dir/.SRCINFO" validpgpkeys)
+  (( ${#keys[@]} > 0 )) || return 0
+  UPSTREAM_TIMEOUT_S=$KEY_FETCH_TIMEOUT_S bash "$UPSTREAM" keyserver \
+    "${AS_BUILDER[@]}" gpg --keyserver "$KEYSERVER" --recv-keys "${keys[@]}" >> "$log" 2>&1 || status=$?
+  (( status != UNAVAILABLE )) || { fail "$base" "deferred to the next night, keyserver unavailable"; return 1; }
+  (( status == 0 )) || log "$base: fetching its validpgpkeys failed"
+}
+
 # a held back or killed night leaves its signed packages in the pool, unpublished; the same recipe stages them again
 restage() {
   local base=$1 key=$2 file files=()
@@ -770,7 +783,7 @@ restage() {
 }
 
 build_base() {
-  local base=$1 dir=$CACHE/recipes/$1 log=$PUBLIC_LOGS/$1.log out=$CACHE/out/$1 key build package file files=() pkgnames=() keys=()
+  local base=$1 dir=$CACHE/recipes/$1 log=$PUBLIC_LOGS/$1.log out=$CACHE/out/$1 key build package file files=() pkgnames=()
   : > "$log"
   # per base: recipes name different tarballs alike (tree-sitter-json-0.24.8.tar.gz from github and pypi)
   install -d -o "$BUILDER" "$CACHE/src/$base"
@@ -788,11 +801,7 @@ build_base() {
   recipe_time_left || { fail "$base" "deferred to the next night, the night's build time is spent"; return 1; }
   build=$(( $(state_get "$base" build) + 1 ))
   log "$base: building (build $build)"
-  mapfile -t keys < <(srcinfo_get "$dir/.SRCINFO" validpgpkeys)
-  if (( ${#keys[@]} > 0 )) && ! UPSTREAM_TIMEOUT_S=$KEY_FETCH_TIMEOUT_S upstream_call keyserver \
-    sudo -u "$BUILDER" -H gpg --keyserver "$KEYSERVER" --recv-keys "${keys[@]}" >> "$log" 2>&1; then
-    log "$base: fetching its validpgpkeys failed"
-  fi
+  keys_fetch "$base" "$dir" "$log" || return 1
   rm -rf "$out"
   install -d -o "$BUILDER" "$out" || { fail "$base" "creating $out failed"; return 1; }
   if ! build_deps_install "$dir" >> "$log" 2>&1; then

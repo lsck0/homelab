@@ -16,7 +16,8 @@
 # leads to the outbox or the served pool, a name neither holds stops the run. archrepo-skip.sh records a skipped
 # night in the served status and leaves the snapshot and the stale clock alone.
 #
-# The night's budget: a recipe starts only while its whole bound still ends within the budget.
+# The night's budget: a recipe starts only while its whole bound still ends within the budget. A keyserver outage
+# defers only the recipes with validpgpkeys.
 { pkgs, lib, ... }:
 let
   build = ../lib/archrepo-build.sh;
@@ -24,8 +25,10 @@ let
   base = "http://127.0.0.1:${toString port}";
   upstream = (import ../../../modules/upstream/default.nix {
     inherit lib pkgs;
-    lab.upstreams.aur.url = "${base}/probe";
+    lab.upstreams = { aur.url = "${base}/probe"; keyserver.url = "${base}/probe"; };
   })._module.args.upstream;
+  # a keyserver that never has the key: what is left to classify is whether the keyserver was up
+  gpgStandIn = pkgs.writeShellScriptBin "gpg" "exit 2";
   # <state dir>: answers by <state dir>/mode (up, down, rpc-broken), the rpc fails <state dir>/fails times first
   standIn = pkgs.writeText "aur-stand-in.py" ''
     import http.server, json, pathlib, sys, urllib.parse
@@ -249,6 +252,22 @@ pkgs.runCommand "archrepo-build" {
   }
   check_recipe "a git fetch the aur fails while up is the recipe's failure" up 1
   check_recipe "a git fetch during an outage ends the night" down ${toString upstream.unavailable}
+
+  # <case> <keyserver mode> <validpgpkeys> <exit> <failed>
+  check_keys() {
+    local status=0 result
+    echo "$2" > aur/mode
+    echo 0 > aur/fails
+    mkdir -p keyed
+    printf 'pkgbase = keyed\n%s' "$3" > keyed/.SRCINFO
+    result=$(failed=(); AS_BUILDER=(env PATH=${gpgStandIn}/bin:$PATH); keys_fetch keyed keyed keys.log > keys.out 2>&1 || status=$?;
+      echo "$status ''${!failed[*]}")
+    [ "$result" = "$4 $5" ] || flunk "$1: '$result', want '$4 $5': $(cat keys.out keys.log)"
+    pass "$1"
+  }
+  check_keys "a recipe without keys needs no keyserver" down "" 0 ""
+  check_keys "a key the keyserver lacks is makepkg's failure, not a deferral" up "validpgpkeys = ABCD" 0 ""
+  check_keys "a keyserver outage defers the recipe, the night goes on" down "validpgpkeys = ABCD" 1 keyed
 
   # ---- the builder's pool: the staged db against the files ----
   OUTBOX_POOL=$PWD/outbox-pool REPO_DIR=$PWD/served-pool STAGE_LINKS=$PWD/stage-links
