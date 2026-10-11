@@ -93,13 +93,11 @@ let
     why = "the dashboard's ${c.widget.type} widget queries ${c.route}";
   }) (lib.filter (c: c.widget != null && c.widget.url == null) lab.homepage);
 
-  # who wakes an idle app on the deploy controller: the ingresses for a request, the state worker for a dump;
-  # modules/swarm admits the same list in the controller itself
-  controllerWakerIds = lib.unique [ internalIngress edge catalog.swarm.stateId ];
-  wakerGrants = [{
-    from = controllerWakerIds; to = swarmManager; tcp = [ catalog.swarm.controllerPort ];
-    why = "the ingresses wake an idle app for a request, the state worker for its nightly dump";
-  }];
+  # who wakes an idle app on its cluster's controller (catalog.clusters `wakers`, which modules/swarm admits too)
+  wakerGrants = lib.mapAttrsToList (name: c: {
+    from = lib.remove c.managerId c.wakers; to = c.managerId; tcp = [ catalog.swarm.controllerPort ];
+    why = "the ingresses wake swarm ${name}'s idle apps for a request, its state worker for a nightly dump";
+  }) catalog.clusters;
 
   ingressMetricsGrants = map (z: {
     from = [ collector ]; to = z.ingress; tcp = [ ports.traefikMetrics ];
@@ -157,7 +155,7 @@ let
   };
 in
 {
-  inherit networks guards controllerWakerIds;
+  inherit networks guards;
 
   # -------------------------------------------------------------------------------------------------------------
   # FORWARD: the exceptions across the router; a dmz reaches nothing private but these
@@ -199,10 +197,6 @@ in
     {
       from = host collector; to = { network = "apps"; addresses = zones.apps.hosts; }; tcp = [ telemetry.ports.promtail ];
       why = "vm-105 scrapes the workers' log shippers for dropped lines";
-    }
-    {
-      from = host edge; to = host collector; tcp = [ telemetry.ports.otlpFrontend ];
-      why = "the edge relays the browsers' frontend telemetry";
     }
     {
       from = all "apps"; to = host swarmManager;
