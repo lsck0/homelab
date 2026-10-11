@@ -222,6 +222,9 @@ the old key still opens all of them in the public history. Inside `nix develop .
   key that must be renewed: delete the guest's `age.sops` and `age.pub`, then `./sync.sh`.
 - A guest was recreated: `sync.sh` reads its new ssh host key through Proxmox. Proxmox reinstalled:
   `src/scripts/init.sh --pin <proxmox-ip>` after comparing the fingerprint on its console.
+- A service's data is broken: `ssh root@10.100.0.109 nas-restore service <share> <snapshot id or date> --yes` restores
+  `/srv/nas/data/<share>` in place. A service whose state lives on its guest's disk (`homelab.localState`) takes the
+  restore at the app's next start; nas-restore prints the guest and the command that makes it take it now.
 - The lab is gone, the nas with it: the off-site copy is the kopia repository on Proton Drive. Sign in with the
   proton account of `src/secrets/shared.sops.json` (`proton-drive auth login`), `proton-drive filesystem download
   /my-files/homelab-offsite/BACKUPS/kopia <dir>`, then `kopia repository connect filesystem --path <dir>` with

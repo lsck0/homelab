@@ -46,8 +46,6 @@ let
   excludes = s: lib.concatMapStringsSep " " (e: "--exclude ${lib.escapeShellArg e}") (s.exclude ++ [ generationFile restoredFile ]);
   # a database and its journals, copied by the backup api instead; a sibling like gitea.db.before-<tag> is plain data
   sqliteFilesOf = glob: map (suffix: "${glob}${suffix}") [ "" "-wal" "-shm" "-journal" ];
-  # a stale automount of the share's old place must be gone before the seed looks at it (modules/nas.nix)
-  mountsPrune = "nas-mounts-prune.service";
 
   # the ids of both copies and of a pending restore, empty where none is written
   generationsRead = local: nas: ''
@@ -105,7 +103,6 @@ in {
       # no RemainAfterExit: every start of the app runs it again
       "${name}-seed" = {
         before = [ "${s.unit}.service" ];
-        after = [ mountsPrune ];
         requiredBy = [ "${s.unit}.service" ];
         unitConfig.RequiresMountsFor = [ (nasDir name) ];
         serviceConfig = { Type = "oneshot"; ExecStart = reconcile name s; };

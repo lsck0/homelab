@@ -2,7 +2,7 @@
 # share by the real rules and runs the real kopia and nas-restore (lib/kopia.nix). Claims: neither direction destroys
 # the other copy; a kopia restore of the share reaches the guest and the mirror never overwrites it; diverged copies
 # are refused; a service whose state lay on the share itself moves onto the guest's disk with its data; a dropped
-# share leaves no stale automount (modules/nas.nix nas-mounts-prune); what lies in the nas data tree without a share
+# share leaves no stale automount (modules/nas.nix nasMountsPrune); what lies in the nas data tree without a share
 # is closed to root and listed, never deleted (lib/nas-exports.nix).
 { pkgs, lib, specialArgs, ... }:
 let
@@ -135,6 +135,6 @@ pkgs.testers.runNixOSTest {
         vm_121.succeed("ls ${nasCopy} >/dev/null && findmnt ${nasCopy}")
         switch("/run/booted-system/specialisation/dropped")
         vm_121.fail("findmnt ${nasCopy}")
-        vm_121.succeed("systemctl is-active nas-mounts-prune")
+        vm_121.fail("systemctl is-active $(systemd-escape --path ${nasCopy}).automount")
   '';
 }

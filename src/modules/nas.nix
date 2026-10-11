@@ -1,5 +1,5 @@
 # a guest's nas mounts: the helpers (nasMount, nasMountRo, nasMedia, nasPath), its fileSystems and the shares vm-109 exports
-{ config, lib, utils, inventory, lab, ... }:
+{ config, lib, pkgs, utils, inventory, lab, ... }:
 let
   nasIP = inventory.${lab.roles.nas}.ip;
   # systemd refuses automounts inside a container, so lxc guests mount at boot
@@ -16,6 +16,7 @@ let
   external = vmid != null && (inventory.${vmid}.type or "internal") != "internal";
 
   nasMountpoints = lib.attrNames config.homelab.nasMounts;
+  declaredMountpoints = pkgs.writeText "nas-mountpoints" (lib.concatLines nasMountpoints);
   # podman-<name> or docker-<name>, whichever backend the host runs
   containerUnits = map (c: c.serviceName) (lib.attrValues config.virtualisation.oci-containers.containers);
   nasAutomounts = map (m: "${utils.escapeSystemdPath m}.${if container then "mount" else "automount"}") nasMountpoints;
@@ -99,6 +100,22 @@ in {
       inherit (fs) localState;
     }) config.homelab.nasMounts;
 
+    # a deploy that drops a mount leaves its automount active: autofs stays on the mountpoint and every access fails
+    # with "host is down" until a reboot. Activation runs before any unit restarts, while the old units are still
+    # loaded, so it stops every nas mount and automount the new configuration does not declare; at boot nothing runs.
+    system.activationScripts.nasMountsPrune.text = ''
+      if [ -d /run/systemd/system ]; then
+        systemctl=${config.systemd.package}/bin/systemctl
+        "$systemctl" list-units --all --plain --no-legend --type=automount,mount | while read -r unit _; do
+          where=$("$systemctl" show -P Where "$unit")
+          if ${pkgs.gnugrep}/bin/grep -qxF -- "$where" ${declaredMountpoints}; then continue; fi
+          case "$("$systemctl" show -P What "''${unit%.*}.mount")" in ${nasIP}:*) ;; *) continue ;; esac
+          echo "stopping $unit ($where), a nas mount this configuration no longer declares"
+          "$systemctl" stop "$unit"
+        done
+      fi
+    '';
+
     # the dmz reaches only per-service state, never media or documents
     assertions = lib.optionals external (map (s: {
       assertion = lib.hasPrefix "/srv/nas/data/" s.path;
@@ -111,27 +128,6 @@ in {
         TimeoutStopSec = "3min";
         Restart = lib.mkForce "on-failure";
         RestartSec = 10;
-      };
-
-      # a deploy that drops a mount leaves its automount active without a unit: autofs stays on the mountpoint
-      # and every access fails with "host is down" until a reboot. Stop those, and nas mounts left without a unit
-      nas-mounts-prune = {
-        description = "Stop NAS mounts this configuration no longer declares";
-        wantedBy = [ "multi-user.target" ];
-        before = [ "nas-tmpfiles.service" ];
-        restartTriggers = [ (builtins.toJSON nasMountpoints) ];
-        path = [ config.systemd.package ];
-        serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
-        script = ''
-          systemctl list-units --all --plain --no-legend --type=automount,mount | while read -r unit _; do
-            [ "$(systemctl show -P LoadState "$unit")" = not-found ] || continue
-            case "$unit" in
-              *.mount) case "$(systemctl show -P What "$unit")" in ${nasIP}:*) ;; *) continue ;; esac ;;
-            esac
-            echo "stopping $unit ($(systemctl show -P Where "$unit")), no longer declared"
-            systemctl stop "$unit"
-          done
-        '';
       };
 
       # tmpfiles skips unmounted automounts
