@@ -102,6 +102,13 @@ pkgs.testers.runNixOSTest {
         files = int([l for l in prom.splitlines() if l.startswith("homelab_backup_snapshot_files ")][0].split()[1])
         assert files == tree, f"snapshot file count {files} is not the tree total ({tree})"
 
+    with subtest("the weekly verify re-reads the repository and publishes its freshness; no proton session skips the sample"):
+        machine.succeed("systemctl start kopia-verify.service")
+        prom = machine.succeed("cat /var/lib/node-exporter-textfile/backup_verify_repository.prom")
+        assert "homelab_backup_verify_last_success_timestamp_seconds" in prom, prom
+        machine.succeed("journalctl -u kopia-verify --no-pager | grep -q 'no proton session'")
+        machine.fail("test -e /var/lib/node-exporter-textfile/backup_verify_offsite.prom")
+
     with subtest("web UI answers"):
         machine.succeed("curl -sf http://127.0.0.1:51515/ | grep -qi kopia")
 

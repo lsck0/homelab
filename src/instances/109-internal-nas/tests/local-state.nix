@@ -2,7 +2,8 @@
 # share by the real rules and runs the real kopia and nas-restore (lib/kopia.nix). Claims: neither direction destroys
 # the other copy; a kopia restore of the share reaches the guest and the mirror never overwrites it; diverged copies
 # are refused; a service whose state lay on the share itself moves onto the guest's disk with its data; a dropped
-# share leaves no stale automount (modules/nas.nix nas-mounts-prune).
+# share leaves no stale automount (modules/nas.nix nas-mounts-prune); what lies in the nas data tree without a share
+# is closed to root and listed, never deleted (lib/nas-exports.nix).
 { pkgs, lib, specialArgs, ... }:
 let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
@@ -121,6 +122,14 @@ pkgs.testers.runNixOSTest {
         assert vm_109.succeed("cat ${share}/state.txt").strip() == "on-share", "the nas copy changed"
         here, there = generations()
         assert here and here == there, (here, there)
+
+    with subtest("an undeclared dir in the nas data tree is closed to root and listed, its data kept"):
+        vm_109.succeed("mkdir -p /srv/nas/data/stray && chmod 0777 /srv/nas/data/stray && echo old > /srv/nas/data/stray/key")
+        vm_109.succeed("chown nobody:nogroup /srv/nas/data/stray && systemctl restart nas-data-orphans")
+        assert vm_109.succeed("stat -c '%a %U' /srv/nas/data/stray").strip() == "700 root"
+        assert vm_109.succeed("cat /srv/nas/data/stray/key").strip() == "old"
+        vm_109.succeed("journalctl -u nas-data-orphans --no-pager | grep -q 'orphan: /srv/nas/data/stray'")
+        assert vm_109.succeed("stat -c '%a' ${share}").strip() == "777", "a declared share was closed"
 
     with subtest("a switch that drops the share leaves no stale automount on its mountpoint"):
         vm_121.succeed("ls ${nasCopy} >/dev/null && findmnt ${nasCopy}")
