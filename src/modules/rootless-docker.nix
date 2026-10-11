@@ -29,7 +29,6 @@ let
   subIdBase = 100000;
   subIdCount = 65536;
   egressChain = "rootless-egress";
-  privateRanges = import ./private-ranges.nix { inherit lib inventory site; };
   net = import ./net.nix { inherit lib inventory site; };
   # half the default weight: builds and jobs yield to the vm's own services
   sliceWeight = 50;
@@ -147,7 +146,7 @@ let
   ] ++ lib.concatLists (lib.mapAttrsToList (_: u:
     map (a: "-A ${egressChain} -m owner --uid-owner ${toString u.uid} -d ${a.ip}/32 -p ${a.proto} --dport ${toString a.port} -j RETURN")
       (dnsAccess ++ u.labAccess)
-    ++ map (range: "-A ${egressChain} -m owner --uid-owner ${toString u.uid} -d ${range} -j REJECT") privateRanges
+    ++ map (range: "-A ${egressChain} -m owner --uid-owner ${toString u.uid} -d ${range} -j REJECT") net.localRanges
   ) cfg) ++ [ "COMMIT" ]));
 
   sliceConfig = u: { MemoryHigh = u.memoryHigh; MemoryMax = u.memoryMax; CPUWeight = sliceWeight; IOWeight = sliceWeight; };

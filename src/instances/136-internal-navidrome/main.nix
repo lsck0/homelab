@@ -63,8 +63,6 @@ in {
     '';
   };
 
-  networking.firewall.allowedTCPPorts = [ route.port ];
-
   # consistent copy for the snapshot, the live file may be mid-write
   homelab.dbBackup.databases.navidrome.sqlite = "${stateDir}/navidrome.db";
 }

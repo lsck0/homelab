@@ -56,6 +56,8 @@ let
   appRouters = lib.filterAttrs (name: r: r ? service && lib.elem "websecure" (r.entryPoints or [ ]) && (r.priority or 0) < 1000
     && lib.any (a: lib.hasPrefix "${a}-" name || name == "${a}-tls") (lib.attrNames catalog.apps)) (httpOf edge).routers;
 
+  portForwardLines = lines router.networking.nftables.tables.port-forwards.content;
+
   kea = router.services.kea.dhcp4.settings.subnet4;
   inPool = ip: pool: let bounds = map lib.trim (lib.splitString "-" pool.pool);
     toInt = a: lib.foldl' (acc: o: acc * 256 + lib.toInt o) 0 (lib.splitString "." a); in
@@ -123,9 +125,25 @@ lawsOf {
     lib.optional (v.type != "router" && lib.any (s: lib.any (inPool v.ip) s.pools) kea) "${id}: ${v.ip} lies in a dhcp pool"
   ) inventory);
 
+  # the house's public address forwards a named port only: a lab-only route has none
+  "port forwards" = map (l: "the router forwards no port: ${l}")
+    (lib.filter (l: lib.hasInfix " dport " l && builtins.match ".* dport [0-9]+ .*" l == null) portForwardLines);
+
   # no guest trusts the homepage, the prober or the agent with every guarded port; each trusts its own address
   "ingress guards" = lib.concatLists (lib.mapAttrsToList (name: config:
     map (s: "${name} trusts ${s} on every guarded port") (lib.intersectLists config.homelab.ingressOnly.trusted
       (map net.hostSource (lib.remove config.homelab.vmid (with lab.roles; [ dashboard collector operator ]))))
   ) configs);
+
+  # the prober and the status dots check an sso route through its ingress: a grant onto the backend passes authelia.
+  # Only a dashboard widget without a url of its own queries the backend, with the token it holds
+  "probes through the ingress" = lib.concatLists (lib.mapAttrsToList (name: r: let
+    admitted = configs.${inventory.${toString r.vmid}.name}.homelab.ingressOnly.allowed.${toString r.port} or [ ];
+    queried = lib.any (c: c.route == name && c.widget != null && c.widget.url == null) lab.homepage;
+  in
+    lib.optional (lib.elem (net.hostSource lab.roles.collector) admitted)
+      "${name}: the prober reaches port ${toString r.port} past the ingress"
+    ++ lib.optional (lib.elem (net.hostSource lab.roles.dashboard) admitted && !queried)
+      "${name}: the dashboard reaches port ${toString r.port} past the ingress, with no widget querying it"
+  ) (lib.filterAttrs (_: r: r.vmid != null && r.off.sso == null) catalog.internal));
 }

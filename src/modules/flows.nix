@@ -8,7 +8,8 @@
 #   trusted there already), and every source whose network the router would not let through gets its forward.
 # - forward: the network-wide exceptions across the router: one source, one destination, its ports.
 # - router: the router's own services and who may use them.
-# - portForwards: the house's public address forwarded: https to the edge, every tcp and udp route to its backend.
+# - portForwards: the house's public address forwarded: https to the edge, every tcp and udp route with a publicPort
+#   to its backend.
 #
 # instances/300-router/main.nix renders networks, forward, router and portForwards; modules/network.nix renders the
 # grants onto the guest it runs on. A grant onto one instance lives in its instance.nix (`grants`, collected by
@@ -92,13 +93,11 @@ let
     why = "the dashboard's ${c.widget.type} widget queries ${c.route}";
   }) (lib.filter (c: c.widget != null && c.widget.url == null) lab.homepage);
 
-  # who wakes an idle app on the deploy controller: the ingresses for a request, the state worker for a dump;
-  # modules/swarm admits the same list in the controller itself
-  controllerWakerIds = lib.unique [ internalIngress edge catalog.swarm.stateId ];
-  wakerGrants = [{
-    from = controllerWakerIds; to = swarmManager; tcp = [ catalog.swarm.controllerPort ];
-    why = "the ingresses wake an idle app for a request, the state worker for its nightly dump";
-  }];
+  # who wakes an idle app on its cluster's controller (catalog.clusters `wakers`, which modules/swarm admits too)
+  wakerGrants = lib.mapAttrsToList (name: c: {
+    from = lib.remove c.managerId c.wakers; to = c.managerId; tcp = [ catalog.swarm.controllerPort ];
+    why = "the ingresses wake swarm ${name}'s idle apps for a request, its state worker for a nightly dump";
+  }) catalog.clusters;
 
   ingressMetricsGrants = map (z: {
     from = [ collector ]; to = z.ingress; tcp = [ ports.traefikMetrics ];
@@ -156,7 +155,7 @@ let
   };
 in
 {
-  inherit networks guards controllerWakerIds;
+  inherit networks guards;
 
   # -------------------------------------------------------------------------------------------------------------
   # FORWARD: the exceptions across the router; a dmz reaches nothing private but these
@@ -198,10 +197,6 @@ in
     {
       from = host collector; to = { network = "apps"; addresses = zones.apps.hosts; }; tcp = [ telemetry.ports.promtail ];
       why = "vm-105 scrapes the workers' log shippers for dropped lines";
-    }
-    {
-      from = host edge; to = host collector; tcp = [ telemetry.ports.otlpFrontend ];
-      why = "the edge relays the browsers' frontend telemetry";
     }
     {
       from = all "apps"; to = host swarmManager;
@@ -276,11 +271,11 @@ in
       off = { inflightLimit = "the edge limits every client itself"; accessLog = "traefik logs every request"; };
     }
   ]
-  # every tcp and udp route (an instance service's or an app's) to every guest answering it, while one runs
+  # every forwarded tcp and udp route (an instance service's or an app's) to every guest answering it, while one runs
   ++ lib.filter (f: f.addresses != [ ]) (map (r: {
     proto = r.protocol; port = r.publicPort; targetPort = r.port;
     addresses = map net.ipOf (backendIdsOf r);
     inherit (r) host srv off;
     why = "${r.protocol} ${net.fqdn r.host}";
-  }) (lib.attrValues catalog.l4));
+  }) (lib.attrValues catalog.forwarded));
 }

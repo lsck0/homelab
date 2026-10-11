@@ -12,6 +12,6 @@ in
   stateful = [ "web" ];
   # the notes
   volumes.web_server_data.backup = true;
-  env.web.WEB_SERVER_ORIGIN = "https://nyangine.lsck0.dev";
+  env.web.WEB_SERVER_ORIGIN = "{{homelab.origin-nyangine}}";
   off = { traces = silent; profiles = silent; };
 }

@@ -99,7 +99,7 @@ in {
   # the cache url carries a password, so it comes from sops, not the nix store; ci alone reads it
   sops.templates."sccache-redis.env" = {
     owner = user;
-    content = "SCCACHE_REDIS=redis://:${config.sops.placeholder.sccache-redis-pass}@${sccache.host}\n";
+    content = "SCCACHE_REDIS=redis://:${config.sops.placeholder.sccache-redis-pass}@${sccache.host}:${toString sccache.port}\n";
   };
 
   systemd.services.forgejo-runner = {

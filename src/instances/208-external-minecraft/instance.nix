@@ -1,5 +1,5 @@
 # Minecraft server; lazymc sleeps/wakes the server per real player logins
-{ net, ... }: {
+{ config, ... }: {
   vm = {
     bootPhase = "public";
     needs = [ "containers" "nfs" ];
@@ -14,8 +14,9 @@
   services.minecraft = {
     host = "mc";
     protocol = "tcp";
-    port = net.ports.minecraft;
-    publicPort = net.ports.minecraft;
+    # the protocol's default: clients without the srv record dial it
+    port = 25565;
+    publicPort = config.services.minecraft.port;
     srv = "_minecraft._tcp";
     off = { homepage = "a game server, no page"; };
   };

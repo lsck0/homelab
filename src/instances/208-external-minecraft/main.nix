@@ -3,10 +3,8 @@
 # and stops it with rcon `stop`, which frees the jvm heap, after sleepAfterS without players.
 # Who may join and who is op lives in whitelist.json and ops.json in the nas data dir (`mc-rcon whitelist add`,
 # `mc-rcon op`), not in this public repo.
-{ config, lib, pkgs, nasMount, inventory, site, ... }:
+{ config, lib, pkgs, nasMount, catalog, ... }:
 let
-  net = import ../../modules/net.nix { inherit lib inventory site; };
-
   data = "/var/lib/minecraft";
   modpacksDir = "/var/lib/minecraft-modpacks";
   modpackEnv = "${data}/modpack.env";
@@ -18,7 +16,7 @@ let
   # the image's uid and gid
   serverUid = "1000";
 
-  publicPort = net.ports.minecraft;
+  publicPort = catalog.l4.minecraft.port;
   # the container's game port, published on loopback for lazymc only
   serverPort = 25566;
   rconPort = 25575;

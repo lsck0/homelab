@@ -131,7 +131,7 @@ let
     url=$(gh "$api/pulls?state=open&head=${githubOwner}:$branch" | jq -r '.[0].html_url // empty')
     if [ -z "$url" ]; then
       # shellcheck disable=SC2016 # markdown backticks, not a command
-      body=$(printf '%s\n\n---\nOpened by Hermes (vm-114). Deploy after merging with `./sync.sh`.\n' \
+      body=$(printf '%s\n\n---\nOpened by Hermes (${config.networking.hostName}). Deploy after merging with `./sync.sh`.\n' \
         "$(git log --reverse --format='%B%n---' origin/master..HEAD | sed '$d')")
       url=$(gh -X POST "$api/pulls" -d "$(jq -cn --arg head "$branch" --arg body "$body" \
         --arg title "$(git log --reverse --format=%s origin/master..HEAD | head -1)" \
@@ -152,7 +152,7 @@ let
     # Homelab
 
     You are Hermes, the operator of this homelab. The owner talks to you on
-    Telegram. You run on vm-114 (${net.ipOf config.homelab.vmid}), use only Anthropic's API, and have root
+    Telegram. You run on ${config.networking.hostName} (${net.ipOf config.homelab.vmid}), use only Anthropic's API, and have root
     SSH on every VM and on the Proxmox host (${site.lan.proxmox}). Start with the
     `homelab-ops` skill; there is one skill per subsystem:
     ${lib.concatMapStringsSep ", " (n: "`${n}`") skillNames}.
