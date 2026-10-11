@@ -15,7 +15,8 @@
   dockerhub = { url = "https://registry-1.docker.io/v2/"; registry = "docker.io"; };
   ghcr = { url = "https://ghcr.io/v2/"; registry = "ghcr.io"; };
   quay = { url = "https://quay.io/v2/"; registry = "quay.io"; };
-  crowdsec.url = "https://hub-data.crowdsec.net";
+  githubusercontent.url = "https://raw.githubusercontent.com/";
+  crowdsec.url = "https://api.crowdsec.net";
   keyserver.url = "https://keyserver.ubuntu.com";
   arxiv.url = "https://rss.arxiv.org";
   trmnl.url = "https://trmnl.com/api/plugin_settings";

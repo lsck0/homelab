@@ -15,6 +15,7 @@ let
     off = { };
     frames = "deny";
     referrer = true;
+    limitScale = 1;
     bodyLimitBytes = service.bodyLimitDefaultBytes;
     sources = null;
   });

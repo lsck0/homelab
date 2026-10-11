@@ -1,14 +1,14 @@
 # traefik with the lab's defences, for both ingresses (100-internal, 200-external)
 #
 # The routes an ingress serves (`routes`, modules/catalog.nix records of modules/service.nix) become its routers,
-# services and middlewares here, each feature on unless the route's `off` names it: client-ip (the real client into
-# X-Real-Ip, lib/traefik-clientip), the strip of client-sent identity and target headers, cloudflare-only, the
-# crowdsec bouncer with its AppSec waf and the core rule set, the per-client and per-route rate and in-flight
-# limits, the body limit, retries, the security headers, then sso, anubis, basic auth and the route's own headers.
-# A hand-written router gets the same chain and may name opt-outs in an `off` attribute of its own. Every quantity
-# that names a client reads X-Real-Ip, which client-ip sets from the socket peer and the X-Forwarded-For hops of
-# trustedProxies and Cloudflare only; the backend's X-Forwarded-For is that client alone. The probers check a route
-# at its health path through the ingress, past sso and anubis but nowhere else (probe routers below).
+# services and middlewares here, each feature on unless the route's `off` names it: cloudflare-only on the socket peer,
+# client-ip (the real client into X-Real-Ip, lib/traefik-clientip), the strip of client-sent identity and target
+# headers, the crowdsec bouncer with its AppSec waf and the core rule set, the per-client and per-route rate and
+# in-flight limits, the body limit, retries, the security headers, then sso, anubis, basic auth and the route's own
+# headers. A hand-written router gets the same chain and may name opt-outs in an `off` attribute of its own. Every
+# quantity that names a client reads X-Real-Ip, which client-ip sets from the socket peer and the X-Forwarded-For
+# hops of trustedProxies and Cloudflare only; the backend's X-Forwarded-For is that client alone. The probers check a
+# route at its health path through the ingress, past sso and anubis but nowhere else (probe routers below).
 { config, lib, pkgs, retry, inventory, site, lab, catalog, ... }:
 let
   cfg = config.homelab.traefik;
@@ -21,6 +21,9 @@ let
   # the prober (vm-105's blackbox) and the dashboard's status dots (vm-103)
   probeSources = map net.hostSource [ telemetry.collectorVmid lab.roles.dashboard ];
   probeMethods = [ "GET" "HEAD" ];
+  # a probe router outranks its route's routers, ranked by rule length (hundreds of characters), and its login
+  # router; the bot defence (9000 and up) stays above
+  probePriority = 1000;
   # a route kept off the internet answers the networks the router lets into the internal zone, never a dmz
   internalOnlySources = [ net.wan.subnet net.wireguard.subnet net.zones.internal.subnet ];
 
@@ -114,26 +117,33 @@ let
   routeBudget = routeLimits.route;
   routeSource.requestHost = true;
 
-  limitMiddlewares = {
-    rate-limit.rateLimit = {
-      average = rateLimitAverage;
-      burst = rateLimitBurst;
+  # one set per scale a route asks for (modules/service.nix limitScale); scale 1 keeps the plain names
+  limitSuffix = scale: lib.optionalString (scale != 1) "-x${toString scale}";
+  scaledLimits = scale: let x = limitSuffix scale; in {
+    "rate-limit${x}".rateLimit = {
+      average = rateLimitAverage * scale;
+      burst = rateLimitBurst * scale;
       period = "1s";
       sourceCriterion = clientSource;
     };
-    inflight-limit.inFlightReq = {
-      amount = inFlightAmount;
+    "inflight-limit${x}".inFlightReq = {
+      amount = inFlightAmount * scale;
       sourceCriterion = clientSource;
     };
-    route-rate-limit.rateLimit = {
-      inherit (routeBudget) average burst;
+    "route-rate-limit${x}".rateLimit = {
+      average = routeBudget.average * scale;
+      burst = routeBudget.burst * scale;
       period = "1s";
       sourceCriterion = routeSource;
     };
-    route-inflight-limit.inFlightReq = {
-      amount = routeBudget.inFlight;
+    "route-inflight-limit${x}".inFlightReq = {
+      amount = routeBudget.inFlight * scale;
       sourceCriterion = routeSource;
     };
+  };
+  limitScales = lib.unique ([ 1 ] ++ map (r: r.limitScale) (map recordOf (lib.attrValues allRouters)));
+
+  limitMiddlewares = lib.foldl' (acc: scale: acc // scaledLimits scale) { } limitScales // {
     # password endpoints a route names in `loginPaths`: brute force stops here, whatever the app does
     rate-limit-login.rateLimit = {
       average = loginRateLimitAverage;
@@ -248,13 +258,23 @@ let
       crowdsecMode = "live";
       crowdsecLapiScheme = "http";
       crowdsecLapiHost = "${loopback}:${toString crowdsecLapiPort}";
-      crowdsecLapiKeyFile = config.sops.secrets.crowdsec-bouncer-key.path;
+      crowdsecLapiKeyFile = bouncerKeyFile;
       crowdsecAppsecEnabled = appsec;
       crowdsecAppsecHost = "${loopback}:${toString appsecPort}";
       # the same hops client-ip walks, so a ban lands on the client client-ip names
       forwardedHeadersTrustedIPs = trustedHops;
     };
   };
+
+  bouncerName = "traefik-bouncer";
+  # cscli makes the key; beside crowdsec's database, so a wiped database takes its key along
+  bouncerKeyFile = "${crowdsecDir}/data/${bouncerName}.key";
+
+  # a start never fetches or upgrades a rule or its data
+  crowdsecHub = import ./lib/crowdsec-hub.nix { inherit pkgs lib; };
+  # the owner's choice: the community api (CAPI) gets each ban's attacker ip, scenario and time, and returns the
+  # community blocklist; an outage keeps the last decisions
+  crowdsecCommunity = true;
 
   # the waf bouncer, and an ip-reputation-only one for routes whose `off.waf` says why
   bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable {
@@ -372,6 +392,7 @@ let
     frames = "deny";
     referrer = true;
     bodyLimitBytes = service.bodyLimitDefaultBytes;
+    limitScale = 1;
     sources = null;
   };
   allRecords = cfg.routes // cfg.relays;
@@ -421,7 +442,8 @@ let
     rule = "${fqdnRule r} && Path(`${r.health}`) && ${anyOf "Method" probeMethods} && ${anyOf "ClientIP" probeSources}";
     service = name;
     entryPoints = [ "websecure" ];
-    route = r // { off = r.off // { accessLog = "a probe every few seconds would bury the clients' requests"; }; };
+    priority = probePriority;
+    route = r // { methods = probeMethods; off = r.off // { accessLog = "a probe every few seconds would bury the clients' requests"; }; };
   }) probeRoutes;
 
   # an instance route to its guest (or its on-demand proxy), an app route to every node of its cluster, health-checked
@@ -466,13 +488,15 @@ let
   # one intake per host, named after its first route
   frontendRoutes = lib.listToAttrs (map (e: lib.nameValuePair e.value.host e) (lib.reverseList
     (lib.filter (e: frontendOn e.value) (lib.attrsToList cfg.routes))));
+  frontendMethods = [ "POST" ];
   frontendRouters = lib.mapAttrs' (host: e: lib.nameValuePair "${e.name}-otlp" {
-    rule = "Host(`${net.fqdn host}`) && PathPrefix(`${telemetry.frontendPath}`) && Method(`POST`)";
+    rule = "Host(`${net.fqdn host}`) && PathPrefix(`${telemetry.frontendPath}`) && ${anyOf "Method" frontendMethods}";
     service = "frontend-intake";
     entryPoints = [ "websecure" ];
     middlewares = lib.optional (on e.value "sso") "authelia" ++ [ "${e.name}-otlp-tenant" ];
     route = e.value // {
       off = e.value.off // { anubis = "browser beacons run no proof of work"; };
+      methods = frontendMethods;
       bodyLimitBytes = frontendBodyBytes;
     };
   }) frontendRoutes;
@@ -504,25 +528,33 @@ let
   basicAuthRoutes = lib.filterAttrs (_: r: r.basicAuth != null) cfg.routes;
   basicAuthSecrets = lib.unique (lib.concatMap (r: lib.attrValues r.basicAuth) (lib.attrValues basicAuthRoutes));
 
-  # the limit is traefik's buffering, which also spools every response to /tmp: a route whose methods carry no body
-  # (a download mirror) has nothing to limit and must not buffer multi-gigabyte responses on the 8 GiB edge disk
-  methodsWithBody = [ "POST" "PUT" "PATCH" "DELETE" ];
-  limitsBody = r: on r "bodyLimit" && lib.any (m: lib.elem m methodsWithBody) (r.methods or methodsWithBody);
+  # the body limit (buffering) also spools whole responses to /tmp: a router splits so only body methods pass it
+  bodyMethods = [ "POST" "PUT" "PATCH" "DELETE" ];
+  bodyRouterSuffix = "-body";
+  # vulcand/oxy's multibuffer files
+  spoolFilePattern = "temp-multibuf-*";
+  spoolMetricName = "traefik_spool";
+  # a hand-written router names no methods: it admits every one
+  methodsOf = r: r.methods or null;
+  admitsBody = r: methodsOf r == null || lib.any (m: lib.elem m bodyMethods) (methodsOf r);
+  admitsBodyless = r: methodsOf r == null || lib.any (m: !(lib.elem m bodyMethods)) (methodsOf r);
+  limitsBody = r: on r "bodyLimit" && admitsBody r;
+  splitsByBody = r: limitsBody r && admitsBodyless r;
 
-  # every websecure router's chain, ahead of its own middlewares; the strip runs before a router's own authelia sets
-  # the identity, cloudflare-only refuses a direct caller by its socket peer, before client-ip makes the client the
-  # remote address and before the waf spends anything on it
-  chainOf = name: r:
+  # every websecure router's chain, ahead of its own middlewares; cloudflare-only judges the socket peer, before
+  # client-ip makes the resolved client the remote address, and refuses a direct caller before the waf spends anything
+  # on it; the strip runs before a router's own authelia sets the identity
+  chainOf = name: r: withBody:
     # a route kept off the internet admits private sources only, cloudflare's included in none
     lib.optional (cfg.cloudflareOnly.enable && on r "cloudflare" && on r "internet") "cloudflare-only"
     ++ [ "client-ip" "strip-client-headers" ]
     # scanners must reach the labyrinth, past the waf
     ++ lib.optional (cfg.crowdsecBouncer.enable && on r "crowdsec")
       (if on r "waf" && name != "honeypot-tls" then "crowdsec" else "crowdsec-noappsec")
-    ++ lib.optionals (on r "rateLimit") [ "rate-limit" "route-rate-limit" ]
-    ++ lib.optionals (on r "inflightLimit") [ "inflight-limit" "route-inflight-limit" ]
+    ++ lib.optionals (on r "rateLimit") [ "rate-limit${limitSuffix r.limitScale}" "route-rate-limit${limitSuffix r.limitScale}" ]
+    ++ lib.optionals (on r "inflightLimit") [ "inflight-limit${limitSuffix r.limitScale}" "route-inflight-limit${limitSuffix r.limitScale}" ]
     # buffered once, outside the retry: a retry inside the buffer re-read a consumed body and sent it empty
-    ++ lib.optional (limitsBody r) "body-limit-${toString r.bodyLimitBytes}"
+    ++ lib.optional withBody "body-limit-${toString r.bodyLimitBytes}"
     ++ [ "retry-upstream" ]
     ++ lib.optional (on r "secureHeaders") (
       if r.frames == "sameorigin" then "secure-headers-sameorigin"
@@ -540,13 +572,31 @@ let
     if cfg.refusedClients == [ ] || r.sources != null then rule
     else "(${rule}) && " + lib.concatMapStringsSep " && " (range: "!ClientIP(`${range}`)") cfg.refusedClients;
 
-  routersWithTls = lib.mapAttrs (name: router: let r = recordOf router; in
-    removeAttrs router [ "route" "off" ] // lib.optionalAttrs (lib.elem "websecure" (router.entryPoints or [ ])) {
-      rule = refuse r router.rule;
+  websecure = router: lib.elem "websecure" (router.entryPoints or [ ]);
+  routersWithTls = lib.concatMapAttrs (name: router: let
+    r = recordOf router;
+    rule = refuse r router.rule;
+    plain = removeAttrs router [ "route" "off" ] // lib.optionalAttrs (!(on r "accessLog")) { observability.accessLogs = false; };
+    secured = withBody: plain // {
       tls = wildcardTls // (router.tls or { });
-      middlewares = chainOf name r ++ (router.middlewares or [ ]);
-    } // lib.optionalAttrs (!(on r "accessLog")) { observability.accessLogs = false; }
+      middlewares = chainOf name r withBody ++ (router.middlewares or [ ]);
+    };
+    # both halves keep the priority the whole rule had, so the split moves neither against any other router
+    half = withBody: secured withBody // {
+      rule = "(${rule}) && ${if withBody then "" else "!"}${anyOf "Method" bodyMethods}";
+      priority = router.priority or (lib.stringLength rule);
+    };
+  in
+    if !(websecure router) then { ${name} = plain; }
+    else if splitsByBody r then { ${name} = half false; "${name}${bodyRouterSuffix}" = half true; }
+    else { ${name} = secured (limitsBody r) // { inherit rule; }; }
   ) allRouters;
+  # a route router ranked at or above the probes would take their health path back behind sso
+  outrankingProbes = lib.attrNames (lib.filterAttrs (name: router:
+    (routeRouters // relayRouters // frontendRouters) ? ${lib.removeSuffix bodyRouterSuffix name}
+    && (router.priority or (lib.stringLength router.rule)) >= probePriority) routersWithTls);
+  splitClashes = lib.filter (name: allRouters ? "${name}${bodyRouterSuffix}")
+    (lib.attrNames (lib.filterAttrs (_: router: websecure router && splitsByBody (recordOf router)) allRouters));
   allRouters = cfg.routers // routeRouters // probeRouters // frontendRouters // relayRouters // botDefenseRouters;
   allMiddlewares = cfg.middlewares // routeMiddlewareDefs // frontendMiddlewares // secureHeadersMiddleware // limitMiddlewares
     // bouncerMiddleware // stripClientHeadersMiddleware // autheliaMiddleware;
@@ -637,6 +687,12 @@ in {
       # traefik drops a router naming a missing middleware and answers its host with a 404
       assertion = missingMiddlewares == [ ];
       message = "${config.networking.hostName}: routers name middlewares nothing defines: ${toString missingMiddlewares}";
+    } {
+      assertion = outrankingProbes == [ ];
+      message = "${config.networking.hostName}: routers at or above the probes' priority ${toString probePriority}: ${toString outrankingProbes}";
+    } {
+      assertion = splitClashes == [ ];
+      message = "${config.networking.hostName}: routers whose body half (${bodyRouterSuffix}) would replace another router: ${toString splitClashes}";
     }];
 
     sops.templates."traefik.env".content = ''
@@ -655,10 +711,11 @@ in {
         "${loopback}:${toString crowdsecLapiPort}:${toString crowdsecLapiContainerPort}"
         "${loopback}:${toString appsecPort}:${toString appsecPort}"
       ];
-      environment.COLLECTIONS = lib.concatStringsSep " " [
-        "crowdsecurity/traefik" "crowdsecurity/http-cve" "crowdsecurity/appsec-virtual-patching"
-        "crowdsecurity/appsec-generic-rules" "crowdsecurity/appsec-crs-inband"
-      ];
+      environment = {
+        COLLECTIONS = lib.concatStringsSep " " crowdsecHub.collections;
+        NO_HUB_UPGRADE = "true";
+        DISABLE_ONLINE_API = lib.boolToString (!crowdsecCommunity);
+      };
     };
 
     # the house's public address rotates; crowdsec must never ban it
@@ -667,7 +724,8 @@ in {
       after = [ "podman-crowdsec.service" ];
       requires = [ "podman-crowdsec.service" ];
       wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.podman pkgs.curl pkgs.coreutils pkgs.diffutils pkgs.python3 ];
+      path = [ pkgs.podman pkgs.getent pkgs.coreutils pkgs.diffutils ];
+      environment.PUBLIC_HOST = net.fqdn net.wan.publicHost;
       # no restart: the timer retries, faster retries restart crowdsec
       serviceConfig.Type = "oneshot";
       script = "exec ${pkgs.bash}/bin/bash ${./lib/crowdsec-home-whitelist.sh}";
@@ -683,6 +741,24 @@ in {
       };
     };
 
+    # leaked buffering spool files (vm-105's ingress_spool alert); traefik's PrivateTmp lies below /tmp
+    systemd.services.traefik-spool-metric = {
+      description = "Measure traefik's buffering spool files";
+      path = [ pkgs.findutils pkgs.gawk pkgs.coreutils ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        bytes=$(find /tmp -type f -name '${spoolFilePattern}' -printf '%s\n' | awk '{ s += $1 } END { print s + 0 }')
+        metric=${config.homelab.textfileDir}/${spoolMetricName}.prom
+        printf '# TYPE homelab_traefik_spool_bytes gauge\nhomelab_traefik_spool_bytes %s\n' "$bytes" > "$metric.tmp"
+        mv "$metric.tmp" "$metric"
+      '';
+    };
+    homelab.textfiles = [ spoolMetricName ];
+    systemd.timers.traefik-spool-metric = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = { OnBootSec = "5min"; OnUnitActiveSec = "5min"; };
+    };
+
     # the access log is only ever appended to
     services.logrotate.settings.${cfg.accessLog} = {
       frequency = "daily";
@@ -695,8 +771,10 @@ in {
     systemd.services.crowdsec-register-bouncer = lib.mkIf cfg.crowdsecBouncer.enable {
       description = "Register the Traefik bouncer with CrowdSec";
       after = [ "podman-crowdsec.service" ];
-      wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.podman pkgs.coreutils pkgs.jq ];
+      # traefik reads the key at start; once it exists this returns at once
+      before = [ "traefik.service" ];
+      wantedBy = [ "traefik.service" ];
+      path = [ pkgs.podman pkgs.coreutils pkgs.jq pkgs.systemd ];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
@@ -704,14 +782,17 @@ in {
         RestartSec = 15;
       };
       script = ''
-        KEY=$(cat ${config.sops.secrets.crowdsec-bouncer-key.path})
+        [ -s ${bouncerKeyFile} ] && exit 0
         ${retry} 60 5 podman exec crowdsec cscli lapi status
-        if podman exec crowdsec cscli bouncers list -o json 2>/dev/null \
-             | jq -e '.[]|select(.name=="traefik-bouncer")' >/dev/null; then
-          echo "bouncer already registered"
-        else
-          podman exec crowdsec cscli bouncers add traefik-bouncer -k "$KEY"
+        if podman exec crowdsec cscli bouncers list -o json | jq -e '.[] | select(.name == "${bouncerName}")' >/dev/null; then
+          podman exec crowdsec cscli bouncers delete ${bouncerName}
         fi
+        # cscli makes the key and prints it: never on an argv
+        key=$(podman exec crowdsec cscli bouncers add ${bouncerName} -o raw)
+        install -m 0440 -g traefik /dev/null ${bouncerKeyFile}.tmp
+        printf '%s' "$key" > ${bouncerKeyFile}.tmp
+        mv ${bouncerKeyFile}.tmp ${bouncerKeyFile}
+        systemctl try-restart --no-block traefik.service
       '';
     };
 
@@ -734,6 +815,11 @@ in {
         install -m 0644 ${traefikAcquis} ${crowdsecDir}/config/acquis.d/traefik.yaml
         install -m 0644 ${appsecAcquis} ${crowdsecDir}/config/acquis.d/appsec.yaml
         install -m 0644 ${crsConfig} ${crowdsecDir}/config/appsec-configs/homelab-crs.yaml
+        rm -rf ${crowdsecDir}/config/hub
+        cp -r --no-preserve=mode ${crowdsecHub.hub} ${crowdsecDir}/config/hub
+        # the image's entrypoint refreshes only an index older than a day
+        touch ${crowdsecDir}/config/hub/.index.json
+        cp -r --no-preserve=mode ${crowdsecHub.data}/. ${crowdsecDir}/data/
         ${lib.optionalString (cfg.crowdsecBouncer.whitelistCidrs != [ ]) ''
           install -d -m 0755 ${crowdsecDir}/config/parsers/s02-enrich
           install -m 0644 ${whitelistParser} ${crowdsecDir}/config/parsers/s02-enrich/homelab-whitelist.yaml
@@ -879,8 +965,6 @@ in {
 
     sops.secrets = {
       cloudflare-token = { };
-      # the bouncer plugin reads it inside traefik
-      crowdsec-bouncer-key = lib.mkIf cfg.crowdsecBouncer.enable { owner = "traefik"; };
     } // lib.genAttrs basicAuthSecrets (_: { restartUnits = [ "traefik-basic-auth.service" "traefik.service" ]; })
       // lib.optionalAttrs (anubisRoutes != { }) { anubis-ed25519-key = { group = "anubis"; mode = "0440"; }; };
     systemd.services.traefik-basic-auth = lib.mkIf (basicAuthRoutes != { }) {

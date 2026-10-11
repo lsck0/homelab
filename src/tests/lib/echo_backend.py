@@ -4,7 +4,8 @@
 
 Listens on 0.0.0.0 on every port (one machine stands in for many guests by owning their addresses), answers every
 method with a json body {node, port, method, path, headers, body_len} and logs the same as one json line per
-request. Paths: /big answers 4 KiB of text/html (for compression), /health and */health answer {"ok": true}.
+request. Paths: /big answers 4 KiB of text/html (for compression), /blob BLOB_BYTES of zeros (a download),
+/health and */health answer {"ok": true}.
 A port listed in --stopped-file (one port per line) refuses to answer (503), so a test can take a "node" down.
 """
 
@@ -16,6 +17,8 @@ import ssl
 import threading
 
 BIG_BYTES = 4096
+# eight times traefik's in-memory buffer (modules/traefik memRequestBodyBytes): buffered, it would spill to disk
+BLOB_BYTES = 8 * 1024 * 1024
 
 
 def handler_for(log_path, stopped_path):
@@ -42,6 +45,8 @@ def handler_for(log_path, stopped_path):
                 return self.reply(503, "text/plain", b"stopped\n")
             if self.path.split("?")[0].endswith("/big"):
                 return self.reply(200, "text/html", b"x" * BIG_BYTES)
+            if self.path.split("?")[0].endswith("/blob"):
+                return self.reply(200, "application/octet-stream", bytes(BLOB_BYTES))
             return self.reply(200, "application/json", json.dumps(entry).encode())
 
         def read_chunked(self):

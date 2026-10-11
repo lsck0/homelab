@@ -1,10 +1,10 @@
-"""lib/ddns-cloudflare.sh against a fake ipify and cloudflare api with injected faults (tests/ddns-cloudflare.nix).
+"""lib/ddns-cloudflare.sh against a fake cloudflare api with injected faults (tests/ddns-cloudflare.nix).
 
-The fake keeps a record table and logs every call; a case sets the public address, seeds records, arms faults
+The fake keeps a record table and logs every call; a case sets the learned public address, seeds records, arms faults
 (the k-th call matching a method and path prefix answers an error status) and runs the real script. The oracle is
 the contract in the script's header: records converge to one per name with the address and proxy flag asked for,
-the address is recorded as synced only when every record converged, and an unchanged synced address costs no api
-call.
+the address is recorded as synced only when every record converged, a record of the house's address no name asks for
+is deleted, and an unchanged synced address costs no api call.
 """
 
 import http.server
@@ -29,7 +29,6 @@ SCRIPT = os.environ["DDNS_SCRIPT"]
 RECORDS = [
     {"name": f"grafana.{ZONE}", "proxied": True},
     {"name": f"share.{ZONE}", "proxied": False},
-    {"name": f"*.{ZONE}", "proxied": False},
 ]
 
 # -----------------------------------------------------------------------------
@@ -84,8 +83,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
         body = json.loads(self.rfile.read(length)) if length else None
         FAKE.calls.append({"method": method, "path": url.path, "query": query, "body": body,
                            "auth": self.headers.get("Authorization")})
-        if url.path == "/ip":
-            return self.reply(200, FAKE.address)
         if self.headers.get("Authorization") != f"Bearer {TOKEN}":
             return self.reply(403, {"success": False, "errors": ["bad token"]})
         status = FAKE.fault_take(method, url.path)
@@ -95,8 +92,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if method == "GET" and url.path == "/zones":
             return self.reply(200, {"success": True, "result": [{"id": ZONE_ID}] if query.get("name") == ZONE else []})
         if method == "GET" and url.path == records_path:
-            found = [r for r in FAKE.records.values() if r["name"] == query.get("name") and r["type"] == query.get("type")]
-            return self.reply(200, {"success": True, "result": found})
+            found = [r for r in FAKE.records.values() if r["type"] == query.get("type")
+                     and query.get("name", r["name"]) == r["name"] and query.get("content.exact", r["content"]) == r["content"]]
+            return self.reply(200, {"success": True, "result": found, "result_info": {"total_pages": 1}})
         if method == "POST" and url.path == records_path:
             record_id = FAKE.record_add(body["name"], body["content"], body["proxied"])
             return self.reply(200, {"success": True, "result": FAKE.records[record_id]})
@@ -133,10 +131,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
 def run(env_base):
     """Run the script once; returns (exit code, the api calls it made)."""
     FAKE.calls = []
-    result = subprocess.run(["bash", SCRIPT], env=env_base, capture_output=True, text=True,
-                            cwd=env_base["DDNS_CWD"])
+    with open(env_base["DDNS_ADDRESS_FILE"], "w") as f:
+        f.write(f"{FAKE.address} wg.{ZONE}\n" if FAKE.address else "")
+    result = subprocess.run(["bash", SCRIPT], env=env_base, capture_output=True, text=True)
     sys.stdout.write(result.stdout + result.stderr)
-    return result.returncode, [c for c in FAKE.calls if c["path"] != "/ip"]
+    return result.returncode, FAKE.calls
 
 
 def converged(address):
@@ -167,18 +166,19 @@ def main():
     with open(os.path.join(work, "token"), "w") as f:
         f.write(TOKEN)
     os.makedirs(os.path.join(work, "state"))
-    # a file a glob of "*.lsck0.dev" would expand to: the script must never glob a record name
-    cwd = os.path.join(work, "cwd")
-    os.makedirs(cwd)
-    open(os.path.join(cwd, f"decoy.{ZONE}"), "w").close()
     env = dict(os.environ, DDNS_RECORDS=os.path.join(work, "records.json"), DDNS_ZONE=ZONE,
                DDNS_TOKEN_FILE=os.path.join(work, "token"), DDNS_STATE_DIR=os.path.join(work, "state"),
-               DDNS_IP_URL=f"{base}/ip", DDNS_API_URL=base, DDNS_CWD=cwd)
+               DDNS_ADDRESS_FILE=os.path.join(work, "address"), DDNS_API_URL=base)
+
+    print("case: no address learned yet costs no api call and is no failure")
+    FAKE.address = ""
+    code, calls = run(env)
+    assert code == 0 and calls == [] and synced(env) is None, (code, calls)
 
     print("case: a fresh zone gets one record per name")
+    FAKE.address = ADDRESS_OLD
     code, calls = run(env)
     assert code == 0 and converged(ADDRESS_OLD) and synced(env) == ADDRESS_OLD, (code, FAKE.records)
-    assert not any(r["name"] == f"decoy.{ZONE}" for r in FAKE.records.values()), "a record name was globbed"
     assert all(c["auth"] == f"Bearer {TOKEN}" for c in calls)
 
     print("case: an unchanged, freshly synced address costs no api call")
@@ -228,7 +228,20 @@ def main():
     assert code == 0 and converged(ADDRESS_NEW), FAKE.records
     assert [c["method"] for c in calls].count("DELETE") == 1, calls
 
-    print("case: an ip service answering garbage is no address")
+    print("case: the house's records no route publishes are deleted, another address's records stay")
+    FAKE.record_add(f"*.{ZONE}", ADDRESS_NEW, False)
+    FAKE.record_add(f"registry.{ZONE}", ADDRESS_NEW, True)
+    foreign = FAKE.record_add(f"mail.{ZONE}", "192.0.2.25", False)
+    os.utime(os.path.join(env["DDNS_STATE_DIR"], "ip"), (0, 0))
+    fault_arm("DELETE", f"/zones/{ZONE_ID}/dns_records/", 500)
+    code, calls = run(env)
+    assert code != 0 and len(FAKE.records) == len(RECORDS) + 2, (code, FAKE.records)
+    code, calls = run(env)
+    assert code == 0 and converged(ADDRESS_NEW) and synced(env) == ADDRESS_NEW, (code, FAKE.records)
+    assert sorted(r["name"] for r in FAKE.records.values()) == sorted([w["name"] for w in RECORDS] + [f"mail.{ZONE}"])
+    assert foreign in FAKE.records, FAKE.records
+
+    print("case: a garbled address file is no address")
     FAKE.address = "<html>rate limited</html>"
     os.utime(os.path.join(env["DDNS_STATE_DIR"], "ip"), (0, 0))
     code, calls = run(env)

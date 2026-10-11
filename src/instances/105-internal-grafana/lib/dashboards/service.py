@@ -61,7 +61,8 @@ PROFILE_TYPE = "process_cpu:cpu:nanoseconds:cpu:nanoseconds"
 STARTED_WINDOW_S = 300
 # traefik names a route's service and router after the route, in the file provider
 TRAEFIK_PROVIDER = "@file"
-ROUTER_SUFFIX = "-tls"
+# a route's router, and its half behind the body limit (modules/traefik bodyRouterSuffix)
+ROUTER_SUFFIXES = ("-tls", "-tls-body")
 # the builder's (instances/140-internal-swarm/lib/app-builder.nix) and the manager's (modules/swarm) gauges
 DEPLOY_OK = "homelab_swarm_deploy_ok"
 DEPLOY_AT = "homelab_swarm_deploy_timestamp_seconds"
@@ -97,11 +98,11 @@ TOP_EVENTS = 10
 
 # ---- selectors ----------------------------------------------------------------------------------
 
-def traefik_selector(routes, label, suffix):
+def traefik_selector(routes, label, suffixes):
     """Exactly these routes' traefik series per ingress: a prefix pattern would match another service <name>-x."""
     by_instance = {}
     for r in routes:
-        by_instance.setdefault(r["instance"], []).append(r["name"] + suffix + TRAEFIK_PROVIDER)
+        by_instance.setdefault(r["instance"], []).extend(r["name"] + suffix + TRAEFIK_PROVIDER for suffix in suffixes)
     return [f'instance="{instance}", {label}=~"{"|".join(sorted(names))}"' for instance, names in sorted(by_instance.items())]
 
 
@@ -237,8 +238,8 @@ def guest(c):
 
 def ingress(c):
     window = c["rateWindow"]
-    services = traefik_selector(c["routes"], "service", "")
-    routers = traefik_selector(c["routes"], "router", ROUTER_SUFFIX)
+    services = traefik_selector(c["routes"], "service", ("",))
+    routers = traefik_selector(c["routes"], "router", ROUTER_SUFFIXES)
     hosts = "|".join(sorted({r["host"].replace(".", "\\\\.") for r in c["routes"]}))
     access_of = {r["ingress"] for r in c["routes"]}
     access = f'{{job="traefik-access", host=~"{"|".join(sorted(access_of))}"}} | json | RequestHost=~`{hosts}`'
@@ -562,11 +563,11 @@ def overview_of(configs):
 
     def requests(c, codes=""):
         code = f', code=~"{codes}"' if codes else ""
-        return sum_over(traefik_selector(c["routes"], "service", ""),
+        return sum_over(traefik_selector(c["routes"], "service", ("",)),
                         lambda s: f"sum(rate(traefik_service_requests_total{{{s}{code}}}[{window}]))")
 
     def latency(c):
-        buckets = sum_over(traefik_selector(c["routes"], "service", ""),
+        buckets = sum_over(traefik_selector(c["routes"], "service", ("",)),
                            lambda s: f"sum by (le) (rate(traefik_service_request_duration_seconds_bucket{{{s}}}[{window}]))")
         return f"histogram_quantile(0.95, {buckets})"
 

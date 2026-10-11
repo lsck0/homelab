@@ -155,6 +155,8 @@ pkgs.testers.runNixOSTest {
       virtualHosts.default = {
         listen = [ { addr = "0.0.0.0"; port = ports.app; } ];
         locations."/".return = "200 'hello from the app\\n'";
+        # what reached the guest as the ingress's client: the proxy passes it byte for byte (modules/traefik client-ip)
+        locations."= /client".return = "200 '$http_x_real_ip $http_x_forwarded_for\\n'";
         # busy while the test holds the flag
         locations."= /busy".extraConfig = "if (-f /run/busy) { return 200; } return 404;";
       };
@@ -233,6 +235,8 @@ pkgs.testers.runNixOSTest {
         out = proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app"}/")
         assert "hello from the app" in out, out
         backend.succeed("systemctl is-active nginx")
+        seen = proxy.succeed("curl -sf -H 'X-Real-Ip: 203.0.113.9' -H 'X-Forwarded-For: 203.0.113.9' http://127.0.0.1:${port "app"}/client")
+        assert seen.split() == ["203.0.113.9", "203.0.113.9"], seen
         assert "/qemu/150/status/start" in calls()
         proxy.wait_for_file("/tmp/leak-done")
         proxy.succeed("[ ! -s /tmp/leak ]")

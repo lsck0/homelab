@@ -340,9 +340,8 @@ pkgs.testers.runNixOSTest {
         own_serves("own v1")
         assert deploy_ok("hello") and deploy_ok("own")
 
-    with subtest("the published port answers the edge only"):
+    with subtest("the published port answers the edge only, the dashboard's status dots go through it"):
         vm_200.succeed("curl -sf -m 5 http://${workers."250"}:${toString helloPort}/")
-        # the dashboard checks a route through its ingress (review 2 #6)
         world.fail("curl -sf -m 5 --interface ${homepage} http://${workers."250"}:${toString helloPort}/")
         world.fail("curl -sf -m 5 --interface ${workstation} http://${workers."250"}:${toString helloPort}/")
         vm_140.fail("curl -sf -m 5 http://${workers."250"}:${toString helloPort}/")

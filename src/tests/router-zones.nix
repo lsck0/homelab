@@ -224,6 +224,25 @@ pkgs.testers.runNixOSTest {
         internal.fail("dig +short +time=3 @10.100.0.1 tor.${net.domain} | grep -q .")
         internal.fail("dig +short +time=3 @10.100.0.1 mc.${net.domain} | grep -q .")
 
+    with subtest("third parties down: the public address and the deny lists stay, no unit fails"):
+        published = "${net.fqdn net.wan.publicHost}"
+        luca_router.succeed(f"echo '203.0.113.77 {published}' > /run/public-address/hosts")
+        internal.wait_until_succeeds(f"[ \"$(dig +short +time=3 @10.100.0.1 {published})\" = 203.0.113.77 ]", timeout=30)
+        luca_router.succeed("echo '0.0.0.0 kept.lab.test' > /var/lib/blocklists/hagezi-pro")
+        luca_router.succeed("systemctl set-environment UPSTREAM_BACKOFF_S=0")
+        # each unit and the upstream it gives up on (modules/upstream says "<name> unavailable" before its exit)
+        given_up = (("public-address", "ipify"), ("ddns-cloudflare", "cloudflare"), ("blocklists-fetch", "githubusercontent"))
+        for unit, upstream in given_up:
+            luca_router.succeed(f"systemctl start {unit}")
+            luca_router.wait_until_succeeds(f"systemctl show -P ActiveState {unit} | grep -qx inactive", timeout=300)
+            result = luca_router.succeed(f"systemctl show -P Result {unit}").strip()
+            assert result == "success", f"{unit}: {result}"
+            luca_router.succeed(f"journalctl -b -u {unit} | grep -q ': {upstream} unavailable'")
+        luca_router.succeed("systemctl unset-environment UPSTREAM_BACKOFF_S")
+        assert luca_router.succeed("cat /run/public-address/hosts").split()[0] == "203.0.113.77"
+        luca_router.succeed("grep -q kept.lab.test /var/lib/blocklists/hagezi-pro")
+        assert internal.succeed(f"dig +short +time=3 @10.100.0.1 {published}").strip() == "203.0.113.77"
+
     with subtest("dhcp leases in the dmz's pool, never in the apps zone"):
         dmz.succeed("ip link set eth2 up")
         apps.succeed("ip link set eth2 up")

@@ -20,10 +20,10 @@ metadata:
 - Routes are the instances' `services` (`src/instances/<folder>/instance.nix`) and the apps' `routes`
   (`src/apps/<name>/app.nix`), one schema (`src/modules/service.nix`), merged in `src/modules/catalog.nix`; every
   protection is on unless a route says `off.<feature> = "<why>"`.
-- Every websecure router runs, in order: client-ip (sets `X-Real-Ip` to the real client: the socket peer, or the
-  X-Forwarded-For hop before Cloudflare and the edge; never a client-sent X-Real-Ip), the header strip,
-  cloudflare-only (proxied routes on vm-200), the crowdsec bouncer, rate and in-flight limits per client, retries,
-  security headers. Password endpoints (`loginPaths`) get `rate-limit-login` (5/min per client) on vm-100.
+- Every websecure router runs, in order: cloudflare-only (proxied routes on vm-200, on the socket peer), client-ip
+  (sets `X-Real-Ip` and the backend's `X-Forwarded-For` to the real client: the socket peer, or the X-Forwarded-For
+  hop before Cloudflare and the edge; never a client-sent X-Real-Ip), the header strip, the crowdsec bouncer, rate
+  and in-flight limits per client, the body limit (POST, PUT, PATCH and DELETE only), retries, security headers. Password endpoints (`loginPaths`) get `rate-limit-login` (5/min per client) on vm-100.
 - The apps zone (10.250.0.0/24) gets a 404 on vm-100 for everything but the registry's pull route.
 - Dashboard: https://traefik.lsck0.dev. API from the VM:
   `ssh 10.100.0.100 curl -s localhost:8080/api/http/routers | jq '.[].name'`
