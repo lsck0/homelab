@@ -591,19 +591,21 @@ in {
     script = ''
       status=0
       changed=0
-    '' + lib.concatStrings (lib.mapAttrsToList (name: url: ''
-      rc=0
-      ${upstream.run} githubusercontent curl -sSf --max-time ${toString blocklistTimeoutS} -o ${blocklistDir}/${name}.part ${url} || rc=$?
-      if [ "$rc" -ne 0 ]; then
-        rm -f ${blocklistDir}/${name}.part
-        status=$rc
-      elif cmp -s ${blocklistDir}/${name}.part ${blocklistDir}/${name}; then
-        rm -f ${blocklistDir}/${name}.part
-      else
-        mv ${blocklistDir}/${name}.part ${blocklistDir}/${name}
-        changed=1
-      fi
-    '') blocklists) + ''
+      # a failed fetch keeps the last list
+      for list in ${lib.escapeShellArgs (lib.mapAttrsToList (name: url: "${name}=${url}") blocklists)}; do
+        file=${blocklistDir}/''${list%%=*}
+        rc=0
+        ${upstream.run} githubusercontent curl -sSf --max-time ${toString blocklistTimeoutS} -o "$file.part" "''${list#*=}" || rc=$?
+        if [ "$rc" -ne 0 ]; then
+          rm -f "$file.part"
+          status=$rc
+        elif cmp -s "$file.part" "$file"; then
+          rm -f "$file.part"
+        else
+          mv "$file.part" "$file"
+          changed=1
+        fi
+      done
       # blocky reads its lists at start; coredns answers from its fallback for the moment it restarts
       if [ "$changed" -eq 1 ]; then systemctl try-restart blocky.service; fi
       exit "$status"

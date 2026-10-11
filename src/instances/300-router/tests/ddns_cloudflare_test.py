@@ -3,8 +3,8 @@
 The fake keeps a record table and logs every call; a case sets the learned public address, seeds records, arms faults
 (the k-th call matching a method and path prefix answers an error status) and runs the real script. The oracle is
 the contract in the script's header: records converge to one per name with the address and proxy flag asked for,
-the address is recorded as synced only when every record converged, and an unchanged synced address costs no api
-call.
+the address is recorded as synced only when every record converged, a record of the house's address no name asks for
+is deleted, and an unchanged synced address costs no api call.
 """
 
 import http.server
@@ -92,8 +92,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if method == "GET" and url.path == "/zones":
             return self.reply(200, {"success": True, "result": [{"id": ZONE_ID}] if query.get("name") == ZONE else []})
         if method == "GET" and url.path == records_path:
-            found = [r for r in FAKE.records.values() if r["name"] == query.get("name") and r["type"] == query.get("type")]
-            return self.reply(200, {"success": True, "result": found})
+            found = [r for r in FAKE.records.values() if r["type"] == query.get("type")
+                     and query.get("name", r["name"]) == r["name"] and query.get("content.exact", r["content"]) == r["content"]]
+            return self.reply(200, {"success": True, "result": found, "result_info": {"total_pages": 1}})
         if method == "POST" and url.path == records_path:
             record_id = FAKE.record_add(body["name"], body["content"], body["proxied"])
             return self.reply(200, {"success": True, "result": FAKE.records[record_id]})
@@ -226,6 +227,19 @@ def main():
     code, calls = run(env)
     assert code == 0 and converged(ADDRESS_NEW), FAKE.records
     assert [c["method"] for c in calls].count("DELETE") == 1, calls
+
+    print("case: the house's records no route publishes are deleted, another address's records stay")
+    FAKE.record_add(f"*.{ZONE}", ADDRESS_NEW, False)
+    FAKE.record_add(f"registry.{ZONE}", ADDRESS_NEW, True)
+    foreign = FAKE.record_add(f"mail.{ZONE}", "192.0.2.25", False)
+    os.utime(os.path.join(env["DDNS_STATE_DIR"], "ip"), (0, 0))
+    fault_arm("DELETE", f"/zones/{ZONE_ID}/dns_records/", 500)
+    code, calls = run(env)
+    assert code != 0 and len(FAKE.records) == len(RECORDS) + 2, (code, FAKE.records)
+    code, calls = run(env)
+    assert code == 0 and converged(ADDRESS_NEW) and synced(env) == ADDRESS_NEW, (code, FAKE.records)
+    assert sorted(r["name"] for r in FAKE.records.values()) == sorted([w["name"] for w in RECORDS] + [f"mail.{ZONE}"])
+    assert foreign in FAKE.records, FAKE.records
 
     print("case: a garbled address file is no address")
     FAKE.address = "<html>rate limited</html>"

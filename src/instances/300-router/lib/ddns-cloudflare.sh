@@ -2,10 +2,12 @@
 # point the lab's cloudflare A records at the house's public address
 #
 # Run by the router after it learned the public address (instances/300-router/main.nix public-address), with the
-# record list generated from the route catalog. A record's state is converged, never assumed: a missing record is created, a wrong address or
-# proxy flag is put right, and duplicates of one name (a past run that created a second record) are deleted down to
-# one. The address is recorded as synced only when every record converged, so a failed call is retried by the next
-# run; while the address is unchanged and synced within DDNS_RESYNC_MIN, cloudflare is not asked at all.
+# record list generated from the route catalog. A record's state is converged, never assumed: a missing record is
+# created, a wrong address or proxy flag is put right, duplicates of one name (a past run that created a second
+# record) are deleted down to one, and an A record of the house's address the list no longer names (a route taken off
+# the internet, the old wildcard) is deleted. The address is recorded as synced only when every record converged, so a
+# failed call is retried by the next run; while the address is unchanged and synced within DDNS_RESYNC_MIN,
+# cloudflare is not asked at all.
 #
 # Environment (defaults in brackets):
 #   DDNS_RECORDS      json file: [{ "name": "grafana.lsck0.dev", "proxied": true }, ...]
@@ -27,6 +29,8 @@ DDNS_RESYNC_MIN=${DDNS_RESYNC_MIN:-60}
 CURL_TIMEOUT_S=20
 # 1: cloudflare's "automatic" ttl
 RECORD_TTL=1
+# the lab publishes some tens of names; one page holds them all, a second page fails loudly
+RECORDS_PAGE_SIZE=1000
 
 LAST="$DDNS_STATE_DIR/ip"
 
@@ -99,6 +103,31 @@ failures=0
 while IFS=$'\t' read -r name proxied; do
     record_sync "$name" "$proxied" || failures=$((failures + 1))
 done < <(jq -r '.[] | [.name, (.proxied | tostring)] | @tsv' "$DDNS_RECORDS")
+
+# the house's records no name in the list asks for; content filtered here too, whatever the api did with the filter
+records_stale() {
+    local found
+    found=$(api -G --data-urlencode "type=A" --data-urlencode "content.exact=$ip" \
+        --data-urlencode "per_page=$RECORDS_PAGE_SIZE" "$records_url") || return 1
+    jq -e '.result_info.total_pages <= 1' >/dev/null <<<"$found" || {
+        echo "ddns: more than $RECORDS_PAGE_SIZE records hold $ip" >&2
+        return 1
+    }
+    jq -r --arg ip "$ip" --slurpfile wanted "$DDNS_RECORDS" \
+        '.result[] | select(.content == $ip and (.name as $n | $wanted[0] | map(.name) | index($n) | not)) | "\(.id)\t\(.name)"' <<<"$found"
+}
+
+if [ "$failures" -eq 0 ]; then
+    stale=$(records_stale) || failures=$((failures + 1))
+    while IFS=$'\t' read -r id name; do
+        [ -n "$id" ] || continue
+        if api -X DELETE "$records_url/$id" >/dev/null; then
+            echo "ddns: deleted $name, which no route publishes"
+        else
+            failures=$((failures + 1))
+        fi
+    done <<<"${stale:-}"
+fi
 
 if [ "$failures" -ne 0 ]; then
     echo "ddns: $failures record(s) not converged, $ip stays unsynced for the next run" >&2
