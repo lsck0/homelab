@@ -12,6 +12,8 @@
 #   (what a producer mints is its instance.nix `tokens`)
 # - db dumps: a host with databases mounts exactly its own dump dir, read-write, and no other host's
 # - the dmz and the apps zone mount per-service state only
+# - no sqlite database (homelab.dbBackup) and no local state (homelab.localState) lies on a nas mount: sqlite over nfs
+#   corrupts or dies of SIGBUS
 { lib, configs, inventory, lab, src, ... }:
 let
   # the rules live beside src/; a tree evaluated as `path:src` lacks them, a git checkout has them
@@ -55,7 +57,7 @@ let
     if lib.hasSuffix "/${layout.sharedName}" file
     then lib.sort lib.lessThan (lib.findFirst (h: "${h.home}/${layout.sharedName}" == file) null (lib.attrValues plan.hosts)).shared
     else lib.attrNames (lib.filterAttrs (_: d: d.file == file) plan.secrets);
-  isValues = file: lib.hasSuffix ".json" file && file != layout.tfvarsFile;
+  isValues = lib.hasSuffix ".json";
   fileLaws = file:
     if !(builtins.pathExists (src + "/${file}")) then [ "src/${file} is missing: run src/scripts/secrets-sync.sh --apply" ]
     else lib.optional (recipientsOf file != wantRecipients file)
@@ -111,10 +113,21 @@ let
     ++ lib.optional (hasDatabases && !(lib.any (s: s.path == ownDumps && !s.readOnly) dumpShares))
       "${name}: dumps databases without its own dump dir mounted read-write";
 
+  sqliteLaws = name: config: let
+    mountOf = path: lib.findFirst (m: path == m || lib.hasPrefix "${m}/" path) null (lib.attrNames config.homelab.nasMounts);
+    onNas = lib.filter (p: mountOf p != null);
+    sqlitePaths = lib.filter (p: p != null) (map (db: db.sqlite) (lib.attrValues config.homelab.dbBackup.databases));
+    localPaths = map (s: s.path) (lib.attrValues config.homelab.localState);
+  in
+    map (p: "${name}: sqlite database ${p} lies on the nas mount ${mountOf p}: keep it on the guest's disk (homelab.localState)")
+      (onNas sqlitePaths)
+    ++ map (p: "${name}: local state ${p} lies on the nas mount ${mountOf p}") (onNas localPaths);
+
   zoneLaws = name: config:
     lib.optionals (lib.elem (zoneOf config) [ "external" "apps" ]) (map (s: "${name}: dmz or apps host mounts ${s.path}")
       (lib.filter (s: !(lib.hasPrefix "/srv/nas/data/" s.path)) config.homelab.nasShares));
 in
 lib.concatLists (lib.mapAttrsToList (name: config:
   wiringLaws name config ++ leakLaws name config ++ tokenLaws name config ++ dumpLaws name config ++ zoneLaws name config
+  ++ sqliteLaws name config
 ) configs) ++ layoutLaws

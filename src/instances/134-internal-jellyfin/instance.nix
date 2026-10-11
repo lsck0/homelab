@@ -65,6 +65,6 @@ in {
   shares = {
     bulk = { };
     "data/janitorr" = { };
-    "data/jellyfin" = { };
+    "data/jellyfin".localState = true;
   };
 }

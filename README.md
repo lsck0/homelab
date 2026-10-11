@@ -207,6 +207,8 @@ Adding a secret: read it in a config (`sops.secrets.<name>`), declare it with it
 lists the kinds) in the reading guest's `instance.nix`, or in `src/secrets/shared.nix` when several read it, then
 `./sync.sh`. A generated one appears by itself, a `manual` one is added empty: fill it with `sops <its file>`.
 Moving a declaration moves the value. `src/scripts/secrets-sync.sh [--apply [--prune]]` runs the same step by hand.
+A `guardsData:` secret (a key that stored data or logins depend on) is never generated once the lab is deployed: a
+missing one stops the run until its value is restored, or, for one that guards nothing yet, `--generate-guarded`.
 
 Every ssh host key is pinned in `src/generated/known_hosts`: Proxmox's by `init.sh` after a console check, each
 guest's by `sync.sh`, which reads it through Proxmox from inside the guest. Any other key stops the run.
@@ -229,7 +231,9 @@ the old key still opens all of them in the public history. Inside `nix develop .
 6. Change every secret value, since the old key reads them in history. Before anything else, change the two that
    guard stored data where they are used: `kopia-password` with `kopia-nas repository change-password` on vm-109,
    `authelia-storage-key` with `authelia storage encryption change-key` on vm-101. Generated ones: delete the line
-   with `sops <its file>`, and `src/scripts/secrets-sync.sh --apply` makes a new one. External ones (cloudflare,
+   with `sops <its file>`, and `src/scripts/secrets-sync.sh --apply` makes a new one (a `guardsData:` one only with
+   `--generate-guarded`, once whatever it guards accepts the new value). A `dotfiles:` one: change its file in the
+   dotfiles' secrets. External ones (cloudflare,
    github, telegram, attic, proton, trmnl tokens and keys): issue new ones at the provider, revoke the old, put the
    new ones in with `sops <its file>`.
 7. `./sync.sh`: it pushes the new host keys, re-activates each guest with them, and commits.
@@ -240,6 +244,9 @@ the old key still opens all of them in the public history. Inside `nix develop .
   key that must be renewed: delete the guest's `age.sops` and `age.pub`, then `./sync.sh`.
 - A guest was recreated: `sync.sh` reads its new ssh host key through Proxmox. Proxmox reinstalled:
   `src/scripts/init.sh --pin <proxmox-ip>` after comparing the fingerprint on its console.
+- A service's data is broken: `ssh root@10.100.0.109 nas-restore service <share> <snapshot id or date> --yes` restores
+  `/srv/nas/data/<share>` in place. A service whose state lives on its guest's disk (`homelab.localState`) takes the
+  restore at the app's next start; nas-restore prints the guest and the command that makes it take it now.
 - The lab is gone, the nas with it: the off-site copy is the kopia repository on Proton Drive. Sign in with the
   proton account of `src/secrets/shared.sops.json` (`proton-drive auth login`), `proton-drive filesystem download
   /my-files/homelab-offsite/BACKUPS/kopia <dir>`, then `kopia repository connect filesystem --path <dir>` with

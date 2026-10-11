@@ -27,7 +27,7 @@ in {
 
   secrets = {
     ntfy-admin-password = "hex:24";
-    ntfy-desktop-token = "ntfy-token"; # mirrored to the dotfiles' ntfy client
+    ntfy-desktop-token = "dotfiles:ntfy-desktop-token"; # the desktop's ntfy client reads the same file
     deadman-ping-url = "manual"; # the off-site dead man's switch's ping url (healthchecks.io or alike)
   };
 

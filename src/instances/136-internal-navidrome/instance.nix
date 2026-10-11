@@ -33,6 +33,6 @@
   shares = {
     "bulk/media/music".readOnly = true;
     "data/db-dumps/vm-${id}" = { mode = "0700"; };
-    "data/navidrome" = { };
+    "data/navidrome".localState = true;
   };
 }

@@ -35,6 +35,6 @@
   };
 
   shares = {
-    "data/jellyseerr" = { };
+    "data/jellyseerr".localState = true;
   };
 }

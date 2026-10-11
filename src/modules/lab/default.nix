@@ -21,7 +21,7 @@
 #   lab.catalog                   # modules/catalog.nix over it: every route and app, what every host gets as `catalog`
 #   lab.withApps f                # the lab collected again with its app folders passed through f (a test's fixture
 #                                 # apps): workers, inventory and catalog follow them
-#   lab.shares."140"              # [{ path; readOnly; mode; }] the nas paths a guest mounts: its instance.nix `shares`,
+#   lab.shares."140"              # [{ path; readOnly; mode; localState; }] the nas paths a guest mounts: its instance.nix `shares`,
 #                                 # its own token dir and those of the tokens it reads (lab.tokenReads."140")
 #   lab.nasClients."10.100.0.140" # the same of every powered guest, by address: what vm-109 exports
 #   lab.roles.collector           # "105": the vmid of the one instance declaring a role (instance.nix `roles`)
@@ -235,7 +235,7 @@ let
 
   # the nas dir of a guest's tokens: read-write to it, read-only to its readers; only its root writes there
   tokenShare = { pathOf = id: "data/tokens/vm-${toString id}"; mode = "0755"; };
-  shareOf = path: { readOnly ? false, mode ? null }: { path = "${nasRoot}/${path}"; inherit readOnly mode; };
+  shareOf = path: { readOnly ? false, mode ? null, localState ? false }: { path = "${nasRoot}/${path}"; inherit readOnly mode localState; };
   sharesOf = i: let
     minted = lib.any (e: e.i.id == i.id) tokenEntries;
     readFrom = lib.remove (idOf i) (lib.unique (map (t: tokens.${t}) (lib.filter (t: tokens ? ${t}) tokenReads.${i.id})));

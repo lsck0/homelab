@@ -26,7 +26,7 @@ let
   # -----------------------------------------------------------------------------
 
   # scripts/secrets-sync.sh knows these generators
-  secretGenerator = types.strMatching "hex:[1-9][0-9]*|garage-key-id";
+  secretGenerator = types.strMatching "(guardsData:)?(hex:[1-9][0-9]*|garage-key-id)";
   digestPinned = types.strMatching ".+@sha256:[0-9a-f]{64}";
   # a path inside the app's checkout: relative, never climbing out (the builder checks the resolved path too)
   repoPath = types.strMatching "([^/.][^/]*|\\.[^/.][^/]*)(/([^/.][^/]*|\\.[^/.][^/]*))*|\\.";
@@ -158,7 +158,7 @@ let
         type = types.attrsOf secretGenerator;
         default = { };
         description = ''
-          Sops secret name -> its generator for scripts/secrets-sync.sh: "hex:<bytes>" or "garage-key-id".
+          Sops secret name -> its generator for scripts/secrets-sync.sh: "hex:<bytes>" or "garage-key-id", prefixed "guardsData:" when data or logins depend on it.
           Exactly the secrets `env` names.
         '';
       };
