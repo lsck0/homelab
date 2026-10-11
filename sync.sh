@@ -73,6 +73,8 @@ SSH_PROBE_TIMEOUT_S=3
 # a switch still running after this hangs (a hard nfs mount, a unit that never settles): the deploy fails and the run
 # goes on to release the state lock and the reaper; half an hour leaves room for the image pulls a switch waits on
 SWITCH_TIMEOUT_S=1800
+# a closure copy over the lan, gigabytes at worst; a stalled one fails its deploy instead of holding the run
+COPY_TIMEOUT_S=1800
 # after the router's own deploy: 2.5 minutes for the bastion, then 1 for the internal zone behind it
 ROUTER_WAIT_ATTEMPTS=30
 INGRESS_WAIT_ATTEMPTS=12
@@ -86,6 +88,11 @@ PVE_API_PORT=8006
 # a fetch or push github does not answer within this gives up; the next run catches up
 GIT_TIMEOUT_S=60
 NIX_FEATURES=(--extra-experimental-features "nix-command flakes")
+# a substituter or github that does not answer: each connection try ends after this (nix makes download-attempts of
+# them), then the path builds locally or the evaluation fails; every nix of the run, terraform's too, and the daemon
+# takes the setting from any user
+NIX_CONNECT_TIMEOUT_S=15
+export NIX_CONFIG="${NIX_CONFIG:+$NIX_CONFIG$'\n'}connect-timeout = $NIX_CONNECT_TIMEOUT_S"
 
 REAPER_PAUSE_FILE=/run/ondemand-reaper-pause-until
 # outlives any sync, expires on its own if the trap never runs
@@ -328,8 +335,8 @@ deploy_nixos() {
   [ "$key_state" = changed ] && echo ">>> $name: age key replaced, re-activating to decrypt its secrets"
 
   # closures are local builds, no sigs
-  nix copy "${NIX_FEATURES[@]}" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
-    || nix-copy-closure --to "root@${ip}" "$toplevel" || return 1
+  timeout "$COPY_TIMEOUT_S" nix copy "${NIX_FEATURES[@]}" --no-check-sigs --to "ssh-ng://root@${ip}" "$toplevel" \
+    || { echo "ERROR: $name: the closure did not copy."; return 1; }
 
   # switch in place, no reboot
   local out rc=0 failed
@@ -507,6 +514,8 @@ if [ "${TF_STATE_OFFLINE:-0}" != 1 ]; then
   [ -n "${TFSTATE_LOCK_PID:-}" ] || host_keys_learn "$NAS_ID"
   tfstate_push || DEPLOY_FAILURE=1
 fi
+# the state is settled: a deploy that hangs below never holds another sync's apply
+tfstate_lock_release
 
 # the anti-spoofing every source-address guard of the lab relies on (terraform/lib.tf FIREWALL)
 "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "pve-firewall status" | grep -qx 'Status: enabled/running' \
