@@ -196,11 +196,12 @@ let
           "$app" "$1" "$app" "$(date +%s)" > "$metrics.tmp"
         mv "$metrics.tmp" "$metrics"
       }
+      unavailable=${toString upstream.unavailable}
       outage_exit() {
         for upstream in $(jq -r --arg app "$app" '.apps[$app].upstreams[]' "$catalog"); do
           if ! ${upstream.run} "$upstream"; then
             say "$upstream unavailable: $app keeps its running version" >&2
-            exit ${toString upstream.unavailable}
+            exit "$unavailable"
           fi
         done
       }
@@ -660,7 +661,7 @@ in {
             for marker in ${convergePendingDir}/*; do
               [ -e "$marker" ] || continue
               app=$(basename "$marker")
-              systemctl restart --no-block "${convergeUnitOf "$app"}.service"
+              systemctl restart --no-block "${convergeUnitOf ""}$app.service"
             done
           '';
         };
