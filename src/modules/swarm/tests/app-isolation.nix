@@ -22,6 +22,9 @@ let
   # -----------------------------------------------------------------------------
 
   workers = [ "250" "251" ];
+  # what each worker advertises and caps its apps to, from the worker shape (modules/limits)
+  workerShape = lab.specialArgs.lab.instances."250".config.vm;
+  allocatableMiB = (limits.allocatableOf workerShape).memoryMiB;
   registryAddress = ip "100";
   collector = ip telemetry.collectorVmid;
   edge = ip "200";
@@ -37,6 +40,8 @@ let
   requestFlood = { count = 2000; concurrency = 64; };
   # the noisy app's spans: three times its burst, back to back, which no refill keeps up with
   spanFlood = rec { bytes = 600000; count = 3 * limits.tenant.traceBurstBytes / bytes; };
+  # the noisy app's browser beacons: each well within the intake's body cap, three times its burst in all
+  beaconFlood = rec { bytes = limits.frontend.bodyBytes / 2; count = 3 * limits.tenant.traceBurstBytes / bytes; };
   # the noisy app's exporter: more series than one scrape may hold
   bigSeries = limits.tenant.scrapeSamples + 1000;
 
@@ -90,9 +95,9 @@ pkgs.testers.runNixOSTest {
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
   };
   nodes.vm-140 = swarmNode "140" 1536;
-  # the production worker shape: its memory is what the worker advertises and caps
-  nodes.vm-250 = swarmNode "250" 2560;
-  nodes.vm-251 = swarmNode "251" 2560;
+  # the production worker's cores: a task's cpu flood meets its own limit, never the apps slice's share of one core
+  nodes.vm-250 = { imports = [ (swarmNode "250" 2560) ]; virtualisation.cores = workerShape.cores; };
+  nodes.vm-251 = { imports = [ (swarmNode "251" 2560) ]; virtualisation.cores = workerShape.cores; };
   nodes.vm-105 = {
     imports = [ (lab.guest telemetry.collectorVmid { flat = true; nas = true; instance = ../../../instances/105-internal-grafana/main.nix; }) common ];
     virtualisation.memorySize = 3072;
@@ -169,7 +174,7 @@ pkgs.testers.runNixOSTest {
                      "127.0.0.1:${toString telemetry.ports.grafana}/api/health"):
             vm_105.succeed(f"curl -sf -m 10 http://{path} >/dev/null")
         vm_105.succeed("curl -sf -m 10 -X POST -H 'Content-Type: application/json' -H 'X-Scope-OrgID: " + TENANT["quiet"] + "' "
-                       "-d '{}' http://127.0.0.1:${toString telemetry.ports.pyroscope}/querier.v1.QuerierService/LabelNames >/dev/null")
+                       "-d '{}' http://127.0.0.1:${toString telemetry.ports.pyroscopeLocal}/querier.v1.QuerierService/LabelNames >/dev/null")
 
     def task_of(app):
         """the worker machine running the app's task and the container's id there; a task the swarm replaces after a
@@ -256,8 +261,8 @@ pkgs.testers.runNixOSTest {
         for name, machine in WORKERS.items():
             vm_140.wait_until_succeeds(f"docker node inspect {name} --format '{{{{.Status.State}}}}' | grep -qx ready", timeout=240)
             resources = vm_140.succeed(f"docker node inspect {name} --format '{{{{json .Description.Resources.GenericResources}}}}'")
-            assert '"HOMELAB_MEMORY_MIB","Value":2048' in resources.replace(" ", ""), resources
-            assert machine.succeed("systemctl show -p MemoryMax --value apps.slice").strip() == str(2048 * 1024 * 1024)
+            assert '"HOMELAB_MEMORY_MIB","Value":${toString allocatableMiB}' in resources.replace(" ", ""), resources
+            assert machine.succeed("systemctl show -p MemoryMax --value apps.slice").strip() == str(${toString allocatableMiB} * 1024 * 1024)
 
     with subtest("both apps deploy within their reservations; a stack beyond its reservation is refused"):
         vm_140.succeed("docker load -i ${image}")
@@ -267,8 +272,9 @@ pkgs.testers.runNixOSTest {
             digest = vm_140.succeed(f"docker image inspect --format '{{{{range .RepoDigests}}}}{{{{println .}}}}{{{{end}}}}' {ref}:v1 | grep -F {ref}@").strip()
             web = {"image": digest, "healthcheck": {"test": ["CMD", "curl", "-f", "http://localhost:8000/"], "interval": "2s"}}
             vm_140.succeed(f"echo {shlex.quote(json.dumps({'services': {'web': web}}))} > /tmp/{app}.json")
-            # five tasks of ${toString task.memoryMiB} MiB are more than the default reservation holds
-            big = dict(web, deploy={"replicas": 5})
+            # three tasks of ${toString task.memoryMiB} MiB are more than the default reservation holds, and within the
+            # two workers' replica bound
+            big = dict(web, deploy={"replicas": 3})
             vm_140.succeed(f"echo {shlex.quote(json.dumps({'services': {'web': big}}))} > /tmp/{app}-big.json")
         refusal = vm_140.fail("swarm-apply noisy < /tmp/noisy-big.json 2>&1")
         assert "reservation.memoryMiB" in refusal, refusal
@@ -409,22 +415,26 @@ pkgs.testers.runNixOSTest {
                                                     "http.request.header.cookie": "session=secret-cookie"})
         intake = "http://${collector}:${toString telemetry.ports.otlpFrontend}${telemetry.frontendPath}/v1/traces"
 
-        def send(tenant, body):
-            return int(vm_200.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' -X POST -H 'Content-Type: application/json' "
-                                      f"-H 'X-Scope-OrgID: {tenant}' --data-binary @{body_on(vm_200, body)} {intake}"))
+        def send(tenant, body, count=1):
+            """the body count times back to back to the intake, as the edge relays it; the http statuses"""
+            curl = (f"curl -s -o /dev/null -w '%{{http_code}}\\n' -X POST -H 'Content-Type: application/json' "
+                    f"-H 'X-Scope-OrgID: {tenant}' --data-binary @{body_on(vm_200, body)} {intake}")
+            return [int(code) for code in vm_200.succeed(f"for i in $(seq {count}); do {curl}; done").split()]
 
-        assert send(TENANT["quiet"], beacon) == 200
+        assert send(TENANT["quiet"], beacon) == [200]
         assert push_span("quiet", span(trace_id, "quiet")) == 200
         vm_105.wait_until_succeeds(f"{tempo_has(TENANT['quiet'], trace_id)} | grep -q quiet-browser", timeout=120)
         trace = vm_105.succeed(tempo_has(TENANT["quiet"], trace_id))
         assert "secret" not in trace and '"quiet"' in trace, trace
         world.fail(f"curl -sf -m 5 -X POST {intake}")
+        # the intake refuses a beacon over its body cap at the door
+        [code] = send(TENANT["noisy"], span(rng.randbytes(16).hex(), "noisy-browser", {"url.path": "x" * ${toString limits.frontend.bodyBytes}}))
+        assert 400 <= code < 500, f"the intake answered {code} to a beacon over its body cap"
         # the intake accepts and batches; noisy's tenant refuses what is over its budget, quiet's beacon still lands
-        big = span(rng.randbytes(16).hex(), "noisy-browser", {"url.path": "x" * 400000})
-        for _ in range(12):
-            send(TENANT["noisy"], big)
+        big = span(rng.randbytes(16).hex(), "noisy-browser", {"url.path": "x" * ${toString beaconFlood.bytes}})
+        assert set(send(TENANT["noisy"], big, ${toString beaconFlood.count})) == {200}
         late = rng.randbytes(16).hex()
-        assert send(TENANT["quiet"], span(late, "quiet-browser")) == 200
+        assert send(TENANT["quiet"], span(late, "quiet-browser")) == [200]
         vm_105.wait_until_succeeds(tempo_has(TENANT["quiet"], late), timeout=120)
         vm_105.wait_until_succeeds(prom_has(f'sum(tempo_discarded_spans_total{{tenant="{TENANT["noisy"]}"}}) > 0'), timeout=180)
 
