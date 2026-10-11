@@ -15,7 +15,7 @@
   tokens = [ "jellyseerr-key" ];
 
   grants = [
-    { from = [ "operator" "130" "134" ]; tcp = [ port ]; why = "hermes, arr-wire and janitorr call its api directly"; }
+    { from = [ "operator" "130" ]; tcp = [ port ]; why = "hermes and arr-wire call its api directly"; }
   ];
 
   idle = { stopAfter = "30m"; };

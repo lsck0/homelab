@@ -17,7 +17,10 @@ let
   ollama = import ../../modules/ollama.nix;
 
   route = catalog.internal.jellyfin;
-  urlOf = name: let r = catalog.internal.${name}; in "http://${net.ipOf (toString r.vmid)}:${toString r.port}";
+  # janitorr's start fails on a client it cannot reach: none of them may sleep (idle), or it crash-loops meanwhile
+  urlOf = name: let r = catalog.internal.${name}; vmid = toString r.vmid; in
+    assert lib.assertMsg (inventory.${vmid}.idle == null) "janitorr calls ${name} directly, but vm-${vmid} sleeps when idle";
+    "http://${net.ipOf vmid}:${toString r.port}";
   publicUrl = "https://${net.fqdn route.host}";
   autheliaUrl = "https://${net.fqdn catalog.internal.authelia.host}";
   # the internal ingress, jellyfin's only trusted proxy: without it redirect_uri is http:// and authelia rejects it
@@ -143,11 +146,9 @@ let
         leaving-soon-type: MOVIES_AND_TV
       emby:
         enabled: false
+      # it sleeps (idle); its own media availability sync drops what janitorr deleted
       jellyseerr:
-        enabled: true
-        url: "${urlOf "jellyseerr"}"
-        api-key: "@JELLYSEERR@"
-        match-server: false
+        enabled: false
       jellystat:
         enabled: false
       streamystats:
@@ -241,8 +242,6 @@ let
     }
   '';
 in {
-  # janitorr cleans up through the arrs and jellyseerr
-
   # nvidia driver and cuda are unfree
   nixpkgs.config.allowUnfree = gpu;
   services.xserver.videoDrivers = lib.optional gpu "nvidia";
@@ -504,14 +503,12 @@ in {
       radarr=$(cat ${config.sops.secrets.radarr-key.path})
       sonarr=$(cat ${config.sops.secrets.sonarr-key.path})
       janitorr=$(cat ${config.sops.secrets.janitorr-pass.path})
-      if ! jellyseerr=$(token_read jellyseerr-key) || ! jellyfin=$(token_read jellyfin-key-janitorr); then
-        echo "waiting for the jellyseerr and jellyfin keys"; exit 1
-      fi
+      jellyfin=$(token_read jellyfin-key-janitorr) || { echo "waiting for the jellyfin key"; exit 1; }
       render() { # <template> <target>; substituted in the shell, so no key passes through argv
         local text
         text=$(cat "$1")
         text=''${text//@RADARR@/$radarr}; text=''${text//@SONARR@/$sonarr}; text=''${text//@JELLYFIN@/$jellyfin}
-        text=''${text//@JELLYSEERR@/$jellyseerr}; text=''${text//@JANITORR_PASS@/$janitorr}
+        text=''${text//@JANITORR_PASS@/$janitorr}
         (umask 077; printf '%s\n' "$text" > "$2.tmp")
         chown ${uid}:${uid} "$2.tmp"; mv "$2.tmp" "$2"
       }
