@@ -8,7 +8,8 @@
 #   nobody deletes through the ingress (the ui's cleanup on vm-118 does)
 # - the swarms (workers, managers) pull with `puller` and write nothing; the apps zone reaches no other internal route
 # - every other source gets nothing, the edge relaying a forged X-Forwarded-For included
-# - the backend answers the ingress and the prober only; ssh and node-exporter stay reachable (the recovery path)
+# - the backend answers the ingress only, the prober goes through it; ssh and node-exporter stay reachable (the
+#   recovery path)
 # - a rotated password takes effect on restart, the old one stops working
 # - a firewall restart on vm-118 opens no window to the backend (desired; finding F7 of the e2e design)
 # Flat: vm-100, vm-118 and `world`, which owns the gateways and every source address.
@@ -179,11 +180,10 @@ pkgs.testers.runNixOSTest {
             ("edge", "GET", "/v2/", "puller", 404, {"X-Forwarded-For": SOURCES["worker"]}),
         ])
 
-    with subtest("the backend answers the ingress and the prober only; ssh and node-exporter stay open"):
+    with subtest("the backend answers the ingress only; ssh and node-exporter stay open"):
         for port in (${toString backendPorts.api}, ${toString backendPorts.ui}):
-            for src in ("ciVm", "worker", "workstation"):
+            for src in ("ciVm", "worker", "workstation", "prober"):
                 world.fail(f"curl -sS -m 5 --interface {SOURCES[src]} http://${backend}:{port}/")
-            world.succeed(f"curl -sS -m 5 --interface {SOURCES['prober']} -o /dev/null http://${backend}:{port}/")
             vm_100.succeed(f"curl -sS -m 5 -o /dev/null http://${backend}:{port}/")
         world.succeed(f"nc -z -w 5 -s {SOURCES['workstation']} ${backend} 22")
         world.succeed(f"curl -sf -m 5 --interface {SOURCES['workstation']} -o /dev/null http://${backend}:9100/metrics")
@@ -205,19 +205,20 @@ pkgs.testers.runNixOSTest {
             ("controller", "GET", "/v2/", "builder", 200, basic("builder", "${rotated}")),
         ])
 
-    def window_successes(src):
-        """Requests from src that reached the backend while its firewall restarted, by status 200."""
+    def window_successes(machine, name, source=""):
+        """Requests from machine (from source, if given) that reached the backend while its firewall restarted, by status 200."""
+        interface = f"--interface {source}" if source else ""
         # the driver's shell exports errexit: without set +e the first refused attempt (curl exit 28) ends the loop
-        world.succeed(f"rm -f /tmp/window-{src}; (set +e; for i in $(seq 1 ${toString attempts}); do curl -s -m 0.3 -o /dev/null "
-                      f"-w '%{{http_code}}\\n' --interface {SOURCES[src]} http://${backend}:${toString backendPorts.api}/v2/; sleep 0.02; "
-                      f"done > /tmp/window-{src} &)")
+        machine.succeed(f"rm -f /tmp/window-{name}; (set +e; for i in $(seq 1 ${toString attempts}); do curl -s -m 0.3 -o /dev/null "
+                        f"-w '%{{http_code}}\\n' {interface} http://${backend}:${toString backendPorts.api}/v2/; sleep 0.02; "
+                        f"done > /tmp/window-{name} &)")
         for _ in range(${toString restarts}):
             vm_118.succeed("systemctl reset-failed firewall; systemctl restart firewall")
-        world.wait_until_succeeds(f"[ $(wc -l < /tmp/window-{src}) -ge ${toString attempts} ]", timeout=180)
-        return world.succeed(f"cat /tmp/window-{src}").split().count("200")
+        machine.wait_until_succeeds(f"[ $(wc -l < /tmp/window-{name}) -ge ${toString attempts} ]", timeout=180)
+        return machine.succeed(f"cat /tmp/window-{name}").split().count("200")
 
     with subtest("a firewall restart on the backend opens no window"):
-        assert window_successes("ciVm") == 0, "the backend answered a pusher directly while its firewall restarted"
-        assert window_successes("prober") > 0, "the positive control never got through"
+        assert window_successes(world, "ciVm", SOURCES["ciVm"]) == 0, "the backend answered a pusher directly while its firewall restarted"
+        assert window_successes(vm_100, "ingress") > 0, "the positive control never got through"
   '';
 }
