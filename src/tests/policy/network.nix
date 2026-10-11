@@ -134,4 +134,16 @@ lawsOf {
     map (s: "${name} trusts ${s} on every guarded port") (lib.intersectLists config.homelab.ingressOnly.trusted
       (map net.hostSource (lib.remove config.homelab.vmid (with lab.roles; [ dashboard collector operator ]))))
   ) configs);
+
+  # the prober and the status dots check an sso route through its ingress: a grant onto the backend passes authelia.
+  # Only a dashboard widget without a url of its own queries the backend, with the token it holds
+  "probes through the ingress" = lib.concatLists (lib.mapAttrsToList (name: r: let
+    admitted = configs.${inventory.${toString r.vmid}.name}.homelab.ingressOnly.allowed.${toString r.port} or [ ];
+    queried = lib.any (c: c.route == name && c.widget != null && c.widget.url == null) lab.homepage;
+  in
+    lib.optional (lib.elem (net.hostSource lab.roles.collector) admitted)
+      "${name}: the prober reaches port ${toString r.port} past the ingress"
+    ++ lib.optional (lib.elem (net.hostSource lab.roles.dashboard) admitted && !queried)
+      "${name}: the dashboard reaches port ${toString r.port} past the ingress, with no widget querying it"
+  ) (lib.filterAttrs (_: r: r.vmid != null && r.off.sso == null) catalog.internal));
 }

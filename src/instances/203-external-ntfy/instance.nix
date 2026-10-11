@@ -1,5 +1,5 @@
 # push notifications (alert delivery)
-{ telemetry, ... }:
+{ ... }:
 let
   port = 80;
 in {
@@ -9,7 +9,7 @@ in {
   };
 
   grants = [
-    { from = [ telemetry.collectorVmid ]; tcp = [ port ]; why = "grafana publishes the alerts here directly, never through the edge"; }
+    { from = [ "collector" ]; tcp = [ port ]; why = "grafana publishes the alerts here directly, never through the edge"; }
   ];
 
   services = {
