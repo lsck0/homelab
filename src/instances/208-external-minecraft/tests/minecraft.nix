@@ -23,6 +23,8 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = ''
+    secrets = ${builtins.toJSON secrets}
+
     def env():
         vm_208.wait_until_succeeds("test -s /tmp/server-env")
         out = vm_208.succeed("cat /tmp/server-env")
