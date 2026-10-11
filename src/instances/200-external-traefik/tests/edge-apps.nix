@@ -198,8 +198,11 @@ pkgs.testers.runNixOSTest {
         assert get("/api/health")["status"] == 200
 
     with subtest("the app sees the client cloudflare saw, never a forged one"):
-        r = get("/api/x", headers={"X-Real-Ip": "6.6.6.6", "X-Forwarded-For": "1.2.3.4, ${realClient}"}, xff=None)
-        assert json.loads(r["body"])["headers"].get("x-real-ip") == "${realClient}", r["body"]
+        # straight and through anubis's hop: X-Forwarded-For is the client alone, what a backend trusting its ingress reads
+        for path in ("/api/x", "/page"):
+            r = get(path, headers={"X-Real-Ip": "6.6.6.6", "X-Forwarded-For": "1.2.3.4, ${realClient}"}, xff=None)
+            seen = json.loads(r["body"])["headers"]
+            assert seen.get("x-real-ip") == seen.get("x-forwarded-for") == "${realClient}", (path, seen)
 
     with subtest("the rate limit counts per client behind cloudflare"):
         # 20 connections of 20 requests each: one tls handshake per connection keeps the flood above the limit's
