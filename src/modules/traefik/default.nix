@@ -106,26 +106,33 @@ let
   routeBudget = routeLimits.route;
   routeSource.requestHost = true;
 
-  limitMiddlewares = {
-    rate-limit.rateLimit = {
-      average = rateLimitAverage;
-      burst = rateLimitBurst;
+  # one set per scale a route asks for (modules/service.nix limitScale); scale 1 keeps the plain names
+  limitSuffix = scale: lib.optionalString (scale != 1) "-x${toString scale}";
+  scaledLimits = scale: let x = limitSuffix scale; in {
+    "rate-limit${x}".rateLimit = {
+      average = rateLimitAverage * scale;
+      burst = rateLimitBurst * scale;
       period = "1s";
       sourceCriterion = clientSource;
     };
-    inflight-limit.inFlightReq = {
-      amount = inFlightAmount;
+    "inflight-limit${x}".inFlightReq = {
+      amount = inFlightAmount * scale;
       sourceCriterion = clientSource;
     };
-    route-rate-limit.rateLimit = {
-      inherit (routeBudget) average burst;
+    "route-rate-limit${x}".rateLimit = {
+      average = routeBudget.average * scale;
+      burst = routeBudget.burst * scale;
       period = "1s";
       sourceCriterion = routeSource;
     };
-    route-inflight-limit.inFlightReq = {
-      amount = routeBudget.inFlight;
+    "route-inflight-limit${x}".inFlightReq = {
+      amount = routeBudget.inFlight * scale;
       sourceCriterion = routeSource;
     };
+  };
+  limitScales = lib.unique ([ 1 ] ++ map (r: r.limitScale) (map recordOf (lib.attrValues allRouters)));
+
+  limitMiddlewares = lib.foldl' (acc: scale: acc // scaledLimits scale) { } limitScales // {
     # password endpoints a route names in `loginPaths`: brute force stops here, whatever the app does
     rate-limit-login.rateLimit = {
       average = loginRateLimitAverage;
@@ -362,6 +369,7 @@ let
     frames = "deny";
     referrer = true;
     bodyLimitBytes = service.bodyLimitDefaultBytes;
+    limitScale = 1;
     sources = null;
   };
   allRecords = cfg.routes // cfg.relays;
@@ -498,8 +506,8 @@ let
     # scanners must reach the labyrinth, past the waf
     ++ lib.optional (cfg.crowdsecBouncer.enable && on r "crowdsec")
       (if on r "waf" && name != "honeypot-tls" then "crowdsec" else "crowdsec-noappsec")
-    ++ lib.optionals (on r "rateLimit") [ "rate-limit" "route-rate-limit" ]
-    ++ lib.optionals (on r "inflightLimit") [ "inflight-limit" "route-inflight-limit" ]
+    ++ lib.optionals (on r "rateLimit") [ "rate-limit${limitSuffix r.limitScale}" "route-rate-limit${limitSuffix r.limitScale}" ]
+    ++ lib.optionals (on r "inflightLimit") [ "inflight-limit${limitSuffix r.limitScale}" "route-inflight-limit${limitSuffix r.limitScale}" ]
     # buffered once, outside the retry: a retry inside the buffer re-read a consumed body and sent it empty
     ++ lib.optional (limitsBody r) "body-limit-${toString r.bodyLimitBytes}"
     ++ [ "retry-upstream" ]

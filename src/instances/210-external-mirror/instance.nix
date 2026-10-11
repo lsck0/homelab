@@ -11,6 +11,8 @@
       port = 80;
       # a read-only file server: pacman only fetches
       methods = [ "GET" "HEAD" ];
+      # a pacman sync fetches hundreds of packages back to back: the default burst cut it off every ~100 files
+      limitScale = 20;
       homepage = {
         group = "Dev";
         icon = "arch-linux";
