@@ -45,6 +45,11 @@ in {
             filebrowser can. null: 0777, any uid may write, for services that run as their own user.
           '';
         };
+        localState = lib.mkOption {
+          type = lib.types.bool;
+          default = false;
+          description = "The share is the nas copy of a guest's local state (modules/local-state).";
+        };
       };
     });
     default = { };
@@ -68,6 +73,7 @@ in {
         path = lib.mkOption { type = lib.types.str; };
         readOnly = lib.mkOption { type = lib.types.bool; };
         mode = lib.mkOption { type = lib.types.nullOr lib.types.str; };
+        localState = lib.mkOption { type = lib.types.bool; };
       };
     });
     readOnly = true;
@@ -90,6 +96,7 @@ in {
       path = lib.removePrefix "${nasIP}:" fs.device;
       readOnly = lib.elem "ro" fs.options;
       mode = fs.shareMode;
+      inherit (fs) localState;
     }) config.homelab.nasMounts;
 
     # the dmz reaches only per-service state, never media or documents

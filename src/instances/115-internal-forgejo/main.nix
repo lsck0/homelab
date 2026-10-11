@@ -1,5 +1,5 @@
 # forgejo: the git forge, logins through authelia oidc, github mirrors, api tokens for the lab
-{ config, pkgs, lib, inventory, catalog, nasMount, retry, setupUnit, site, ... }:
+{ config, pkgs, lib, inventory, catalog, retry, setupUnit, site, upstream, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   route = catalog.internal.forgejo;
@@ -58,7 +58,13 @@ let
 in {
   networking.hostName = "vm-115";
 
-  homelab.nasMounts = nasMount data "forgejo";
+  homelab.localState.forgejo = {
+    path = data;
+    unit = "podman-forgejo";
+    sqlite = [ "gitea/gitea.db" ];
+    # live leveldb queues and rebuilt indexes
+    exclude = [ "gitea/queues" "gitea/indexers" "gitea/log" ];
+  };
 
   sops.secrets.forgejo-oidc-secret = {};
 
@@ -86,17 +92,17 @@ in {
   };
 
   # before every container start (no RemainAfterExit): a new or unknown previous image keeps the db as
-  # gitea.db.before-<tag>, never overwritten
+  # gitea.db.before-<tag>, root's only; the copy before the newest upgrade replaces the older ones
   systemd.services.forgejo-upgrade-backup = {
     description = "Keep the Forgejo database before an image upgrade migrates it";
     before = [ "podman-forgejo.service" ];
+    after = [ "forgejo-seed.service" ];
     requiredBy = [ "podman-forgejo.service" ];
-    unitConfig.RequiresMountsFor = [ data ];
-    path = [ pkgs.sqlite pkgs.coreutils ];
-    serviceConfig.Type = "oneshot";
+    path = [ pkgs.sqlite pkgs.coreutils pkgs.findutils ];
+    serviceConfig = { Type = "oneshot"; UMask = "0077"; };
     script = let running = config.virtualisation.oci-containers.containers.forgejo.image; in ''
       stamp=${data}/.image
-      [ "$(cat "$stamp" 2>/dev/null)" = ${lib.escapeShellArg running} ] && exit 0
+      if [ -f "$stamp" ] && [ "$(cat "$stamp")" = ${lib.escapeShellArg running} ]; then exit 0; fi
       if [ -f ${db} ]; then
         keep=${db}.before-${lib.last (lib.splitString ":" running)}
         if [ ! -e "$keep" ]; then
@@ -104,6 +110,8 @@ in {
           mv "$keep.tmp" "$keep"
           echo "kept the database as $keep before upgrading to ${running}"
         fi
+        find ${dirOf db} -maxdepth 1 -name '${baseNameOf db}.before-*' ! -path "$keep" -print -delete
+        chmod 0600 "$keep"
       fi
       printf '%s' ${lib.escapeShellArg running} > "$stamp.tmp"
       mv "$stamp.tmp" "$stamp"
@@ -186,8 +194,11 @@ in {
     serviceConfig = {
       Type = "oneshot";
       StateDirectory = "forgejo-mirror";
+      SuccessExitStatus = [ upstream.unavailable ];
     };
     environment = {
+      UPSTREAM = upstream.run;
+      UPSTREAM_UNAVAILABLE = toString upstream.unavailable;
       FORGEJO_URL = localUrl;
       FORGEJO_OWNER = owner;
       # forgejo's own re-fetch interval

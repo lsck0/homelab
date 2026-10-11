@@ -7,7 +7,7 @@
 # /archlinux of the repo's vhost, so lsck0 keeps /x86_64 and its authority over overridden and aur packages (clients
 # list it first). Symlinks stay enabled: the package files are relative links into the shared pool/ and rsync's
 # --safe-links already bars any escape, so disable_symlinks would 404 every package.
-{ config, lib, pkgs, inventory, site, catalog, ... }:
+{ config, lib, pkgs, inventory, site, catalog, upstream, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   routes = catalog.internal;
@@ -121,6 +121,7 @@ in {
   };
 
   homelab.nasExports.enable = true;
+  homelab.textfiles = [ "media_quota" ];
 
   services.samba = {
     enable = true;
@@ -280,10 +281,13 @@ in {
       ARCHMIRROR_UPSTREAM = mirrorUpstream;
       ARCHMIRROR_TARGET = mirrorDir;
       ARCHMIRROR_BWLIMIT_KBPS = toString mirrorBwlimitKBps;
+      ARCHMIRROR_PROBE = pkgs.writeShellScript "archmirror-probe" "exec ${upstream.run} archmirror";
     };
     serviceConfig = {
       Type = "oneshot";
-      ExecStart = "${pkgs.util-linux}/bin/flock -n ${mirrorLock} ${lib.getExe mirrorSync}";
+      SuccessExitStatus = [ upstream.unavailable ];
+      # a tick the running sync holds the lock against is skipped, not failed
+      ExecStart = "${pkgs.util-linux}/bin/flock --nonblock --conflict-exit-code 0 ${mirrorLock} ${lib.getExe mirrorSync}";
       # behind live nfs serving and the nightly archbuild
       IOSchedulingClass = "idle";
       Nice = 19;

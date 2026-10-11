@@ -1,10 +1,16 @@
 #!/usr/bin/env bash
-# pull-mirror every owned github repo into forgejo
+# pull-mirror every owned github repo into forgejo; a github outage skips the run (exit UPSTREAM_UNAVAILABLE)
 set -euo pipefail
 
 FORGEJO_URL=${FORGEJO_URL:?the forgejo base url}
 FORGEJO_OWNER=${FORGEJO_OWNER:?the Forgejo user the mirrors belong to}
 MIRROR_INTERVAL=${MIRROR_INTERVAL:?forgejo re-fetch interval, e.g. 8h}
+UPSTREAM=${UPSTREAM:?modules/upstream run}
+UPSTREAM_UNAVAILABLE=${UPSTREAM_UNAVAILABLE:?its exit status for an outage}
+GITHUB_UPSTREAM=github
+GITHUB_TIMEOUT_S=30
+# the api's largest page
+GITHUB_PAGE_COUNT=100
 
 FORGEJO_TOKEN=$(cat "${FORGEJO_TOKEN_FILE:?}")
 GITHUB_TOKEN=$(cat "${GITHUB_TOKEN_FILE:?}")
@@ -37,24 +43,24 @@ fj() {
 }
 
 gh_api() {
-  curl -fsS "https://api.github.com$1" \
+  "$UPSTREAM" "$GITHUB_UPSTREAM" curl -fsS --max-time "$GITHUB_TIMEOUT_S" "https://api.github.com$1" \
     -H "Authorization: Bearer $GITHUB_TOKEN" \
     -H "Accept: application/vnd.github+json" \
     -H "X-GitHub-Api-Version: 2022-11-28"
 }
 
 # every repository the token's account owns, private ones included
-repos=$(
-  page=1
-  while :; do
-    body=$(gh_api "/user/repos?affiliation=owner&per_page=100&page=$page")
-    count=$(echo "$body" | jq 'length')
-    [ "$count" -gt 0 ] || break
-    echo "$body" | jq -c '.[] | {name, private, clone_url, archived, fork}'
-    [ "$count" -eq 100 ] || break
-    page=$((page + 1))
-  done
-)
+# in the main shell: a failed page, an outage's status included, ends the run with its status
+repos=""
+page=1
+while :; do
+  body=$(gh_api "/user/repos?affiliation=owner&per_page=$GITHUB_PAGE_COUNT&page=$page")
+  count=$(echo "$body" | jq 'length')
+  [ "$count" -gt 0 ] || break
+  repos+=$(echo "$body" | jq -c '.[] | {name, private, clone_url, archived, fork}')$'\n'
+  [ "$count" -eq "$GITHUB_PAGE_COUNT" ] || break
+  page=$((page + 1))
+done
 total=$(printf '%s' "$repos" | jq -s length)
 [ "$total" -gt 0 ] || { echo "ERROR: GitHub returned no repositories"; exit 1; }
 echo "GitHub reports $total repositories owned by the token's account"
@@ -114,6 +120,10 @@ while read -r repo; do
 done <<< "$repos"
 
 echo "created=$created corrected=$corrected unchanged=$unchanged skipped=$skipped"
+# forgejo clones from github itself: failures while github is down are the outage's
+if [ "$problems" -gt 0 ] && ! "$UPSTREAM" "$GITHUB_UPSTREAM"; then
+  exit "$UPSTREAM_UNAVAILABLE"
+fi
 if [ "$problems" -gt 0 ]; then
   echo "$problems repositories need attention"
   exit 1

@@ -28,9 +28,14 @@ STAMP=lastupdate
 # no data for this long aborts the pass; 10 min outlasts a busy tier-1 that stalls while it renames its own batch
 IO_TIMEOUT_S=600
 CONNECT_TIMEOUT_S=60
+# exits 0 while the upstream answers, its own status (modules/upstream's EX_TEMPFAIL) while it is down
+PROBE=${ARCHMIRROR_PROBE:?command telling whether the upstream is up}
 
 # -----------------------------------------------------------------------------
 # MAIN
+# an outage skips the run with the probe's status; any other failure is this run's
+upstream_failed() { "$PROBE" || exit $?; exit 1; }
+
 [[ $UPSTREAM == rsync://*/ ]] || { echo "archmirror: '$UPSTREAM' is no rsync:// module root ending in /" >&2; exit 1; }
 [[ $BWLIMIT_KBPS =~ ^[1-9][0-9]*$ ]] || { echo "archmirror: bandwidth cap '$BWLIMIT_KBPS' is no positive KiB/s" >&2; exit 1; }
 mkdir -p "$TARGET"
@@ -39,7 +44,7 @@ stamp_new=$(mktemp)
 trap 'rm -f "$stamp_new"' EXIT
 if ! rsync -q --no-motd --timeout="$IO_TIMEOUT_S" --contimeout="$CONNECT_TIMEOUT_S" "$UPSTREAM$STAMP" "$stamp_new"; then
   echo "archmirror: cannot fetch $UPSTREAM$STAMP, the mirror stays as it is" >&2
-  exit 1
+  upstream_failed
 fi
 if cmp -s "$stamp_new" "$TARGET/$STAMP"; then
   echo "archmirror: upstream unchanged, nothing to sync"
@@ -54,7 +59,7 @@ rsync \
   --bwlimit="$BWLIMIT_KBPS" \
   --filter="P /$STAMP" --exclude="/$STAMP" \
   --exclude='/iso' --exclude='/sources' --exclude='*.links.tar.gz*' \
-  "$UPSTREAM" "$TARGET/"
+  "$UPSTREAM" "$TARGET/" || upstream_failed
 
 # a rename, so a reader sees the old stamp or the new one, never a torn file; dotfiles are never served
 install -m 0644 "$stamp_new" "$TARGET/.$STAMP.new"

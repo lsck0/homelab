@@ -27,6 +27,8 @@
   alerts = let
     # a nightly job's window: the night itself plus a late start
     nightlyStaleSeconds = 26 * 3600;
+    # a proton outage is its own "proton unavailable" alert (modules/upstream), never a stale off-site copy
+    whileProtonUp = expr: "(${expr}) * on () max(probe_success{job=\"upstream\",upstream=\"proton\"})";
     # a failed night is tolerated (proton's api fails runs now and then), plus start jitter and run length
     offsiteStaleSeconds = 60 * 3600;
     # lib/kopia.nix verifies weekly (verifyAt): a missed week plus its randomized delay
@@ -47,7 +49,7 @@
     offsite_stale = {
       title = "Off-site copy stale";
       category = "backups";
-      expr = "time() - max(homelab_offsite_last_success_timestamp_seconds)";
+      expr = whileProtonUp "time() - max(homelab_offsite_last_success_timestamp_seconds)";
       threshold = offsiteStaleSeconds;
       for = "30m";
       noData = "Alerting";
@@ -69,7 +71,7 @@
     offsite_verify_stale = {
       title = "Off-site copy unverified";
       category = "backups";
-      expr = "time() - max(homelab_offsite_verify_last_success_timestamp_seconds)";
+      expr = whileProtonUp "time() - max(homelab_offsite_verify_last_success_timestamp_seconds)";
       threshold = verifyStaleSeconds;
       for = "30m";
       noData = "Alerting";

@@ -117,10 +117,10 @@ in
   };
   secrets = {
     wat-default-user-password = "hex:24";
-    wat-postgres-password = "hex:24";
-    wat-postgres-root-password = "hex:24";
+    wat-postgres-password = "guardsData:hex:24"; # postgres keeps the password of its first start
+    wat-postgres-root-password = "guardsData:hex:24";
     wat-pgweb-password = "hex:24";
-    wat-garage-rpc-secret = "hex:32";
+    wat-garage-rpc-secret = "guardsData:hex:32";
     wat-garage-root-key-id = "garage-key-id";
     wat-garage-root-secret = "hex:32";
     wat-garage-files-key-id = "garage-key-id";

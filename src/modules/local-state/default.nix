@@ -7,7 +7,8 @@
 # A share with an id the guest does not know was either restored (nas-restore writes a new id, and the same id into
 # .restored): the seed then replaces the local copy with it; or it diverged (a lost local id, a second writer): the
 # seed refuses and a human decides. The mirror runs only while the ids match, so it never overwrites a restore; it
-# starts `<name>-reseed` (a restart of the app, so the seed runs) when it finds one.
+# starts `<name>-reseed` (a restart of the app, so the seed runs) when it finds one. The share is declared
+# `localState` (instance.nix `shares`), which tells nas-restore to write the ids.
 { config, lib, pkgs, nasMount, ... }:
 let
   cfg = config.homelab.localState;
@@ -43,6 +44,16 @@ let
   # nas-restore (109-internal-nas lib/kopia.nix) writes the generation it made here
   restoredFile = ".restored";
   excludes = s: lib.concatMapStringsSep " " (e: "--exclude ${lib.escapeShellArg e}") (s.exclude ++ [ generationFile restoredFile ]);
+  # a stale autofs mount of the share's old place must be gone before the seed checks it (modules/nas.nix)
+  mountsPrune = "nas-mounts-prune.service";
+
+  # the generation ids of both copies and the pending restore's, empty where none is written
+  generationsRead = local: nas: ''
+    generation_of() { if [ -f "$1" ]; then cat "$1"; fi; }
+    local_gen=$(generation_of ${local}/${generationFile})
+    nas_gen=$(generation_of ${nas}/${generationFile})
+    restored=$(generation_of ${nas}/${restoredFile})
+  '';
 
   reconcile = name: s: let local = s.path; nas = nasDir name; in pkgs.writeShellScript "${name}-reconcile" ''
     set -euo pipefail
@@ -50,9 +61,7 @@ let
     mkdir -p ${local}
     # the nas share itself, still mounted from before localState: copying it onto itself would destroy it
     if mountpoint -q ${local}; then echo "${name}: ${local} is a mount, not the guest's disk; unmount it" >&2; exit 1; fi
-    nas_gen=$(cat ${nas}/${generationFile} 2>/dev/null || true)
-    local_gen=$(cat ${local}/${generationFile} 2>/dev/null || true)
-    restored=$(cat ${nas}/${restoredFile} 2>/dev/null || true)
+    ${generationsRead local nas}
     from_nas() {
       rsync -a --delete ${excludes s} ${nas}/ ${local}/
       printf '%s\n' "$nas_gen" > ${local}/${generationFile}
@@ -61,19 +70,19 @@ let
     if [ -n "$local_gen" ] && [ "$local_gen" = "$nas_gen" ]; then
       exit 0
     elif [ -z "$(find ${local} -type f ! -name ${generationFile} -print -quit)" ]; then
-      [ -n "$nas_gen" ] || { nas_gen=$(cat /proc/sys/kernel/random/uuid); printf '%s\n' "$nas_gen" > ${nas}/${generationFile}; }
+      if [ -z "$nas_gen" ]; then nas_gen=$(cat /proc/sys/kernel/random/uuid); printf '%s\n' "$nas_gen" > ${nas}/${generationFile}; fi
       from_nas
       echo "${name}: seeded ${local} from the nas copy"
     elif [ -z "$nas_gen" ]; then
-      [ -n "$local_gen" ] || { local_gen=$(cat /proc/sys/kernel/random/uuid); printf '%s\n' "$local_gen" > ${local}/${generationFile}; }
+      if [ -z "$local_gen" ]; then local_gen=$(cat /proc/sys/kernel/random/uuid); printf '%s\n' "$local_gen" > ${local}/${generationFile}; fi
       printf '%s\n' "$local_gen" > ${nas}/${generationFile}
       echo "${name}: the nas copy has no generation: keeping the local data, the next mirror replaces the nas copy"
-    elif [ -n "$local_gen" ] && [ "$restored" = "$nas_gen" ]; then
+    elif [ "$restored" = "$nas_gen" ]; then
       from_nas
       echo "${name}: replaced ${local} with the restored nas copy"
     else
       echo "${name}: ${local} (generation ''${local_gen:-none}) and the nas copy (generation $nas_gen) diverged."
-      echo "  Keep the nas copy: empty ${local}, then systemctl start ${name}-reseed."
+      echo "  Keep the nas copy: empty ${local}, then systemctl restart ${s.unit}."
       echo "  Keep the local data: cp ${nas}/${generationFile} ${local}/; the next mirror replaces the nas copy."
       exit 1
     fi
@@ -86,12 +95,15 @@ in {
   };
 
   config = lib.mkIf (cfg != { }) {
-    homelab.nasMounts = lib.mkMerge (lib.mapAttrsToList (name: _: nasMount (nasDir name) name) cfg);
+    homelab.nasMounts = lib.mkMerge (lib.mapAttrsToList (name: _:
+      lib.mapAttrs (_: m: m // { localState = true; }) (nasMount (nasDir name) name)) cfg);
+    homelab.textfiles = [ "local_state_*" ];
 
     systemd.services = lib.mkMerge (lib.mapAttrsToList (name: s: {
       # no RemainAfterExit: every start of the app runs it again
       "${name}-seed" = {
         before = [ "${s.unit}.service" ];
+        after = [ mountsPrune ];
         requiredBy = [ "${s.unit}.service" ];
         unitConfig.RequiresMountsFor = [ (nasDir name) ];
         serviceConfig = { Type = "oneshot"; ExecStart = reconcile name s; };
@@ -110,10 +122,9 @@ in {
         path = [ pkgs.rsync pkgs.sqlite config.systemd.package ];
         serviceConfig.Type = "oneshot";
         script = ''
-          local_gen=$(cat ${s.path}/${generationFile} 2>/dev/null || true)
-          nas_gen=$(cat ${nasDir name}/${generationFile} 2>/dev/null || true)
+          ${generationsRead s.path (nasDir name)}
           if [ -z "$local_gen" ] || [ "$local_gen" != "$nas_gen" ]; then
-            if [ -n "$nas_gen" ] && [ "$(cat ${nasDir name}/${restoredFile} 2>/dev/null)" = "$nas_gen" ]; then
+            if [ -n "$nas_gen" ] && [ "$restored" = "$nas_gen" ]; then
               echo "${name}: the nas copy was restored, reseeding"
               exec systemctl start --no-block ${name}-reseed.service
             fi
@@ -121,11 +132,11 @@ in {
             exit 1
           fi
           rsync -a --delete ${excludes s} ${lib.concatMapStringsSep " " (g: "--exclude ${lib.escapeShellArg "${g}*"}") s.sqlite} ${s.path}/ ${nasDir name}/
-          cd ${s.path} || exit 1
-          for db in ${lib.concatStringsSep " " s.sqlite}; do
+          for db in ${lib.concatMapStringsSep " " (g: "${s.path}/${g}") s.sqlite}; do
             [ -f "$db" ] || continue
-            mkdir -p "${nasDir name}/$(dirname "$db")"
-            ${sqliteBackup.command "\"$db\"" "${nasDir name}/$db"}
+            copy=${nasDir name}/''${db#${s.path}/}
+            mkdir -p "$(dirname "$copy")"
+            ${sqliteBackup.command "\"$db\"" "$copy"}
           done
           # grafana's state_mirror_stale alert watches this
           d=${config.homelab.textfileDir}

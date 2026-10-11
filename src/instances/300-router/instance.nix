@@ -11,6 +11,6 @@
 
   secrets = {
     protonvpn-private-key = "manual";
-    wireguard-private-key = "manual"; # init.sh: wg genkey
+    wireguard-private-key = "guardsData:wireguard"; # every wireguard client peers with its public half
   };
 }

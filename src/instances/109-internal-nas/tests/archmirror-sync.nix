@@ -17,6 +17,8 @@ let
   # bounded waits; each poll is a tenth of a second
   daemonUpPolls = 300;
   cutPolls = 600;
+  # modules/upstream's EX_TEMPFAIL
+  unavailable = 75;
 in
 pkgs.runCommand "archmirror-sync" {
   nativeBuildInputs = [ sync pkgs.rsync pkgs.coreutils pkgs.diffutils pkgs.findutils pkgs.util-linux pkgs.gnugrep ];
@@ -29,6 +31,10 @@ pkgs.runCommand "archmirror-sync" {
   export ARCHMIRROR_UPSTREAM=rsync://127.0.0.1:${toString port}/${module}/
   export ARCHMIRROR_TARGET=$T
   export ARCHMIRROR_BWLIMIT_KBPS=${toString fastKBps}
+  # modules/upstream's probe: the upstream answers, or it is down
+  export ARCHMIRROR_PROBE=true
+  printf '#!/bin/sh\nexit ${toString unavailable}\n' > probe-down
+  chmod +x probe-down
 
   fail() { echo "FAIL: $*" >&2; exit 1; }
   pass() { echo "PASS: $*"; }
@@ -123,9 +129,14 @@ pkgs.runCommand "archmirror-sync" {
   # 5. UPSTREAM UNREACHABLE: fails, touches nothing
   daemon_stop
   served=$(manifest "$T")
-  if archmirror-sync; then fail "unreachable: exit 0"; fi
+  status=0
+  archmirror-sync || status=$?
+  [ "$status" = 1 ] || fail "unreachable while the probe answers: exit $status, not 1"
+  status=0
+  ARCHMIRROR_PROBE=$W/probe-down archmirror-sync || status=$?
+  [ "$status" = ${toString unavailable} ] || fail "unreachable while the probe finds it down: exit $status, not ${toString unavailable}"
   [ "$(manifest "$T")" = "$served" ] || fail "unreachable: the tree changed"
-  pass "an unreachable upstream fails and leaves the mirror alone"
+  pass "an unreachable upstream leaves the mirror alone: an outage exits ${toString unavailable}, else the run fails"
 
   # -----------------------------------------------------------------------------
   # 6. TRANSFER CUT MID-FILE: the served tree and its old stamp survive, the next run converges

@@ -43,7 +43,7 @@ let
       tampered = tamper "101-internal-authelia" [ "virtualisation" "podman" "enable" ] true; };
     shares = { file = "guests"; marker = "it does not declare";
       tampered = tamper "121-internal-paperless" [ "homelab" "nasShares" ]
-        (configs."121-internal-paperless".homelab.nasShares ++ [ { path = "/srv/nas/data/stray"; readOnly = false; mode = "0700"; } ]); };
+        (configs."121-internal-paperless".homelab.nasShares ++ [ { path = "/srv/nas/data/stray"; readOnly = false; mode = "0700"; localState = false; } ]); };
     memory-budget = { file = "guests"; marker = "host memory:";
       tampered = facts // { lab = facts.lab // { instances = facts.lab.instances // {
         "119" = lib.recursiveUpdate facts.lab.instances."119" { config.vm.balloonMiB = 1024 * 1024; };
@@ -54,6 +54,8 @@ let
       tampered = tamper "101-internal-authelia" [ "systemd" "services" "lldap-bootstrap" "environment" "BOOTSTRAP_GROUPS" ] "admins"; };
     secret-readable = { file = "secrets"; marker = "is readable by others";
       tampered = tamper "101-internal-authelia" [ "sops" "secrets" "authelia-jwt-secret" "mode" ] "0444"; };
+    sqlite-on-nfs = { file = "secrets"; marker = "lies on the nas mount";
+      tampered = tamper "138-internal-headscale" [ "homelab" "nasMounts" "/var/lib/headscale" ] { }; };
     instance-folder = { file = "placement"; marker = "src/instances/101-internal-authelia has no main.nix";
       tampered = facts // { src = builtins.path {
         path = facts.src;

@@ -30,7 +30,7 @@
   };
 
   secrets = {
-    firefly-app-key = "manual"; # init.sh: base64: and 32 random bytes
+    firefly-app-key = "guardsData:laravel-key"; # encrypts fields of firefly's db
     firefly-db-password = "hex:24";
   };
 

@@ -239,7 +239,7 @@ let
 
   # the nas dir of a guest's tokens: read-write to it, read-only to its readers; only its root writes there
   tokenShare = { pathOf = id: "data/tokens/vm-${toString id}"; mode = "0755"; };
-  shareOf = path: { readOnly ? false, mode ? null }: { path = "${nasRoot}/${path}"; inherit readOnly mode; };
+  shareOf = path: { readOnly ? false, mode ? null, localState ? false }: { path = "${nasRoot}/${path}"; inherit readOnly mode localState; };
   sharesOf = i: let
     minted = lib.any (e: e.i.id == i.id) tokenEntries;
     readFrom = lib.remove (idOf i) (lib.unique (map (t: tokens.${t}) (lib.filter (t: tokens ? ${t}) tokenReads.${i.id})));

@@ -25,7 +25,8 @@ let
       };
     in builtins.toJSON (layout.planOf (lib.listToAttrs (map (g: lib.nameValuePair g.instance.name g.config) guests)));
 
-  catalog = { shared = "hex:16"; gen = "hex:16"; tok = "ntfy-token"; pub = "public"; man = "manual"; vault = "guardsData:hex:16"; wg = "wireguard"; };
+  catalog = { shared = "hex:16"; gen = "hex:16"; tok = "ntfy-token"; pub = "public"; man = "manual"; vault = "guardsData:hex:16"; wg = "wireguard";
+    lk = "laravel-key"; df = "dotfiles:desk"; };
   a = own: guest { id = "100"; name = "100-internal-a"; secrets = { a-own = "hex:16"; } // own; reads = [ "a-own" "shared" "gen" ]; };
   b = reads: guest { id = "101"; name = "101-internal-b"; reads = [ "shared" "b-oidc-secret" "x-app" "app-x-redeploy-token" ] ++ reads; };
   node = guest { id = "250"; name = "250-apps-swarm"; reads = [ "shared" ]; };

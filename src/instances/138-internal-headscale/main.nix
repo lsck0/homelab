@@ -1,4 +1,4 @@
-{ config, lib, pkgs, nasMount, retry, inventory, site, catalog, lab, ... }:
+{ config, lib, pkgs, retry, inventory, site, catalog, lab, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   headscaleRoute = catalog.internal.headscale;
@@ -33,7 +33,7 @@ in
 {
   networking.hostName = "vm-138";
 
-  homelab.nasMounts = nasMount headscaleDir "headscale";
+  homelab.localState.headscale = { path = headscaleDir; unit = "headscale"; sqlite = [ "db.sqlite" ]; };
 
   services.headscale = {
     enable = true;

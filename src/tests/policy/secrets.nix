@@ -12,6 +12,8 @@
 #   (what a producer mints is its instance.nix `tokens`)
 # - db dumps: a host with databases mounts exactly its own dump dir, read-write, and no other host's
 # - the dmz and the apps zone mount per-service state only
+# - no sqlite database (homelab.dbBackup) and no local state (homelab.localState) lies on a nas mount: sqlite over
+#   nfs corrupts or dies of SIGBUS
 { lib, configs, inventory, lab, ... }:
 let
   src = ../..;
@@ -40,7 +42,7 @@ let
   ) (lib.attrNames catalog);
 
   wiringLaws = name: config: let host = layout.hostOf config.networking.hostName; in
-    lib.optionals (host != null && migrated) (map (s: "${name}: secret ${s.key} comes from ${toString s.sopsFile}, not ${layout.fileOf host s.key}")
+    lib.optionals (host != null) (map (s: "${name}: secret ${s.key} comes from ${toString s.sopsFile}, not ${layout.fileOf host s.key}")
       (lib.filter (s: toString s.sopsFile != "${toString src}/${layout.fileOf host s.key}") (lib.attrValues config.sops.secrets)))
     ++ lib.optional (config.sops.age.keyFile != keyFile) "${name}: sops reads its key from ${toString config.sops.age.keyFile}, not ${keyFile}"
     ++ lib.optional (config.sops.age.sshKeyPaths != [ ] || config.sops.gnupg.sshKeyPaths != [ ])
@@ -56,7 +58,7 @@ let
     if lib.hasSuffix "/${layout.sharedName}" file
     then lib.sort lib.lessThan (lib.findFirst (h: "${h.home}/${layout.sharedName}" == file) null (lib.attrValues plan.hosts)).shared
     else lib.attrNames (lib.filterAttrs (_: d: d.file == file) plan.secrets);
-  isValues = file: lib.hasSuffix ".json" file && file != layout.tfvarsFile;
+  isValues = lib.hasSuffix ".json";
   fileLaws = file:
     if !(builtins.pathExists (src + "/${file}")) then [ "src/${file} is missing: run src/scripts/secrets-sync.sh --apply" ]
     else lib.optional (recipientsOf file != wantRecipients file)
@@ -77,10 +79,8 @@ let
     lib.optional ((rules.${file} or null) != wantRecipients file) ".sops.yaml has no rule for src/${file} to the admins and its readers"
   ) (lib.attrNames plan.files));
 
-  migrated = !(builtins.pathExists (src + "/secrets.json"));
   layoutLaws = map (p: "secrets layout: ${p}") plan.problems ++ placementLaws
-    ++ (if migrated then lib.concatMap fileLaws (lib.attrNames plan.files) ++ uniqueRecipients ++ ruleLaws
-        else [ "src/secrets.json: the secrets are not per folder yet: run src/scripts/secrets-migrate.sh" ]);
+    ++ lib.concatMap fileLaws (lib.attrNames plan.files) ++ uniqueRecipients ++ ruleLaws;
 
   # every string a unit runs or is handed: a placeholder there is never replaced
   unitStrings = unit: lib.filter builtins.isString (
@@ -114,10 +114,21 @@ let
     ++ lib.optional (hasDatabases && !(lib.any (s: s.path == ownDumps && !s.readOnly) dumpShares))
       "${name}: dumps databases without its own dump dir mounted read-write";
 
+  sqliteLaws = name: config: let
+    mountpoints = lib.attrNames config.homelab.nasMounts;
+    mountOf = path: lib.findFirst (m: path == m || lib.hasPrefix "${m}/" path) null mountpoints;
+    sqlitePaths = lib.filter (p: p != null) (map (db: db.sqlite) (lib.attrValues config.homelab.dbBackup.databases));
+    localPaths = map (s: s.path) (lib.attrValues config.homelab.localState);
+  in
+    map (p: "${name}: sqlite database ${p} lies on the nas mount ${mountOf p}: keep it on the guest's disk (homelab.localState)")
+      (lib.filter (p: mountOf p != null) sqlitePaths)
+    ++ map (p: "${name}: local state ${p} lies on the nas mount ${mountOf p}") (lib.filter (p: mountOf p != null) localPaths);
+
   zoneLaws = name: config:
     lib.optionals (lib.elem (zoneOf config) [ "external" "apps" ]) (map (s: "${name}: dmz or apps host mounts ${s.path}")
       (lib.filter (s: !(lib.hasPrefix "/srv/nas/data/" s.path)) config.homelab.nasShares));
 in
 lib.concatLists (lib.mapAttrsToList (name: config:
   wiringLaws name config ++ leakLaws name config ++ tokenLaws name config ++ dumpLaws name config ++ zoneLaws name config
+  ++ sqliteLaws name config
 ) configs) ++ layoutLaws

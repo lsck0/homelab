@@ -5,6 +5,7 @@
 # src/secrets/shared.sops.json (`sops src/secrets/shared.sops.json`); src/scripts/secrets-sync.sh adds a missing one by its kind:
 #   "hex:<bytes>"          that many random bytes as hex
 #   "wireguard"            a wireguard private key: 32 random bytes as base64, clamped by wireguard
+#   "laravel-key"          a laravel APP_KEY: base64: and 32 random bytes as base64
 #   "ntfy-token"           tk_ and 29 of [a-z0-9], the only shape ntfy accepts
 #   "garage-key-id"        GK and 12 random bytes as hex (apps)
 #   "guardsData:<kind>"    a key that data or logins depend on (a backup repository, an encrypted db, an app login

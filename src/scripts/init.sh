@@ -169,7 +169,10 @@ fi
 export SOPS_AGE_KEY_FILE="$AGE_KEY"
 
 echo ">>> Generating secrets..."
-"$SCRIPT_DIR/secrets-sync.sh" --apply
+# a repo without the shared values never deployed: nothing is guarded yet. Later a missing guarded value stops here
+GUARDED=()
+[ -f "$SRC/$SECRETS_CATALOG_FILE" ] || GUARDED=(--generate-guarded)
+"$SCRIPT_DIR/secrets-sync.sh" --apply "${GUARDED[@]}"
 
 mkdir -p "$ROOT_DIR/images"
 if [ ! -f "$ROOT_DIR/images/nixos.img" ]; then

@@ -25,7 +25,7 @@ let
       "${name}: vm.needs is [ ${toString declared} ], its configuration uses [ ${toString used} ]"
   ) lab.hosts);
 
-  sortedShares = shares: lib.sort (a: b: a.path < b.path) (map (s: { inherit (s) path readOnly mode; }) shares);
+  sortedShares = shares: lib.sort (a: b: a.path < b.path) (map (s: { inherit (s) path readOnly mode localState; }) shares);
   shareLaws = lib.concatLists (lib.mapAttrsToList (name: host: let
       declared = sortedShares lab.shares.${host.id};
       mounted = sortedShares configs.${name}.homelab.nasShares;

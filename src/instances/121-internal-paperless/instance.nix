@@ -24,8 +24,8 @@
 
   shares = {
     "data/db-dumps/vm-${id}" = { mode = "0700"; };
-    "data/paperless" = { };
-    "data/paperless-ai" = { };
+    "data/paperless".localState = true;
+    "data/paperless-ai".localState = true;
     "data/paperless/media" = { };
     "documents/inbox" = { };
   };

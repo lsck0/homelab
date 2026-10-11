@@ -38,9 +38,9 @@
 
   shares = {
     "data/app-dashboards".readOnly = true;
-    "data/grafana" = { };
-    "data/loki" = { };
-    "data/prometheus" = { };
-    "data/pyroscope" = { };
+    "data/grafana".localState = true;
+    "data/loki".localState = true;
+    "data/prometheus".localState = true;
+    "data/pyroscope".localState = true;
   };
 }

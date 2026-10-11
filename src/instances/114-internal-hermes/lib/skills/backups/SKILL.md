@@ -28,9 +28,10 @@ snapshot then carries them off the VM.
 To restore a database, restore the dump file and load it; do **not** restore
 the live data directory over a running service:
 
-- Postgres: `zstd -dc <dump>.sql.zst | psql -U postgres` (the dumps are taken
+- Postgres: `psql -U postgres < <dump>.sql` (the dumps are taken
   with `--clean --if-exists`, so they drop and recreate their own objects).
-- SQLite: `zstd -d <dump>.sqlite.zst -o <target>.sqlite3` with the service
+- Older dumps end in `.zst`: `zstd -d <dump>.zst` first.
+- SQLite: `cp <dump>.sqlite <target>.sqlite3` with the service
   stopped, then start it.
 
 This is also the only copy of two things: the Authelia second-factor enrolments
@@ -65,11 +66,10 @@ All commands run on vm-109 with `terminal`: `ssh 10.100.0.109 nas-restore ...`
 4. Stop the VM that writes the data: `vm stop <id>`.
 5. Restore in place: `ssh 10.100.0.109 nas-restore service <name> <snapshot-id|YYYY-MM-DD> --yes`
 6. Start the VM: `vm start <id>` and check the service (`podman ps`, logs, HTTP).
-   A service whose state lives on its VM's own disk (`homelab.localState`, a `<name>-seed` unit on the VM)
-   takes the restored copy when the app starts: the seed sees the restore's new generation and replaces the
-   local files. Check `ssh <ip> journalctl -u <name>-seed -n 5`
-   says "replaced ... with the restored nas copy". If the VM was not stopped, `ssh <ip> systemctl start
-   <name>-reseed` does the same; the nightly mirror never overwrites a restore, it starts the reseed itself.
+   A service whose state lives on its VM's own disk (`homelab.localState`) takes the restored copy when the app
+   starts; nas-restore prints which VM and the command that makes it take it now (`<name>-reseed`). Check
+   `ssh <ip> journalctl -u <name>-seed -n 5` says "replaced ... with the restored nas copy". The nightly mirror
+   never overwrites a restore.
    A seed that says "diverged" stops the app: report it to the owner, never pick a copy yourself.
 7. Report which snapshot (id, date/time) was restored, and the id of the
    safety snapshot if you took one.

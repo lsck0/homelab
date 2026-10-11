@@ -6,9 +6,12 @@
 # declares a mode (homelab.nasMounts.<mountpoint>.shareMode), which makes it root's, as the tokens and db dumps are.
 # vm-109 enables it; a test enables it on its stand-in nas with nasClients computed over the test's nodes.
 #
+# The data tree is the shares': anything else below it (a share no guest declares any more) is closed to root 0700
+# and listed by nas-data-orphans, never deleted; the owner deletes it once nothing needs it.
+#
 # Limit: an export trusts the client's source address (sec=sys). Only Proxmox binding each guest's NIC to its
 # inventory address makes that address mean the guest; see modules/tokens.
-{ config, lib, pkgs, inventory, site, nasClients, ... }:
+{ config, lib, pkgs, inventory, site, nasClients, lab, ... }:
 let
   cfg = config.homelab.nasExports;
   net = import ../../../modules/net.nix { inherit lib inventory site; };
@@ -26,6 +29,12 @@ let
   modeOf = path: let modes = lib.unique (lib.filter (m: m != null) (map (c: c.mode or null) clientsByPath.${path})); in
     if lib.length modes > 1 then throw "nas-exports: clients of ${path} declare the share modes ${toString modes}"
     else if modes == [ ] then null else lib.head modes;
+  # every share any guest declares, powered or not (lab.shares), and the exported ones; their parents hold no data
+  declaredShares = lib.unique (lib.filter (lib.hasPrefix "${dataRoot}/")
+    (map (s: s.path) (lib.concatLists (lib.attrValues lab.shares)) ++ dataShares));
+  declaredParents = lib.subtractLists declaredShares (lib.unique (lib.concatMap parentsOf declaredShares));
+  orphanMode = "0700";
+
   shareRule = path: let mode = modeOf path; in
     if mode == null then "d ${path} 0777 nobody nogroup -" else "d ${path} ${mode} root root -";
 
@@ -69,6 +78,28 @@ in {
         RemainAfterExit = true;
         ExecStart = "${pkgs.nfs-utils}/bin/exportfs -ra";
       };
+    };
+
+    systemd.services.nas-data-orphans = {
+      description = "Close and list what lies in the NAS data tree without a share";
+      after = [ "nfs-exports-reload.service" ];
+      wantedBy = [ "multi-user.target" ];
+      restartTriggers = [ (builtins.toJSON declaredShares) ];
+      path = [ pkgs.coreutils ];
+      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+      script = ''
+        for parent in ${lib.escapeShellArgs ([ dataRoot ] ++ declaredParents)}; do
+          for entry in "$parent"/* "$parent"/.[!.]*; do
+            [ -e "$entry" ] || continue
+            case "$entry" in ${lib.concatMapStringsSep "|" lib.escapeShellArg (declaredShares ++ declaredParents)}) continue ;; esac
+            if [ "$(stat -c '%a %U %G' "$entry")" != "${lib.removePrefix "0" orphanMode} root root" ]; then
+              chown root:root "$entry"
+              chmod ${orphanMode} "$entry"
+            fi
+            echo "orphan: $entry, no guest declares it (closed to root); delete it once nothing needs it"
+          done
+        done
+      '';
     };
 
     networking.firewall.allowedTCPPorts = nfsPorts;

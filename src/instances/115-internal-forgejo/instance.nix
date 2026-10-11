@@ -39,6 +39,6 @@
 
   shares = {
     "data/db-dumps/vm-${id}" = { mode = "0700"; };
-    "data/forgejo" = { };
+    "data/forgejo".localState = true;
   };
 }

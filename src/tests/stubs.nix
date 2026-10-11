@@ -16,6 +16,7 @@ in {
     ../modules/local-state
     ../modules/tokens
     ../modules/textfile.nix
+    ../modules/upstream
   ];
 
   _module.args = {

@@ -13,7 +13,7 @@
   tokens = [ "hass-key" ];
 
   shares = {
-    "data/homeassistant" = { };
+    "data/homeassistant".localState = true;
   };
 
   services = {
