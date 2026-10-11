@@ -246,12 +246,15 @@ let
           docker service rm "$service" >/dev/null
         fi
       done
-      for service in $(docker stack services --format '{{.Name}}' "$app"); do
-        if docker service ps --filter desired-state=running --format '{{.CurrentState}}' "$service" | grep -q '^Pending'; then
-          say "rescheduling $service: a task of it is stuck pending"
-          docker service update --detach --force "$service" >/dev/null
-        fi
-      done
+      # only while a node takes tasks: a task forced while none does is just as stuck (the converge retries later)
+      if docker node ls --format '{{.Status}} {{.Availability}}' | grep -qx 'Ready Active'; then
+        for service in $(docker stack services --format '{{.Name}}' "$app"); do
+          if docker service ps --filter desired-state=running --format '{{.CurrentState}}' "$service" | grep -q '^Pending'; then
+            say "rescheduling $service: a task of it is stuck pending"
+            docker service update --detach --force "$service" >/dev/null
+          fi
+        done
+      fi
       started=$(date +%s)
       # the swarm rolls a service back when its new tasks fail their healthchecks (update_config failure_action)
       if ! timeout ${toString deployTimeoutS} docker stack deploy --detach=false --prune --resolve-image always \

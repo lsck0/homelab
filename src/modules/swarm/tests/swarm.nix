@@ -225,21 +225,14 @@ pkgs.testers.runNixOSTest {
         serves(${toString port}, "demo v2")
 
     with subtest("a task stuck pending is replaced by the next converge, not waited on"):
-        def availability(value):
-            for worker in ("vm-250", "vm-251"):
-                vm_140.succeed(f"docker node update --availability {value} {worker}")
         def forced():
             return vm_140.succeed("docker service inspect demo_web --format '{{.Spec.TaskTemplate.ForceUpdate}}'").strip()
-        # an update while no node can take its task (a deploy during the lab shutdown of 2026-10-08) leaves the task
-        # pending once the nodes are back
-        availability("drain")
+        # pending with every worker ready: a reservation no worker holds, which the next deploy's spec drops
+        vm_140.succeed("docker service update --detach --reserve-memory 64G demo_web")
         vm_140.wait_until_succeeds("docker service ps demo_web --filter desired-state=running --format '{{.CurrentState}}' | grep -q ^Pending", timeout=60)
-        vm_140.succeed("docker service update --detach --force demo_web")
-        availability("active")
         before = forced()
-        vm_140.succeed("systemctl restart --no-block swarm-converge-demo.service")
-        vm_140.wait_until_succeeds("journalctl -b -u swarm-converge-demo | grep -q 'rescheduling demo_web'", timeout=60)
-        vm_140.wait_until_succeeds("systemctl is-active swarm-converge-demo.service", timeout=300)
+        vm_140.succeed("systemctl restart swarm-converge-demo.service")
+        vm_140.succeed("journalctl -b -u swarm-converge-demo | grep -q 'rescheduling demo_web'")
         assert forced() != before, before
         serves(${toString port}, "demo v2")
 
