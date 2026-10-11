@@ -129,7 +129,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
       initialization[0].user_account,
       mac_addresses,
       disk[0].file_id,
-      # root@pam's alone, which the api token is not; the lab sets none (scripts/pve-install.sh removes an old one)
+      # scripts/pve-install.sh sets it as root (the nas's bulk storage); the api token may not
       hook_script_file_id,
     ]
   }

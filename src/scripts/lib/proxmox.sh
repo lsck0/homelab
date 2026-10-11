@@ -124,6 +124,7 @@ proxmox_converge() {
     "WAKE_ZONES=$(jq -r '[.zones | to_entries[] | select(.value.ingress != null) | .key] | join(" ")' "$export")" \
     "GPU_IDS=$(jq -r '.gpu.functionIds // [] | join(",")' "$LAB_SITE")" \
     "BULK_DISK=$bulk_disk" \
+    "NAS_ID=$(jq -r .routes.nas.vmid "$export")" \
     "LLDAP_VMID=$(jq -r .vmid <<<"$ldap")" \
     "LLDAP_HOST=$(jq -r .host <<<"$ldap")" \
     "LLDAP_PORT=$(jq -r .port <<<"$ldap")" \
