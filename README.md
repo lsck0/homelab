@@ -185,6 +185,8 @@ Adding a secret: read it in a config (`sops.secrets.<name>`), declare it with it
 lists the kinds) in the reading guest's `instance.nix`, or in `src/secrets/shared.nix` when several read it, then
 `./sync.sh`. A generated one appears by itself, a `manual` one is added empty: fill it with `sops <its file>`.
 Moving a declaration moves the value. `src/scripts/secrets-sync.sh [--apply [--prune]]` runs the same step by hand.
+A `guardsData:` secret (a key that stored data or logins depend on) is never generated once the lab is deployed: a
+missing one stops the run until its value is restored, or, for one that guards nothing yet, `--generate-guarded`.
 
 Every ssh host key is pinned in `src/generated/known_hosts`: Proxmox's by `init.sh` after a console check, each
 guest's by `sync.sh`, which reads it through Proxmox from inside the guest. Any other key stops the run.
@@ -207,7 +209,9 @@ the old key still opens all of them in the public history. Inside `nix develop .
 6. Change every secret value, since the old key reads them in history. Before anything else, change the two that
    guard stored data where they are used: `kopia-password` with `kopia-nas repository change-password` on vm-109,
    `authelia-storage-key` with `authelia storage encryption change-key` on vm-101. Generated ones: delete the line
-   with `sops <its file>`, and `src/scripts/secrets-sync.sh --apply` makes a new one. External ones (cloudflare,
+   with `sops <its file>`, and `src/scripts/secrets-sync.sh --apply` makes a new one (a `guardsData:` one only with
+   `--generate-guarded`, once whatever it guards accepts the new value). A `dotfiles:` one: change its file in the
+   dotfiles' secrets. External ones (cloudflare,
    github, telegram, attic, proton, trmnl tokens and keys): issue new ones at the provider, revoke the old, put the
    new ones in with `sops <its file>`.
 7. `./sync.sh`: it pushes the new host keys, re-activates each guest with them, and commits.

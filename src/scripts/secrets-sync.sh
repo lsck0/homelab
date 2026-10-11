@@ -56,12 +56,12 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SRC="$ROOT_DIR/src"
 SOPS_CONFIG="$ROOT_DIR/.sops.yaml"
 ENCRYPT="$SRC/scripts/sops-encrypt.sh"
-# ntfy access tokens are tk_ plus this many of [a-z0-9]; any other shape stops ntfy from starting
-NTFY_TOKEN_CHARS=29
 # garage access key ids are GK plus 12 random bytes in hex
 GARAGE_KEY_ID_BYTES=12
 # a wireguard private key is 32 bytes; wireguard clamps any 32 bytes into a valid curve25519 scalar
 WIREGUARD_KEY_BYTES=32
+# laravel's APP_KEY (firefly): base64: and this many random bytes as base64, aes-256's key size
+LARAVEL_KEY_BYTES=32
 GUARDED_PREFIX=guardsData:
 
 # shellcheck source=src/scripts/lib/tools.sh
@@ -136,15 +136,10 @@ done
 
 # secret_generate <kind>: a fresh value, or nothing for a kind a human fills
 secret_generate() {
-  local v
   case "${1#"$GUARDED_PREFIX"}" in
     hex:*) openssl rand -hex "${1#*hex:}" ;;
     wireguard) openssl rand -base64 "$WIREGUARD_KEY_BYTES" ;;
-    ntfy-token)
-      # bounded input: tr reading /dev/urandom dies of SIGPIPE when head closes, and pipefail aborts the script
-      v="tk_$(head -c 512 /dev/urandom | LC_ALL=C tr -dc a-z0-9 | cut -c1-"$NTFY_TOKEN_CHARS")"
-      [ "${#v}" -eq $((NTFY_TOKEN_CHARS + 3)) ] || { echo "ERROR: could not generate an ntfy token" >&2; exit 1; }
-      echo "$v" ;;
+    laravel-key) echo "base64:$(openssl rand -base64 "$LARAVEL_KEY_BYTES")" ;;
     garage-key-id) echo "GK$(openssl rand -hex "$GARAGE_KEY_ID_BYTES")" ;;
     manual|public|dotfiles:*) ;;
     *) echo "ERROR: unknown kind $1" >&2; exit 1 ;;
