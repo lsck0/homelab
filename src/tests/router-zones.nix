@@ -230,12 +230,14 @@ pkgs.testers.runNixOSTest {
         internal.wait_until_succeeds(f"[ \"$(dig +short +time=3 @10.100.0.1 {published})\" = 203.0.113.77 ]", timeout=30)
         luca_router.succeed("echo '0.0.0.0 kept.lab.test' > /var/lib/blocklists/hagezi-pro")
         luca_router.succeed("systemctl set-environment UPSTREAM_BACKOFF_S=0")
-        for unit in ("public-address", "ddns-cloudflare", "blocklists-fetch"):
+        # each unit and the upstream it gives up on (modules/upstream says "<name> unavailable" before its exit)
+        given_up = (("public-address", "ipify"), ("ddns-cloudflare", "cloudflare"), ("blocklists-fetch", "githubusercontent"))
+        for unit, upstream in given_up:
             luca_router.succeed(f"systemctl start {unit}")
             luca_router.wait_until_succeeds(f"systemctl show -P ActiveState {unit} | grep -qx inactive", timeout=300)
             result = luca_router.succeed(f"systemctl show -P Result {unit}").strip()
-            status = luca_router.succeed(f"systemctl show -P ExecMainStatus {unit}").strip()
-            assert result == "success" and status == "75", f"{unit}: {result}, exit {status}"
+            assert result == "success", f"{unit}: {result}"
+            luca_router.succeed(f"journalctl -b -u {unit} | grep -q ': {upstream} unavailable'")
         luca_router.succeed("systemctl unset-environment UPSTREAM_BACKOFF_S")
         assert luca_router.succeed("cat /run/public-address/hosts").split()[0] == "203.0.113.77"
         luca_router.succeed("grep -q kept.lab.test /var/lib/blocklists/hagezi-pro")
