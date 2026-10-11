@@ -212,6 +212,39 @@ pkgs.testers.runNixOSTest {
             backends.fail(f"nc -z -w 2 -s {source} ${ip "101"} ${toString routes.authelia.port}")
         world.fail("nc -z -w 2 -s ${clients.anon} ${ip "101"} ${toString routes.authelia.port}")
 
+    with subtest("the proxmox realm reads lldap over ldaps from proxmox's address, verified against the guest's own certificate"):
+        world.succeed(f"cat > /tmp/realm.pem <<'EOF'\n{vm_101.succeed('cat ${realm.certFile}')}EOF")
+        world.succeed("openssl x509 -in /tmp/realm.pem -noout -ext subjectAltName | grep -qw 'IP Address:${realm.host}'")
+        world.succeed(f"printf %s '{secret('lldap-proxmox-bind-password')}' > /tmp/realm.pw")
+        # what the hypervisor sends from: its own lan address
+        world.succeed("ip route replace ${realm.host}/32 dev eth1 src ${net.wan.proxmox}")
+
+        def realm_search(ca):
+            return world.execute(
+                f"LDAPTLS_CACERT={ca} LDAPTLS_REQCERT=demand ldapsearch -o nettimeout=${toString ldapTimeoutS} -LLL "
+                "-H ldaps://${realm.host}:${toString realm.port} -D uid=${realm.bindUser},ou=people,${realm.baseDn} -y /tmp/realm.pw "
+                "-b ou=groups,${realm.baseDn} cn=${realm.adminGroup} cn")
+
+        status, out = realm_search("/tmp/realm.pem")
+        assert status == 0 and "cn: ${realm.adminGroup}" in out, out
+        # verification is on: a certificate for the same address from anyone else is refused
+        world.succeed("openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj /CN=other "
+                      "-addext subjectAltName=IP:${realm.host} -keyout /tmp/other.key -out /tmp/other.pem")
+        status, out = realm_search("/tmp/other.pem")
+        assert status != 0, out
+        world.fail("nc -z -w ${toString ldapTimeoutS} -s ${net.wan.proxmox} ${realm.host} ${toString nodes.vm-101.services.lldap.settings.ldap_port}")
+        world.fail("nc -z -w ${toString ldapTimeoutS} -s ${clients.anon} ${realm.host} ${toString realm.port}")
+        world.succeed("ip route del ${realm.host}/32")
+
+    with subtest("a lost ldaps key makes a new certificate, which the realm's old pin refuses"):
+        vm_101.succeed("rm ${dirOf realm.certFile}/ldaps-key.pem")
+        vm_101.succeed("systemctl restart lldap.service")
+        vm_101.wait_for_open_port(${toString realm.port})
+        world.succeed("ip route replace ${realm.host}/32 dev eth1 src ${net.wan.proxmox}")
+        status, out = realm_search("/tmp/realm.pem")
+        assert status != 0, out
+        world.succeed("ip route del ${realm.host}/32")
+
     with subtest("the probers reach a route's health path past sso, and nothing else of it"):
         def probe(src, path, method="GET"):
             host = "${net.fqdn routes.headplane.host}"
@@ -254,38 +287,5 @@ pkgs.testers.runNixOSTest {
             f"[ $(curl -s -o /dev/null -w '%{{http_code}}' --interface {CLIENTS['probe']} --resolve ${net.fqdn routes.authelia.host}:443:{INGRESS} "
             f"-H 'Content-Type: application/json' --data '{json.dumps({'username': 'guest', 'password': passwords['guest'], 'keepMeLoggedIn': False})}' "
             f"{PORTAL}/api/firstfactor) = 200 ]", timeout=420)
-
-    with subtest("the proxmox realm reads lldap over ldaps from proxmox's address, verified against the guest's own certificate"):
-        world.succeed(f"cat > /tmp/realm.pem <<'EOF'\n{vm_101.succeed('cat ${realm.certFile}')}EOF")
-        world.succeed("openssl x509 -in /tmp/realm.pem -noout -ext subjectAltName | grep -qw 'IP Address:${realm.host}'")
-        world.succeed(f"printf %s '{secret('lldap-proxmox-bind-password')}' > /tmp/realm.pw")
-        # what the hypervisor sends from: its own lan address
-        world.succeed("ip route replace ${realm.host}/32 dev eth1 src ${net.wan.proxmox}")
-
-        def realm_search(ca):
-            return world.execute(
-                f"LDAPTLS_CACERT={ca} LDAPTLS_REQCERT=demand ldapsearch -o nettimeout=${toString ldapTimeoutS} -LLL "
-                "-H ldaps://${realm.host}:${toString realm.port} -D uid=${realm.bindUser},ou=people,${realm.baseDn} -y /tmp/realm.pw "
-                "-b ou=groups,${realm.baseDn} cn=${realm.adminGroup} cn")
-
-        status, out = realm_search("/tmp/realm.pem")
-        assert status == 0 and "cn: ${realm.adminGroup}" in out, out
-        # verification is on: a certificate for the same address from anyone else is refused
-        world.succeed("openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 1 -subj /CN=other "
-                      "-addext subjectAltName=IP:${realm.host} -keyout /tmp/other.key -out /tmp/other.pem")
-        status, out = realm_search("/tmp/other.pem")
-        assert status != 0, out
-        world.fail("nc -z -w ${toString ldapTimeoutS} -s ${net.wan.proxmox} ${realm.host} ${toString nodes.vm-101.services.lldap.settings.ldap_port}")
-        world.fail("nc -z -w ${toString ldapTimeoutS} -s ${clients.anon} ${realm.host} ${toString realm.port}")
-        world.succeed("ip route del ${realm.host}/32")
-
-    with subtest("a lost ldaps key makes a new certificate, which the realm's old pin refuses"):
-        vm_101.succeed("rm ${dirOf realm.certFile}/ldaps-key.pem")
-        vm_101.succeed("systemctl restart lldap.service")
-        vm_101.wait_for_open_port(${toString realm.port})
-        world.succeed("ip route replace ${realm.host}/32 dev eth1 src ${net.wan.proxmox}")
-        status, out = realm_search("/tmp/realm.pem")
-        assert status != 0, out
-        world.succeed("ip route del ${realm.host}/32")
   '';
 }
