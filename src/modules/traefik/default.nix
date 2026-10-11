@@ -21,6 +21,9 @@ let
   # the prober (vm-105's blackbox) and the dashboard's status dots (vm-103)
   probeSources = map net.hostSource [ telemetry.collectorVmid lab.roles.dashboard ];
   probeMethods = [ "GET" "HEAD" ];
+  # a probe router outranks its route's routers, ranked by rule length (hundreds of characters), and its login
+  # router; the bot defence (9000 and up) stays above
+  probePriority = 1000;
   # a route kept off the internet answers the networks the router lets into the internal zone, never a dmz
   internalOnlySources = [ net.wan.subnet net.wireguard.subnet net.zones.internal.subnet ];
 
@@ -431,6 +434,7 @@ let
     rule = "${fqdnRule r} && Path(`${r.health}`) && ${anyOf "Method" probeMethods} && ${anyOf "ClientIP" probeSources}";
     service = name;
     entryPoints = [ "websecure" ];
+    priority = probePriority;
     route = r // { methods = probeMethods; off = r.off // { accessLog = "a probe every few seconds would bury the clients' requests"; }; };
   }) probeRoutes;
 
@@ -578,6 +582,10 @@ let
     else if splitsByBody r then { ${name} = half false; "${name}${bodyRouterSuffix}" = half true; }
     else { ${name} = secured (limitsBody r) // { inherit rule; }; }
   ) allRouters;
+  # a route router ranked at or above the probes would take their health path back behind sso
+  outrankingProbes = lib.attrNames (lib.filterAttrs (name: router:
+    (routeRouters // relayRouters // frontendRouters) ? ${lib.removeSuffix bodyRouterSuffix name}
+    && (router.priority or (lib.stringLength router.rule)) >= probePriority) routersWithTls);
   splitClashes = lib.filter (name: allRouters ? "${name}${bodyRouterSuffix}")
     (lib.attrNames (lib.filterAttrs (_: router: websecure router && splitsByBody (recordOf router)) allRouters));
   allRouters = cfg.routers // routeRouters // probeRouters // frontendRouters // relayRouters // botDefenseRouters;
@@ -670,6 +678,9 @@ in {
       # traefik drops a router naming a missing middleware and answers its host with a 404
       assertion = missingMiddlewares == [ ];
       message = "${config.networking.hostName}: routers name middlewares nothing defines: ${toString missingMiddlewares}";
+    } {
+      assertion = outrankingProbes == [ ];
+      message = "${config.networking.hostName}: routers at or above the probes' priority ${toString probePriority}: ${toString outrankingProbes}";
     } {
       assertion = splitClashes == [ ];
       message = "${config.networking.hostName}: routers whose body half (${bodyRouterSuffix}) would replace another router: ${toString splitClashes}";
