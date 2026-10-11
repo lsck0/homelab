@@ -5,7 +5,7 @@
     needs = [ "containers" "nfs" ];
     # a build is sure of the floor only: one compile job plus the guest's services (main.nix buildJobs)
     memoryMiB = 6144;
-    balloonMiB = 2816;
+    balloonMiB = 3840;
     cores = 8;
     # nightly builds yield the cpu to every interactive guest (proxmox default weight is 100)
     cpuUnits = 25;

@@ -3,6 +3,8 @@
   vm = {
     bootPhase = "network";
     needs = [ "containers" "nfs" ];
+    # headscale and headplane use under 300 MiB; the rest of the floor builds packages on vm-119
+    balloonMiB = 512;
   };
 
   grants = [ {

@@ -37,8 +37,8 @@ let
   listScript = ./lib/archrepo-list.sh;
   containerBuild = "archbuild-build";
   containerPublish = "archbuild-publish";
-  # memory one compile job may take: c++ with lto peaks near 2 GiB
-  buildJobMemoryMiB = 2048;
+  # memory one compile job may take: one rustc of a large crate (artcraft) peaked at 2.9 GiB and was oom killed in 2
+  buildJobMemoryMiB = 3072;
   # nginx, sshd, conmon, node-exporter and the kernel stay outside the build container's limit
   systemReserveMiB = 768;
   # jobs from the balloon floor, which the host cannot take back mid-build
