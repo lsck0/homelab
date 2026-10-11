@@ -273,6 +273,16 @@ let
       summary = "{{ $labels.device }} on {{ $labels.vm }}: critical warning {{ $values.A.Value }}";
       description = "The drive raised a critical warning. Every guest disk and the local backup repository share this volume group: check the off-site copy, then `nvme smart-log /dev/{{ $labels.device }}` on the host.";
     };
+    ossec_down = {
+      title = "Host intrusion detection stopped";
+      category = "service";
+      expr = "homelab_ossec_up";
+      op = "lt"; threshold = 1;
+      for = "30m";
+      telegram = true;
+      summary = "OSSEC on {{ $labels.vm }} is not running";
+      description = "ossec-analysisd is down: the hypervisor's file integrity goes unwatched. `systemctl status ossec` and `/var/ossec/logs/ossec.log` on the host.";
+    };
     nvme_temperature = {
       title = "NVMe running hot";
       category = "storage";

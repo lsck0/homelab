@@ -167,6 +167,17 @@ tests = [
         ],
     },
     {
+        "name": "host: a stopped ossec pages after half an hour, a running one never",
+        "interval": "1m",
+        "input_series": [
+            {"series": 'homelab_ossec_up{vm="proxmox"}', "values": "1 0x40"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "20m", "alertname": "ossec_down", "exp_alerts": []},
+            {"eval_time": "35m", "alertname": "ossec_down", "exp_alerts": [expect("ossec_down", vm="proxmox")]},
+        ],
+    },
+    {
         "name": "monitoring: the watchdog always fires, a stopped unit and a silent loki page",
         "interval": "1m",
         "input_series": [
