@@ -19,8 +19,9 @@
 #   monitoring   { prometheus; loki; grafana; dashboard; accessLog; }  the query apis, grafana's url, the overview
 #                board's path on it, the promtail `host` of the public ingress's access log
 #   ntfy         { url; topics; desktop; }  the server, its topics by role, the topics the desktop token reads
-#   ldap         { baseDn; adminGroup; vmid; host; port; }  the directory the proxmox realm binds to over ldaps, and
-#                the guest serving it
+#   ldap         { baseDn; adminGroup; vmid; host; port; certFile; bindUser; }  the directory the proxmox realm binds to
+#                over ldaps, the guest serving it, its self-signed certificate inside the guest, which the realm pins,
+#                and the read-only user the realm binds as
 { lib, lab }:
 let
   inherit (lab) inventory site catalog;
@@ -80,5 +81,7 @@ in
     vmid = catalog.internal.lldap.vmid;
     host = inventory.${toString catalog.internal.lldap.vmid}.ip;
     port = net.ports.ldaps;
+    certFile = "/var/lib/lldap/ldaps-cert.pem";
+    bindUser = "proxmox-bind";
   };
 }

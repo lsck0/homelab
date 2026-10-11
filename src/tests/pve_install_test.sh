@@ -14,6 +14,7 @@ not_called() { ! grep -qF -- "$1" "$CALLS" || fail "$2: unexpected call '$1'"; }
 
 PROXMOX_IP=192.168.178.200 ZONE_BRIDGES=vmbr1 WAKE_ZONES=internal NAS_ID=109 ROOT_PASSWORD=x ROOT_KEYS=key
 LLDAP_VMID=101 LLDAP_HOST=10.100.0.101 LLDAP_PORT=6360 LLDAP_BASE_DN=dc=lab LLDAP_ADMIN_GROUP=admins LLDAP_BIND_PASSWORD=y
+LLDAP_CERT=/var/lib/lldap/ldaps-cert.pem LLDAP_BIND_USER=proxmox-bind
 # shellcheck source=src/scripts/pve-install.sh
 . "${1:?pve-install.sh}"
 REALM_PASSWORD_FILE=$T/realm/lldap.pw

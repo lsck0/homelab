@@ -11,7 +11,8 @@
 #   NAS_ID                the nas guest, whose hookscript wakes the bulk pool around its start and stop
 #   LLDAP_VMID LLDAP_HOST LLDAP_PORT   the guest running lldap and its ldaps listener
 #   LLDAP_BASE_DN LLDAP_ADMIN_GROUP    the directory, and its group that administers the datacentre
-#   LLDAP_BIND_PASSWORD   lldap's read-only proxmox-bind user
+#   LLDAP_CERT            lldap's self-signed ldaps certificate inside its guest, which the realm pins
+#   LLDAP_BIND_USER LLDAP_BIND_PASSWORD   the read-only user the realm binds as (lldap_strict_readonly)
 #   ROOT_PASSWORD         root@pam's own password (proxmox-root-pass)
 #   ROOT_KEYS             the ssh keys root takes, one per line
 # An api token is created only when missing, its secret written once to TOKEN_DIR/<role> as "<token id>=<secret>"
@@ -25,7 +26,8 @@
 set -euo pipefail
 
 : "${PROXMOX_IP:?}" "${ZONE_BRIDGES:?}" "${WAKE_ZONES:?}" "${NAS_ID:?}" "${ROOT_PASSWORD:?}" "${ROOT_KEYS:?}"
-: "${LLDAP_VMID:?}" "${LLDAP_HOST:?}" "${LLDAP_PORT:?}" "${LLDAP_BASE_DN:?}" "${LLDAP_ADMIN_GROUP:?}" "${LLDAP_BIND_PASSWORD:?}"
+: "${LLDAP_VMID:?}" "${LLDAP_HOST:?}" "${LLDAP_PORT:?}" "${LLDAP_BASE_DN:?}" "${LLDAP_ADMIN_GROUP:?}" "${LLDAP_CERT:?}"
+: "${LLDAP_BIND_USER:?}" "${LLDAP_BIND_PASSWORD:?}"
 GPU_IDS="${GPU_IDS:-}"
 BULK_DISK="${BULK_DISK:-}"
 
@@ -51,13 +53,9 @@ WAKE_PRIVILEGES=VM.Audit,VM.PowerMgmt
 REALM=lldap
 REALM_PASSWORD_FILE=/etc/pve/priv/realm/$REALM.pw
 REALM_CA_FILE=/etc/pve/priv/realm/$REALM-ca.pem
-# read-only (lldap_strict_readonly): the realm sync reads users and groups and never writes
-REALM_BIND_USER=proxmox-bind
 REALM_SYNC_SCHEDULE=hourly
 # a realm login asks for a totp code too; root@pam sets each user's key (README, "Proxmox login")
 REALM_TFA=type=oath
-# lldap's self-signed ldaps certificate, as instances/101-internal-authelia/lib/lldap.nix writes it in the guest
-LLDAP_CERT=/var/lib/lldap/ldaps-cert.pem
 GUEST_EXEC_TIMEOUT_S=10
 API_CERT=/etc/pve/local/pve-ssl.pem
 # an uploaded certificate (pvenode cert set, acme) that pveproxy serves instead of the cluster-signed one
@@ -319,7 +317,7 @@ realm_converge() {
   pveum realm list --output-format json | json_has realm "$REALM" && mode=(modify "$REALM")
   pveum realm "${mode[@]}" \
     --server1 "$LLDAP_HOST" --port "$LLDAP_PORT" --mode ldaps --verify 1 --capath "$REALM_CA_FILE" \
-    --base_dn "ou=people,$LLDAP_BASE_DN" --user_attr uid --bind_dn "uid=$REALM_BIND_USER,ou=people,$LLDAP_BASE_DN" \
+    --base_dn "ou=people,$LLDAP_BASE_DN" --user_attr uid --bind_dn "uid=$LLDAP_BIND_USER,ou=people,$LLDAP_BASE_DN" \
     --group_dn "ou=groups,$LLDAP_BASE_DN" --group_name_attr cn --group_classes groupOfUniqueNames \
     --sync-defaults-options "enable-new=1,scope=both" --tfa "$REALM_TFA" --comment "lldap (single sign-on account store)"
   # the sync fills the group it would create; it exists before the first sync so the acl can name it
