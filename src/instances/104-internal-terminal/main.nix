@@ -1,5 +1,5 @@
 # e-ink terminal: calendar, lab stats, arxiv, energy and github feeds for the TRMNL cloud
-{ config, pkgs, lib, inventory, site, nasMount, catalog, ... }:
+{ config, pkgs, lib, inventory, site, nasMount, catalog, upstream, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   telemetry = import ../../modules/telemetry.nix { inherit lib inventory; };
@@ -27,6 +27,8 @@ let
   pythonScript = name: libraries: python name libraries (builtins.readFile ./lib/${name}.py);
 
   energyState = "/var/lib/energy-sync";
+  # each calendar source's last good answer, read while its host is down
+  calendarCopies = "/var/lib/calendar-sync";
   inherit (config.homelab) textfileDir;
 
   /*
@@ -38,6 +40,8 @@ let
       plugins      TRMNL plugin id -> the template trmnl-sync pushes to it
       route        the catalog route its urls use, terminal by default
       script       lib/<script>.py, run as nginx by a timer; a feed without one is written by another's
+      upstream     the third party it fetches from (src/lab/upstreams.nix): a failed run keeps the last output, its
+                   outage is "<upstream> unavailable", not a failed unit
       libraries    python packages the script imports
       arguments    its command line, the feed's directory by default
       environment, timer, description   the unit's
@@ -88,6 +92,7 @@ let
       cloud = "today's arXiv mathematics announcements, public data";
       plugins."484717" = ./lib/trmnl/arxiv.liquid;
       script = "arxiv-sync";
+      upstream = "arxiv";
       libraries = [ feedIo ];
       description = "Fetch today's arXiv mathematics announcements";
       timer = { OnBootSec = "5m"; OnUnitActiveSec = "1h"; Persistent = true; };
@@ -97,6 +102,7 @@ let
       cloud = "the owner's public GitHub repos, their ci failures, open issues and pull requests, commit counts";
       plugins."487323" = ./lib/trmnl/github.liquid;
       script = "github-sync";
+      upstream = "github";
       libraries = [ feedIo ];
       description = "Collect GitHub activity for the TRMNL terminal";
       environment.GITHUB_TOKEN_FILE = config.sops.secrets.github-mirror-token.path;
@@ -110,9 +116,11 @@ let
       script = "calendar-sync";
       libraries = with pkgs.python3Packages; [ icalendar recurring-ical-events tzdata feedIo ];
       arguments = [ (feedDir "calendar") (feedDir "ics") ];
+      stateDirectory = baseNameOf calendarCopies;
       description = "Merge remote calendars and render the TRMNL payload";
       environment = {
         CALENDAR_SOURCES = config.sops.secrets.calendar-sources.path;
+        CALENDAR_COPY_DIR = calendarCopies;
         CALENDAR_UPLOAD_DIR = uploadDir;
         CALENDAR_TZ = site.timeZone;
       };
@@ -246,8 +254,11 @@ in {
           Type = "oneshot";
           User = "nginx";
           Group = "nginx";
-          ExecStart = lib.escapeShellArgs ([ "${pythonScript f.script (f.libraries or [ ])}/bin/${f.script}" ]
+          ExecStart = lib.escapeShellArgs (lib.optionals (f ? upstream) [ upstream.run f.upstream ]
+            ++ [ "${pythonScript f.script (f.libraries or [ ])}/bin/${f.script}" ]
             ++ f.arguments or [ (feedDir name) ]);
+        } // lib.optionalAttrs (f ? upstream) {
+          SuccessExitStatus = [ upstream.unavailable ];
         } // lib.optionalAttrs (f ? stateDirectory) {
           StateDirectory = f.stateDirectory;
         } // lib.optionalAttrs (f ? exports) {
@@ -281,7 +292,10 @@ in {
     virtualHosts.terminal = {
       listen = [{ addr = "0.0.0.0"; port = terminalRoute.port; }];
       root = terminalPublic;
+      # every path holds a token (instance.nix off.accessLog); a miss would log it as an error
       extraConfig = ''
+        access_log off;
+        log_not_found off;
         autoindex off;
         default_type application/json;
         add_header Cache-Control "no-store";
@@ -328,13 +342,10 @@ in {
     wants = [ "network-online.target" ];
     serviceConfig = {
       Type = "oneshot";
-      # trmnl outages should not strand stale templates
-      Restart = "on-failure";
-      RestartSec = 600;
-      TimeoutStartSec = "10min";
+      SuccessExitStatus = [ upstream.unavailable ];
     };
     environment.TRMNL_API_KEY_FILE = config.sops.secrets.trmnl-api-key.path;
-    script = "exec ${pythonScript "trmnl-sync" [ ]}/bin/trmnl-sync ${lib.escapeShellArgs pluginTemplates}";
+    script = "exec ${upstream.run} trmnl ${pythonScript "trmnl-sync" [ ]}/bin/trmnl-sync ${lib.escapeShellArgs pluginTemplates}";
   };
 
   systemd.timers.trmnl-sync = {

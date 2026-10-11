@@ -494,6 +494,7 @@ class CalendarSync(unittest.TestCase):
                 handle.write(f"proton|file://{source}\n")
             views, ics = os.path.join(tmp, "views"), os.path.join(tmp, "ics")
             os.environ["CALENDAR_SOURCES"] = sources
+            os.environ["CALENDAR_COPY_DIR"] = os.path.join(tmp, "copies")
             argv = sys.argv
             sys.argv = ["calendar-sync", views, ics]
             try:
@@ -504,6 +505,31 @@ class CalendarSync(unittest.TestCase):
             self.assertIn("secret meeting link", text_read(os.path.join(ics, "merged.ics")))
             for name in os.listdir(views):
                 self.assertNotIn("meet.example", text_read(os.path.join(views, name)), name)
+
+    def test_a_source_down_reads_its_last_copy_until_it_is_a_week_old(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source, copies = os.path.join(tmp, "private.ics"), os.path.join(tmp, "copies")
+            os.makedirs(copies)
+            with open(source, "w") as handle:
+                handle.write(ICS)
+            sources = [("proton", f"file://{source}")]
+            now_s = os.path.getmtime(source)
+            with contextlib.redirect_stderr(io.StringIO()):
+                answered, stale = calendar_sync.load_calendars(sources, copies, now_s)
+                os.remove(source)
+                down, down_stale = calendar_sync.load_calendars(sources, copies, now_s)
+                week_s = calendar_sync.SOURCE_COPY_AGE_MAX_S
+                for copy in os.listdir(copies):
+                    os.utime(os.path.join(copies, copy), (now_s - week_s - 1, now_s - week_s - 1))
+                gone, gone_stale = calendar_sync.load_calendars(sources, copies, now_s)
+                never, never_stale = calendar_sync.load_calendars([("other", f"file://{source}")], copies, now_s)
+        self.assertEqual(([name for name, _ in answered], stale), (["proton"], []))
+        # the copy holds the same events the source did
+        self.assertEqual(([name for name, _ in down], down_stale), (["proton"], []))
+        self.assertEqual(len(down[0][1].walk("VEVENT")), len(answered[0][1].walk("VEVENT")))
+        # past a week the copy still renders, and the run names the source
+        self.assertEqual(([name for name, _ in gone], gone_stale), (["proton"], ["proton"]))
+        self.assertEqual((never, never_stale), ([], ["other"]))
 
     def test_week_view_on_the_long_day(self):
         calendars = [("proton", calendar_sync.Calendar.from_ical(ICS))]
@@ -558,6 +584,30 @@ class GithubSync(unittest.TestCase):
         payload = github_sync.payload_build(GITHUB_REPOS, GITHUB_NOTES, GITHUB_ISSUES, {"total_count": 0}, 3, 20,
                                             GITHUB_NOW, include_private=True)
         self.assertEqual((payload["repos"], payload["ci_failing"], payload["alerts"]), (3, 2, 2))
+
+    def test_a_failed_call_keeps_the_last_payload(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token, out = os.path.join(tmp, "token"), os.path.join(tmp, "out")
+            os.makedirs(out)
+            with open(token, "w") as handle:
+                handle.write("secret\n")
+            with open(os.path.join(out, "github.json"), "w") as handle:
+                handle.write("last")
+
+            def get(path, token, accept=None):
+                if path.startswith("notifications"):
+                    raise urllib.error.URLError("unreachable")
+                return {"total_count": 0, "items": []} if path.startswith("search") else []
+
+            saved = (github_sync.get, github_sync.TOKEN_FILE, sys.argv)
+            try:
+                github_sync.get, github_sync.TOKEN_FILE, sys.argv = get, token, ["github-sync", out]
+                with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                    rc = github_sync.main()
+            finally:
+                github_sync.get, github_sync.TOKEN_FILE, sys.argv = saved
+            # the upstream wrapper retries a failed run and tells github's outage from a bug
+            self.assertEqual((rc, text_read(os.path.join(out, "github.json"))), (1, "last"))
 
     def test_a_repo_without_the_private_field_counts_as_private(self):
         self.assertFalse(github_sync.public({"name": "x"}, False))

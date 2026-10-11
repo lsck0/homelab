@@ -253,6 +253,17 @@ let
       summary = "{{ $labels.device }} on {{ $labels.vm }}: smartd warns ({{ $labels.type }})";
       description = "smartd found a failed self-test, a prefail attribute or a temperature limit. `smartctl -a {{ $labels.device }}` on the host, then check that the backups are current.";
     };
+    ossec_down = {
+      title = "Intrusion detection down";
+      category = "monitoring";
+      expr = "homelab_ossec_up";
+      op = "lt"; threshold = 1;
+      # its textfile is rewritten every 5 minutes: three runs in a row saw no analysisd
+      for = "15m";
+      telegram = true;
+      summary = "OSSEC on {{ $labels.vm }} is not running";
+      description = "ossec-analysisd is down, so the hypervisor's intrusion detection sees nothing. `systemctl restart ossec` on the host, then `/var/ossec/logs/ossec.log`.";
+    };
     nvme_wear = {
       title = "NVMe worn";
       category = "storage";
@@ -272,16 +283,6 @@ let
       severity = "critical"; telegram = true;
       summary = "{{ $labels.device }} on {{ $labels.vm }}: critical warning {{ $values.A.Value }}";
       description = "The drive raised a critical warning. Every guest disk and the local backup repository share this volume group: check the off-site copy, then `nvme smart-log /dev/{{ $labels.device }}` on the host.";
-    };
-    ossec_down = {
-      title = "Host intrusion detection stopped";
-      category = "service";
-      expr = "homelab_ossec_up";
-      op = "lt"; threshold = 1;
-      for = "30m";
-      telegram = true;
-      summary = "OSSEC on {{ $labels.vm }} is not running";
-      description = "ossec-analysisd is down: the hypervisor's file integrity goes unwatched. `systemctl status ossec` and `/var/ossec/logs/ossec.log` on the host.";
     };
     nvme_temperature = {
       title = "NVMe running hot";
@@ -329,11 +330,13 @@ let
       description = "journal-remote, promtail or loki on vm-105 stopped forwarding; the log alerts see nothing. `journalctl -u promtail -u systemd-journal-remote` on vm-105.";
     };
     # telegram and ntfy (the only webhook) are outside this guest: one alert per channel that keeps failing, through
-    # every 10 minutes for a quarter hour (one retried failure is no outage); it reaches the owner over the other one
+    # every 10 minutes for a quarter hour (one retried failure is no outage); it reaches the owner over the other one.
+    # A channel whose service is down (src/lab/upstreams.nix) is upstream_unavailable's alert, not a second one
     notifications_failing = {
       title = "Notification channel unavailable";
       category = "monitoring";
-      expr = "label_replace(sum by (integration) (increase(grafana_alerting_notifications_failed_total[10m])), \"integration\", \"ntfy\", \"integration\", \"webhook\")";
+      expr = "label_replace(sum by (integration) (increase(grafana_alerting_notifications_failed_total[10m])), \"integration\", \"ntfy\", \"integration\", \"webhook\")"
+        + " unless on (integration) label_replace(probe_success{job=\"${upstreamJob}\"} == 0, \"integration\", \"$1\", \"upstream\", \"(.+)\")";
       threshold = 0;
       for = "15m";
       telegram = true;

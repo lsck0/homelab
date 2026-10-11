@@ -13,4 +13,7 @@
   ghcr.url = "https://ghcr.io/v2/";
   crowdsec.url = "https://hub-data.crowdsec.net";
   keyserver.url = "https://keyserver.ubuntu.com";
+  arxiv.url = "https://rss.arxiv.org";
+  trmnl.url = "https://trmnl.com/api/plugin_settings";
+  openmeteo.url = "https://api.open-meteo.com/v1/forecast";
 }

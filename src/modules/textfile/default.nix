@@ -5,10 +5,16 @@
 # previous generation recorded and this one no longer declares (lib/prune.sh): a unit that went away or moved to
 # another host leaves no stale metric behind. A file no generation declared is left alone, so a writer that forgot
 # to declare loses nothing.
+#
+# legacyTextfiles: names hosts wrote before they recorded their files (generation 448 and earlier). A host's first
+# activation takes them as its previous record, so they go wherever no unit writes them now: the builder's file on
+# vm-117, which left for vm-140 and paged "app deploy failed" from its last 0. Delete the list once every host has
+# activated a generation with this module.
 { config, lib, pkgs, ... }:
 let
   cfg = config.homelab;
   prune = pkgs.writeShellScript "textfile-prune" (builtins.readFile ./lib/prune.sh);
+  legacyTextfiles = [ "app_builder" ];
 in {
   options.homelab = {
     textfileDir = lib.mkOption {
@@ -24,5 +30,6 @@ in {
     };
   };
 
-  config.system.activationScripts.textfile-prune = "${prune} ${cfg.textfileDir} ${lib.escapeShellArgs cfg.textfiles}";
+  config.system.activationScripts.textfile-prune =
+    "${prune} ${cfg.textfileDir} ${lib.escapeShellArg (toString legacyTextfiles)} ${lib.escapeShellArgs cfg.textfiles}";
 }

@@ -167,17 +167,6 @@ tests = [
         ],
     },
     {
-        "name": "host: a stopped ossec pages after half an hour, a running one never",
-        "interval": "1m",
-        "input_series": [
-            {"series": 'homelab_ossec_up{vm="proxmox"}', "values": "1 0x40"},
-        ],
-        "alert_rule_test": [
-            {"eval_time": "20m", "alertname": "ossec_down", "exp_alerts": []},
-            {"eval_time": "35m", "alertname": "ossec_down", "exp_alerts": [expect("ossec_down", vm="proxmox")]},
-        ],
-    },
-    {
         "name": "monitoring: the watchdog always fires, a stopped unit and a silent loki page",
         "interval": "1m",
         "input_series": [
@@ -256,6 +245,30 @@ tests += [
              "exp_alerts": [expect("notifications_failing", integration="ntfy")]},
             {"eval_time": "40m", "alertname": "notifications_failing",
              "exp_alerts": [expect("notifications_failing", integration="ntfy")]},
+        ],
+    },
+    {
+        "name": "alert path: telegram's outage is its upstream alert alone, its failed deliveries add none",
+        "interval": "1m",
+        "input_series": [
+            {"series": 'grafana_alerting_notifications_failed_total{integration="telegram",component="grafana"}', "values": "0+1x40"},
+            {"series": 'probe_success{job="upstream",upstream="telegram",instance="https://api.telegram.org"}', "values": "0x40"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "30m", "alertname": "notifications_failing", "exp_alerts": []},
+            {"eval_time": "30m", "alertname": "upstream_unavailable",
+             "exp_alerts": [expect("upstream_unavailable", job="upstream", upstream="telegram", instance="https://api.telegram.org")]},
+        ],
+    },
+    {
+        "name": "intrusion detection: ossec down on the host pages after three runs, a running one does not",
+        "interval": "5m",
+        "input_series": [
+            {"series": 'homelab_ossec_up{vm="proxmox"}', "values": "1 1 0 0 0 0 0"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "15m", "alertname": "ossec_down", "exp_alerts": []},
+            {"eval_time": "30m", "alertname": "ossec_down", "exp_alerts": [expect("ossec_down", vm="proxmox")]},
         ],
     },
     {
