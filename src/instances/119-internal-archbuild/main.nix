@@ -67,7 +67,6 @@ let
     ${pkgs.coreutils}/bin/mv -f ${metricsFile}.tmp ${metricsFile}
   '';
 in {
-  
   homelab.textfiles = [ metricsName ];
   homelab.nasMounts = nasPath repoDir "bulk/archrepo";
 
