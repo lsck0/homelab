@@ -60,6 +60,10 @@ let
     nas_gen=$(generation_of ${nas}/${generationFile})
   '';
 
+  # the app's own user owns its state directory; a copy from the share must not hand it to the share's squashed owner
+  ownerOf = s: let sc = config.systemd.services.${s.unit}.serviceConfig; user = sc.User or "root"; in
+    "${user}:${sc.Group or user}";
+
   reconcile = name: s: let local = s.path; nas = nasDir name; in pkgs.writeShellScript "${name}-reconcile" ''
     set -euo pipefail
     export PATH=${lib.makeBinPath [ pkgs.rsync pkgs.findutils pkgs.coreutils pkgs.util-linux ]}
@@ -69,7 +73,11 @@ let
     ${generationsRead local nas}
     # the local id first: a crash between the writes leaves the mark, and the next seed copies again
     from_nas() {
+      mode=$(stat -c %a ${local})
       ${rsyncCopy} ${excludes s} ${nas}/ ${local}/
+      # rsync gave the directory itself the share's owner and mode (root squashed to nobody)
+      chown ${ownerOf s} ${local}
+      chmod "$mode" ${local}
       printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${local}/${generationFile}
       printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${nas}/${generationFile}
     }
@@ -137,8 +145,11 @@ in {
             exit 1
           fi
           status=0
+          # the share's directory keeps its own mode: rsync would give it the local one
+          share_mode=$(stat -c %a ${nasDir name})
           ${rsyncCopy} ${excludes s} ${lib.concatMapStringsSep " " (f: "--exclude ${lib.escapeShellArg f}") (lib.concatMap sqliteFilesOf s.sqlite)} ${s.path}/ ${nasDir name}/ \
             || status=$?
+          chmod "$share_mode" ${nasDir name}
           if [ "$status" != 0 ] && [ "$status" != ${toString rsyncVanishedStatus} ]; then exit "$status"; fi
           for db in ${lib.concatMapStringsSep " " (g: "${s.path}/${g}") s.sqlite}; do
             [ -f "$db" ] || continue

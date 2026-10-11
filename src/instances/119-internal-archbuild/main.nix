@@ -133,16 +133,16 @@ in {
         [ "$2" -ne "$unavailable" ] || echo "$1" > ${unavailableFile}
         return "$2"
       }
+      # run is called inside `run | tee || status=$?`, where bash ignores set -e: every step returns its own failure
       run() {
-        set -e
         export ARCHBUILD_RUN_STARTED ARCHBUILD_COMMIT
         ARCHBUILD_RUN_STARTED=$(date +%s)
         for name in ${toString upstreams}; do
-          ${upstream.run} "$name" || unavailable_note "$name" "$?"
+          ${upstream.run} "$name" || unavailable_note "$name" "$?" || return
         done
         # an unsigned or foreign-signed head stops here: nothing builds, the published snapshot stays
         ARCHBUILD_COMMIT=$(${pkgs.bash}/bin/bash ${./lib/archrepo-fetch.sh} ${dotfilesSource} ${dotfilesRef} ${dotfilesDir} \
-          ${dotfilesSigningKey} ${upstream.run} github) || unavailable_note github "$?"
+          ${dotfilesSigningKey} ${upstream.run} github) || { unavailable_note github "$?"; return; }
         podman run --rm --init --replace --pull=newer --name ${containerBuild} \
           --memory ${toString buildMemoryMiB}m --oom-score-adj ${toString oomScoreAdjMax} \
           --cpuset-cpus 0-${toString (buildJobs - 1)} \
@@ -154,7 +154,7 @@ in {
           -v ${publicDir}:/public \
           -v ${buildScript}:/build.sh:ro \
           -v ${listScript}:/list.sh:ro \
-          ${buildImage} bash /build.sh build
+          ${buildImage} bash /build.sh build || return
         podman run --rm --init --replace --pull=missing --name ${containerPublish} \
           ${runEnv} -e ARCHBUILD_PUSH_TARGET \
           -v ${repoDir}:/repo \

@@ -127,7 +127,8 @@ let
   blocklistDir = "/var/lib/blocklists";
   blocklists = {
     stevenblack = "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts";
-    hagezi-pro = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/hosts/pro.txt";
+    # hagezi dropped its hosts format; blocky reads the wildcard one (*.domain)
+    hagezi-pro = "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/pro.txt";
   };
   blocklistTimeoutS = 120;
 

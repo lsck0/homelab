@@ -12,9 +12,19 @@
 #                          is set aside
 #      TF_STATE_OFFLINE=1  the nas is down: apply from the local state copy without its lock (it may be behind)
 #      HOMELAB_PARALLEL    deploys at once (default DEPLOY_PARALLEL_DEFAULT)
+# log: ~/.local/state/homelab/logs/sync-<utc time>.log, the last 30 runs
 # shellcheck disable=SC2016 # the remote scripts are single-quoted on purpose: they expand on the Proxmox host
 set -euo pipefail
 export SHELL=/bin/bash
+
+# every run's whole output, kept beside the terraform state: the last LOG_KEEP runs
+LOG_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/homelab/logs"
+LOG_KEEP=30
+install -d -m 700 "$LOG_DIR"
+LOG_FILE="$LOG_DIR/sync-$(date -u +%Y%m%dT%H%M%SZ).log"
+exec > >(tee -a "$LOG_FILE") 2>&1
+find "$LOG_DIR" -name 'sync-*.log' | sort -r | tail -n +$((LOG_KEEP + 1)) | xargs -r rm -f
+echo ">>> Log: $LOG_FILE"
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC="$ROOT_DIR/src"

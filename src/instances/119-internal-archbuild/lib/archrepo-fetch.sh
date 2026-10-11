@@ -24,7 +24,7 @@ FINGERPRINT=${4:?primary key fingerprint the commit must be signed by}
 UPSTREAM=${5:?modules/upstream run}
 UPSTREAM_NAME=${6:?the upstream serving the source}
 # arch-dotfiles bootstrap.sh SIGNING_KEY_FILE
-KEY_FILE=configs/base/gnupg/luca-sandrock.pub.asc
+KEY_FILE=configs/core/gnupg/luca-sandrock.pub.asc
 FETCH_TIMEOUT_S=900
 # a v4 fingerprint as gpg prints it
 FINGERPRINT_PATTERN='^[0-9A-F]{40}$'

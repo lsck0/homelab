@@ -31,10 +31,14 @@ pkgs.testers.runNixOSTest {
   nodes.vm-121 = {
     imports = [ (lab.guest "121" { flat = true; nas = true; }) ];
     homelab.localState.${name} = { path = local; unit = "demo"; };
+    # no collector in this test: a failed upload would fail every switch below
+    services.journald.upload.enable = lib.mkForce false;
+    users.users.demo = { isSystemUser = true; group = "demo"; };
+    users.groups.demo = { };
     # the app the seed must precede
     systemd.services.demo = {
       wantedBy = [ "multi-user.target" ];
-      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; ExecStart = "${pkgs.coreutils}/bin/true"; };
+      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; ExecStart = "${pkgs.coreutils}/bin/true"; User = "demo"; };
     };
     systemd.services."${name}-mirror" = {
       path = lib.mkBefore [ vanishingRsync ];
@@ -69,6 +73,8 @@ pkgs.testers.runNixOSTest {
     with subtest("a fresh guest with an empty nas copy is seeded, both copies carry one generation"):
         here, there = generations()
         assert here and here == there, (here, there)
+        # the app's user keeps its state directory, not the share's squashed owner
+        assert vm_121.succeed("stat -c %U ${local}").strip() == "demo"
 
     with subtest("the mirror copies local data to the nas"):
         vm_121.succeed("echo v1 > ${local}/state.txt && systemctl start ${name}-mirror")

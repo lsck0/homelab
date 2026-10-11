@@ -6,7 +6,7 @@
 { pkgs, lib, ... }:
 let
   # arch-dotfiles bootstrap.sh SIGNING_KEY_FILE, the path the script reads the pinned key from
-  keyFile = "configs/base/gnupg/luca-sandrock.pub.asc";
+  keyFile = "configs/core/gnupg/luca-sandrock.pub.asc";
   ref = "master";
   # a local fetch never meets the outage path; nothing listens on port 1
   upstream = (import ../../../modules/upstream/default.nix {
