@@ -56,6 +56,8 @@ let
   appRouters = lib.filterAttrs (name: r: r ? service && lib.elem "websecure" (r.entryPoints or [ ]) && (r.priority or 0) < 1000
     && lib.any (a: lib.hasPrefix "${a}-" name || name == "${a}-tls") (lib.attrNames catalog.apps)) (httpOf edge).routers;
 
+  portForwardLines = lines router.networking.nftables.tables.port-forwards.content;
+
   kea = router.services.kea.dhcp4.settings.subnet4;
   inPool = ip: pool: let bounds = map lib.trim (lib.splitString "-" pool.pool);
     toInt = a: lib.foldl' (acc: o: acc * 256 + lib.toInt o) 0 (lib.splitString "." a); in
@@ -122,6 +124,10 @@ lawsOf {
   "inventory" = lib.concatLists (lib.mapAttrsToList (id: v:
     lib.optional (v.type != "router" && lib.any (s: lib.any (inPool v.ip) s.pools) kea) "${id}: ${v.ip} lies in a dhcp pool"
   ) inventory);
+
+  # the house's public address forwards a named port only: a lab-only route has none
+  "port forwards" = map (l: "the router forwards no port: ${l}")
+    (lib.filter (l: lib.hasInfix " dport " l && builtins.match ".* dport [0-9]+ .*" l == null) portForwardLines);
 
   # no guest trusts the homepage, the prober or the agent with every guarded port; each trusts its own address
   "ingress guards" = lib.concatLists (lib.mapAttrsToList (name: config:

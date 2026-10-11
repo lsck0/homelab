@@ -50,6 +50,8 @@ let
     inventory = network "inventory" (facts // { inventory = inventory // { "206" = inventory."206" // { ip = poolStart; }; }; });
     ingress-guards = network "ingress guards" (tamper "121-internal-paperless" [ "homelab" "ingressOnly" "trusted" ]
       [ "${inventory.${facts.lab.roles.operator}.ip}/32" ]);
+    port-forwards = network "port forwards" (tamper "300-router" [ "networking" "nftables" "tables" "port-forwards" "content" ]
+      "tcp dport  dnat to ${inventory.${facts.lab.roles.collector}.ip}:${toString catalog.internal.paperless.port}");
 
     catalog = { file = "apps"; marker = "catalog: a control's problem";
       tampered = facts // { catalog = catalog // { problems = [ "a control's problem" ]; }; }; };

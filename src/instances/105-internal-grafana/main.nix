@@ -468,10 +468,10 @@ let
   in {
     name = key;
     routes = boardRoutes "internal" (routesIn catalog.internal) ++ boardRoutes "external" (routesIn catalog.external);
-    forwards = if routesIn catalog.l4 == { } || router == null then null else {
+    forwards = if routesIn catalog.forwarded == { } || router == null then null else {
       host = router.name;
       loki = "loki";
-      routes = lib.mapAttrsToList (name: r: { inherit name; inherit (r) protocol; port = r.publicPort; }) (routesIn catalog.l4);
+      routes = lib.mapAttrsToList (name: r: { inherit name; inherit (r) protocol; port = r.publicPort; }) (routesIn catalog.forwarded);
     };
     deploys = app;
     idle = app && s.idle.stopAfter != null;

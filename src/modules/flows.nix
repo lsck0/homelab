@@ -8,7 +8,8 @@
 #   trusted there already), and every source whose network the router would not let through gets its forward.
 # - forward: the network-wide exceptions across the router: one source, one destination, its ports.
 # - router: the router's own services and who may use them.
-# - portForwards: the house's public address forwarded: https to the edge, every tcp and udp route to its backend.
+# - portForwards: the house's public address forwarded: https to the edge, every tcp and udp route with a publicPort
+#   to its backend.
 #
 # instances/300-router/main.nix renders networks, forward, router and portForwards; modules/network.nix renders the
 # grants onto the guest it runs on. A grant onto one instance lives in its instance.nix (`grants`, collected by
@@ -276,11 +277,11 @@ in
       off = { inflightLimit = "the edge limits every client itself"; accessLog = "traefik logs every request"; };
     }
   ]
-  # every tcp and udp route (an instance service's or an app's) to every guest answering it, while one runs
+  # every forwarded tcp and udp route (an instance service's or an app's) to every guest answering it, while one runs
   ++ lib.filter (f: f.addresses != [ ]) (map (r: {
     proto = r.protocol; port = r.publicPort; targetPort = r.port;
     addresses = map net.ipOf (backendIdsOf r);
     inherit (r) host srv off;
     why = "${r.protocol} ${net.fqdn r.host}";
-  }) (lib.attrValues catalog.l4));
+  }) (lib.attrValues catalog.forwarded));
 }
