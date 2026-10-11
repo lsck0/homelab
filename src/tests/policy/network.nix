@@ -27,12 +27,14 @@ let
       padded = chain ++ lib.genList (_: "") 10;
       rest = lib.drop 2 padded;
       limits = [ "rate-limit" "route-rate-limit" "inflight-limit" "route-inflight-limit" ];
+      # a route's limitScale names its set `<limit>-x<scale>` (modules/traefik)
+      unscaled = n: let s = builtins.match "(.*)-x[0-9]+" n; in if s == null then n else lib.head s;
       afterLimits = lib.drop (lib.length limits + 1) rest;
       afterBody = if lib.hasPrefix "body-limit-" (lib.head afterLimits) then lib.tail afterLimits else afterLimits;
     in
     lib.optional (lib.take 2 chain != [ "client-ip" "strip-client-headers" ]
       || !(lib.hasPrefix "crowdsec" (lib.head rest))
-      || lib.take (lib.length limits) (lib.tail rest) != limits
+      || map unscaled (lib.take (lib.length limits) (lib.tail rest)) != limits
       || lib.head afterBody != "retry-upstream"
       || !(lib.hasPrefix "secure-headers" (lib.elemAt afterBody 1)))
       "${host} router ${name}: chain ${toString m} is not [cloudflare-only], client-ip, strip-client-headers, crowdsec*, ${toString limits}, [body-limit-*], retry-upstream, secure-headers*"
