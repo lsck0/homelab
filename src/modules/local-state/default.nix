@@ -48,6 +48,8 @@ let
   # nas-restore (109-internal-nas lib/kopia.nix) marks the generation it writes with this
   restoredPrefix = "restored-";
   excludes = s: lib.concatMapStringsSep " " (e: "--exclude ${lib.escapeShellArg e}") (s.exclude ++ [ generationFile ]);
+  # mtimes to the nanosecond: whole seconds would skip a file rewritten at its size within the second of a copy, for good
+  rsyncCopy = "rsync -a --delete --modify-window=-1";
   # a database and its journals, copied by the backup api instead; a sibling like gitea.db.before-<tag> is plain data
   sqliteFilesOf = glob: map (suffix: "${glob}${suffix}") [ "" "-wal" "-shm" "-journal" ];
 
@@ -67,7 +69,7 @@ let
     ${generationsRead local nas}
     # the local id first: a crash between the writes leaves the mark, and the next seed copies again
     from_nas() {
-      rsync -a --delete ${excludes s} ${nas}/ ${local}/
+      ${rsyncCopy} ${excludes s} ${nas}/ ${local}/
       printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${local}/${generationFile}
       printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${nas}/${generationFile}
     }
@@ -135,7 +137,7 @@ in {
             exit 1
           fi
           status=0
-          rsync -a --delete ${excludes s} ${lib.concatMapStringsSep " " (f: "--exclude ${lib.escapeShellArg f}") (lib.concatMap sqliteFilesOf s.sqlite)} ${s.path}/ ${nasDir name}/ \
+          ${rsyncCopy} ${excludes s} ${lib.concatMapStringsSep " " (f: "--exclude ${lib.escapeShellArg f}") (lib.concatMap sqliteFilesOf s.sqlite)} ${s.path}/ ${nasDir name}/ \
             || status=$?
           if [ "$status" != 0 ] && [ "$status" != ${toString rsyncVanishedStatus} ]; then exit "$status"; fi
           for db in ${lib.concatMapStringsSep " " (g: "${s.path}/${g}") s.sqlite}; do
