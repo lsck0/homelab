@@ -42,7 +42,7 @@ let
 
   swarmPorts = catalog.swarm.ports;
   telemetry = import ../telemetry.nix { inherit lib inventory; };
-  privateRanges = import ../private-ranges.nix { inherit lib inventory site; };
+  inherit (import ../net.nix { inherit lib inventory site; }) localRanges;
   cidr = import ../cidr.nix { inherit lib; };
 
   # docker's default overlay pool 10.0.0.0/8 holds every lab subnet; this one overlaps none (asserted below)
@@ -435,7 +435,7 @@ let
     "*filter"
     ":DOCKER-USER - [0:0]"
     "-A DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN"
-  ] ++ map (range: "-A DOCKER-USER -i docker_gwbridge -d ${range} -j DROP") privateRanges
+  ] ++ map (range: "-A DOCKER-USER -i docker_gwbridge -d ${range} -j DROP") localRanges
   ++ [
     "-A DOCKER-USER -j RETURN"
     "COMMIT"

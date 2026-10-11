@@ -150,7 +150,8 @@ let
           Service -> KEY -> value, over the stack's own environment of that service only: a secret reaches the
           services that name it and no other. In a value, `{{name}}` is the sops secret <name> (see `secrets`),
           `{{homelab.otlp-grpc}}`, `{{homelab.otlp-http}}` and `{{homelab.pyroscope}}` (host:port) are the lab's
-          telemetry endpoints (they need `telemetry`), and `{{.Node.Hostname}}`-style templates are swarm's.
+          telemetry endpoints (they need `telemetry`), `{{homelab.origin-<route>}}` is a route's https origin, and
+          `{{.Node.Hostname}}`-style templates are swarm's.
         '';
       };
       secrets = mkOption {

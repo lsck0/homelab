@@ -93,7 +93,7 @@ in
     postgresRoot.POSTGRES_ROOT_PASSWORD = "{{wat-postgres-root-password}}";
   in {
     server = otel // garageFiles // {
-      PUBLIC_URL = "https://wat.lsck0.dev";
+      PUBLIC_URL = "{{homelab.origin-wat}}";
       DEFAULT_USER_PASSWORD = "{{wat-default-user-password}}";
       DATABASE_URL = "postgres://admin:{{wat-postgres-password}}@postgres:5432/root";
     };
