@@ -1,5 +1,5 @@
 # storage: NFS + SMB + Syncthing + FileBrowser, Kopia backups of it
-{ lib, site, ... }: {
+{ lib, site, telemetry, ... }: {
   roles = [ "nas" ];
 
   vm = {
@@ -31,6 +31,8 @@
     offsiteStaleSeconds = 60 * 3600;
     # lib/kopia.nix verifies weekly (verifyAt): a missed week plus its randomized delay
     verifyStaleSeconds = 8 * 24 * 3600 + 3600;
+    # a proton outage is its own "proton unavailable" alert, not a stale off-site copy too
+    whileProtonUp = expr: "(${expr}) * on () ${telemetry.upstreamUp "proton"}";
   in {
     backup_stale = {
       title = "NAS snapshot stale";
@@ -47,7 +49,7 @@
     offsite_stale = {
       title = "Off-site copy stale";
       category = "backups";
-      expr = "time() - max(homelab_offsite_last_success_timestamp_seconds)";
+      expr = whileProtonUp "time() - max(homelab_offsite_last_success_timestamp_seconds)";
       threshold = offsiteStaleSeconds;
       for = "30m";
       noData = "Alerting";
@@ -69,7 +71,7 @@
     offsite_verify_stale = {
       title = "Off-site copy unverified";
       category = "backups";
-      expr = "time() - max(homelab_offsite_verify_last_success_timestamp_seconds)";
+      expr = whileProtonUp "time() - max(homelab_offsite_verify_last_success_timestamp_seconds)";
       threshold = verifyStaleSeconds;
       for = "30m";
       noData = "Alerting";

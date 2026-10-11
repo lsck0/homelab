@@ -1,5 +1,5 @@
 # forgejo: the git forge, logins through authelia oidc, github mirrors, api tokens for the lab
-{ config, pkgs, lib, inventory, catalog, retry, setupUnit, site, ... }:
+{ config, pkgs, lib, inventory, catalog, retry, setupUnit, site, upstream, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   route = catalog.internal.forgejo;
@@ -192,8 +192,11 @@ in {
     serviceConfig = {
       Type = "oneshot";
       StateDirectory = "forgejo-mirror";
+      SuccessExitStatus = [ upstream.unavailable ];
     };
     environment = {
+      UPSTREAM = upstream.run;
+      UPSTREAM_UNAVAILABLE = toString upstream.unavailable;
       FORGEJO_URL = localUrl;
       FORGEJO_OWNER = owner;
       # forgejo's own re-fetch interval

@@ -84,6 +84,11 @@ let
     heartbeat = { firing = "Alerting alive"; resolved = "Alerting stopped"; };
   };
 
+  # vm-105's probe of every third-party service (modules/upstream); upstreamUp <name> is 1 while it answers, so an
+  # alert multiplied by it stays quiet through that service's own "unavailable" alert
+  upstreamJob = "upstream";
+  upstreamUp = name: "max(probe_success{job=\"${upstreamJob}\",upstream=\"${name}\"})";
+
   # -----------------------------------------------------------------------------
   # INTERNAL
   # -----------------------------------------------------------------------------
@@ -131,7 +136,7 @@ let
     };
   };
 in {
-  inherit collectorVmid ports categories alertType relayAddress relayBridge pushPaths;
+  inherit collectorVmid ports categories alertType relayAddress relayBridge pushPaths upstreamJob upstreamUp;
 
   urls = {
     prometheus = urlOf ports.prometheus;

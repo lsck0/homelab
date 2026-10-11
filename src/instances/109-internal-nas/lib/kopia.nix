@@ -20,7 +20,9 @@
 #
 # Verification: kopia-verify re-reads a share of the stored files every week and downloads a few repository blobs
 # back from proton drive, comparing them with the local ones; each part publishes its own freshness metric.
-{ config, lib, pkgs, catalog, site, inventory, nasClients, ... }:
+#
+# A proton outage (modules/upstream) skips the night's upload or sample: the off-site copy stays as it was.
+{ config, lib, pkgs, catalog, site, inventory, nasClients, upstream, ... }:
 let
   protonDir = "/var/lib/proton-drive";
   protonDriveCli = pkgs.stdenv.mkDerivation rec {
@@ -295,6 +297,7 @@ in {
       TimeoutStartSec = "12h";
       # 1.8G peak on 2026-10-01; above that it is a leak, and nfs and smb keep the rest of the 3G guest
       MemoryMax = "2G";
+      SuccessExitStatus = [ upstream.unavailable ];
       CPUWeight = "idle";
       IOSchedulingClass = "idle";
     };
@@ -303,7 +306,7 @@ in {
     script = ''
       exec 9>${protonLock}
       flock 9
-      # nixos starts scripts with set -e; a failed batch must not skip the rest, and create-folder-exists is non-fatal
+      # nixos starts scripts with set -e; a failed batch must not skip the rest
       set +e -uo pipefail
       shopt -s nullglob
 
@@ -328,12 +331,22 @@ in {
         exit 1
       fi
 
+      # an outage skips the night: the off-site copy stays as the last run left it
+      ${upstream.run} proton || exit $?
+      # a failure while proton went down is the outage's, any other this run's own
+      failed() { ${upstream.run} proton || exit $?; echo "$1"; exit 1; }
+
       root=${offsiteRoot}
       # same remote layout as when all of BACKUPS went up, so the repo uploaded before is reused
       remote=${offsiteRepo}
-      # remote parents must exist before an upload; create-folder errors if present, so ignore it
-      proton-drive filesystem create-folder /my-files homelab-offsite >/dev/null 2>&1 || true
-      proton-drive filesystem create-folder "$root" BACKUPS >/dev/null 2>&1 || true
+      # remote parents must exist before an upload; create-folder refuses an existing one
+      folder_ensure() { # <parent> <name>
+        proton-drive filesystem list -j "$1" | jq -e --arg n "$2" 'any(.[]; .name.value == $n)' >/dev/null \
+          || proton-drive filesystem create-folder "$1" "$2" >/dev/null
+      }
+      if ! { folder_ensure /my-files "$(basename "$root")" && folder_ensure "$root" BACKUPS; }; then
+        failed "cannot create the remote folders"
+      fi
 
       # 0 uploaded, 2 only files changed mid-upload (retry once), 1 anything else; unchanged files are skipped by hash
       upload() {
@@ -442,7 +455,7 @@ in {
       fi
       rm -f "$current" "$gone" "$kept"
 
-      [ "$ok" = 1 ] || { echo "one or more uploads or prunes failed"; exit 1; }
+      [ "$ok" = 1 ] || failed "one or more uploads or prunes failed"
 
       # freshness metric only on a fully successful run
       ${metricWrite}
@@ -459,7 +472,13 @@ in {
     restartIfChanged = false;
     environment = protonEnv;
     path = [ protonDriveCli pkgs.util-linux pkgs.diffutils pkgs.gnugrep ];
-    serviceConfig = { Type = "oneshot"; CPUWeight = "idle"; IOSchedulingClass = "idle"; MemoryMax = "1G"; };
+    serviceConfig = {
+      Type = "oneshot";
+      CPUWeight = "idle";
+      IOSchedulingClass = "idle";
+      MemoryMax = "1G";
+      SuccessExitStatus = [ upstream.unavailable ];
+    };
     script = ''
       ${kopiaEnv}
       ${metricWrite}
@@ -468,6 +487,7 @@ in {
         "Unix time of the last Kopia repository verify." "$(date +%s)"
 
       [ -s ${protonDir}/auth-session.json ] || { echo "no proton session: off-site copy not sampled"; exit 0; }
+      ${upstream.run} proton || exit $?
       exec 9>${protonLock}
       flock 9
       sample=$(mktemp -d)
@@ -477,7 +497,11 @@ in {
         | shuf -n ${toString offsiteSampleCount} > "$sample/list"
       [ -s "$sample/list" ] || { echo "no uploaded pack blob to sample yet"; exit 0; }
       while IFS= read -r rel; do
-        proton-drive filesystem download -f remove "${offsiteRepo}/$rel" "$sample" </dev/null >/dev/null
+        if ! proton-drive filesystem download -f remove "${offsiteRepo}/$rel" "$sample" </dev/null >/dev/null; then
+          ${upstream.run} proton || exit $?
+          echo "off-site $rel does not download" >&2
+          exit 1
+        fi
         cmp "$sample/$(basename "$rel")" "${repo}/$rel" || { echo "off-site $rel differs from the local blob" >&2; exit 1; }
         echo "off-site $rel matches"
       done < "$sample/list"

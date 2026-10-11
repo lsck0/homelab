@@ -211,7 +211,7 @@ let
     target = "${node.ip}:${toString r.port}";
   }) (lib.filterAttrs (_: r: r.protocol == "tcp" && r.off.probe == null && (r.vmid == null || awake (guest r.vmid))) catalog.l4);
   # every third-party service the lab depends on (modules/upstream), one alert each
-  upstreamJob = "upstream";
+  inherit (telemetry) upstreamJob;
   probesOf = protocol: if protocol == "http" then httpProbes else tcpProbes;
   probeJob = protocol: {
     job_name = "blackbox-${protocol}";
