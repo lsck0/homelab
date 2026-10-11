@@ -1,9 +1,9 @@
 # the apps swarm end to end: a manager and two workers build the cluster from the inventory over the nas, the
 # manager deploys an app through swarm-apply, the workers serve it, the policy, the rollback check and the autolock
 # hold, the reconcile follows the workers' events and not the manager's own, a task stuck pending is replaced by the
-# next converge, a tcp and a udp route answer a client from anywhere on every worker (the router forwards to each,
-# asserted from flows.nix), and a catalog edit reaches the running app without a commit: a changed port and env roll
-# out, a disabled app's stack is removed.
+# next converge and a failed converge is tried again, a tcp and a udp route answer a client from anywhere on every
+# worker (the router forwards to each, asserted from flows.nix), and a catalog edit reaches the running app without a
+# commit: a changed port and env roll out, a disabled app's stack is removed.
 # Lab guests at their real addresses on one flat network (tests/lib/lab.nix): the real modules mount the real
 # shares (homelab.nasMounts) from a test nas that exports them by the real rules (109-internal-nas's lib/nas-exports.nix). The
 # apps are the test's own, one app, so the production catalog can change without touching this test.
@@ -239,6 +239,17 @@ pkgs.testers.runNixOSTest {
         vm_140.wait_until_succeeds("journalctl -b -u swarm-converge-demo | grep -q 'rescheduling demo_web'", timeout=60)
         vm_140.wait_until_succeeds("systemctl is-active swarm-converge-demo.service", timeout=300)
         assert forced() != before, before
+        serves(${toString port}, "demo v2")
+
+    with subtest("a failed converge is tried again and clears its mark once it lands"):
+        registry.succeed("systemctl stop docker-registry.service")
+        vm_140.fail("systemctl restart swarm-converge-demo.service")
+        vm_140.succeed("test -e /run/swarm-converge-pending/demo")
+        registry.succeed("systemctl start docker-registry.service")
+        registry.wait_for_open_port(443)
+        vm_140.succeed("systemctl start swarm-converge-retry.service")
+        vm_140.wait_until_succeeds("systemctl is-active swarm-converge-demo.service", timeout=300)
+        vm_140.fail("test -e /run/swarm-converge-pending/demo")
         serves(${toString port}, "demo v2")
 
     with subtest("a catalog edit reaches the running app without a commit"):

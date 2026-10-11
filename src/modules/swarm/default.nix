@@ -16,7 +16,9 @@
 #                                       command on a guest's manager; by hand on any manager
 #   swarm-converge-<app>                the catalog applied to the kept stack: on every switch that changes the app's
 #                                       catalog entry or secrets, and at boot; one unit per app, so one app's failure
-#                                       or edit touches no other
+#                                       or edit touches no other; a failed one is tried again (swarm-converge-retry)
+# A task left pending while no node could take it (a lab shutdown) stays pending once the nodes are back and an
+# unchanged spec creates no new one: each deploy force-updates such a service first.
 #   swarm-prune                         removes the stacks of apps that left the catalog; volumes stay
 # An idle app sleeps and wakes by scaling its services (to 0, and back to the replicas each carries as a label)
 # under its own lock only; a deploy of a sleeping app keeps it asleep. Nothing here polls.
@@ -73,9 +75,12 @@ let
   # images of past deploys; volumes are never pruned
   imageKeep = "72h";
   restartDelayS = { cluster = 15; reconcile = 10; };
-  # a converge an upstream outage held back marks its app here; swarm-converge-retry runs it again this often
+  # a converge that failed for anything but a policy refusal (an outage, workers still booting) marks its app here;
+  # swarm-converge-retry runs it again this often
   convergePendingDir = "/run/swarm-converge-pending";
-  outageRetry = "15min";
+  convergeRetry = "15min";
+  # swarm-deploy's answer to a stack its policy refuses or an app not in the catalog: nothing to retry until either changes
+  deployRefused = 2;
 
   tokens = config.homelab.tokens.dir;
   inherit (config.homelab) textfileDir;
@@ -185,8 +190,9 @@ let
     runtimeInputs = [ docker pkgs.coreutils pkgs.jq pkgs.util-linux pkgs.gnugrep ];
     text = ''
       app=$1 input=$2
+      refused=${toString deployRefused}
       # the name becomes a path and a stack name
-      [[ "$app" =~ ${appNamePattern} ]] || { echo "swarm-deploy: '$app' is no app name" >&2; exit 2; }
+      [[ "$app" =~ ${appNamePattern} ]] || { echo "swarm-deploy: '$app' is no app name" >&2; exit "$refused"; }
       catalog=/etc/${appCatalogDir}/"$app".json
       metrics=${textfileDir}/swarm_app_$app.prom
       # to the caller (the builder's journal) and to this manager's own, tagged swarm-deploy
@@ -205,7 +211,7 @@ let
           fi
         done
       }
-      [ -f "$catalog" ] || { say "$app is not an enabled app" >&2; exit 2; }
+      [ -f "$catalog" ] || { say "$app is not an enabled app" >&2; exit "$refused"; }
       ${appLock}
       exec 9>${deployLock}
       flock 9
@@ -219,7 +225,7 @@ let
       if ! ${render} "$app" "$catalog" ${envDir}/swarm-app-"$app".env "''${mode[@]}" < "$work/input.yaml" > "$work/stack.yaml"; then
         # a policy refusal: render said why, nothing changed on the swarm
         report 0
-        exit 2
+        exit "$refused"
       fi
       say "deploying $app"
       export DOCKER_CONFIG=${dockerConfigDir}
@@ -240,7 +246,6 @@ let
           docker service rm "$service" >/dev/null
         fi
       done
-      # a task left pending while no node could take it (a lab shutdown) outlives an unchanged spec: replace it
       for service in $(docker stack services --format '{{.Name}}' "$app"); do
         if docker service ps --filter desired-state=running --format '{{.CurrentState}}' "$service" | grep -q '^Pending'; then
           say "rescheduling $service: a task of it is stuck pending"
@@ -301,11 +306,10 @@ let
       if [ -f ${stackDir}/"$app".yaml ]; then
         status=0
         ${lib.getExe swarmDeploy} "$app" ${stackDir}/"$app".yaml || status=$?
-        if [ "$status" = ${toString upstream.unavailable} ]; then
-          touch ${convergePendingDir}/"$app"
-        else
-          rm -f ${convergePendingDir}/"$app"
-        fi
+        case "$status" in
+          0|${toString deployRefused}) rm -f ${convergePendingDir}/"$app" ;;
+          *) touch ${convergePendingDir}/"$app" ;;
+        esac
         exit "$status"
       fi
       echo "swarm-converge: $app has no stack yet; the builder deploys its first commit"
@@ -664,7 +668,7 @@ in {
         };
 
         swarm-converge-retry = {
-          description = "Apply the catalog again to the apps an upstream outage held back";
+          description = "Apply the catalog again to the apps whose converge failed";
           serviceConfig.Type = "oneshot";
           script = ''
             for marker in ${convergePendingDir}/*; do
@@ -744,7 +748,7 @@ in {
 
       systemd.timers.swarm-converge-retry = {
         wantedBy = [ "timers.target" ];
-        timerConfig = { OnBootSec = outageRetry; OnUnitInactiveSec = outageRetry; };
+        timerConfig = { OnBootSec = convergeRetry; OnUnitInactiveSec = convergeRetry; };
       };
 
       users.users.${controllerUser} = { isSystemUser = true; group = controllerUser; };
