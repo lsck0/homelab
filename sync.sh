@@ -296,20 +296,10 @@ host_age_key_run() {
   lab_ssh "root@$3" "bash -c $(printf %q "$(cat "$SRC/scripts/lib/host-age-key.sh")") host-age-key $1 $HOST_AGE_KEY_PATH" <<<"$key"
 }
 
-# switch_failures_real <ip> <switch output>: the units the switch named as failed that the configuration declares;
-# a transient unit (podman's healthcheck runs, systemd-run) is no configuration's and fails mid-restart by design;
-# one systemd already collected is not found any more, which no declared unit ever is
+# switch_failures_real <ip> <switch output>: what failed the switch beyond undeclared units (scripts/lib/switch-failures.sh)
 switch_failures_real() {
-  local units
-  units=$(sed -n 's/^warning: the following units failed: //p' "$2" | tr ',' ' ')
-  [ -n "$units" ] || { echo "the switch itself"; return 0; }
-  # shellcheck disable=SC2086 # one word per unit
   lab_ssh -o ConnectTimeout="$SSH_CONNECT_TIMEOUT_S" "root@$1" \
-    "for u in $units; do
-       if [ \"\$(systemctl show -P Transient \"\$u\")\" = no ] && [ \"\$(systemctl show -P LoadState \"\$u\")\" != not-found ]; then
-         echo \"\$u\"
-       fi
-     done"
+    "bash -c $(printf %q "$(cat "$SRC/scripts/lib/switch-failures.sh")")" < "$2"
 }
 
 deploy_nixos() {
