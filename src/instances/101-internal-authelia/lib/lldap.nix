@@ -246,7 +246,7 @@ in {
   # every account lives in this sqlite file
   homelab.dbBackup.databases.lldap.sqlite = "${stateDir}/users.db";
 
-  # ldaps for the proxmox realm, the web ui through the ingress; plain ldap is authelia's, over loopback only
-  networking.firewall.allowedTCPPorts = [ ldaps.ldaps httpPort ];
-  homelab.ingressOnly.ports = [ ldaps.ldaps httpPort ];
+  # ldaps for the proxmox realm (instance.nix grants); the web ui is the route's, plain ldap authelia's over loopback
+  networking.firewall.allowedTCPPorts = [ ldaps.ldaps ];
+  homelab.ingressOnly.ports = [ ldaps.ldaps ];
 }

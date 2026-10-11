@@ -1057,7 +1057,7 @@ in {
   };
 
   networking.firewall.allowedTCPPorts = with ports; [
-    grafana prometheus loki lokiPush otlpGrpc otlpHttp pyroscope journalRemote otlpFrontend
+    prometheus loki lokiPush otlpGrpc otlpHttp pyroscope journalRemote otlpFrontend
   ];
   # the query doors read every tenant: the grants only (grafana's own port is its route's). The push doors are open
   # to whoever the router lets through; their tenant map decides what a sender may write
