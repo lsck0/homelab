@@ -57,6 +57,9 @@ REALM_SYNC_SCHEDULE=hourly
 # a realm login asks for a totp code too; root@pam sets each user's key (README, "Proxmox login")
 REALM_TFA=type=oath
 GUEST_EXEC_TIMEOUT_S=10
+HOSTS_FILE=/etc/hosts
+# a cluster's nodes are named in it, which this script does not own
+COROSYNC_CONF=/etc/pve/corosync.conf
 API_CERT=/etc/pve/local/pve-ssl.pem
 # an uploaded certificate (pvenode cert set, acme) that pveproxy serves instead of the cluster-signed one
 API_CUSTOM_CERT=/etc/pve/local/pveproxy-ssl.pem
@@ -337,10 +340,16 @@ node_address() { getent ahostsv4 "$(hostname)" | awk 'NR == 1 { print $1 }'; }
 
 hosts_converge() {
   [ "$(node_address)" != "$PROXMOX_IP" ] || return 0
-  sed -i -E "/[[:space:]]$(hostname)([[:space:]]|\$)/ s/^[0-9.]+/$PROXMOX_IP/" /etc/hosts
+  [ ! -e "$COROSYNC_CONF" ] \
+    || { echo "ERROR: $(hostname) resolves to $(node_address), not $PROXMOX_IP, in a cluster: fix its address by hand." >&2; exit 1; }
+  [[ "$(ip -o -4 addr show)" == *" inet $PROXMOX_IP/"* ]] \
+    || { echo "ERROR: no interface of this host holds $PROXMOX_IP (site.json lan.proxmox)." >&2; exit 1; }
+  sed -i -E "/[[:space:]]$(hostname)([[:space:]]|\$)/ s/^[0-9.]+/$PROXMOX_IP/" "$HOSTS_FILE"
   [ "$(node_address)" = "$PROXMOX_IP" ] \
-    || { echo "ERROR: $(hostname) does not resolve to $PROXMOX_IP: give it a line in /etc/hosts." >&2; exit 1; }
-  echo ">>> Proxmox: /etc/hosts names $(hostname) at $PROXMOX_IP"
+    || { echo "ERROR: $(hostname) does not resolve to $PROXMOX_IP: give it a line in $HOSTS_FILE." >&2; exit 1; }
+  # pmxcfs resolves the node's address once, at its start; restarted, it reports the one pvecm signs below
+  systemctl restart pve-cluster
+  echo ">>> Proxmox: $HOSTS_FILE names $(hostname) at $PROXMOX_IP"
 }
 
 # clients verify the api against the cluster CA (site.json proxmoxCa) and by address: the node certificate must name
