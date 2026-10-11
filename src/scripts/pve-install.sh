@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
 # converge the Proxmox VE host to what the lab declares; every run of init.sh and sync.sh runs it, reruns change
-# nothing
+# nothing. deinit.sh runs its teardown.
 #
-# lib/proxmox.sh (proxmox_converge) prepends its inputs on stdin, out of argv:
+# lib/proxmox.sh prepends its inputs on stdin, out of argv:
+#   ACTION                converge (proxmox_converge), or teardown (proxmox_teardown): every guest and what converge
+#                         set up go
+#   TOKEN_DIR             where a new api token's secret is left, one file per role
+#   TEMPLATES             the golden image and the lxc template sync.sh uploads
+# converge only:
 #   PROXMOX_IP            the host's lan address (site.json), which its api certificate must name
 #   ZONE_BRIDGES          every zone's bridge (zones.json); vmbr0 comes from the installer
 #   WAKE_ZONES            the zones whose ingress wakes onDemand guests (terraform/lib.tf grants each its guests)
@@ -25,16 +30,13 @@
 # rest of it.
 set -euo pipefail
 
-: "${PROXMOX_IP:?}" "${ZONE_BRIDGES:?}" "${WAKE_ZONES:?}" "${NAS_ID:?}" "${ROOT_PASSWORD:?}" "${ROOT_KEYS:?}"
-: "${LLDAP_VMID:?}" "${LLDAP_HOST:?}" "${LLDAP_PORT:?}" "${LLDAP_BASE_DN:?}" "${LLDAP_ADMIN_GROUP:?}" "${LLDAP_CERT:?}"
-: "${LLDAP_BIND_USER:?}" "${LLDAP_BIND_PASSWORD:?}"
+: "${ACTION:?}" "${TOKEN_DIR:?}" "${TEMPLATES:?}"
 GPU_IDS="${GPU_IDS:-}"
 BULK_DISK="${BULK_DISK:-}"
 
 # -----------------------------------------------------------------------------
 # CONSTANTS
 # -----------------------------------------------------------------------------
-TOKEN_DIR=/root/homelab-tokens
 PACKAGES=(prometheus-node-exporter prometheus-node-exporter-collectors smartmontools nvme-cli jq)
 OSSEC_BUILD_PACKAGES=(build-essential libevent-dev libpcre2-dev libz-dev libssl-dev libsystemd-dev wget ca-certificates)
 # a mirror or github that does not answer costs a run at most this, per try
@@ -57,6 +59,7 @@ REALM_SYNC_SCHEDULE=hourly
 # a realm login asks for a totp code too; root@pam sets each user's key (README, "Proxmox login")
 REALM_TFA=type=oath
 GUEST_EXEC_TIMEOUT_S=10
+NETWORK_INTERFACES=/etc/network/interfaces
 HOSTS_FILE=/etc/hosts
 # a cluster's nodes are named in it, which this script does not own
 COROSYNC_CONF=/etc/pve/corosync.conf
@@ -188,18 +191,18 @@ apt_sources_converge() {
 bridges_converge() {
   local bridge changed=0 present
   for bridge in $ZONE_BRIDGES; do
-    grep -q "^auto $bridge\$" /etc/network/interfaces && continue
+    grep -q "^auto $bridge\$" "$NETWORK_INTERFACES" && continue
     printf '\nauto %s\niface %s inet manual\n    bridge-ports none\n    bridge-stp off\n    bridge-fd 0\n' "$bridge" "$bridge" \
-      >> /etc/network/interfaces
+      >> "$NETWORK_INTERFACES"
     changed=1
   done
-  mapfile -t present < <(sed -n 's/^auto \(vmbr[1-9][0-9]*\)$/\1/p' /etc/network/interfaces)
+  mapfile -t present < <(sed -n 's/^auto \(vmbr[1-9][0-9]*\)$/\1/p' "$NETWORK_INTERFACES")
   for bridge in "${present[@]}"; do
     [[ " $ZONE_BRIDGES " == *" $bridge "* ]] && continue
     # a guest still on it would lose its network: that guest is the drift to fix first
     [ -z "$(ls "/sys/class/net/$bridge/brif" 2>/dev/null)" ] \
       || { echo "ERROR: $bridge is no zone's bridge but guests are on it: $(ls "/sys/class/net/$bridge/brif")" >&2; exit 1; }
-    sed -i "/^auto $bridge\$/,/^\$/d" /etc/network/interfaces
+    sed -i "/^auto $bridge\$/,/^\$/d" "$NETWORK_INTERFACES"
     echo ">>> Proxmox: removed $bridge, no zone's bridge"
     changed=1
   done
@@ -592,8 +595,10 @@ METRICS
 # FUNCTIONS
 # -----------------------------------------------------------------------------
 
-main() {
-  command -v pveversion >/dev/null || { echo "ERROR: install Proxmox VE first, then rerun init.sh." >&2; exit 1; }
+converge() {
+  : "${PROXMOX_IP:?}" "${ZONE_BRIDGES:?}" "${WAKE_ZONES:?}" "${NAS_ID:?}" "${ROOT_PASSWORD:?}" "${ROOT_KEYS:?}"
+  : "${LLDAP_VMID:?}" "${LLDAP_HOST:?}" "${LLDAP_PORT:?}" "${LLDAP_BASE_DN:?}" "${LLDAP_ADMIN_GROUP:?}" "${LLDAP_CERT:?}"
+  : "${LLDAP_BIND_USER:?}" "${LLDAP_BIND_PASSWORD:?}"
   apt_sources_converge
   bridges_converge
   gpu_converge
@@ -611,6 +616,58 @@ main() {
   fi
   ossec_converge
   echo ">>> Proxmox $(pveversion) converged."
+}
+
+# every guest and what converge and terraform made on the host, except what it keeps working without the lab: OSSEC,
+# the bulk pool, gpu passthrough, apt sources, root's password and keys, the node's address and certificate, the
+# power, module and smartd settings. The datacenter firewall goes off with its rules, which a fresh terraform state
+# would add a second time.
+teardown() {
+  local id user pool group bridges bridge pos
+  for id in $(qm list | awk 'NR > 1 { print $1 }'); do
+    if [ "$(qm status "$id" | cut -d' ' -f2)" = running ]; then qm stop "$id" --skiplock 1 >/dev/null; fi
+    qm destroy "$id" --destroy-unreferenced-disks 1 --purge 1 >/dev/null
+  done
+  for id in $(pct list | awk 'NR > 1 { print $1 }'); do
+    if [ "$(pct status "$id" | cut -d' ' -f2)" = running ]; then pct stop "$id" >/dev/null; fi
+    pct destroy "$id" --purge 1 --destroy-unreferenced-disks 1 >/dev/null
+  done
+  # shellcheck disable=SC2086 # one path per word
+  rm -f $TEMPLATES
+  rm -rf "$TOKEN_DIR"
+
+  pvesh set /cluster/firewall/options --enable 0
+  for pos in $(pvesh get /cluster/firewall/rules --output-format json | jq -r '.[].pos' | sort -rn); do
+    pvesh delete "/cluster/firewall/rules/$pos"
+  done
+
+  # deleting a user deletes its tokens and acl entries
+  for user in $(pveum user list --output-format json | jq -r '.[].userid | select(endswith("@pve"))'); do pveum user delete "$user"; done
+  for pool in $(pveum pool list --output-format json | jq -r '.[].poolid'); do pveum pool delete "$pool"; done
+  if pveum role list --output-format json | json_has roleid "$WAKE_ROLE"; then pveum role delete "$WAKE_ROLE"; fi
+  if pvesh get /cluster/jobs/realm-sync --output-format json | json_has id "$REALM"; then pvesh delete "/cluster/jobs/realm-sync/$REALM"; fi
+  if pveum realm list --output-format json | json_has realm "$REALM"; then pveum realm delete "$REALM"; fi
+  for group in $(pveum group list --output-format json | jq -r --arg suffix "-$REALM" '.[].groupid | select(endswith($suffix))'); do
+    pveum group delete "$group"
+  done
+  rm -f "$REALM_PASSWORD_FILE" "$REALM_CA_FILE"
+
+  DEBIAN_FRONTEND=noninteractive apt-get purge -y prometheus-node-exporter </dev/null >/dev/null
+  DEBIAN_FRONTEND=noninteractive apt-get autoremove -y </dev/null >/dev/null
+
+  mapfile -t bridges < <(sed -n 's/^auto \(vmbr[1-9][0-9]*\)$/\1/p' "$NETWORK_INTERFACES")
+  for bridge in "${bridges[@]}"; do sed -i "/^auto $bridge\$/,/^\$/d" "$NETWORK_INTERFACES"; done
+  ifreload -a
+  echo ">>> Proxmox: torn down; left: $(qm list | awk 'NR > 1' | wc -l) vms, $(pct list | awk 'NR > 1' | wc -l) containers"
+}
+
+main() {
+  command -v pveversion >/dev/null || { echo "ERROR: install Proxmox VE first, then rerun init.sh." >&2; exit 1; }
+  case "$ACTION" in
+    converge) converge ;;
+    teardown) teardown ;;
+    *) echo "ERROR: ACTION is converge or teardown, not $ACTION" >&2; exit 1 ;;
+  esac
 }
 
 # piped in or run; tests/pve_install_test.sh sources it for its functions

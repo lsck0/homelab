@@ -434,20 +434,19 @@ pve_api "$PVE_API/version" >/dev/null \
   || { echo "ERROR: the Proxmox api refused the token, or its certificate does not chain to site.json's proxmoxCa."; exit 1; }
 
 # golden image
-if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f /var/lib/vz/template/iso/nixos.img" 2>/dev/null; then
+if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f $PROXMOX_IMAGE" 2>/dev/null; then
   [ -f "$ROOT_DIR/images/nixos.img" ] || { echo "ERROR: Golden image missing. Run: sudo nix build ./src#cloud-image"; exit 1; }
   echo ">>> Uploading golden image..."
   scp -P "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS" -o StrictHostKeyChecking=yes "$ROOT_DIR/images/nixos.img" \
-    "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:/var/lib/vz/template/iso/nixos.img"
+    "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:$PROXMOX_IMAGE"
 fi
 
 # lxc template; only seeds new containers, so upload once
-LXC_TEMPLATE=/var/lib/vz/template/cache/nixos-homelab.tar.xz
-if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f $LXC_TEMPLATE" 2>/dev/null; then
+if ! "${PROXMOX_SSH[@]}" "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST" "test -f $PROXMOX_LXC_TEMPLATE" 2>/dev/null; then
   echo ">>> Building and uploading the LXC template..."
   tarball=$(nix build "$SRC#lxc-template" "${NIX_FEATURES[@]}" --no-link --print-out-paths)
   scp -P "$PROXMOX_SSH_PORT" -o UserKnownHostsFile="$LAB_KNOWN_HOSTS" -o StrictHostKeyChecking=yes "$tarball"/tarball/*.tar.xz \
-    "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:$LXC_TEMPLATE"
+    "$PROXMOX_SSH_USER@$PROXMOX_SSH_HOST:$PROXMOX_LXC_TEMPLATE"
 fi
 
 # -----------------------------------------------------------------------------

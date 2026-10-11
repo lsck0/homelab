@@ -14,6 +14,7 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 called() { grep -qF -- "$1" "$CALLS" || fail "$2: no call '$1' in: $(cat "$CALLS")"; }
 not_called() { ! grep -qF -- "$1" "$CALLS" || fail "$2: unexpected call '$1'"; }
 
+ACTION=converge TOKEN_DIR=$T/tokens TEMPLATES="$T/nixos.img $T/nixos-homelab.tar.xz"
 PROXMOX_IP=192.168.178.200 ZONE_BRIDGES=vmbr1 WAKE_ZONES=internal NAS_ID=109 ROOT_PASSWORD=x ROOT_KEYS=key
 LLDAP_VMID=101 LLDAP_HOST=10.100.0.101 LLDAP_PORT=6360 LLDAP_BASE_DN=dc=lab LLDAP_ADMIN_GROUP=admins LLDAP_BIND_PASSWORD=y
 LLDAP_CERT=/var/lib/lldap/ldaps-cert.pem LLDAP_BIND_USER=proxmox-bind
@@ -23,6 +24,7 @@ REALM_PASSWORD_FILE=$T/realm/lldap.pw
 REALM_CA_FILE=$T/realm/lldap-ca.pem
 OSSEC_DIR=$T/ossec
 OSSEC_CONTROL=$OSSEC_DIR/bin/ossec-control
+NETWORK_INTERFACES=$T/interfaces
 HOSTS_FILE=$T/hosts
 COROSYNC_CONF=$T/corosync.conf
 API_CERT=$T/pve-ssl.pem
@@ -49,7 +51,14 @@ pveum() {
     "realm list"|"group list") echo '[]' ;;
   esac
 }
-pvesh() { log pvesh "$@"; [ "$1" != get ] || echo '[]'; }
+pvesh() {
+  log pvesh "$@"
+  case "$1 $2" in
+    "get /cluster/firewall/rules") echo '[{"pos": 0}, {"pos": 1}, {"pos": 2}]' ;;
+    "get "*) echo '[]' ;;
+  esac
+}
+ifreload() { log ifreload "$@"; }
 dpkg-query() { echo "not-installed"; }
 apt-get() { log apt-get "$@"; [ "$MIRROR" = up ]; }
 # -O <file> <url>: the archive github serves, never the pinned one
@@ -129,6 +138,21 @@ touch "$API_CUSTOM_CERT"
 if (api_cert_converge 2>"$T/err"); then fail "an uploaded certificate was kept"; fi
 grep -q "pvenode cert delete" "$T/err" || fail "an uploaded certificate: no error"
 not_called pvecm "an uploaded certificate: re-signed anyway"
+
+# -----------------------------------------------------------------------------
+# teardown
+# -----------------------------------------------------------------------------
+reset down
+printf 'auto vmbr0\niface vmbr0 inet static\n\nauto vmbr1\niface vmbr1 inet manual\n\n' > "$NETWORK_INTERFACES"
+touch "$T/nixos.img" "$T/nixos-homelab.tar.xz"
+teardown >/dev/null
+called "pvesh set /cluster/firewall/options --enable 0" "teardown: the datacenter firewall stays on"
+[ "$(grep -o 'pvesh delete /cluster/firewall/rules/[0-9]*' "$CALLS" | tr -dc '0-9')" = 210 ] \
+  || fail "teardown: the cluster rules are not deleted last position first: $(cat "$CALLS")"
+[ ! -e "$T/nixos.img" ] && [ ! -e "$T/nixos-homelab.tar.xz" ] || fail "teardown: the templates stay"
+grep -qx 'auto vmbr0' "$NETWORK_INTERFACES" || fail "teardown: the installer's bridge went"
+! grep -q vmbr1 "$NETWORK_INTERFACES" || fail "teardown: a zone bridge stays"
+called "apt-get purge -y prometheus-node-exporter" "teardown: the exporter stays"
 
 # -----------------------------------------------------------------------------
 # outages outside the lab
