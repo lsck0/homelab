@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # scripts/pve-install.sh's own decisions, with the Proxmox and Debian tools stubbed: the lldap realm fails closed
-# without the guest's certificate and binds over ldaps with it; openipmi is masked only on a host without a bmc; the
-# node's name moves to its lan address only on a
+# without the guest's certificate and binds over ldaps with it; pvestatd's lvm config is written whole, read back by
+# lvm's own parser and installed only when it rejects every name of the bulk pv; openipmi is masked only on a host
+# without a bmc; the node's name moves to its lan address only on a
 # standalone host that holds it, and the api certificate is re-signed only when it does not name that address; an
 # unavailable package mirror or github leaves the host exporter and OSSEC for the next run instead of stopping the
 # converge.
@@ -27,6 +28,10 @@ OSSEC_DIR=$T/ossec
 OSSEC_CONTROL=$OSSEC_DIR/bin/ossec-control
 NETWORK_INTERFACES=$T/interfaces
 IPMI_DMI_ENTRY=$T/dmi-38-0
+PVESTATD_LVM_DIR=$T/lvm-pvestatd
+PVESTATD_DROPIN_DIR=$T/pvestatd.service.d
+DISK_BY_ID_DIR=$T/by-id
+BULK_PV=$T/dev/sdb
 HOSTS_FILE=$T/hosts
 COROSYNC_CONF=$T/corosync.conf
 API_CERT=$T/pve-ssl.pem
@@ -65,6 +70,14 @@ dpkg-query() { echo "not-installed"; }
 apt-get() { log apt-get "$@"; [ "$MIRROR" = up ]; }
 # -O <file> <url>: the archive github serves, never the pinned one
 wget() { log wget "$@"; [ "$GITHUB" = up ] && echo tampered > "${@: -2:1}"; }
+
+# lvm: BULK_PV is the bulk group's pv; under an LVM_SYSTEM_DIR it shows the groups that config's filter lets through,
+# the pve group while LVM_PVE is 1, the bulk one unless the filter names the pv and LVM_FILTERS is 1
+pvs() {
+  if [ -z "${LVM_SYSTEM_DIR:-}" ]; then printf '  %s bulk\n  /dev/nvme0n1p3 pve\n' "$BULK_PV"; return 0; fi
+  if [ "$LVM_PVE" = 1 ]; then echo "  pve"; fi
+  if [ "$LVM_FILTERS" = 0 ] || ! grep -qF "r|^$BULK_PV\$|" "$LVM_SYSTEM_DIR/lvm.conf"; then echo "  bulk"; fi
+}
 
 # the node's address: HOSTS_FILE is what the resolver reads, LOCAL_IP what the interfaces hold, CERT_IP what the api
 # certificate names; pvecm signs the address the name resolves to
@@ -148,6 +161,59 @@ touch "$API_CUSTOM_CERT"
 if (api_cert_converge 2>"$T/err"); then fail "an uploaded certificate was kept"; fi
 grep -q "pvenode cert delete" "$T/err" || fail "an uploaded certificate: no error"
 not_called pvecm "an uploaded certificate: re-signed anyway"
+
+# -----------------------------------------------------------------------------
+# pvestatd's lvm view
+# -----------------------------------------------------------------------------
+# lvm_reset <filters> <pve seen>: the bulk pv with two by-id names, one unrelated disk
+lvm_reset() {
+  : > "$CALLS"
+  LVM_FILTERS=$1 LVM_PVE=$2
+  rm -rf "${T:?}/dev" "$DISK_BY_ID_DIR"
+  mkdir -p "$T/dev" "$DISK_BY_ID_DIR"
+  touch "$BULK_PV" "$T/dev/nvme0n1"
+  ln -s ../dev/sdb "$DISK_BY_ID_DIR/ata-WDC_WD40-1"
+  ln -s ../dev/sdb "$DISK_BY_ID_DIR/wwn-0x50014ee2"
+  ln -s ../dev/nvme0n1 "$DISK_BY_ID_DIR/nvme-Samsung_980"
+}
+conf_filter() { LVM_SYSTEM_DIR=$PVESTATD_LVM_DIR lvmconfig devices/global_filter 2>/dev/null; }
+
+rm -rf "$PVESTATD_LVM_DIR" "$PVESTATD_DROPIN_DIR"
+lvm_reset 1 1
+pvestatd_lvm_converge >/dev/null 2>&1
+for name in "$BULK_PV" "$DISK_BY_ID_DIR/ata-WDC_WD40-1" "$DISK_BY_ID_DIR/wwn-0x50014ee2"; do
+  [[ "$(conf_filter)" == *"\"r|^$name\$|\""* ]] || fail "lvm reads no reject of $name from: $(conf_filter)"
+done
+[[ "$(conf_filter)" == *'"r|/dev/zd.*|","r|/dev/rbd.*|"'* ]] || fail "pve-manager's own rejects are gone: $(conf_filter)"
+[[ "$(conf_filter)" != *nvme* ]] || fail "another disk is rejected: $(conf_filter)"
+grep -qx "Environment=LVM_SYSTEM_DIR=$PVESTATD_LVM_DIR" "$PVESTATD_DROPIN_DIR/homelab-no-hdd.conf" || fail "pvestatd runs without its lvm view"
+called "systemctl restart pvestatd" "a new lvm view: pvestatd not restarted"
+
+lvm_reset 1 1
+pvestatd_lvm_converge >/dev/null 2>&1
+not_called "restart pvestatd" "an unchanged lvm view: pvestatd restarted"
+[ ! -e "$PVESTATD_LVM_DIR.new" ] || fail "an unchanged lvm view: the candidate stays"
+
+lvm_reset 1 1
+ln -s ../dev/sdb "$DISK_BY_ID_DIR/ata-WDC_WD40-1-part1-alias"
+pvestatd_lvm_converge >/dev/null 2>&1
+[[ "$(conf_filter)" == *"ata-WDC_WD40-1-part1-alias"* ]] || fail "a new name of the bulk pv is not rejected"
+not_called "restart pvestatd" "a changed filter: pvestatd restarted (lvm reads its config per call)"
+
+installed=$(cat "$PVESTATD_LVM_DIR/lvm.conf")
+for case in "0:1:still sees the bulk pv" "1:0:loses the pve group"; do
+  IFS=: read -r filters pve what <<<"$case"
+  lvm_reset "$filters" "$pve"
+  if (pvestatd_lvm_converge >/dev/null 2>"$T/err"); then fail "an lvm view that $what was installed"; fi
+  grep -q ERROR "$T/err" || fail "an lvm view that $what: no error"
+  [ "$(cat "$PVESTATD_LVM_DIR/lvm.conf")" = "$installed" ] || fail "an lvm view that $what replaced the last good one"
+  [ ! -e "$PVESTATD_LVM_DIR.new" ] || fail "an lvm view that $what: the candidate stays"
+done
+
+lvm_reset 1 1
+if (PVE_LVM_REJECTS=('r|"|'); pvestatd_lvm_converge >/dev/null 2>"$T/err"); then fail "an lvm.conf lvm cannot parse was installed"; fi
+grep -q "cannot read" "$T/err" || fail "an lvm.conf lvm cannot parse: no error"
+[ "$(cat "$PVESTATD_LVM_DIR/lvm.conf")" = "$installed" ] || fail "an lvm.conf lvm cannot parse replaced the last good one"
 
 # -----------------------------------------------------------------------------
 # the host's own units

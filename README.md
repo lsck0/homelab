@@ -133,6 +133,17 @@ empty pool are removed), the lldap realm, the node's address and the api certifi
 and its hookscript, the host exporter and OSSEC. While the package mirrors or github are unavailable, what needs them
 waits for the next run; everything else still converges. `src/scripts/deinit.sh` runs its teardown.
 
+The bulk storage (the hdd's lvm-thin pool, vm-109's media disk) stays disabled in Proxmox except while vm-109 starts
+or stops (its hookscript), and pvestatd runs with its own lvm config (`/etc/lvm-pvestatd`) that rejects the hdd, so
+nothing but the nas wakes the disk. Proxmox refuses every operation on a disabled storage, so a resize (a terraform
+`diskGiB` change of vm-109's bulk disk too), a snapshot or a backup of vm-109's bulk disk needs it enabled by hand
+for that operation, as root on the host, whether the nas runs or not:
+
+```sh
+pvesm set bulk --disable 0    # then the resize, snapshot or backup, or ./sync.sh with the disk change
+pvesm set bulk --disable 1    # spun down again; the next converge does it too while vm-109 runs
+```
+
 ### Proxmox firewall
 
 Terraform (`src/terraform/lib.tf`, FIREWALL) keeps the datacenter firewall on: every guest's nic may send only from
