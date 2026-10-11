@@ -39,7 +39,7 @@
   telegram-chat-id = "public"; # hermes-secrets.sh: the owner's telegram user id
 
   # read by no guest
-  proxmox-root-pass = "hex:24"; # proxmox root@pam, set by sync.sh; its own, shared with no guest
+  proxmox-root-pass = "hex:24"; # proxmox root@pam, set by scripts/pve-install.sh; its own, shared with no guest
   # the proton account: restoring the off-site backup signs in with it (README, Recovery)
   proton-username = "public";
   proton-password = "manual";

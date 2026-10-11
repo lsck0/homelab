@@ -45,7 +45,7 @@ let
     base64 -w0 server_key > $out
   '';
   # the comment the production key carries (modules/swarm homelab.swarm.deployKey)
-  app-deploy-key = sshKey "app-deploy-key" "app-builder@vm-117";
+  app-deploy-key = sshKey "app-deploy-key" "app-builder";
 in {
   wireguard-private-key = wireguardOf "wireguard-private-key";
   protonvpn-private-key = wireguardOf "protonvpn-private-key";

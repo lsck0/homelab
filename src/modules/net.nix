@@ -117,6 +117,5 @@ in
   ipOf = id: (vmOf id).ip;
   hostSource = id: "${(vmOf id).ip}/32";
   zoneOf = id: zones.${(vmOf id).type} or (throw "net.nix: guest ${id} is in no zone (type ${(vmOf id).type})");
-  # host name under the lab domain
   fqdn = host: "${host}.${domain}";
 }
