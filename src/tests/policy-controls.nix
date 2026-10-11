@@ -90,6 +90,9 @@ let
       tampered = tamper owner [ "services" "lldap" "enable" ] false; };
     realm-ldaps = { file = "sso"; marker = "proxmox realm: ";
       tampered = tamper owner [ "networking" "firewall" "allowedTCPPorts" ] [ 3890 ]; };
+    long-run-mount = { file = "mounts"; marker = "outlives deploys yet RequiresMountsFor";
+      tampered = tamper "119-internal-archbuild" [ "systemd" "services" "archbuild" "unitConfig" "RequiresMountsFor" ]
+        [ "/var/lib/archrepo" ]; };
     image-pulled-at-start = { file = "images"; marker = "pulls 'always' at every start";
       tampered = tamper "207-external-share" [ "virtualisation" "oci-containers" "containers" "share" "pull" ] "always"; };
     secret-readable = { file = "secrets"; marker = "is readable by others";

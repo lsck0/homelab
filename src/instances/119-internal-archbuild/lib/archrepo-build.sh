@@ -64,9 +64,13 @@
 # the hold, does not hold the night back: the night publishes without it and it shows at once in
 # status.{txt,json} `missing` and in vm-119's homelab_archrepo_missing_packages.
 #
-# Outages: every call to the aur, the official mirrors and github goes through modules/upstream
+# Outages: every call to the aur, the official mirrors, the keyserver and github goes through modules/upstream
 # (upstream_call), which retries it; while the service stays down the night ends with UNAVAILABLE before
 # anything is proposed or published, the served snapshot stays and the host records "<name> unavailable".
+#
+# Time: main.nix bounds the run (TimeoutStartSec) and gives the recipes a budget inside it; a recipe that could
+# end past the budget is deferred like a failure (its base keeps its last build), so the snapshot and the publish
+# still fit and the unit's timeout never cuts a night that has built something.
 set -euo pipefail
 shopt -s nullglob
 
@@ -138,19 +142,26 @@ BUILDER_UID=1000
 FULL_REBUILD_DAYS=14
 SECONDS_PER_DAY=86400
 # per recipe, so one hung build cannot eat the night
-BUILD_TIMEOUT=3h
+BUILD_TIMEOUT_S=10800
 FETCH_TIMEOUT_S=900
-BUILD_KILL_AFTER=5m
+BUILD_KILL_AFTER_S=300
 FETCH_KILL_AFTER=1m
+# the longest one recipe may take, its dependency installs included: a recipe starts only while this fits the budget
+RECIPE_BOUND_S=$(( BUILD_TIMEOUT_S + BUILD_KILL_AFTER_S + FETCH_TIMEOUT_S ))
+# main.nix's run bound less the snapshot and the publish: past it a started recipe would be cut by the unit's timeout
+BUILD_DEADLINE=$(( RUN_STARTED + ${ARCHBUILD_BUILD_BUDGET_S:?seconds the recipes of a night may take} ))
+# a whole night's official downloads, several GiB after a gap; pacman drops a stalled connection itself
+PACMAN_TRANSFER_TIMEOUT_S=7200
 HTTP_TIMEOUT_S=60
 # modules/upstream's run, mounted by the host: retries a call to a third party and exits UNAVAILABLE while it is down
 UPSTREAM=/upstream
+# modules/upstream's unavailable (tests/archrepo-build.nix holds them equal)
 UNAVAILABLE=75
 # the host reads the upstream that ended the night from here (main.nix)
 UNAVAILABLE_FILE=/run/archbuild.unavailable
-# where a recipe's validpgpkeys come from; makepkg's source check fails a build whose key is missing
+# where a recipe's validpgpkeys come from (the keyserver upstream); makepkg's source check fails a build whose key is missing
 KEYSERVER=hkps://keyserver.ubuntu.com
-KEY_FETCH_TIMEOUT=2m
+KEY_FETCH_TIMEOUT_S=120
 NINJA_WRAPPER=/usr/local/bin/ninja
 # bound on the depth of aur dependency chains
 RESOLVE_ROUNDS_MAX=16
@@ -426,7 +437,7 @@ setup_build_pacman() {
   # the image strips docs and locales, a build dependency must install whole
   sed -i -e '/^NoExtract/d' -e "s|^#\?CacheDir.*|CacheDir = $CACHE/pacman/|" /etc/pacman.conf
   # the only sync of the run: builds and the snapshot resolve against one state of the official repos
-  upstream_call archlinux pacman -Syu --noconfirm --needed git jq expac >/dev/null
+  UPSTREAM_TIMEOUT_S=$PACMAN_TRANSFER_TIMEOUT_S upstream_call archlinux pacman -Syu --noconfirm --needed git jq expac >/dev/null
   # added after the sync, which would look for a served db: db_sync_local installs the staging one.
   # After the official repos, so the staged copies of official packages never shadow today's versions;
   # SigLevel Never, since the staged packages are this container's own unsigned builds, publish checks them
@@ -688,7 +699,7 @@ build_deps_install() {
   # -T prints the unsatisfied ones and exits 127 when there are any
   mapfile -t missing < <(pacman -T "${wanted[@]}")
   (( ${#missing[@]} > 0 )) || return 0
-  upstream_call archlinux pacman -S --noconfirm --needed --asdeps "${missing[@]}"
+  UPSTREAM_TIMEOUT_S=$PACMAN_TRANSFER_TIMEOUT_S upstream_call archlinux pacman -S --noconfirm --needed --asdeps "${missing[@]}"
 }
 
 remove_build_deps() {
@@ -742,6 +753,9 @@ stage_add() {
   db_sync_local
 }
 
+# a recipe that would end past the budget waits for the next night, its base keeping its last build like a failed one
+recipe_time_left() { (( $(date +%s) + RECIPE_BOUND_S <= BUILD_DEADLINE )); }
+
 # a held back or killed night leaves its signed packages in the pool, unpublished; the same recipe stages them again
 restage() {
   local base=$1 key=$2 file files=()
@@ -756,7 +770,7 @@ restage() {
 }
 
 build_base() {
-  local base=$1 dir=$CACHE/recipes/$1 log=$PUBLIC_LOGS/$1.log out=$CACHE/out/$1 key build package file files=() pkgnames=()
+  local base=$1 dir=$CACHE/recipes/$1 log=$PUBLIC_LOGS/$1.log out=$CACHE/out/$1 key build package file files=() pkgnames=() keys=()
   : > "$log"
   # per base: recipes name different tarballs alike (tree-sitter-json-0.24.8.tar.gz from github and pypi)
   install -d -o "$BUILDER" "$CACHE/src/$base"
@@ -771,10 +785,14 @@ build_base() {
     log "$base: staged again from an unpublished run"
     return 0
   fi
+  recipe_time_left || { fail "$base" "deferred to the next night, the night's build time is spent"; return 1; }
   build=$(( $(state_get "$base" build) + 1 ))
   log "$base: building (build $build)"
-  srcinfo_get "$dir/.SRCINFO" validpgpkeys | xargs -r timeout "$KEY_FETCH_TIMEOUT" sudo -u "$BUILDER" -H \
-    gpg --keyserver "$KEYSERVER" --recv-keys >> "$log" 2>&1 || log "$base: fetching its validpgpkeys failed"
+  mapfile -t keys < <(srcinfo_get "$dir/.SRCINFO" validpgpkeys)
+  if (( ${#keys[@]} > 0 )) && ! UPSTREAM_TIMEOUT_S=$KEY_FETCH_TIMEOUT_S upstream_call keyserver \
+    sudo -u "$BUILDER" -H gpg --keyserver "$KEYSERVER" --recv-keys "${keys[@]}" >> "$log" 2>&1; then
+    log "$base: fetching its validpgpkeys failed"
+  fi
   rm -rf "$out"
   install -d -o "$BUILDER" "$out" || { fail "$base" "creating $out failed"; return 1; }
   if ! build_deps_install "$dir" >> "$log" 2>&1; then
@@ -782,7 +800,7 @@ build_base() {
     fail "$base" "installing the build dependencies failed, $LOGS_NAME/$base.log"
     return 1
   fi
-  if ! (cd "$dir" && timeout -k "$BUILD_KILL_AFTER" "$BUILD_TIMEOUT" "${AS_BUILDER[@]}" SRCDEST="$CACHE/src/$base" PKGDEST="$out" makepkg -fc --noconfirm --nocheck) >> "$log" 2>&1; then
+  if ! (cd "$dir" && timeout -k "${BUILD_KILL_AFTER_S}s" "${BUILD_TIMEOUT_S}s" "${AS_BUILDER[@]}" SRCDEST="$CACHE/src/$base" PKGDEST="$out" makepkg -fc --noconfirm --nocheck) >> "$log" 2>&1; then
     remove_build_deps
     fail "$base" "build failed, $LOGS_NAME/$base.log"
     return 1
@@ -863,7 +881,8 @@ snapshot_official() {
   cachedirs=(--cachedir "$OUTBOX_POOL" --cachedir "$CACHE/pacman")
   # a first run has no pool yet, and this container cannot create it
   [ ! -d "$REPO_DIR" ] || cachedirs+=(--cachedir "$REPO_DIR")
-  if ! upstream_call archlinux pacman --dbpath "$root" -Swdd --noconfirm "${cachedirs[@]}" "${new[@]}" >> "$PUBLIC_LOGS/snapshot.log" 2>&1; then
+  if ! UPSTREAM_TIMEOUT_S=$PACMAN_TRANSFER_TIMEOUT_S upstream_call archlinux \
+    pacman --dbpath "$root" -Swdd --noconfirm "${cachedirs[@]}" "${new[@]}" >> "$PUBLIC_LOGS/snapshot.log" 2>&1; then
     held_back="downloading the official packages failed, $LOGS_NAME/snapshot.log"
     return 1
   fi
@@ -957,7 +976,7 @@ setup_key() {
 setup_publish_pacman() {
   local name
   pacman_setup_official
-  upstream_call archlinux pacman -Syu --noconfirm --needed jq rsync openssh >/dev/null
+  UPSTREAM_TIMEOUT_S=$PACMAN_TRANSFER_TIMEOUT_S upstream_call archlinux pacman -Syu --noconfirm --needed jq rsync openssh >/dev/null
   while read -r name; do official_name[$name]=1; done < <(pacman -Slq "${OFFICIAL_REPOS[@]}")
   (( ${#official_name[@]} > 0 )) || { log "no official package names"; exit 1; }
 }
@@ -1125,8 +1144,8 @@ assemble() {
   done < "$WORK/official.txt"
   # pacman checks every file against its db entry and arch's keyring, the pool's and the outbox's copies
   # included, and fetches what neither holds; a .sig next to a file says nothing, pacman may have put arch's there
-  if ! upstream_call archlinux pacman --dbpath "$root" -Swdd --noconfirm --cachedir "$REPO_DIR" --cachedir "$OUTBOX_POOL" "${download[@]}" \
-    > "$WORK/download.log" 2>&1; then
+  if ! UPSTREAM_TIMEOUT_S=$PACMAN_TRANSFER_TIMEOUT_S upstream_call archlinux \
+    pacman --dbpath "$root" -Swdd --noconfirm --cachedir "$REPO_DIR" --cachedir "$OUTBOX_POOL" "${download[@]}" > "$WORK/download.log" 2>&1; then
     cat "$WORK/download.log"
     held_back="downloading or checking the official packages failed"
     return 0

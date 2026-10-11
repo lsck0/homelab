@@ -15,6 +15,8 @@
 # a name the aur dropped keeps its served base's last build. The staged db's files: each link of the builder's pool
 # leads to the outbox or the served pool, a name neither holds stops the run. archrepo-skip.sh records a skipped
 # night in the served status and leaves the snapshot and the stale clock alone.
+#
+# The night's budget: a recipe starts only while its whole bound still ends within the budget.
 { pkgs, lib, ... }:
 let
   build = ../lib/archrepo-build.sh;
@@ -62,7 +64,9 @@ pkgs.runCommand "archrepo-build" {
     pkgs.git pkgs.python3 ];
 } ''
   set -euo pipefail
-  export ARCHBUILD_COMMIT=test ARCHBUILD_RUN_STARTED=0
+  # a run that started now with an hour of recipes: the budget cases below move the clock against it
+  budget_s=3600
+  export ARCHBUILD_COMMIT=test ARCHBUILD_RUN_STARTED=$(date +%s) ARCHBUILD_BUILD_BUDGET_S=$budget_s
   # shellcheck source=/dev/null
   source ${build}
   # the script brings a fail of its own, which the build steps below record failures with
@@ -182,6 +186,20 @@ pkgs.runCommand "archrepo-build" {
   rm -rf "$PUBLIC_LOGS"
   ln -s ../keys "$PUBLIC_LOGS"
   check_push "a logs/ that is a link pushes no log, the rest still goes" "$served $BUILD_LOG_NAME" "$LOGS_NAME/signing.log"
+
+  # ---- the night's budget ----
+  [ "$UNAVAILABLE" = ${toString upstream.unavailable} ] || flunk "UNAVAILABLE $UNAVAILABLE is not modules/upstream's ${toString upstream.unavailable}"
+  # <case> <seconds the run has taken> <recipe bound in seconds> <starts: yes|no>
+  check_budget() {
+    local starts=no
+    if (BUILD_DEADLINE=$(( $(date +%s) - $2 + budget_s )) RECIPE_BOUND_S=$3; recipe_time_left); then starts=yes; fi
+    [ "$starts" = "$4" ] || flunk "$1: starts $starts, want $4"
+    pass "$1"
+  }
+  check_budget "a recipe that ends well within the budget starts" 0 600 yes
+  check_budget "a recipe that ends past the budget waits for the next night" 3000 1200 no
+  check_budget "the full bound of the real recipe never fits an hour" 0 "$RECIPE_BOUND_S" no
+  check_budget "a run past its budget starts nothing" 7200 1 no
 
   # ---- outages of the aur ----
   export HOME=$PWD UPSTREAM_BACKOFF_S=0 UPSTREAM_TIMEOUT_S=5

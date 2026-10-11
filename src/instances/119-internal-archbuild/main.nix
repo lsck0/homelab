@@ -1,9 +1,10 @@
-{ config, lib, pkgs, inventory, nasPath, catalog, lab, instance, upstream, ... }:
+{ config, lib, pkgs, utils, inventory, nasPath, catalog, lab, instance, upstream, ... }:
 let
   inherit (instance.config) vm;
   route = catalog.internal.archbuild;
   # pushed to vm-210, which serves mirror.lsck0.dev
   repoDir = "/var/lib/archrepo";
+  repoAutomount = "${utils.escapeSystemdPath repoDir}.automount";
   # pacman cache, sources, cargo and go caches: what makes a nightly build incremental; the build container's alone
   cacheDir = "/var/lib/archbuild/cache";
   # the build container's proposal to the publish container: unsigned packages, staged db, state, report
@@ -16,6 +17,10 @@ let
   busyFlag = "/run/archbuild.busy";
   # a build started at the nightly wake stays fresh until the next one
   staleMinutes = 20 * 60;
+  # the whole run's bound (TimeoutStartSec); the recipes get it less the snapshot downloads and the publish after them
+  runTimeoutS = 20 * 3600;
+  publishReserveS = 3 * 3600;
+  buildBudgetS = runTimeoutS - publishReserveS;
   # rolling like the distro, pulled per run so the in-container -Syu stays small (--pull=newer keeps the present
   # image through a registry outage); the build holds no secret
   buildImage = "docker.io/library/archlinux:base-devel";
@@ -42,14 +47,22 @@ let
   # the limit is the ceiling: a build may use what the host leaves it, and a squeeze kills the build first
   buildMemoryMiB = vm.memoryMiB - systemReserveMiB;
   oomScoreAdjMax = 1000;
+  # the kernel never picks it
+  oomScoreAdjMin = -1000;
   # the third parties a night needs, probed before it in this order (modules/upstream)
-  upstreams = [ "github" "aur" "archlinux" ];
+  upstreams = [ "github" "aur" "archlinux" "keyserver" ];
   # the upstream that ended the night, written by whichever step met the outage
   unavailableFile = "/run/archbuild.unavailable";
   # podman rm grace before it kills a container
   containerStopTimeoutS = 30;
+  # podman's cleanup after the kill: conmon, the overlay, the memory of a 4 GiB build
+  containerRemoveSlackS = 60;
+  # status.json lies on the hard-mounted nas: a hung read must not hold the stop
+  metricsTimeoutS = 20;
+  # the whole stop path: the 2026-10-07 stop overran systemd's 90 s default inside podman rm
+  stopTimeoutS = metricsTimeoutS + containerStopTimeoutS + containerRemoveSlackS;
   # what both containers get of the run: the verified commit, the run id and the outage primitive
-  runEnv = "-e ARCHBUILD_SOURCE -e ARCHBUILD_REF -e ARCHBUILD_COMMIT -e ARCHBUILD_RUN_STARTED"
+  runEnv = "-e ARCHBUILD_SOURCE -e ARCHBUILD_REF -e ARCHBUILD_COMMIT -e ARCHBUILD_RUN_STARTED -e ARCHBUILD_BUILD_BUDGET_S"
     + " -v ${upstream.run}:/upstream:ro -v ${unavailableFile}:${unavailableFile}";
   # node-exporter's textfile collector (modules/base)
   metricsName = "archrepo";
@@ -57,7 +70,7 @@ let
   # the served status after every run, a failed one included: what a client installing now lacks
   metricsWrite = pkgs.writeShellScript "archbuild-metrics" ''
     set -euo pipefail
-    ${pkgs.jq}/bin/jq -r '"# TYPE homelab_archrepo_missing_packages gauge",
+    ${pkgs.coreutils}/bin/timeout -k ${toString metricsTimeoutS} ${toString metricsTimeoutS} ${pkgs.jq}/bin/jq -r '"# TYPE homelab_archrepo_missing_packages gauge",
       "homelab_archrepo_missing_packages \(.missing // [] | length)",
       "# TYPE homelab_archrepo_held_back gauge",
       "homelab_archrepo_held_back \(if .held_back then 1 else 0 end)",
@@ -83,29 +96,33 @@ in {
   systemd.services.archbuild = {
     description = "Snapshot and build every package arch-dotfiles lists into the lsck0 pacman repo";
     wants = [ "network-online.target" ];
-    after = [ "network-online.target" ];
+    # the automount, not the mount (RequiresMountsFor): an idle expiry or a restart of the mount would stop the build
+    requires = [ repoAutomount ];
+    after = [ "network-online.target" repoAutomount ];
     path = [ pkgs.podman pkgs.coreutils pkgs.git pkgs.gnupg pkgs.jq pkgs.gnugrep ];
     # a deploy must not kill a running build
     restartIfChanged = false;
-    unitConfig.RequiresMountsFor = [ repoDir ];
     environment = {
       ARCHBUILD_SOURCE = dotfilesSource;
       ARCHBUILD_REF = dotfilesRef;
+      ARCHBUILD_BUILD_BUDGET_S = toString buildBudgetS;
       # relative: the key on vm-210 runs rrsync rooted at the repo
       ARCHBUILD_PUSH_TARGET = "archrepo@${inventory.${toString lab.routes.mirror.vmid}.ip}:.";
     };
     serviceConfig = {
       Type = "oneshot";
-      TimeoutStartSec = "20h";
+      TimeoutStartSec = runTimeoutS;
       # a night skipped for an outage is no failure: the next one recovers
       SuccessExitStatus = [ upstream.unavailable ];
       ExecStartPre = "${pkgs.coreutils}/bin/touch ${busyFlag}";
-      # conmon lives outside this unit's cgroup, a stop would leave the build running unflagged
+      # bounded steps, the metrics first: an overrun kills what is left, never the gauges
+      TimeoutStopSec = stopTimeoutS;
       ExecStopPost = [
-        "${pkgs.podman}/bin/podman rm -f -t ${toString containerStopTimeoutS} ${containerBuild} ${containerPublish}"
-        "${pkgs.coreutils}/bin/rm -f ${busyFlag}"
         # a first run has no status yet
         "-${metricsWrite}"
+        # conmon lives outside this unit's cgroup, a stop would leave the build running unflagged
+        "${pkgs.podman}/bin/podman rm --force --ignore --time ${toString containerStopTimeoutS} ${containerBuild} ${containerPublish}"
+        "${pkgs.coreutils}/bin/rm -f ${busyFlag}"
       ];
     };
     script = ''
@@ -185,6 +202,8 @@ in {
     timerConfig = { OnActiveSec = "3min"; OnUnitActiveSec = "1h"; };
   };
 
+  # the reaper reads the busy flag through it: a squeeze's oom takes the build, never the answer keeping the guest up
+  systemd.services.nginx.serviceConfig.OOMScoreAdjust = oomScoreAdjMin;
   services.nginx = {
     enable = true;
     virtualHosts.archbuild = {
