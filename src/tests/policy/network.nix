@@ -46,6 +46,8 @@ let
 
   appsSubnet = net.zones.apps.subnet;
   refusal = "!ClientIP(`${appsSubnet}`)";
+  # the image pull route's router and its parts (a websocket's, modules/traefik)
+  pulls = name: name == "registry-api-tls" || lib.hasPrefix "registry-api-tls-" name;
   routerRules = router.networking.firewall.extraForwardRules;
   lines = text: lib.filter (l: l != "" && !(lib.hasPrefix "#" l)) (map lib.trim (lib.splitString "\n" text));
   forwardLines = lines routerRules;
@@ -125,12 +127,13 @@ lawsOf {
     admitted = map (m: lib.head (lib.splitString "/" (lib.head m))) (lib.filter lib.isList (builtins.split "ClientIP\\(`([^`]+)`\\)" r.rule));
     onlyOthers = admitted != [ ] && !(lib.any (ip: net.cidrContains net.zones.apps.subnet ip) admitted);
   in
-    lib.optional (name != "registry-api-tls" && !(lib.hasInfix refusal r.rule) && !onlyOthers) "vm-100 router ${name} answers the apps zone"
+    lib.optional (!(pulls name) && !(lib.hasInfix refusal r.rule) && !onlyOthers) "vm-100 router ${name} answers the apps zone"
   ) (websecure internalIngress))
-  ++ (let pull = (websecure internalIngress).registry-api-tls; in
+  ++ lib.concatLists (lib.mapAttrsToList (name: pull:
     lib.optional (lib.hasInfix "Method(`PUT`)" pull.rule || lib.hasInfix "Method(`POST`)" pull.rule || lib.hasInfix "Method(`DELETE`)" pull.rule)
-      "registry-api-tls allows more than GET and HEAD"
-    ++ lib.optional (!(lib.any (m: lib.hasSuffix "-auth" m) pull.middlewares)) "registry-api-tls pulls without a credential")
+      "${name} allows more than GET and HEAD"
+    ++ lib.optional (!(lib.any (m: lib.hasSuffix "-auth" m) pull.middlewares)) "${name} pulls without a credential"
+  ) (lib.filterAttrs (name: _: pulls name) (websecure internalIngress)))
   ++ lib.optional (lib.hasInfix "DELETE" (websecure internalIngress).registry-push-tls.rule) "registry pushers may DELETE";
 
   # nothing between the ingresses or toward proxmox travels unverified

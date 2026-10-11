@@ -38,6 +38,9 @@ let
     sso-routes = network "sso routes" (tamper "100-internal-traefik" (traefik ++ [ "routers" "grafana-tls" "middlewares" ])
       (lib.remove "authelia" (http "100-internal-traefik").routers.grafana-tls.middlewares));
     apps-zone = network "apps zone" (tamper "100-internal-traefik" (traefik ++ [ "routers" "grafana-tls" "rule" ]) "Host(`grafana.lsck0.dev`)");
+    pull-part-credential = { file = "network"; marker = "registry-api-tls-socket pulls without a credential";
+      tampered = tamper "100-internal-traefik" (traefik ++ [ "routers" "registry-api-tls-socket" "middlewares" ])
+        (lib.filter (m: !(lib.hasSuffix "-auth" m)) (http "100-internal-traefik").routers.registry-api-tls-socket.middlewares); };
     tls-verification = network "tls verification" (tamper "200-external-traefik" (traefik ++ [ "serversTransports" "grafana-relay" ])
       { insecureSkipVerify = true; });
     buffered-downloads = network "buffered downloads" (tamper "200-external-traefik" (traefik ++ [ "routers" "mirror-tls" "middlewares" ])
