@@ -1,8 +1,9 @@
 # who reaches which internal route, through the real internal ingress (100-internal-traefik.nix) and the real
 # authelia with lldap (101-internal-authelia.nix): anonymous, first factor only, and three users each with a second
 # factor, the own-login routes, the login redirect, regulation, the login rate limit, oidc's policy, the read-only
-# bind user, the guarded portal port, the probers' health path, the apps zone refused, and the proxmox realm's ldaps:
-# verified against the certificate the guest made for itself, from proxmox's address alone, never in plain ldap
+# bind user, the guarded portal port, the probers' health path, a public route's ssoPaths, the apps zone refused, and
+# the proxmox realm's ldaps: verified against the certificate the guest made for itself, from proxmox's address alone,
+# never in plain ldap
 #
 # The oracle is the table below, the policy as stated: admins everywhere, a user where their app-<route> group
 # says, own-login routes without forwardauth and without any identity header reaching them.
@@ -10,13 +11,16 @@
 let
   lab = import ../../../tests/lib/lab.nix {
     inherit pkgs lib specialArgs;
-    apps = apps: lib.recursiveUpdate apps { wat.enable = true; };
+    # hello, a public demo, moved to the internal zone with its metrics behind authelia: a public route's ssoPaths
+    apps = apps: lib.recursiveUpdate apps { wat.enable = true; hello.routes.hello = { zone = "internal"; ssoPaths = [ metricsPath ]; }; };
   };
+  metricsPath = "/metrics";
   net = import ../../../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
   ip = id: lab.inventory.${id}.ip;
   # the internal routes under test: the instances' nixos services and wat's internal page (src/apps/wat)
   routes = lab.routes.internal // {
     wat-db = { host = "wat-db"; inherit (lab.appsCatalog.apps.wat.routes.wat-db) port; };
+    inherit (lab.catalog.internal) hello;
   };
   echoBackend = pkgs.writers.writePython3Bin "echo-backend" { flakeIgnore = [ "E501" ]; } (builtins.readFile ../../../tests/lib/echo_backend.py);
 
@@ -32,7 +36,7 @@ let
 
   # the backends of the routes under test, each at its guest's address and route port; all always-on guests
   backendAddresses = map ip ([ "103" "105" "109" "115" "125" "138" ] ++ map toString lab.appsCatalog.swarm.workers);
-  backendPorts = lib.unique (map (r: r.port) (with routes; [ homepage grafana kopia forgejo homeassistant headscale headplane wat-db ]));
+  backendPorts = lib.unique (map (r: r.port) (with routes; [ homepage grafana kopia forgejo homeassistant headscale headplane wat-db hello ]));
 
   # client addresses on the house lan, one per actor, so the login limit (per client) counts each alone
   clients = { anon = "192.168.178.138"; luca = "192.168.178.139"; guest = "192.168.178.140"; dbuser = "192.168.178.141"; probe = "192.168.178.142"; };
@@ -175,6 +179,27 @@ pkgs.testers.runNixOSTest {
                     suffix = " (first factor only)" if jar == one_factor else ""
                     wrong.append(f"{page} as {actor}{suffix}: {status}, expected {want}")
         assert not wrong, "\n".join(wrong)
+
+    with subtest("a public route's ssoPaths need a session however spelled, the rest stays open, the collector reads the backend"):
+        public = "https://${net.fqdn routes.hello.host}"
+        backends.succeed(": > /run/echo/requests.jsonl")
+        for path in ("${metricsPath}", "${metricsPath}/x", "${metricsPath}?format=prometheus", "/METRICS", "//metrics", "/x/../metrics", "/%6detrics"):
+            for method in ("GET", "POST"):
+                status, _, _ = curl(CLIENTS["anon"], f"{public}{path}", method=method, extra="--path-as-is")
+                assert status != 200, f"{method} {path}: {status}"
+        assert "etrics" not in backends.succeed("cat /run/echo/requests.jsonl").lower(), "an anonymous request reached the metrics"
+        status, headers, _ = curl(CLIENTS["anon"], f"{public}${metricsPath}")
+        assert status == 302 and PORTAL in headers, f"{status}: {headers}"
+        status, _, body = curl(CLIENTS["anon"], f"{public}/")
+        assert status == 200 and json.loads(body)["path"] == "/", f"{status}: {body}"
+        # admins and the route's group with both factors, nobody else
+        status, _, _ = curl(CLIENTS["guest"], f"{public}${metricsPath}", jars["guest"])
+        assert status == 403, status
+        status, _, body = curl(CLIENTS["luca"], f"{public}${metricsPath}", jars["luca"])
+        assert status == 200 and json.loads(body)["headers"].get("remote-user") == "luca", body
+        # the collector's scrape: the backend port itself, past the ingress and authelia
+        direct = backends.succeed("curl -sf --interface ${ip "105"} http://${lib.head routes.hello.nodes}:${toString routes.hello.port}${metricsPath}")
+        assert "remote-user" not in json.loads(direct)["headers"], direct
 
     with subtest("own-login routes skip authelia and never receive an identity header"):
         backends.succeed(": > /run/echo/requests.jsonl")

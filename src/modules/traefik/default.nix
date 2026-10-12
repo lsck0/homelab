@@ -10,7 +10,8 @@
 # same chain and may name opt-outs in an `off` attribute of its own. Every quantity that names a client reads
 # X-Real-Ip, which client-ip sets from the socket peer and the X-Forwarded-For hops of trustedProxies and Cloudflare
 # only; the backend's X-Forwarded-For is that client alone. The probers check a route at its health path through the
-# ingress, past sso and anubis but nowhere else (probe routers below).
+# ingress, past sso and anubis but nowhere else (probe routers below). A public
+# route's ssoPaths get a router of their own with authelia, ranked above the route's others.
 { config, lib, pkgs, retry, inventory, site, lab, catalog, ... }:
 let
   cfg = config.homelab.traefik;
@@ -26,6 +27,8 @@ let
   # a probe router outranks its route's routers, ranked by rule length (hundreds of characters), and its login
   # router; the bot defence (9000 and up) stays above
   probePriority = 1000;
+  # a route's ssoPaths router outranks every other router of it, login and frontend included, the probes alone above
+  ssoPathPriority = probePriority - 1;
   # a route kept off the internet answers the networks the router lets into the internal zone, never a dmz
   internalOnlySources = [ net.wan.subnet net.wireguard.subnet net.zones.internal.subnet ];
 
@@ -431,7 +434,17 @@ let
       middlewares = routeMiddlewares name r ++ [ "rate-limit-login" ];
       route = r;
     };
-  } // lib.optionalAttrs (anubisOn r) {
+  } // lib.optionalAttrs (r.ssoPaths != [ ]) (let behind = r // { off = r.off // { sso = null; }; }; in {
+    # the prefixes a public route keeps behind authelia: its rule and chain with sso on, straight to the backend
+    "${name}-sso-tls" = {
+      rule = "${routeRule r} && (${lib.concatMapStringsSep " || " (p: "PathRegexp(`${service.prefixPattern p}`)") r.ssoPaths})";
+      service = name;
+      entryPoints = [ "websecure" ];
+      priority = ssoPathPriority;
+      middlewares = routeMiddlewares name behind;
+      route = behind;
+    };
+  }) // lib.optionalAttrs (anubisOn r) {
     # what anubis lets through comes back on loopback and goes to the route's backend
     "${name}-balancer" = { rule = fqdnRule r; service = name; entryPoints = [ "anubis-balancer" ]; middlewares = [ "client-ip-anubis" ]; };
   }) cfg.routes;

@@ -6,6 +6,7 @@
 let
   facts = import ./policy/lib/facts.nix { inherit lib inputs specialArgs; };
   inherit (facts) configs inventory site catalog;
+  net = import ../modules/net.nix { inherit lib inventory site; };
 
   # one config with one value replaced at a path
   tamper = name: path: value: facts // {
@@ -37,6 +38,12 @@ let
       (edgeRouter // { middlewares = lib.tail edgeRouter.middlewares; }));
     sso-routes = network "sso routes" (tamper "100-internal-traefik" (traefik ++ [ "routers" "grafana-tls" "middlewares" ])
       (lib.remove "authelia" (http "100-internal-traefik").routers.grafana-tls.middlewares));
+    sso-paths = network "sso paths" (facts // { catalog = catalog // { internal = catalog.internal // {
+      forgejo = catalog.internal.forgejo // { ssoPaths = [ "/metrics" ]; };
+    }; }; });
+    direct-scrapes = network "direct scrapes" (tamper "105-internal-grafana" [ "services" "prometheus" "scrapeConfigs" ]
+      (configs."105-internal-grafana".services.prometheus.scrapeConfigs
+        ++ [ { job_name = "control"; static_configs = [ { targets = [ "${catalog.ingress.internal.ip}:${toString net.ports.https}" ]; } ]; } ]));
     apps-zone = network "apps zone" (tamper "100-internal-traefik" (traefik ++ [ "routers" "grafana-tls" "rule" ]) "Host(`grafana.lsck0.dev`)");
     pull-part-credential = { file = "network"; marker = "registry-api-tls-socket pulls without a credential";
       tampered = tamper "100-internal-traefik" (traefik ++ [ "routers" "registry-api-tls-socket" "middlewares" ])

@@ -12,7 +12,9 @@
 #
 # Composition: sso and anubis both stop bots before the app; where sso is on, anubis adds nothing and stays off.
 # A route of the external zone is public by definition: sso cannot run there (the dmz reaches no authelia), so an
-# external route opts out of sso explicitly.
+# external route opts out of sso explicitly. A public route of the internal zone may still put prefixes of itself
+# behind authelia, `ssoPaths = [ "/metrics" ];`: the internal ingress sends them through authelia ahead of every other
+# router of the route, and authelia admits them like a route behind sso (admins and the route's own group).
 { lib }:
 let
   inherit (lib) mkOption types;
@@ -46,8 +48,10 @@ let
   urlPath = types.strMatching "/.*";
   # a reason: any text with a word in it
   why = types.strMatching ".*[a-z].*";
-  # a url prefix: / or /segment[/segment...] without a trailing slash
-  urlPrefix = types.strMatching "/|(/[A-Za-z0-9._~-]+)+";
+  # /segment[/segment...] without a trailing slash
+  urlSegments = "(/[A-Za-z0-9._~-]+)+";
+  # a url prefix: / or segments
+  urlPrefix = types.strMatching "/|${urlSegments}";
   serviceName = types.strMatching "[A-Za-z0-9][A-Za-z0-9_.-]*";
 
   # -----------------------------------------------------------------------------
@@ -134,6 +138,11 @@ in rec {
       description = "user -> sops secret: the ingress asks for these credentials; null: none.";
     };
     loginPaths = mkOption { type = types.listOf urlPath; default = [ ]; description = "Password endpoints the ingress rate limits per client."; };
+    ssoPaths = mkOption {
+      type = types.listOf (types.strMatching urlSegments);
+      default = [ ];
+      description = "Url prefixes behind authelia on a route whose sso is off (its metrics, an admin page); the rest stays public.";
+    };
     loginRedirect = mkOption {
       type = types.nullOr (types.submodule {
         options = {
@@ -175,6 +184,10 @@ in rec {
       wakeAt = mkOption { type = types.nullOr types.str; default = null; description = "A systemd calendar time it is woken at for its own jobs."; };
     };
   };
+
+  # the requests below a url prefix, one regex for traefik's PathRegexp and authelia's `resources` alike: any case and
+  # any run of slashes, which many backends fold onto one handler
+  prefixPattern = path: "(?i)^" + lib.concatMapStringsSep "/+" lib.escapeRegex (lib.splitString "/" path);
 
   # every feature of a service record as a bool: what consumers read
   enabledOf = off: lib.mapAttrs (_: why: why == null) off;
