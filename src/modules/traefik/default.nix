@@ -923,6 +923,8 @@ in {
       "d /var/lib/traefik/acme 0700 traefik traefik -"
       # traefik writes access.log, crowdsec reads it
       "d ${logDir} 0755 traefik traefik -"
+      # crowdsec tails it from its start, and a file acquisition never picks up a file that appears later
+      "f ${cfg.accessLog} 0644 traefik traefik -"
       "L+ ${config.services.traefik.dataDir}/plugins-local - - - - ${pluginsLocal}"
     ];
 
