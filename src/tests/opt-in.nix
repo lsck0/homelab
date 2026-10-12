@@ -6,7 +6,8 @@
 # opens ssh, node-exporter and its http port. Per path, one host and one backend: `/api` rate limited under a plain
 # `/`, a plain `/public` under a hardened `/`, each prefix ranked above its parent. A houseUnlimited route (the real
 # mirror) answers the house on a router of its own without limits, everyone else with them, and the router's dns sends
-# the house straight to the edge.
+# the house straight to the edge. Its publicPrefix (the mirror's own builds) shows everyone else that subtree alone,
+# the house and the probers the whole backend.
 { pkgs, lib, inputs, ... }:
 let
   # -----------------------------------------------------------------------------
@@ -93,6 +94,9 @@ let
   limits = rateLimits ++ [ "inflight-limit" "route-inflight-limit" "gate" ];
   limited = middlewares: lib.all (limit: lib.any (lib.hasPrefix limit) middlewares) limits;
   edgeAddress = net.ipOf net.zones.external.ingress;
+  edgeMiddlewares = (configOf "200-external-traefik").services.traefik.dynamicConfigOptions.http.middlewares;
+  # the mirror's publicPrefix: the internet reads its own builds alone, the house the full snapshot
+  prefixMiddleware = "${unlimited}-prefix";
 
   # -----------------------------------------------------------------------------
   # CHECKS
@@ -141,6 +145,12 @@ let
       (lib.attrValues (partsOf edge "${unlimited}-tls"));
     "a houseUnlimited route's house router outranks its public ones" = outranks edge "${unlimited}-house" "${unlimited}-tls";
     "a route without houseUnlimited has no house router" = !(edge ? open-house) && !(internal ? hardened-house);
+    "a publicPrefix route shows everyone but the house its subtree, last in the chain" = lib.all
+      (part: lib.last part.middlewares == prefixMiddleware) (lib.attrValues (partsOf edge "${unlimited}-tls"))
+      && edgeMiddlewares.${prefixMiddleware} == { addPrefix.prefix = grown.routes.${unlimited}.publicPrefix; };
+    "a publicPrefix route's house router and probes see the whole backend" =
+      lib.all (name: !(lib.elem prefixMiddleware edge.${name}.middlewares)) [ "${unlimited}-house" "${unlimited}-probe" ];
+    "a route without publicPrefix adds no prefix" = lib.attrNames (lib.filterAttrs (_: m: m ? addPrefix) edgeMiddlewares) == [ prefixMiddleware ];
     "the router answers every public route's name with the edge, which the house reaches as itself" = lib.all
       (r: lib.hasInfix "${edgeAddress} ${net.fqdn r.host}\n" router.services.coredns.config) (lib.attrValues grown.catalog.external);
   };

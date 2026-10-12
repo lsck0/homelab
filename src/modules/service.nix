@@ -25,7 +25,8 @@
 # the route's public name, which an internal route has with `internet` alone. An onion route's onion routers pass the gate whatever its
 # `on` takes for its name (modules/traefik). houseUnlimited gives the house, wireguard and the internal zone a router
 # of the route's own with none of its limits, gate, proof of work or body limit, whoever else it protects; it takes no
-# `sources`, which name a route's clients alone.
+# `sources`, which name a route's clients alone. Its `publicPrefix` shows everyone else a subtree of the backend alone
+# (the pacman mirror's own builds), the house the whole of it.
 { lib }:
 let
   inherit (lib) mkOption types;
@@ -186,6 +187,11 @@ in rec {
       default = false;
       description = "Also a tor v3 onion service: the router publishes it, the edge serves its address with the route's chain (external routes only; its key is the router's secret <name>-onion-key, its address src/generated/onions.json).";
     };
+    publicPrefix = mkOption {
+      type = types.nullOr (types.strMatching urlSegments);
+      default = null;
+      description = "Prepended to every request's path but the house's (houseUnlimited) and the probers': the internet sees this subtree of the backend alone; null: the whole backend.";
+    };
     busyPath = mkOption {
       type = types.nullOr urlPath;
       default = null;
@@ -230,7 +236,9 @@ in rec {
     ++ lib.optional (!(publicOf r) && has "cloudflare")
       "${where}: cloudflare proxies the route's public name, which an internal route has with internet alone"
     ++ lib.optional (has "houseUnlimited" && r.sources != null)
-      "${where}: houseUnlimited admits the house past the limits, sources admit named clients alone: drop one";
+      "${where}: houseUnlimited admits the house past the limits, sources admit named clients alone: drop one"
+    ++ lib.optional (r.publicPrefix != null && !(has "houseUnlimited"))
+      "${where}: publicPrefix narrows what everyone but the house sees, which only houseUnlimited sets apart: add it";
 
   # the route has a name on the internet: an external one always, an internal one relayed by the edge
   # (a hand-written traefik router names no zone: its `on` says)

@@ -13,7 +13,8 @@
 # only; the backend's X-Forwarded-For is that client alone. The probers check a route at its health path through the
 # ingress, past sso and anubis but nowhere else (probe routers below). A public
 # route's ssoPaths get a router of their own with authelia, ranked above the route's others. A houseUnlimited route
-# gets routers of its own for the house's sources (by socket peer), its chain without limits, gate or proof of work.
+# gets routers of its own for the house's sources (by socket peer), its chain without limits, gate or proof of work,
+# and the whole backend where its publicPrefix shows everyone else a subtree of it.
 #
 # An onion route (modules/service.nix `onion`, the edge's routes only) is served a second time at its onion address on
 # the onion entrypoint, plain http from the router's tor (core/300-router/lib/onion-services.nix), with the same
@@ -511,7 +512,9 @@ let
     ++ lib.optional (r.basicAuth != null) "${name}-auth"
     ++ lib.optional (r.headers != { }) "${name}-headers"
     # the template's nginx compressed for its browsers; nixos services answer as they choose
-    ++ lib.optional (r.app != null) "compress";
+    ++ lib.optional (r.app != null) "compress"
+    # last: the login redirect above matches the path the client sent
+    ++ lib.optional (r.publicPrefix != null) "${name}-prefix";
 
   # a route's routers where it is served: at its name on websecure (tag tls), at its onion address (tag onion)
   routeRoutersOf = { tag, entryPoint, hostOf, routes }: lib.concatMapAttrs (name: r: let host = hostOf r; in {
@@ -551,12 +554,13 @@ let
   routeRouters = routeRoutersOf { tag = "tls"; entryPoint = "websecure"; hostOf = r: net.fqdn r.host; routes = cfg.routes; }
     // houseRouters;
   # a houseUnlimited route's routers for the house: its rule admitting the house alone, longer, so ranked above the
-  # route's own but those of its longer prefixes, logins and sso paths; its chain without what the house is spared
+  # route's own but those of its longer prefixes, logins and sso paths; its chain without what the house is spared,
+  # its backend whole, past the publicPrefix everyone else sees it under
   houseRouters = routeRoutersOf {
     tag = "house";
     entryPoint = "websecure";
     hostOf = r: net.fqdn r.host;
-    routes = lib.mapAttrs (_: r: r // { on = lib.subtractLists houseSpared r.on; sources = houseSources; })
+    routes = lib.mapAttrs (_: r: r // { on = lib.subtractLists houseSpared r.on; sources = houseSources; publicPrefix = null; })
       (lib.filterAttrs (_: r: on r "houseUnlimited") cfg.routes);
   };
   # an onion route without an address yet (secrets-sync.sh writes it) is served at its name alone
@@ -610,6 +614,9 @@ let
       "${name}-auth".basicAuth = { usersFile = "${basicAuthDir}/${name}"; realm = name; removeHeader = false; };
     } // lib.optionalAttrs (r.headers != { }) {
       "${name}-headers".headers = r.headers;
+    } // lib.optionalAttrs (r.publicPrefix != null) {
+      # what the route shows everyone but the house: that subtree of its backend alone
+      "${name}-prefix".addPrefix.prefix = r.publicPrefix;
     }) cfg.routes // {
     compress.compress = { };
   } // lib.optionalAttrs (cfg.relays != { }) {
