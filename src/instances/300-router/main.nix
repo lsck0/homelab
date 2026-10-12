@@ -709,11 +709,13 @@ in {
 
   # wol-pc wakes luca-pc from the vpn; its mac is a device identity, kept out of the public repo
   sops.secrets.workstation-mac = { };
-  environment.etc."profile.d/wol.sh".text = ''
-    alias wol-pc='wakeonlan "$(cat ${config.sops.secrets.workstation-mac.path})"'
-  '';
-
+  # a command, not a shell alias: `ssh <router> wol-pc` runs no profile
   environment.systemPackages = with pkgs; [
-    tcpdump iperf3 wireguard-tools ethtool wakeonlan
+    tcpdump iperf3 wireguard-tools ethtool
+    (writeShellApplication {
+      name = "wol-pc";
+      runtimeInputs = [ wakeonlan ];
+      text = "wakeonlan \"$(cat ${config.sops.secrets.workstation-mac.path})\"";
+    })
   ];
 }
