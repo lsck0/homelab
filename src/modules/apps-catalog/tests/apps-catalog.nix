@@ -58,7 +58,11 @@ let
     };
     waf-without-crowdsec = { lab = withDemo { routes.demo.on = [ "waf" ]; }; expect = "waf acts through crowdsec's gate"; };
     tarpit-without-crowdsec = { lab = withDemo { routes.demo.on = [ "tarpit" ]; }; expect = "tarpit acts through crowdsec's gate"; };
-    cloudflare-without-internet = { lab = withDemo { routes.demo.on = [ "cloudflare" ]; }; expect = "which only internet gives it"; };
+    cloudflare-without-internet = {
+      lab = withDemo { routes.demo = { zone = "internal"; on = [ "cloudflare" ]; }; };
+      expect = "which an internal route has with internet alone";
+    };
+    internet-on-the-edge = { lab = withDemo { routes.demo.on = [ "internet" ]; }; expect = "an external route is public already"; };
     dump-of-a-stateless-service = { lab = withDemo { dumps.db = { service = "db"; command = "true"; }; }; expect = "is not stateful"; };
     limits-above-a-worker = { lab = withDemo { resources.web.memoryMiB = 8192; }; expect = "above swarm.taskMax.memoryMiB"; };
     excluded-but-used = { lab = withDemo { exclude = [ "web" ]; }; expect = "drops web"; };
@@ -102,6 +106,8 @@ let
     defaults-only = withApps { demo = removeAttrs demo [ "routes" ]; };
     tcp-stays-up = withDemo { routes.demo-game = { protocol = "tcp"; port = 20131; }; };
     # protection per path: /api rate limited on the root's backend, / plain
+    # an external route's name is public already: the proxy needs nothing more
+    cloudflare-on-the-edge = withDemo { routes.demo.on = [ "cloudflare" ]; };
     per-path = withDemo { routes.demo-api = { host = "demo"; path = "/api"; port = 20130; on = [ "rateLimit" ]; }; };
     hardened = withDemo {
       routes.demo.on = profiles.hardenedExternal ++ [ "probe" ];

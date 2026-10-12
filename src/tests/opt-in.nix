@@ -1,9 +1,10 @@
 # lab-wide: every feature is off until a service opts in, and protection is per path
-# The real tree plus a bare guest, a hardened one and a bare app (src/modules/service.nix): a service without `on` is
-# a router to its port on its ingress with the plumbing alone (the real client, the strip of client-sent identity
-# headers, the retry), no card, no probe, no scrape, no guard on its port, no public name; its guest's firewall opens
-# ssh, node-exporter and its http port. Per path, one host and one backend: `/api` rate limited under a plain `/`, a
-# plain `/public` under a hardened `/`, each prefix ranked above its parent.
+# The real tree plus a bare internal guest, a bare external one, a hardened one and a bare app
+# (src/modules/service.nix): a service without `on` is a router to its port on its ingress with the plumbing alone (the
+# real client, the strip of client-sent identity headers, the retry), no card, no probe, no scrape, no guard on its
+# port; an internal one has no public name, an external one its raw public name and nothing more. Its guest's firewall
+# opens ssh, node-exporter and its http port. Per path, one host and one backend: `/api` rate limited under a plain
+# `/`, a plain `/public` under a hardened `/`, each prefix ranked above its parent.
 { pkgs, lib, inputs, ... }:
 let
   # -----------------------------------------------------------------------------
@@ -13,6 +14,7 @@ let
   inherit ((import ../modules/lab { inherit lib; }).layout) preconfigured custom;
   bare = { id = "199"; folder = "199-internal-bare"; port = 80; };
   hardened = { id = "198"; folder = "198-internal-hardened"; port = 80; };
+  open = { id = "249"; folder = "249-external-open"; port = 80; };
   app = { name = "plain"; port = 20190; };
   # every router's own: the real client, the strip of what a client claims, the retry
   plumbing = [ "client-ip" "strip-client-headers" "retry-upstream" ];
@@ -25,6 +27,7 @@ let
         services.bare-api = { host = "bare"; path = "/api"; port = ${toString bare.port}; on = [ "rateLimit" ]; };
       }
     '';
+    ${open.folder} = "{ ... }: { services.open.port = ${toString open.port}; }";
     ${hardened.folder} = ''
       { profiles, ... }: {
         services.hardened = { port = ${toString hardened.port}; on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed; };
@@ -101,6 +104,14 @@ let
     "a bare guest opens ssh, node-exporter and its http port" = opened (guestOf bare)
       == { tcp = lib.sort lib.lessThan [ net.ports.ssh bare.port ]; udp = [ ]; ranges = [ ]; rules = [ net.ports.nodeExporter ]; interfaces = [ ]; };
     "a bare guest guards no port" = (guestOf bare).homelab.ingressOnly.ports == [ ];
+    "a bare external route is an edge router with the plumbing alone" = edge.open-tls.middlewares == plumbing
+      && lib.attrNames (lib.filterAttrs (n: _: lib.hasPrefix "open-" n) edge) == [ "open-tls" ];
+    "a bare external route has its raw public name" = lib.all (host: recordOf host == { name = net.fqdn host; proxied = false; })
+      [ "open" app.name ];
+    "a bare external route has no card" = !(lib.any (c: c.route == "open") grown.homepage);
+    "a bare external guest opens ssh, node-exporter and its http port, guarding none" = opened (guestOf open)
+      == { tcp = lib.sort lib.lessThan [ net.ports.ssh open.port ]; udp = [ ]; ranges = [ ]; rules = [ net.ports.nodeExporter ]; interfaces = [ ]; }
+      && (guestOf open).homelab.ingressOnly.ports == [ ];
     "a bare app route is a router with the plumbing alone" = edge."${app.name}-tls".middlewares == plumbing ++ [ "compress" ];
 
     "a rate limited /api under a plain / limits /api alone" = internal.bare-api-tls.middlewares == lib.take 2 plumbing ++ rateLimits ++ [ "retry-upstream" ];

@@ -16,13 +16,13 @@
 # ingress routes the longer prefix first, `/api` rate limited while `/` stays plain.
 #
 # Composition (featureProblemsOf, an evaluation error each): sso and anubis both stop bots before the app, so a route
-# takes one. A route of the external zone is public by definition: sso cannot run there (the dmz reaches no
-# authelia). A public route of the internal zone may still put prefixes of itself behind authelia,
+# takes one. A route of the external zone is public by definition, its name on the internet whatever it takes: sso
+# cannot run there (the dmz reaches no authelia), internet has nothing to add. A public route of the internal zone may still put prefixes of itself behind authelia,
 # `ssoPaths = [ "/metrics" ];`: the internal ingress sends them through authelia ahead of every other router of the
 # route, and authelia admits them like a route behind sso (admins and the route's own group). waf, captcha,
 # anonymousLimit and tarpit act through the gate that crowdsec puts in front of a route, so they need crowdsec; the
 # gate never stops the house, the lab, wireguard or a user authelia knows, whatever a route says. cloudflare proxies
-# the route's public name, which only `internet` gives it. An onion route's onion routers pass the gate whatever its
+# the route's public name, which an internal route has with `internet` alone. An onion route's onion routers pass the gate whatever its
 # `on` takes for its name (modules/traefik).
 { lib }:
 let
@@ -43,7 +43,7 @@ let
     "tarpit"
     # the dns record goes through cloudflare's proxy and the origin refuses anyone else
     "cloudflare"
-    # an internal route is relayed by the edge, so it is reachable from the internet behind authelia
+    # an internal route is relayed by the edge, so it is reachable from the internet behind authelia (internal only)
     "internet"
     # the backend port answers its zone's ingress and the instance's grants only (modules/network.nix)
     "guard"
@@ -218,5 +218,12 @@ in rec {
     ++ lib.optional (has "sso" && has "anubis") "${where}: anubis behind sso adds nothing, sso stops bots before the app: drop one"
     ++ map (feature: "${where}: ${feature} acts through crowdsec's gate, which the route lacks: add crowdsec")
       (lib.optionals (!(has "crowdsec")) (lib.filter has crowdsecFeatures))
-    ++ lib.optional (has "cloudflare" && !(has "internet")) "${where}: cloudflare proxies the route's public name, which only internet gives it";
+    ++ lib.optional (r.zone == "external" && has "internet")
+      "${where}: internet relays an internal route through the edge; an external route is public already: drop it"
+    ++ lib.optional (!(publicOf r) && has "cloudflare")
+      "${where}: cloudflare proxies the route's public name, which an internal route has with internet alone";
+
+  # the route has a name on the internet: an external one always, an internal one relayed by the edge
+  # (a hand-written traefik router names no zone: its `on` says)
+  publicOf = r: (r.zone or null) == "external" || lib.elem "internet" r.on;
 }

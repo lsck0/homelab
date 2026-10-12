@@ -19,6 +19,7 @@
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   flows = import ../../modules/flows.nix { inherit lib net inventory catalog nasClients lab; };
+  service = import ../../modules/service.nix { inherit lib; };
   inherit (net) zones ports;
   wan = net.wan.interface;
 
@@ -125,10 +126,10 @@ let
   directHosts = { smb = net.ipOf lab.roles.nas; } // lib.mapAttrs' (_: r: lib.nameValuePair r.host (net.ipOf (toString r.vmid)))
     (lib.filterAttrs (_: r: r.vmid != null && r.publicPort == null) catalog.l4);
 
-  # public names: the routes taking internet, proxied where they take cloudflare; install lines, the wireguard
+  # public names: the public routes (service.nix publicOf), proxied with cloudflare; install lines, the wireguard
   # endpoint and port forwards are raw by nature
   routeHosts = side: map (r: { inherit (r) host; proxied = lib.elem "cloudflare" r.on; })
-    (lib.filter (r: lib.elem "internet" r.on) (lib.attrValues catalog.${side}));
+    (lib.filter service.publicOf (lib.attrValues catalog.${side}));
   allRouteHosts = routeHosts "internal" ++ routeHosts "external"
     ++ map (host: { inherit host; proxied = true; }) internalExtraHosts;
   proxiedHosts = lib.unique (map (r: r.host) (lib.filter (r: r.proxied) allRouteHosts));

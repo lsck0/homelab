@@ -674,7 +674,7 @@ let
   # on it; the strip runs before a router's own authelia sets the identity
   chainOf = name: r: withBody:
     # a route kept off the internet admits private sources only, cloudflare's included in none
-    lib.optional (cfg.cloudflareOnly.enable && on r "cloudflare" && on r "internet") "cloudflare-only"
+    lib.optional (cfg.cloudflareOnly.enable && on r "cloudflare" && service.publicOf r) "cloudflare-only"
     ++ [ "client-ip" "strip-client-headers" ]
     ++ lib.optional (gateOn && on r "crowdsec") (gate.middlewareName (gateFlagsOf r))
     # scanners must reach the labyrinth, past the waf

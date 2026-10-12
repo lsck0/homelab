@@ -7,14 +7,14 @@
 # instance.nix and app.nix get this file as the argument `profiles`.
 let
   # a route's defences whichever zone serves it: the ingress's chain (modules/traefik), the guard on the backend
-  # port, and its name on the internet behind cloudflare's proxy
+  # port, and its public name behind cloudflare's proxy
   defences = [
     "waf" "crowdsec" "rateLimit" "inflightLimit" "bodyLimit" "botDefense" "secureHeaders" "accessLog" "captcha"
-    "anonymousLimit" "tarpit" "guard" "internet" "cloudflare"
+    "anonymousLimit" "tarpit" "guard" "cloudflare"
   ];
 in {
   # behind authelia, which stops bots before the app; reachable from the internet through the edge's relay
-  hardenedInternal = [ "sso" ] ++ defences;
+  hardenedInternal = [ "sso" "internet" ] ++ defences;
   # public: the dmz reaches no authelia, anubis stops the bots
   hardenedExternal = [ "anubis" ] ++ defences;
   # a card on the dashboard, its status dot and vm-105 the prober's check
