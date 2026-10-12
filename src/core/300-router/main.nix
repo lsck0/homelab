@@ -142,6 +142,8 @@ let
   hostLines = ip: names: lib.concatMapStrings (h: "      ${ip} ${net.fqdn h}\n") names;
   # the forwards a name leads to: inside the lab it resolves straight to the backend
   hostForwards = lib.filter (f: f.host != null) flows.portForwards;
+  # one line per name and backend: a name's tcp and udp forwards (teamspeak's voice and files) share its guest
+  forwardHostLines = lib.unique (lib.concatMap (f: map (ip: hostLines ip [ f.host ]) f.addresses) hostForwards);
 
   # the house's public address as the router learns it, a hosts line coredns serves as net.wan.publicHost
   publicAddressFile = "/run/public-address/hosts";
@@ -584,7 +586,7 @@ in {
     '' + hostLines (ingressIp "external") (hostsOf "external" ++ installHosts) + ''
           # names that skip the ingresses
     '' + lib.concatStrings (lib.mapAttrsToList (h: ip: hostLines ip [ h ]) directHosts)
-      + lib.concatMapStrings (f: lib.concatMapStrings (ip: hostLines ip [ f.host ]) f.addresses) hostForwards + ''
+      + lib.concatStrings forwardHostLines + ''
           fallthrough
         }
     '' + lib.concatMapStrings (f: ''

@@ -28,7 +28,7 @@ let
   housePublic = "198.51.100.8";
   zoneAddresses = {
     internal = map ip [ "100" "101" "103" "104" "107" "111" "120" "121" ];
-    external = map ip [ "200" "201" "210" "211" "212" "213" ];
+    external = map ip [ "200" "201" "210" "211" "212" "213" "215" ];
     apps = map (id: ip (toString id)) lab.appsCatalog.swarm.workers;
   };
 
@@ -42,18 +42,23 @@ let
   };
   dhcpPool = net.zones.external.dhcpPool;
   # the split horizon serves the catalog: every route's name at its ingress, the enabled apps' public and internal
-  # hosts with them
+  # hosts with them, a forwarded route's name at its running guest (once, whatever its routes)
   dnsExpected = lib.listToAttrs (
     map (h: lib.nameValuePair (net.fqdn h) (ip "100"))
       (map (r: r.host) (lib.attrValues lab.catalog.internal))
     ++ map (h: lib.nameValuePair (net.fqdn h) (ip "200"))
       (map (r: r.host) (lib.attrValues lab.catalog.external))
+    ++ map (r: lib.nameValuePair (net.fqdn r.host) (ip (toString r.vmid)))
+      (lib.filter (r: r.vmid != null && lab.inventory.${toString r.vmid}.powered) (lib.attrValues lab.catalog.forwarded))
     ++ [ (lib.nameValuePair (net.fqdn "smb") (ip "104")) ]);
 
+  # a forwarded udp and tcp route of one guest: teamspeak's voice and file transfer, vm-215 a dmz address here
+  voice = lab.catalog.forwarded.teamspeak;
+  files = lab.catalog.forwarded.teamspeak-files;
   # the ports the policy names, and 4444, which only the killswitch subtest uses
   killswitchPort = 4444;
   tcpPorts = [ 22 53 80 111 443 2049 2377 3100 3102 4040 4317 4318 4319 7946 8006 8095 9055 9100 19532 25565 killswitchPort ]
-    ++ facts.appsPorts;
+    ++ [ files.publicPort ] ++ facts.appsPorts;
   # count syns from one source at one address, as fast as the kernel sends them
   synFlood = pkgs.writers.writePython3 "syn-flood" { } ''
     import socket
@@ -73,7 +78,7 @@ let
         sockets.append(s)
   '';
   synFloodCount = 400;
-  udpPorts = [ 53 111 2049 4789 7946 ];
+  udpPorts = [ 53 111 2049 4789 7946 voice.publicPort ];
 
   tools = { environment.systemPackages = [ pkgs.dig pkgs.netcat pkgs.tcpdump pkgs.python3 pkgs.busybox pkgs.nftables ]; };
   zoneNode = zone: extra: {
@@ -194,7 +199,10 @@ pkgs.testers.runNixOSTest {
             # a dmz or the apps zone reaching the public address would be a way around its isolation
             {"src": ZONES["external"][1], "dst": ROUTER_WAN, "proto": "tcp", "port": 443, "expect": "closed"},
             {"src": ZONES["apps"][0], "dst": ROUTER_WAN, "proto": "tcp", "port": 443, "expect": "closed"},
-            # minecraft's vm is disabled: no forward; and nothing else is forwarded
+            # a udp and a tcp route forwarded straight to their guest
+            {"src": HOUSE["internet"], "dst": ROUTER_WAN, "proto": "udp", "port": ${toString voice.publicPort}, "expect": "open"},
+            {"src": HOUSE["internet"], "dst": ROUTER_WAN, "proto": "tcp", "port": ${toString files.publicPort}, "expect": "open"},
+            # minecraft's guest is no node here: its forward finds no one; and nothing else is forwarded
             {"src": HOUSE["internet"], "dst": ROUTER_WAN, "proto": "tcp", "port": 25565, "expect": "closed"},
             {"src": HOUSE["internet"], "dst": ROUTER_WAN, "proto": "tcp", "port": 80, "expect": "closed"},
         ]
@@ -226,9 +234,10 @@ pkgs.testers.runNixOSTest {
                 # a public name's proxied AAAA would send the house around the edge's own address
                 got = machine.succeed(f"dig +short +time=3 -b {src} @{server} AAAA {name}").strip()
                 assert not got, f"{name} AAAA from {src}: {got!r}"
-        # retired and disabled names are gone
+        # retired names are gone
         internal.fail("dig +short +time=3 @10.100.0.1 tor.${net.domain} | grep -q .")
-        internal.fail("dig +short +time=3 @10.100.0.1 mc.${net.domain} | grep -q .")
+        # a forwarded route's srv record names its public port
+        internal.succeed("dig +short +time=3 @10.100.0.1 SRV ${voice.srv}.${net.fqdn voice.host} | grep -qx '0 0 ${toString voice.publicPort} ${net.fqdn voice.host}.'")
 
     with subtest("third parties down: the public address and the deny lists stay, no unit fails"):
         published = "${net.fqdn net.wan.publicHost}"

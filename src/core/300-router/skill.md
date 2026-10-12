@@ -28,7 +28,8 @@ metadata:
   (`nft list chain ip antispoof prerouting`, counters per interface). Inside a zone Proxmox's ip/mac filter binds
   each guest to its address (src/terraform/lib.tf FIREWALL).
 - Port forwards (WAN IP, from the internet, the house and the trusted zones): 443 -> vm-200; every tcp/udp route
-  straight to its backend while its guest is enabled (25565 -> vm-214). `nft list table ip port-forwards`.
+  straight to its backend while its guest is enabled (25565 -> vm-214; udp 9987, tcp 30033 -> vm-215).
+  `nft list table ip port-forwards`.
 - DNS: CoreDNS (split horizon: *.lsck0.dev -> the ingresses) -> blocky (ad block, DoT); blocky down: DoT to
   Cloudflare, never plain dns. VPN members (`profiles.vpnEgress`) resolve through Proton's resolver inside the
   tunnel and nothing else, tor members through tor. Test: `dig +short grafana.lsck0.dev @10.100.0.1`. A house
