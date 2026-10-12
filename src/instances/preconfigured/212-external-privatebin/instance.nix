@@ -1,6 +1,8 @@
 # encrypted pastebin
 { lib, profiles, ... }: {
   vm = {
+    # parked while unused; "on" brings it back
+    power = "off";
     bootPhase = "public";
     needs = [ "containers" "nfs" ];
   };
