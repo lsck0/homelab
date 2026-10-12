@@ -16,9 +16,10 @@ let
   websecure = config: lib.filterAttrs (_: r: lib.elem "websecure" (r.entryPoints or [ ])) (httpOf config).routers;
   lawsOf = laws: lib.concatLists (lib.mapAttrsToList (name: law: map (v: "${name}: ${v}") law) laws);
 
-  # the defences every public request passes, in order; `cloudflare-only` may come first, on the socket peer. Each
-  # limit runs per client, then per route (one route's budget over all its clients, modules/limits `route`). The body
-  # limit buffers before the retry: a retry inside it would resend a consumed body, empty
+  # the defences every public request passes, in order; `cloudflare-only` may come first, on the socket peer. The gate
+  # answers crowdsec's decisions before the waf spends anything on a banned client. Each limit runs per client, then
+  # per route (one route's budget over all its clients, modules/limits `route`). The body limit buffers before the
+  # retry: a retry inside it would resend a consumed body, empty
   chainLawOf = host: routers: lib.concatLists (lib.mapAttrsToList (name: r:
     let
       m = r.middlewares or [ ];
@@ -26,18 +27,20 @@ let
       chain = if lib.head (m ++ [ "" ]) == "cloudflare-only" then lib.tail m else m;
       padded = chain ++ lib.genList (_: "") 10;
       rest = lib.drop 2 padded;
+      afterGate = lib.tail rest;
+      afterWaf = if lib.head afterGate == "crowdsec" then lib.tail afterGate else afterGate;
       limits = [ "rate-limit" "route-rate-limit" "inflight-limit" "route-inflight-limit" ];
       # a route's limitScale names its set `<limit>-x<scale>` (modules/traefik)
       unscaled = n: let s = builtins.match "(.*)-x[0-9]+" n; in if s == null then n else lib.head s;
-      afterLimits = lib.drop (lib.length limits + 1) rest;
+      afterLimits = lib.drop (lib.length limits) afterWaf;
       afterBody = if lib.hasPrefix "body-limit-" (lib.head afterLimits) then lib.tail afterLimits else afterLimits;
     in
     lib.optional (lib.take 2 chain != [ "client-ip" "strip-client-headers" ]
-      || !(lib.hasPrefix "crowdsec" (lib.head rest))
-      || map unscaled (lib.take (lib.length limits) (lib.tail rest)) != limits
+      || !(lib.hasPrefix "gate" (lib.head rest))
+      || map unscaled (lib.take (lib.length limits) afterWaf) != limits
       || lib.head afterBody != "retry-upstream"
       || !(lib.hasPrefix "secure-headers" (lib.elemAt afterBody 1)))
-      "${host} router ${name}: chain ${toString m} is not [cloudflare-only], client-ip, strip-client-headers, crowdsec*, ${toString limits}, [body-limit-*], retry-upstream, secure-headers*"
+      "${host} router ${name}: chain ${toString m} is not [cloudflare-only], client-ip, strip-client-headers, gate*, [crowdsec], ${toString limits}, [body-limit-*], retry-upstream, secure-headers*"
   ) routers);
   chainLaw = host: config: chainLawOf host (websecure config);
 

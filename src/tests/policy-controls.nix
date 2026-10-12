@@ -22,6 +22,8 @@ let
   forwardRules = configs."300-router".networking.firewall.extraForwardRules;
   natLine = lib.findFirst (l: lib.hasInfix "comment" l && lib.hasInfix "accept" l) "" (lib.splitString "\n" forwardRules);
   traefik = [ "services" "traefik" "dynamicConfigOptions" "http" ];
+  gate = [ "homelab" "traefik" "gate" "settings" ];
+  net = import ../modules/net.nix { inherit lib inventory site; };
   # a well-formed app the ports law sees twice
   hello = facts.appsCatalog.apps.hello;
   # the first address of the router's first lease pool
@@ -80,6 +82,18 @@ let
       { ${toString catalog.internal.paperless.port} = [ "${inventory.${facts.lab.roles.collector}.ip}/32" ]; });
     port-forwards = network "port forwards" (tamper "300-router" [ "networking" "nftables" "tables" "port-forwards" "content" ]
       "tcp dport  dnat to ${inventory.${facts.lab.roles.collector}.ip}:${toString catalog.internal.paperless.port}");
+
+    gate-allow = { file = "antibot"; marker = "vm-200's gate stops wireguard";
+      tampered = tamper "200-external-traefik" (gate ++ [ "allow" "cidrs" ]) [ net.wan.subnet ]; };
+    crowdsec-whitelist = { file = "antibot"; marker = "vm-100's crowdsec may ban the house lan";
+      tampered = tamper "100-internal-traefik" [ "homelab" "traefik" "crowdsecBouncer" "whitelistCidrs" ] [ "10.0.0.0/8" ]; };
+    gate-session = { file = "antibot"; marker = "vm-200's gate cannot tell a logged-in user";
+      tampered = tamper "200-external-traefik" (gate ++ [ "session" ]) null; };
+    captcha-default = { file = "antibot"; marker = "router share-tls: the gate's captcha is 0";
+      tampered = tamper "200-external-traefik" (traefik ++ [ "middlewares" "gate" "forwardAuth" "address" ])
+        (lib.replaceStrings [ "captcha=1" ] [ "captcha=0" ] (http "200-external-traefik").middlewares.gate.forwardAuth.address); };
+    captcha-answer-log = { file = "antibot"; marker = "200-external-traefik logs every captcha's answer";
+      tampered = tamper "200-external-traefik" (gate ++ [ "captcha" "answerLog" ]) "/run/lab-gate/answers"; };
 
     catalog = { file = "apps"; marker = "catalog: a control's problem";
       tampered = facts // { catalog = catalog // { problems = [ "a control's problem" ]; }; }; };
