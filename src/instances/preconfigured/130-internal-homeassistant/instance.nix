@@ -1,6 +1,8 @@
 # home automation hub
 { lib, config, profiles, ... }: {
   vm = {
+    # parked while unused; "on" brings it back
+    power = "off";
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
     # large python process, squeezed it stalls: 739 MiB peak over 7d, so the floor stays above it

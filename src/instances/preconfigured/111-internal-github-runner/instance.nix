@@ -3,6 +3,8 @@
   roles = [ "ci" ];
 
   vm = {
+    # parked while unused; "on" brings it back
+    power = "off";
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
     # the floor holds the idle listeners; a job takes what the host has free

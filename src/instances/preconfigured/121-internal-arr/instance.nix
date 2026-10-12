@@ -15,6 +15,8 @@ let
   keySource = arr: if arr.minted then "tokens" else "secrets";
 in {
   vm = {
+    # parked while unused; "on" brings it back
+    power = "off";
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
     # five .net apps plus flaresolverr's chromium: 1510 MiB peak over 7d

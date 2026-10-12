@@ -8,6 +8,8 @@ in {
   roles = [ "llm" ];
 
   vm = {
+    # parked while unused; "on" brings it back
+    power = "off";
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
     # vfio pins all ram, so no balloon

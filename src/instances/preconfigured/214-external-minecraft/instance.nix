@@ -4,7 +4,6 @@
     bootPhase = "public";
     needs = [ "containers" "nfs" ];
     # no ballooning: the jvm's growing heap (main.nix heapSize) in a ballooned-down guest gets oom-killed
-    power = "off";
     memoryMiB = 8192;
     balloonMiB = 8192;
     cores = 4;

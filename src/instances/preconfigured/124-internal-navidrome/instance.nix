@@ -1,6 +1,8 @@
 # music streaming (Subsonic API)
 { id, config, profiles, ... }: {
   vm = {
+    # parked while unused; "on" brings it back
+    power = "off";
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
     kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";

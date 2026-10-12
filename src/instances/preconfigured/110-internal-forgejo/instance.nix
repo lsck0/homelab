@@ -1,6 +1,8 @@
 # git forge (OIDC + SSH); its ci runner lives on 111
 { lib, id, profiles, ... }: {
   vm = {
+    # parked while unused; "on" brings it back
+    power = "off";
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
     memoryMiB = 2048;

@@ -1,6 +1,8 @@
 # Firefly III personal finance
 { lib, id, config, profiles, ... }: {
   vm = {
+    # parked while unused; "on" brings it back
+    power = "off";
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
     memoryMiB = 1024;

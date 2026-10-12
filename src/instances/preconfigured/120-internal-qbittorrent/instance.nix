@@ -1,6 +1,8 @@
 # torrent client, egress through the router's vpn exit
 { lib, profiles, ... }: {
   vm = {
+    # parked while unused; "on" brings it back
+    power = "off";
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
     memoryMiB = 1024;

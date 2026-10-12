@@ -1,6 +1,8 @@
 # media requests: movies, series, anime (-> Radarr/Sonarr)
 { profiles, ... }: let port = 80; in {
   vm = {
+    # parked while unused; "on" brings it back
+    power = "off";
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
     kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";

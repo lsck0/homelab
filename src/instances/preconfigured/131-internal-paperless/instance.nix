@@ -1,6 +1,8 @@
 # document management (paperless-ngx) and paperless-ai auto-tagging
 { lib, id, config, profiles, ... }: {
   vm = {
+    # parked while unused; "on" brings it back
+    power = "off";
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
     # ocr plus the paperless-ai node process
