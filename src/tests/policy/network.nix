@@ -184,6 +184,26 @@ let
     ++ lib.optional (published != [ { port = net.ports.http; target = { addr = net.ipOf net.zones.external.ingress; port = torPorts.onionIngress; }; } ])
       "${name}: the router's tor does not publish it to the edge's onion entrypoint";
 
+  # a guest's direct calls: every <address>:<port> its units, containers and /etc are configured with, and every
+  # <NAME>_HOST and <NAME>_PORT pair of one environment. A template a unit reads from the store stays unread here
+  guestIds = lib.filter (id: id != null) (map (c: c.homelab.vmid) (lib.attrValues configs));
+  guestOfIp = lib.listToAttrs (map (id: lib.nameValuePair (net.ipOf id) id) guestIds);
+  addressPattern = "([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+):([0-9]+)";
+  addressesIn = text: map (m: { ip = lib.elemAt m 0; port = lib.toInt (lib.elemAt m 1); })
+    (lib.filter lib.isList (builtins.split addressPattern text));
+  hostPortPairsIn = env: lib.concatMap (key: let port = env."${lib.removeSuffix "_HOST" key}_PORT" or null; in
+    lib.optional (lib.hasSuffix "_HOST" key && port != null) { ip = toString env.${key}; port = lib.toInt (toString port); })
+    (lib.attrNames env);
+  environmentsOf = config: map (s: s.environment) (lib.attrValues config.systemd.services)
+    ++ map (c: c.environment) (lib.attrValues config.virtualisation.oci-containers.containers);
+  textsOf = config: lib.concatMap (s: [ s.script s.preStart s.postStart ]) (lib.attrValues config.systemd.services)
+    ++ map (e: if e.text == null then "" else e.text) (lib.attrValues config.environment.etc)
+    ++ lib.concatMap (env: map toString (lib.attrValues env)) (environmentsOf config);
+  callsOf = config: lib.unique (lib.concatMap addressesIn (textsOf config) ++ lib.concatMap hostPortPairsIn (environmentsOf config));
+  directCallLaw = config: let from = config.homelab.vmid; in lib.concatMap (call: let to = guestOfIp.${call.ip}; in
+    lib.optionals (to != from && running to) (reach from to call.port))
+    (lib.filter (call: guestOfIp ? ${call.ip}) (callsOf config));
+
   kea = router.services.kea.dhcp4.settings.subnet4;
   inPool = ip: pool: let bounds = map lib.trim (lib.splitString "-" pool.pool);
     toInt = a: lib.foldl' (acc: o: acc * 256 + lib.toInt o) 0 (lib.splitString "." a); in
@@ -239,6 +259,9 @@ lawsOf {
     (lib.attrValues (catalog.internal // catalog.external))
   ++ lib.concatLists (lib.mapAttrsToList (_: c:
     lib.concatMap (w: reach w c.managerId catalog.swarm.controllerPort) (lib.filter running c.wakers)) catalog.clusters);
+
+  # a guest calls another guest's port only where the router passes it and the target's guard admits it (a grant)
+  "direct calls" = lib.concatMap directCallLaw (lib.filter (c: c.homelab.vmid != null) (lib.attrValues configs));
 
   # a route kept off the internet answers no dmz neighbour through the edge
   "internal only" = map (range: "vm-200 internal-only admits ${range}, which overlaps a dmz")
