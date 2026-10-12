@@ -24,7 +24,10 @@ in {
   };
 
   grants = lib.mapAttrsToList (name: arr: { from = [ "operator" ]; tcp = [ arr.port ]; why = "hermes' ${name} skill calls the api"; }) arrs
-    ++ [ { from = [ "122" ]; tcp = [ arrs.radarr.port arrs.sonarr.port ]; why = "janitorr on jellyfin reads and cleans the libraries"; } ];
+    ++ [
+      { from = [ "122" ]; tcp = [ arrs.radarr.port arrs.sonarr.port ]; why = "janitorr on jellyfin reads and cleans the libraries"; }
+      { from = [ "123" ]; tcp = [ arrs.radarr.port arrs.sonarr.port ]; why = "jellyseerr hands approved requests over, at the addresses arr-wire gives it"; }
+    ];
 
   tokens = map keyOf (lib.attrNames (lib.filterAttrs (_: arr: arr.minted) arrs));
 
