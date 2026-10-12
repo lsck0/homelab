@@ -472,6 +472,7 @@ let
   gateMetricsName = "lab_gate";
   # a loopback answer in milliseconds; this only bounds a hung gate
   gateMetricsTimeoutS = 5;
+  gateMetricsRetries = 5;
 
   # -- routes: every router, service and middleware a route needs -------------------------------------------
 
@@ -1201,7 +1202,8 @@ in {
       serviceConfig.Type = "oneshot";
       script = ''
         metric=${config.homelab.textfileDir}/${gateMetricsName}.prom
-        curl -sf --max-time ${toString gateMetricsTimeoutS} http://${gate.loopback}:${toString gate.port}${gate.metricsPath} > "$metric.tmp"
+        # a switch restarts the gate while this timer may fire: wait the few seconds it takes to listen
+        curl -sf --max-time ${toString gateMetricsTimeoutS} --retry ${toString gateMetricsRetries} --retry-connrefused http://${gate.loopback}:${toString gate.port}${gate.metricsPath} > "$metric.tmp"
         mv "$metric.tmp" "$metric"
       '';
     };
