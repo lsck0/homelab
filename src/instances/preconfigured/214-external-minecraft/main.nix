@@ -24,8 +24,8 @@ let
   # what lazymc advertises while the server sleeps: the pack's minecraft and its protocol number (wiki.vg)
   advertisedVersion = "1.21.1";
   advertisedProtocol = 767;
-  # instance.nix gives the guest 8 GiB unballooned: the heap plus 2 GiB for the os and the jvm's off-heap
-  heapSize = "6G";
+  # instance.nix gives the guest 11.5 GiB unballooned: the heap plus 3 GiB for the os and the jvm's off-heap (375 mods)
+  heapSize = "8704M";
   # a short break keeps the world warm, an evening off frees the heap
   sleepAfterS = 1800;
   minimumOnlineS = 60;
