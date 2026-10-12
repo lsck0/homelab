@@ -1,4 +1,4 @@
-# surviving a third-party outage: every call to a service outside the lab (src/lab/upstreams.nix) goes through
+# surviving a third-party outage: every call to a service outside the lab (src/modules/upstream/lib/upstreams.nix) goes through
 # `upstream`, a module argument of every host:
 #
 #   ${upstream.run} aur git clone https://aur.archlinux.org/foo.git      a call: retried, then classified
@@ -31,7 +31,7 @@ let
       declare -A urls
       ${lib.concatStrings (lib.mapAttrsToList (n: u: "urls[${n}]=${lib.escapeShellArg u.url}\n") lab.upstreams)}
       url=''${urls[$name]:-}
-      [ -n "$url" ] || { echo "upstream: no upstream $name in src/lab/upstreams.nix" >&2; exit 2; }
+      [ -n "$url" ] || { echo "upstream: no upstream $name in src/modules/upstream/lib/upstreams.nix" >&2; exit 2; }
       attempts=''${UPSTREAM_ATTEMPTS:-${toString attempts}}
       backoff=''${UPSTREAM_BACKOFF_S:-${toString backoffS}}
       limit=''${UPSTREAM_TIMEOUT_S:-${toString attemptTimeoutS}}
@@ -80,7 +80,7 @@ in {
     run = lib.getExe run;
     inherit unavailable registries;
     retry = { inherit attempts backoffS probeTimeoutS; };
-    # the upstream an image is pulled from, null when it is none of lab/upstreams.nix (the lab's own registry)
+    # the upstream an image is pulled from, null when it is none of modules/upstream/lib/upstreams.nix (the lab's own registry)
     ofImage = image: registries.${registryOf image} or null;
   };
 }

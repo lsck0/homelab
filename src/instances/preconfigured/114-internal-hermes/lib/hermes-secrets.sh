@@ -7,7 +7,7 @@ set -euo pipefail
 HERMES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ROOT_DIR="$(cd "$HERMES_DIR/../../../.." && pwd)"
 SRC="$ROOT_DIR/src"
-PUB="$SRC/lab/keys/hermes.pub"
+PUB="$SRC/secrets/keys/hermes.pub"
 APP_JSON="$HERMES_DIR/lib/github-app.json"
 HERMES_ID=114
 RULESET_NAME="protect-master"
@@ -49,7 +49,7 @@ if [ -z "$(current hermes-ssh-key)" ] || [ "$FORCE" = --force ] || [ ! -f "$PUB"
   printf 'from="%s,%s" %s\n' "$(nix eval --raw --no-warn-dirty "$SRC#lab.inventory.\"$HERMES_ID\".ip")" \
     "$(jq -r .lan.router "$SRC/generated/site.json")" "$(cat "$tmp/lab.pub")" > "$PUB"
   git -C "$ROOT_DIR" add "$PUB"
-  echo ">>> hermes-ssh-key generated, public key in src/lab/keys/hermes.pub"
+  echo ">>> hermes-ssh-key generated, public key in src/secrets/keys/hermes.pub"
 else
   echo ">>> hermes-ssh-key already set"
 fi

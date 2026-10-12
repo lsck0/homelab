@@ -15,7 +15,7 @@ terraform {
   backend "local" {}
 }
 
-# the lab's source tree: the flake, the facts init.sh writes (generated/) and the ssh keys (lab/keys)
+# the lab's source tree: the flake, the facts init.sh writes (generated/) and the ssh keys (secrets/keys)
 locals {
   src = "${path.module}/.."
 }

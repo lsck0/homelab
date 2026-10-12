@@ -21,7 +21,7 @@ locals {
   datastores = { guest = var.proxmox_datastore, bulk = local.bulk_datastore }
 
   # first-boot root keys; nixos (modules/base) reads the same files from then on
-  authorized_keys = [for f in sort(fileset("${local.src}/lab/keys", "*.pub")) : trimspace(file("${local.src}/lab/keys/${f}"))]
+  authorized_keys = [for f in sort(fileset("${local.src}/secrets/keys", "*.pub")) : trimspace(file("${local.src}/secrets/keys/${f}"))]
 
   # the router's legs after the wan, in proxmox nic order: net1 is the zone with router_nic 1, and so on
   router_zones = [for nic in range(1, length(local.zones) + 1) : one([for name, z in local.zones : name if z.router_nic == nic])]

@@ -148,7 +148,7 @@ def time_sleep(seconds):
 
 
 def upstream_reachable(ctx, name):
-    """The upstream's probe (src/lab/upstreams.nix) answers below 500 within its bound."""
+    """The upstream's probe (src/modules/upstream/lib/upstreams.nix) answers below 500 within its bound."""
     try:
         with urllib.request.urlopen(ctx["upstreams"]["urls"][name], timeout=ctx["upstreams"]["retry"]["probeTimeoutS"]):
             return True
@@ -361,7 +361,7 @@ def upstream_call(ctx, name, call):
 
 
 def image_upstream(ctx, image):
-    """The upstream (src/lab/upstreams.nix) an image is pulled from; None for any other registry (the lab's own)."""
+    """The upstream (src/modules/upstream/lib/upstreams.nix) an image is pulled from; None for any other registry (the lab's own)."""
     first, slash, _ = image.partition("/")
     host = first if slash and ("." in first or ":" in first or first == LOCALHOST) else DOCKER_HUB
     return ctx["upstreams"]["registries"].get(host)

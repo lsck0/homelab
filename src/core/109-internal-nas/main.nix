@@ -31,7 +31,7 @@ let
 
   mirrorDir = "${bulk}/archmirror";
   # tier 1, german, rsync-enabled; the trailing slash is the module root, already laid out as $repo/os/$arch; its
-  # https side is the outage probe, src/lab/upstreams.nix archmirror
+  # https side is the outage probe, src/modules/upstream/lib/upstreams.nix archmirror
   mirrorUpstream = "rsync://ftp.halifax.rwth-aachen.de/archlinux/";
   # 1 GbE nas; cap the pull so a sync never starves live nfs serving or the nightly archbuild writes
   mirrorBwlimitKBps = 60 * 1024;

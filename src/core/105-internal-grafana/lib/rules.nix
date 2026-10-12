@@ -110,7 +110,7 @@ let
       op = "lt"; threshold = 1;
       for = "15m";
       summary = "{{ $labels.upstream }} unavailable";
-      description = "The lab has not reached this third-party service (src/lab/upstreams.nix) for 15 minutes. Its callers skip their runs and keep their last state; nothing to do unless it lasts.";
+      description = "The lab has not reached this third-party service (src/modules/upstream/lib/upstreams.nix) for 15 minutes. Its callers skip their runs and keep their last state; nothing to do unless it lasts.";
     };
     memory_pressure = {
       title = "Guest thrashing";
@@ -369,7 +369,7 @@ let
     };
     # telegram and ntfy (the only webhook) are outside this guest: one alert per channel that keeps failing, through
     # every 10 minutes for a quarter hour (one retried failure is no outage); it reaches the owner over the other one.
-    # A channel whose service is down (src/lab/upstreams.nix) is upstream_unavailable's alert, not a second one
+    # A channel whose service is down (src/modules/upstream/lib/upstreams.nix) is upstream_unavailable's alert, not a second one
     notifications_failing = {
       title = "Notification channel unavailable";
       category = "monitoring";

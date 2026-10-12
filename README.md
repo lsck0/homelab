@@ -11,7 +11,7 @@ Nix with flakes is the one thing to install: every tool comes from the flake's d
 `~/projects/arch-dotfiles/secrets/age.txt` (`$DOTFILES` moves the checkout, `$DOTFILES_SECRETS` points at a secrets
 directory of another layout, e.g. `~/projects/arch-dotfiles/configs/secrets`); `secrets/age.txt` is a symlink to it that
 `init.sh` and `sync.sh` keep pointing there, and `sync.sh` unlocks it with the YubiKey
-(`~/projects/arch-dotfiles/scripts/yubikey.sh unlock`) when it is locked. Every key in `src/lab/keys/` is authorized on
+(`~/projects/arch-dotfiles/scripts/yubikey.sh unlock`) when it is locked. Every key in `src/secrets/keys/` is authorized on
 every guest, the router and Proxmox root, so the deploying machine's `~/.ssh/id_ed25519.pub` must be one of them.
 
 ## Layout
@@ -54,9 +54,9 @@ src/
   core/swarm.nix            the shared swarm: state worker, ports, worker shape (manager and builder: vm-140)
   instances/custom/<name>/  an app: app.nix (repo, branch and the same service properties), secrets.sops.json its
                             secrets, lib/ and tests/ as a guest's
-  lab/keys/                 the ssh public keys authorized everywhere (hand-written)
-  secrets/                  admins.txt (the admins' age recipients), shared.nix and shared.sops.json (the
-                            secrets two or more guests read, or the operator alone)
+  secrets/                  admins.txt (the admins' age recipients), keys/ (the ssh public keys authorized
+                            everywhere, hand-written), shared.nix and shared.sops.json (the secrets two or more
+                            guests read, or the operator alone)
   terraform/                main.tf, lib.tf: the guests from `nix eval .#lab.terraform`; its connection vars
   generated/                what the scripts write: site.json and known_hosts (init.sh, sync.sh), zones.json (the
                             zones, edited by hand too), lab.json (sync.sh, for desktop clients), nodes/<vmid>-apps-swarm/
@@ -149,7 +149,7 @@ no secret; `schema` changes only when a key changes meaning or goes away.
 
 `src/scripts/pve-install.sh` converges the host on every `init.sh` and `sync.sh` run: apt sources, the zone
 bridges, gpu passthrough, power settings, openipmi off without a bmc, root's password (`proxmox-root-pass`) and ssh
-keys (`src/lab/keys/`), the lab's api users and tokens (created once, never rotated; undeclared `@pve` users and every
+keys (`src/secrets/keys/`), the lab's api users and tokens (created once, never rotated; undeclared `@pve` users and every
 empty pool are removed), the lldap realm, the node's address and the api certificate naming it, the bulk storage
 and its hookscript, the host exporter and OSSEC. While the package mirrors or github are unavailable, what needs them
 waits for the next run; everything else still converges. `src/scripts/deinit.sh` runs its teardown.
@@ -282,7 +282,7 @@ the old key still opens all of them in the public history. Inside `nix develop .
   while the nas is down. `TF_STATE_FRESH=1 ./sync.sh` starts an empty lab: it sets any local copy aside
   (`terraform.tfstate.<time>.backup`), as `deinit.sh` does, and never pulls from or locks a nas.
 - Proxmox firewall locks out a machine: ssh stays open to the house lan, so `ssh root@<proxmox> pve-firewall stop`
-  from any machine with a key of `src/lab/keys/`; fix `lan.workstation`/`lan.notebook` (`src/scripts/init.sh`), then
+  from any machine with a key of `src/secrets/keys/`; fix `lan.workstation`/`lan.notebook` (`src/scripts/init.sh`), then
   `./sync.sh` turns it on again.
 
 ## Test

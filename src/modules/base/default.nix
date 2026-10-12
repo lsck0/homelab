@@ -62,7 +62,7 @@ in {
     # eth0 naming so cloud-init config matches
     networking.usePredictableInterfaceNames = false;
     # deployer, owner, owner's YubiKey, hermes: the same files terraform and sync.sh (proxmox) install
-    users.users.root.openssh.authorizedKeys.keyFiles = lib.filesystem.listFilesRecursive ../../lab/keys;
+    users.users.root.openssh.authorizedKeys.keyFiles = lib.filesystem.listFilesRecursive ../../secrets/keys;
 
     services.openssh = {
       enable = true;

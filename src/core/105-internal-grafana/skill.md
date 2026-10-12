@@ -75,7 +75,7 @@ Ports and addresses are defined once in `src/modules/telemetry.nix`; rules, cont
   `disk_health`, `smartd_warning`, `nvme_wear`, `nvme_critical_warning`, `nvme_temperature` (Proxmox SMART and NVMe
   collectors). Monitoring: `monitoring_unit_down`, `logs_not_arriving`, `promtail_dropping`, `notifications_failing`
   (a channel), `deadman_unavailable` (the off-site switch), `ossec_down` (the host's intrusion detection).
-  Third parties: `upstream_unavailable` per service of `src/lab/upstreams.nix`; its callers keep their last state.
+  Third parties: `upstream_unavailable` per service of `src/modules/upstream/lib/upstreams.nix`; its callers keep their last state.
 
 When the owner asks "is everything ok": query `up == 0`, active alerts, disk
 space below 10 %, backup age, then summarise in a few lines.

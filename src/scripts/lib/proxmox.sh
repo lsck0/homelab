@@ -134,7 +134,7 @@ proxmox_converge() {
     "LLDAP_BIND_USER=$(jq -r .bindUser <<<"$ldap")" \
     "LLDAP_BIND_PASSWORD=$bind_password" \
     "ROOT_PASSWORD=$root_password" \
-    "ROOT_KEYS=$(cat "$SRC"/lab/keys/*.pub)" \
+    "ROOT_KEYS=$(cat "$SRC"/secrets/keys/*.pub)" \
     || { echo "ERROR: the Proxmox host did not converge (above)." >&2; exit 1; }
 
   while read -r role value; do

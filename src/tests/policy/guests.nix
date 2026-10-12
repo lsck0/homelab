@@ -3,13 +3,21 @@
 # - a guest's declared needs (instance.nix `vm.needs`) are what its configuration uses, so the kind the rule derives
 #   from them (modules/instance-schema.nix) is the kind it must be: its own container runtime, nfs (client or server)
 # - host memory budget: every powered guest's floor (a vm's balloon floor, its whole memory when unballooned, an
-#   lxc's limit) plus the zfs arc and the node's reserve fit the node's memory (src/lab/node.nix). Past it the
+#   lxc's limit) plus the zfs arc and the node's reserve fit the node's memory (`node` below). Past it the
 #   balloon squeezes guests below their floors and the node swaps; onDemand guests count, since all may wake at once.
 # - a guest mounts exactly the shares its instance.nix declares (lab.shares, its token dirs derived): vm-109 exports
 #   those, so a mount it does not export hangs and an export nothing mounts is open for nothing
 { lib, configs, lab, ... }:
 let
-  node = import ../../lab/node.nix;
+  # the proxmox node every guest shares
+  node = {
+    # MemTotal of the node (32 GiB less the firmware's share)
+    memoryMiB = 32022;
+    # the zfs arc is capped at 3202 MiB, but the node has no zfs pool (its storage is lvm-thin), so the arc holds nothing
+    arcMaxMiB = 0;
+    # the node's own kernel, pve daemons and the page cache of the guest disks
+    reserveMiB = 2048;
+  };
   # the largest floors, named in the violation: where shrinking pays
   largestShown = 8;
 

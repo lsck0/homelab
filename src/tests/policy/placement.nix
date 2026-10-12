@@ -2,7 +2,7 @@
 #
 # Owners: an instance (src/core/<folder>/ or src/instances/preconfigured/<folder>/), an app
 # (src/instances/custom/<name>/), a module (src/modules/<name>.nix or src/modules/<name>/) and the lab itself (the
-# flake, src/scripts, src/terraform, src/secrets, src/generated, src/lab, src/tests, src/core/swarm.nix, sync.sh). A
+# flake, src/scripts, src/terraform, src/secrets, src/generated, src/tests, src/core/swarm.nix, sync.sh). A
 # file's users are the owners of the code that names it: a path literal in a .nix file, "$SRC/<path>" in a shell
 # script, "${local.src}/<path>" in terraform, resolved against the file's directory; comment lines name what they
 # describe without using it. Tests (anything under a tests/ folder), laws,
@@ -26,7 +26,7 @@ let
   # CONSTANTS
   # -------------------------------------------------------------------------------------------------------------
 
-  topAllowed = [ "flake.nix" "flake.lock" "core" "generated" "instances" "lab" "modules" "scripts" "secrets" "terraform" "tests" ];
+  topAllowed = [ "flake.nix" "flake.lock" "core" "generated" "instances" "modules" "scripts" "secrets" "terraform" "tests" ];
   instanceKinds = [ lab.layout.core lab.layout.preconfigured ];
   folderKinds = instanceKinds ++ [ lab.layout.custom ];
   moduleFolderAllowed = [ "default.nix" "lib" "tests" ];

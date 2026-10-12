@@ -40,7 +40,7 @@ let
       plugins      TRMNL plugin id -> the template trmnl-sync pushes to it
       route        the catalog route its urls use, terminal by default
       script       lib/<script>.py, run as nginx by a timer; a feed without one is written by another's
-      upstream     the third party it fetches from (src/lab/upstreams.nix): a failed run keeps the last output, its
+      upstream     the third party it fetches from (src/modules/upstream/lib/upstreams.nix): a failed run keeps the last output, its
                    outage is "<upstream> unavailable", not a failed unit
       libraries    python packages the script imports
       arguments    its command line, the feed's directory by default

@@ -29,7 +29,7 @@
 #   lab.nasClients."10.100.0.140" # the same of every powered guest, by address: what vm-109 exports
 #   lab.roles.collector           # "105": the vmid of the one instance declaring a role (instance.nix `roles`)
 #   lab.alerts.backup_stale       # an instance's own alert rule (instance.nix `alerts`) plus its vmid
-#   lab.upstreams.aur             # { url; } a third-party service the lab depends on (src/lab/upstreams.nix, modules/upstream)
+#   lab.upstreams.aur             # { url; } a third-party service the lab depends on (modules/upstream/lib/upstreams.nix)
 #   lab.onions."paste-onion-key"  # "<56 base32>.onion": an onion route's address (src/generated/onions.json)
 #   lab.layout.custom             # "instances/custom": where each kind of folder lives, relative to src/
 #
@@ -371,7 +371,7 @@ let
       shares nasClients problems layout;
     onions = if builtins.pathExists onionsFile then lib.importJSON onionsFile else { };
     alerts = lib.listToAttrs (map (e: lib.nameValuePair e.name (e.v // { vmid = idOf e.i; })) alertEntries);
-    upstreams = import (root + "/lab/upstreams.nix");
+    upstreams = import (root + "/modules/upstream/lib/upstreams.nix");
     withApps = f: import ./. { inherit lib root; apps = folders: f (apps folders); };
     # zone: from: the address a grant's source stands for in a guard of that zone
     inherit sourceOf;

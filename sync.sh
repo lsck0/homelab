@@ -49,7 +49,7 @@ if ! grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY"; then
   grep -qs '^AGE-SECRET-KEY-' "$AGE_KEY" || { echo "ERROR: $AGE_KEY is not an age key, unlock the dotfiles secrets."; exit 1; }
 fi
 export SOPS_AGE_KEY_FILE="$AGE_KEY"
-# deploys log in with this key; src/lab/keys/ authorizes it everywhere
+# deploys log in with this key; src/secrets/keys/ authorizes it everywhere
 DEPLOY_KEY="$HOME/.ssh/id_ed25519"
 DEPLOY_PUB="$DEPLOY_KEY.pub"
 # a fresh dotfiles install has the key only in the dotfiles secrets
@@ -403,8 +403,8 @@ proxmox_ssh_init "$PROXMOX_SSH_HOST" "$PROXMOX_SSH_PORT"
 # the owner's own ssh sees what this run trusts
 mkdir -p "$HOME/.ssh" && ln -sfn "$LAB_KNOWN_HOSTS" "$USER_KNOWN_HOSTS"
 
-{ [ -f "$DEPLOY_PUB" ] && cat "$SRC"/lab/keys/*.pub | grep -qF "$(cut -d' ' -f2 "$DEPLOY_PUB")"; } \
-  || { echo "ERROR: $DEPLOY_PUB is not in src/lab/keys/. Add it, then deploy once from a machine whose key is."; exit 1; }
+{ [ -f "$DEPLOY_PUB" ] && cat "$SRC"/secrets/keys/*.pub | grep -qF "$(cut -d' ' -f2 "$DEPLOY_PUB")"; } \
+  || { echo "ERROR: $DEPLOY_PUB is not in src/secrets/keys/. Add it, then deploy once from a machine whose key is."; exit 1; }
 
 # bpg provider imports vm disks over ssh, through the agent
 if ! ssh-add -l >/dev/null 2>&1; then

@@ -39,7 +39,7 @@ through pull requests, and the owner merges and syncs.
   - `src/terraform/` terraform, which reads the guests from nix (`nix eval .#lab.terraform`).
   - `src/generated/` what scripts write: `site.json` (the machine and the house), `known_hosts`, `zones.json` (the
     zones: bridge, subnet, vmid range), the swarm workers' keys, terraform's state copy.
-  - `src/secrets/` the shared secrets and the admins' recipients; `src/lab/keys/` the authorized ssh keys.
+  - `src/secrets/` the shared secrets and the admins' recipients; `src/secrets/keys/` the authorized ssh keys.
   - `src/scripts/` the owner's workstation tools; `src/tests/` the test harness, the laws (`policy/`) and the
     tests of the whole lab. `src/tests/policy/placement.nix` fails a file in the wrong place.
   - `src/instances/preconfigured/114-internal-hermes/lib/skills/` the general skills.
