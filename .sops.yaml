@@ -171,6 +171,10 @@ creation_rules:
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age17acysswqg64s02p2kse3reqvealgkalh0x0fdv6lu480563jfdfq3wmew7
   - path_regex: src/instances/preconfigured/214-external-minecraft/secrets\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age17acysswqg64s02p2kse3reqvealgkalh0x0fdv6lu480563jfdfq3wmew7
+  - path_regex: src/instances/preconfigured/215-external-teamspeak/age\.sops$
+    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
+  - path_regex: src/instances/preconfigured/215-external-teamspeak/secrets\.shared\.sops\.json$
+    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1pwyru6hgdn8c5kttteyr0ap02gf8ckt2nvt9xmtzpvaw4e4nt5asax35pg
   - path_regex: src/secrets/shared\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
   - path_regex: src/terraform/terraform\.tfvars\.sops\.json$

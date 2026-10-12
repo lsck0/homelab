@@ -241,6 +241,14 @@
       "powered": true,
       "zone": "external"
     },
+    "215": {
+      "enabled": "true",
+      "idle": null,
+      "ip": "10.200.0.215",
+      "name": "215-external-teamspeak",
+      "powered": true,
+      "zone": "external"
+    },
     "250": {
       "enabled": "true",
       "idle": null,
@@ -767,6 +775,28 @@
       "protocol": "http",
       "vmid": 104,
       "zone": "internal"
+    },
+    "teamspeak": {
+      "app": null,
+      "health": "/",
+      "host": "ts.lsck0.dev",
+      "onion": null,
+      "path": "/",
+      "port": 9987,
+      "protocol": "udp",
+      "vmid": 215,
+      "zone": "external"
+    },
+    "teamspeak-files": {
+      "app": null,
+      "health": "/",
+      "host": "ts.lsck0.dev",
+      "onion": null,
+      "path": "/",
+      "port": 30033,
+      "protocol": "tcp",
+      "vmid": 215,
+      "zone": "external"
     },
     "terminal": {
       "app": null,
