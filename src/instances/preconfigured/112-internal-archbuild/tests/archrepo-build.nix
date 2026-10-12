@@ -16,6 +16,9 @@
 # leads to the outbox or the served pool, a name neither holds stops the run. archrepo-skip.sh records a skipped
 # night in the served status and leaves the snapshot and the stale clock alone.
 #
+# A local recipe over an official package of its name (quickshell, 2026-10-12): the staged db and the final db
+# serve the local build whether its version is newer or older than the official one, against real pacman dbs.
+#
 # The night's budget: a recipe starts only while its whole bound still ends within the budget. A keyserver outage
 # defers only the recipes with validpgpkeys.
 { pkgs, lib, ... }:
@@ -64,7 +67,7 @@ let
 in
 pkgs.runCommand "archrepo-build" {
   nativeBuildInputs = [ pkgs.coreutils pkgs.gnused pkgs.gawk pkgs.gnugrep pkgs.findutils pkgs.rsync pkgs.jq pkgs.curl
-    pkgs.git pkgs.python3 ];
+    pkgs.git pkgs.python3 pkgs.pacman pkgs.libarchive pkgs.zstd ];
 } ''
   set -euo pipefail
   # a run that started now with an hour of recipes: the budget cases below move the clock against it
@@ -290,6 +293,64 @@ pkgs.runCommand "archrepo-build" {
   if (stage_links_sync > links.log); then flunk "a staged name without a file passed"; fi
   grep -q "names gone-1-1-any.pkg.tar.zst for gone" links.log || flunk "no message naming the file: $(cat links.log)"
   pass "a staged name neither pool holds stops the run"
+
+  # ---- a local recipe over an official package ----
+  # <dir> <name> <version>: a package of only a .PKGINFO, its path printed
+  package_make() {
+    local tree=$PWD/package-tree file=$1/$2-$3-any.pkg.tar.zst
+    rm -rf "$tree"
+    mkdir -p "$tree"
+    printf 'pkgname = %s\npkgbase = %s\npkgver = %s\narch = any\nsize = 0\n' "$2" "$2" "$3" > "$tree/.PKGINFO"
+    bsdtar -C "$tree" -cf - .PKGINFO | zstd -q -c > "$file"
+    echo "$file"
+  }
+  # <case> <official version> <local version>: the official repos have the name at one version, the local recipe
+  # built it at another; the staged db and the final db serve the local build, whichever version is newer
+  local_over_official_name=quickshell
+  check_local_over_official() {
+    local name=$local_over_official_name result want
+    want=$name-$3-any.pkg.tar.zst
+    # not root: snapshot_official has a local of that name, which the pacman stand-in would see
+    result=$(
+      fixture=$PWD/local-over-official
+      rm -rf "$fixture"
+      CACHE=$fixture/cache PACMAN_SYNC=$fixture/sync OUTBOX_POOL=$fixture/outbox/pool OUTBOX_SYNC=$fixture/outbox/sync
+      OUTBOX_STATE=$fixture/outbox/state REPO_DIR=$fixture/served STAGE_LINKS=$fixture/stage-links STATE_DIR=$fixture/state
+      PUBLIC_LOGS=$fixture/logs WORK=$fixture/work STAGE_DB=$fixture/cache/db/$REPO.db.tar.gz OUTBOX_DB=$fixture/cache/db/$REPO.db.tar.gz
+      mkdir -p "$CACHE"/{pacman,db} "$PACMAN_SYNC" "$OUTBOX_POOL" "$OUTBOX_SYNC" "$REPO_DIR" "$STATE_DIR" "$PUBLIC_LOGS" \
+        "$WORK" "$fixture/official" "$fixture/built"
+      # the build container's pacman.conf: the official repos first, the staging db last
+      for repo in "''${OFFICIAL_REPOS[@]}"; do
+        printf '[%s]\nServer = file://%s\n' "$repo" "$fixture/official" >> "$fixture/repos.conf"
+        bsdtar -czf "$PACMAN_SYNC/$repo.db" --files-from /dev/null
+      done
+      printf '[options]\nArchitecture = auto\nSigLevel = Never\nCacheDir = %s\n%s\n[%s]\nServer = file://%s\n' \
+        "$CACHE/pacman" "$(cat "$fixture/repos.conf")" "$REPO" "$STAGE_LINKS" > "$fixture/pacman.conf"
+      # a download needs root, which the sandbox is not: the official file is in the pacman cache already
+      pacman() { [[ " $* " == *" -Swdd "* ]] || command pacman --config "$fixture/pacman.conf" "$@"; }
+      upstream_call() { shift; "$@"; }
+      repo-add -q "$fixture/official/extra.db.tar.gz" "$(package_make "$CACHE/pacman" "$name" "$2")" 2>/dev/null
+      cp "$fixture/official/extra.db.tar.gz" "$PACMAN_SYNC/extra.db"
+      bsdtar -czf "$STAGE_DB" --files-from /dev/null
+      kind=([$name]=local) bases=("$name") official_wanted=() failed=()
+      state_set "$name" "$(printf '%064d' 0)" 1 "$name" "$want"
+      {
+        stage_add "$(package_make "$fixture/built" "$name" "$3")" && snapshot_official \
+          && echo "staged ''${db_file[$name]}" || echo "held back: $held_back, $(cat "$PUBLIC_LOGS/snapshot.log")"
+        # publish, after base_accept signed the local build
+        cp -a "$STATE_DIR" "$OUTBOX_STATE"
+        state_file=([$want]=$name) owner_of=([$name]=$name) served=([$name]=$name-0.3.1-1-any.pkg.tar.zst)
+        assemble && echo "final ''${final[$name]:-}"
+      } > "$fixture/run.log" 2>&1 || true
+      grep -E '^(staged|final) ' "$fixture/run.log" | xargs
+    ) || flunk "$1: $result"
+    [ "$result" = "staged $want final $want" ] \
+      || flunk "$1: '$result', want the staged and the final db to serve $want: $(cat local-over-official/run.log)"
+    pass "$1"
+  }
+  check_local_over_official "a local recipe newer than the official package serves its build (quickshell, 2026-10-12)" \
+    0.3.2-1 0.3.2-2.9
+  check_local_over_official "a local recipe older than the official package still serves its build" 0.3.2-5 0.3.2-2.9
 
   # ---- a skipped night in the served status ----
   skip() { bash ${../lib/archrepo-skip.sh} skipped "$1" github aur archlinux; }
