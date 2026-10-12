@@ -1,5 +1,5 @@
 # home automation hub
-{ ... }: {
+{ config, ... }: {
   vm = {
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
@@ -11,6 +11,10 @@
   };
 
   tokens = [ "hass-key" ];
+
+  grants = [
+    { from = [ "collector" ]; tcp = [ config.services.homeassistant.port ]; why = "prometheus scrapes /api/prometheus for the hand-typed gas and water readings"; }
+  ];
 
   shares = {
     "data/homeassistant".localState = true;
