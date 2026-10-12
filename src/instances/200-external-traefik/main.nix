@@ -52,7 +52,7 @@ in {
 
     routers = lib.listToAttrs (map (b: lib.nameValuePair (metricsBlockName b) {
       # /API/Metrics, //api/metrics/x reach one handler too; traefik already resolved dot segments and escapes
-      rule = "Host(`${net.fqdn b.host}`) && PathRegexp(`(?i)^${lib.concatMapStringsSep "/+" lib.escapeRegex (lib.splitString "/" b.path)}(/|$)`)";
+      rule = "Host(`${net.fqdn b.host}`) && PathRegexp(`${service.prefixPattern b.path}(/|$)`)";
       service = "noop@internal";
       entryPoints = [ "websecure" ];
       priority = metricsBlockPriority;

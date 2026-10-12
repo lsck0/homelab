@@ -5,6 +5,10 @@
 # Every field and its default: modules/apps-catalog and modules/service.nix.
 # A public route's requests, its browser telemetry (<host>/otlp) included, pass Cloudflare's proxy, which decrypts them;
 # a route carrying credentials (a ci token) sets `off.cloudflare` and is served from the house's address directly.
+# Not public: a `metrics` path that a public route serves too is denied at the edge for everyone (catalog
+# metricsBlocks), the collector scrapes its own published port. A public route of the internal zone may instead keep
+# prefixes behind authelia, `ssoPaths = [ "/admin" ];`, open to admins and the route's group; the edge has no authelia,
+# so an external route can only block a path, never gate it.
 {
   enable = true;
   repo = "lsck0/demo";

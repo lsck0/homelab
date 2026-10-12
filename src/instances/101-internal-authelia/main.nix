@@ -6,6 +6,7 @@
 { config, lib, inventory, site, catalog, lab, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
+  service = import ../../modules/service.nix { inherit lib; };
   user = "authelia-main";
   # local disk: nas stalls must not wedge auth
   stateDir = "/var/lib/authelia-main";
@@ -19,19 +20,18 @@ let
   adminsSubject = "group:${catalog.access.admins}";
   appSubject = name: "group:${catalog.access.groups.${name}}";
 
+  # what a route's rules match admits its group and the admins, with both factors, and nobody else
+  gate = name: match: [
+    (match // { policy = "two_factor"; subject = [ [ adminsSubject ] [ (appSubject name) ] ]; })
+    (match // { policy = "deny"; })
+  ];
   # access rules come from every route behind sso, either ingress: nixos services and swarm apps (modules/catalog.nix)
   ssoRoutes = lib.filterAttrs (_: r: r.off.sso == null) routes;
-  routeRules = lib.concatLists (lib.mapAttrsToList (name: r: let domain = [ (net.fqdn r.host) ]; in [
-    {
-      inherit domain;
-      policy = "two_factor";
-      subject = [ [ adminsSubject ] [ (appSubject name) ] ];
-    }
-    {
-      inherit domain;
-      policy = "deny";
-    }
-  ]) ssoRoutes);
+  routeRules = lib.concatLists (lib.mapAttrsToList (name: r: gate name { domain = [ (net.fqdn r.host) ]; }) ssoRoutes);
+  # a public route's ssoPaths, by the pattern its router matches them with (modules/traefik)
+  pathRoutes = lib.filterAttrs (_: r: r.ssoPaths != [ ]) routes;
+  pathRules = lib.concatLists (lib.mapAttrsToList (name: r:
+    gate name { domain = [ (net.fqdn r.host) ]; resources = map service.prefixPattern r.ssoPaths; }) pathRoutes);
 
   # every oidc client an instance declares (instance.nix `oidc`), its secret read at start by the template filter
   oidcClients = map (c: {
@@ -137,7 +137,8 @@ in {
 
       access_control = {
         default_policy = "deny";
-        rules = [
+        # ssoPaths first: no rule of their host, the portal's bypass included, may decide them
+        rules = pathRules ++ [
           {
             domain = [ (net.fqdn portal.host) ];
             policy = "bypass";

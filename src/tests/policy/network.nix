@@ -44,6 +44,38 @@ let
   autheliaRules = authelia.services.authelia.instances.main.settings.access_control.rules;
   ruleIndex = host: policy: lib.lists.findFirstIndex (r: r.domain == [ (net.fqdn host) ] && r.policy == policy) null autheliaRules;
 
+  # a route's ssoPaths: on its ingress, a router with authelia matches each by the lab's one pattern and outranks
+  # every router of the host without authelia but the probes'; authelia's first rule for host and path is a two_factor
+  # one, a deny of the same after it. A rule naming other paths is taken as not matching this one
+  service = import ../../modules/service.nix { inherit lib; };
+  # the probes' rank (modules/traefik probePriority): their health path alone passes by authelia
+  probeRank = 1000;
+  rankOf = r: r.priority or (lib.stringLength r.rule);
+  ingressOf = r: if r.zone == "internal" then internalIngress else edge;
+  pathLaw = name: r: path: let
+    host = net.fqdn r.host;
+    pattern = service.prefixPattern path;
+    routers = lib.filterAttrs (_: x: lib.hasInfix "Host(`${host}`)" x.rule) (websecure (ingressOf r));
+    gated = lib.filterAttrs (_: x: lib.elem "authelia" (x.middlewares or [ ]) && lib.hasInfix "PathRegexp(`${pattern}`)" x.rule) routers;
+    open = lib.filterAttrs (_: x: !(lib.elem "authelia" (x.middlewares or [ ])) && rankOf x < probeRank) routers;
+    lowest = lib.foldl' lib.min probeRank (map rankOf (lib.attrValues gated));
+    applies = rule: (lib.elem host rule.domain || lib.elem "*.${net.domain}" rule.domain) && (!(rule ? resources) || lib.elem pattern rule.resources);
+    first = lib.lists.findFirstIndex applies null autheliaRules;
+    firstRule = if first == null then { policy = null; } else lib.elemAt autheliaRules first;
+    denyAfter = first != null && lib.any (rule: applies rule && rule ? resources && rule.policy == "deny") (lib.drop first autheliaRules);
+  in
+    lib.optional (gated == { }) "route ${name}: no router with authelia matches ${host}${path}"
+    ++ map (n: "route ${name}: router ${n} outranks the authelia router of ${host}${path}") (lib.attrNames (lib.filterAttrs (_: x: rankOf x >= lowest) open))
+    ++ lib.optional (firstRule.policy != "two_factor" || !(firstRule ? resources) || !denyAfter)
+      "authelia: ${host}${path} needs its own two_factor rule ahead of every other rule for it, followed by a deny";
+  pathRoutes = lib.filterAttrs (_: r: r.ssoPaths != [ ]) (catalog.internal // catalog.external);
+
+  # the collector reads every exporter at its own port, never through an ingress's web ports, where ssoPaths bite
+  collectorConfig = configs.${inventory.${toString lab.roles.collector}.name};
+  scrapeTargets = lib.concatMap (job: lib.concatMap (c: c.targets or [ ]) (job.static_configs or [ ])) collectorConfig.services.prometheus.scrapeConfigs;
+  ingressDoors = lib.concatMap (z: map (port: "${net.ipOf z.ingress}:${toString port}") [ net.ports.http net.ports.https ])
+    (lib.filter (z: z.ingress != null) (lib.attrValues net.zones));
+
   appsSubnet = net.zones.apps.subnet;
   refusal = "!ClientIP(`${appsSubnet}`)";
   routerRules = router.networking.firewall.extraForwardRules;
@@ -57,7 +89,7 @@ let
   relays = lib.filterAttrs (_: r: lib.hasSuffix "-relay" r.service) (websecure edge);
 
   metricsBlocks = lib.filterAttrs (name: _: lib.hasSuffix "-metrics-block" name) (httpOf edge).routers;
-  appRouters = lib.filterAttrs (name: r: r ? service && lib.elem "websecure" (r.entryPoints or [ ]) && (r.priority or 0) < 1000
+  appRouters = lib.filterAttrs (name: r: r ? service && lib.elem "websecure" (r.entryPoints or [ ]) && (r.priority or 0) < probeRank
     && lib.any (a: lib.hasPrefix "${a}-" name || name == "${a}-tls") (lib.attrNames catalog.apps)) (httpOf edge).routers;
 
   # the methods a rule admits: those of a top-level method-only conjunct; null (any) without one or with a top-level ||
@@ -119,6 +151,10 @@ lawsOf {
       || ruleIndex r.host "deny" < ruleIndex r.host "two_factor")
       "authelia: ${r.host} needs a two_factor rule followed by a deny"
   ) ssoRoutes);
+
+  "sso paths" = lib.concatLists (lib.mapAttrsToList (name: r: lib.concatMap (pathLaw name r) r.ssoPaths) pathRoutes);
+
+  "direct scrapes" = map (t: "the collector scrapes ${t}, an ingress's web port") (lib.intersectLists ingressDoors scrapeTargets);
 
   # the apps zone may pull images and use nothing else on the internal ingress, robots.txt included
   "apps zone" = lib.concatLists (lib.mapAttrsToList (name: r: let

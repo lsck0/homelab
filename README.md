@@ -65,7 +65,10 @@ workstation's scripts, terraform) has its own folder. Tests, laws and docs do no
 with what it tests. `src/tests/policy/placement.nix` holds the tree to it.
 
 Every property is on by default and turned off where it does not fit, with its reason: `off.<feature> = "<why>";`
-(`src/modules/service.nix` lists the features).
+(`src/modules/service.nix` lists the features). A public route of the internal zone keeps prefixes of itself behind
+authelia with `ssoPaths = [ "/metrics" "/admin" ];`: the rest stays open, and the lab's own readers (the collector's
+scrapes) reach the backend port directly, never through the ingress. The edge has no authelia: an app's metrics on an
+external route are denied there for everyone instead (`catalog.metricsBlocks`).
 
 ### Adding an instance
 

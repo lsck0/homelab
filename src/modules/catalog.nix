@@ -11,7 +11,7 @@
 #   l4              route name -> tcp or udp route: forwarded from the house's publicPort, or lab-only without one
 #   forwarded       the l4 routes the router forwards from the house's public address
 #   access          { admins; groups.<name>; } the lldap groups authelia admits: admins everywhere, else the sso
-#                   route's or the oidc client's own group; lldap creates exactly these
+#                   route's (its ssoPaths' too) or the oidc client's own group; lldap creates exactly these
 #   nodes           the shared swarm's workers' addresses: the routing mesh answers every published port on each
 #   clusters        swarm name (`shared`, `app-<name>`) -> { managerId; workerIds; stateId; wakers; nodes; zone; apps;
 #                   admission }: wakers the guests calling its controller (the ingresses, the state worker's dumps)
@@ -146,8 +146,8 @@ let
   routesOf = zone: lib.listToAttrs (map (e: lib.nameValuePair e.name e.route)
     (lib.filter (e: e.route.protocol == "http" && e.route.zone == zone) routeEntries));
   l4Entries = lib.filter (e: e.route.protocol != "http") routeEntries;
-  # what authelia guards: every http route with sso on, either ingress, and every oidc client
-  ssoNames = map (e: e.name) (lib.filter (e: e.route.protocol == "http" && e.route.off.sso == null) routeEntries)
+  # what authelia guards: every http route with sso on or ssoPaths, either ingress, and every oidc client
+  ssoNames = map (e: e.name) (lib.filter (e: e.route.protocol == "http" && (e.route.off.sso == null || e.route.ssoPaths != [ ])) routeEntries)
     ++ map (c: c.id) lab.oidc;
 
   # every published port of every enabled app as { port; owner; where; group; }
@@ -183,6 +183,15 @@ let
     lib.optional (lib.length (lib.unique (map (e: e.owner) es)) > 1)
       "${what} ${k} is claimed by ${lib.concatMapStringsSep " and " (e: e.owner) es}"
   ) (lib.groupBy key entries));
+
+  # an ssoPath needs the internal ingress, which has authelia, a route that is public otherwise, and a prefix of its own
+  under = path: prefix: path == "/" || prefix == path || lib.hasPrefix "${path}/" prefix;
+  ssoPathProblems = lib.concatMap (e: let r = e.route; where = "${e.owner} route ${e.name}"; in
+    lib.optional (r.protocol != "http" || r.zone != "internal")
+      "${where}: ssoPaths need the internal ingress, the dmz reaches no authelia"
+    ++ lib.optional (r.off.sso == null) "${where}: ssoPaths on a route behind sso already: remove them"
+    ++ map (p: "${where}: ssoPaths ${p} lies outside the route's path ${r.path}, which never serves it") (lib.filter (p: !(under r.path p)) r.ssoPaths)
+  ) (lib.filter (e: e.route.ssoPaths != [ ]) routeEntries);
 
   # a host belongs to one owner, an instance or an app, whose routes split it by path
   hostOwners = map (e: { inherit (e) name owner; inherit (e.route) host; }) routeEntries;
@@ -306,6 +315,7 @@ in {
       (lib.intersectLists (lib.attrNames appsCatalog.apps) (lib.attrNames lab.routes))
     ++ hostProblems
     ++ zoneProblems
+    ++ ssoPathProblems
     ++ portProblems
     ++ lib.concatLists (lib.mapAttrsToList appProblems allApps)
     ++ lib.concatLists (lib.mapAttrsToList (name: c: map (p: "swarm ${name}: ${p}") (admissionOf c).problems) clusters)
