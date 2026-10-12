@@ -296,6 +296,9 @@ let
 
   # a start never fetches or upgrades a rule or its data
   crowdsecHub = import ./lib/crowdsec-hub.nix { inherit pkgs lib; };
+  # without it every start asks version.crowdsec.net which hub branch to install from, and a start without internet
+  # fails (the image's entrypoint installs its docker parsers at every start)
+  crowdsecLocalConfig = yamlDocs "config.yaml.local" [ { cscli.hub_branch = crowdsecHub.hubBranch; } ];
   # the owner's choice: the community api (CAPI) gets each ban's attacker ip, scenario and time, and returns the
   # community blocklist; an outage keeps the last decisions
   crowdsecCommunity = true;
@@ -934,6 +937,8 @@ in {
         install -m 0644 ${traefikAcquis} ${crowdsecDir}/config/acquis.d/traefik.yaml
         install -m 0644 ${appsecAcquis} ${crowdsecDir}/config/acquis.d/appsec.yaml
         install -m 0644 ${crsConfig} ${crowdsecDir}/config/appsec-configs/homelab-crs.yaml
+        # crowdsec merges it over the image's config.yaml: the entrypoint's hub installs never ask the internet
+        install -m 0644 ${crowdsecLocalConfig} ${crowdsecDir}/config/config.yaml.local
         # the ladder: its signals and the profiles that turn their alerts into rungs (lib/ladder.nix)
         install -d -m 0755 ${crowdsecDir}/config/scenarios
         rm -f ${crowdsecDir}/config/scenarios/homelab-*.yaml
