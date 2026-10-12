@@ -73,6 +73,8 @@ let
 in rec {
   inherit (facts) inventory site nasClients;
   inherit pki labprobe vlans;
+  # the named feature lists a fixture app opts into (modules/profiles.nix), as an app.nix gets them
+  profiles = import ../../modules/profiles.nix;
   testDefaults.globalTimeout = lib.mkDefault globalTimeoutS;
   secretValues = import ./secret-values.nix { inherit pkgs; };
   images = import ./images.nix { inherit pkgs; };

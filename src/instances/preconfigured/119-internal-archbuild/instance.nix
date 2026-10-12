@@ -1,5 +1,5 @@
 # arch package builds for the lsck0 pacman repo on the nas, wakes nightly
-{ id, net, ... }: {
+{ id, net, profiles, ... }: {
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
@@ -20,6 +20,7 @@
       port = 80;
       busyPath = "/busy";
       homepage = { group = "Dev"; icon = "arch-linux"; name = "Arch Build"; };
+      on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
   };
 

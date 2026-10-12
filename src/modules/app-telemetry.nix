@@ -301,6 +301,7 @@ in {
     # only the tasks reach the relay, over the bridge swarm gives them
     networking.firewall.interfaces.${gatewayBridge}.allowedTCPPorts = lib.attrValues relayPorts;
 
+    homelab.openings.appTelemetry = "the apps' log shipper, cadvisor and the tasks' telemetry relay";
     # vm-105 scrapes the shipper for what it dropped per app and cadvisor for the containers (modules/flows.nix)
     networking.firewall.allowedTCPPorts = [ telemetry.ports.promtail cadvisorPort ];
     homelab.ingressOnly.ports = [ telemetry.ports.promtail cadvisorPort ];

@@ -1,16 +1,10 @@
 # docker image registry and its ui, internal only
-{ lib, net, roles, swarmManagers, ... }:
+{ lib, net, roles, swarmManagers, profiles, ... }:
 let
   apiPort = 5000;
-  # docker clients: no browser login, no proof of work, layers the waf rules misread, nobody outside the lab
-  dockerClients = {
-    sso = "docker clients cannot follow a browser login";
-    anubis = "docker clients run no proof of work";
-    waf = "image layers the rules misread";
-    internet = "only the lab's builders and swarms";
-    bodyLimit = "image layers";
-    homepage = "no web ui; registry-ui has the card";
-  };
+  # docker clients: no browser login, image layers the waf rules misread, nobody outside the lab; no card
+  dockerClients = lib.subtractLists [ "sso" "waf" "bodyLimit" "internet" "cloudflare" ] profiles.hardenedInternal
+    ++ profiles.observed;
   # by socket address: the deploy controller, the forgejo runner's ci and the workstation
   pushers = map net.hostSource [ roles.app-builder roles.ci ] ++ [ "${net.wan.workstation}/32" ];
   pushUsers = { ci = "registry-push-password"; builder = "registry-builder-password"; };
@@ -30,7 +24,7 @@ in {
       methods = [ "GET" "HEAD" ];
       sources = lib.unique ([ net.zones.apps.subnet ] ++ map net.hostSource swarmManagers ++ pushers);
       basicAuth = { puller = "registry-pull-password"; } // pushUsers;
-      off = dockerClients;
+      on = dockerClients ++ [ "probe" ];
     };
     # writes; DELETE stays with the registry ui's own cleanup on this guest
     registry-push = {
@@ -39,9 +33,14 @@ in {
       methods = [ "POST" "PUT" "PATCH" ];
       sources = pushers;
       basicAuth = pushUsers;
-      off = dockerClients // { probe = "registry-api probes the same port"; };
+      # registry-api probes the same port
+      on = dockerClients;
     };
-    registry-ui = { port = 80; homepage = { group = "Dev"; icon = "docker-moby"; name = "Registry"; }; };
+    registry-ui = {
+      port = 80;
+      homepage = { group = "Dev"; icon = "docker-moby"; name = "Registry"; };
+      on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
+    };
   };
 
   shares = {

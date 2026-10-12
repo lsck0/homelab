@@ -1,5 +1,5 @@
 # Minecraft server; lazymc sleeps/wakes the server per real player logins
-{ config, ... }: {
+{ config, profiles, ... }: {
   vm = {
     bootPhase = "public";
     needs = [ "containers" "nfs" ];
@@ -18,7 +18,8 @@
     port = 25565;
     publicPort = config.services.minecraft.port;
     srv = "_minecraft._tcp";
-    off = { homepage = "a game server, no page"; };
+    # the router caps and logs its forward; a game server, no page
+    on = [ "inflightLimit" "accessLog" "probe" ] ++ profiles.observed;
   };
 
   shares = {

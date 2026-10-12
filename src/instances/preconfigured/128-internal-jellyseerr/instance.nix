@@ -1,5 +1,5 @@
 # media requests: movies, series, anime (-> Radarr/Sonarr)
-{ ... }: let port = 80; in {
+{ profiles, ... }: let port = 80; in {
   vm = {
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
@@ -31,6 +31,7 @@
         icon = "jellyseerr";
         widget = { tokens = { key = "jellyseerr-key"; }; type = "jellyseerr"; };
       };
+      on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
   };
 

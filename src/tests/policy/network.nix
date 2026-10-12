@@ -16,35 +16,37 @@ let
   websecure = config: lib.filterAttrs (_: r: lib.elem "websecure" (r.entryPoints or [ ])) (httpOf config).routers;
   lawsOf = laws: lib.concatLists (lib.mapAttrsToList (name: law: map (v: "${name}: ${v}") law) laws);
 
-  # the defences every public request passes, in order; `cloudflare-only` may come first, on the socket peer. The gate
-  # answers crowdsec's decisions before the waf spends anything on a banned client. Each limit runs per client, then
-  # per route (one route's budget over all its clients, modules/limits `route`). The body limit buffers before the
-  # retry: a retry inside it would resend a consumed body, empty
+  # the defences a request passes, in this order, each where its route opts in: `cloudflare-only` on the socket peer,
+  # the real client and the strip of its identity headers on every router. The gate answers crowdsec's decisions
+  # before the waf spends anything on a banned client. Each limit runs per client, then per route (one route's budget
+  # over all its clients, modules/limits `route`). The body limit buffers before the retry: a retry inside it would
+  # resend a consumed body, empty. The router's own middlewares (sso, its headers) come last
+  chainOrder = [
+    "cloudflare-only" "client-ip" "strip-client-headers" "gate" "crowdsec" "rate-limit" "route-rate-limit" "inflight-limit"
+    "route-inflight-limit" "body-limit" "retry-upstream" "secure-headers"
+  ];
+  # the entries of chainOrder named with a suffix: gate-<flags>, body-limit-<bytes>, secure-headers-<variant>
+  chainFamilies = [ "gate" "body-limit" "secure-headers" ];
+  # a middleware's entry of chainOrder (a limitScale's <limit>-x<scale> its limit's), null for a router's own
+  chainEntryOf = name: let unscaled = let s = builtins.match "(.*)-x[0-9]+" name; in if s == null then name else lib.head s; in
+    lib.findFirst (e: unscaled == e || (lib.elem e chainFamilies && lib.hasPrefix "${e}-" name)) null chainOrder;
+  chainRankOf = name: let e = chainEntryOf name; in
+    if e == null then lib.length chainOrder else lib.lists.findFirstIndex (x: x == e) null chainOrder;
   chainLawOf = host: routers: lib.concatLists (lib.mapAttrsToList (name: r:
     let
       m = r.middlewares or [ ];
-      # padded, so a short chain fails the comparison instead of the evaluation
-      chain = if lib.head (m ++ [ "" ]) == "cloudflare-only" then lib.tail m else m;
-      padded = chain ++ lib.genList (_: "") 10;
-      rest = lib.drop 2 padded;
-      afterGate = lib.tail rest;
-      afterWaf = if lib.head afterGate == "crowdsec" then lib.tail afterGate else afterGate;
-      limits = [ "rate-limit" "route-rate-limit" "inflight-limit" "route-inflight-limit" ];
-      # a route's limitScale names its set `<limit>-x<scale>` (modules/traefik)
-      unscaled = n: let s = builtins.match "(.*)-x[0-9]+" n; in if s == null then n else lib.head s;
-      afterLimits = lib.drop (lib.length limits) afterWaf;
-      afterBody = if lib.hasPrefix "body-limit-" (lib.head afterLimits) then lib.tail afterLimits else afterLimits;
+      ranks = map chainRankOf m;
+      has = entry: lib.any (n: chainEntryOf n == entry) m;
     in
-    lib.optional (lib.take 2 chain != [ "client-ip" "strip-client-headers" ]
-      || !(lib.hasPrefix "gate" (lib.head rest))
-      || map unscaled (lib.take (lib.length limits) afterWaf) != limits
-      || lib.head afterBody != "retry-upstream"
-      || !(lib.hasPrefix "secure-headers" (lib.elemAt afterBody 1)))
-      "${host} router ${name}: chain ${toString m} is not [cloudflare-only], client-ip, strip-client-headers, gate*, [crowdsec], ${toString limits}, [body-limit-*], retry-upstream, secure-headers*"
+    lib.optional (ranks != lib.sort lib.lessThan ranks || !(has "client-ip") || !(has "strip-client-headers") || !(has "retry-upstream"))
+      "${host} router ${name}: chain ${toString m} is not in the order ${toString chainOrder}, client-ip, strip-client-headers and retry-upstream on every router"
+    ++ lib.optional (has "crowdsec" && !(has "gate")) "${host} router ${name}: the waf runs without the gate in front"
+    ++ lib.optional (has "rate-limit" != has "route-rate-limit" || has "inflight-limit" != has "route-inflight-limit")
+      "${host} router ${name}: a limit runs per client or per route alone"
   ) routers);
   chainLaw = host: config: chainLawOf host (websecure config);
 
-  ssoRoutes = lib.filterAttrs (_: r: r.off.sso == null) catalog.internal;
+  ssoRoutes = lib.filterAttrs (_: r: lib.elem "sso" r.on) catalog.internal;
   autheliaRules = authelia.services.authelia.instances.main.settings.access_control.rules;
   ruleIndex = host: policy: lib.lists.findFirstIndex (r: r.domain == [ (net.fqdn host) ] && r.policy == policy) null autheliaRules;
 
@@ -310,5 +312,5 @@ lawsOf {
       "${name}: the prober reaches port ${toString r.port} past the ingress"
     ++ lib.optional (lib.elem (net.hostSource lab.roles.dashboard) admitted && !queried)
       "${name}: the dashboard reaches port ${toString r.port} past the ingress, with no widget querying it"
-  ) (lib.filterAttrs (_: r: r.vmid != null && r.off.sso == null) catalog.internal));
+  ) (lib.filterAttrs (_: r: r.vmid != null && lib.elem "sso" r.on) catalog.internal));
 }

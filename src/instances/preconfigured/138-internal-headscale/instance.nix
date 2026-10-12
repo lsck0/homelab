@@ -1,5 +1,5 @@
 # Tailscale control server (VPN mesh) + Headplane UI; internal, not dmz: it controls mesh membership
-{ id, config, ... }: {
+{ lib, id, config, profiles, ... }: {
   vm = {
     bootPhase = "network";
     needs = [ "containers" "nfs" ];
@@ -26,6 +26,7 @@
         pkce = false;
         tokenAuthMethod = "client_secret_post";
       };
+      on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
     headscale = {
       host = "hs";
@@ -38,12 +39,8 @@
         pkce = true;
         tokenAuthMethod = "client_secret_basic";
       };
-      off = {
-        sso = "tailscale clients cannot log in to authelia";
-        anubis = "tailscale clients run no proof of work";
-        captcha = "tailscale clients solve no captcha";
-        waf = "tailscale's control protocol the rules misread";
-      };
+      # tailscale clients log in to no portal, solve no captcha, and speak a control protocol the waf rules misread
+      on = lib.subtractLists [ "sso" "captcha" "waf" ] profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
   };
 

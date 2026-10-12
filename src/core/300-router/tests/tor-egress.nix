@@ -1,4 +1,4 @@
-# the tor egress class (instance.nix `egress.via = "tor"`) on the real router: a member's internet tcp ends at tor's
+# the tor egress class (`profiles.torEgress`) on the real router: a member's internet tcp ends at tor's
 # TransPort, is refused while tor is down and dropped once the redirect is gone, its udp has no way out and nothing
 # of it reaches the house; its names go to tor's DNSPort, its lab traffic stays direct. A vpn member and a plain
 # guest beside it keep their own paths: the tunnel, and the house masqueraded.

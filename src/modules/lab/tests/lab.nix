@@ -1,7 +1,7 @@
 # the collector's rules (modules/lab `problems`), table by table: every broken tree below is refused with a
 # line naming the fix, and the real tree holds. A tree is the real zones, site and swarm plus the given folders.
 # Adding is one folder: the real tree plus a copy of each template (instances/preconfigured/_template,
-# instances/custom/_template) is a lab whose new guest is a host with an address, a route, a card, its grants and
+# instances/custom/_template) is a lab whose new guest is a host with an address, a plain route, its grants and
 # shares, and whose new app is in the catalog. The desktop clients' lab.json (modules/lab-export.nix) keeps its
 # guests' shape.
 { pkgs, lib, ... }:
@@ -76,7 +76,7 @@ let
     "the folder is a host" = (grown.hosts.${addedFolder}.main or null) != null;
     "the guest has its zone's address" = addedIp == cidr.host zoneSubnet (lib.toInt added.id);
     "its service is a route" = (grown.routes.${added.service}.vmid or null) == lib.toInt added.id;
-    "its service has a card" = lib.any (c: c.route == added.service) grown.homepage;
+    "its service is plain, no card" = grown.routes.${added.service}.on == [ ] && !(lib.any (c: c.route == added.service) grown.homepage);
     "its grant names the role's guest" = lib.any (g: g.to == added.id && g.from == [ grown.roles.operator ]) grown.grants;
     "its share is exported to it" = lib.any (s: s.path == "/srv/nas/${added.share}") (grown.nasClients.${addedIp} or [ ]);
     "the app is in the catalog" = grown.catalog.apps ? ${added.app};

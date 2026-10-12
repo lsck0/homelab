@@ -1,5 +1,5 @@
 # music streaming (Subsonic API)
-{ id, config, ... }: {
+{ id, config, profiles, ... }: {
   vm = {
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
@@ -27,6 +27,7 @@
       host = "music";
       port = 80;
       homepage = { description = "Music"; group = "Media"; icon = "navidrome"; };
+      on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
   };
 

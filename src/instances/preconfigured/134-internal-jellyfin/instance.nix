@@ -1,5 +1,5 @@
 # media streaming + Janitorr (deletes media unwatched for months)
-{ lib, site, ... }:
+{ lib, site, profiles, ... }:
 let
   port = 80;
   ollama = import ../../../modules/ollama.nix;
@@ -54,13 +54,10 @@ in {
         pkce = false;
         tokenAuthMethod = "client_secret_post";
       };
-      off = {
-        sso = "logs in itself through authelia oidc (sso plugin); apps use quick connect";
-        anubis = "the jellyfin apps run no proof of work";
-        captcha = "the jellyfin apps solve no captcha";
-        anonymousLimit = "the apps fetch a library's posters in bursts; jellyfin checks its own accounts";
-        bodyLimit = "image and plugin uploads";
-      };
+      # logs in itself through authelia oidc (sso plugin); the apps use quick connect, solve no captcha and fetch a
+      # library's posters in bursts; image and plugin uploads
+      on = lib.subtractLists [ "sso" "captcha" "anonymousLimit" "bodyLimit" ] profiles.hardenedInternal
+        ++ profiles.listed ++ profiles.observed;
     };
   };
 

@@ -58,7 +58,7 @@ let
 
   nfsPorts = [ ports.rpcbind ports.nfs ];
   torPorts = import ./tor-ports.nix;
-  # the guests whose internet traffic leaves through the router's tor (instance.nix `egress`), by zone
+  # the guests whose internet traffic leaves through the router's tor (instance.nix `on`), by zone
   torMembersByZone = lib.groupBy (id: (net.zoneOf id).name) (lib.attrNames (lib.filterAttrs (_: e: e.via == "tor") lab.egress));
   # the push doors only: no sender outside the internal zone reaches a query api
   appTelemetryPorts = with telemetry.ports; [ journalRemote otlpGrpc otlpHttp pyroscope lokiPush ];
@@ -119,7 +119,7 @@ let
   probeGrants = map (r: {
     from = [ collector ]; to = toString r.vmid; tcp = [ r.port ];
     why = "vm-105 probes the lab-only tcp route ${r.host}";
-  }) (lib.filter (r: r.vmid != null && r.protocol == "tcp" && r.publicPort == null && r.off.probe == null) (lib.attrValues catalog.l4));
+  }) (lib.filter (r: r.vmid != null && r.protocol == "tcp" && r.publicPort == null && lib.elem "probe" r.on) (lib.attrValues catalog.l4));
 
   # the router's tor hands an onion route's visitors to the edge (core/300-router/lib/onion-services.nix)
   onionGrants = lib.optional (lib.any (r: r.onionAddress != null) (lib.attrValues catalog.external)) {
@@ -280,14 +280,15 @@ in
     {
       proto = "tcp"; port = ports.https; addresses = [ (net.ipOf edge) ]; targetPort = ports.https;
       host = null; srv = null; why = "every public route";
-      off = { inflightLimit = "the edge limits every client itself"; accessLog = "traefik logs every request"; };
+      # the edge limits and logs every client itself
+      on = [ ];
     }
   ]
   # every forwarded tcp and udp route (an instance service's or an app's) to every guest answering it, while one runs
   ++ lib.filter (f: f.addresses != [ ]) (map (r: {
     proto = r.protocol; port = r.publicPort; targetPort = r.port;
     addresses = map net.ipOf (backendIdsOf r);
-    inherit (r) host srv off;
+    inherit (r) host srv on;
     why = "${r.protocol} ${net.fqdn r.host}";
   }) (lib.attrValues catalog.forwarded));
 }

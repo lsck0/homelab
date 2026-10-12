@@ -1,5 +1,5 @@
 # encrypted pastebin
-{ ... }: {
+{ lib, profiles, ... }: {
   vm = {
     bootPhase = "public";
     needs = [ "containers" "nfs" ];
@@ -12,11 +12,8 @@
       host = "paste";
       port = 80;
       homepage = { group = "Public"; icon = "privatebin"; name = "PrivateBin"; };
-      off = {
-        sso = "public pastebin";
-        cloudflare = "anubis fronts it at the edge";
-        bodyLimit = "privatebin caps pastes itself";
-      };
+      # anubis fronts it at the edge; privatebin caps pastes itself
+      on = lib.subtractLists [ "cloudflare" "bodyLimit" ] profiles.hardenedExternal ++ profiles.listed ++ profiles.observed;
     };
   };
 

@@ -17,14 +17,17 @@ let
   requestTimeoutS = 10;
   guestMemoryMiB = 1536;
 
+  inherit (lab) profiles;
   appOf = name: extra: {
     enable = true;
     repo = "lsck0/${name}";
     branch = "master";
-    routes.${name} = { port = ports.${name}; health = "/"; off = { sso = "the fixture is public"; anubis = "no browser here"; }; };
+    # no browser here
+    routes.${name} = { port = ports.${name}; health = "/"; on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ]; };
     resources.web = task;
     reservation = { memoryMiB = 256; cpus = 0.5; };
-    off.scaleToZero = "the test places apps; app-idle wakes them";
+    # stays up: the test places apps, app-idle wakes them
+    on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
   } // extra;
   apps = {
     level = appOf "level" { };

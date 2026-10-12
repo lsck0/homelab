@@ -1,6 +1,7 @@
 # webapp-template's core; its own monitoring and edge services stay out, the homelab provides them
+{ lib, profiles, ... }:
 let
-  public = "the template's public web app";
+  public = profiles.hardenedExternal ++ [ "probe" ];
   # services/core/nginx/security_headers.conf; the edge's own frame DENY and referrer policy are stricter
   headers = {
     contentSecurityPolicy = builtins.concatStringsSep " " [
@@ -35,14 +36,15 @@ in
     redis = { context = "services/storage/redis"; dockerfile = "services/storage/redis/Dockerfile"; };
   };
   routes = {
-    wat = { service = "client"; targetPort = 80; port = 20120; off.sso = public; inherit headers; };
+    wat = { service = "client"; targetPort = 80; port = 20120; on = public; inherit headers; };
     wat-api = {
       path = "/api";
       service = "server";
       targetPort = 80;
       port = serverPort;
       health = "/api/health";
-      off = { sso = public; anubis = "api calls run no proof of work"; };
+      # api calls run no proof of work
+      on = lib.remove "anubis" public;
       inherit headers;
     };
     # presigned s3 urls into garage, with the template's 100 MiB upload cap
@@ -52,11 +54,20 @@ in
       targetPort = 3900;
       port = 20122;
       bodyLimitBytes = 100 * 1024 * 1024;
-      off = { sso = public; anubis = "presigned urls are fetched by scripts"; waf = "file uploads the rules misread"; };
+      # presigned urls are fetched by scripts, file uploads the waf rules misread
+      on = lib.subtractLists [ "anubis" "waf" ] public;
       inherit headers;
     };
     # the sql console, never public; pgweb asks for its basic auth on /, so no health check
-    wat-db = { zone = "internal"; host = "wat-db"; service = "pgweb"; targetPort = 8081; port = 20123; health = null; };
+    wat-db = {
+      zone = "internal";
+      host = "wat-db";
+      service = "pgweb";
+      targetPort = 8081;
+      port = 20123;
+      health = null;
+      on = profiles.hardenedInternal ++ [ "probe" ];
+    };
   };
   # consistent sql, nightly to the nas; the volume itself is not archived (see `volumes`)
   dumps.postgres = { service = "postgres"; command = "pg_dumpall -U admin"; };
@@ -128,7 +139,9 @@ in
     wat-garage-files-secret = "hex:32";
   };
   images = [ socat ];
-  off.scaleToZero = "the postgres service's wal-g loop pushes the nightly base backup from inside the stack; asleep it pushes none (alerts.walg_stale)";
+  # stays up: the postgres service's wal-g loop pushes the nightly base backup from inside the stack; asleep it pushes
+  # none (alerts.walg_stale)
+  on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
   # the rust server pushes profiles to a hardcoded http://pyroscope:4040; this stand-in forwards them to vm-105
   override.services.pyroscope = {
     image = socat;

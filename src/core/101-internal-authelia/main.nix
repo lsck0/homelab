@@ -26,7 +26,7 @@ let
     (match // { policy = "deny"; })
   ];
   # access rules come from every route behind sso, either ingress: nixos services and swarm apps (modules/catalog.nix)
-  ssoRoutes = lib.filterAttrs (_: r: r.off.sso == null) routes;
+  ssoRoutes = lib.filterAttrs (_: r: lib.elem "sso" r.on) routes;
   routeRules = lib.concatLists (lib.mapAttrsToList (name: r: gate name { domain = [ (net.fqdn r.host) ]; }) ssoRoutes);
   # a public route's ssoPaths, by the pattern its router matches them with (modules/traefik)
   pathRoutes = lib.filterAttrs (_: r: r.ssoPaths != [ ]) routes;

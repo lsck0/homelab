@@ -2,8 +2,9 @@
 #
 # The real swarm (manager vm-140, worker vm-250, nas vm-109) behind the real edge (vm-200, offline crowdsec), whose
 # on-demand proxy wakes an app through the manager's controller (lib/controller-api.py). `lazy` stops after its
-# idle window, `steady` opts out. A request to a sleeping app is held until the app answers, within coldStartMaxS
-# and without an image pull; a deploy of a sleeping app runs its new version once and puts it back to sleep.
+# idle window, `steady` stays up without scaleToZero. A request to a sleeping app is held until the app answers,
+# within coldStartMaxS and without an image pull; a deploy of a sleeping app runs its new version once and puts it
+# back to sleep.
 { pkgs, lib, specialArgs, ... }:
 let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: apps; };
@@ -27,18 +28,23 @@ let
     config.Cmd = [ "httpd" "-f" "-p" "8000" "-h" "/www" ];
   };
   images = { v1 = imageOf "v1"; v2 = imageOf "v2"; };
+  inherit (lab) profiles;
+  # every telemetry and the card, as an app the owner deploys
+  appOn = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
   appOf = name: port: extra: lib.recursiveUpdate {
     enable = true;
     repo = "lsck0/${name}";
     branch = "master";
-    routes.${name} = { inherit port; health = "/"; off = { sso = "the fixture is public"; anubis = "no browser here"; }; };
+    # no browser here
+    routes.${name} = { inherit port; health = "/"; on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ]; };
     # both apps and a deploy's surge on the one worker (modules/limits workerCountOf)
     resources.web.memoryMiB = 128;
     reservation.memoryMiB = 256;
+    on = appOn ++ [ "scaleToZero" ];
   } extra;
   apps = {
     lazy = appOf "lazy" 20180 { idle.stopAfter = idleWindow; };
-    steady = appOf "steady" 20190 { off.scaleToZero = "the fixture that stays up"; };
+    steady = appOf "steady" 20190 { on = appOn; };
   };
   common = {
     networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];

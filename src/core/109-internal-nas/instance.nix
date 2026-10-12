@@ -1,5 +1,5 @@
 # storage: NFS + SMB + Syncthing + FileBrowser, Kopia backups of it
-{ lib, site, telemetry, ... }: {
+{ lib, site, telemetry, profiles, ... }: {
   roles = [ "nas" ];
 
   vm = {
@@ -14,14 +14,15 @@
     disks = lib.optional (site.bulk != null) { sizeGiB = site.bulk.sizeGiB; store = "bulk"; };
   };
 
-  services = {
-    kopia = { host = "backup"; port = 51515; homepage = { group = "Core"; icon = "kopia"; }; };
+  services = let on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed; in {
+    kopia = { host = "backup"; port = 51515; homepage = { group = "Core"; icon = "kopia"; }; inherit on; };
     nas = {
       port = 80;
       homepage = { group = "Core"; icon = "mdi-nas"; name = "NAS"; };
-      off = { bodyLimit = "file uploads through filebrowser"; };
+      # file uploads through filebrowser
+      on = lib.remove "bodyLimit" on;
     };
-    syncthing = { host = "sync"; port = 8384; homepage = { group = "Core"; icon = "syncthing"; }; };
+    syncthing = { host = "sync"; port = 8384; homepage = { group = "Core"; icon = "syncthing"; }; inherit on; };
   };
 
   alerts = let

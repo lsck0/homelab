@@ -1,5 +1,5 @@
 # document management (paperless-ngx) and paperless-ai auto-tagging
-{ id, config, ... }: {
+{ lib, id, config, profiles, ... }: {
   vm = {
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
@@ -17,9 +17,10 @@
 
   tokens = [ "paperless-key" ];
 
-  services = {
-    paperless = { port = 8080; homepage = { icon = "paperless-ngx"; }; off = { bodyLimit = "document uploads"; }; };
-    paperless-ai = { port = 80; homepage = { icon = "paperless-ngx"; name = "Paperless AI"; }; };
+  services = let on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed; in {
+    # document uploads
+    paperless = { port = 8080; homepage = { icon = "paperless-ngx"; }; on = lib.remove "bodyLimit" on; };
+    paperless-ai = { port = 80; homepage = { icon = "paperless-ngx"; name = "Paperless AI"; }; inherit on; };
   };
 
   shares = {

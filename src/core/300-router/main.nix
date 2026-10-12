@@ -9,7 +9,7 @@
 # Sources are bound to their interface before any of it (table antispoof), and proxmox binds a guest to its address
 # inside a zone (lib.tf FIREWALL).
 #
-# Egress classes (instance.nix `egress`): a member's internet-bound traffic leaves through its exit or not at all,
+# Egress classes (instance.nix `on`): a member's internet-bound traffic leaves through its exit or not at all,
 # its lab traffic (any private destination) stays direct. vpn marks it into the tunnel's routing table; tor redirects
 # its tcp into tor's TransPort and answers its dns from tor's DNSPort (coredns view), and the killswitch drops the
 # rest (udp, icmp), which tor cannot carry. Transparent on the router, so a member needs no proxy setting per app and
@@ -65,7 +65,7 @@ let
   inputRules = lib.concatStringsSep "\n" (lib.concatMap flowRules flows.router);
 
   # -------------------------------------------------------------------------------------------------------------
-  # EGRESS CLASSES (an instance's `egress`, collected by modules/lab)
+  # EGRESS CLASSES (an instance's `on`, collected by modules/lab `egress`)
   # -------------------------------------------------------------------------------------------------------------
 
   # the vpn exit: a mark selects a routing table whose default is the tunnel and whose fallback is a blackhole
@@ -125,10 +125,10 @@ let
   directHosts = { smb = net.ipOf lab.roles.nas; } // lib.mapAttrs' (_: r: lib.nameValuePair r.host (net.ipOf (toString r.vmid)))
     (lib.filterAttrs (_: r: r.vmid != null && r.publicPort == null) catalog.l4);
 
-  # public names: the routes the internet reaches, proxied unless one opts out; install lines, the wireguard
+  # public names: the routes taking internet, proxied where they take cloudflare; install lines, the wireguard
   # endpoint and port forwards are raw by nature
-  routeHosts = side: map (r: { inherit (r) host; proxied = r.off.cloudflare == null; })
-    (lib.filter (r: r.off.internet == null) (lib.attrValues catalog.${side}));
+  routeHosts = side: map (r: { inherit (r) host; proxied = lib.elem "cloudflare" r.on; })
+    (lib.filter (r: lib.elem "internet" r.on) (lib.attrValues catalog.${side}));
   allRouteHosts = routeHosts "internal" ++ routeHosts "external"
     ++ map (host: { inherit host; proxied = true; }) internalExtraHosts;
   proxiedHosts = lib.unique (map (r: r.host) (lib.filter (r: r.proxied) allRouteHosts));
@@ -475,7 +475,7 @@ in {
     '';
   };
 
-  # PORT FORWARDS: the wan address only, from forwardSources; each capped and its clients logged unless its route's `off`
+  # PORT FORWARDS: the wan address only, from forwardSources; capped and its clients logged where its route opts in
   networking.nftables.tables.port-forwards = {
     family = "ip";
     content = ''
@@ -483,9 +483,9 @@ in {
         type nat hook prerouting priority dstnat - 1; policy accept;
     '' + lib.concatMapStrings (f: let match = "iifname ${forwardSources} ip daddr ${net.wan.address} ${f.proto} dport ${toString f.port}"; in ''
         # ${f.why}
-    '' + lib.optionalString (f.off.inflightLimit or null == null) ''
+    '' + lib.optionalString (lib.elem "inflightLimit" f.on) ''
         ${match} ct state new ct count over ${toString forwardConnsMax} counter drop
-    '' + lib.optionalString (f.off.accessLog or null == null) ''
+    '' + lib.optionalString (lib.elem "accessLog" f.on) ''
         ${match} ct state new limit rate ${toString forwardLogPerMinute}/minute log prefix "forward ${toString f.port}: "
     '' + ''
         ${match} dnat to ${dnatTarget f}

@@ -58,15 +58,17 @@ let
     config.Cmd = [ "httpd" "-f" "-p" "8000" "-h" "/www" ];
   };
 
+  inherit (lab) profiles;
   appOf = name: metricsPath: {
     enable = true;
     repo = "lsck0/${name}";
     branch = "master";
     # anubis is core/200-external-traefik/tests/edge-apps.nix's subject; a flood here must reach the app's own limits, not a challenge
-    routes.${name} = { port = ports.${name}; health = "/"; off = { sso = "the fixture is public"; anubis = "no browser here"; }; };
+    routes.${name} = { port = ports.${name}; health = "/"; on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ]; };
     metrics.web = { service = "web"; targetPort = 8000; port = ports.${name} + 1; path = metricsPath; };
     resources.web = task;
-    off.scaleToZero = "a flood here meets the app's own limits, not its wake proxy (app-idle wakes apps)";
+    # stays up: a flood here meets the app's own limits, not its wake proxy (app-idle wakes apps)
+    on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
   };
   apps = { quiet = appOf "quiet" "/metrics.txt"; noisy = appOf "noisy" "/big.txt"; };
 

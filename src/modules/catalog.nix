@@ -6,7 +6,7 @@
 # catalog (`lab.catalog`, its `problems` stopping the flake) and every host gets it as the argument `catalog`.
 #
 #   apps            the enabled apps, normalized by the schema, `{{homelab.*}}` endpoints resolved
-#   internal        route name -> route served by vm-100, behind authelia unless its `off.sso` says why not
+#   internal        route name -> route served by vm-100, behind authelia with its sso feature
 #   external        route name -> route served by the edge, vm-200; onionAddress its onion service's (lab.onions) or null
 #   l4              route name -> tcp or udp route: forwarded from the house's publicPort, or lab-only without one
 #   forwarded       the l4 routes the router forwards from the house's public address
@@ -20,7 +20,8 @@
 #   builder         the app builder's inventory entry
 #   swarm           { managerId; builderId; stateId; controllerPort; cadvisorPort; taskDefaults; ports; portRange; }
 #   ports           { external; internal; metrics; tcp; udp; } the enabled apps' published ports by group: http by
-#                   its zone, exporters, and the tcp and udp ports of l4 routes, which answer anyone
+#                   its zone, exporters, and the tcp and udp ports of l4 routes, which answer anyone; `guarded` those
+#                   of the routes taking the guard and every exporter's, by group in that order
 #   secretRefs      the sops secrets a string names as {{name}}
 #   metricsBlocks   [{ app; host; path; }] metrics a public route would expose: the edge denies them
 #   appsZone        the workers' subnet (cidr, modules/net.nix)
@@ -48,6 +49,9 @@ let
   swarmPorts = { manager = net.ports.swarmManager; gossip = net.ports.swarmGossip; vxlan = net.ports.vxlan; };
   # an app publishes a port for each http route by its zone, each l4 route by its protocol, and each exporter
   groups = [ "external" "internal" "metrics" "tcp" "udp" ];
+  # the switches of a service record (`services`): an instance service's own, an app's beside its routes'
+  instanceFeatures = service.protectionFeatures ++ service.telemetryFeatures;
+  appFeatures = service.telemetryFeatures ++ service.platformFeatures;
 
   # `{{homelab.<name>}}` in an app's env or override: lab endpoints an app may not hard-code. Telemetry at the relay
   # on the task's own node; origin-<route> where an app's route lives for its users
@@ -149,24 +153,28 @@ let
     (lib.filter (e: e.route.protocol == "http" && e.route.zone == zone) routeEntries));
   l4Entries = lib.filter (e: e.route.protocol != "http") routeEntries;
   # what authelia guards: every http route with sso on or ssoPaths, either ingress, and every oidc client
-  ssoNames = map (e: e.name) (lib.filter (e: e.route.protocol == "http" && (e.route.off.sso == null || e.route.ssoPaths != [ ])) routeEntries)
+  ssoNames = map (e: e.name) (lib.filter (e: e.route.protocol == "http" && (lib.elem "sso" e.route.on || e.route.ssoPaths != [ ])) routeEntries)
     ++ map (c: c.id) lab.oidc;
 
-  # every published port of every enabled app as { port; owner; where; group; }
+  # every published port of every enabled app as { port; owner; where; group; guarded; }: an http route's guarded where
+  # it takes the guard, an exporter's always (vm-105 alone scrapes it)
   uses = lib.concatLists (lib.mapAttrsToList (app: a:
     lib.mapAttrsToList (key: p: {
       inherit (p) port;
       group = if p.protocol == "http" then p.zone else p.protocol;
       owner = "${app}/${p.service}:${toString p.targetPort}";
       where = "apps.${app}.routes.${key}";
+      guarded = p.protocol == "http" && lib.elem "guard" p.on;
     }) a.routes
     ++ lib.mapAttrsToList (key: p: {
       inherit (p) port;
       group = "metrics";
       owner = "${app}/${p.service}:${toString p.targetPort}";
       where = "apps.${app}.metrics.${key}";
+      guarded = true;
     }) a.metrics
   ) apps);
+  portsOf = group: uses: lib.unique (map (u: u.port) (lib.filter (u: u.group == group) uses));
 
   # a metrics endpoint served by a container port that a public path also routes to is public unless denied
   metricsBlocks = lib.concatLists (lib.mapAttrsToList (app: a: lib.concatMap (m:
@@ -191,7 +199,7 @@ let
   ssoPathProblems = lib.concatMap (e: let r = e.route; where = "${e.owner} route ${e.name}"; in
     lib.optional (r.protocol != "http" || r.zone != "internal")
       "${where}: ssoPaths need the internal ingress, the dmz reaches no authelia"
-    ++ lib.optional (r.off.sso == null) "${where}: ssoPaths on a route behind sso already: remove them"
+    ++ lib.optional (lib.elem "sso" r.on) "${where}: ssoPaths on a route behind sso already: remove them"
     ++ map (p: "${where}: ssoPaths ${p} lies outside the route's path ${r.path}, which never serves it") (lib.filter (p: !(under r.path p)) r.ssoPaths)
   ) (lib.filter (e: e.route.ssoPaths != [ ]) routeEntries);
 
@@ -234,17 +242,17 @@ let
       unknownPlaceholders
     ++ map (n: "${where}: {{homelab.${n}}} is no lab endpoint; known: ${lib.concatStringsSep ", " (lib.attrNames labEndpoints)}")
       (lib.subtractLists (lib.attrNames labEndpoints) lab)
-    ++ lib.optional (lib.intersectLists (lib.attrNames telemetryEndpoints) lab != [ ] && a.off.traces != null && a.off.profiles != null)
-      "${where} names {{homelab.*}} telemetry endpoints with traces and profiles off: the workers would drop its traffic"
+    ++ lib.optional (lib.intersectLists (lib.attrNames telemetryEndpoints) lab != [ ] && !(telemetry.sendsSignals a))
+      "${where} names {{homelab.*}} telemetry endpoints without traces or profiles in `on`: the workers would drop its traffic"
+    ++ lib.concatLists (lib.mapAttrsToList (name: service.featureProblemsOf "${where}.routes.${name}") a.routes)
     ++ map (d: "${where}.dumps.${d}.service ${a.dumps.${d}.service} is not stateful: a dump runs on the state worker only")
       (lib.filter (d: !(lib.elem a.dumps.${d}.service a.stateful)) (lib.attrNames a.dumps))
     ++ map (s: "${where}.exclude drops ${s}, which the catalog still uses (stateful, published, env or resources)")
       (lib.intersectLists a.exclude (a.stateful ++ published ++ envServices ++ lib.attrNames a.resources))
-    # every app scales to zero (modules/apps-catalog stopAfterDefault); staying up is a decision with its reason
-    ++ lib.optional (a.idle.stopAfter == null && a.off.scaleToZero == null)
-      "${where}.idle.stopAfter is null without a reason: an app that stays up says why in `off.scaleToZero`"
-    ++ lib.optional (a.idle.stopAfter != null && a.off.scaleToZero != null)
-      "${where}: off.scaleToZero says it stays up, idle.stopAfter ${a.idle.stopAfter} stops it: keep one"
+    ++ lib.optional (a.idle.stopAfter == null && lib.elem "scaleToZero" a.on)
+      "${where}: scaleToZero with idle.stopAfter null never sleeps: drop one"
+    ++ lib.optional (a.idle.stopAfter != null && !(lib.elem "scaleToZero" a.on))
+      "${where}.idle.stopAfter ${a.idle.stopAfter} stops it without scaleToZero in `on`: add it"
     ++ lib.optional (a.enable && a.routes == { } && a.metrics == { })
       "${where} publishes nothing: give it `routes` or `metrics`, or disable it"
     ++ lib.concatLists (lib.mapAttrsToList (service: r: map (limit:
@@ -256,7 +264,7 @@ let
     inherit (r) vmid zone;
     app = null;
     routes = [ name ];
-    on = service.enabledOf r.off;
+    on = service.enabledOf instanceFeatures r.on;
     inherit (lab.instances.${toString r.vmid}.config) idle;
     inherit (lab.instances.${toString r.vmid}.config.services.${name}) metrics;
   }) lab.routes // lib.mapAttrs (app: a: {
@@ -265,7 +273,7 @@ let
     inherit app;
     inherit (a) metrics idle cluster;
     routes = lib.attrNames a.routes;
-    on = service.enabledOf a.off;
+    on = service.enabledOf appFeatures a.on;
   }) apps;
 in {
   inherit apps nodes domain metricsBlocks services secretRefs;
@@ -284,7 +292,9 @@ in {
     inherit portRange;
   };
 
-  ports = lib.genAttrs groups (group: lib.unique (map (u: u.port) (lib.filter (u: u.group == group) uses)));
+  ports = lib.genAttrs groups (group: portsOf group uses) // {
+    guarded = lib.concatMap (group: portsOf group (lib.filter (u: u.guarded) uses)) groups;
+  };
 
   appsZone = net.zones.apps.subnet;
 
@@ -312,7 +322,7 @@ in {
     ++ map (e: "${e.owner} route ${e.name}: onion serves a public http route of the edge only")
       (lib.filter (e: e.route.onion && (e.route.protocol != "http" || e.route.zone != "external")) routeEntries)
     # an idle deployment sleeps until an ingress's wake proxy sees a connection; the router forwards past it
-    ++ map (e: "${e.owner} route ${e.name}: a ${e.route.protocol} route goes from the router straight to its backend, which no wake proxy sees; its deployment cannot idle${lib.optionalString (e.route.app != null) ": keep it up with off.scaleToZero"}")
+    ++ map (e: "${e.owner} route ${e.name}: a ${e.route.protocol} route goes from the router straight to its backend, which no wake proxy sees; its deployment cannot idle${lib.optionalString (e.route.app != null) ": keep it up without scaleToZero"}")
       (lib.filter (e: if e.route.app != null then apps.${e.route.app}.idle.stopAfter != null
         else inventory.${toString e.route.vmid}.idle != null) l4Entries)
     # the house's public address: https for the ingresses, wireguard for the owner's devices, every l4 route once
@@ -326,6 +336,7 @@ in {
     ++ hostProblems
     ++ zoneProblems
     ++ ssoPathProblems
+    ++ lib.concatLists (lib.mapAttrsToList (name: r: service.featureProblemsOf "vm-${toString r.vmid} route ${name}" r) lab.routes)
     ++ portProblems
     ++ lib.concatLists (lib.mapAttrsToList appProblems allApps)
     ++ lib.concatLists (lib.mapAttrsToList (name: c: map (p: "swarm ${name}: ${p}") (admissionOf c).problems) clusters)

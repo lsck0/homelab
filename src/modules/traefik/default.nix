@@ -1,14 +1,14 @@
 # traefik with the lab's defences, for both ingresses (100-internal, 200-external)
 #
 # The routes an ingress serves (`routes`, modules/catalog.nix records of modules/service.nix) become its routers,
-# services and middlewares here, each feature on unless the route's `off` names it: cloudflare-only on the socket peer,
+# services and middlewares here, each feature where the route's `on` names it: cloudflare-only on the socket peer,
 # client-ip (the real client into X-Real-Ip, lib/traefik-clientip), the strip of client-sent identity and target
 # headers, the gate (lib/gate: crowdsec's decisions as a captcha or a ban page, the anonymous limit), the crowdsec
 # bouncer with its AppSec waf and the core rule set, the per-client and per-route rate and
 # in-flight limits, the body limit, retries, the security headers, then sso, anubis, basic auth and the route's own
 # headers. A router splits by what a request holds: body methods pass the body limit on a router of their own, a
 # websocket upgrade holds the in-flight slots of its own router for the socket's life. A hand-written router gets the
-# same chain and may name opt-outs in an `off` attribute of its own. Every quantity that names a client reads
+# same chain from an `on` attribute of its own, none without. Every quantity that names a client reads
 # X-Real-Ip, which client-ip sets from the socket peer and the X-Forwarded-For hops of trustedProxies and Cloudflare
 # only; the backend's X-Forwarded-For is that client alone. The probers check a route at its health path through the
 # ingress, past sso and anubis but nowhere else (probe routers below). A public
@@ -303,7 +303,7 @@ let
   # community blocklist; an outage keeps the last decisions
   crowdsecCommunity = true;
 
-  # the waf, on routes whose `off.waf` does not say why not
+  # the waf, on routes taking it
   bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable { crowdsec = bouncer; };
 
   # -- bot defence: robots.txt / llms.txt and the labyrinth --------------------
@@ -372,35 +372,36 @@ let
 
   honeypotRule = lib.concatMapStringsSep " || " (p: "Path(`${p}`)") honeypotPaths;
 
-  # every host, above all routes, no auth in front, but those whose route opts out
+  # every host, above all routes, no auth in front, but those of routes without botDefense
   botExcluded = lib.unique (map (r: r.host) (lib.filter (r: !(on r "botDefense")) (lib.attrValues allRecords)));
   botRule = rule: if botExcluded == [ ] then rule
     else "(${rule}) && " + lib.concatMapStringsSep " && " (host: "!Host(`${net.fqdn host}`)") botExcluded;
-  # unproxied hosts serve robots.txt and the labyrinth too, to clients that reach them directly
-  botOff = { cloudflare = "it answers every host, unproxied ones included"; };
-  # the labyrinth trickles through the gate's tarpit unless the router says why not
-  labyrinthService = off: if gateOn && (off.tarpit or null) == null then "tarpit" else "labyrinth";
+  # the whole chain but cloudflare: unproxied hosts serve robots.txt and the labyrinth too, to clients reaching them
+  botOn = lib.remove "cloudflare" service.protectionFeatures;
+  # the labyrinth trickles through the gate's tarpit where the router takes it
+  labyrinthService = features: if gateOn && lib.elem "tarpit" features then "tarpit" else "labyrinth";
   botDefenseRouters = lib.optionalAttrs cfg.botDefense.enable {
     wellknown-tls = {
       rule = botRule "Path(`/robots.txt`) || Path(`/llms.txt`) || Path(`/.well-known/llms.txt`)";
       service = "wellknown";
       entryPoints = [ "websecure" ];
       priority = 10000;
-      off = botOff;
+      on = botOn;
     };
     labyrinth-tls = {
       rule = botRule labyrinthRule;
-      service = labyrinthService botOff;
+      service = labyrinthService botOn;
       entryPoints = [ "websecure" ];
       priority = 9000;
-      off = botOff;
+      on = botOn;
     };
     # above real routes, below robots.txt
     honeypot-tls = {
       rule = botRule honeypotRule;
-      service = labyrinthService { };
+      service = labyrinthService service.protectionFeatures;
       entryPoints = [ "websecure" ];
       priority = 9500;
+      on = service.protectionFeatures;
     };
   };
 
@@ -430,7 +431,8 @@ let
       entryPoints = [ "websecure" ];
       priority = gateAnswerPriority;
       route = {
-        off = { cloudflare = "the captcha answers on every host, unproxied ones included"; };
+        # the captcha answers on every host, unproxied ones included
+        on = lib.remove "cloudflare" service.protectionFeatures;
         methods = [ "POST" ];
         frames = "deny";
         referrer = true;
@@ -476,10 +478,10 @@ let
 
   # -- routes: every router, service and middleware a route needs -------------------------------------------
 
-  # a feature is on unless the record's `off` names it; a hand-written router's record is its `off` on service.nix's defaults
-  on = r: feature: (r.off.${feature} or null) == null;
+  # a feature is on where the record's `on` names it; a hand-written router's record: its `on`, service.nix's defaults
+  on = r: feature: lib.elem feature r.on;
   recordOf = router: router.route or {
-    off = router.off or { };
+    on = router.on or [ ];
     frames = "deny";
     referrer = true;
     bodyLimitBytes = service.bodyLimitDefaultBytes;
@@ -487,9 +489,7 @@ let
     sources = null;
   };
   allRecords = cfg.routes // cfg.relays;
-  # sso stops bots before the app already: anubis runs only where sso does not (modules/service.nix)
-  anubisOn = r: on r "anubis" && !(on r "sso");
-  anubisRoutes = lib.filterAttrs (_: anubisOn) cfg.routes;
+  anubisRoutes = lib.filterAttrs (_: r: on r "anubis") cfg.routes;
 
   hostRule = host: r: "Host(`${host}`)" + lib.optionalString (r.path != "/") " && PathPrefix(`${r.path}`)";
   fqdnRule = r: hostRule (net.fqdn r.host) r;
@@ -508,7 +508,7 @@ let
   routeRoutersOf = { tag, entryPoint, hostOf, routes }: lib.concatMapAttrs (name: r: let host = hostOf r; in {
     "${name}-${tag}" = {
       rule = routeRule host r;
-      service = if anubisOn r then "anubis" else name;
+      service = if on r "anubis" then "anubis" else name;
       entryPoints = [ entryPoint ];
       middlewares = routeMiddlewares name r;
       route = r;
@@ -522,7 +522,7 @@ let
       middlewares = routeMiddlewares name r ++ [ "rate-limit-login" ];
       route = r;
     };
-  } // lib.optionalAttrs (r.ssoPaths != [ ]) (let behind = r // { off = r.off // { sso = null; }; }; in {
+  } // lib.optionalAttrs (r.ssoPaths != [ ]) (let behind = r // { on = r.on ++ [ "sso" ]; }; in {
     # the prefixes a public route keeps behind authelia: its rule and chain with sso on, straight to the backend
     "${name}-sso-${tag}" = {
       rule = "${routeRule host r} && (${lib.concatMapStringsSep " || " (p: "PathRegexp(`${service.prefixPattern p}`)") r.ssoPaths})";
@@ -532,16 +532,24 @@ let
       middlewares = routeMiddlewares name behind;
       route = behind;
     };
-  }) // lib.optionalAttrs (anubisOn r) {
-    # what anubis lets through comes back on loopback and goes to the route's backend
+  }) // lib.optionalAttrs (on r "anubis") {
+    # what anubis lets through comes back on loopback, logged, and goes to the route's backend
     "${name}-balancer${lib.optionalString (tag != "tls") "-${tag}"}" = {
       rule = hostRule host r; service = name; entryPoints = [ "anubis-balancer" ]; middlewares = [ "client-ip-anubis" ];
+      on = [ "accessLog" ];
     };
   }) routes;
   routeRouters = routeRoutersOf { tag = "tls"; entryPoint = "websecure"; hostOf = r: net.fqdn r.host; routes = cfg.routes; };
   # an onion route without an address yet (secrets-sync.sh writes it) is served at its name alone
   onionRoutes = lib.filterAttrs (_: r: r.onionAddress != null) cfg.routes;
-  onionRouters = routeRoutersOf { tag = "onion"; entryPoint = onionEntryPoint; hostOf = r: r.onionAddress; routes = onionRoutes; };
+  # every onion visitor passes the gate, whatever the route takes on its name: the onion routers' chain is built here
+  onionGate = [ "crowdsec" ];
+  onionRouters = routeRoutersOf {
+    tag = "onion";
+    entryPoint = onionEntryPoint;
+    hostOf = r: r.onionAddress;
+    routes = lib.mapAttrs (_: r: r // { on = lib.unique (r.on ++ onionGate); }) onionRoutes;
+  };
 
   # the probers' door: GET and HEAD of the health path from their addresses, to the backend past sso and anubis
   probeOn = r: r.health != null && on r "probe";
@@ -552,7 +560,8 @@ let
     service = name;
     entryPoints = [ "websecure" ];
     priority = probePriority;
-    route = r // { methods = probeMethods; off = r.off // { accessLog = "a probe every few seconds would bury the clients' requests"; }; };
+    # a probe every few seconds would bury the clients' requests in the access log
+    route = r // { methods = probeMethods; on = lib.remove "accessLog" r.on; };
   }) probeRoutes;
 
   # an instance route to its guest (or its on-demand proxy), an app route to every node of its cluster, health-checked
@@ -593,7 +602,7 @@ let
   # same origin: no cors, and a route behind sso keeps it, the session cookie rides along; anubis would stop the
   # beacons, the body limit bounds what an unauthenticated public input may send
   frontendBodyBytes = routeLimits.frontend.bodyBytes;
-  frontendOn = r: (if r.app == null then r.off else catalog.apps.${r.app}.off).frontend == null;
+  frontendOn = r: lib.elem "frontend" (if r.app == null then r.on else catalog.apps.${r.app}.on);
   # one intake per host, named after its first route
   frontendRoutes = lib.listToAttrs (map (e: lib.nameValuePair e.value.host e) (lib.reverseList
     (lib.filter (e: frontendOn e.value) (lib.attrsToList cfg.routes))));
@@ -604,7 +613,8 @@ let
     entryPoints = [ "websecure" ];
     middlewares = lib.optional (on e.value "sso") "authelia" ++ [ "${e.name}-otlp-tenant" ];
     route = e.value // {
-      off = e.value.off // { anubis = "browser beacons run no proof of work"; };
+      # browser beacons run no proof of work
+      on = lib.remove "anubis" e.value.on;
       methods = frontendMethods;
       bodyLimitBytes = frontendBodyBytes;
     };
@@ -619,8 +629,9 @@ let
 
   # -- relays: the edge forwards every internal route to the internal ingress, over tls verified for its host ---
 
+  # by its prefix too: the routes of one host may differ in `internet`, the longer prefix ranked first
   relayRouters = lib.mapAttrs' (name: r: lib.nameValuePair "${name}-relay" ({
-    rule = "Host(`${net.fqdn r.host}`)";
+    rule = fqdnRule r;
     service = "${name}-relay";
     entryPoints = [ "websecure" ];
     middlewares = lib.optional (!(on r "internet")) "internal-only";
@@ -695,7 +706,7 @@ let
   routersWithTls = lib.concatMapAttrs (name: router: let
     r = recordOf router;
     rule = refuse r router.rule;
-    plain = removeAttrs router [ "route" "off" ] // lib.optionalAttrs (!(on r "accessLog")) { observability.accessLogs = false; };
+    plain = removeAttrs router [ "route" "on" ] // lib.optionalAttrs (!(on r "accessLog")) { observability.accessLogs = false; };
     secured = withBody: plain // lib.optionalAttrs (websecure router) {
       tls = wildcardTls // (router.tls or { });
     } // {
@@ -761,7 +772,7 @@ in {
     enable = lib.mkEnableOption "Traefik reverse proxy with ACME and CrowdSec";
 
     entryPoints = passthrough "entrypoints beyond web, websecure and metrics";
-    routers = passthrough "http routers of the ingress's own, protected like a route (an `off` attribute opts out)";
+    routers = passthrough "http routers of the ingress's own, protected like a route by the features of an `on` attribute";
     services = passthrough "http services";
     middlewares = passthrough "http middlewares";
     serversTransports = passthrough "servers transports";
@@ -1128,6 +1139,7 @@ in {
       ) basicAuthRoutes);
     };
 
+    homelab.openings.ingress = "traefik's http, https, metrics and onion entrypoints and its access log shipper (modules/base)";
     # the metrics entrypoint is for the scraper only (modules/flows.nix guards)
     networking.firewall.allowedTCPPorts = [ net.ports.http net.ports.https net.ports.traefikMetrics ]
       ++ lib.optional (onionRoutes != { }) torPorts.onionIngress;

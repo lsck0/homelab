@@ -1,5 +1,5 @@
 # observability: prometheus, loki, tempo, pyroscope, grafana and the alerting
-{ net, telemetry, ... }: {
+{ net, telemetry, profiles, ... }: {
   roles = [ "collector" ];
 
   vm = {
@@ -37,6 +37,7 @@
         icon = "grafana";
         widget = { type = "prometheus"; url = telemetry.urls.prometheus; };
       };
+      on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
   };
 

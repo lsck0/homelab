@@ -1,4 +1,4 @@
-# the router's one wireguard exit for every instance whose egress is vpn (instance.nix `egress`)
+# the router's one wireguard exit for every instance whose egress is vpn (instance.nix `on`)
 { config, lib, pkgs, ... }:
 let
   cfg = config.homelab.egress.vpn;

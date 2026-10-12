@@ -1,16 +1,11 @@
 # e-ink terminal feeds: calendar, homelab stats, arXiv
-{ ... }:
+{ lib, profiles, ... }:
 let
   # one nginx serves both hosts, polled by the trmnl cloud
   feedPort = 8081;
-  feedOff = {
-    sso = "the trmnl cloud polls it with a token";
-    anubis = "the trmnl cloud runs no proof of work";
-    captcha = "the trmnl cloud solves no captcha";
-    cloudflare = "the trmnl cloud fetches it directly";
-    homepage = "a feed, no page";
-    accessLog = "the path carries the feed's token";
-  };
+  # the trmnl cloud fetches it directly with a token in the path, which the access log would keep, and solves no captcha
+  feedOn = lib.subtractLists [ "sso" "captcha" "cloudflare" "accessLog" ] profiles.hardenedInternal
+    ++ [ "probe" ] ++ profiles.observed;
 in {
   vm = {
     bootPhase = "apps";
@@ -21,8 +16,8 @@ in {
   };
 
   services = {
-    calendar = { host = "cal"; port = feedPort; off = feedOff; };
-    terminal = { port = feedPort; off = feedOff; };
+    calendar = { host = "cal"; port = feedPort; on = feedOn; };
+    terminal = { port = feedPort; on = feedOn; };
   };
 
   secrets = {

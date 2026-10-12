@@ -292,7 +292,7 @@ in {
     virtualHosts.terminal = {
       listen = [{ addr = "0.0.0.0"; port = terminalRoute.port; }];
       root = terminalPublic;
-      # every path holds a token (instance.nix off.accessLog); a miss would log it as an error
+      # every path holds a token (instance.nix leaves out accessLog); a miss would log it as an error
       extraConfig = ''
         access_log off;
         log_not_found off;

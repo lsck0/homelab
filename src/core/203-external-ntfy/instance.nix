@@ -1,5 +1,5 @@
 # push notifications (alert delivery)
-{ ... }:
+{ lib, profiles, ... }:
 let
   port = 80;
 in {
@@ -16,13 +16,9 @@ in {
     ntfy = {
       inherit port;
       homepage = { group = "Public"; icon = "ntfy"; name = "ntfy"; };
-      off = {
-        sso = "public push notifications; ntfy checks its own accounts";
-        anubis = "the phone app and vm-105 publish natively";
-        captcha = "the phone app subscribes natively, it shows no page";
-        waf = "publishers and subscribers are api clients the rules misread";
-        bodyLimit = "attachments";
-      };
+      # api clients: the phone app and vm-105 publish and subscribe natively, with attachments the waf rules misread
+      on = lib.subtractLists [ "anubis" "captcha" "waf" "bodyLimit" ] profiles.hardenedExternal
+        ++ profiles.listed ++ profiles.observed;
     };
   };
 

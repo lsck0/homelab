@@ -1,5 +1,5 @@
 # privacy metasearch
-{ ... }: {
+{ lib, profiles, ... }: {
   vm = {
     bootPhase = "public";
     needs = [ "containers" ];
@@ -9,7 +9,7 @@
   };
 
   # engine traffic: neither strangers' searches nor the owner's point at the house ip, and engines rate-limit the tunnel
-  egress = { via = "vpn"; inbound = false; };
+  on = profiles.vpnEgress;
 
   idle = { stopAfter = "1h"; };
 
@@ -22,11 +22,8 @@
       # the query is in the url: no referrer leaves
       referrer = false;
       homepage = { group = "Public"; icon = "searxng"; name = "SearXNG"; };
-      off = {
-        sso = "public metasearch";
-        cloudflare = "anubis fronts it at the edge";
-        accessLog = "the search query is in the url";
-      };
+      # anubis fronts it at the edge; the search query is in the url, which the access log would keep
+      on = lib.subtractLists [ "cloudflare" "accessLog" ] profiles.hardenedExternal ++ profiles.listed ++ profiles.observed;
     };
   };
 }

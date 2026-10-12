@@ -1,5 +1,5 @@
 # home automation hub
-{ config, ... }: {
+{ lib, config, profiles, ... }: {
   vm = {
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
@@ -36,13 +36,9 @@
         pkce = false;
         tokenAuthMethod = "client_secret_post";
       };
-      off = {
-        sso = "the companion app calls /auth/token and /api/websocket natively, it cannot pass a portal";
-        anubis = "the companion app runs no proof of work";
-        captcha = "the companion app solves no captcha";
-        waf = "the companion app's api calls the rules misread";
-        bodyLimit = "backup uploads";
-      };
+      # the companion app calls /auth/token and /api/websocket natively, past no portal or captcha, with api calls the
+      # waf rules misread; backup uploads
+      on = lib.subtractLists [ "sso" "captcha" "waf" "bodyLimit" ] profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
   };
 }

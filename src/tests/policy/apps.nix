@@ -2,7 +2,8 @@
 #
 # - the catalog holds: no route, host or port collision, every secret generated (modules/catalog.nix problems;
 #   every host asserts them at build time, this catches them at evaluation)
-# - every port an app publishes is guarded on every swarm node: the routing mesh publishes it on all of them
+# - every port of an app route taking the guard, and every app exporter's, is guarded on every swarm node: the
+#   routing mesh publishes it on all of them
 # - the builder's key does one thing: the forced command on the manager, from the builder's address only
 # - ci isolation on the ci vm: every github runner is its own ephemeral user that holds no cache, registry or deploy
 #   credential, reaches dns only, and never the nix daemon; no rootless user is in a group that is root, on the ci
@@ -30,10 +31,12 @@ let
   # LAWS
   # -----------------------------------------------------------------------------
 
-  published = catalog.ports.external ++ catalog.ports.internal ++ catalog.ports.metrics;
+  # the http routes taking the guard and every exporter, which vm-105 alone scrapes
+  guarded = lib.concatMap (a: map (r: r.port) (lib.filter (r: r.protocol == "http" && lib.elem "guard" r.on) (lib.attrValues a.routes))
+    ++ map (m: m.port) (lib.attrValues a.metrics)) (lib.attrValues catalog.apps);
   guardLaws = lib.concatLists (lib.mapAttrsToList (name: c:
-    map (port: "${name}: published app port ${toString port} is not in homelab.ingressOnly.ports, anyone reaches it")
-      (lib.subtractLists c.homelab.ingressOnly.ports published)
+    map (port: "${name}: guarded app port ${toString port} is not in homelab.ingressOnly.ports, anyone reaches it")
+      (lib.subtractLists c.homelab.ingressOnly.ports guarded)
   ) swarmHosts);
 
   # the builder deploys to its own host's swarm locally, to a guest swarm over that manager's forced command alone

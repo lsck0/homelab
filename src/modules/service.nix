@@ -1,22 +1,29 @@
 # the properties of one deployed service, shared by an instance's services (instance.nix `services`) and a swarm
 # app's routes (app.nix `routes`): where it is exposed, how the ingress protects it, what telemetry it gets
 #
-# Every feature is on unless the service says why not: `off.<feature> = "<why>";`, the reason being the value, so an
-# opt-out without one cannot be written. The ingresses (modules/traefik), authelia, lldap, the homepage, the
-# prober and the router derive everything from these records; none keeps a per-service list.
+# Every feature is off unless the service opts in: `on = [ "<feature>" ... ];`, usually named lists of
+# modules/profiles.nix concatenated. A service without `on` is a plain route to its port: no sso, no defences, no
+# card, no probe, no telemetry, no guard on the port. The ingresses (modules/traefik), authelia, lldap, the
+# homepage, the prober and the router derive everything from these records; none keeps a per-service list.
 #
 #   services.git = {
 #     port = 80;
-#     off = { sso = "logs in itself through authelia oidc"; waf = "git clients push packs the rules misread"; };
+#     # logs in itself through authelia oidc; git clients push packs the waf rules misread
+#     on = lib.subtractLists [ "sso" "waf" ] (profiles.hardenedInternal ++ profiles.listed ++ profiles.observed);
 #   };
 #
-# Composition: sso and anubis both stop bots before the app; where sso is on, anubis adds nothing and stays off.
-# A route of the external zone is public by definition: sso cannot run there (the dmz reaches no authelia), so an
-# external route opts out of sso explicitly. A public route of the internal zone may still put prefixes of itself
-# behind authelia, `ssoPaths = [ "/metrics" ];`: the internal ingress sends them through authelia ahead of every other
-# router of the route, and authelia admits them like a route behind sso (admins and the route's own group).
-# captcha, anonymousLimit and tarpit act through the gate that crowdsec puts in front of a route, so they need crowdsec
-# on; the gate never stops the house, the lab, wireguard or a user authelia knows, whatever a route says.
+# Protection per path: a second service (or app route) on the same host and port with its own `path` and `on`; the
+# ingress routes the longer prefix first, `/api` rate limited while `/` stays plain.
+#
+# Composition (featureProblemsOf, an evaluation error each): sso and anubis both stop bots before the app, so a route
+# takes one. A route of the external zone is public by definition: sso cannot run there (the dmz reaches no
+# authelia). A public route of the internal zone may still put prefixes of itself behind authelia,
+# `ssoPaths = [ "/metrics" ];`: the internal ingress sends them through authelia ahead of every other router of the
+# route, and authelia admits them like a route behind sso (admins and the route's own group). waf, captcha,
+# anonymousLimit and tarpit act through the gate that crowdsec puts in front of a route, so they need crowdsec; the
+# gate never stops the house, the lab, wireguard or a user authelia knows, whatever a route says. cloudflare proxies
+# the route's public name, which only `internet` gives it. An onion route's onion routers pass the gate whatever its
+# `on` takes for its name (modules/traefik).
 { lib }:
 let
   inherit (lib) mkOption types;
@@ -28,7 +35,7 @@ let
   # what the ingress does for a route
   protectionFeatures = [
     "sso" "anubis" "waf" "crowdsec" "rateLimit" "inflightLimit" "bodyLimit" "botDefense" "secureHeaders" "accessLog"
-    # the gate (modules/traefik/lib/gate) asks a client crowdsec flagged its captcha; off, its captcha decisions pass
+    # the gate (modules/traefik/lib/gate) asks a client crowdsec flagged its captcha; without, captcha decisions pass
     "captcha"
     # the gate's token bucket for clients without an authelia session, below rateLimit's for everyone
     "anonymousLimit"
@@ -43,11 +50,15 @@ let
     "probe"
     "homepage"
   ];
+  # what acts through the gate crowdsec puts in front of a route
+  crowdsecFeatures = [ "waf" "captcha" "anonymousLimit" "tarpit" ];
   # frontend: the browser's otlp beacons at <host>/otlp, relayed by the ingress to the collector (modules/traefik)
   telemetryFeatures = [ "metrics" "logs" "traces" "profiles" "dashboard" "alerts" "frontend" ];
+  # what the platform runs for a swarm app besides its telemetry: sleeping when idle, its card on the dashboard
+  platformFeatures = [ "scaleToZero" "homepage" ];
   # what a browser app speaks; anything else matches no router and gets a 404
   webMethods = [ "GET" "HEAD" "POST" "PUT" "PATCH" "DELETE" "OPTIONS" ];
-  # webapp-template's request body cap: forms and api calls; an upload route raises it or opts out
+  # webapp-template's request body cap: forms and api calls; an upload route raises it or leaves bodyLimit out
   bodyLimitDefaultBytes = 1024 * 1024;
   # where a web server in a container listens unless its app says otherwise (the lab's own examples do)
   targetPortDefault = 8000;
@@ -68,14 +79,8 @@ let
   # TYPES
   # -----------------------------------------------------------------------------
 
-  # feature -> why it is off; a feature without an entry is on
-  offType = features: types.submodule {
-    options = lib.genAttrs features (feature: mkOption {
-      type = types.nullOr why;
-      default = null;
-      description = "Why ${feature} is off for this service; null: on.";
-    });
-  };
+  # the features opted into, each one of `features`
+  featuresType = features: types.listOf (types.enum features);
 
   widgetType = types.submodule {
     options = {
@@ -92,7 +97,7 @@ let
     };
   };
 in rec {
-  inherit protectionFeatures telemetryFeatures webMethods bodyLimitDefaultBytes offType urlPath why serviceName onionKeyOf;
+  inherit protectionFeatures telemetryFeatures platformFeatures webMethods bodyLimitDefaultBytes featuresType urlPath why serviceName onionKeyOf;
 
   # the dashboard card; a deployment's defaults name its kind (an instance service, an app)
   cardType = { name, group, icon, description }: types.submodule {
@@ -151,7 +156,7 @@ in rec {
     ssoPaths = mkOption {
       type = types.listOf (types.strMatching urlSegments);
       default = [ ];
-      description = "Url prefixes behind authelia on a route whose sso is off (its metrics, an admin page); the rest stays public.";
+      description = "Url prefixes behind authelia on a route without sso (its metrics, an admin page); the rest stays public.";
     };
     loginRedirect = mkOption {
       type = types.nullOr (types.submodule {
@@ -179,7 +184,7 @@ in rec {
       default = null;
       description = "With idle: a path answering 2xx while the backend works, so idle never stops it mid-job.";
     };
-    off = mkOption { type = offType features; default = { }; description = "Feature -> why it is off."; };
+    on = mkOption { type = featuresType features; default = [ ]; description = "The features opted into (modules/profiles.nix); none: a plain route to the port."; };
   };
 
   # the swarm app route's backend; the defaults are the builder's stack of one: service web from the root Dockerfile
@@ -204,6 +209,14 @@ in rec {
   # any run of slashes, which many backends fold onto one handler
   prefixPattern = path: "(?i)^" + lib.concatMapStringsSep "/+" lib.escapeRegex (lib.splitString "/" path);
 
-  # every feature of a service record as a bool: what consumers read
-  enabledOf = off: lib.mapAttrs (_: why: why == null) off;
+  # each of `features` as a bool, true where `on` names it: what consumers read
+  enabledOf = features: on: lib.genAttrs features (feature: lib.elem feature on);
+
+  # a route's features that need one it lacks, or that another makes moot (header): one line each
+  featureProblemsOf = where: r: let has = feature: lib.elem feature r.on; in
+    lib.optional (r.zone == "external" && has "sso") "${where}: sso on the external zone, which reaches no authelia: take anubis"
+    ++ lib.optional (has "sso" && has "anubis") "${where}: anubis behind sso adds nothing, sso stops bots before the app: drop one"
+    ++ map (feature: "${where}: ${feature} acts through crowdsec's gate, which the route lacks: add crowdsec")
+      (lib.optionals (!(has "crowdsec")) (lib.filter has crowdsecFeatures))
+    ++ lib.optional (has "cloudflare" && !(has "internet")) "${where}: cloudflare proxies the route's public name, which only internet gives it";
 }

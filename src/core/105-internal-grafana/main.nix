@@ -191,13 +191,13 @@ let
     inherit name;
     vm = vmName (guest r.vmid);
     target = catalog.probeUrlOf r;
-  }) (lib.filterAttrs (_: r: r.vmid != null && r.off.probe == null && awake (guest r.vmid)) (catalog.internal // catalog.external));
+  }) (lib.filterAttrs (_: r: r.vmid != null && lib.elem "probe" r.on && awake (guest r.vmid)) (catalog.internal // catalog.external));
   # a tcp route at the backend the router forwards to; udp has no generic probe
   tcpProbes = lib.mapAttrsToList (name: r: let node = if r.vmid != null then guest r.vmid else guestAt (lib.head r.nodes); in {
     inherit name;
     vm = vmName node;
     target = "${node.ip}:${toString r.port}";
-  }) (lib.filterAttrs (_: r: r.protocol == "tcp" && r.off.probe == null && (r.vmid == null || awake (guest r.vmid))) catalog.l4);
+  }) (lib.filterAttrs (_: r: r.protocol == "tcp" && lib.elem "probe" r.on && (r.vmid == null || awake (guest r.vmid))) catalog.l4);
   # every third-party service the lab depends on (modules/upstream), one alert each
   inherit (telemetry) upstreamJob;
   probesOf = protocol: if protocol == "http" then httpProbes else tcpProbes;
@@ -373,7 +373,7 @@ let
       secureJsonData = tenant;
       jsonData = lokiJsonData // tenantHeader;
     }
-  ] ++ lib.optional (a.off.traces == null) {
+  ] ++ lib.optional (lib.elem "traces" a.on) {
     name = "Tempo ${app}";
     type = "tempo";
     access = "proxy";
@@ -397,7 +397,7 @@ let
       serviceMap.datasourceUid = "prometheus";
       nodeGraph.enabled = true;
     };
-  } ++ lib.optional (a.off.profiles == null) {
+  } ++ lib.optional (lib.elem "profiles" a.on) {
     name = "Pyroscope ${app}";
     type = "grafana-pyroscope-datasource";
     access = "proxy";

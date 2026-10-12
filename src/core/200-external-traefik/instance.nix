@@ -1,5 +1,7 @@
 # public reverse proxy: tls, crowdsec, anubis, waf
 { id, net, ... }: {
+  on = [ "ingress" ];
+
   vm = import ../../modules/traefik/lib/vm.nix // {
     bootPhase = "network";
     needs = [ "containers" ];

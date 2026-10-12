@@ -17,11 +17,15 @@ let
     contents = [ pkgs.busybox pkgs.curl ];
     config.Cmd = [ "httpd" "-f" "-p" "8000" "-h" "/data" ];
   };
+  inherit (lab) profiles;
+  # every telemetry and the card, as an app the owner deploys
+  appOn = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
   appOf = name: port: extra: lib.recursiveUpdate {
     enable = true;
     repo = "lsck0/${name}";
     branch = "master";
-    routes.${name} = { inherit port; off.sso = "the fixture is public"; };
+    routes.${name} = { inherit port; on = profiles.hardenedExternal ++ [ "probe" ]; };
+    on = appOn ++ [ "scaleToZero" ];
     stateful = [ "web" ];
     volumes.data.backup = true;
     # both apps and a deploy's surge on the one worker (modules/limits workerCountOf)
@@ -29,7 +33,8 @@ let
     reservation.memoryMiB = 256;
   } extra;
   apps = {
-    keep = appOf "keep" 20160 { off.scaleToZero = "the test's app that never sleeps, whose wake the controller refuses"; };
+    # never sleeps, so the controller refuses its wake
+    keep = appOf "keep" 20160 { on = appOn; };
     sleepy = appOf "sleepy" 20170 {
       volumes.data.backup = lib.mkForce false;
       dumps.page = { service = "web"; command = "cat /data/index.html"; };

@@ -24,6 +24,7 @@ let
   # CONSTANTS
   # -----------------------------------------------------------------------------
 
+  inherit (lab) profiles;
   placedId = "220";
   ownPort = 20170;
   guestMemoryMiB = 1536;
@@ -32,7 +33,9 @@ let
     enable = true;
     repo = "lsck0/own";
     branch = "master";
-    routes.own = { port = ownPort; health = "/"; off = { sso = "the fixture is public"; anubis = "no browser here"; }; };
+    # no browser here
+    routes.own = { port = ownPort; health = "/"; on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ]; };
+    on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" "scaleToZero" ];
     resources.web = { memoryMiB = 192; cpus = 0.5; pids = 96; };
     reservation = { memoryMiB = 256; cpus = 0.5; };
     placement = { zone = "external"; vmid = lib.toInt placedId; vm.memoryMiB = guestMemoryMiB; };

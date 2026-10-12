@@ -1,5 +1,5 @@
 # public lsck0 pacman mirror; vm (nfs is internal, dmz gets an ssh push instead)
-{ ... }: {
+{ lib, profiles, ... }: {
   vm = {
     bootPhase = "dev";
     # the packages (30G, growing) plus archrepo-build.sh's hardlinked daily snapshots (~1G each, SNAPSHOT_KEEP_DAYS)
@@ -23,14 +23,10 @@
           type = "customapi";
         };
       };
-      off = {
-        guard = "the house's pacman fetches straight from here (arch-dotfiles pacman.conf); public and signed";
-        sso = "public pacman mirror";
-        anubis = "pacman clients run no proof of work";
-        captcha = "pacman solves no captcha";
-        cloudflare = "pacman pulls large binaries, not through the proxy";
-        waf = "crs rule 920440 refuses the .db extension, and the repo database is lsck0.db";
-      };
+      # pacman, public and signed: the house fetches straight from here (arch-dotfiles pacman.conf), large binaries
+      # past the proxy, with no proof of work or captcha; crs rule 920440 refuses the repo database lsck0.db
+      on = lib.subtractLists [ "anubis" "captcha" "cloudflare" "guard" "waf" ] profiles.hardenedExternal
+        ++ profiles.listed ++ profiles.observed;
     };
   };
 }

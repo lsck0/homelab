@@ -7,12 +7,13 @@
 #
 # instance.nix is a module over this schema with the arguments id (the vmid, a string), zone, site (site.json), net
 # (modules/net.nix over the collected inventory), telemetry (modules/telemetry.nix), roles (lab.roles: role -> vmid),
-# swarmManagers (the vmids of every enabled swarm's manager) and grantSourceNames (modules/lab). The smallest:
+# swarmManagers (the vmids of every enabled swarm's manager), grantSourceNames (modules/lab) and profiles
+# (modules/profiles.nix). The smallest, a plain route to port 80:
 #
 #   # what the guest is for, in one line
 #   { ... }: {
 #     vm.bootPhase = "apps";
-#     services.demo = { port = 80; homepage.icon = "mdi-cube"; };
+#     services.demo.port = 80;
 #   }
 #
 # Guest kind: a vm when it is the router, sits outside the internal zone (strangers' traffic wants a vm's isolation),
@@ -38,6 +39,10 @@ let
   # proxmox's own cpu weight
   cpuUnitsDefault = 100;
   diskDefaultGiB = 8;
+  # a shared module's listeners beyond the guest's own services: the ingress (modules/traefik and its log shipper),
+  # a swarm's manager and worker (modules/swarm), the apps' telemetry on a worker (modules/app-telemetry.nix)
+  openingFeatures = [ "ingress" "swarmManager" "swarmWorker" "appTelemetry" ];
+  guestFeatures = [ "vpnEgress" "vpnInbound" "torEgress" ] ++ openingFeatures;
   secretKind = types.strMatching (import ./secrets.nix { inherit lib; }).kindPattern;
   vmidString = types.strMatching "[0-9]+";
   inherit (service) urlPath why;
@@ -67,16 +72,13 @@ let
   };
 
   serviceType = types.submodule ({ name, config, ... }: {
-    config = {
-      off.frontend = lib.mkDefault "a nixos service's own ui sends no browser telemetry";
-      # the probers check the backend itself, not the sso portal in front of it
-      health = lib.mkDefault config.path;
-    };
+    # the probers check the backend itself, not the sso portal in front of it
+    config.health = lib.mkDefault config.path;
     options = service.exposureOptions { inherit name zone; features = service.protectionFeatures ++ service.telemetryFeatures; } // {
       homepage = mkOption {
         type = service.cardType { inherit name; group = "Apps"; icon = "mdi-web"; description = ""; };
         default = { };
-        description = "The service's card on the dashboard (vm-103); off.homepage drops it.";
+        description = "The service's card on the dashboard (vm-103), shown with the homepage feature.";
       };
       oidc = mkOption {
         type = types.nullOr oidcType;
@@ -234,18 +236,17 @@ in {
       default = [ ];
       description = "Lab tokens of other guests this one reads; vm-109 exports their minters' dirs to it read-only (lab.nasClients).";
     };
-    egress = mkOption {
-      type = types.nullOr (types.submodule {
-        options = {
-          via = mkOption {
-            type = types.enum [ "vpn" "tor" ];
-            description = "vpn: the router's shared wireguard exit; tor: the router's tor, tcp and dns only. Each with a killswitch.";
-          };
-          inbound = mkOption { type = types.bool; default = false; description = "vpn only: the exit's one forwarded port leads here."; };
-        };
-      });
-      default = null;
-      description = "Which exit the guest's internet traffic leaves through, lab traffic staying direct; null: the house's own address.";
+    on = mkOption {
+      type = service.featuresType guestFeatures;
+      default = [ ];
+      description = ''
+        What the guest opts into for itself (modules/profiles.nix). vpnEgress: its internet traffic leaves through the
+        router's shared wireguard exit, vpnInbound: the exit's one forwarded port leads here; torEgress: through the
+        router's tor, tcp and dns only; each with a killswitch, lab traffic staying direct, and without one the house's
+        own address. ${lib.concatStringsSep ", " openingFeatures}: the firewall openings of the shared module of that
+        name, which refuses to evaluate without its own. Unasked, a guest's firewall opens ssh, node-exporter and its
+        services' ports (modules/network.nix), and whatever its own main.nix opens.
+      '';
     };
     secrets = mkOption {
       type = types.attrsOf secretKind;

@@ -690,10 +690,10 @@ in {
       };
 
       # published ports bypass INPUT through the routing mesh, on every node; the pre-dnat guard admits the grants
-      # (modules/flows.nix guards) onto every port but the tcp and udp routes', which the router forwards from anywhere
+      # (modules/flows.nix guards) onto the guarded routes' and the exporters' ports
       homelab.ingressOnly = {
         trustContainers = false;
-        ports = catalog.ports.external ++ catalog.ports.internal ++ catalog.ports.metrics;
+        ports = catalog.ports.guarded;
       };
     }
 
@@ -821,6 +821,7 @@ in {
           }
         });
       '';
+      homelab.openings.swarmManager = "the swarm controller, and a shared swarm's control, gossip and overlay ports";
       # the wakers' grant onto it is the cluster's (modules/flows.nix guards)
       networking.firewall.allowedTCPPorts = [ controllerPort ];
       homelab.ingressOnly.ports = [ controllerPort ];
@@ -851,6 +852,7 @@ in {
     })
 
     (lib.mkIf isWorker {
+      homelab.openings = lib.mkIf (!single) { swarmWorker = "a swarm worker's gossip and overlay ports"; };
       # gossip and overlay traffic from the other workers and the manager; esp carries the encrypted overlays
       networking.firewall.extraCommands = lib.optionalString (!single) ''
         for src in ${catalog.appsZone} ${manager.ip}; do

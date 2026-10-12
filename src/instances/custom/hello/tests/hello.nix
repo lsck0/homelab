@@ -1,7 +1,7 @@
 # hello builds from the header app.nix pins by hash, offline, and answers
 { pkgs, ... }:
 let
-  app = import ../app.nix;
+  app = import ../app.nix { profiles = import ../../../../modules/profiles.nix; };
   args = app.build.web.args;
   header = pkgs.fetchurl { url = args.HTTPSERVER_URL; sha256 = args.HTTPSERVER_SHA256; };
   port = toString app.routes.hello.targetPort;

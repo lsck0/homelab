@@ -1,8 +1,9 @@
 # the anti-bot laws, over the ingresses' rendered gate (modules/traefik lib/gate) and its middlewares
 #
 # Never hit: the house, wireguard, the internal zone and the ingress itself pass every gate untouched, as crowdsec
-# never decides against them; a logged-in user is asked about. On by default: a public route asks the captcha, limits
-# anonymous clients and holds banned ones unless it says why not, read off the forwardauth address of its router.
+# never decides against them; a logged-in user is asked about. As the route opts in: a route taking crowdsec has the
+# gate, which asks the captcha, limits anonymous clients and holds banned ones where the route takes each, read off
+# the forwardauth address of its router.
 # No lab host logs the captcha's answers.
 { lib, configs, inventory, site, catalog, ... }:
 let
@@ -49,13 +50,16 @@ lib.concatLists (lib.mapAttrsToList (law: violations: map (v: "${law}: ${v}") vi
     ++ lib.optional (settings.session == null) "${host}'s gate cannot tell a logged-in user"
   ) ingresses);
 
-  "on by default" = lib.concatLists (lib.mapAttrsToList (name: r: lib.concatLists (lib.mapAttrsToList (router: rendered: let
+  "as the route opts in" = lib.concatLists (lib.mapAttrsToList (name: r: lib.concatLists (lib.mapAttrsToList (router: rendered: let
     flags = gateFlags edge rendered;
+    gated = lib.elem "crowdsec" r.on;
+    says = feature: if lib.elem feature r.on then "on" else "off";
   in
-    if flags == null then [ "vm-200 router ${router} has no gate" ]
-    else lib.concatLists (lib.mapAttrsToList (flag: feature:
-      lib.optional ((flags.${flag} or "0") != (if r.off.${feature} == null then "1" else "0"))
-        "vm-200 router ${router}: the gate's ${flag} is ${flags.${flag} or "absent"}, its route's ${feature} says ${if r.off.${feature} == null then "on" else "off"}"
+    if flags == null then lib.optional gated "vm-200 router ${router} has no gate, its route takes crowdsec"
+    else lib.optional (!gated) "vm-200 router ${router} has a gate, its route takes no crowdsec"
+    ++ lib.concatLists (lib.mapAttrsToList (flag: feature:
+      lib.optional ((flags.${flag} or "0") != (if lib.elem feature r.on then "1" else "0"))
+        "vm-200 router ${router}: the gate's ${flag} is ${flags.${flag} or "absent"}, its route's ${feature} says ${says feature}"
     ) features)
   ) (edgeRoutersOf name))) edgeRoutes);
 

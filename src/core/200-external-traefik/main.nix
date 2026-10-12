@@ -12,7 +12,7 @@ let
   ingressPages = lib.genAttrs (lib.attrValues net.ingressPages) (host: {
     inherit host;
     path = "/";
-    off = { };
+    on = service.protectionFeatures;
     frames = "deny";
     referrer = true;
     limitScale = 1;
@@ -64,15 +64,14 @@ in {
       entryPoints = [ "websecure" ];
       priority = metricsBlockPriority;
       middlewares = [ "deny-all" ];
+      on = service.protectionFeatures;
     }) catalog.metricsBlocks) // {
       install-tls = {
         rule = installRule;
         service = "install";
         entryPoints = [ "websecure" ];
-        off = {
-          cloudflare = "the install lines are published raw for a bare arch iso's curl";
-          captcha = "curl piped into sh solves no captcha";
-        };
+        # published raw for a bare arch iso's curl, piped into sh, which solves no captcha
+        on = lib.subtractLists [ "cloudflare" "captcha" ] service.protectionFeatures;
       };
     };
 

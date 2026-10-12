@@ -1,6 +1,7 @@
 # the deploy controller: the apps swarm's manager (drained of tasks) and the app builder
-{ ... }: {
+{ lib, profiles, ... }: {
   roles = [ "swarm-manager" "app-builder" ];
+  on = [ "swarmManager" ];
 
   vm = {
     bootPhase = "dev";
@@ -23,14 +24,8 @@
     methods = [ "POST" ];
     # a bearer token and an empty body
     bodyLimitBytes = 1024;
-    off = {
-      sso = "ci jobs call it with the app's own bearer token";
-      anubis = "ci jobs run no proof of work";
-      captcha = "ci jobs solve no captcha";
-      homepage = "an endpoint, no page";
-      probe = "POST only; socket activated, idle costs nothing";
-      cloudflare = "a ci bearer token is nobody else's to decrypt";
-    };
+    # ci jobs call it with the app's own bearer token, which is nobody else's to decrypt, and solve no captcha
+    on = lib.subtractLists [ "anubis" "captcha" "cloudflare" ] profiles.hardenedExternal ++ profiles.observed;
   };
 
   secrets = {

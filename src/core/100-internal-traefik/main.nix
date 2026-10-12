@@ -3,6 +3,7 @@
 { config, lib, inventory, site, catalog, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
+  service = import ../../modules/service.nix { inherit lib; };
   authelia = catalog.internal.authelia;
   loopback = "127.0.0.1";
 in {
@@ -42,15 +43,17 @@ in {
         service = "api@internal";
         entryPoints = [ "websecure" ];
         middlewares = [ "authelia" ];
-        # traefik 3.6.10 panics behind the buffering middleware ("invalid WriteHeader code 0", the page never loads)
-        off.bodyLimit = "api@internal takes no uploads, and the body limit breaks its dashboard";
+        # no bodyLimit: traefik 3.6.10 panics behind the buffering middleware ("invalid WriteHeader code 0", the page
+        # never loads), and api@internal takes no uploads
+        on = lib.remove "bodyLimit" service.protectionFeatures;
       };
       proxmox-tls = {
         rule = "Host(`${net.fqdn net.ingressPages.proxmox}`)";
         service = "proxmox";
         entryPoints = [ "websecure" ];
         middlewares = [ "authelia" ];
-        off.bodyLimit = "iso and disk uploads through the web ui";
+        # iso and disk uploads through the web ui
+        on = lib.remove "bodyLimit" service.protectionFeatures;
       };
     };
     services.proxmox.loadBalancer = {

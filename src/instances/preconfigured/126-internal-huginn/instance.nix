@@ -1,5 +1,5 @@
 # automation agents / scraping
-{ id, ... }: {
+{ id, profiles, ... }: {
   vm = {
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
@@ -13,7 +13,7 @@
   };
 
   services = {
-    huginn = { port = 80; homepage = { icon = "huginn"; }; };
+    huginn = { port = 80; homepage = { icon = "huginn"; }; on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed; };
   };
 
   shares = {

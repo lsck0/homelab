@@ -1,7 +1,7 @@
 # the ci demo: lib/ here, a c http server
+{ profiles, ... }:
 let
   dir = "src/instances/custom/hello";
-  silent = "a static c server sends none";
 in
 {
   enable = true;
@@ -19,11 +19,12 @@ in
   # this repo moves with every sync; hello only with its own folder
   watch = [ dir ];
   # main.c's port
-  routes.hello = { service = "web"; targetPort = 8000; port = 20100; onion = true; off.sso = "the public demo"; };
+  routes.hello = { service = "web"; targetPort = 8000; port = 20100; onion = true; on = profiles.hardenedExternal ++ [ "probe" ]; };
   homepage = { name = "Hello"; icon = "mdi-hand-wave"; };
   # one static c server
   resources.web.memoryMiB = 128;
   reservation.memoryMiB = 128;
   # scales to zero: a static page with no job of its own and no client holding a connection
-  off = { traces = silent; profiles = silent; };
+  # no traces or profiles: the static c server emits none
+  on = profiles.observed ++ [ "frontend" "homepage" "scaleToZero" ];
 }

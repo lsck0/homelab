@@ -1,5 +1,5 @@
 # Firefly III personal finance
-{ id, config, ... }: {
+{ lib, id, config, profiles, ... }: {
   vm = {
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
@@ -15,17 +15,20 @@
   # the daily wake runs the bank import (main.nix) before it sleeps again
   idle = { stopAfter = "1h"; wakeAt = "05:00"; };
 
-  services = {
+  services = let
+    # statement imports
+    on = lib.remove "bodyLimit" profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
+  in {
     fints = {
       port = 8090;
       homepage = { icon = "mdi-bank-transfer"; name = "FinTS Import"; };
-      off = { bodyLimit = "statement imports"; };
+      inherit on;
     };
     firefly = {
       port = 8080;
       health = "/health";
       homepage = { icon = "firefly-iii"; name = "Firefly III"; };
-      off = { bodyLimit = "statement imports"; };
+      inherit on;
     };
   };
 

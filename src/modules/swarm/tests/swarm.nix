@@ -25,6 +25,9 @@ let
     config.Cmd = [ "httpd" "-f" "-p" "8000" "-h" "/www" ];
   };
 
+  inherit (lab) profiles;
+  # the router caps and logs a forward's clients
+  forwarded = [ "inflightLimit" "accessLog" "probe" ];
   port = 20130;
   portChanged = 20131;
   tcpPort = 20132;
@@ -38,12 +41,13 @@ let
     repo = "lsck0/demo";
     branch = "master";
     routes = {
-      demo = { service = "web"; targetPort = 8000; inherit port; off.sso = "the test's public fixture"; };
-      demo-tcp = { protocol = "tcp"; service = "web"; targetPort = 8000; port = tcpPort; publicPort = tcpPort; };
-      demo-udp = { protocol = "udp"; service = "echo"; targetPort = echoPort; port = udpPort; publicPort = udpPort; };
+      demo = { service = "web"; targetPort = 8000; inherit port; on = profiles.hardenedExternal ++ [ "probe" ]; };
+      demo-tcp = { protocol = "tcp"; service = "web"; targetPort = 8000; port = tcpPort; publicPort = tcpPort; on = forwarded; };
+      demo-udp = { protocol = "udp"; service = "echo"; targetPort = echoPort; port = udpPort; publicPort = udpPort; on = forwarded; };
     };
     resources = { web.memoryMiB = 256; echo.memoryMiB = 128; };
-    off.scaleToZero = "its tcp and udp routes go from the router straight to the workers, past every wake proxy";
+    # stays up: its tcp and udp routes go from the router straight to the workers, past every wake proxy
+    on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
     # more than one worker holds beside a deploy's surge: the swarm gets two (modules/limits workerCountOf)
     reservation.memoryMiB = 768;
   };

@@ -1,5 +1,5 @@
 # public file sharing
-{ ... }: {
+{ lib, profiles, ... }: {
   vm = {
     bootPhase = "public";
     needs = [ "containers" "nfs" ];
@@ -12,7 +12,8 @@
     share = {
       port = 80;
       homepage = { group = "Public"; icon = "pingvin-share"; };
-      off = { sso = "public file sharing"; cloudflare = "anubis fronts it at the edge"; bodyLimit = "file uploads"; };
+      # anubis fronts it at the edge; file uploads
+      on = lib.subtractLists [ "cloudflare" "bodyLimit" ] profiles.hardenedExternal ++ profiles.listed ++ profiles.observed;
     };
   };
 

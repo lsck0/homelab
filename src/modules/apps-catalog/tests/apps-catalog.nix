@@ -9,12 +9,13 @@ let
   # -----------------------------------------------------------------------------
 
   inherit (specialArgs) lab;
-  # a well-formed app every case changes one thing of
+  profiles = import ../../profiles.nix;
+  # a well-formed app every case changes one thing of: a plain route, no feature
   demo = {
     enable = true;
     repo = "lsck0/demo";
     branch = "master";
-    routes.demo = { service = "web"; targetPort = 8000; port = 20130; off.sso = "the test's public fixture"; };
+    routes.demo = { service = "web"; targetPort = 8000; port = 20130; };
   };
   # a case: the lab collected with these app folders over the real ones
   withApps = apps: lab.withApps (folders: lib.recursiveUpdate folders apps);
@@ -47,9 +48,17 @@ let
     unknown-lab-endpoint = { lab = withDemo { env.web.A = "{{homelab.loki}}"; }; expect = "is no lab endpoint"; };
     unknown-origin = { lab = withDemo { env.web.A = "{{homelab.origin-nowhere}}"; }; expect = "is no lab endpoint"; };
     telemetry-endpoint-without-telemetry = {
-      lab = withDemo { off = { traces = "none"; profiles = "none"; }; env.web.A = "{{homelab.otlp-grpc}}"; };
-      expect = "with traces and profiles off";
+      lab = withDemo { env.web.A = "{{homelab.otlp-grpc}}"; };
+      expect = "without traces or profiles in `on`";
     };
+    sso-on-the-edge = { lab = withDemo { routes.demo.on = [ "sso" ]; }; expect = "sso on the external zone"; };
+    anubis-behind-sso = {
+      lab = withDemo { routes.demo = { zone = "internal"; on = [ "sso" "anubis" ]; }; };
+      expect = "anubis behind sso adds nothing";
+    };
+    waf-without-crowdsec = { lab = withDemo { routes.demo.on = [ "waf" ]; }; expect = "waf acts through crowdsec's gate"; };
+    tarpit-without-crowdsec = { lab = withDemo { routes.demo.on = [ "tarpit" ]; }; expect = "tarpit acts through crowdsec's gate"; };
+    cloudflare-without-internet = { lab = withDemo { routes.demo.on = [ "cloudflare" ]; }; expect = "which only internet gives it"; };
     dump-of-a-stateless-service = { lab = withDemo { dumps.db = { service = "db"; command = "true"; }; }; expect = "is not stateful"; };
     limits-above-a-worker = { lab = withDemo { resources.web.memoryMiB = 8192; }; expect = "above swarm.taskMax.memoryMiB"; };
     excluded-but-used = { lab = withDemo { exclude = [ "web" ]; }; expect = "drops web"; };
@@ -60,13 +69,12 @@ let
       lab = { catalog = import ../../catalog.nix { inherit lib lab; inherit (lab) inventory site; appsCatalog = lab.appsCatalog // { cadvisorPort = 20500; }; }; };
       expect = "cadvisorPort 20500 lies inside";
     };
-    # scale to zero is the default: a tcp route needs the opt-out
     idle-tcp = {
-      lab = withDemo { routes.demo-game = { protocol = "tcp"; publicPort = 25565; port = 20131; }; };
+      lab = withDemo { on = [ "scaleToZero" ]; routes.demo-game = { protocol = "tcp"; publicPort = 25565; port = 20131; }; };
       expect = "route demo-game: a tcp route goes from the router straight to its backend";
     };
-    up-without-reason = { lab = withDemo { idle.stopAfter = null; }; expect = "idle.stopAfter is null without a reason"; };
-    up-and-asleep = { lab = withDemo { off.scaleToZero = "clients hold a websocket"; idle.stopAfter = "30m"; }; expect = "keep one"; };
+    asleep-never = { lab = withDemo { on = [ "scaleToZero" ]; idle.stopAfter = null; }; expect = "never sleeps"; };
+    stopped-unasked = { lab = withDemo { idle.stopAfter = "30m"; }; expect = "without scaleToZero in `on`"; };
   };
 
   # catalogs the schema itself rejects: an unknown field, a wrong type, a missing field
@@ -74,7 +82,10 @@ let
     unknown-field = withDemo { statefull = [ "db" ]; };
     port-as-string = withDemo { routes.demo.port = "20130"; };
     trailing-slash = withDemo { routes.demo.path = "/api/"; };
-    unknown-feature = withDemo { routes.demo.off.ssso = "a typo"; };
+    unknown-feature = withDemo { routes.demo.on = [ "ssso" ]; };
+    # the card is the app's, not a route's
+    card-on-a-route = withDemo { routes.demo.on = [ "homepage" ]; };
+    protection-on-the-app = withDemo { on = [ "sso" ]; };
     missing-repo = withApps { demo = removeAttrs demo [ "repo" ]; };
     unpinned-image = withDemo { images = [ "docker.io/library/redis:8" ]; };
     climbing-build = withDemo { build.web.context = "../other"; };
@@ -87,16 +98,22 @@ let
     everything-enabled = lab.withApps (lib.mapAttrs (_: a: a // { enable = true; }));
     enable-omitted = withApps { demo = removeAttrs demo [ "enable" ]; };
     internal-only = withApps { demo = removeAttrs demo [ "routes" ] // { routes.demo-admin = { zone = "internal"; port = 20131; }; }; };
-    # repo and branch only: one route at demo.<domain>, behind the edge and authelia
+    # repo and branch only: one plain route at demo.<domain> on the edge
     defaults-only = withApps { demo = removeAttrs demo [ "routes" ]; };
-    tcp-stays-up = withDemo { routes.demo-game = { protocol = "tcp"; port = 20131; }; off.scaleToZero = "a game server's clients hold their connection"; };
+    tcp-stays-up = withDemo { routes.demo-game = { protocol = "tcp"; port = 20131; }; };
+    # protection per path: /api rate limited on the root's backend, / plain
+    per-path = withDemo { routes.demo-api = { host = "demo"; path = "/api"; port = 20130; on = [ "rateLimit" ]; }; };
+    hardened = withDemo {
+      routes.demo.on = profiles.hardenedExternal ++ [ "probe" ];
+      on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" "scaleToZero" ];
+    };
   };
 
-  # a lab -> the demo app's idle.stopAfter: scale to zero unless the app says why not
+  # a lab -> the demo app's idle.stopAfter: up unless it opts into scaleToZero
   stopAfter = {
-    by-default = { lab = withDemo { }; expect = "15m"; };
-    tuned = { lab = withDemo { idle.stopAfter = "1h"; }; expect = "1h"; };
-    stays-up = { lab = withDemo { off.scaleToZero = "a worker drains a queue"; }; expect = null; };
+    by-default = { lab = withDemo { }; expect = null; };
+    scales-to-zero = { lab = withDemo { on = [ "scaleToZero" ]; }; expect = "15m"; };
+    tuned = { lab = withDemo { on = [ "scaleToZero" ]; idle.stopAfter = "1h"; }; expect = "1h"; };
   };
 
   # the hosts that read the catalog, evaluated with it: what a consumer would choke on shows here

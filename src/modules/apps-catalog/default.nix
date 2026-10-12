@@ -8,13 +8,13 @@
 #
 #   lab.withApps (apps: lib.recursiveUpdate apps { wat.enable = true; })    (tests/lib/lab.nix `apps`)
 #
-# The smallest app.nix serves one public path:
+# The smallest app.nix serves one plain public path; app.nix is a function of { lib, profiles } (modules/profiles.nix):
 #
-#   {
+#   { ... }: {
 #     enable = true;
 #     repo = "lsck0/demo";
 #     branch = "master";
-#     routes.demo = { service = "web"; targetPort = 8000; port = 20130; off.sso = "public"; };
+#     routes.demo = { service = "web"; targetPort = 8000; port = 20130; };
 #   }
 { config, lib, telemetry, ... }:
 let
@@ -35,11 +35,11 @@ let
   taskDefaults = { memoryMiB = 512; cpus = 1.0; pids = 512; };
   taskMax = { memoryMiB = 2048; cpus = 2.0; pids = 4096; };
 
-  # scale to zero unless the app says why it stays up: a quarter hour covers a reading session's pauses, so a user
-  # waits on a cold start once per visit, not per page; shorter only adds wakes, longer only holds memory
+  # with scaleToZero: a quarter hour covers a reading session's pauses, so a user waits on a cold start once per
+  # visit, not per page; shorter only adds wakes, longer only holds memory
   stopAfterDefault = "15m";
-  # what the platform runs for an app besides its telemetry, each on unless `off` says why
-  platformFeatures = [ "scaleToZero" ];
+  # an app's card is the app's own (platformFeatures), its routes have none
+  routeFeatures = lib.remove "homepage" service.protectionFeatures;
 
   # -----------------------------------------------------------------------------
   # TYPES
@@ -63,7 +63,7 @@ let
       (range.last - range.first + 1);
 
   routeType = app: types.submodule ({ name, config, ... }: {
-    options = service.exposureOptions { name = app; zone = "external"; features = service.protectionFeatures; backend = service.swarmBackend; };
+    options = service.exposureOptions { name = app; zone = "external"; features = routeFeatures; backend = service.swarmBackend; };
     config = {
       port = lib.mkDefault (portOfRoute name);
       # an app's root answers its health check by default; another prefix only names one that answers
@@ -133,7 +133,7 @@ let
       };
       routes = mkOption {
         type = types.attrsOf (routeType name);
-        # the app at <app>.<domain>, behind the edge and authelia
+        # the app at <app>.<domain> on the edge, a plain route
         default.${name} = { };
         description = "Route name (unique in the lab) -> a host and prefix on the internal ingress or the edge, served by a stack service.";
       };
@@ -193,12 +193,12 @@ let
       homepage = mkOption {
         type = service.cardType { inherit name; group = "Swarm"; icon = "mdi-docker"; description = "${config.repo}@${config.branch}"; };
         default = { };
-        description = "The app's card on the dashboard (vm-103).";
+        description = "The app's card on the dashboard (vm-103), shown with the homepage feature.";
       };
-      off = mkOption {
-        type = service.offType (service.telemetryFeatures ++ platformFeatures);
-        default = { };
-        description = "Telemetry or platform feature -> why it is off; scaleToZero: why the app stays up (a job of its own, clients holding a connection).";
+      on = mkOption {
+        type = service.featuresType (service.telemetryFeatures ++ service.platformFeatures);
+        default = [ ];
+        description = "The telemetry and platform features opted into (modules/profiles.nix); scaleToZero: the stack sleeps after `idle.stopAfter` without requests.";
       };
       dashboards = mkOption {
         type = types.listOf types.str;
@@ -212,7 +212,7 @@ let
       idle = mkOption {
         type = service.idleType;
         default = { };
-        description = "When the stack scales to zero on its own (stopAfter ${stopAfterDefault} unless `off.scaleToZero`); the ingress wakes it.";
+        description = "When the stack scales to zero on its own (stopAfter ${stopAfterDefault} with scaleToZero); the ingress wakes it.";
       };
       placement = mkOption {
         type = types.nullOr (types.submodule {
@@ -226,7 +226,7 @@ let
         description = "null: the shared apps swarm; else the app's own guest, a single-node swarm.";
       };
     };
-    config.idle.stopAfter = lib.mkDefault (if config.off.scaleToZero == null then stopAfterDefault else null);
+    config.idle.stopAfter = lib.mkDefault (if lib.elem "scaleToZero" config.on then stopAfterDefault else null);
   });
 in {
   options = {

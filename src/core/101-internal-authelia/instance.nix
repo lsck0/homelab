@@ -1,5 +1,5 @@
 # SSO: authelia (OIDC + ForwardAuth) and lldap, its identity store
-{ id, net, ... }: {
+{ lib, id, net, profiles, ... }: {
   vm = {
     bootPhase = "network";
     needs = [ "nfs" ];
@@ -11,9 +11,14 @@
       port = 9091;
       loginPaths = [ "/api/firstfactor" "/api/secondfactor" ];
       homepage = { group = "Core"; icon = "authelia"; };
-      off = { sso = "authelia is the portal itself"; anubis = "the login portal; authelia regulates logins itself"; };
+      # the portal itself, which regulates logins on its own
+      on = lib.remove "sso" profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
-    lldap = { port = 17170; homepage = { group = "Core"; icon = "mdi-account-group"; name = "LLDAP"; }; };
+    lldap = {
+      port = 17170;
+      homepage = { group = "Core"; icon = "mdi-account-group"; name = "LLDAP"; };
+      on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
+    };
   };
 
   alerts.sso_bruteforce = {

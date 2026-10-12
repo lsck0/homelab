@@ -1,8 +1,12 @@
-# a guest's place in the lab: its name and static address from its own instance record, and the ingress guard on
-# the ports only its zone's ingress may reach
+# a guest's place in the lab: its name and static address from its own instance record, its firewall's openings, and
+# the ingress guard on the ports only its zone's ingress may reach
 #
 # Every lab host gets its instance record (modules/lab) as the argument `instance`; its hostname, vmid, zone and
 # services come from there. The install images and the router's lan-side tests have none (null).
+#
+# The firewall opens ssh and node-exporter (the recovery path, and vm-105's watch over every guest), the guest's
+# services' ports, and what its own main.nix opens. A shared module opening more (an ingress, a swarm node) names
+# the opening in homelab.openings, and the guest's instance.nix allows it in `on`, or no host evaluates.
 #
 # The guard (homelab.ingressOnly) is one nftables table, homelab-ingress, hooked into prerouting ahead of every
 # dnat, so a podman- or docker-published port is guarded like a native one. Trusted on every guarded port:
@@ -41,11 +45,11 @@ let
     ++ lib.optional (zone != null && zone.ingress != null && zone.ingress != vmId) (net.hostSource zone.ingress)
     ++ lib.optional (vm != null) (net.hostSource vmId);
 
-  # the guest's own services: every port open, an http or lab-only tcp one guarded unless it says why; a port the
+  # the guest's own services: every port open, an http or lab-only tcp one guarded where it opts in; a port the
   # router forwards from the house's public address answers the world
   services = if vm == null then [ ] else lib.attrValues instance.config.services;
   portsOf = protocol: lib.unique (map (s: s.port) (lib.filter (s: s.protocol == protocol) services));
-  isGuarded = s: s.off.guard == null && (s.protocol == "http" || (s.protocol == "tcp" && s.publicPort == null));
+  isGuarded = s: lib.elem "guard" s.on && (s.protocol == "http" || (s.protocol == "tcp" && s.publicPort == null));
   guardedPorts = lib.unique (map (s: s.port) (lib.filter isGuarded services));
 
   # port -> sources: every guard onto this guest, its instance.nix grants among them (modules/flows.nix `guards`)
@@ -86,6 +90,19 @@ in {
     readOnly = true;
     default = vmId;
     description = "The guest's vmid, from its instance record; null on the router and the install images.";
+  };
+
+  options.homelab.on = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    readOnly = true;
+    default = if instance == null then [ ] else instance.config.on;
+    description = "What the guest opts into for itself, from its instance record (modules/instance-schema.nix `on`).";
+  };
+
+  options.homelab.openings = lib.mkOption {
+    type = lib.types.attrsOf lib.types.str;
+    default = { };
+    description = "Opening -> the ports a shared module running here opens beyond the guest's services; each must be in homelab.on.";
   };
 
   options.homelab.ingressOnly = {
@@ -164,7 +181,12 @@ in {
       assertions = [{
         assertion = lib.intersectLists recoveryPorts cfg.ports == [ ];
         message = "homelab.ingressOnly.ports must not contain ${toString recoveryPorts}: SSH and node-exporter are the recovery path.";
-      }];
+      }]
+      # a host without an instance record (an install image, a test's stand-in) has no instance.nix to allow them in
+      ++ lib.optionals (instance != null) (lib.mapAttrsToList (opening: ports: {
+        assertion = lib.elem opening config.homelab.on;
+        message = "${config.networking.hostName} opens ${ports}, which its instance.nix allows with \"${opening}\" in `on`.";
+      }) config.homelab.openings);
     }
 
     (lib.mkIf (config.networking.nftables.enable && cfg.ports != [ ]) {

@@ -6,8 +6,8 @@
 # it is a third-party service the lab runs. The vmid and the zone come from the folder name; the name is the
 # configuration's name and the proxmox guest's. The swarm's worker nodes have no folder: src/core/swarm.nix `nodes`
 # generates them, each running modules/swarm alone. An app, the owner's own software, is a folder
-# src/instances/custom/<name>/ with app.nix (typed by modules/apps-catalog). Folders starting with `_` (the
-# templates) are no instance.
+# src/instances/custom/<name>/ with app.nix, a function of { lib, profiles } (modules/profiles.nix) typed by
+# modules/apps-catalog. Folders starting with `_` (the templates) are no instance.
 #
 # Everything below derives from those files plus src/generated/zones.json and src/generated/site.json; nothing reads
 # a host's evaluated configuration, so the flake, every module (argument `lab`), every test and terraform
@@ -61,7 +61,10 @@ let
 
   cidr = import ../cidr.nix { inherit lib; };
   limits = import ../limits { inherit lib; };
+  profiles = import ../profiles.nix;
   schema = ../instance-schema.nix;
+  # the guest features naming an exit (instance.nix `on`) -> the router's egress class
+  exits = { vpnEgress = "vpn"; torEgress = "tor"; };
 
   # the router's role is its zone name in the folder and its type in the inventory
   routerZone = "router";
@@ -106,7 +109,7 @@ let
   # instance.nix over the schema; net, telemetry and roles read the collected instances, lazily
   instanceEval = { id, zone, module }: (lib.evalModules {
     modules = [ schema module ];
-    specialArgs = { inherit id zone site net telemetry roles swarmManagers grantSourceNames; };
+    specialArgs = { inherit id zone site net telemetry roles swarmManagers grantSourceNames profiles; };
   }).config;
 
   instanceOfFolder = folder:
@@ -156,6 +159,8 @@ let
       inherit (a.placement) zone;
       module = {
         vm = { power = if a.enable then "on" else "off"; needs = [ "containers" "nfs" ]; } // a.placement.vm;
+        # its own swarm's manager and only worker, which ships the app's telemetry
+        on = [ "swarmManager" "appTelemetry" ];
         # its manager role keeps its unlock key on its own share, as the shared manager does (modules/swarm)
         shares."data/swarm-manager-${id}" = { };
       };
@@ -226,15 +231,16 @@ let
   routes = lib.listToAttrs (map (e: lib.nameValuePair e.name (removeAttrs e.s [ "homepage" "oidc" "metrics" ] // { vmid = idOf e.i; }))
     serviceEntries);
 
-  homepage = map (e: e.s.homepage // { route = e.name; vmid = idOf e.i; }) (lib.filter (e: e.s.off.homepage == null) serviceEntries);
+  homepage = map (e: e.s.homepage // { route = e.name; vmid = idOf e.i; }) (lib.filter (e: lib.elem "homepage" e.s.on) serviceEntries);
   oidc = map (e: e.s.oidc // { id = e.name; secret = "${e.name}-oidc-secret"; route = e.name; vmid = idOf e.i; })
     (lib.filter (e: e.s.oidc != null) serviceEntries);
   # a role in `from` becomes its guest's vmid
   grants = lib.concatMap (i: map (g: g // { to = i.id; from = map (f: roles.${f} or f) g.from; }) i.config.grants) ordered;
   tokenEntries = lib.concatMap (i: map (name: { inherit name i; }) i.config.tokens) ordered;
   tokens = lib.listToAttrs (map (e: lib.nameValuePair e.name (idOf e.i)) tokenEntries);
-  egress = lib.mapAttrs (_: i: i.config.egress // { vmid = idOf i; })
-    (lib.filterAttrs (_: i: i.config.egress != null) instances);
+  exitsOf = i: lib.filter (feature: lib.elem feature i.config.on) (lib.attrNames exits);
+  egress = lib.mapAttrs (_: i: { via = exits.${lib.head (exitsOf i)}; inbound = lib.elem "vpnInbound" i.config.on; vmid = idOf i; })
+    (lib.filterAttrs (_: i: exitsOf i != [ ]) instances);
   secretEntries = lib.concatMap (i: lib.mapAttrsToList (name: kind: { inherit name kind i; }) i.config.secrets) ordered;
   secrets = lib.listToAttrs (map (e: lib.nameValuePair e.name { inherit (e) kind; vmid = idOf e.i; }) secretEntries);
   roleEntries = lib.concatMap (i: map (name: { inherit name i; }) i.config.roles) ordered;
@@ -272,7 +278,7 @@ let
     let dir = appsDir + "/${name}"; in
     assert lib.assertMsg ((builtins.readDir dir) ? "app.nix")
       "src/${layout.custom}/${name}: an app folder holds app.nix (see src/${layout.custom}/_template)";
-    import (dir + "/app.nix");
+    import (dir + "/app.nix") { inherit lib profiles; };
 
   # the app folders and src/core/swarm.nix over modules/apps-catalog: every field typed and defaulted, once
   appsCatalog = removeAttrs (lib.evalModules {
@@ -345,9 +351,10 @@ let
     # a static address inside the zone's lease pool flaps with whatever the dhcp server leased it to
     ++ lib.optional (pool != null && lib.toInt i.id >= pool.first && lib.toInt i.id <= pool.last)
       "${where}: vm-${i.id}'s address lies in zone ${i.zone}'s dhcp pool ${toString pool.first}..${toString pool.last}"
+    ++ lib.optional (lib.length (exitsOf i) > 1) "${where}: on names ${toString (exitsOf i)}; a guest's internet leaves through one exit"
     # tor has no forwarded port: nothing on the internet can open a connection to a tor member
-    ++ lib.optional (i.config.egress != null && i.config.egress.via != "vpn" && i.config.egress.inbound)
-      "${where}: egress.inbound is the vpn exit's forwarded port; ${i.config.egress.via} has none";
+    ++ lib.optional (lib.elem "vpnInbound" i.config.on && !(lib.elem "vpnEgress" i.config.on))
+      "${where}: vpnInbound is the vpn exit's forwarded port, which needs vpnEgress";
 
   problems = lib.filter (p: p != null) (map folderProblemOf allFolders)
     ++ zoneProblems

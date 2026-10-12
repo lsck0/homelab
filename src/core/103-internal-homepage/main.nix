@@ -52,7 +52,7 @@ let
     map (g: g // { cards = map routeCard (lib.filter (c: c.group == g.name) lab.homepage); }) layout
     ++ lib.optional (catalog.apps != { }) {
       name = "Swarm"; icon = "mdi-docker"; columns = 4;
-      cards = [ swarmCard ] ++ lib.mapAttrsToList appCard catalog.apps;
+      cards = [ swarmCard ] ++ lib.mapAttrsToList appCard (lib.filterAttrs (_: a: lib.elem "homepage" a.on) catalog.apps);
     };
 
   # every service listed, whatever its guest's power; a swarm app is up while its cluster is
@@ -64,7 +64,7 @@ let
     else "";
 
   # the dot checks what the prober does (catalog.probeUrlOf)
-  monitorOf = r: if r.off.probe != null then null else catalog.probeUrlOf r;
+  monitorOf = r: if lib.elem "probe" r.on then catalog.probeUrlOf r else null;
 
   routeCard = c: let r = routes.${c.route}; guest = guestOf r; in {
     inherit (c) name icon;

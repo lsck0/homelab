@@ -184,7 +184,7 @@ in {
   tenantHeader = "X-Scope-OrgID";
   tenantOf = app: "app-${app}";
   # an app sending traces or profiles: its containers reach the relay, and its tenant exists on vm-105
-  sendsSignals = a: a.off.traces == null || a.off.profiles == null;
+  sendsSignals = a: lib.elem "traces" a.on || lib.elem "profiles" a.on;
   # loki's name for everything stored before tenants existed, so the lab's history stays readable; the lab's tenant
   # in every store
   labTenant = "fake";

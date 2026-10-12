@@ -38,6 +38,9 @@ let
   controls = {
     defence-chain = network "defence chain" (tamper "200-external-traefik" (traefik ++ [ "routers" "share-tls" ])
       (edgeRouter // { middlewares = lib.tail edgeRouter.middlewares; }));
+    waf-without-gate = { file = "network"; marker = "router share-tls: the waf runs without the gate in front";
+      tampered = tamper "200-external-traefik" (traefik ++ [ "routers" "share-tls" ])
+        (edgeRouter // { middlewares = lib.filter (m: !(lib.hasPrefix "gate" m)) edgeRouter.middlewares; }); };
     sso-routes = network "sso routes" (tamper "100-internal-traefik" (traefik ++ [ "routers" "grafana-tls" "middlewares" ])
       (lib.remove "authelia" (http "100-internal-traefik").routers.grafana-tls.middlewares));
     sso-paths = network "sso paths" (facts // { catalog = catalog // { internal = catalog.internal // {

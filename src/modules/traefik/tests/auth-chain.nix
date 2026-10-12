@@ -60,6 +60,8 @@ let
   };
 
   hostRule = host: "Host(`${host}`)";
+  # every router the whole chain, the limits the flood meets among it
+  on = (import ../../service.nix { inherit lib; }).protectionFeatures;
 in
 pkgs.testers.runNixOSTest {
   name = "auth-chain";
@@ -86,9 +88,9 @@ pkgs.testers.runNixOSTest {
         trustCloudflare = true;
         authelia.address = "http://${nodes.auth.networking.primaryIPAddress}:${toString stubPort}/api/authz/forward-auth";
         routers = {
-          portal-tls = { rule = hostRule portalHost; service = "app"; entryPoints = [ "websecure" ]; };
-          gated-tls = { rule = hostRule gatedHost; service = "app"; entryPoints = [ "websecure" ]; middlewares = [ "authelia" ]; };
-          own-tls = { rule = hostRule ownHost; service = "app"; entryPoints = [ "websecure" ]; };
+          portal-tls = { rule = hostRule portalHost; service = "app"; entryPoints = [ "websecure" ]; inherit on; };
+          gated-tls = { rule = hostRule gatedHost; service = "app"; entryPoints = [ "websecure" ]; middlewares = [ "authelia" ]; inherit on; };
+          own-tls = { rule = hostRule ownHost; service = "app"; entryPoints = [ "websecure" ]; inherit on; };
         };
         services.app.loadBalancer.servers = [{ url = backendUrl; }];
       };
@@ -105,6 +107,7 @@ pkgs.testers.runNixOSTest {
           rule = hostRule ({ portal-relay = portalHost; gated-relay = gatedHost; own-relay = ownHost; }.${name});
           service = "internal-relay";
           entryPoints = [ "websecure" ];
+          inherit on;
         });
         services.internal-relay.loadBalancer = {
           servers = [{ url = "https://${nodes.internal.networking.primaryIPAddress}:443"; }];

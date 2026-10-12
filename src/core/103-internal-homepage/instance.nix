@@ -1,5 +1,5 @@
 # dashboard / service landing page
-{ ... }: {
+{ profiles, ... }: {
   vm = {
     bootPhase = "apps";
     needs = [ "containers" "nfs" ];
@@ -10,7 +10,8 @@
   };
 
   services = {
-    homepage = { host = "homelab"; port = 80; guest = true; off = { homepage = "the dashboard itself"; }; };
+    # the dashboard itself, no card on it
+    homepage = { host = "homelab"; port = 80; guest = true; on = profiles.hardenedInternal ++ [ "probe" ] ++ profiles.observed; };
   };
 
   secrets = {

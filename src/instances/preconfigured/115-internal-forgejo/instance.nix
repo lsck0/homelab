@@ -1,5 +1,5 @@
 # git forge (OIDC + SSH); its ci runner lives on 117
-{ id, ... }: {
+{ lib, id, profiles, ... }: {
   vm = {
     bootPhase = "dev";
     needs = [ "containers" "nfs" ];
@@ -28,13 +28,8 @@
         pkce = false;
         tokenAuthMethod = "client_secret_basic";
       };
-      off = {
-        sso = "logs in itself through authelia oidc; git clients use tokens and ssh";
-        anubis = "git clients run no proof of work";
-        captcha = "git clients solve no captcha";
-        waf = "git packs the rules misread";
-        bodyLimit = "git pushes and attachments";
-      };
+      # logs in itself through authelia oidc; git clients use tokens, solve no captcha, push packs the waf misreads
+      on = lib.subtractLists [ "sso" "captcha" "waf" "bodyLimit" ] profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
   };
 

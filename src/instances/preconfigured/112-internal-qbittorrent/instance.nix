@@ -1,5 +1,5 @@
 # torrent client, egress through the router's vpn exit
-{ ... }: {
+{ lib, profiles, ... }: {
   vm = {
     bootPhase = "media";
     needs = [ "containers" "nfs" ];
@@ -22,7 +22,7 @@
   };
 
   # peers find it through the exit's forwarded port
-  egress = { via = "vpn"; inbound = true; };
+  on = profiles.vpnEgress ++ [ "vpnInbound" ];
 
   services = {
     qbittorrent = {
@@ -39,7 +39,8 @@
           type = "qbittorrent";
         };
       };
-      off = { bodyLimit = "torrent file uploads"; };
+      # torrent file uploads
+      on = lib.remove "bodyLimit" profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
   };
 }

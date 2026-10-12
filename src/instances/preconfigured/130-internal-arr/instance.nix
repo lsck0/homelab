@@ -1,5 +1,5 @@
 # *arr stack: prowlarr + flaresolverr, radarr, sonarr, lidarr, bazarr, recyclarr
-{ lib, ... }:
+{ lib, profiles, ... }:
 let
   # each api key is <name>-key: a sops secret the servarr apps take from their environment (lib/servarr.nix), a lab
   # token bazarr mints itself; hermes' skill of the same name calls the api
@@ -35,6 +35,7 @@ in {
       icon = name;
       widget = { ${keySource arr}.key = keyOf name; type = name; };
     };
+    on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
   }) arrs;
 
   tokenReads = [ "jellyfin-key-arr" ];
