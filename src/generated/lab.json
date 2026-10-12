@@ -218,19 +218,19 @@
       "zone": "external"
     },
     "212": {
-      "enabled": "onDemand",
+      "enabled": "false",
       "idle": "30m",
       "ip": "10.200.0.212",
       "name": "212-external-privatebin",
-      "powered": true,
+      "powered": false,
       "zone": "external"
     },
     "213": {
-      "enabled": "onDemand",
+      "enabled": "false",
       "idle": "30m",
       "ip": "10.200.0.213",
       "name": "213-external-share",
-      "powered": true,
+      "powered": false,
       "zone": "external"
     },
     "214": {
