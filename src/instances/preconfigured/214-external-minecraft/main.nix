@@ -21,6 +21,9 @@ let
   # the container's game port, published on loopback for lazymc only
   serverPort = 25566;
   rconPort = 25575;
+  # what lazymc advertises while the server sleeps: the pack's minecraft and its protocol number (wiki.vg)
+  advertisedVersion = "1.21.1";
+  advertisedProtocol = 767;
   # instance.nix gives the guest 8 GiB unballooned: the heap plus 2 GiB for the os and the jvm's off-heap
   heapSize = "6G";
   # a short break keeps the world warm, an evening off frees the heap
@@ -107,6 +110,8 @@ in {
     content = ''
       [public]
       address = "0.0.0.0:${toString publicPort}"
+      version = "${advertisedVersion}"
+      protocol = ${toString advertisedProtocol}
 
       [server]
       address = "127.0.0.1:${toString serverPort}"
