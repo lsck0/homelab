@@ -23,7 +23,6 @@ let
   natLine = lib.findFirst (l: lib.hasInfix "comment" l && lib.hasInfix "accept" l) "" (lib.splitString "\n" forwardRules);
   traefik = [ "services" "traefik" "dynamicConfigOptions" "http" ];
   gate = [ "homelab" "traefik" "gate" "settings" ];
-  net = import ../modules/net.nix { inherit lib inventory site; };
   # a well-formed app the ports law sees twice
   hello = facts.appsCatalog.apps.hello;
   # the first address of the router's first lease pool
