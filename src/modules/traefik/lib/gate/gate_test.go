@@ -443,7 +443,7 @@ func TestGateCaptchaFlow(t *testing.T) {
 	f.decisions[client] = `[{"id":1,"type":"captcha","duration":"4h"}]`
 
 	status, page, header := gateFixtureAuth(t, f, client, routeAll)
-	if status != http.StatusForbidden || header.Get(headerOutcome) != "captcha" {
+	if status != captchaStatus || header.Get(headerOutcome) != "captcha" {
 		t.Fatalf("a flagged client: %d %s", status, header.Get(headerOutcome))
 	}
 	answer := puzzleFromSeed(f.gate.captcha.challenges.clients.entries[client].seed, len(shapeColors)).Answer
@@ -480,7 +480,7 @@ func TestGateCaptchaFlow(t *testing.T) {
 		t.Fatalf("an unflagged client: %d", status)
 	}
 	f.decisions["203.0.113.11"] = f.decisions[client]
-	if status, _, _ := gateFixtureAuth(t, f, "203.0.113.11", routeAll, cookies[0]); status != http.StatusForbidden {
+	if status, _, _ := gateFixtureAuth(t, f, "203.0.113.11", routeAll, cookies[0]); status != captchaStatus {
 		t.Fatalf("a flagged client with another's cookie: %d", status)
 	}
 	// a route that opts out lets a captcha decision through

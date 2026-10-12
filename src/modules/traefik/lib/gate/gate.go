@@ -40,6 +40,8 @@ const (
 	banDelay = 10 * time.Second
 	// a limited client may retry after this long
 	limitedRetryAfterSeconds = 1
+	// not 403: crowdsec's probing scenarios count 403s, and a flagged person's page loads are no probe
+	captchaStatus = http.StatusTooManyRequests
 )
 
 /*
@@ -188,7 +190,7 @@ func captchaPageWrite(ctx context.Context, g *Gate, w http.ResponseWriter, clien
 		NoticeExpired: "That picture had expired. Here is a new one.",
 	}
 	action := g.captcha.answerPath + "?" + url.Values{returnQuery: {returnPathParse(uri)}}.Encode()
-	pageWrite(w, http.StatusForbidden, verdictNames[VerdictCaptcha], pageData{
+	pageWrite(w, captchaStatus, verdictNames[VerdictCaptcha], pageData{
 		Title:     "One question before you continue",
 		Captcha:   true,
 		Notice:    notices[notice],
