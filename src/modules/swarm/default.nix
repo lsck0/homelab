@@ -1,4 +1,4 @@
-# the apps swarms: the shared one (manager vm-140 in the internal zone, workers in the apps zone) and each
+# the apps swarms: the shared one (manager vm-107 in the internal zone, workers in the apps zone) and each
 # guest-placed app's swarm of one, every host taking the role its cluster (catalog.clusters) gives it
 #
 # The control plane stays inside: the manager holds the raft and the stacks' secrets and runs no app (drained); the
@@ -104,7 +104,7 @@ let
   controllerState = "/run/controller-api";
   # a request reads a few headers; a client that dribbles them holds a process no longer than this
   controllerRequestMaxS = 10;
-  # the boards apps ship, which vm-105 provisions (core/140-internal-swarm/lib/dashboards-import.py)
+  # the boards apps ship, which vm-103 provisions (core/107-internal-swarm/lib/dashboards-import.py)
   appDashboardsMount = "/var/lib/app-dashboards";
   # a woken app's task starts within a deploy's image pull; the dump waits that long, then fails and alerts
   dumpWakeWait = { attempts = 60; intervalS = 5; };
@@ -143,7 +143,7 @@ let
   convergeUnitOf = app: "swarm-converge-${app}";
   docker = config.virtualisation.docker.package;
 
-  # the one user the registry's read route admits and its write route does not (118's instance.nix): the swarms'
+  # the one user the registry's read route admits and its write route does not (106's instance.nix): the swarms'
   pullUsers = removeAttrs catalog.internal.registry-api.basicAuth (lib.attrNames catalog.internal.registry-push.basicAuth);
   pullUser = assert lib.length (lib.attrNames pullUsers) == 1; lib.head (lib.attrNames pullUsers);
   pullSecret = pullUsers.${pullUser};
@@ -632,7 +632,7 @@ in {
       default = null;
       description = ''
         A directory of stacks (<app>.yaml) that `swarm-deploy@<app>` deploys on this manager: the builder's, on the
-        host that builds (core/140-internal-swarm/lib/app-builder.nix), which may start that unit and nothing else of it.
+        host that builds (core/107-internal-swarm/lib/app-builder.nix), which may start that unit and nothing else of it.
       '';
     };
     deployUnit = lib.mkOption {
@@ -645,7 +645,7 @@ in {
       type = lib.types.str;
       readOnly = true;
       default = "${appDashboardsMount}/${telemetry.appDashboardsDir}";
-      description = "Where the controller writes the boards apps ship (core/140-internal-swarm/lib/dashboards-import.py), vm-105 reads them.";
+      description = "Where the controller writes the boards apps ship (core/107-internal-swarm/lib/dashboards-import.py), vm-103 reads them.";
     };
   };
 

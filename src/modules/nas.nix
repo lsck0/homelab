@@ -1,4 +1,4 @@
-# a guest's nas mounts: the helpers (nasMount, nasMountRo, nasMedia, nasPath), its fileSystems and the shares vm-109 exports
+# a guest's nas mounts: the helpers (nasMount, nasMountRo, nasMedia, nasPath), its fileSystems and the shares vm-104 exports
 { config, lib, pkgs, utils, inventory, lab, ... }:
 let
   nasIP = inventory.${lab.roles.nas}.ip;
@@ -57,7 +57,7 @@ in {
     description = ''
       NAS mounts of this host by mountpoint, written with the nasMount, nasMountRo, nasMedia and nasPath helpers:
       `homelab.nasMounts = nasMount "/var/lib/app" "app";`. They become fileSystems, homelab.nasShares and so
-      vm-109's exports and the router's nfs rules.
+      vm-104's exports and the router's nfs rules.
     '';
   };
 
@@ -78,13 +78,13 @@ in {
       };
     });
     readOnly = true;
-    description = "NAS paths this host mounts; vm-109 exports each one to this host only.";
+    description = "NAS paths this host mounts; vm-104 exports each one to this host only.";
   };
 
   config = {
     _module.args = {
       nasMount = mountpoint: name: mount nfsOpts mountpoint "data/${name}";
-      # vm-109 exports it read-only to this host
+      # vm-104 exports it read-only to this host
       nasMountRo = mountpoint: name: mount nfsOptsRo mountpoint "data/${name}";
       nasMedia = mountpoint: subpath: mount nfsOptsRo mountpoint "bulk/media/${subpath}";
       nasPath = mount nfsOpts;

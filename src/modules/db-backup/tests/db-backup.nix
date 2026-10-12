@@ -1,6 +1,6 @@
 # database dumps to the nas as shipped: modules/db-backup on lab guests at their real addresses, a test nas that
-# exports exactly what they mount (109-internal-nas's lib/nas-exports.nix). vm-101 (internal) dumps a sqlite database, a command's
-# dump, an empty one and a failing one; vm-206 (dmz) dumps its own sqlite database.
+# exports exactly what they mount (104-internal-nas's lib/nas-exports.nix). vm-101 (internal) dumps a sqlite database, a command's
+# dump, an empty one and a failing one; vm-212 (dmz) dumps its own sqlite database.
 #
 # Claims: a dump is restorable (integrity_check, rows) even under a concurrent writer and through a nas outage; a
 # failed or empty dump leaves nothing behind and no fresh metric; retention keeps the newest DUMPS_KEPT; each host
@@ -9,7 +9,7 @@
 let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
   ip = id: lab.inventory.${id}.ip;
-  nasIp = ip "109";
+  nasIp = ip "104";
   dumps = "/srv/nas/data/db-dumps";
   # modules/db-backup's retention
   dumpsKept = 14;
@@ -22,8 +22,8 @@ let
     homelab.dbBackup.databases = databases;
   };
 
-  # the dmz assertion of modules/nas.nix, as evaluated for the real vm-206: a media mount is refused there
-  privatebin = inputs.self.nixosConfigurations."206-external-privatebin";
+  # the dmz assertion of modules/nas.nix, as evaluated for the real vm-212: a media mount is refused there
+  privatebin = inputs.self.nixosConfigurations."212-external-privatebin";
   failedAssertions = config: map (a: a.message) (lib.filter (a: !a.assertion) config.assertions);
   withMedia = (privatebin.extendModules {
     modules = [ ({ nasMedia, ... }: { homelab.nasMounts = nasMedia "/srv/media" "movies"; }) ];
@@ -31,35 +31,35 @@ let
   dmzRule = "dmz hosts may only mount /srv/nas/data/<share>";
 in
 assert lib.assertMsg (!(lib.any (lib.hasInfix dmzRule) (failedAssertions privatebin.config)))
-  "db-backup: the real vm-206 already fails the dmz mount assertion";
+  "db-backup: the real vm-212 already fails the dmz mount assertion";
 assert lib.assertMsg (lib.any (lib.hasInfix dmzRule) (failedAssertions withMedia))
-  "db-backup: vm-206 with a media mount passes nas.nix's dmz assertion";
+  "db-backup: vm-212 with a media mount passes nas.nix's dmz assertion";
 pkgs.testers.runNixOSTest {
   name = "db-backup";
 
   node.specialArgs = lab.specialArgs;
-  nodes.vm-109 = { imports = [ (lab.nas { flat = true; }) ]; environment.systemPackages = [ pkgs.sqlite ]; };
+  nodes.vm-104 = { imports = [ (lab.nas { flat = true; }) ]; environment.systemPackages = [ pkgs.sqlite ]; };
   nodes.vm-101 = guest "101" {
     app.sqlite = "/var/lib/app/db.sqlite";
     pg.command = "cat /var/lib/app/dump.sql";
     empty.command = "true";
     half.command = "sh -c 'echo half-a-dump; exit 1'";
   };
-  nodes.vm-206 = guest "206" { paste.sqlite = "/var/lib/paste/db.sqlite"; };
+  nodes.vm-212 = guest "212" { paste.sqlite = "/var/lib/paste/db.sqlite"; };
 
   testScript = ''
     NAS = "${nasIp}"
     DUMPS = "${dumps}"
 
     def latest(host, name):
-        return vm_109.succeed(f"ls -1t {DUMPS}/{host}/{name}/{name}-* | head -1").strip()
+        return vm_104.succeed(f"ls -1t {DUMPS}/{host}/{name}/{name}-* | head -1").strip()
 
     def restored(path):
         """a dump on the nas: (integrity_check, rows, unpaired rows)"""
-        vm_109.succeed(f"cp {path} /tmp/r.sqlite")
-        check = vm_109.succeed("sqlite3 /tmp/r.sqlite 'PRAGMA integrity_check'").strip()
-        rows = int(vm_109.succeed("sqlite3 /tmp/r.sqlite 'SELECT count(*) FROM t'"))
-        unpaired = int(vm_109.succeed("sqlite3 /tmp/r.sqlite 'SELECT count(*) FROM t a WHERE NOT EXISTS (SELECT 1 FROM t b WHERE b.id = -a.id)'"))
+        vm_104.succeed(f"cp {path} /tmp/r.sqlite")
+        check = vm_104.succeed("sqlite3 /tmp/r.sqlite 'PRAGMA integrity_check'").strip()
+        rows = int(vm_104.succeed("sqlite3 /tmp/r.sqlite 'SELECT count(*) FROM t'"))
+        unpaired = int(vm_104.succeed("sqlite3 /tmp/r.sqlite 'SELECT count(*) FROM t a WHERE NOT EXISTS (SELECT 1 FROM t b WHERE b.id = -a.id)'"))
         return check, rows, unpaired
 
     def run(machine, unit):
@@ -70,13 +70,13 @@ pkgs.testers.runNixOSTest {
         return machine.succeed(f"cat /var/lib/node-exporter-textfile/db_dump_{name}.prom 2>/dev/null || true")
 
     start_all()
-    vm_109.wait_for_unit("nfs-exports-reload.service")
-    for m in (vm_101, vm_206):
+    vm_104.wait_for_unit("nfs-exports-reload.service")
+    for m in (vm_101, vm_212):
         m.wait_for_unit("multi-user.target")
     vm_101.succeed("mkdir -p /var/lib/app && sqlite3 /var/lib/app/db.sqlite 'CREATE TABLE t (id INTEGER PRIMARY KEY, v TEXT)'")
     vm_101.succeed("sqlite3 /var/lib/app/db.sqlite \"WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 500) "
                    "INSERT INTO t SELECT i, hex(randomblob(64)) FROM n UNION ALL SELECT -i, 'pair' FROM n\"")
-    vm_206.succeed("mkdir -p /var/lib/paste && sqlite3 /var/lib/paste/db.sqlite 'CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1), (-1)'")
+    vm_212.succeed("mkdir -p /var/lib/paste && sqlite3 /var/lib/paste/db.sqlite 'CREATE TABLE t (id INTEGER PRIMARY KEY); INSERT INTO t VALUES (1), (-1)'")
 
     with subtest("a sqlite dump lands on the nas and restores"):
         start = int(vm_101.succeed("date +%s"))
@@ -89,7 +89,7 @@ pkgs.testers.runNixOSTest {
     with subtest("a command's dump lands on the nas"):
         vm_101.succeed("echo 'CREATE TABLE x (y int);' > /var/lib/app/dump.sql")
         run(vm_101, "db-backup-pg")
-        assert "CREATE TABLE x" in vm_109.succeed(f"cat {latest('vm-101', 'pg')}")
+        assert "CREATE TABLE x" in vm_104.succeed(f"cat {latest('vm-101', 'pg')}")
 
     with subtest("five dumps under a concurrent writer: each restores whole, no unpaired row"):
         vm_101.succeed("systemd-run --unit=writer --setenv=PATH=$PATH bash -c 'for i in $(seq 1001 6000); do "
@@ -102,35 +102,35 @@ pkgs.testers.runNixOSTest {
 
     with subtest("an empty dump fails and leaves nothing"):
         vm_101.fail("systemctl start db-backup-empty")
-        vm_109.fail(f"ls {DUMPS}/vm-101/empty/empty-*")
-        assert vm_109.succeed(f"ls -A {DUMPS}/vm-101/empty") == "", "a temp file stayed behind"
+        vm_104.fail(f"ls {DUMPS}/vm-101/empty/empty-*")
+        assert vm_104.succeed(f"ls -A {DUMPS}/vm-101/empty") == "", "a temp file stayed behind"
         assert metric(vm_101, "empty") == ""
 
     with subtest("a dump whose command fails halfway leaves no partial file"):
         vm_101.fail("systemctl start db-backup-half")
-        assert vm_109.succeed(f"ls -A {DUMPS}/vm-101/half") == "", "a partial dump or temp file stayed behind"
+        assert vm_104.succeed(f"ls -A {DUMPS}/vm-101/half") == "", "a partial dump or temp file stayed behind"
         assert metric(vm_101, "half") == ""
 
     with subtest("retention keeps the newest ${toString dumpsKept}, the compressed dumps of earlier versions included"):
         d = f"{DUMPS}/vm-101/app"
-        vm_109.succeed(f"rm -f {d}/app-*")
+        vm_104.succeed(f"rm -f {d}/app-*")
         for i in range(16):
-            vm_109.succeed(f"touch -d '{30 - i} days ago' {d}/app-old{i:02d}.sqlite.zst")
+            vm_104.succeed(f"touch -d '{30 - i} days ago' {d}/app-old{i:02d}.sqlite.zst")
         run(vm_101, "db-backup-app")
-        kept = vm_109.succeed(f"ls -1 {d}").split()
+        kept = vm_104.succeed(f"ls -1 {d}").split()
         assert len(kept) == ${toString dumpsKept}, kept
         assert not {"app-old00.sqlite.zst", "app-old01.sqlite.zst", "app-old02.sqlite.zst"} & set(kept), kept
         assert any(not k.startswith("app-old") for k in kept), "the new dump is gone"
 
     with subtest("each host reaches its own dump dir only, which only root enters on the nas"):
-        run(vm_206, "db-backup-paste")
-        vm_109.succeed(f"ls {DUMPS}/vm-206/paste/paste-*")
-        vm_109.fail(f"ls {DUMPS}/vm-101/paste")
-        for host in ("vm-101", "vm-206"):
-            assert vm_109.succeed(f"stat -c '%a %U' {DUMPS}/{host}").strip() == "700 root"
-        listing = vm_109.succeed("exportfs -v")
+        run(vm_212, "db-backup-paste")
+        vm_104.succeed(f"ls {DUMPS}/vm-212/paste/paste-*")
+        vm_104.fail(f"ls {DUMPS}/vm-101/paste")
+        for host in ("vm-101", "vm-212"):
+            assert vm_104.succeed(f"stat -c '%a %U' {DUMPS}/{host}").strip() == "700 root"
+        listing = vm_104.succeed("exportfs -v")
         print(listing)
-        for node, other, own in ((vm_206, "vm-101", "vm-206"), (vm_101, "vm-206", "vm-101")):
+        for node, other, own in ((vm_212, "vm-101", "vm-212"), (vm_101, "vm-212", "vm-101")):
             node.succeed("mkdir -p /mnt/probe")
             node.fail(f"timeout 30 mount -t nfs4 -o ro,soft,timeo=10,retrans=1 {NAS}:{DUMPS}/{other} /mnt/probe")
             node.succeed(f"timeout 30 mount -t nfs4 -o ro {NAS}:{DUMPS}/{own} /mnt/probe && umount /mnt/probe")
@@ -140,12 +140,12 @@ pkgs.testers.runNixOSTest {
             assert seen == [own], f"{own} sees {seen}"
 
     with subtest("the nas goes away mid-dump: the dump waits, completes and restores"):
-        vm_109.block()
+        vm_104.block()
         vm_101.succeed("systemctl start --no-block db-backup-app")
         vm_101.succeed("sleep ${toString outageS}")
         # still at it: the hard mount holds the dump instead of failing it
         vm_101.succeed("systemctl show -p ActiveState db-backup-app | grep -qx ActiveState=activating")
-        vm_109.unblock()
+        vm_104.unblock()
         vm_101.wait_until_succeeds("systemctl show -p ActiveState db-backup-app | grep -qx ActiveState=inactive", timeout=300)
         vm_101.succeed("systemctl show -p Result db-backup-app | grep -qx Result=success")
         check, rows, unpaired = restored(latest("vm-101", "app"))

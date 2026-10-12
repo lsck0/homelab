@@ -39,7 +39,7 @@ let
   house = addresses: { network = "lan"; inherit addresses; };
   # any source the wan carries: the house and, through the fritzbox's forwards, the internet
   anywhere = { network = "lan"; addresses = [ "0.0.0.0/0" ]; };
-  # the guests of a zone vm-109 exports to (lab.nasClients), none when it exports to none there
+  # the guests of a zone vm-104 exports to (lab.nasClients), none when it exports to none there
   nasClientsIn = name: {
     network = name;
     addresses = lib.filter (ip: lib.elem ip zones.${name}.hosts) (lib.attrNames nasClients);
@@ -103,22 +103,22 @@ let
 
   ingressMetricsGrants = map (z: {
     from = [ collector ]; to = z.ingress; tcp = [ ports.traefikMetrics ];
-    why = "vm-105 scrapes the ${z.name} ingress";
+    why = "vm-103 scrapes the ${z.name} ingress";
   }) (lib.filter (z: z.ingress != null) (lib.attrValues zones));
 
   metricsGrants = map (id: {
     from = [ collector ]; to = id; tcp = catalog.ports.metrics ++ [ catalog.swarm.cadvisorPort telemetry.ports.promtail ];
-    why = "vm-105 scrapes the apps' metrics, and each app node's cadvisor and log shipper";
+    why = "vm-103 scrapes the apps' metrics, and each app node's cadvisor and log shipper";
   }) appNodeIds
   ++ lib.mapAttrsToList (key: s: {
     from = [ collector ]; to = toString s.vmid; tcp = lib.unique (map (m: m.port) (lib.attrValues s.metrics));
-    why = "vm-105 scrapes ${key}'s exporters";
+    why = "vm-103 scrapes ${key}'s exporters";
   }) (lib.filterAttrs (_: s: s.vmid != null && s.on.metrics && s.metrics != { }) catalog.services);
 
   # the prober's checks of a lab-only tcp route at its guest
   probeGrants = map (r: {
     from = [ collector ]; to = toString r.vmid; tcp = [ r.port ];
-    why = "vm-105 probes the lab-only tcp route ${r.host}";
+    why = "vm-103 probes the lab-only tcp route ${r.host}";
   }) (lib.filter (r: r.vmid != null && r.protocol == "tcp" && r.publicPort == null && lib.elem "probe" r.on) (lib.attrValues catalog.l4));
 
   # the router's tor hands an onion route's visitors to the edge (core/300-router/lib/onion-services.nix)
@@ -188,7 +188,7 @@ in
     }
     {
       from = nasClientsIn "external"; to = host nas; tcp = nfsPorts; udp = nfsPorts;
-      why = "dmz guests mount the nas shares vm-109 exports to them";
+      why = "dmz guests mount the nas shares vm-104 exports to them";
     }
     {
       from = host edge; to = house [ net.wan.proxmox ]; tcp = [ ports.proxmoxApi ];
@@ -204,7 +204,7 @@ in
     }
     {
       from = host collector; to = { network = "apps"; addresses = zones.apps.hosts; }; tcp = [ telemetry.ports.promtail ];
-      why = "vm-105 scrapes the workers' log shippers for dropped lines";
+      why = "vm-103 scrapes the workers' log shippers for dropped lines";
     }
     {
       from = all "apps"; to = host swarmManager;
@@ -213,7 +213,7 @@ in
     }
     {
       from = nasClientsIn "apps"; to = host nas; tcp = nfsPorts; udp = nfsPorts;
-      why = "the workers vm-109 exports to mount their shares";
+      why = "the workers vm-104 exports to mount their shares";
     }
   ]
   ++ lib.mapAttrsToList (zone: ids: {
@@ -244,7 +244,7 @@ in
     }
     {
       from = host collector; tcp = [ ports.nodeExporter ];
-      why = "vm-105 scrapes the router's node exporter";
+      why = "vm-103 scrapes the router's node exporter";
     }
     {
       from = host prowlarr; tcp = [ torPorts.socksIsolated ];

@@ -17,11 +17,11 @@ in {
   hardenedInternal = [ "sso" "internet" ] ++ defences;
   # public: the dmz reaches no authelia, anubis stops the bots
   hardenedExternal = [ "anubis" ] ++ defences;
-  # a card on the dashboard, its status dot and vm-105 the prober's check
+  # a card on the dashboard, its status dot and vm-103 the prober's check
   listed = [ "homepage" "probe" ];
   # scraped, its logs kept, a board of its own and its alert rules
   observed = [ "metrics" "logs" "dashboard" "alerts" ];
-  # an app's traces and profiles sent to its tenant on vm-105
+  # an app's traces and profiles sent to its tenant on vm-103
   traced = [ "traces" "profiles" ];
 
   # the guest's internet traffic through the router's vpn exit, or its tor (killswitch either way)

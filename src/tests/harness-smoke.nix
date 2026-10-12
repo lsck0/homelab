@@ -6,8 +6,8 @@
 let
   lab = import ./lib/lab.nix { inherit pkgs lib specialArgs; };
 
-  internal = lab.inventory."121".ip;
-  dmz = lab.inventory."203".ip;
+  internal = lab.inventory."131".ip;
+  dmz = lab.inventory."201".ip;
   # the router's own address in the internal zone: an allowed source for the controls
   routerInternal = "10.100.0.1";
   # no service port of the sink guests: those are guarded to their ingress (modules/network.nix)
@@ -35,8 +35,8 @@ pkgs.testers.runNixOSTest {
     imports = [ lab.router ];
     virtualisation.memorySize = 1024;
   };
-  nodes.vm-121 = sinkGuest "121";
-  nodes.vm-203 = sinkGuest "203";
+  nodes.vm-131 = sinkGuest "131";
+  nodes.vm-201 = sinkGuest "201";
 
   testScript = lab.driverPython + ''
     SEED = ${toString seed}
@@ -47,9 +47,9 @@ pkgs.testers.runNixOSTest {
     with subtest("the router comes up offline: firewall, dns, dhcp, tor, both tunnels, the egress policy"):
         luca_router.succeed("systemctl is-active ${lib.concatStringsSep " " routerUnits}")
 
-    vm_121.wait_for_unit("multi-user.target")
-    vm_203.wait_for_unit("multi-user.target")
-    probe_sinks_start([vm_121, vm_203], tcp=(${toString sinkTcp},), udp=(${toString sinkUdp},))
+    vm_131.wait_for_unit("multi-user.target")
+    vm_201.wait_for_unit("multi-user.target")
+    probe_sinks_start([vm_131, vm_201], tcp=(${toString sinkTcp},), udp=(${toString sinkUdp},))
 
     with subtest("internal reaches the dmz; the dmz reaches no internal guest, which the router does reach"):
         router = "${routerInternal}"
@@ -60,12 +60,12 @@ pkgs.testers.runNixOSTest {
             {"src": "${dmz}", "dst": "${internal}", "proto": "udp", "port": ${toString sinkUdp}, "expect": "closed"},
             {"src": router, "dst": "${internal}", "proto": "tcp", "port": ${toString sinkTcp}, "expect": "open"},
             {"src": router, "dst": "${internal}", "proto": "udp", "port": ${toString sinkUdp}, "expect": "open"},
-        ], sources={"${internal}": vm_121, "${dmz}": vm_203, router: luca_router},
-            sinks=[vm_121, vm_203], seed=SEED)
+        ], sources={"${internal}": vm_131, "${dmz}": vm_201, router: luca_router},
+            sinks=[vm_131, vm_201], seed=SEED)
 
     with subtest("the split horizon answers from the catalog, blocky blocks from its local list"):
-        vm_121.succeed("dig +short +time=3 @10.100.0.1 grafana.lsck0.dev | grep -qx 10.100.0.100")
-        vm_203.succeed("dig +short +time=3 @10.200.0.1 hello.lsck0.dev | grep -qx 10.200.0.200")
-        vm_121.succeed("dig +short +time=3 @10.100.0.1 blocked.lab.test | grep -qx 0.0.0.0")
+        vm_131.succeed("dig +short +time=3 @10.100.0.1 grafana.lsck0.dev | grep -qx 10.100.0.100")
+        vm_201.succeed("dig +short +time=3 @10.200.0.1 hello.lsck0.dev | grep -qx 10.200.0.200")
+        vm_131.succeed("dig +short +time=3 @10.100.0.1 blocked.lab.test | grep -qx 0.0.0.0")
   '';
 }

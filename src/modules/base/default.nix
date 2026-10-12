@@ -83,7 +83,7 @@ in {
     };
     systemd.tmpfiles.rules = [ "d ${textfileDir} 0755 root root -" ];
 
-    # journals ship to vm-105's journal-remote; a few MB each instead of a promtail per host
+    # journals ship to vm-103's journal-remote; a few MB each instead of a promtail per host
     services.journald.upload = lib.mkIf (!isCollector) {
       enable = true;
       settings.Upload.URL = telemetry.urls.journalUpload;
@@ -146,7 +146,7 @@ in {
       };
     };
 
-    # vm-105 scrapes every promtail for dropped entries; the port is guarded, modules/flows.nix grants vm-105
+    # vm-103 scrapes every promtail for dropped entries; the port is guarded, modules/flows.nix grants vm-103
     networking.firewall.allowedTCPPorts = lib.mkIf (promtailOn && !isCollector) [ promtailPort ];
     homelab.ingressOnly.ports = lib.mkIf (promtailOn && !isCollector) [ promtailPort ];
 
@@ -158,7 +158,7 @@ in {
     services.journald.extraConfig = "SystemMaxUse=200M";
     nix.optimise.automatic = true;
 
-    # attic (vm-110) substituter, read-only netrc token
+    # attic (vm-105) substituter, read-only netrc token
     sops.secrets.attic-pull-token = lib.mkIf (!isInstallImage) {};
     sops.templates."nix-netrc" = lib.mkIf (!isInstallImage) {
       content = ''

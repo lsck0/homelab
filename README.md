@@ -52,7 +52,7 @@ src/
   modules/                  the platform: what two or more guests use
     <name>.nix              a module of one file
     <name>/                 a module of more: default.nix, lib/ (its scripts and templates), tests/
-  core/swarm.nix            the shared swarm: state worker, ports, worker shape (manager and builder: vm-140)
+  core/swarm.nix            the shared swarm: state worker, ports, worker shape (manager and builder: vm-107)
   instances/custom/<name>/  an app: app.nix (repo, branch and the same service properties), secrets.sops.json its
                             secrets, lib/ and tests/ as a guest's
   secrets/                  admins.txt (the admins' age recipients), keys/ (the ssh public keys authorized
@@ -109,10 +109,10 @@ scale of a service whose image is already on the worker). An app stays up withou
 (wat's backup loop), clients that hold a connection (websockets), a tcp or udp route, which the router forwards past
 every wake proxy. A sleeping app keeps its `reservation`, since all may wake at once.
 
-The deploy controller vm-140 builds every new commit, parks the images in `registry.lsck0.dev` and deploys them to
+The deploy controller vm-107 builds every new commit, parks the images in `registry.lsck0.dev` and deploys them to
 the app's cluster. Editing an app's folder and syncing redeploys it without an app commit; disabling it removes its
 stack (its volumes stay on the state worker). A failed build or deploy keeps the old version running, alerts, and is
-retried with backoff or on the next commit. `app-builder-redeploy <app>` on vm-140 rebuilds one now; a ci job does it
+retried with backoff or on the next commit. `app-builder-redeploy <app>` on vm-107 rebuilds one now; a ci job does it
 with `curl -fsS -X POST -H "Authorization: Bearer $DEPLOY_TOKEN" https://deploy.lsck0.dev/redeploy/<app>`. A deploy of
 a sleeping app runs the new version until it is up, then puts it back to sleep.
 
@@ -135,7 +135,7 @@ registerInstrumentations({ instrumentations: [new FetchInstrumentation({ propaga
 
 ```sh
 src/scripts/init.sh <proxmox-ip>      # once: pin proxmox's host key, site, secrets, golden image, converge the host
-src/instances/preconfigured/114-internal-hermes/lib/hermes-secrets.sh   # once: hermes' ssh key, github app, api key, telegram bot
+src/instances/preconfigured/113-internal-hermes/lib/hermes-secrets.sh   # once: hermes' ssh key, github app, api key, telegram bot
 TF_STATE_FRESH=1 ./sync.sh            # the first deploy: no terraform state on the nas yet
 ./sync.sh                             # every deploy after
 TF_STATE_OFFLINE=1 ./sync.sh          # the nas is down: apply from the local state copy
@@ -161,15 +161,15 @@ empty pool are removed), the lldap realm, the node's address and the api certifi
 and its hookscript, the host exporter and OSSEC. While the package mirrors or github are unavailable, what needs them
 waits for the next run; everything else still converges. `src/scripts/deinit.sh` runs its teardown.
 
-The bulk storage (the hdd's lvm-thin pool, vm-109's media disk) stays disabled in Proxmox except while vm-109 starts
+The bulk storage (the hdd's lvm-thin pool, vm-104's media disk) stays disabled in Proxmox except while vm-104 starts
 or stops (its hookscript), and pvestatd runs with its own lvm config (`/etc/lvm-pvestatd`) that rejects the hdd, so
 nothing but the nas wakes the disk. Proxmox refuses every operation on a disabled storage, so a resize (a terraform
-`diskGiB` change of vm-109's bulk disk too), a snapshot or a backup of vm-109's bulk disk needs it enabled by hand
+`diskGiB` change of vm-104's bulk disk too), a snapshot or a backup of vm-104's bulk disk needs it enabled by hand
 for that operation, as root on the host, whether the nas runs or not:
 
 ```sh
 pvesm set bulk --disable 0    # then the resize, snapshot or backup, or ./sync.sh with the disk change
-pvesm set bulk --disable 1    # spun down again; the next converge does it too while vm-109 runs
+pvesm set bulk --disable 1    # spun down again; the next converge does it too while vm-104 runs
 ```
 
 ### Proxmox firewall
@@ -190,7 +190,7 @@ Turning it on the first time (the generation that brings it):
    guest but the router, the cluster rules, and last `cluster_firewall.datacenter` with `enabled = true` and
    `input_policy = "DROP"`; no guest is replaced.
 3. Afterwards, from the workstation: `ssh root@<proxmox> pve-firewall status` says `enabled/running`;
-   `https://<proxmox>:8006` answers; `ssh root@10.100.0.140 docker node ls` and the on-demand wake still work.
+   `https://<proxmox>:8006` answers; `ssh root@10.100.0.107 docker node ls` and the on-demand wake still work.
    From the router (`ssh root@<router> ping -c1 10.100.0.100`) the internal zone answers.
 4. A guest that cannot talk any more: `pve-firewall stop` on the host, then compare the guest's address with its
    ipset (`pvesh get /nodes/<node>/qemu/<vmid>/firewall/ipset/ipfilter-net0`); see Recovery.
@@ -260,7 +260,7 @@ the old key still opens all of them in the public history. Inside `nix develop .
 5. In the dotfiles repo, replace `age.txt` with `age.new.txt` and commit there; drop any other copy of the old key
    (`~/.config/sops/age/keys.txt`).
 6. Change every secret value, since the old key reads them in history. Before anything else, change the two that
-   guard stored data where they are used: `kopia-password` with `kopia-nas repository change-password` on vm-109,
+   guard stored data where they are used: `kopia-password` with `kopia-nas repository change-password` on vm-104,
    `authelia-storage-key` with `authelia storage encryption change-key` on vm-101. Generated ones: delete the line
    with `sops <its file>`, and `src/scripts/secrets-sync.sh --apply` makes a new one (a `guardsData:` one only with
    `--generate-guarded`, once whatever it guards accepts the new value). A `dotfiles:` one: change its file in the
@@ -275,13 +275,13 @@ the old key still opens all of them in the public history. Inside `nix develop .
   key that must be renewed: delete the guest's `age.sops` and `age.pub`, then `./sync.sh`.
 - A guest was recreated: `sync.sh` reads its new ssh host key through Proxmox. Proxmox reinstalled:
   `src/scripts/init.sh --pin <proxmox-ip>` after comparing the fingerprint on its console.
-- A service's data is broken: `ssh root@10.100.0.109 nas-restore service <share> <snapshot id or date> --yes` restores
+- A service's data is broken: `ssh root@10.100.0.104 nas-restore service <share> <snapshot id or date> --yes` restores
   `/srv/nas/data/<share>` in place. A service whose state lives on its guest's disk (`homelab.localState`) takes the
   restore at the app's next start; nas-restore prints the guest and the command that makes it take it now.
 - The lab is gone, the nas with it: the off-site copy is the kopia repository on Proton Drive. Sign in with the
   proton account of `src/secrets/shared.sops.json` (`proton-drive auth login`), `proton-drive filesystem download
   /my-files/homelab-offsite/BACKUPS/kopia <dir>`, then `kopia repository connect filesystem --path <dir>` with
-  `kopia-password` from `src/core/109-internal-nas/secrets.sops.json`, and `kopia snapshot list` /
+  `kopia-password` from `src/core/104-internal-nas/secrets.sops.json`, and `kopia snapshot list` /
   `kopia restore <snapshot> <target>`.
 - Terraform state: the nas holds it (`/srv/nas/terraform`), sync.sh works on a copy outside the repo,
   `~/.local/state/homelab/terraform/` (`$XDG_STATE_HOME`), where terraform's providers live too: a `path:` evaluation
@@ -299,7 +299,7 @@ nix eval ./src#checks.x86_64-linux --apply builtins.attrNames                   
 nix build ./src#checks.x86_64-linux.<name> -L --no-link --max-jobs 1           # one check
 nix build ./src#legacyPackages.x86_64-linux.seeded.<name>.<seed> -L --no-link   # one seed of a seeded test
 src/tests/media-stack.sh                                  # media stack against the real containers (docker)
-src/instances/preconfigured/114-internal-hermes/tests/hermes-agent.sh   # hermes scenarios (free nous model, or ANTHROPIC_API_KEY)
+src/instances/preconfigured/113-internal-hermes/tests/hermes-agent.sh   # hermes scenarios (free nous model, or ANTHROPIC_API_KEY)
 ```
 
 Every `src/tests/<name>.nix` and every `tests/<name>.nix` of a folder in `src/core/`, `src/instances/preconfigured/`,

@@ -1,11 +1,11 @@
 """The house's energy model, defined once: series, cost formula, local days and day-ahead prices.
 
 Consumers:
-- core/105-internal-grafana/lib/dashboards/energy.py builds the Grafana board "Energie" from these queries over $__range.
-- instances/preconfigured/104-internal-terminal/lib/energy-sync.py evaluates the same queries per window for the TRMNL
+- core/103-internal-grafana/lib/dashboards/energy.py builds the Grafana board "Energie" from these queries over $__range.
+- instances/preconfigured/114-internal-terminal/lib/energy-sync.py evaluates the same queries per window for the TRMNL
   panel, and exports local-day and local-month totals as node-exporter gauges that the board's per-day and per-month
   bars read.
-- core/105-internal-grafana/lib/spot-price.py exports the running quarter hour's day-ahead price from the shared price cache.
+- core/103-internal-grafana/lib/spot-price.py exports the running quarter hour's day-ahead price from the shared price cache.
 
 Overview:
     INPUTS                                   the hand-typed inputs, lib/inputs.nix as json
@@ -73,7 +73,7 @@ COVERAGE_MIN_S = SECONDS_PER_HOUR
 # the subquery step of covered_seconds stays within prometheus' 5 m lookback, or the first samples fall between
 COVERAGE_STEP = "5m"
 
-# the fronius exporter (core/105-internal-grafana/lib/fronius-exporter.py); signs: load and pv positive, grid positive importing,
+# the fronius exporter (core/103-internal-grafana/lib/fronius-exporter.py); signs: load and pv positive, grid positive importing,
 # battery positive discharging
 PV_W = "fronius_pv_watts"
 LOAD_W = "fronius_load_watts"
@@ -101,7 +101,7 @@ TARIFFS = tuple(sorted(INPUTS["tariffs"]))
 READING_STALE_S = 36 * SECONDS_PER_HOUR
 READING_OVERDUE_S = 72 * SECONDS_PER_HOUR
 
-# energy-sync's totals per local day and month, as node-exporter gauges on vm-104: term -> (unit, label, value);
+# energy-sync's totals per local day and month, as node-exporter gauges on vm-114: term -> (unit, label, value);
 # homelab_energy_<period>_<unit>{<period>="2026-10-05", <label>="<value>"}
 PERIOD_LABEL_FORMATS = {"day": "%Y-%m-%d", "month": "%Y-%m"}
 # how many complete periods are exported besides the running one: the board's bars and the panel's history

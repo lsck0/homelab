@@ -8,7 +8,7 @@
 #   net = import ../modules/net.nix { inherit lib inventory site; };
 #   net.zones.internal.subnet        # "10.100.0.0/24"
 #   net.zones.external.interface     # "ens20", the router's nic in the zone
-#   net.ipOf "105"                   # "10.100.0.105"
+#   net.ipOf "103"                   # "10.100.0.103"
 #   net.hostSource "200"             # "10.200.0.200/32"
 #   net.ports.nfs                    # 2049
 #
@@ -31,7 +31,7 @@ let
   privateRanges = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
   # the owner's devices dialing in (core/300-router/main.nix wg0)
   wireguardSubnet = "10.0.0.0/24";
-  # headscale's tailnet (instances/preconfigured/138-internal-headscale), rfc 6598 carrier-grade nat: never the internet either
+  # headscale's tailnet (instances/preconfigured/140-internal-headscale), rfc 6598 carrier-grade nat: never the internet either
   tailnet = "100.64.0.0/10";
   # never the internet: what a stranger's process (ci jobs, swarm tasks) is refused, named exceptions in front
   localRanges = privateRanges ++ [ tailnet ];

@@ -8,7 +8,7 @@
 set -euo pipefail
 
 : "${PEER_HOST:?the inbound member address}" "${GATEWAY:?the provider gateway}" "${LEASE_S:?the lease in seconds}"
-# qbittorrent's webui (112-internal-qbittorrent/instance.nix port)
+# qbittorrent's webui (120-internal-qbittorrent/instance.nix port)
 API="http://$PEER_HOST:80/api/v2"
 TABLE=proton-port
 SET=proton_port

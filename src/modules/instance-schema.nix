@@ -78,7 +78,7 @@ let
       homepage = mkOption {
         type = service.cardType { inherit name; group = "Apps"; icon = "mdi-web"; description = ""; };
         default = { };
-        description = "The service's card on the dashboard (vm-103), shown with the homepage feature.";
+        description = "The service's card on the dashboard (vm-102), shown with the homepage feature.";
       };
       oidc = mkOption {
         type = types.nullOr oidcType;
@@ -93,7 +93,7 @@ let
           };
         });
         default = { };
-        description = "Name -> an exporter of the service vm-105 scrapes.";
+        description = "Name -> an exporter of the service vm-103 scrapes.";
       };
     };
   });
@@ -111,7 +111,7 @@ let
 
   shareType = types.submodule {
     options = {
-      readOnly = mkOption { type = types.bool; default = false; description = "vm-109 exports it read-only to this guest."; };
+      readOnly = mkOption { type = types.bool; default = false; description = "vm-104 exports it read-only to this guest."; };
       mode = mkOption {
         type = types.nullOr (types.strMatching "0[0-7]{3}");
         default = null;
@@ -214,12 +214,12 @@ in {
     shares = mkOption {
       type = types.attrsOf shareType;
       default = { };
-      description = "Nas paths below /srv/nas this guest mounts (\"data/<share>\", \"bulk/media\"), token dirs aside (`tokens`, `tokenReads`): vm-109 exports exactly these to it, the router opens nfs to it (lab.nasClients); modules/nas.nix holds its mounts to them.";
+      description = "Nas paths below /srv/nas this guest mounts (\"data/<share>\", \"bulk/media\"), token dirs aside (`tokens`, `tokenReads`): vm-104 exports exactly these to it, the router opens nfs to it (lab.nasClients); modules/nas.nix holds its mounts to them.";
     };
     alerts = mkOption {
       type = types.attrsOf telemetry.alertType;
       default = { };
-      description = "Grafana rule uid -> a rule over this guest's own metrics or logs (modules/telemetry.nix alertType); vm-105 provisions it.";
+      description = "Grafana rule uid -> a rule over this guest's own metrics or logs (modules/telemetry.nix alertType); vm-103 provisions it.";
     };
     roles = mkOption {
       type = types.listOf (types.strMatching "[a-z][a-z0-9-]*");
@@ -234,7 +234,7 @@ in {
     tokenReads = mkOption {
       type = types.listOf (types.strMatching "[a-z0-9-]+");
       default = [ ];
-      description = "Lab tokens of other guests this one reads; vm-109 exports their minters' dirs to it read-only (lab.nasClients).";
+      description = "Lab tokens of other guests this one reads; vm-104 exports their minters' dirs to it read-only (lab.nasClients).";
     };
     on = mkOption {
       type = service.featuresType guestFeatures;

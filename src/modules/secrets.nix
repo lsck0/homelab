@@ -14,8 +14,8 @@
 # src/scripts/secrets-sync.sh writes the files from `planOf`; modules/base points every secret at its file.
 #
 #   secrets = import ./secrets.nix { inherit lib lab; };
-#   secrets.declared.kopia-password     # { kind = "guardsData:hex:24"; file = "core/109-internal-nas/secrets.sops.json"; home = ...; }
-#   secrets.fileOf host "attic-pull-token"   # "core/109-internal-nas/secrets.shared.sops.json" (paths relative to src/)
+#   secrets.declared.kopia-password     # { kind = "guardsData:hex:24"; file = "core/104-internal-nas/secrets.sops.json"; home = ...; }
+#   secrets.fileOf host "attic-pull-token"   # "core/104-internal-nas/secrets.shared.sops.json" (paths relative to src/)
 #   secrets.planOf configs              # what secrets-sync.sh converges to, and the problems that stop it
 #   (import ./secrets.nix { inherit lib; }).kindPattern   # the kinds alone, for a schema (no `lab` needed)
 # `catalog` is src/secrets/shared.nix; a test passes its own.

@@ -142,7 +142,7 @@ in
   # stays up: the postgres service's wal-g loop pushes the nightly base backup from inside the stack; asleep it pushes
   # none (alerts.walg_stale)
   on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
-  # the rust server pushes profiles to a hardcoded http://pyroscope:4040; this stand-in forwards them to vm-105
+  # the rust server pushes profiles to a hardcoded http://pyroscope:4040; this stand-in forwards them to vm-103
   override.services.pyroscope = {
     image = socat;
     command = [ "TCP-LISTEN:4040,fork,reuseaddr" "TCP:{{homelab.pyroscope}}" ];

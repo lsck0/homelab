@@ -17,7 +17,7 @@
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     sops-nix.url = "github:Mic92/sops-nix";
     sops-nix.inputs.nixpkgs.follows = "nixpkgs";
-    # hermes agent (vm-114)
+    # hermes agent (vm-113)
     hermes-agent.url = "github:NousResearch/hermes-agent";
     # owner's personal skills, passed to hermes as-is
     dotfiles.url = "github:lsck0/arch-dotfiles";

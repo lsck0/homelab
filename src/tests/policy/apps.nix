@@ -10,7 +10,7 @@
 #   vm or the builder's; only the builder reads the builder's credentials
 # - the registry reads and writes on disjoint methods, so one host may pull and push with one credential each; reads
 #   admit exactly the swarms (the apps zone, every cluster's manager) and the pushers, writes the pushers alone
-# - vm-105 scrapes cadvisor and the log shipper on every node app tasks run on, a guest-placed app's own guest too
+# - vm-103 scrapes cadvisor and the log shipper on every node app tasks run on, a guest-placed app's own guest too
 { lib, configs, inventory, catalog, appsCatalog, ... }:
 let
   # -----------------------------------------------------------------------------
@@ -31,7 +31,7 @@ let
   # LAWS
   # -----------------------------------------------------------------------------
 
-  # the http routes taking the guard and every exporter, which vm-105 alone scrapes
+  # the http routes taking the guard and every exporter, which vm-103 alone scrapes
   guarded = lib.concatMap (a: map (r: r.port) (lib.filter (r: r.protocol == "http" && lib.elem "guard" r.on) (lib.attrValues a.routes))
     ++ map (m: m.port) (lib.attrValues a.metrics)) (lib.attrValues catalog.apps);
   guardLaws = lib.concatLists (lib.mapAttrsToList (name: c:

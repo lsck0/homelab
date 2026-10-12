@@ -2,11 +2,11 @@
 
 Written from the policy, not from the nftables the router renders (modules/flows.nix, core/300-router/main.nix):
 if the two disagree, one of them is wrong, and the test says which probe showed it. The only inputs taken from the
-lab are the ones the claim itself is about: which guests vm-109 exports to (nas clients), which ports the enabled
+lab are the ones the claim itself is about: which guests vm-104 exports to (nas clients), which ports the enabled
 swarm apps publish, who leaves through the vpn exit, and which worker holds the apps' state.
 
     oracle = ZoneOracle(facts)        # facts: {"nasClients", "appsPorts", "vpnMembers", "appsNodes", "stateWorker"}
-    expect, seen_src = oracle.forward("10.200.0.203", "10.100.0.109", "tcp", 2049)
+    expect, seen_src = oracle.forward("10.200.0.201", "10.100.0.104", "tcp", 2049)
 
 expect is "open" or "closed" (labprobe's vocabulary); seen_src is the source the destination sees: the router's wan
 address when the path leaves through the house (masquerade), the probe's own source otherwise.
@@ -30,9 +30,9 @@ NETWORKS = {
 PRIVATE = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")]
 
 INGRESS = "10.100.0.100"
-COLLECTOR = "10.100.0.105"
-NAS = "10.100.0.109"
-MANAGER = "10.100.0.140"
+COLLECTOR = "10.100.0.103"
+NAS = "10.100.0.104"
+MANAGER = "10.100.0.107"
 EDGE = "10.200.0.200"
 
 NFS_PORTS = (111, 2049)

@@ -45,7 +45,7 @@ let
   # rsync's "some files vanished before they could be transferred": the app replaced a file (home assistant's
   # .storage/*.new renames) while the mirror copied the rest, which is complete
   rsyncVanishedStatus = 24;
-  # nas-restore (109-internal-nas lib/kopia.nix) marks the generation it writes with this
+  # nas-restore (104-internal-nas lib/kopia.nix) marks the generation it writes with this
   restoredPrefix = "restored-";
   excludes = s: lib.concatMapStringsSep " " (e: "--exclude ${lib.escapeShellArg e}") (s.exclude ++ [ generationFile ]);
   # mtimes to the nanosecond: whole seconds would skip a file rewritten at its size within the second of a copy, for good

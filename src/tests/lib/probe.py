@@ -5,11 +5,11 @@
 # printing all of them. Every negative needs its positive control in the same plan: the same listener reached from
 # an allowed source.
 #
-#     probe_sinks_start([vm_121, vm_203], tcp=(22, 8080), udp=(53,), esp=True)
+#     probe_sinks_start([vm_131, vm_201], tcp=(22, 8080), udp=(53,), esp=True)
 #     probe_check([
-#         {"src": "10.100.0.121", "dst": "10.200.0.203", "proto": "tcp", "port": 8080, "expect": "open"},
-#         {"src": "10.200.0.203", "dst": "10.100.0.121", "proto": "tcp", "port": 8080, "expect": "closed"},
-#     ], sources={"10.100.0.121": vm_121, "10.200.0.203": vm_203}, sinks=[vm_121, vm_203], seed=SEED)
+#         {"src": "10.100.0.131", "dst": "10.200.0.201", "proto": "tcp", "port": 8080, "expect": "open"},
+#         {"src": "10.200.0.201", "dst": "10.100.0.131", "proto": "tcp", "port": 8080, "expect": "closed"},
+#     ], sources={"10.100.0.131": vm_131, "10.200.0.201": vm_201}, sinks=[vm_131, vm_201], seed=SEED)
 #
 # expect is one of open, closed, refused, filtered, unreachable; "seen_src" names the source a sink must see when
 # the path rewrites it (masquerade). "via" names an entry of `runners`, a command prefix the source machine runs

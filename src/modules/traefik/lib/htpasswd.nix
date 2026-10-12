@@ -1,5 +1,5 @@
 # bcrypt htpasswd files from sops secrets, each password read from its file on stdin, never from an argv: the
-# ingress's basic auth (modules/traefik) and every backend checking the same users again (118's registry)
+# ingress's basic auth (modules/traefik) and every backend checking the same users again (106's registry)
 #
 #   htpasswd = import ../modules/traefik/lib/htpasswd.nix { inherit pkgs lib; };
 #   script = htpasswd.render "/run/x/users" { ci = config.sops.secrets.registry-push-password.path; };

@@ -39,7 +39,7 @@ let
   proxmoxCa = pkgs.runCommand "fake-proxmox-ca.pem" { } "cp ${proxmoxPki}/ca.pem $out";
 
   # the backends of the routes under test, each at its guest's address and route port; all always-on guests
-  backendAddresses = map ip ([ "103" "105" "109" "115" "125" "138" ] ++ map toString lab.appsCatalog.swarm.workers);
+  backendAddresses = map ip ([ "102" "103" "104" "110" "130" "140" ] ++ map toString lab.appsCatalog.swarm.workers);
   backendPorts = lib.unique (map (r: r.port) (with routes; [ homepage grafana kopia forgejo homeassistant headscale headplane wat-db hello ]));
 
   # client addresses on the house lan, one per actor, so the login limit (per client) counts each alone
@@ -202,7 +202,7 @@ pkgs.testers.runNixOSTest {
         status, _, body = curl(CLIENTS["luca"], f"{public}${metricsPath}", jars["luca"])
         assert status == 200 and json.loads(body)["headers"].get("remote-user") == "luca", body
         # the collector's scrape: the backend port itself, past the ingress and authelia
-        direct = backends.succeed("curl -sf --interface ${ip "105"} http://${lib.head routes.hello.nodes}:${toString routes.hello.port}${metricsPath}")
+        direct = backends.succeed("curl -sf --interface ${ip "103"} http://${lib.head routes.hello.nodes}:${toString routes.hello.port}${metricsPath}")
         assert "remote-user" not in json.loads(direct)["headers"], direct
 
     with subtest("own-login routes skip authelia and never receive an identity header"):
@@ -237,7 +237,7 @@ pkgs.testers.runNixOSTest {
         assert "code=" not in guest_headers, guest_headers
 
     with subtest("authelia's port answers the ingress only, the probers included"):
-        for source in ("${ip "115"}", "${ip "103"}", "${ip "105"}"):
+        for source in ("${ip "110"}", "${ip "102"}", "${ip "103"}"):
             backends.fail(f"nc -z -w 2 -s {source} ${ip "101"} ${toString routes.authelia.port}")
         world.fail("nc -z -w 2 -s ${clients.anon} ${ip "101"} ${toString routes.authelia.port}")
 
@@ -280,14 +280,14 @@ pkgs.testers.runNixOSTest {
             verb = "-I" if method == "HEAD" else f"-X {method}"
             return backends.succeed(f"curl -s -o /dev/null -w '%{{http_code}}' {verb} --interface {src} --resolve {host}:443:{INGRESS} https://{host}{path}")
         backends.succeed(": > /run/echo/requests.jsonl")
-        for source in ("${ip "103"}", "${ip "105"}"):
+        for source in ("${ip "102"}", "${ip "103"}"):
             assert probe(source, "${routes.headplane.health}") == "200", source
             assert probe(source, "${routes.headplane.health}", "HEAD") == "200", source
             # the rest of the route, and any other method on the health path, still meet authelia
             assert probe(source, "/") == "302", source
             assert probe(source, "${routes.headplane.health}", "POST") != "200", source
         # positive control of the source check: another internal guest meets authelia on the health path
-        assert probe("${ip "115"}", "${routes.headplane.health}") == "302"
+        assert probe("${ip "110"}", "${routes.headplane.health}") == "302"
         logged = backends.succeed("cat /run/echo/requests.jsonl")
         assert logged.count("${routes.headplane.health}") == 4 and "remote-user" not in logged, logged
 

@@ -5,7 +5,7 @@
 # - host memory budget: every powered guest's floor (a vm's balloon floor, its whole memory when unballooned, an
 #   lxc's limit) plus the zfs arc and the node's reserve fit the node's memory (`node` below). Past it the
 #   balloon squeezes guests below their floors and the node swaps; onDemand guests count, since all may wake at once.
-# - a guest mounts exactly the shares its instance.nix declares (lab.shares, its token dirs derived): vm-109 exports
+# - a guest mounts exactly the shares its instance.nix declares (lab.shares, its token dirs derived): vm-104 exports
 #   those, so a mount it does not export hangs and an export nothing mounts is open for nothing
 { lib, configs, lab, ... }:
 let

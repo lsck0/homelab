@@ -157,7 +157,7 @@ let
     ++ map (c: c.id) lab.oidc;
 
   # every published port of every enabled app as { port; owner; where; group; guarded; }: an http route's guarded where
-  # it takes the guard, an exporter's always (vm-105 alone scrapes it)
+  # it takes the guard, an exporter's always (vm-103 alone scrapes it)
   uses = lib.concatLists (lib.mapAttrsToList (app: a:
     lib.mapAttrsToList (key: p: {
       inherit (p) port;

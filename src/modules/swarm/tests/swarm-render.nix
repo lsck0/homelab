@@ -4,6 +4,6 @@
 { pkgs, ... }:
 pkgs.runCommand "swarm-render" { nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ps.hypothesis ])) ]; } ''
   python3 ${./swarm_render_test.py} ${../lib/swarm-render.py}
-  python3 ${./render_properties_test.py} ${../lib/swarm-render.py} ${../../../core/140-internal-swarm/lib/app-builder.py}
+  python3 ${./render_properties_test.py} ${../lib/swarm-render.py} ${../../../core/107-internal-swarm/lib/app-builder.py}
   touch $out
 ''

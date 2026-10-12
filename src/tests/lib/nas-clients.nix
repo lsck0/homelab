@@ -6,7 +6,7 @@
 # test's stand-in nodes) is skipped:
 #
 #   nasClients = import ./nas-clients.nix { inherit lib inventory; configs = nodes; };
-#   # { "10.100.0.140" = [ { path = "/srv/nas/data/swarm-manager"; readOnly = false; mode = null; localState = false; } ... ]; ... }
+#   # { "10.100.0.107" = [ { path = "/srv/nas/data/swarm-manager"; readOnly = false; mode = null; localState = false; } ... ]; ... }
 { lib, inventory, configs }:
 let
   vmOf = config: let match = builtins.match "vm-([0-9]+)" config.networking.hostName; in

@@ -10,20 +10,20 @@
 # query or alert over them reads both.
 #
 # Metrics. cadvisor reports docker containers only, with no container label turned into a prometheus label: an app's
-# own labels would otherwise be series names the scrape of every app pays for. vm-105 derives stack and service
+# own labels would otherwise be series names the scrape of every app pays for. vm-103 derives stack and service
 # from the task name (modules/telemetry.nix swarmTaskPatterns).
 #
-# Traces and profiles. A task never reaches vm-105 (modules/swarm DOCKER-USER); it sends to the relay on its own node
+# Traces and profiles. A task never reaches vm-103 (modules/swarm DOCKER-USER); it sends to the relay on its own node
 # (telemetry.nix relayEndpoints), which sets the tenant from the sender's address: the resolver maps each task
 # container's docker_gwbridge address to the app swarm named its service after (<app>_<service>, which no compose
 # file chooses), on every container start and stop. A request from any other address is refused, never guessed.
-# vm-105 then admits from this node only the tenants of the apps its cluster runs.
+# vm-103 then admits from this node only the tenants of the apps its cluster runs.
 #
 # The docker api. The shipper and the resolver read untrusted names and lines; they get a proxy of the socket that
 # passes the reads they make (listing, inspecting, logs, events) and nothing else, never the docker group.
 #
 # Rejected: the docker journald driver. Every container logs as docker.service, so journald's per-unit rate limit
-# suppressed every app on the node once one flooded, and the upload filled vm-105's journal-remote directory, which
+# suppressed every app on the node once one flooded, and the upload filled vm-103's journal-remote directory, which
 # ignores its size cap between vacuums.
 { config, lib, pkgs, inventory, catalog, ... }:
 let
@@ -62,7 +62,7 @@ let
   positions = "/var/lib/promtail/positions.yaml";
   # cpu, memory, network, disk io, oom kills, and processes for the pids limit; the per-cpu and tcp families stay off
   cadvisorMetrics = [ "cpu" "memory" "network" "diskIO" "oom_event" "process" ];
-  # vm-105 scrapes every 15s; the 1s default spent a third of a core on a worker with a dozen tasks
+  # vm-103 scrapes every 15s; the 1s default spent a third of a core on a worker with a dozen tasks
   cadvisorHousekeeping = "10s";
 
   # -----------------------------------------------------------------------------
@@ -217,7 +217,7 @@ in {
       type = lib.types.str;
       readOnly = true;
       default = shipperJob;
-      description = "The `job` label of the apps' container logs, and vm-105's scrape job of the shippers.";
+      description = "The `job` label of the apps' container logs, and vm-103's scrape job of the shippers.";
     };
     relayConfig = lib.mkOption {
       type = lib.types.lines;
@@ -302,7 +302,7 @@ in {
     networking.firewall.interfaces.${gatewayBridge}.allowedTCPPorts = lib.attrValues relayPorts;
 
     homelab.openings.appTelemetry = "the apps' log shipper, cadvisor and the tasks' telemetry relay";
-    # vm-105 scrapes the shipper for what it dropped per app and cadvisor for the containers (modules/flows.nix)
+    # vm-103 scrapes the shipper for what it dropped per app and cadvisor for the containers (modules/flows.nix)
     networking.firewall.allowedTCPPorts = [ telemetry.ports.promtail cadvisorPort ];
     homelab.ingressOnly.ports = [ telemetry.ports.promtail cadvisorPort ];
 

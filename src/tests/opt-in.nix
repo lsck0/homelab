@@ -64,7 +64,7 @@ let
   routersOf = host: (configOf host).services.traefik.dynamicConfigOptions.http.routers;
   internal = routersOf "100-internal-traefik";
   edge = routersOf "200-external-traefik";
-  grafana = configOf "105-internal-grafana";
+  grafana = configOf "103-internal-grafana";
   router = configOf "300-router";
   guestOf = i: configOf i.folder;
   # a router's rank among a host's: its priority, else its rule's length (traefik's own default)

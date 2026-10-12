@@ -65,7 +65,7 @@ let
       printf '%s' "$value" | ${pkgs.diffutils}/bin/cmp -s - "$own/$1.token" && return 0
       tmp=$(${pkgs.coreutils}/bin/mktemp "$own/.$1.XXXXXX")
       printf '%s' "$value" > "$tmp"
-      # 0644: hermes reads every token as its own user (lab-token on vm-114)
+      # 0644: hermes reads every token as its own user (lab-token on vm-113)
       ${pkgs.coreutils}/bin/chmod 0644 "$tmp"
       ${pkgs.coreutils}/bin/mv -f "$tmp" "$own/$1.token"
       echo "token $1 exported"

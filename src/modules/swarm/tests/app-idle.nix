@@ -1,6 +1,6 @@
 # an app scales to zero and the edge wakes it, an app that says why it stays up never sleeps
 #
-# The real swarm (manager vm-140, worker vm-250, nas vm-109) behind the real edge (vm-200, offline crowdsec), whose
+# The real swarm (manager vm-107, worker vm-250, nas vm-104) behind the real edge (vm-200, offline crowdsec), whose
 # on-demand proxy wakes an app through the manager's controller (lib/controller-api.py). `lazy` stops after its
 # idle window, `steady` stays up without scaleToZero. A request to a sleeping app is held until the app answers,
 # within coldStartMaxS and without an image pull; a deploy of a sleeping app runs its new version once and puts it
@@ -13,7 +13,7 @@ let
   registryAddress = ip "100";
   edge = ip "200";
   cloudflare = "104.16.0.10";
-  controller = "http://${ip "140"}:${toString lab.appsCatalog.controllerPort}";
+  controller = "http://${ip "107"}:${toString lab.appsCatalog.controllerPort}";
   # short enough to watch it pass, long enough for a request's round trip
   idleWindow = "1m";
   requestTimeoutS = 120;
@@ -61,7 +61,7 @@ pkgs.testers.runNixOSTest {
   name = "app-idle";
 
   node.specialArgs = lab.specialArgs;
-  nodes.vm-109 = lab.nas { flat = true; };
+  nodes.vm-104 = lab.nas { flat = true; };
   nodes.registry = {
     imports = [ (lab.multi { addresses = [ "${registryAddress}/8" ]; }) ];
     services.dockerRegistry = {
@@ -72,7 +72,7 @@ pkgs.testers.runNixOSTest {
     };
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
   };
-  nodes.vm-140 = swarmNode "140";
+  nodes.vm-107 = swarmNode "107";
   nodes.vm-250 = swarmNode "250";
   nodes.vm-200 = {
     imports = [ (lab.guest "200" { flat = true; instance = ../../../core/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
@@ -105,25 +105,25 @@ pkgs.testers.runNixOSTest {
         return vm_200.succeed(f"curl -s ${controller}/state/{app}").strip()
 
     def tasks(app):
-        return int(vm_140.succeed(f"docker service ls --filter name={app}_web --format '{{{{.Replicas}}}}'").split("/")[0])
+        return int(vm_107.succeed(f"docker service ls --filter name={app}_web --format '{{{{.Replicas}}}}'").split("/")[0])
 
     def deploy(app, version):
         ref = f"registry.lsck0.dev/{app}/web"
-        vm_140.succeed(f"docker tag fixture:{version} {ref}:{version} && docker push -q {ref}:{version}")
-        digest = vm_140.succeed(f"docker image inspect --format '{{{{range .RepoDigests}}}}{{{{println .}}}}{{{{end}}}}' {ref}:{version} | grep -F {ref}@").strip()
+        vm_107.succeed(f"docker tag fixture:{version} {ref}:{version} && docker push -q {ref}:{version}")
+        digest = vm_107.succeed(f"docker image inspect --format '{{{{range .RepoDigests}}}}{{{{println .}}}}{{{{end}}}}' {ref}:{version} | grep -F {ref}@").strip()
         stack = {"services": {"web": {"image": digest}}}
-        vm_140.succeed(f"echo {shlex.quote(json.dumps(stack))} > /tmp/{app}.json && swarm-apply {app} < /tmp/{app}.json")
+        vm_107.succeed(f"echo {shlex.quote(json.dumps(stack))} > /tmp/{app}.json && swarm-apply {app} < /tmp/{app}.json")
         return digest
 
     start_all()
-    vm_109.wait_for_unit("nfs-exports-reload.service")
+    vm_104.wait_for_unit("nfs-exports-reload.service")
     registry.wait_for_open_port(443)
-    vm_140.wait_until_succeeds("[ $(docker node ls -q | wc -l) = 2 ]", timeout=300)
+    vm_107.wait_until_succeeds("[ $(docker node ls -q | wc -l) = 2 ]", timeout=300)
     vm_200.wait_for_unit("traefik.service")
     # the bouncer refuses every client until the crowdsec stub listens (tests/lib/offline-traefik.nix)
     vm_200.wait_for_file("/var/lib/crowdsec/data/stub-ready")
     for image in ("${images.v1}", "${images.v2}"):
-        vm_140.succeed(f"docker load -i {image}")
+        vm_107.succeed(f"docker load -i {image}")
     for app in ("lazy", "steady"):
         deploy(app, "v1")
     world.wait_until_succeeds(f"[ \"$({request_command('steady', 10)} | tail -n1 | cut -d' ' -f1)\" = 200 ]", timeout=240)
@@ -133,15 +133,15 @@ pkgs.testers.runNixOSTest {
         # the reaper's turn, as its timer would take it; it fails for the edge's guests (no proxmox here), lazy sleeps
         vm_200.execute("systemctl start ondemand-reaper")
         vm_200.wait_until_succeeds("[ \"$(curl -s ${controller}/state/lazy)\" = stopped ]", timeout=60)
-        vm_140.wait_until_succeeds("[ \"$(docker service ls --filter name=lazy_web --format '{{.Replicas}}' | cut -d/ -f1)\" = 0 ]", timeout=120)
-        vm_140.succeed("grep -q 'homelab_app_idle_stopped{app=\"lazy\"} 1' /var/lib/node-exporter-textfile/swarm_idle_lazy.prom")
+        vm_107.wait_until_succeeds("[ \"$(docker service ls --filter name=lazy_web --format '{{.Replicas}}' | cut -d/ -f1)\" = 0 ]", timeout=120)
+        vm_107.succeed("grep -q 'homelab_app_idle_stopped{app=\"lazy\"} 1' /var/lib/node-exporter-textfile/swarm_idle_lazy.prom")
         assert tasks("steady") == 1
         vm_200.fail("curl -sf -X POST ${controller}/sleep/steady")
 
     with subtest("a deploy of a sleeping app runs the new version once and leaves it asleep, its image on the worker"):
         digest = deploy("lazy", "v2")
         assert state("lazy") == "stopped"
-        vm_140.wait_until_succeeds("[ \"$(docker service ls --filter name=lazy_web --format '{{.Replicas}}' | cut -d/ -f1)\" = 0 ]", timeout=120)
+        vm_107.wait_until_succeeds("[ \"$(docker service ls --filter name=lazy_web --format '{{.Replicas}}' | cut -d/ -f1)\" = 0 ]", timeout=120)
         vm_250.succeed(f"docker image inspect {digest}")
         # what the worker's image prune keeps: every digest a service names
         vm_250.wait_until_succeeds(f"grep -qx {digest.split('@')[1]} /var/lib/lab-tokens/swarm-images.token", timeout=60)
@@ -155,7 +155,7 @@ pkgs.testers.runNixOSTest {
         pulls = vm_250.succeed(f"docker events --since {since} --until $(date +%s) --filter type=image --filter event=pull --format '{{{{.ID}}}}'").strip()
         assert pulls == "", f"the wake pulled {pulls}"
         assert state("lazy") == "running" and tasks("lazy") == 1
-        vm_140.succeed("grep -q 'homelab_app_idle_stopped{app=\"lazy\"} 0' /var/lib/node-exporter-textfile/swarm_idle_lazy.prom")
+        vm_107.succeed("grep -q 'homelab_app_idle_stopped{app=\"lazy\"} 0' /var/lib/node-exporter-textfile/swarm_idle_lazy.prom")
         _, _, warm = request("lazy")
         print(f"warm: {warm:.2f}s")
 

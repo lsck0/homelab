@@ -4,7 +4,7 @@
 # time); stand-ins are built from nixpkgs. Set one as the real container's imageFile, keeping the real image name:
 #
 #   images = import ./images.nix { inherit pkgs; };
-#   virtualisation.oci-containers.containers.registry.imageFile = images.registry;      # on the real vm-118
+#   virtualisation.oci-containers.containers.registry.imageFile = images.registry;      # on the real vm-106
 #   virtualisation.oci-containers.containers.registry-ui.imageFile = images.registry-ui;
 #
 # A pinned image changes with its instance: bump the tag there, then refill digest and hash here with
@@ -13,7 +13,7 @@
 let
   labprobe = import ./labprobe.nix { inherit pkgs; };
 in {
-  # core/118-internal-registry/main.nix
+  # core/106-internal-registry/main.nix
   registry = pkgs.dockerTools.pullImage {
     imageName = "registry";
     imageDigest = "sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373";

@@ -2,7 +2,7 @@
 # capabilities and tenant, reached the same way through the edge
 #
 # The real lab plus two apps (tests/lib/lab.nix `apps`): `level` runs on the shared swarm
-# (manager vm-140, worker vm-250), `own` is placed on its own guest, a swarm of one. Every property is checked by
+# (manager vm-107, worker vm-250), `own` is placed on its own guest, a swarm of one. Every property is checked by
 # one function over both apps, so a difference between the two placements is a failure of that property.
 { pkgs, lib, specialArgs, ... }:
 let
@@ -66,7 +66,7 @@ pkgs.testers.runNixOSTest {
   name = "app-placement";
 
   node.specialArgs = lab.specialArgs;
-  nodes.vm-109 = lab.nas { flat = true; };
+  nodes.vm-104 = lab.nas { flat = true; };
   nodes.registry = {
     imports = [ (lab.multi { addresses = [ "${registryAddress}/8" ]; }) ];
     services.dockerRegistry = {
@@ -77,7 +77,7 @@ pkgs.testers.runNixOSTest {
     };
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
   };
-  nodes.vm-140 = swarmNode "140";
+  nodes.vm-107 = swarmNode "107";
   nodes.vm-250 = swarmNode "250";
   nodes."vm-${placedId}" = swarmNode placedId;
   nodes.vm-200 = {
@@ -93,7 +93,7 @@ pkgs.testers.runNixOSTest {
     import json
     import shlex
 
-    MANAGER = {"level": vm_140, "own": vm_${placedId}}
+    MANAGER = {"level": vm_107, "own": vm_${placedId}}
     WORKERS = {"vm-250": vm_250, "vm-${placedId}": vm_${placedId}}
 
     def deploy(app):
@@ -120,15 +120,15 @@ pkgs.testers.runNixOSTest {
                              f"--resolve {app}.${net.domain}:443:${edge} -H 'X-Forwarded-For: 198.51.100.1' https://{app}.${net.domain}/").strip()
 
     start_all()
-    vm_109.wait_for_unit("nfs-exports-reload.service")
+    vm_104.wait_for_unit("nfs-exports-reload.service")
     registry.wait_for_open_port(443)
-    vm_140.wait_until_succeeds("[ $(docker node ls -q | wc -l) = 2 ]", timeout=300)
+    vm_107.wait_until_succeeds("[ $(docker node ls -q | wc -l) = 2 ]", timeout=300)
     vm_${placedId}.wait_until_succeeds("docker node ls --format '{{.ManagerStatus}}' | grep -qx Leader", timeout=300)
     vm_200.wait_for_unit("traefik.service")
 
     with subtest("the guest is a swarm of its own, apart from the shared one"):
         assert vm_${placedId}.succeed("docker node ls -q | wc -l").strip() == "1"
-        assert "vm-${placedId}" not in vm_140.succeed("docker node ls --format '{{.Hostname}}'")
+        assert "vm-${placedId}" not in vm_107.succeed("docker node ls --format '{{.Hostname}}'")
 
     for app in ("level", "own"):
         deploy(app)

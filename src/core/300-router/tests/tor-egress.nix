@@ -13,9 +13,9 @@ let
   torPorts = import ../../../modules/tor-ports.nix;
   ip = id: lab.inventory.${id}.ip;
 
-  memberId = "121";
+  memberId = "131";
   vpnMemberId = lib.head (lib.attrNames (lib.filterAttrs (id: e: e.via == "vpn" && (net.zoneOf id).name == "internal") lab.egress));
-  plainId = "105";
+  plainId = "103";
   facts = lab.specialArgs // {
     lab = lab.specialArgs.lab // { egress = lab.egress // { ${memberId} = { via = "tor"; inbound = false; vmid = lib.toInt memberId; }; }; };
   };

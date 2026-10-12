@@ -4,7 +4,7 @@
 # live in sops. Each producer writes only its own directory, exported read-write to it alone and owned by root on
 # the nas (only the producer's root writes it), and a consumer mounts read-only exactly the producers of the tokens
 # it reads. A producer declares what it writes in its instance.nix (`tokens`), a consumer what it reads
-# (`tokenReads`, or a role, modules/lab); the collector derives both the registry below and vm-109's exports from
+# (`tokenReads`, or a role, modules/lab); the collector derives both the registry below and vm-104's exports from
 # them. A producer writes through ownDir: a temp file, then a rename into place, so a reader never sees half a token.
 #
 # Limit: the nas tells clients apart by source address alone. The guarantee holds only while a guest cannot take

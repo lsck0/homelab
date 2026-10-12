@@ -7,7 +7,7 @@
 # The fixture is the real `wat` app (src/instances/custom/wat), enabled for this test (every edge feature: anubis on /, a direct
 # /api with its metrics on the same port, an upload path without the waf and a 100 MiB limit, an internal route).
 # Its reservation here needs three swarm workers (modules/limits workerCountOf); `appnodes` serves its ports on
-# two of their addresses (the third is absent: the health check must drop it), the terminal's feed (vm-104) and authelia's forwardauth (vm-101, lib/authelia_stub.py: no session
+# two of their addresses (the third is absent: the health check must drop it), the terminal's feed (vm-114) and authelia's forwardauth (vm-101, lib/authelia_stub.py: no session
 # here, every gated host is sent to the portal); `world` owns the flat lab's gateways and the outside clients.
 { pkgs, lib, specialArgs, ... }:
 let
@@ -58,7 +58,7 @@ pkgs.testers.runNixOSTest {
   nodes.vm-200 = guest "200" ../main.nix 1536;
   nodes.vm-100 = guest "100" ../../100-internal-traefik/main.nix 1024;
   nodes.appnodes = {
-    imports = [ (lab.multi { addresses = map (a: "${a}/8") [ (ip "250") (ip "251") (ip "104") (ip "101") ]; }) ];
+    imports = [ (lab.multi { addresses = map (a: "${a}/8") [ (ip "250") (ip "251") (ip "114") (ip "101") ]; }) ];
     systemd.services.echo-backend = {
       wantedBy = [ "multi-user.target" ];
       serviceConfig.ExecStart = "${echoBackend}/bin/echo-backend --ports ${lib.concatMapStringsSep "," toString (appPorts ++ [ feed.port ])} --log /run/echo/requests.jsonl";
@@ -283,7 +283,7 @@ pkgs.testers.runNixOSTest {
             # positive control: the house is relayed
             assert get("/", host=host, src=LAN)["status"] != 403
         r = get("/", host="https://${net.fqdn feed.host}", src=NET)
-        assert r["status"] == 200 and json.loads(r["body"])["node"] == "${ip "104"}", r
+        assert r["status"] == 200 and json.loads(r["body"])["node"] == "${ip "114"}", r
         vm_100.succeed(": > /var/log/traefik/access.log")
         assert get("/", host="https://unknown.${net.domain}")["status"] == 404
         vm_100.fail("grep -q unknown /var/log/traefik/access.log")

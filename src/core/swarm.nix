@@ -1,6 +1,6 @@
 # the shared apps swarm: its state worker, its ports, and the one entry generating every worker
 #
-# The manager and the builder are the instances declaring the roles swarm-manager and app-builder (vm-140). The
+# The manager and the builder are the instances declaring the roles swarm-manager and app-builder (vm-107). The
 # workers have no instance folder: modules/lab makes as many guests from `nodes.first` on as the enabled apps'
 # reservations need (modules/limits workerCountOf, at least one), each with the vm shape `nodes.vm`
 # (modules/instance-schema.nix `vm`) and nothing but modules/swarm as configuration.

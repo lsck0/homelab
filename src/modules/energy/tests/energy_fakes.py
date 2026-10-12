@@ -1,6 +1,6 @@
 """The boundary energy_model's users fetch through, faked: urlopen's answers and energy-charts' price api.
 
-Imported by the tests of 104-internal-terminal's energy-sync and 105-internal-grafana's spot-price; import it after
+Imported by the tests of 114-internal-terminal's energy-sync and 103-internal-grafana's spot-price; import it after
 setting ENERGY_SPOT_API, which energy_model reads at import.
 """
 import datetime

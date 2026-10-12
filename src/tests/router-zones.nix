@@ -25,8 +25,8 @@ let
     cloudflare = "104.16.0.10";
   };
   zoneAddresses = {
-    internal = map ip [ "100" "101" "105" "109" "112" "117" "130" "140" ];
-    external = map ip [ "200" "203" "204" "206" "207" "210" ];
+    internal = map ip [ "100" "101" "103" "104" "107" "111" "120" "121" ];
+    external = map ip [ "200" "201" "210" "211" "212" "213" ];
     apps = map (id: ip (toString id)) lab.appsCatalog.swarm.workers;
   };
 
@@ -46,7 +46,7 @@ let
       (map (r: r.host) (lib.attrValues lab.catalog.internal))
     ++ map (h: lib.nameValuePair (net.fqdn h) (ip "200"))
       (map (r: r.host) (lib.attrValues lab.catalog.external))
-    ++ [ (lib.nameValuePair (net.fqdn "smb") (ip "109")) ]);
+    ++ [ (lib.nameValuePair (net.fqdn "smb") (ip "104")) ]);
 
   # the ports the policy names, and 4444, which only the killswitch subtest uses
   killswitchPort = 4444;
@@ -203,8 +203,8 @@ pkgs.testers.runNixOSTest {
             (house, HOUSE["device"], ROUTER_WAN, 9100, False), (house, HOUSE["internet"], ROUTER_WAN, 22, False),
             (house, HOUSE["internet"], ROUTER_WAN, 53, False),
             (internal, ZONES["internal"][1], "10.100.0.1", 22, True), (internal, ZONES["internal"][1], "10.100.0.1", 53, True),
-            (internal, ZONES["internal"][1], "10.100.0.1", 9100, False), (internal, "${ip "105"}", "10.100.0.1", 9100, True),
-            (internal, ZONES["internal"][1], "10.100.0.1", 9055, False), (internal, "${ip "130"}", "10.100.0.1", 9055, True),
+            (internal, ZONES["internal"][1], "10.100.0.1", 9100, False), (internal, "${ip "103"}", "10.100.0.1", 9100, True),
+            (internal, ZONES["internal"][1], "10.100.0.1", 9055, False), (internal, "${ip "121"}", "10.100.0.1", 9055, True),
             (dmz, ZONES["external"][1], "10.200.0.1", 53, True), (dmz, ZONES["external"][1], "10.200.0.1", 22, False),
             (dmz, ZONES["external"][1], "10.200.0.1", 9100, False),
             (apps, ZONES["apps"][0], "10.250.0.1", 53, True), (apps, ZONES["apps"][0], "10.250.0.1", 22, False),
@@ -252,7 +252,7 @@ pkgs.testers.runNixOSTest {
         apps.fail("busybox udhcpc -i eth2 -n -q -t 3 -s ${leaseScript}")
 
     with subtest("vpn members never leave through the house, whichever piece of the exit is missing"):
-        member, other = "${ip "112"}", ZONES["internal"][1]
+        member, other = "${ip "120"}", ZONES["internal"][1]
         capture_start(house, "eth1", "/tmp/leak.pcap", "tcp port ${toString killswitchPort}")
         steps = ["true", "systemctl stop wireguard-wg-egress", "ip rule del fwmark 1 table 100"]
         for step in steps:
@@ -273,13 +273,13 @@ pkgs.testers.runNixOSTest {
     with subtest("vpn members' dns goes into the tunnel, everyone else's to blocky, nobody's through the house"):
         capture_start(house, "eth1", "/tmp/dns-leak.pcap", "udp port 53")
         capture_start(luca_router, "wg-egress", "/tmp/tunnel-dns.pcap", "udp port 53")
-        internal.execute("dig +time=2 +tries=1 -b ${ip "112"} @10.100.0.1 example.org")
+        internal.execute("dig +time=2 +tries=1 -b ${ip "120"} @10.100.0.1 example.org")
         luca_router.wait_until_succeeds("tcpdump -n -r /tmp/tunnel-dns.pcap 2>/dev/null | grep -q example.org", timeout=20)
         # a split horizon name still answers for a member
-        assert internal.succeed("dig +short +time=3 -b ${ip "112"} @10.100.0.1 grafana.${net.domain}").strip() == "${ip "100"}"
+        assert internal.succeed("dig +short +time=3 -b ${ip "120"} @10.100.0.1 grafana.${net.domain}").strip() == "${ip "100"}"
         internal.execute(f"dig +time=2 +tries=1 -b {other} @10.100.0.1 example.net")
         # positive control, last in the capture: the tunnel capture sees a member's query sent after the other's
-        internal.execute("dig +time=2 +tries=1 -b ${ip "112"} @10.100.0.1 control.example")
+        internal.execute("dig +time=2 +tries=1 -b ${ip "120"} @10.100.0.1 control.example")
         luca_router.wait_until_succeeds("tcpdump -n -r /tmp/tunnel-dns.pcap 2>/dev/null | grep -q control.example", timeout=20)
         tunnel = capture_stop(luca_router, "/tmp/tunnel-dns.pcap")
         assert "example.net" not in tunnel, tunnel
@@ -313,7 +313,7 @@ pkgs.testers.runNixOSTest {
             assert grew == metered, f"{src}: wan-syn grew {grew}, expected {metered}"
 
     with subtest("no forbidden flow opens while the ruleset reloads or the router boots"):
-        loop = (f"for i in $(seq 300); do echo try; nc -z -w 1 -s {ZONES['external'][1]} ${ip "109"} 2049 && echo OPEN; done "
+        loop = (f"for i in $(seq 300); do echo try; nc -z -w 1 -s {ZONES['external'][1]} ${ip "104"} 2049 && echo OPEN; done "
                 "> /tmp/window.log 2>&1 &")
         dmz.succeed(loop)
         # ten restarts within a second pass systemd's start limit (5 in 10 s); reset-failed clears its count
@@ -326,7 +326,7 @@ pkgs.testers.runNixOSTest {
         dmz.wait_until_succeeds("[ $(grep -c try /tmp/window.log) -ge 20 ]", timeout=120)
         dmz.fail("grep -q OPEN /tmp/window.log")
         # positive control: a nas client of the dmz reaches the same port
-        if "${ip "206"}" in FACTS["nasClients"]:
-            assert reach(dmz, "${ip "206"}", "${ip "109"}", 2049)
+        if "${ip "212"}" in FACTS["nasClients"]:
+            assert reach(dmz, "${ip "212"}", "${ip "104"}", 2049)
   '';
 }

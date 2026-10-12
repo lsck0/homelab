@@ -127,8 +127,8 @@ let
     "300-router" = c: c.networking.nftables.ruleset;
     "200-external-traefik" = c: c.services.traefik.dynamicConfigOptions;
     "100-internal-traefik" = c: c.services.traefik.dynamicConfigOptions;
-    "105-internal-grafana" = c: c.services.prometheus.scrapeConfigs;
-    "140-internal-swarm" = c: c.systemd.services.app-builder.serviceConfig.ExecStart;
+    "103-internal-grafana" = c: c.services.prometheus.scrapeConfigs;
+    "107-internal-swarm" = c: c.systemd.services.app-builder.serviceConfig.ExecStart;
     "250-apps-swarm" = c: c.networking.firewall.extraCommands;
   };
   # rendered as json: a store path stays a string, nothing is built; the host's facts are the case's whole lab

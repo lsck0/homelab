@@ -1,5 +1,5 @@
-# energy_model.py and its inputs as a python module, for 104-internal-terminal's energy-sync.py and
-# 105-internal-grafana's spot-price.py and its grafana board (lib/dashboards/energy.py)
+# energy_model.py and its inputs as a python module, for 114-internal-terminal's energy-sync.py and
+# 103-internal-grafana's spot-price.py and its grafana board (lib/dashboards/energy.py)
 { pkgs }:
 pkgs.python3Packages.toPythonModule (pkgs.runCommand "energy-model" {
   inputs = builtins.toJSON (import ./lib/inputs.nix);

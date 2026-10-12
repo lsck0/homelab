@@ -1,4 +1,4 @@
-"""The deploy controller's one door (vm-140): CI asks for a redeploy, the ingresses wake and stop idle apps.
+"""The deploy controller's one door (vm-107): CI asks for a redeploy, the ingresses wake and stop idle apps.
 
 Usage: controller-api.py <config.json>   (systemd socket activation, Accept=yes: the connection is fd 0)
 

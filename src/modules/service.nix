@@ -102,7 +102,7 @@ in rec {
   # the dashboard card; a deployment's defaults name its kind (an instance service, an app)
   cardType = { name, group, icon, description }: types.submodule {
     options = {
-      group = mkOption { type = types.str; default = group; description = "Dashboard group (vm-103 lays them out)."; };
+      group = mkOption { type = types.str; default = group; description = "Dashboard group (vm-102 lays them out)."; };
       name = mkOption { type = types.str; default = lib.toUpper (lib.substring 0 1 name) + lib.substring 1 (-1) name; description = "Card title."; };
       icon = mkOption { type = types.str; default = icon; description = "Card icon (a homepage icon name)."; };
       description = mkOption { type = types.str; default = description; description = "Card subtitle."; };

@@ -14,7 +14,7 @@ Overview:
     loki_query(base, query, urlopen)               instant vector rows, same contract
 
 Example:
-    rows = prometheus_query("http://10.100.0.105:9090", "up")
+    rows = prometheus_query("http://10.100.0.103:9090", "up")
     if rows is None:
         ...  # prometheus unreachable
 """

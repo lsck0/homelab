@@ -15,19 +15,19 @@
 # that could go stale.
 #
 #   lab = import ./modules/lab { inherit lib; };
-#   lab.inventory."134"           # { name; type; kind; privileged; features; ip; prefix; gateway; powered; idle; roles; }
+#   lab.inventory."122"           # { name; type; kind; privileged; features; ip; prefix; gateway; powered; idle; roles; }
 #                                 # powered: vm.power is on; idle: idle.stopAfter, null for a guest that never idles
-#   lab.instances."134"           # { id; zone; name; dir; folder; main; source; config; }, config the evaluated instance.nix,
+#   lab.instances."122"           # { id; zone; name; dir; folder; main; source; config; }, config the evaluated instance.nix,
 #                                 # folder its home relative to src/ (an app's own guest: the app's), null for a worker
 #   lab.routes.jellyfin           # an instance service's route with every field (modules/service.nix), plus vmid
 #   lab.appsCatalog               # the apps typed by modules/apps-catalog: { apps; builder; swarm; cadvisorPort; controllerPort; }
 #   lab.catalog                   # modules/catalog.nix over it: every route and app, what every host gets as `catalog`
 #   lab.withApps f                # the lab collected again with its app folders passed through f (a test's fixture
 #                                 # apps): workers, inventory and catalog follow them
-#   lab.shares."140"              # [{ path; readOnly; mode; localState; }] the nas paths a guest mounts: its instance.nix `shares`,
-#                                 # its own token dir and those of the tokens it reads (lab.tokenReads."140")
-#   lab.nasClients."10.100.0.140" # the same of every powered guest, by address: what vm-109 exports
-#   lab.roles.collector           # "105": the vmid of the one instance declaring a role (instance.nix `roles`)
+#   lab.shares."107"              # [{ path; readOnly; mode; localState; }] the nas paths a guest mounts: its instance.nix `shares`,
+#                                 # its own token dir and those of the tokens it reads (lab.tokenReads."107")
+#   lab.nasClients."10.100.0.107" # the same of every powered guest, by address: what vm-104 exports
+#   lab.roles.collector           # "103": the vmid of the one instance declaring a role (instance.nix `roles`)
 #   lab.alerts.backup_stale       # an instance's own alert rule (instance.nix `alerts`) plus its vmid
 #   lab.upstreams.aur             # { url; } a third-party service the lab depends on (modules/upstream/lib/upstreams.nix)
 #   lab.onions."paste-onion-key"  # "<56 base32>.onion": an onion route's address (src/generated/onions.json)
@@ -73,7 +73,7 @@ let
   nodeService = "swarm";
   # `_template` and the like: documentation, never a guest
   hiddenPrefix = "_";
-  # every nas path a guest declares lives below this on vm-109
+  # every nas path a guest declares lives below this on vm-104
   nasRoot = "/srv/nas";
   # a boot phase starts all its guests at once; the next waits this long so their boots do not stack up in ram
   bootPhaseWaitSeconds = 60;
@@ -265,7 +265,7 @@ let
     ++ lib.optional minted (shareOf (tokenShare.pathOf i.id) { inherit (tokenShare) mode; })
     ++ map (id: shareOf (tokenShare.pathOf id) { readOnly = true; }) readFrom;
   shares = lib.mapAttrs (_: sharesOf) instances;
-  # what vm-109 exports and the router opens nfs to: every powered guest's shares, by address
+  # what vm-104 exports and the router opens nfs to: every powered guest's shares, by address
   nasClients = lib.listToAttrs (lib.filter (e: e.value != [ ]) (map (i: lib.nameValuePair inventory.${i.id}.ip shares.${i.id})
     (lib.filter (i: inventory.${i.id}.powered) ordered)));
 

@@ -31,7 +31,7 @@ let
   torPorts = import ../tor-ports.nix;
   onionEntryPoint = "onion";
 
-  # the prober (vm-105's blackbox) and the dashboard's status dots (vm-103)
+  # the prober (vm-103's blackbox) and the dashboard's status dots (vm-102)
   probeSources = map net.hostSource [ telemetry.collectorVmid lab.roles.dashboard ];
   probeMethods = [ "GET" "HEAD" ];
   # a probe router outranks its route's routers, ranked by rule length (hundreds of characters), and its login
@@ -591,7 +591,7 @@ let
         replacement = "https://${net.fqdn r.host}${r.loginRedirect.to}";
       };
     } // lib.optionalAttrs (r.basicAuth != null) {
-      # the header goes on: a backend checks the same users again (118's registry)
+      # the header goes on: a backend checks the same users again (106's registry)
       "${name}-auth".basicAuth = { usersFile = "${basicAuthDir}/${name}"; realm = name; removeHeader = false; };
     } // lib.optionalAttrs (r.headers != { }) {
       "${name}-headers".headers = r.headers;
@@ -908,7 +908,7 @@ in {
       };
     };
 
-    # leaked buffering spool files (vm-105's ingress_spool alert); traefik's PrivateTmp lies below /tmp
+    # leaked buffering spool files (vm-103's ingress_spool alert); traefik's PrivateTmp lies below /tmp
     systemd.services.traefik-spool-metric = {
       description = "Measure traefik's buffering spool files";
       path = [ pkgs.findutils pkgs.gawk pkgs.coreutils ];
@@ -996,7 +996,7 @@ in {
           };
         };
         api.dashboard = true;
-        # scraped by vm-105
+        # scraped by vm-103
         metrics.prometheus = {
           entryPoint = "metrics";
           addEntryPointsLabels = true;

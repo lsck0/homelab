@@ -382,7 +382,7 @@ resource "proxmox_virtual_environment_firewall_rules" "host" {
     proto   = "tcp"
     dport   = "9100"
     source  = local.site.lan.router
-    comment = "node exporter, scraped by vm-105 through the router"
+    comment = "node exporter, scraped by vm-103 through the router"
   }
   rule {
     type    = "in"

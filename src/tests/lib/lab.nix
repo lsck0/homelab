@@ -12,7 +12,7 @@
 #     name = "example";
 #     node.specialArgs = lab.specialArgs;
 #     nodes.luca-router = lab.router;
-#     nodes.vm-121 = lab.guest "121" { };                                         # internal zone, vlan 2
+#     nodes.vm-131 = lab.guest "131" { };                                         # internal zone, vlan 2
 #     nodes.vm-200 = { imports = [ (lab.guest "200" { instance = ../instances/200-external-traefik/main.nix; })
 #                                  ./lib/offline-traefik.nix ]; };
 #     nodes.world = lab.multi { addresses = [ "192.168.178.1/24" "198.51.100.7/24" ]; };
@@ -25,11 +25,11 @@
 # 1 the house lan and wan (proxmox net0), each zone's the number of its router leg plus one. Flat tests (`flat = true`)
 # put every node on vlan 1 with a /8, so all lab subnets are on-link; a guest answers anything else through its
 # gateway, so a `multi` node owning the outside addresses (192.168.178.138/24, ...) must also own the gateways
-# (10.100.0.1/8, ...). The test driver names machines by hostname: vm-121 is `vm_121` in the script.
+# (10.100.0.1/8, ...). The test driver names machines by hostname: vm-131 is `vm_131` in the script.
 #
 # nas: a guest's nas mounts bind-mount directories of its own disk by default (lib/nas-local.nix), so the units
 # keyed on them run as in the lab; `nas = true` mounts them for real from a `nas` node, which exports exactly what
-# the test's guests mount (109-internal-nas/lib/nas-exports.nix over lib/nas-clients.nix, lib/nas-mounts.nix).
+# the test's guests mount (104-internal-nas/lib/nas-exports.nix over lib/nas-clients.nix, lib/nas-mounts.nix).
 #
 # testDefaults: what every vm test takes; the flake extends each check with it.
 #
@@ -51,7 +51,7 @@ let
   # proxmox's net0 is the router's wan
   wanVlan = 1;
   vlans = { lan = wanVlan; } // lib.mapAttrs (_: z: z.routerNic + wanVlan) net.zones;
-  nasId = "109";
+  nasId = "104";
   # the slowest test runs about 10 min (monitoring, 615 s); a hang ends at three times that, not at the driver's hour
   globalTimeoutS = 1800;
 
@@ -137,9 +137,9 @@ in rec {
       // lib.mapAttrs' (name: z: lib.nameValuePair z.interface { vlan = vlans.${name}; }) net.zones;
   };
 
-  # the nas at 10.100.0.109, exporting exactly what the test's guests mount, by the real export rules
+  # the nas at 10.100.0.104, exporting exactly what the test's guests mount, by the real export rules
   nas = { flat ? false, vlan ? (if flat then vlans.lan else vlans.internal) }: { nodes, ... }: {
-    imports = [ (guest nasId { inherit flat vlan; }) ../../core/109-internal-nas/lib/nas-exports.nix ];
+    imports = [ (guest nasId { inherit flat vlan; }) ../../core/104-internal-nas/lib/nas-exports.nix ];
     homelab.nasExports.enable = true;
     _module.args.nasClients = import ./nas-clients.nix {
       inherit lib inventory;

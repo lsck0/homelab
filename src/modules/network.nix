@@ -4,7 +4,7 @@
 # Every lab host gets its instance record (modules/lab) as the argument `instance`; its hostname, vmid, zone and
 # services come from there. The install images and the router's lan-side tests have none (null).
 #
-# The firewall opens ssh and node-exporter (the recovery path, and vm-105's watch over every guest), the guest's
+# The firewall opens ssh and node-exporter (the recovery path, and vm-103's watch over every guest), the guest's
 # services' ports, and what its own main.nix opens. A shared module opening more (an ingress, a swarm node) names
 # the opening in homelab.openings, and the guest's instance.nix allows it in `on`, or no host evaluates.
 #

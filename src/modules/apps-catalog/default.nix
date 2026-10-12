@@ -184,7 +184,7 @@ let
       };
       override = mkOption { type = types.attrs; default = { }; description = "A compose overlay merged last, as nix attrs; the policy still applies to the result."; };
       images = mkOption { type = types.listOf digestPinned; default = [ ]; description = "Public images the stack may run besides its own builds, each pinned by digest."; };
-      metrics = mkOption { type = types.attrsOf metricsType; default = { }; description = "Name -> an exporter scraped every 15s by vm-105, never routed."; };
+      metrics = mkOption { type = types.attrsOf metricsType; default = { }; description = "Name -> an exporter scraped every 15s by vm-103, never routed."; };
       alerts = mkOption {
         type = types.attrsOf telemetry.alertType;
         default = { };
@@ -193,7 +193,7 @@ let
       homepage = mkOption {
         type = service.cardType { inherit name; group = "Swarm"; icon = "mdi-docker"; description = "${config.repo}@${config.branch}"; };
         default = { };
-        description = "The app's card on the dashboard (vm-103), shown with the homepage feature.";
+        description = "The app's card on the dashboard (vm-102), shown with the homepage feature.";
       };
       on = mkOption {
         type = service.featuresType (service.telemetryFeatures ++ service.platformFeatures);
@@ -205,7 +205,7 @@ let
         default = [ ];
         description = ''
           Globs in the repo (`grafana/*.json`): Grafana boards of the deployed commit, in the app's folder beside its
-          generated board, every datasource the app's own (core/140-internal-swarm/lib/dashboards-import.py); one that does not parse
+          generated board, every datasource the app's own (core/107-internal-swarm/lib/dashboards-import.py); one that does not parse
           fails the deploy.
         '';
       };
@@ -248,7 +248,7 @@ in {
     };
     builder = mkOption {
       type = types.ints.positive;
-      description = "Vmid of the guest that builds and deploys the apps (140-internal-swarm/lib/app-builder.nix); the manager's forced command accepts its address only.";
+      description = "Vmid of the guest that builds and deploys the apps (107-internal-swarm/lib/app-builder.nix); the manager's forced command accepts its address only.";
     };
     cadvisorPort = mkOption { type = types.port; description = "Per-worker container metrics, scraped on every worker; outside the app range."; };
     controllerPort = mkOption { type = types.port; description = "The managers' controller (redeploys, an idle app's wake and sleep)."; };

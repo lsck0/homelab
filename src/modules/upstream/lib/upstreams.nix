@@ -2,7 +2,7 @@
 {
   aur.url = "https://aur.archlinux.org/rpc/v5/info";
   archlinux.url = "https://geo.mirror.pkgbuild.com/core/os/x86_64/core.db";
-  # vm-109's tier-1 rsync source (109-internal-nas main.nix mirrorUpstream), probed over https
+  # vm-104's tier-1 rsync source (104-internal-nas main.nix mirrorUpstream), probed over https
   archmirror.url = "https://ftp.halifax.rwth-aachen.de/archlinux/lastupdate";
   github.url = "https://api.github.com/zen";
   cloudflare.url = "https://api.cloudflare.com/client/v4/ips";

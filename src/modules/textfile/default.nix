@@ -8,7 +8,7 @@
 #
 # legacyTextfiles: names hosts wrote before they recorded their files (generation 448 and earlier). A host's first
 # activation takes them as its previous record, so they go wherever no unit writes them now: the builder's file on
-# vm-117, which left for vm-140 and paged "app deploy failed" from its last 0. Delete the list once every host has
+# vm-111, which left for vm-107 and paged "app deploy failed" from its last 0. Delete the list once every host has
 # activated a generation with this module.
 { config, lib, pkgs, ... }:
 let

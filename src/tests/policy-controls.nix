@@ -28,7 +28,7 @@ let
   # the first address of the router's first lease pool
   poolStart = lib.trim (lib.head (lib.splitString "-" (lib.head (lib.head configs."300-router".services.kea.dhcp4.settings.subnet4).pools).pool));
   # the ci vm, its github runner and its two rootless users
-  ci = "117-internal-github-runner";
+  ci = "111-internal-github-runner";
   runner = lib.head (lib.attrNames configs.${ci}.services.github-runners);
   builder = inventory.${catalog.swarm.builderId}.name;
   owner = "101-internal-authelia";
@@ -46,8 +46,8 @@ let
     sso-paths = network "sso paths" (facts // { catalog = catalog // { internal = catalog.internal // {
       forgejo = catalog.internal.forgejo // { ssoPaths = [ "/metrics" ]; };
     }; }; });
-    direct-scrapes = network "direct scrapes" (tamper "105-internal-grafana" [ "services" "prometheus" "scrapeConfigs" ]
-      (configs."105-internal-grafana".services.prometheus.scrapeConfigs
+    direct-scrapes = network "direct scrapes" (tamper "103-internal-grafana" [ "services" "prometheus" "scrapeConfigs" ]
+      (configs."103-internal-grafana".services.prometheus.scrapeConfigs
         ++ [ { job_name = "control"; static_configs = [ { targets = [ "${catalog.ingress.internal.ip}:${toString net.ports.https}" ]; } ]; } ]));
     apps-zone = network "apps zone" (tamper "100-internal-traefik" (traefik ++ [ "routers" "grafana-tls" "rule" ]) "Host(`grafana.lsck0.dev`)");
     pull-part-credential = { file = "network"; marker = "registry-api-tls-socket pulls without a credential";
@@ -72,16 +72,16 @@ let
     router-order = network "router order" (tamper "300-router" [ "networking" "firewall" "extraForwardRules" ] (natLine + "\n" + forwardRules));
     # a guest declared a tor member that the router does not render as one
     egress-killswitch = network "egress killswitch" (facts // { lab = facts.lab // {
-      egress = facts.lab.egress // { "121" = { via = "tor"; inbound = false; vmid = 121; }; };
+      egress = facts.lab.egress // { "131" = { via = "tor"; inbound = false; vmid = 131; }; };
     }; });
     # a route declared onion, with an address, that neither the edge nor the router's tor serves
     onion = network "onion" (facts // { catalog = catalog // { external = catalog.external // {
       privatebin = catalog.external.privatebin // { onion = true; onionAddress = "${lib.fixedWidthString 56 "a" ""}.onion"; };
     }; }; });
-    inventory = network "inventory" (facts // { inventory = inventory // { "206" = inventory."206" // { ip = poolStart; }; }; });
-    ingress-guards = network "ingress guards" (tamper "121-internal-paperless" [ "homelab" "ingressOnly" "trusted" ]
+    inventory = network "inventory" (facts // { inventory = inventory // { "212" = inventory."212" // { ip = poolStart; }; }; });
+    ingress-guards = network "ingress guards" (tamper "131-internal-paperless" [ "homelab" "ingressOnly" "trusted" ]
       [ "${inventory.${facts.lab.roles.operator}.ip}/32" ]);
-    probes-through-ingress = network "probes through the ingress" (tamper "121-internal-paperless" [ "homelab" "ingressOnly" "allowed" ]
+    probes-through-ingress = network "probes through the ingress" (tamper "131-internal-paperless" [ "homelab" "ingressOnly" "allowed" ]
       { ${toString catalog.internal.paperless.port} = [ "${inventory.${facts.lab.roles.collector}.ip}/32" ]; });
     port-forwards = network "port forwards" (tamper "300-router" [ "networking" "nftables" "tables" "port-forwards" "content" ]
       "tcp dport  dnat to ${inventory.${facts.lab.roles.collector}.ip}:${toString catalog.internal.paperless.port}");
@@ -123,15 +123,15 @@ let
         registry-api = catalog.internal.registry-api // { methods = [ "GET" "PUT" ]; };
       }; }; }; };
     node-scrapes = { file = "apps"; marker = "does not scrape";
-      tampered = tamper "105-internal-grafana" [ "services" "prometheus" "scrapeConfigs" ] [ ]; };
+      tampered = tamper "103-internal-grafana" [ "services" "prometheus" "scrapeConfigs" ] [ ]; };
 
     needs = { file = "guests"; marker = "vm.needs is";
       tampered = tamper owner [ "virtualisation" "podman" "enable" ] true; };
     shares = { file = "guests"; marker = "it does not declare";
-      tampered = mounting "121-internal-paperless" "/srv/nas/data/stray"; };
+      tampered = mounting "131-internal-paperless" "/srv/nas/data/stray"; };
     memory-budget = { file = "guests"; marker = "host memory:";
       tampered = facts // { lab = facts.lab // { instances = facts.lab.instances // {
-        "119" = lib.recursiveUpdate facts.lab.instances."119" { config.vm.balloonMiB = 1024 * 1024; };
+        "112" = lib.recursiveUpdate facts.lab.instances."112" { config.vm.balloonMiB = 1024 * 1024; };
       }; }; }; };
 
     port-twice = { file = "ports"; marker = "is published for";
@@ -144,14 +144,14 @@ let
     realm-ldaps = { file = "sso"; marker = "proxmox realm: ";
       tampered = tamper owner [ "networking" "firewall" "allowedTCPPorts" ] [ 3890 ]; };
     long-run-mount = { file = "mounts"; marker = "outlives deploys yet RequiresMountsFor";
-      tampered = tamper "119-internal-archbuild" [ "systemd" "services" "archbuild" "unitConfig" "RequiresMountsFor" ]
+      tampered = tamper "112-internal-archbuild" [ "systemd" "services" "archbuild" "unitConfig" "RequiresMountsFor" ]
         [ "/var/lib/archrepo" ]; };
     image-pulled-at-start = { file = "images"; marker = "pulls 'always' at every start";
-      tampered = tamper "207-external-share" [ "virtualisation" "oci-containers" "containers" "share" "pull" ] "always"; };
+      tampered = tamper "213-external-share" [ "virtualisation" "oci-containers" "containers" "share" "pull" ] "always"; };
     secret-readable = { file = "secrets"; marker = "is readable by others";
       tampered = tamper owner [ "sops" "secrets" "authelia-jwt-secret" "mode" ] "0444"; };
     sqlite-on-nfs = { file = "secrets"; marker = "lies on the nas mount";
-      tampered = tamper "138-internal-headscale" [ "homelab" "nasMounts" "/var/lib/headscale" ] { }; };
+      tampered = tamper "140-internal-headscale" [ "homelab" "nasMounts" "/var/lib/headscale" ] { }; };
     secret-source = { file = "secrets"; marker = "secret authelia-jwt-secret comes from";
       tampered = tamper owner [ "sops" "secrets" "authelia-jwt-secret" "sopsFile" ] ./policy-controls.nix; };
     secret-key-file = { file = "secrets"; marker = "sops reads its key from";
@@ -163,16 +163,16 @@ let
     secret-file-missing = { file = "secrets"; marker = "src/${ownerFolder}/secrets.sops.json is missing";
       tampered = srcWithout "src-without-a-secrets-file" (lib.hasSuffix "/${ownerFolder}/secrets.sops.json"); };
     token-share = { file = "secrets"; marker = "mounts another producer's";
-      tampered = mounting "121-internal-paperless" "/srv/nas/data/tokens/vm-999"; };
+      tampered = mounting "131-internal-paperless" "/srv/nas/data/tokens/vm-999"; };
     dump-share = { file = "secrets"; marker = "not its own dump dir";
-      tampered = mounting "121-internal-paperless" "/srv/nas/data/db-dumps/vm-999"; };
+      tampered = mounting "131-internal-paperless" "/srv/nas/data/db-dumps/vm-999"; };
     dmz-share = { file = "secrets"; marker = "dmz or apps host mounts";
-      tampered = mounting "207-external-share" "/srv/nas/bulk/media"; };
+      tampered = mounting "213-external-share" "/srv/nas/bulk/media"; };
 
     query-readers = { file = "telemetry"; marker = "which is neither an internal guest";
-      tampered = tamper "105-internal-grafana" [ "homelab" "ingressOnly" "allowed" "9090" ] [ site.lan.subnet ]; };
+      tampered = tamper "103-internal-grafana" [ "homelab" "ingressOnly" "allowed" "9090" ] [ site.lan.subnet ]; };
     push-tenant = { file = "telemetry"; marker = "forwards without the tenant its sender's address names";
-      tampered = tamper "105-internal-grafana" [ "services" "nginx" "virtualHosts" "otlp-http" "locations" "= /v1/traces" "extraConfig" ]
+      tampered = tamper "103-internal-grafana" [ "services" "nginx" "virtualHosts" "otlp-http" "locations" "= /v1/traces" "extraConfig" ]
         "proxy_pass http://127.0.0.1:14318;"; };
     relay-tenant = { file = "telemetry"; marker = "a relay location forwards without the tenant";
       tampered = tamper "250-apps-swarm" [ "homelab" "appTelemetry" "relayConfig" ] "location = /v1/traces { proxy_pass http://collector; }"; };

@@ -491,7 +491,7 @@ exporter_converge() {
   for collector in smartmon nvme; do systemctl -q enable --now "prometheus-node-exporter-$collector.timer"; done
 
   # guests overprovision local-lvm (pve/data) and bulk/data; a full thin pool pauses every guest on it, and
-  # node_exporter has no lvm collector, so lvs feeds gauges that vm-105 alerts on
+  # node_exporter has no lvm collector, so lvs feeds gauges that vm-103 alerts on
   textfile_job_install thinpool-metrics "LVM thin pool fill" 1m <<'METRICS'
 #!/usr/bin/env bash
 # fill of every thin pool on this host, for node_exporter's textfile collector
@@ -519,7 +519,7 @@ pools=$(lvs --noheadings --nosuffix --units b --separator '|' --select 'segtype=
 mv "$TEXTFILE_DIR/thinpool.prom.tmp" "$TEXTFILE_DIR/thinpool.prom"
 METRICS
 
-  # smartd's warnings become a gauge vm-105 alerts on, instead of mail to a root mailbox nobody reads
+  # smartd's warnings become a gauge vm-103 alerts on, instead of mail to a root mailbox nobody reads
   file_converge /usr/local/bin/smartd-textfile 755 <<SMARTD
 #!/bin/sh
 # run by smartd on a warning: SMARTD_DEVICE, SMARTD_FAILTYPE; one file per device and kind of failure
@@ -532,7 +532,7 @@ name=\$(printf '%s-%s' "\$SMARTD_DEVICE" "\$SMARTD_FAILTYPE" | tr -c 'A-Za-z0-9\
 } > "$TEXTFILE_DIR/smartd-\$name.prom.tmp"
 mv "$TEXTFILE_DIR/smartd-\$name.prom.tmp" "$TEXTFILE_DIR/smartd-\$name.prom"
 SMARTD
-  # repeated daily while it lasts, which keeps the gauge fresh for vm-105's smartd_warning rule
+  # repeated daily while it lasts, which keeps the gauge fresh for vm-103's smartd_warning rule
   echo "DEVICESCAN -d removable -n standby -m root -M daily -M exec /usr/local/bin/smartd-textfile" \
     | file_converge /etc/smartd.conf 644 systemctl restart smartd
 }

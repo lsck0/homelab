@@ -17,11 +17,19 @@
       "powered": true,
       "zone": "internal"
     },
+    "102": {
+      "enabled": "true",
+      "idle": null,
+      "ip": "10.100.0.102",
+      "name": "102-internal-homepage",
+      "powered": true,
+      "zone": "internal"
+    },
     "103": {
       "enabled": "true",
       "idle": null,
       "ip": "10.100.0.103",
-      "name": "103-internal-homepage",
+      "name": "103-internal-grafana",
       "powered": true,
       "zone": "internal"
     },
@@ -29,7 +37,7 @@
       "enabled": "true",
       "idle": null,
       "ip": "10.100.0.104",
-      "name": "104-internal-terminal",
+      "name": "104-internal-nas",
       "powered": true,
       "zone": "internal"
     },
@@ -37,15 +45,23 @@
       "enabled": "true",
       "idle": null,
       "ip": "10.100.0.105",
-      "name": "105-internal-grafana",
+      "name": "105-internal-cache",
       "powered": true,
       "zone": "internal"
     },
-    "109": {
+    "106": {
       "enabled": "true",
       "idle": null,
-      "ip": "10.100.0.109",
-      "name": "109-internal-nas",
+      "ip": "10.100.0.106",
+      "name": "106-internal-registry",
+      "powered": true,
+      "zone": "internal"
+    },
+    "107": {
+      "enabled": "true",
+      "idle": null,
+      "ip": "10.100.0.107",
+      "name": "107-internal-swarm",
       "powered": true,
       "zone": "internal"
     },
@@ -53,15 +69,31 @@
       "enabled": "true",
       "idle": null,
       "ip": "10.100.0.110",
-      "name": "110-internal-cache",
+      "name": "110-internal-forgejo",
+      "powered": true,
+      "zone": "internal"
+    },
+    "111": {
+      "enabled": "true",
+      "idle": null,
+      "ip": "10.100.0.111",
+      "name": "111-internal-github-runner",
       "powered": true,
       "zone": "internal"
     },
     "112": {
+      "enabled": "onDemand",
+      "idle": "30m",
+      "ip": "10.100.0.112",
+      "name": "112-internal-archbuild",
+      "powered": true,
+      "zone": "internal"
+    },
+    "113": {
       "enabled": "true",
       "idle": null,
-      "ip": "10.100.0.112",
-      "name": "112-internal-qbittorrent",
+      "ip": "10.100.0.113",
+      "name": "113-internal-hermes",
       "powered": true,
       "zone": "internal"
     },
@@ -69,39 +101,15 @@
       "enabled": "true",
       "idle": null,
       "ip": "10.100.0.114",
-      "name": "114-internal-hermes",
+      "name": "114-internal-terminal",
       "powered": true,
       "zone": "internal"
     },
-    "115": {
+    "120": {
       "enabled": "true",
       "idle": null,
-      "ip": "10.100.0.115",
-      "name": "115-internal-forgejo",
-      "powered": true,
-      "zone": "internal"
-    },
-    "117": {
-      "enabled": "true",
-      "idle": null,
-      "ip": "10.100.0.117",
-      "name": "117-internal-github-runner",
-      "powered": true,
-      "zone": "internal"
-    },
-    "118": {
-      "enabled": "true",
-      "idle": null,
-      "ip": "10.100.0.118",
-      "name": "118-internal-registry",
-      "powered": true,
-      "zone": "internal"
-    },
-    "119": {
-      "enabled": "onDemand",
-      "idle": "30m",
-      "ip": "10.100.0.119",
-      "name": "119-internal-archbuild",
+      "ip": "10.100.0.120",
+      "name": "120-internal-qbittorrent",
       "powered": true,
       "zone": "internal"
     },
@@ -109,39 +117,31 @@
       "enabled": "true",
       "idle": null,
       "ip": "10.100.0.121",
-      "name": "121-internal-paperless",
+      "name": "121-internal-arr",
+      "powered": true,
+      "zone": "internal"
+    },
+    "122": {
+      "enabled": "true",
+      "idle": null,
+      "ip": "10.100.0.122",
+      "name": "122-internal-jellyfin",
+      "powered": true,
+      "zone": "internal"
+    },
+    "123": {
+      "enabled": "onDemand",
+      "idle": "30m",
+      "ip": "10.100.0.123",
+      "name": "123-internal-jellyseerr",
       "powered": true,
       "zone": "internal"
     },
     "124": {
       "enabled": "onDemand",
-      "idle": "1h",
-      "ip": "10.100.0.124",
-      "name": "124-internal-firefly",
-      "powered": true,
-      "zone": "internal"
-    },
-    "125": {
-      "enabled": "true",
-      "idle": null,
-      "ip": "10.100.0.125",
-      "name": "125-internal-homeassistant",
-      "powered": true,
-      "zone": "internal"
-    },
-    "126": {
-      "enabled": "false",
-      "idle": null,
-      "ip": "10.100.0.126",
-      "name": "126-internal-huginn",
-      "powered": false,
-      "zone": "internal"
-    },
-    "128": {
-      "enabled": "onDemand",
       "idle": "30m",
-      "ip": "10.100.0.128",
-      "name": "128-internal-jellyseerr",
+      "ip": "10.100.0.124",
+      "name": "124-internal-navidrome",
       "powered": true,
       "zone": "internal"
     },
@@ -149,39 +149,39 @@
       "enabled": "true",
       "idle": null,
       "ip": "10.100.0.130",
-      "name": "130-internal-arr",
+      "name": "130-internal-homeassistant",
       "powered": true,
       "zone": "internal"
     },
-    "134": {
+    "131": {
       "enabled": "true",
       "idle": null,
-      "ip": "10.100.0.134",
-      "name": "134-internal-jellyfin",
+      "ip": "10.100.0.131",
+      "name": "131-internal-paperless",
       "powered": true,
       "zone": "internal"
     },
-    "136": {
+    "132": {
       "enabled": "onDemand",
-      "idle": "30m",
-      "ip": "10.100.0.136",
-      "name": "136-internal-navidrome",
+      "idle": "1h",
+      "ip": "10.100.0.132",
+      "name": "132-internal-firefly",
       "powered": true,
       "zone": "internal"
     },
-    "138": {
-      "enabled": "true",
+    "133": {
+      "enabled": "false",
       "idle": null,
-      "ip": "10.100.0.138",
-      "name": "138-internal-headscale",
-      "powered": true,
+      "ip": "10.100.0.133",
+      "name": "133-internal-huginn",
+      "powered": false,
       "zone": "internal"
     },
     "140": {
       "enabled": "true",
       "idle": null,
       "ip": "10.100.0.140",
-      "name": "140-internal-swarm",
+      "name": "140-internal-headscale",
       "powered": true,
       "zone": "internal"
     },
@@ -193,44 +193,12 @@
       "powered": true,
       "zone": "external"
     },
-    "203": {
+    "201": {
       "enabled": "true",
       "idle": null,
-      "ip": "10.200.0.203",
-      "name": "203-external-ntfy",
+      "ip": "10.200.0.201",
+      "name": "201-external-ntfy",
       "powered": true,
-      "zone": "external"
-    },
-    "204": {
-      "enabled": "onDemand",
-      "idle": "1h",
-      "ip": "10.200.0.204",
-      "name": "204-external-searxng",
-      "powered": true,
-      "zone": "external"
-    },
-    "206": {
-      "enabled": "onDemand",
-      "idle": "30m",
-      "ip": "10.200.0.206",
-      "name": "206-external-privatebin",
-      "powered": true,
-      "zone": "external"
-    },
-    "207": {
-      "enabled": "onDemand",
-      "idle": "30m",
-      "ip": "10.200.0.207",
-      "name": "207-external-share",
-      "powered": true,
-      "zone": "external"
-    },
-    "208": {
-      "enabled": "false",
-      "idle": null,
-      "ip": "10.200.0.208",
-      "name": "208-external-minecraft",
-      "powered": false,
       "zone": "external"
     },
     "210": {
@@ -239,6 +207,38 @@
       "ip": "10.200.0.210",
       "name": "210-external-mirror",
       "powered": true,
+      "zone": "external"
+    },
+    "211": {
+      "enabled": "onDemand",
+      "idle": "1h",
+      "ip": "10.200.0.211",
+      "name": "211-external-searxng",
+      "powered": true,
+      "zone": "external"
+    },
+    "212": {
+      "enabled": "onDemand",
+      "idle": "30m",
+      "ip": "10.200.0.212",
+      "name": "212-external-privatebin",
+      "powered": true,
+      "zone": "external"
+    },
+    "213": {
+      "enabled": "onDemand",
+      "idle": "30m",
+      "ip": "10.200.0.213",
+      "name": "213-external-share",
+      "powered": true,
+      "zone": "external"
+    },
+    "214": {
+      "enabled": "false",
+      "idle": null,
+      "ip": "10.200.0.214",
+      "name": "214-external-minecraft",
+      "powered": false,
       "zone": "external"
     },
     "250": {
@@ -308,8 +308,8 @@
     "accessLog": "vm-200",
     "dashboard": "/d/homelab",
     "grafana": "https://grafana.lsck0.dev",
-    "loki": "http://10.100.0.105:3100",
-    "prometheus": "http://10.100.0.105:9090"
+    "loki": "http://10.100.0.103:3100",
+    "prometheus": "http://10.100.0.103:9090"
   },
   "ntfy": {
     "desktop": [
@@ -336,7 +336,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 119,
+      "vmid": 112,
       "zone": "internal"
     },
     "attic": {
@@ -347,7 +347,7 @@
       "path": "/",
       "port": 8080,
       "protocol": "http",
-      "vmid": 110,
+      "vmid": 105,
       "zone": "internal"
     },
     "authelia": {
@@ -369,7 +369,7 @@
       "path": "/",
       "port": 6767,
       "protocol": "http",
-      "vmid": 130,
+      "vmid": 121,
       "zone": "internal"
     },
     "calendar": {
@@ -380,7 +380,7 @@
       "path": "/",
       "port": 8081,
       "protocol": "http",
-      "vmid": 104,
+      "vmid": 114,
       "zone": "internal"
     },
     "deploy": {
@@ -391,7 +391,7 @@
       "path": "/redeploy",
       "port": 8095,
       "protocol": "http",
-      "vmid": 140,
+      "vmid": 107,
       "zone": "external"
     },
     "fints": {
@@ -402,7 +402,7 @@
       "path": "/",
       "port": 8090,
       "protocol": "http",
-      "vmid": 124,
+      "vmid": 132,
       "zone": "internal"
     },
     "firefly": {
@@ -413,7 +413,7 @@
       "path": "/",
       "port": 8080,
       "protocol": "http",
-      "vmid": 124,
+      "vmid": 132,
       "zone": "internal"
     },
     "forgejo": {
@@ -424,7 +424,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 115,
+      "vmid": 110,
       "zone": "internal"
     },
     "grafana": {
@@ -435,7 +435,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 105,
+      "vmid": 103,
       "zone": "internal"
     },
     "headplane": {
@@ -446,7 +446,7 @@
       "path": "/",
       "port": 3000,
       "protocol": "http",
-      "vmid": 138,
+      "vmid": 140,
       "zone": "internal"
     },
     "headscale": {
@@ -457,7 +457,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 138,
+      "vmid": 140,
       "zone": "internal"
     },
     "hello": {
@@ -479,7 +479,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 125,
+      "vmid": 130,
       "zone": "internal"
     },
     "homepage": {
@@ -490,7 +490,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 103,
+      "vmid": 102,
       "zone": "internal"
     },
     "huginn": {
@@ -501,7 +501,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 126,
+      "vmid": 133,
       "zone": "internal"
     },
     "jellyfin": {
@@ -512,7 +512,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 134,
+      "vmid": 122,
       "zone": "internal"
     },
     "jellyseerr": {
@@ -523,7 +523,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 128,
+      "vmid": 123,
       "zone": "internal"
     },
     "kopia": {
@@ -534,7 +534,7 @@
       "path": "/",
       "port": 51515,
       "protocol": "http",
-      "vmid": 109,
+      "vmid": 104,
       "zone": "internal"
     },
     "lidarr": {
@@ -545,7 +545,7 @@
       "path": "/",
       "port": 8686,
       "protocol": "http",
-      "vmid": 130,
+      "vmid": 121,
       "zone": "internal"
     },
     "lldap": {
@@ -567,7 +567,7 @@
       "path": "/",
       "port": 25565,
       "protocol": "tcp",
-      "vmid": 208,
+      "vmid": 214,
       "zone": "external"
     },
     "mirror": {
@@ -589,7 +589,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 109,
+      "vmid": 104,
       "zone": "internal"
     },
     "navidrome": {
@@ -600,7 +600,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 136,
+      "vmid": 124,
       "zone": "internal"
     },
     "ntfy": {
@@ -611,7 +611,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 203,
+      "vmid": 201,
       "zone": "external"
     },
     "paperless": {
@@ -622,7 +622,7 @@
       "path": "/",
       "port": 8080,
       "protocol": "http",
-      "vmid": 121,
+      "vmid": 131,
       "zone": "internal"
     },
     "paperless-ai": {
@@ -633,7 +633,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 121,
+      "vmid": 131,
       "zone": "internal"
     },
     "privatebin": {
@@ -644,7 +644,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 206,
+      "vmid": 212,
       "zone": "external"
     },
     "prowlarr": {
@@ -655,7 +655,7 @@
       "path": "/",
       "port": 9696,
       "protocol": "http",
-      "vmid": 130,
+      "vmid": 121,
       "zone": "internal"
     },
     "qbittorrent": {
@@ -666,7 +666,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 112,
+      "vmid": 120,
       "zone": "internal"
     },
     "radarr": {
@@ -677,7 +677,7 @@
       "path": "/",
       "port": 7878,
       "protocol": "http",
-      "vmid": 130,
+      "vmid": 121,
       "zone": "internal"
     },
     "registry-api": {
@@ -688,7 +688,7 @@
       "path": "/",
       "port": 5000,
       "protocol": "http",
-      "vmid": 118,
+      "vmid": 106,
       "zone": "internal"
     },
     "registry-push": {
@@ -699,7 +699,7 @@
       "path": "/",
       "port": 5000,
       "protocol": "http",
-      "vmid": 118,
+      "vmid": 106,
       "zone": "internal"
     },
     "registry-ui": {
@@ -710,7 +710,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 118,
+      "vmid": 106,
       "zone": "internal"
     },
     "sccache": {
@@ -721,7 +721,7 @@
       "path": "/",
       "port": 6379,
       "protocol": "tcp",
-      "vmid": 110,
+      "vmid": 105,
       "zone": "internal"
     },
     "searxng": {
@@ -732,7 +732,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 204,
+      "vmid": 211,
       "zone": "external"
     },
     "share": {
@@ -743,7 +743,7 @@
       "path": "/",
       "port": 80,
       "protocol": "http",
-      "vmid": 207,
+      "vmid": 213,
       "zone": "external"
     },
     "sonarr": {
@@ -754,7 +754,7 @@
       "path": "/",
       "port": 8989,
       "protocol": "http",
-      "vmid": 130,
+      "vmid": 121,
       "zone": "internal"
     },
     "syncthing": {
@@ -765,7 +765,7 @@
       "path": "/",
       "port": 8384,
       "protocol": "http",
-      "vmid": 109,
+      "vmid": 104,
       "zone": "internal"
     },
     "terminal": {
@@ -776,7 +776,7 @@
       "path": "/",
       "port": 8081,
       "protocol": "http",
-      "vmid": 104,
+      "vmid": 114,
       "zone": "internal"
     }
   },

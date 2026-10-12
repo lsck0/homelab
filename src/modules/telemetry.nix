@@ -1,22 +1,22 @@
 # Where the lab's telemetry goes, how it is labeled, and the shape of an alert, defined once for every host.
 #
-# collector, ports, urls: vm-105 collects metrics, logs, traces and profiles. Senders address its doors (urls), which
+# collector, ports, urls: vm-103 collects metrics, logs, traces and profiles. Senders address its doors (urls), which
 # set the tenant from the sender's address and serve nothing else; the stores listen on loopback (the *Local ports and
-# tempo), where only vm-105 itself queries them. Readers get the query doors (prometheus, loki), each guarded to its
-# named readers. The apps' containers never reach vm-105: they send to the relay on their own node
+# tempo), where only vm-103 itself queries them. Readers get the query doors (prometheus, loki), each guarded to its
+# named readers. The apps' containers never reach vm-103: they send to the relay on their own node
 # (modules/app-telemetry.nix), which names the app's tenant.
 #
-# vmName: the readable `vm` label of a guest, "router" for the router. The short name of "134-internal-jellyfin" is
+# vmName: the readable `vm` label of a guest, "router" for the router. The short name of "122-internal-jellyfin" is
 # "jellyfin"; when two guests share it, the zone tells them apart (traefik-internal, traefik-external), and when they
-# share the zone too (the swarm workers), the id does (swarm-250). vm-105 labels node-exporter targets with it and
-# vm-104's stats-sync names guests by it, so Grafana and the TRMNL panel agree.
+# share the zone too (the swarm workers), the id does (swarm-250). vm-103 labels node-exporter targets with it and
+# vm-114's stats-sync names guests by it, so Grafana and the TRMNL panel agree.
 #
 # swarmTaskPatterns: swarm names a task's container <stack>_<service>.<slot>.<task id>. The regexes cut the task id
 # (a new one per deploy and restart) and derive service and stack, for modules/base (promtail), modules/app-telemetry.nix
-# and the cadvisor scrape on vm-105.
+# and the cadvisor scrape on vm-103.
 #
 # alertType: one Grafana rule, query A thresholded by C. An instance declares the rules over its own metrics as
-# instance.nix `alerts.<uid>` (modules/lab collects them), an app in app.nix `alerts`; vm-105 adds the lab-wide ones and
+# instance.nix `alerts.<uid>` (modules/lab collects them), an app in app.nix `alerts`; vm-103 adds the lab-wide ones and
 # provisions them all. The uid is Grafana's id: a renamed uid loses the rule's history and silences, and the old one
 # stays in Grafana's database until it is deleted there.
 { lib, inventory }:
@@ -60,7 +60,7 @@ let
   relayAddress = "172.17.0.1";
   relayBridge = "${relayAddress}/16";
 
-  # the only requests a push door (vm-105) or a relay (an app node) passes, by the port it listens on
+  # the only requests a push door (vm-103) or a relay (an app node) passes, by the port it listens on
   pushPaths = {
     lokiPush = [ "/loki/api/v1/push" ];
     otlpHttp = [ "/v1/traces" ];
@@ -84,7 +84,7 @@ let
     heartbeat = { firing = "Alerting alive"; resolved = "Alerting stopped"; };
   };
 
-  # vm-105's probe of every third-party service (modules/upstream); upstreamUp <name> is 1 while it answers, so an
+  # vm-103's probe of every third-party service (modules/upstream); upstreamUp <name> is 1 while it answers, so an
   # alert multiplied by it stays quiet through that service's own "unavailable" alert
   upstreamJob = "upstream";
   upstreamUp = name: "max(probe_success{job=\"${upstreamJob}\",upstream=\"${name}\"})";
@@ -157,7 +157,7 @@ in {
     pyroscope = "${relayAddress}:${toString ports.pyroscope}";
   };
 
-  # alerts keyed by uid, typed and defaulted like an instance's (rules vm-105 writes itself)
+  # alerts keyed by uid, typed and defaulted like an instance's (rules vm-103 writes itself)
   alertsOf = alerts: (lib.evalModules {
     modules = [{ options.alerts = mkOption { type = types.attrsOf alertType; }; config = { inherit alerts; }; }];
   }).config.alerts;
@@ -183,7 +183,7 @@ in {
   # the prefix keeps the apps apart from the lab's own tenant
   tenantHeader = "X-Scope-OrgID";
   tenantOf = app: "app-${app}";
-  # an app sending traces or profiles: its containers reach the relay, and its tenant exists on vm-105
+  # an app sending traces or profiles: its containers reach the relay, and its tenant exists on vm-103
   sendsSignals = a: lib.elem "traces" a.on || lib.elem "profiles" a.on;
   # loki's name for everything stored before tenants existed, so the lab's history stays readable; the lab's tenant
   # in every store
@@ -192,10 +192,10 @@ in {
   # the browsers' otlp path on every app's own origin, which the ingresses route to the frontend intake as it is
   frontendPath = "/otlp";
 
-  # the lab's overview board: vm-105 builds it (lib/dashboards/homelab.py), the desktop clients open it (lab.export)
+  # the lab's overview board: vm-103 builds it (lib/dashboards/homelab.py), the desktop clients open it (lab.export)
   homelabDashboardUid = "homelab";
 
-  # the boards an app ships: the deploy controller writes them to this nas share, vm-105 provisions them read-only
+  # the boards an app ships: the deploy controller writes them to this nas share, vm-103 provisions them read-only
   appDashboardsShare = "app-dashboards";
   appDashboardsDir = "dashboards";
 }

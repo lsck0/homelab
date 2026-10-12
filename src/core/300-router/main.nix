@@ -13,7 +13,7 @@
 # its lab traffic (any private destination) stays direct. vpn marks it into the tunnel's routing table; tor redirects
 # its tcp into tor's TransPort and answers its dns from tor's DNSPort (coredns view), and the killswitch drops the
 # rest (udp, icmp), which tor cannot carry. Transparent on the router, so a member needs no proxy setting per app and
-# a program that ignores one leaks nothing; a socks proxy per app (prowlarr's, 130-internal-arr) isolates circuits
+# a program that ignores one leaks nothing; a socks proxy per app (prowlarr's, 121-internal-arr) isolates circuits
 # per destination, which the transparent port does per client address only.
 { config, pkgs, lib, inventory, nasClients, site, catalog, lab, upstream, ... }:
 let
@@ -323,7 +323,7 @@ in {
   homelab.egress.vpn = {
     enable = true;
     table = egressMarks.vpn.table;
-    # former vm-112 key, clients cannot share one
+    # former vm-120 key, clients cannot share one
     privateKeyFile = config.sops.secrets.protonvpn-private-key.path;
     address = "10.2.0.2/32";
     publicKey = "36G8+pInNcPK9F1TpHglWs9Pk5uJOY9o8SCNrCBgvHE=";

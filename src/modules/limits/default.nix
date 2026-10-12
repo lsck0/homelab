@@ -6,7 +6,7 @@
 #   limits.tenant           what one service may send: log lines, trace and profile bytes, scrape samples
 #   limits.route            what one route admits from all its clients together (traefik.nix), beside the per-client
 #                           limits
-#   limits.frontend         what one browser beacon may carry, at the edge and at the intake on vm-105
+#   limits.frontend         what one browser beacon may carry, at the edge and at the intake on vm-103
 #   limits.allocatableOf vm { memoryMiB; cpuMillis; } what a worker of this vm shape holds for apps: swarm advertises
 #                           it as generic resources, apps.slice caps the containers to it (swarm.nix)
 #   limits.lab              what the lab's own journals and access logs may send to loki, one tenant

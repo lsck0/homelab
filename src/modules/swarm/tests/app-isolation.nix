@@ -1,8 +1,8 @@
 # one app driven to saturation does not take the lab down: the other app, the edge and the monitoring stack keep
 # answering, and the noisy app meets its own limits, each one checked where it bites
 #
-# Two apps of one image on the real swarm (manager vm-140, workers vm-250 and vm-251, nas vm-109), behind the real
-# edge (vm-200, offline crowdsec) and watched by the real collector (vm-105). `quiet` is the positive control of
+# Two apps of one image on the real swarm (manager vm-107, workers vm-250 and vm-251, nas vm-104), behind the real
+# edge (vm-200, offline crowdsec) and watched by the real collector (vm-103). `quiet` is the positive control of
 # every subtest: it must answer, ship its lines, its spans and its profiles while `noisy` floods. Floods: cpu,
 # memory, processes, requests, log lines, metric series, spans, profiles, browser beacons. Then the platform's own
 # guarantees: admission against the app's reservation, capabilities, the workers' advertised capacity, and the
@@ -13,8 +13,8 @@ let
   net = import ../../net.nix { inherit lib; inherit (specialArgs) inventory site; };
   telemetry = import ../../telemetry.nix { inherit lib; inherit (lab) inventory; };
   limits = import ../../limits { inherit lib; };
-  # the builder's import of an app's own boards (140-internal-swarm)
-  dashboardsImport = ../../../core/140-internal-swarm/lib/dashboards-import.py;
+  # the builder's import of an app's own boards (107-internal-swarm)
+  dashboardsImport = ../../../core/107-internal-swarm/lib/dashboards-import.py;
   ip = id: lab.inventory.${id}.ip;
 
   # -----------------------------------------------------------------------------
@@ -86,7 +86,7 @@ pkgs.testers.runNixOSTest {
   name = "app-isolation";
 
   node.specialArgs = lab.specialArgs;
-  nodes.vm-109 = lab.nas { flat = true; };
+  nodes.vm-104 = lab.nas { flat = true; };
   nodes.registry = {
     imports = [ (lab.multi { addresses = [ "${registryAddress}/8" ]; }) ];
     services.dockerRegistry = {
@@ -97,12 +97,12 @@ pkgs.testers.runNixOSTest {
     };
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
   };
-  nodes.vm-140 = swarmNode "140" 1536;
+  nodes.vm-107 = swarmNode "107" 1536;
   # the production worker's cores: a task's cpu flood meets its own limit, never the apps slice's share of one core
   nodes.vm-250 = { imports = [ (swarmNode "250" 2560) ]; virtualisation.cores = workerShape.cores; };
   nodes.vm-251 = { imports = [ (swarmNode "251" 2560) ]; virtualisation.cores = workerShape.cores; };
-  nodes.vm-105 = {
-    imports = [ (lab.guest telemetry.collectorVmid { flat = true; nas = true; instance = ../../../core/105-internal-grafana/main.nix; }) common ];
+  nodes.vm-103 = {
+    imports = [ (lab.guest telemetry.collectorVmid { flat = true; nas = true; instance = ../../../core/103-internal-grafana/main.nix; }) common ];
     virtualisation.memorySize = 3072;
   };
   nodes.vm-200 = {
@@ -175,16 +175,16 @@ pkgs.testers.runNixOSTest {
                      "${collector}:${toString telemetry.ports.loki}/loki/api/v1/labels",
                      "127.0.0.1:${toString telemetry.ports.tempo}/api/echo",
                      "127.0.0.1:${toString telemetry.ports.grafana}/api/health"):
-            vm_105.succeed(f"curl -sf -m 10 http://{path} >/dev/null")
-        vm_105.succeed("curl -sf -m 10 -X POST -H 'Content-Type: application/json' -H 'X-Scope-OrgID: " + TENANT["quiet"] + "' "
+            vm_103.succeed(f"curl -sf -m 10 http://{path} >/dev/null")
+        vm_103.succeed("curl -sf -m 10 -X POST -H 'Content-Type: application/json' -H 'X-Scope-OrgID: " + TENANT["quiet"] + "' "
                        "-d '{}' http://127.0.0.1:${toString telemetry.ports.pyroscopeLocal}/querier.v1.QuerierService/LabelNames >/dev/null")
 
     def task_of(app):
         """the worker machine running the app's task and the container's id there; a task the swarm replaces after a
         flood (its health check failing at its limits) is waited for: the app recovers on its own"""
         running = f"docker service ps {app}_web --filter desired-state=running --format '{{{{.Node}}}} {{{{.CurrentState}}}}'"
-        vm_140.wait_until_succeeds(f"{running} | grep -q ' Running'", timeout=120)
-        node = vm_140.succeed(f"{running} | grep ' Running' | head -n1").split()[0]
+        vm_107.wait_until_succeeds(f"{running} | grep -q ' Running'", timeout=120)
+        node = vm_107.succeed(f"{running} | grep ' Running' | head -n1").split()[0]
         machine = WORKERS[node]
         task = f"docker ps -q --filter label=com.docker.swarm.service.name={app}_web --filter status=running"
         machine.wait_until_succeeds(f"[ -n \"$({task})\" ]", timeout=60)
@@ -203,12 +203,12 @@ pkgs.testers.runNixOSTest {
         return machine, cid, f"/sys/fs/cgroup{path}"
 
     def prom(query):
-        out = vm_105.succeed(f"curl -sfG {PROM}/api/v1/query --data-urlencode {shlex.quote('query=' + query)}")
+        out = vm_103.succeed(f"curl -sfG {PROM}/api/v1/query --data-urlencode {shlex.quote('query=' + query)}")
         return json.loads(out)["data"]["result"]
 
     def loki_count(app, filter_):
         query = 'sum(count_over_time({swarm_stack="' + app + '"} |= "' + filter_ + '" [10m]))'
-        out = vm_105.succeed(f"curl -sfG -H 'X-Scope-OrgID: {TENANT[app]}' {LOKI}/loki/api/v1/query --data-urlencode {shlex.quote('query=' + query)}")
+        out = vm_103.succeed(f"curl -sfG -H 'X-Scope-OrgID: {TENANT[app]}' {LOKI}/loki/api/v1/query --data-urlencode {shlex.quote('query=' + query)}")
         result = json.loads(out)["data"]["result"]
         return int(float(result[0]["value"][1])) if result else 0
 
@@ -252,37 +252,37 @@ pkgs.testers.runNixOSTest {
 
 
     start_all()
-    vm_109.wait_for_unit("nfs-exports-reload.service")
+    vm_104.wait_for_unit("nfs-exports-reload.service")
     registry.wait_for_open_port(443)
-    vm_140.wait_until_succeeds("[ $(docker node ls -q | wc -l) = 3 ]", timeout=300)
+    vm_107.wait_until_succeeds("[ $(docker node ls -q | wc -l) = 3 ]", timeout=300)
     vm_200.wait_for_unit("traefik.service")
     # the bouncer refuses every client until the crowdsec stub listens (tests/lib/offline-traefik.nix)
     vm_200.wait_for_file("/var/lib/crowdsec/data/stub-ready")
-    vm_105.wait_for_unit("grafana.service")
+    vm_103.wait_for_unit("grafana.service")
 
     with subtest("each worker advertises what it holds for apps, and caps its containers to it"):
         for name, machine in WORKERS.items():
-            vm_140.wait_until_succeeds(f"docker node inspect {name} --format '{{{{.Status.State}}}}' | grep -qx ready", timeout=240)
-            resources = vm_140.succeed(f"docker node inspect {name} --format '{{{{json .Description.Resources.GenericResources}}}}'")
+            vm_107.wait_until_succeeds(f"docker node inspect {name} --format '{{{{.Status.State}}}}' | grep -qx ready", timeout=240)
+            resources = vm_107.succeed(f"docker node inspect {name} --format '{{{{json .Description.Resources.GenericResources}}}}'")
             assert '"HOMELAB_MEMORY_MIB","Value":${toString allocatableMiB}' in resources.replace(" ", ""), resources
             assert machine.succeed("systemctl show -p MemoryMax --value apps.slice").strip() == str(${toString allocatableMiB} * 1024 * 1024)
 
     with subtest("both apps deploy within their reservations; a stack beyond its reservation is refused"):
-        vm_140.succeed("docker load -i ${image}")
+        vm_107.succeed("docker load -i ${image}")
         for app in ("quiet", "noisy"):
             ref = f"registry.lsck0.dev/{app}/web"
-            vm_140.succeed(f"docker tag fixture:v1 {ref}:v1 && docker push -q {ref}:v1")
-            digest = vm_140.succeed(f"docker image inspect --format '{{{{range .RepoDigests}}}}{{{{println .}}}}{{{{end}}}}' {ref}:v1 | grep -F {ref}@").strip()
+            vm_107.succeed(f"docker tag fixture:v1 {ref}:v1 && docker push -q {ref}:v1")
+            digest = vm_107.succeed(f"docker image inspect --format '{{{{range .RepoDigests}}}}{{{{println .}}}}{{{{end}}}}' {ref}:v1 | grep -F {ref}@").strip()
             web = {"image": digest, "healthcheck": {"test": ["CMD", "curl", "-f", "http://localhost:8000/"], "interval": "2s"}}
-            vm_140.succeed(f"echo {shlex.quote(json.dumps({'services': {'web': web}}))} > /tmp/{app}.json")
+            vm_107.succeed(f"echo {shlex.quote(json.dumps({'services': {'web': web}}))} > /tmp/{app}.json")
             # three tasks of ${toString task.memoryMiB} MiB are more than the default reservation holds, and within the
             # two workers' replica bound
             big = dict(web, deploy={"replicas": 3})
-            vm_140.succeed(f"echo {shlex.quote(json.dumps({'services': {'web': big}}))} > /tmp/{app}-big.json")
-        refusal = vm_140.fail("swarm-apply noisy < /tmp/noisy-big.json 2>&1")
+            vm_107.succeed(f"echo {shlex.quote(json.dumps({'services': {'web': big}}))} > /tmp/{app}-big.json")
+        refusal = vm_107.fail("swarm-apply noisy < /tmp/noisy-big.json 2>&1")
         assert "reservation.memoryMiB" in refusal, refusal
         for app in ("quiet", "noisy"):
-            vm_140.succeed(f"swarm-apply {app} < /tmp/{app}.json")
+            vm_107.succeed(f"swarm-apply {app} < /tmp/{app}.json")
         world.wait_until_succeeds(f"[ \"$({edge_request('quiet', '198.51.100.1', '%{http_code}')})\" = 200 ]", timeout=240)
         quiet_answers("deployed")
 
@@ -292,21 +292,21 @@ pkgs.testers.runNixOSTest {
         assert in_task("quiet", direct) == "000"
 
     with subtest("positive controls: both apps' metrics, lines, spans and profiles arrive"):
-        vm_105.wait_until_succeeds(prom_has('up{job="app-quiet-web"} == 1'), timeout=180)
+        vm_103.wait_until_succeeds(prom_has('up{job="app-quiet-web"} == 1'), timeout=180)
         traces = {}
         for app in ("quiet", "noisy"):
             in_task(app, f"echo control-{app} > /proc/1/fd/1")
-            vm_105.wait_until_succeeds(loki_has(app, f"control-{app}"), timeout=120)
+            vm_103.wait_until_succeeds(loki_has(app, f"control-{app}"), timeout=120)
             traces[app] = rng.randbytes(16).hex()
             assert push_span(app, span(traces[app], app)) == 200
-            vm_105.wait_until_succeeds(tempo_has(TENANT[app], traces[app]), timeout=120)
+            vm_103.wait_until_succeeds(tempo_has(TENANT[app], traces[app]), timeout=120)
             assert push_profile(app, 64) == 200
         # one tenant cannot read another's, nor write into it: the relay names the sender's own
-        vm_105.fail(tempo_has(TENANT["noisy"], traces["quiet"]))
+        vm_103.fail(tempo_has(TENANT["noisy"], traces["quiet"]))
         forged = rng.randbytes(16).hex()
         assert push_span("quiet", span(forged, "quiet"), f"-H 'X-Scope-OrgID: {TENANT['noisy']}'") == 200
-        vm_105.wait_until_succeeds(tempo_has(TENANT["quiet"], forged), timeout=120)
-        vm_105.fail(tempo_has(TENANT["noisy"], forged))
+        vm_103.wait_until_succeeds(tempo_has(TENANT["quiet"], forged), timeout=120)
+        vm_103.fail(tempo_has(TENANT["noisy"], forged))
 
     def flood_cpu():
         machine, cid, cgroup = cgroup_of("noisy")
@@ -371,10 +371,10 @@ pkgs.testers.runNixOSTest {
         # while noisy floods, quiet's line arrives
         marker = f"marker-{rng.randrange(10**9)}"
         in_task("quiet", f"echo {marker} > /proc/1/fd/1")
-        vm_105.wait_until_succeeds(loki_has("quiet", marker), timeout=60)
+        vm_103.wait_until_succeeds(loki_has("quiet", marker), timeout=60)
         # noisy's lines arrive too, never faster than its budget
         try:
-            vm_105.wait_until_succeeds(loki_has("noisy", "noisy-flood"), timeout=180)
+            vm_103.wait_until_succeeds(loki_has("noisy", "noisy-flood"), timeout=180)
         except Exception:
             print(machine.succeed(f"{SHIPPER} | grep -E '^(logentry|promtail_(read|sent|dropped|request|batch|stream|targets|docker))'"))
             print(machine.succeed(f"docker logs --tail 3 {cid} 2>&1; journalctl -u promtail --no-pager | tail -30"))
@@ -391,10 +391,10 @@ pkgs.testers.runNixOSTest {
         # noisy's exporter answers more series than its budget, so its own scrape fails on the limit (a task the swarm
         # is replacing refuses connections first: the scrape after it meets the limit again)
         targets = f"curl -sf {PROM}/api/v1/targets?state=active"
-        vm_105.wait_until_succeeds(f"{targets} | jq -e '.data.activeTargets[] | select(.labels.job == \"app-noisy-web\")"
+        vm_103.wait_until_succeeds(f"{targets} | jq -e '.data.activeTargets[] | select(.labels.job == \"app-noisy-web\")"
                                    " | .lastError | contains(\"sample limit\")'", timeout=120)
         assert prom('up{job="app-quiet-web"}')[0]["value"][1] == "1"
-        quiet_error = vm_105.succeed(f"{targets} | jq -r '.data.activeTargets[] | select(.labels.job == \"app-quiet-web\") | .lastError'")
+        quiet_error = vm_103.succeed(f"{targets} | jq -r '.data.activeTargets[] | select(.labels.job == \"app-quiet-web\") | .lastError'")
         assert not quiet_error.strip(), quiet_error
         assert not prom("fixture_series"), "the oversized scrape reached the tsdb"
 
@@ -404,7 +404,7 @@ pkgs.testers.runNixOSTest {
         assert 429 in codes, f"noisy's spans met no budget: {codes}"
         trace_id = rng.randbytes(16).hex()
         assert push_span("quiet", span(trace_id, "quiet")) == 200
-        vm_105.wait_until_succeeds(tempo_has(TENANT["quiet"], trace_id), timeout=120)
+        vm_103.wait_until_succeeds(tempo_has(TENANT["quiet"], trace_id), timeout=120)
 
     def flood_profiles():
         codes = [push_profile("noisy", 3 * 1024 * 1024) for _ in range(6)]
@@ -426,8 +426,8 @@ pkgs.testers.runNixOSTest {
 
         assert send(TENANT["quiet"], beacon) == [200]
         assert push_span("quiet", span(trace_id, "quiet")) == 200
-        vm_105.wait_until_succeeds(f"{tempo_has(TENANT['quiet'], trace_id)} | grep -q quiet-browser", timeout=120)
-        trace = vm_105.succeed(tempo_has(TENANT["quiet"], trace_id))
+        vm_103.wait_until_succeeds(f"{tempo_has(TENANT['quiet'], trace_id)} | grep -q quiet-browser", timeout=120)
+        trace = vm_103.succeed(tempo_has(TENANT["quiet"], trace_id))
         assert "secret" not in trace and '"quiet"' in trace, trace
         world.fail(f"curl -sf -m 5 -X POST {intake}")
         # the intake refuses a beacon over its body cap at the door
@@ -438,8 +438,8 @@ pkgs.testers.runNixOSTest {
         assert set(send(TENANT["noisy"], big, ${toString beaconFlood.count})) == {200}
         late = rng.randbytes(16).hex()
         assert send(TENANT["quiet"], span(late, "quiet-browser")) == [200]
-        vm_105.wait_until_succeeds(tempo_has(TENANT["quiet"], late), timeout=120)
-        vm_105.wait_until_succeeds(prom_has(f'sum(tempo_discarded_spans_total{{tenant="{TENANT["noisy"]}"}}) > 0'), timeout=180)
+        vm_103.wait_until_succeeds(tempo_has(TENANT["quiet"], late), timeout=120)
+        vm_103.wait_until_succeeds(prom_has(f'sum(tempo_discarded_spans_total{{tenant="{TENANT["noisy"]}"}}) > 0'), timeout=180)
 
     floods = [flood_cpu, flood_memory, flood_pids, flood_requests, flood_logs, flood_metrics, flood_spans, flood_profiles, flood_frontend]
     rng.shuffle(floods)
@@ -450,12 +450,12 @@ pkgs.testers.runNixOSTest {
             monitoring_answers(flood.__name__)
 
     with subtest("each app has its board in its own folder, reading its own datasources, and the overview lists both"):
-        boards = json.loads(vm_105.succeed(f"{GRAFANA}/api/search?type=dash-db"))
+        boards = json.loads(vm_103.succeed(f"{GRAFANA}/api/search?type=dash-db"))
         by_uid = {b["uid"]: b for b in boards}
         for app in ("quiet", "noisy"):
             assert by_uid[f"service-{app}"]["folderTitle"] == app, by_uid
         assert "services" in by_uid
-        sources = json.loads(vm_105.succeed(f"{GRAFANA}/api/datasources"))
+        sources = json.loads(vm_103.succeed(f"{GRAFANA}/api/datasources"))
         uids = {s["uid"] for s in sources}
         assert {"loki-quiet", "tempo-quiet", "pyroscope-quiet", "loki-noisy"} <= uids, uids
         assert not {"tempo", "pyroscope"} & uids, uids
@@ -463,10 +463,10 @@ pkgs.testers.runNixOSTest {
     with subtest("an app's own dashboard lands in its folder, rewritten to its own datasources"):
         repo = "/tmp/quiet-repo"
         board = json.dumps({"uid": "own", "title": "Own", "panels": [{"type": "logs", "datasource": {"type": "loki", "uid": "loki-noisy"}}]})
-        vm_140.succeed(f"mkdir -p {repo}/dash && echo {shlex.quote(board)} > {repo}/dash/own.json")
+        vm_107.succeed(f"mkdir -p {repo}/dash && echo {shlex.quote(board)} > {repo}/dash/own.json")
         share = "/var/lib/app-dashboards/${telemetry.appDashboardsDir}"
-        vm_140.succeed(f"${pkgs.python3}/bin/python3 ${dashboardsImport} quiet {repo} {share} 'dash/*.json'")
+        vm_107.succeed(f"${pkgs.python3}/bin/python3 ${dashboardsImport} quiet {repo} {share} 'dash/*.json'")
         landed = '.meta.folderTitle == "quiet" and .dashboard.panels[0].datasource.uid == "loki-quiet"'
-        vm_105.wait_until_succeeds(f"{GRAFANA}/api/dashboards/uid/quiet-own | jq -e {shlex.quote(landed)}", timeout=180)
+        vm_103.wait_until_succeeds(f"{GRAFANA}/api/dashboards/uid/quiet-own | jq -e {shlex.quote(landed)}", timeout=180)
   '';
 }

@@ -6,7 +6,7 @@
 # this unless `nas = true` (lib/nas-mounts.nix, a real test nas).
 { config, lib, ... }:
 let
-  # where the shares live on the vm disk: /srv/lab-nas/data/<share> for 10.100.0.109:/srv/nas/data/<share>
+  # where the shares live on the vm disk: /srv/lab-nas/data/<share> for 10.100.0.104:/srv/nas/data/<share>
   localRoot = "/srv/lab-nas";
   localOf = device: localRoot + lib.removePrefix "/srv/nas" (lib.last (lib.splitString ":" device));
   # the systemd and access options carry over; the nfs ones (nfsvers, hard, timeo, retry, ...) mean nothing here

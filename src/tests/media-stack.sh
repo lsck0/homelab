@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lab-wide: the media stack of 112, 128, 130 and 134, run by hand against the real containers
+# lab-wide: the media stack of 120, 121, 122 and 123, run by hand against the real containers
 # media stack wiring e2e test, real app containers
 set -euo pipefail
 
@@ -57,7 +57,7 @@ export PATH="$W/bin:$PATH"
 
 # the lab's token layout (modules/tokens): each producer writes its own dir, tokens/<name>.token are links into
 # them, so a setup unit that wrote through a link instead of its own dir breaks here as it would in the lab
-nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.114-internal-hermes.config.homelab.tokens.producers" \
+nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.113-internal-hermes.config.homelab.tokens.producers" \
   | jq -r 'to_entries[] | "\(.key) \(.value)"' | while read -r name id; do
       mkdir -p "$W/tokens.d/vm-$id"
       ln -sfn "$W/tokens.d/vm-$id/$name.token" "$W/tokens/$name.token"
@@ -84,47 +84,47 @@ run_app() {
 
 echo ">>> Starting containers (images from the NixOS configs)"
 DATA=(-v "$W/media:/data/media" -v "$W/torrents:/data/torrents")
-run_app qbittorrent "$(image 112-internal-qbittorrent qbittorrent)" 18080:8080 -e WEBUI_PORT=8080 \
+run_app qbittorrent "$(image 120-internal-qbittorrent qbittorrent)" 18080:8080 -e WEBUI_PORT=8080 \
   -v "$W/qbittorrent:/config" -v "$W/torrents:/data/torrents"
-run_app prowlarr  "$(image 130-internal-arr prowlarr)"           19696:9696 -v "$W/prowlarr:/config" "${DATA[@]}"
-run_app radarr    "$(image 130-internal-arr radarr)"             17878:7878 -v "$W/radarr:/config" "${DATA[@]}"
-run_app sonarr    "$(image 130-internal-arr sonarr)"             18989:8989 -v "$W/sonarr:/config" "${DATA[@]}"
-run_app lidarr    "$(image 130-internal-arr lidarr)"             18686:8686 -v "$W/lidarr:/config" "${DATA[@]}"
+run_app prowlarr  "$(image 121-internal-arr prowlarr)"           19696:9696 -v "$W/prowlarr:/config" "${DATA[@]}"
+run_app radarr    "$(image 121-internal-arr radarr)"             17878:7878 -v "$W/radarr:/config" "${DATA[@]}"
+run_app sonarr    "$(image 121-internal-arr sonarr)"             18989:8989 -v "$W/sonarr:/config" "${DATA[@]}"
+run_app lidarr    "$(image 121-internal-arr lidarr)"             18686:8686 -v "$W/lidarr:/config" "${DATA[@]}"
 mkdir -p "$W/jellyfin/config" "$W/jellyfin/cache"
-run_app jellyfin  "$(image 134-internal-jellyfin jellyfin)"      18096:8096 \
+run_app jellyfin  "$(image 122-internal-jellyfin jellyfin)"      18096:8096 \
   -v "$W/jellyfin/config:/config" -v "$W/jellyfin/cache:/cache" -v "$W/media:/data/media:ro"
-run_app jellyseerr "$(image 128-internal-jellyseerr jellyseerr)" 15055:5055 --init -e PORT=5055 -v "$W/jellyseerr:/app/config"
-run_app bazarr    "$(image 130-internal-arr bazarr)"             16767:6767 -v "$W/bazarr:/config" -v "$W/media:/data/media"
+run_app jellyseerr "$(image 123-internal-jellyseerr jellyseerr)" 15055:5055 --init -e PORT=5055 -v "$W/jellyseerr:/app/config"
+run_app bazarr    "$(image 121-internal-arr bazarr)"             16767:6767 -v "$W/bazarr:/config" -v "$W/media:/data/media"
 
 # -----------------------------------------------------------------------------
 # PER-VM SETUP UNITS
 Q="s#/var/lib/qbittorrent#$W/qbittorrent#g"
-run_unit 112-internal-qbittorrent qbittorrent-disable-auth "$Q" \
+run_unit 120-internal-qbittorrent qbittorrent-disable-auth "$Q" \
   "s#systemctl stop podman-qbittorrent.service#docker stop ${P}qbittorrent#" \
   "s#systemctl start podman-qbittorrent.service#docker start ${P}qbittorrent#"
 # whitelist the test subnet, not the lab vms
-nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.112-internal-qbittorrent.config.systemd.units.\"qbittorrent-settings.service\".unit"
-QPREFS=$(nixeval 112-internal-qbittorrent systemd.services.qbittorrent-settings.script | grep -o '/nix/store/[^ ]*-qbittorrent-prefs.json')
+nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.120-internal-qbittorrent.config.systemd.units.\"qbittorrent-settings.service\".unit"
+QPREFS=$(nixeval 120-internal-qbittorrent systemd.services.qbittorrent-settings.script | grep -o '/nix/store/[^ ]*-qbittorrent-prefs.json')
 jq --arg s "$SUBNET" '.bypass_auth_subnet_whitelist = $s' "$QPREFS" > "$W/qbittorrent-prefs.json"
-run_unit 112-internal-qbittorrent qbittorrent-settings "$TOK" \
+run_unit 120-internal-qbittorrent qbittorrent-settings "$TOK" \
   "s#$QPREFS#$W/qbittorrent-prefs.json#" \
   "s#podman exec \\(-i \\)\\?qbittorrent#podman exec \\1${P}qbittorrent#g"
 
 for name in prowlarr radarr sonarr lidarr bazarr; do
-  run_unit 130-internal-arr "$name-setup" "$TOK" "s#/var/lib/$name#$W/$name#g" \
+  run_unit 121-internal-arr "$name-setup" "$TOK" "s#/var/lib/$name#$W/$name#g" \
     "s#systemctl stop podman-$name.service#docker stop $P$name#" "s#systemctl start podman-$name.service#docker start $P$name#"
 done
 
 JF="s#http://127.0.0.1:80#http://127.0.0.1:18096#g"
-run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "$JF"
-run_unit 128-internal-jellyseerr jellyseerr-token "$TOK" "s#/var/lib/jellyseerr#$W/jellyseerr#g"
+run_unit 122-internal-jellyfin jellyfin-setup "$TOK" "$JF"
+run_unit 123-internal-jellyseerr jellyseerr-token "$TOK" "s#/var/lib/jellyseerr#$W/jellyseerr#g"
 
 # -----------------------------------------------------------------------------
 # JELLYFIN SETUP UNDER A RESTART (the readiness contract, no fixed waits)
 echo ">>> jellyfin restarted, setup at once: it waits for ready instead of failing"
 docker restart "${P}jellyfin" >/dev/null
-check "jellyfin-setup right after a restart" run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "$JF"
-out=$(run_unit 134-internal-jellyfin jellyfin-setup "$TOK" "$JF" 2>&1); echo "$out"
+check "jellyfin-setup right after a restart" run_unit 122-internal-jellyfin jellyfin-setup "$TOK" "$JF"
+out=$(run_unit 122-internal-jellyfin jellyfin-setup "$TOK" "$JF" 2>&1); echo "$out"
 if echo "$out" | grep -qE "restarting jellyfin|created|enabled|revoked|exported"; then
   fail "jellyfin-setup third run changed something"
 else
@@ -135,10 +135,10 @@ echo ">>> Exported tokens: $(cd "$W/tokens" && echo *)"
 
 # -----------------------------------------------------------------------------
 # ARR-WIRE (THE REAL SCRIPT BUILT FOR VM-130, RUN ON THE TEST NETWORK)
-nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.130-internal-arr.config.systemd.services.arr-wire.serviceConfig.ExecStart"
-WIRE=$(nixeval 130-internal-arr systemd.services.arr-wire.serviceConfig.ExecStart)
+nix build --no-warn-dirty --no-link "$SRC#nixosConfigurations.121-internal-arr.config.systemd.services.arr-wire.serviceConfig.ExecStart"
+WIRE=$(nixeval 121-internal-arr systemd.services.arr-wire.serviceConfig.ExecStart)
 # the unit's own environment, addresses replaced by the test network's below
-WIRE_ENV=$(nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.130-internal-arr.config.systemd.services.arr-wire.environment" \
+WIRE_ENV=$(nix eval --no-warn-dirty --json "$SRC#nixosConfigurations.121-internal-arr.config.systemd.services.arr-wire.environment" \
   | jq -r 'to_entries[] | select(.key | test("^(INDEXERS|RADARR_PUBLIC_URL|SONARR_PUBLIC_URL|JELLYSEERR_ADMIN_EMAIL|TOR_HOST|TOR_PORT)$")) | "-e\n\(.key)=\(.value)"')
 arr_wire() {
   local env=(); mapfile -t env <<< "$WIRE_ENV"
@@ -230,7 +230,7 @@ check "jellyfin: janitorr user can delete and is no admin" sh -c "curl -sf -H 'A
 check "jellyfin: one api key per consumer, the shared one gone" sh -c "curl -sf -H 'Authorization: MediaBrowser Token=\"$jfk\"' http://127.0.0.1:18096/Auth/Keys | jq -e '[.Items[].AppName] | (index(\"homelab\") | not) and (contains([\"homelab-homepage\",\"homelab-hermes\",\"homelab-arr\",\"homelab-janitorr\"]))'"
 check "jellyfin: only the sso plugin authenticates" sh -c "curl -sf -H 'Authorization: MediaBrowser Token=\"$jfk\"' http://127.0.0.1:18096/Plugins | jq -e '(any(.[]; .Name | test(\"SSO\")) and (any(.[]; .Name | test(\"LDAP\")) | not))'"
 for t in jellyfin-key-homepage jellyfin-admin-pass janitorr-pass; do
-  check "tokens: $t is a link into vm-134's own dir" sh -c "[ -L $W/tokens/$t.token ] && [ -f $W/tokens.d/vm-134/$t.token ] && [ ! -L $W/tokens.d/vm-134/$t.token ]"
+  check "tokens: $t is a link into vm-122's own dir" sh -c "[ -L $W/tokens/$t.token ] && [ -f $W/tokens.d/vm-122/$t.token ] && [ ! -L $W/tokens.d/vm-122/$t.token ]"
 done
 
 
@@ -242,7 +242,7 @@ if echo "$out" | grep -vE "unreachable, skipped" | grep -qE "added|connected|ini
 # JANITORR
 echo ">>> Janitorr with the config NixOS renders"
 mkdir -p "$W/janitorr/logs" "$W/janitorr/stats"; chmod -R 777 "$W/janitorr"
-run_unit 134-internal-jellyfin janitorr-config "$TOK" "s#/var/lib/janitorr#$W/janitorr#g" "s#chown 1000:1000#true#"
+run_unit 122-internal-jellyfin janitorr-config "$TOK" "s#/var/lib/janitorr#$W/janitorr#g" "s#chown 1000:1000#true#"
 # the lab's addresses (the collected inventory and routes, modules/lab) to the test network's names
 url_of() { nix eval --no-warn-dirty --raw "$SRC#lab" --apply "l: let r = l.routes.internal.$1; in \"http://\${l.inventory.\${toString r.vmid}.ip}:\${toString r.port}\""; }
 for f in application.yml stats.yml; do
@@ -254,10 +254,10 @@ chmod 644 "$W/janitorr/"*.yml
 docker rm -f "${P}janitorr-stats" "${P}janitorr" >/dev/null 2>&1 || true
 docker run -d --name "${P}janitorr-stats" --network "$NET" --network-alias janitorr-stats \
   -v "$W/janitorr/stats.yml:/work/config/application.yml:ro" -v "$W/janitorr/stats:/data" \
-  "$(image 134-internal-jellyfin janitorr-stats)" >/dev/null
+  "$(image 122-internal-jellyfin janitorr-stats)" >/dev/null
 docker run -d --name "${P}janitorr" --network "$NET" --user 1000:1000 -e SERVER_PORT=8082 --memory=512m \
   -v "$W/janitorr/application.yml:/config/application.yml:ro" -v "$W/janitorr/logs:/logs" "${DATA[@]}" \
-  "$(image 134-internal-jellyfin janitorr)" >/dev/null
+  "$(image 122-internal-jellyfin janitorr)" >/dev/null
 # janitorr runs its first cycle within a minute and a half of start
 for _ in $(seq 120); do docker logs "${P}janitorr" 2>&1 | grep -q 'Deleting Movies and updating Leaving Soon' && break; sleep 1; done
 check "janitorr-stats running" sh -c "[ \"\$(docker inspect -f '{{.State.Running}}' ${P}janitorr-stats)\" = true ]"

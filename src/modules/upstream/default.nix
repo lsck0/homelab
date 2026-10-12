@@ -75,7 +75,7 @@ let
     first = lib.head parts;
   in if lib.length parts > 1 && (lib.hasInfix "." first || lib.hasInfix ":" first || first == "localhost") then first else dockerHub;
 in {
-  # retry and probeTimeoutS: for callers implementing the same contract (core/140-internal-swarm/lib/app-builder.py)
+  # retry and probeTimeoutS: for callers implementing the same contract (core/107-internal-swarm/lib/app-builder.py)
   _module.args.upstream = {
     run = lib.getExe run;
     inherit unavailable registries;
