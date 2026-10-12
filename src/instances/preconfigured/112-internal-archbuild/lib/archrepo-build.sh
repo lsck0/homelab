@@ -136,6 +136,8 @@ COMMIT=${ARCHBUILD_COMMIT:?the verified arch-dotfiles commit}
 # epoch seconds the unit started at: the run id, the snapshot date and the age archbuild-if-stale reads
 RUN_STARTED=${ARCHBUILD_RUN_STARTED:?epoch seconds of the run start}
 OFFICIAL_REPOS=(core extra multilib)
+# the container pacman's sync dbs: the official ones of the run's only sync, and the staging db
+PACMAN_SYNC=/var/lib/pacman/sync
 BUILDER=builder
 # the uid every writing container on the nas uses
 BUILDER_UID=1000
@@ -307,8 +309,9 @@ sign() {
   mv -f "$tmp" "$1.sig"
 }
 
-# against today's official repos and the staging db
-names_resolve() { pacman -Sp --noconfirm "$@" >/dev/null 2>&1; }
+# the staged packages of these names against today's official repos and the staging db: by name alone pacman's
+# repo order would check an official package of the same name in their place
+names_resolve() { pacman -Sp --noconfirm "${@/#/$REPO/}" >/dev/null 2>&1; }
 
 # one field of the .PKGINFO on stdin
 pkginfo_get() { sed -n "s/^$1 = //p"; }
@@ -393,7 +396,7 @@ stage_links_sync() {
 
 # the builder's pacman reads the staging db, so later builds and the resolve checks see what is staged
 db_sync_local() {
-  cp "$STAGE_DB" "/var/lib/pacman/sync/$REPO.db" || return 1
+  cp "$STAGE_DB" "$PACMAN_SYNC/$REPO.db" || return 1
   load_db_index || return 1
   stage_links_sync
 }
@@ -832,15 +835,19 @@ build_base() {
 
 # -----------------------------------------------------------------------------
 # BUILD: SNAPSHOT
-# names the staged set is checked and installed by: listed official ones plus everything built
+# names the staged set is checked and installed by: listed official ones plus everything built. A local recipe's
+# names come as $REPO/<name>: it may replace an official package (header), which pacman's repo order, the official
+# repos first, would otherwise resolve them to, and repo-add would then stage over the local build
 snapshot_targets() {
-  local base name
+  local base name prefix
   # an empty array would print one empty line, which pacman takes as a target
   (( ${#official_wanted[@]} == 0 )) || printf '%s\n' "${official_wanted[@]}"
   for base in "${bases[@]}"; do
-    state_get "$base" names | tr ' ' '\n'
-  done | while read -r name; do
-    [ -n "$name" ] && [ -n "${db_file[$name]:-}" ] && echo "$name"
+    prefix=
+    [ "${kind[$base]}" != local ] || prefix=$REPO/
+    for name in $(state_get "$base" names); do
+      [ -z "${db_file[$name]:-}" ] || echo "$prefix$name"
+    done
   done
 }
 
@@ -867,10 +874,10 @@ snapshot_official() {
   mapfile -t targets < <(snapshot_targets | sort -u)
   # an empty local db, so the closure includes what the build container has installed
   dbpath_create "$root"
-  cp /var/lib/pacman/sync/*.db "$root/sync/" || { held_back="copying the sync dbs failed"; return 1; }
+  cp "$PACMAN_SYNC"/*.db "$root/sync/" || { held_back="copying the sync dbs failed"; return 1; }
   # publish downloads and checks the official files against the dbs this closure came from
   for repo in "${OFFICIAL_REPOS[@]}"; do
-    cp "/var/lib/pacman/sync/$repo.db" "$OUTBOX_SYNC/" || { held_back="copying the $repo db failed"; return 1; }
+    cp "$PACMAN_SYNC/$repo.db" "$OUTBOX_SYNC/" || { held_back="copying the $repo db failed"; return 1; }
   done
   if ! pacman --dbpath "$root" -Sp --noconfirm --print-format '%r %n %f' "${targets[@]}" \
     > "$CACHE/closure.txt" 2> "$PUBLIC_LOGS/snapshot.log"; then
