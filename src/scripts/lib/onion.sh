@@ -2,7 +2,7 @@
 # a tor v3 onion service's address and key file from its 32-byte ed25519 seed (base64), the secret kind `onion`
 #
 # secrets-sync.sh generates the seed and writes each address to src/generated/onions.json, the router turns the seed
-# into the key file tor reads (instances/300-router/main.nix); both derive from the seed alone, so they cannot drift.
+# into the key file tor reads (core/300-router/main.nix); both derive from the seed alone, so they cannot drift.
 #
 #   seed=$(onion_seed_generate)
 #   onion_address "$seed"                   # <56 base32 characters>.onion

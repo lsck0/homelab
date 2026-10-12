@@ -14,13 +14,13 @@ metadata:
 # Monitoring (vm-105 10.100.0.105)
 
 Ports and addresses are defined once in `src/modules/telemetry.nix`; rules, contact points and scrape jobs in
-`src/instances/105-internal-grafana/main.nix`.
+`src/core/105-internal-grafana/main.nix`.
 
 - Prometheus `http://10.100.0.105:9090` is read-only from other hosts (GET, and POST on the query endpoints);
   writes (remote write, admin api) only reach it on vm-105's loopback.
   node-exporter on every VM (:9100, label `vm`), Traefik (:8082), the monitoring stack itself (job `monitoring`,
   label `component`: loki, tempo, pyroscope, grafana, promtail), itself (job `prometheus`; capped at 50GB).
-  Swarm apps (`src/apps/<app>/app.nix`, enabled ones only): one job per exporter `app-<app>-<name>` every 15s,
+  Swarm apps (`src/instances/custom/<app>/app.nix`, enabled ones only): one job per exporter `app-<app>-<name>` every 15s,
   label `app`, at most 10000 samples a scrape (above, that scrape fails alone: `up` 0,
   `prometheus_target_scrapes_exceeded_sample_limit_total`); `app-cadvisor` on every apps node with
   `swarm_service`/`swarm_stack` labels (`container_*` by `swarm_stack="<app>"`); `app-logs`, the workers' log

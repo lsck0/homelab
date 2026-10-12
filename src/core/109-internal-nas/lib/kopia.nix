@@ -139,7 +139,7 @@ let
                obj=$(echo "$snap" | jq -r .rootEntry.obj)
                when=$(date -d "$(echo "$snap" | jq -r .startTime)" '+%F %T %Z')
                echo ">>> Restore ${source}/data/$name from snapshot $(echo "$snap" | jq -r .id) of $when, IN PLACE."
-               echo ">>> Stop the service that uses it first (see its src/instances/*/instance.nix)."
+               echo ">>> Stop the service that uses it first (see its instance.nix)."
                if [ "$yes" != "--yes" ]; then
                  printf ">>> type 'yes' to proceed: "; read -r ok; [ "$ok" = yes ] || { echo aborted; exit 1; }
                fi

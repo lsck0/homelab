@@ -19,7 +19,7 @@ Token `lab-token hass-key`, header `Authorization: Bearer <token>`.
 - States: `GET /api/states`, one entity `GET /api/states/<entity_id>`.
 - Call a service: `POST /api/services/<domain>/<service> {"entity_id":"light.kitchen"}`.
 - Automations live in `/var/lib/homeassistant/automations.yaml` (local disk, mirrored to the NAS nightly); reload `POST /api/services/automation/reload`.
-If it is disabled, say so; enabling it is `vm.power = "on"` in `src/instances/125-internal-homeassistant/instance.nix`.
+If it is disabled, say so; enabling it is `vm.power = "on"` in `src/instances/preconfigured/125-internal-homeassistant/instance.nix`.
 
 ## Energy meters and tariffs (the Energie dashboard)
 
@@ -37,7 +37,7 @@ Meters (m³, absolute reading):
 - `input_number.gas_meter`: Gaszähler.
 - `input_number.water_meter`: Wasserzähler.
 
-A typed reading is guarded (`src/instances/125-internal-homeassistant/lib/meter_reading.jinja`) before it counts. It becomes
+A typed reading is guarded (`src/instances/preconfigured/125-internal-homeassistant/lib/meter_reading.jinja`) before it counts. It becomes
 `sensor.gas_meter_reading` / `sensor.water_meter_reading` (Prometheus: `hass_gas_meter_cubic_meters`,
 `hass_water_meter_cubic_meters`; read time `sensor.<meter>_meter_read_at`, `hass_<meter>_meter_read_timestamp_seconds`)
 only if it is plausible:

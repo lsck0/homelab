@@ -16,7 +16,7 @@ metadata:
 - Send the owner a push: `lab-notify [-t <title>] [-p min|low|default|high|urgent] [-g <tags>] [-c <click url>] <text>`.
   It publishes to topic `homelab-hermes` as user `hermes`; the password stays inside the tool.
 - ntfy requires a login (`auth-default-access` is `deny-all`). Every account and every topic grant is declared
-  in `src/instances/203-external-ntfy/main.nix` (`users`): ntfy provisions exactly those at start, and an account made
+  in `src/core/203-external-ntfy/main.nix` (`users`): ntfy provisions exactly those at start, and an account made
   by hand is deleted on the next start. A new topic or account is an edit there plus a deploy by the owner.
 - `homelab-alerts` is Grafana's topic and the owner's alert channel; `homelab-heartbeat` is Grafana's watchdog.
   Never publish to either: `hermes` may not, and a message there would read as an alert.

@@ -13,9 +13,9 @@ metadata:
 
 # CI/CD: the apps swarm
 
-An app is a folder `src/apps/<name>/` whose `app.nix` names a GitHub repo and a branch (every field, its type and
-default: `src/modules/apps-catalog`, the shared route properties `src/modules/service.nix`). Everything else is
-derived.
+An app is a folder `src/instances/custom/<name>/` whose `app.nix` names a GitHub repo and a branch (every field, its
+type and default: `src/modules/apps-catalog`, the shared route properties `src/modules/service.nix`). Everything else
+is derived.
 
 Flow on every push to that branch:
 
@@ -96,7 +96,7 @@ Flow on every push to that branch:
 
 ## Add an app (Nix change for the owner)
 
-Copy `src/apps/_template/` to `src/apps/<name>/` and set `repo` and `branch`: the app answers at
+Copy `src/instances/custom/_template/` to `src/instances/custom/<name>/` and set `repo` and `branch`: the app answers at
 `<name>.lsck0.dev` behind the edge and authelia, its port drawn from 20100 to 20999. A public app says
 `routes.<name>.off.sso = "<why>"`; more routes, `idle`, `resources` and `placement` are optional. Repos without a
 compose file need a root `Dockerfile` (service `web`, port 8000 unless the route says otherwise); a stack whose
@@ -109,7 +109,7 @@ naming the field. Draft the entry; do not deploy it yourself.
 
 - Forgejo (git.lsck0.dev): user `ci`, compile cache (sccache) and registry pushes as `ci`.
 - GitHub: one runner per repo whose workflows use `runs-on: self-hosted`, user `gh-<repo>`, wiped before every
-  job, dns and the internet only. Repos are listed in `src/instances/117-internal-github-runner/main.nix`.
+  job, dns and the internet only. Repos are listed in `src/instances/preconfigured/117-internal-github-runner/main.nix`.
 - No job runs as root or reaches the nix daemon.
 
 ## Registry (vm-118, https://registry.lsck0.dev through vm-100)

@@ -2,8 +2,9 @@
 
 Usage: energy.py <out.json>   (run by nix at build time, see 105-internal-grafana.nix)
 
-Every query comes from energy_model (modules/energy), the same definitions instances/104-internal-terminal/lib/energy-sync.py evaluates for
-the TRMNL panel, so the board and the panel cannot disagree. Labels are German, the board is read at home.
+Every query comes from energy_model (modules/energy), the same definitions
+instances/preconfigured/104-internal-terminal/lib/energy-sync.py evaluates for the TRMNL panel, so the board and the
+panel cannot disagree. Labels are German, the board is read at home.
 
 Per-day and per-month bars read energy-sync's gauges (homelab_energy_day_*, homelab_energy_month_*), which hold
 totals over local days and months. Rejected alternative: interval="1d" buckets align to the epoch, so a "day" ran

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # point the lab's cloudflare A records at the house's public address
 #
-# Run by the router after it learned the public address (instances/300-router/main.nix public-address), with the
+# Run by the router after it learned the public address (core/300-router/main.nix public-address), with the
 # record list generated from the route catalog. A record's state is converged, never assumed: a missing record is
 # created, a wrong address or proxy flag is put right, duplicates of one name (a past run that created a second
 # record) are deleted down to one, and an A record of the house's address the list no longer names (a route taken off

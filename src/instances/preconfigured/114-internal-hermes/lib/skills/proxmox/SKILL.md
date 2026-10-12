@@ -40,7 +40,7 @@ Everything else with `terminal` on the host: `ssh 192.168.178.200 <cmd>`.
 
 ## Rules
 
-- VM definitions (CPU, RAM, disk, power, idle) are each guest's `vm` in
-  `src/instances/<folder>/instance.nix` of the homelab repo, applied by Terraform. `qm set` changes drift until the
-  next `sync.sh`; tell the owner the matching instance.nix edit.
+- VM definitions (CPU, RAM, disk, power, idle) are each guest's `vm` in `<folder>/instance.nix` (`src/core/` or
+  `src/instances/preconfigured/`) of the homelab repo, applied by Terraform. `qm set` changes drift until the next
+  `sync.sh`; tell the owner the matching instance.nix edit.
 - Never `qm destroy` or touch the host network config without the owner asking.

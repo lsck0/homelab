@@ -2,8 +2,8 @@
   Meter reading guard: decides what a typed-in meter reading does to the accepted one.
 
   Loaded by home assistant from /config/custom_templates (125-internal-homeassistant.nix) and imported by each
-  meter's trigger-based template sensor; instances/104-internal-terminal/tests/feeds_test.py renders it with plain jinja2. Pure: every input is
-  an argument, so the same numbers always give the same verdict.
+  meter's trigger-based template sensor; instances/preconfigured/104-internal-terminal/tests/feeds_test.py renders
+  it with plain jinja2. Pure: every input is an argument, so the same numbers always give the same verdict.
 
   A meter only counts up, and readings are typed by hand once a day or so. The guard therefore accepts:
     accept_first  the first reading of a meter, or any reading once "meter replaced" was pressed after the last

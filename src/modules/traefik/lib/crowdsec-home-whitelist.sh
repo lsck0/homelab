@@ -2,7 +2,7 @@
 # never let crowdsec ban the house (the lab's own ranges are modules/traefik's static whitelist)
 #
 # The house is its public v4 address, which the router learns and serves to the lab as PUBLIC_HOST
-# (instances/300-router/main.nix public-address); the lab is v4-only. Nothing resolved: the file stays as it is.
+# (core/300-router/main.nix public-address); the lab is v4-only. Nothing resolved: the file stays as it is.
 set -euo pipefail
 
 : "${PUBLIC_HOST:?the name the router serves the public address as}"

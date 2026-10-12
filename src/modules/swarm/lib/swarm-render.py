@@ -2,7 +2,7 @@
 
 Usage: swarm-render.py <app> <catalog.json> <env-file> < stack.yaml > rendered.yaml
 
-The builder (instances/140-internal-swarm/lib/app-builder.nix) sends the app's own compose file with every built image pinned by digest
+The builder (core/140-internal-swarm/lib/app-builder.nix) sends the app's own compose file with every built image pinned by digest
 and every env_file already inlined. This adds the homelab and enforces its policy (modules/swarm runs it):
 
 - services the catalog `exclude`s are dropped, with every depends_on pointing at them; the catalog `override`

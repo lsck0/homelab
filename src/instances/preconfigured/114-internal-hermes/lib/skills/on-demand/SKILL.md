@@ -36,4 +36,4 @@ until used:
 - Why did it not wake? On the Traefik VM: `journalctl -u ondemand-<route> -n 50`
   (wake script logs the Proxmox status and readiness wait).
 - Change the idle time or make a VM always-on: edit `idle` in its
-  `src/instances/<folder>/instance.nix`; tell the owner (applied by `sync.sh`).
+  `<folder>/instance.nix` (`src/core/` or `src/instances/preconfigured/`); tell the owner (applied by `sync.sh`).

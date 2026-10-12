@@ -63,7 +63,7 @@ STARTED_WINDOW_S = 300
 TRAEFIK_PROVIDER = "@file"
 # a route's router, and its parts for bodies and websockets (modules/traefik routerSuffixes)
 ROUTER_SUFFIXES = ("-tls", "-tls-body", "-tls-socket")
-# the builder's (instances/140-internal-swarm/lib/app-builder.nix) and the manager's (modules/swarm) gauges
+# the builder's (core/140-internal-swarm/lib/app-builder.nix) and the manager's (modules/swarm) gauges
 DEPLOY_OK = "homelab_swarm_deploy_ok"
 DEPLOY_AT = "homelab_swarm_deploy_timestamp_seconds"
 BUILD_OK = "homelab_app_deploy_ok"

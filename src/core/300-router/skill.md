@@ -13,7 +13,7 @@ metadata:
 
 # Router (`luca-router`, 192.168.178.29 / 10.100.0.1 / 10.200.0.1 / 10.250.0.1)
 
-`ssh 192.168.178.29 <cmd>`. NixOS config: `src/instances/300-router/main.nix`; the policy it renders is data in
+`ssh 192.168.178.29 <cmd>`. NixOS config: `src/core/300-router/main.nix`; the policy it renders is data in
 `src/modules/flows.nix` (who may reach whom, with the reason per line), the zones in `src/generated/zones.json`.
 
 - Interfaces: ens18 WAN (FritzBox LAN), one leg per zone of `src/generated/zones.json` (ens19 internal, ens20 DMZ, ens21
@@ -43,7 +43,7 @@ metadata:
   as src/generated/onions.json. Keys: `systemctl status tor-onion-keys`.
 - WireGuard: `wg show wg0` (peers laptop .2, phone .3, tablet .4, pc .5). New peers are
   Nix config; generate the client keys and tell the owner the peer block to add.
-- DDNS: `systemctl start ddns-cloudflare` then `journalctl -u ddns-cloudflare -n 30` (src/instances/300-router/lib/ddns-cloudflare.sh).
+- DDNS: `systemctl start ddns-cloudflare` then `journalctl -u ddns-cloudflare -n 30` (src/core/300-router/lib/ddns-cloudflare.sh).
   Public records come from the route catalog; a failed run leaves the address unsynced and the next run retries.
 - WAN limits: `nft list table ip wan-limits` (per internet source syn rate and connection count; the house and
   Cloudflare exempt).

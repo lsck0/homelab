@@ -17,9 +17,9 @@ metadata:
   ForwardAuth in front. External Traefik vm-200 (10.200.0.200): public apps,
   CrowdSec bouncer + AppSec WAF + rate limits, relays each internal host to vm-100 under its own router
   (`<name>-relay`, tls verified for that host). A host no router names gets a 404 at vm-200.
-- Routes are the instances' `services` (`src/instances/<folder>/instance.nix`) and the apps' `routes`
-  (`src/apps/<name>/app.nix`), one schema (`src/modules/service.nix`), merged in `src/modules/catalog.nix`; every
-  protection is on unless a route says `off.<feature> = "<why>"`.
+- Routes are the instances' `services` (`<folder>/instance.nix` in `src/core/` or `src/instances/preconfigured/`) and
+  the apps' `routes` (`src/instances/custom/<name>/app.nix`), one schema (`src/modules/service.nix`), merged in
+  `src/modules/catalog.nix`; every protection is on unless a route says `off.<feature> = "<why>"`.
 - Every websecure router runs, in order: cloudflare-only (proxied routes on vm-200, on the socket peer), client-ip
   (sets `X-Real-Ip` and the backend's `X-Forwarded-For` to the real client: the socket peer, or the X-Forwarded-For
   hop before Cloudflare and the edge; never a client-sent X-Real-Ip), the header strip, the crowdsec bouncer, rate

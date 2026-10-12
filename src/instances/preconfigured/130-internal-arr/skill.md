@@ -25,7 +25,7 @@ Confirmed endpoints (used by `arr-wire.sh`):
 - Health/config: `GET /api/system/settings`, `GET /api/system/status`.
 - Restart: `POST /api/system?action=restart`.
 
-Bazarr's action API is version-specific (the image tag is in `src/instances/130-internal-arr/main.nix`), so before
+Bazarr's action API is version-specific (the image tag is in `src/instances/preconfigured/130-internal-arr/main.nix`), so before
 acting, confirm the exact route and body against the running instance rather than
 assuming. The stable shape:
 - Missing subtitles: `GET /api/movies/wanted` and `GET /api/episodes/wanted`.

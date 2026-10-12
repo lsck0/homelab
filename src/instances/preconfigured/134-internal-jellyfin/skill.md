@@ -38,4 +38,4 @@ and api_key). The key is yours alone: every consumer has its own (`homelab-<cons
 - Keep something forever: add tag `janitorr_keep` in Radarr/Sonarr
   (`POST /api/v3/tag {"label":"janitorr_keep"}`, then add the tag id to the movie/series and `PUT` it).
 - Logs: `ssh 10.100.0.134 'podman logs --tail 100 janitorr'`.
-- Config (rendered): `/var/lib/janitorr/application.yml`; thresholds are Nix (`src/instances/134-internal-jellyfin/main.nix`).
+- Config (rendered): `/var/lib/janitorr/application.yml`; thresholds are Nix (`src/instances/preconfigured/134-internal-jellyfin/main.nix`).

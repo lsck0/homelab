@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # renew proton's forwarded port, point the dnat set at it and hand it to qbittorrent
 #
-# Run by the router's protonvpn-port timer (instances/300-router/main.nix), which sets the environment:
+# Run by the router's protonvpn-port timer (core/300-router/main.nix), which sets the environment:
 #   PEER_HOST   the inbound vpn member, qbittorrent
 #   GATEWAY     the provider's nat-pmp gateway inside the tunnel
 #   LEASE_S     the lease asked for; the timer renews well inside it

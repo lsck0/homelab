@@ -16,7 +16,7 @@ metadata:
 Layout under `/srv/nas`:
 - `data/<service>` persistent data of every service (NFS-mounted by the VMs)
 - `bulk/` the 2 TB hdd, not backed up: `bulk/media/{movies,tv,anime,music,leaving-soon}`, `bulk/torrents` finished downloads;
-  media and torrents share a 750 GiB ext4 project quota (`mediaQuotaGiB` in `src/instances/109-internal-nas/main.nix`).
+  media and torrents share a 750 GiB ext4 project quota (`mediaQuotaGiB` in `src/core/109-internal-nas/main.nix`).
   Incomplete torrents live on vm-112's own 150 GiB disk, not on the NAS.
 - `documents` (`inbox/` is the Paperless consume dir, `archive/` a read-only view of all Paperless documents), `public`, `syncthing`
 - `BACKUPS/kopia` Kopia repository (see `backups`)

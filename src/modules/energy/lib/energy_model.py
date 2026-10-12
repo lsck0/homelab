@@ -1,10 +1,11 @@
 """The house's energy model, defined once: series, cost formula, local days and day-ahead prices.
 
 Consumers:
-- instances/105-internal-grafana/lib/dashboards/energy.py builds the Grafana board "Energie" from these queries over $__range.
-- instances/104-internal-terminal/lib/energy-sync.py evaluates the same queries per window for the TRMNL panel, and exports local-day and
-  local-month totals as node-exporter gauges that the board's per-day and per-month bars read.
-- instances/105-internal-grafana/lib/spot-price.py exports the running quarter hour's day-ahead price from the shared price cache.
+- core/105-internal-grafana/lib/dashboards/energy.py builds the Grafana board "Energie" from these queries over $__range.
+- instances/preconfigured/104-internal-terminal/lib/energy-sync.py evaluates the same queries per window for the TRMNL
+  panel, and exports local-day and local-month totals as node-exporter gauges that the board's per-day and per-month
+  bars read.
+- core/105-internal-grafana/lib/spot-price.py exports the running quarter hour's day-ahead price from the shared price cache.
 
 Overview:
     INPUTS                                   the hand-typed inputs, lib/inputs.nix as json
@@ -72,7 +73,7 @@ COVERAGE_MIN_S = SECONDS_PER_HOUR
 # the subquery step of covered_seconds stays within prometheus' 5 m lookback, or the first samples fall between
 COVERAGE_STEP = "5m"
 
-# the fronius exporter (instances/105-internal-grafana/lib/fronius-exporter.py); signs: load and pv positive, grid positive importing,
+# the fronius exporter (core/105-internal-grafana/lib/fronius-exporter.py); signs: load and pv positive, grid positive importing,
 # battery positive discharging
 PV_W = "fronius_pv_watts"
 LOAD_W = "fronius_load_watts"
