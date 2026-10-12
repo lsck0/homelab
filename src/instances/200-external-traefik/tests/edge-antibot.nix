@@ -208,6 +208,7 @@ pkgs.testers.runNixOSTest {
         metrics = vm_200.succeed("cat ${nodes.vm-200.homelab.textfileDir}/lab_gate.prom")
         for series in ('homelab_gate_answers_total{outcome="solved"} 1', 'homelab_gate_answers_total{outcome="wrong"} 7'):
             assert series in metrics, metrics
-        assert int(re.search(r"^homelab_gate_bans_total (\d+)$", metrics, re.M).group(1)) >= 3, metrics
+        bans_total = re.search(r"^homelab_gate_bans_total (\d+)$", metrics, re.M)
+        assert bans_total and int(bans_total.group(1)) >= 3, metrics
   '';
 }

@@ -23,15 +23,16 @@ const pageStyle = `
 @media (prefers-color-scheme:dark){:root{--bg:#0f172a;--card:#1e293b;--ink:#e2e8f0;--muted:#94a3b8;--line:#334155;
 --accent:#38bdf8;--accent-ink:#0f172a;--warn-bg:#422006;--warn-ink:#fde68a;--stop:#f87171}}
 *{box-sizing:border-box}
-body{margin:0;min-height:100vh;display:grid;place-items:center;padding:16px;background:var(--bg);color:var(--ink);
+body{margin:0;min-height:100vh;display:grid;grid-template-columns:minmax(0,1fr);place-items:center;padding:16px;
+background:var(--bg);color:var(--ink);
 font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-main{width:100%;max-width:760px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px;
+main{width:100%;min-width:0;max-width:760px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:28px;
 box-shadow:0 10px 30px rgb(15 23 42/.08)}
 h1{margin:0 0 4px;font-size:1.4rem;line-height:1.3}
 .lead{margin:0 0 20px;color:var(--muted)}
 .notice{margin:0 0 16px;padding:10px 14px;border-radius:10px;background:var(--warn-bg);color:var(--warn-ink)}
 figure{margin:0 0 16px;border:1px solid var(--line);border-radius:12px;padding:8px}
-figure img{display:block;width:100%;height:auto}
+figure img{display:block;max-width:100%;height:auto;margin:0 auto}
 .question{margin:0 0 16px;font-size:1.1rem;font-weight:600}
 form{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
 label{display:flex;flex-direction:column;gap:6px;flex:1 1 220px;font-size:.9rem;color:var(--muted)}

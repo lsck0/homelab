@@ -18,10 +18,11 @@ import (
 // The scene: objects in distinct cells of a grid, each a shape with a label plate below it. The cells keep a shape and
 // its plate apart from every other; the jitter keeps the scene from being a readable table.
 const (
-	canvasWidthPx  = 720
-	canvasHeightPx = 450
-	gridColumns    = 4
-	gridRows       = 3
+	// portrait, so a phone shows it whole with the labels' glyphs still 14 px tall
+	canvasWidthPx  = 540
+	canvasHeightPx = 600
+	gridColumns    = 3
+	gridRows       = 4
 	objectCount    = 7
 	cellWidthPx    = canvasWidthPx / gridColumns
 	cellHeightPx   = canvasHeightPx / gridRows
