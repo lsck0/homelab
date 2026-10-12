@@ -12,6 +12,12 @@
 # only; the backend's X-Forwarded-For is that client alone. The probers check a route at its health path through the
 # ingress, past sso and anubis but nowhere else (probe routers below). A public
 # route's ssoPaths get a router of their own with authelia, ranked above the route's others.
+#
+# An onion route (modules/service.nix `onion`, the edge's routes only) is served a second time at its onion address on
+# the onion entrypoint, plain http from the router's tor (instances/300-router/lib/onion-services.nix), with the same
+# routers, chain and backend as its name; tls is the onion service's. Every onion visitor arrives from the router, so
+# the per-client limits and crowdsec see one client there: crowdsec never bans it (private), the waf still judges
+# each request. The bot defence and the browser telemetry intake stay on the name.
 { config, lib, pkgs, retry, inventory, site, lab, catalog, ... }:
 let
   cfg = config.homelab.traefik;
@@ -20,6 +26,8 @@ let
   telemetry = import ../telemetry.nix { inherit lib inventory; };
   htpasswd = import ./lib/htpasswd.nix { inherit pkgs lib; };
   inherit (net) cloudflareRanges privateRanges;
+  torPorts = import ../tor-ports.nix;
+  onionEntryPoint = "onion";
 
   # the prober (vm-105's blackbox) and the dashboard's status dots (vm-103)
   probeSources = map net.hostSource [ telemetry.collectorVmid lab.roles.dashboard ];
@@ -405,10 +413,11 @@ let
   anubisOn = r: on r "anubis" && !(on r "sso");
   anubisRoutes = lib.filterAttrs (_: anubisOn) cfg.routes;
 
-  fqdnRule = r: "Host(`${net.fqdn r.host}`)" + lib.optionalString (r.path != "/") " && PathPrefix(`${r.path}`)";
+  hostRule = host: r: "Host(`${host}`)" + lib.optionalString (r.path != "/") " && PathPrefix(`${r.path}`)";
+  fqdnRule = r: hostRule (net.fqdn r.host) r;
   anyOf = matcher: values: "(${lib.concatMapStringsSep " || " (v: "${matcher}(`${v}`)") values})";
   # admitted sources are part of the rule: another client falls through to the host's other routes, or a 404
-  routeRule = r: "${fqdnRule r} && ${anyOf "Method" r.methods}" + lib.optionalString (r.sources != null) " && ${anyOf "ClientIP" r.sources}";
+  routeRule = host: r: "${hostRule host r} && ${anyOf "Method" r.methods}" + lib.optionalString (r.sources != null) " && ${anyOf "ClientIP" r.sources}";
 
   routeMiddlewares = name: r: lib.optional (on r "sso") "authelia"
     ++ lib.optional (r.loginRedirect != null) "${name}-login"
@@ -417,20 +426,21 @@ let
     # the template's nginx compressed for its browsers; nixos services answer as they choose
     ++ lib.optional (r.app != null) "compress";
 
-  routeRouters = lib.concatMapAttrs (name: r: {
-    "${name}-tls" = {
-      rule = routeRule r;
+  # a route's routers where it is served: at its name on websecure (tag tls), at its onion address (tag onion)
+  routeRoutersOf = { tag, entryPoint, hostOf, routes }: lib.concatMapAttrs (name: r: let host = hostOf r; in {
+    "${name}-${tag}" = {
+      rule = routeRule host r;
       service = if anubisOn r then "anubis" else name;
-      entryPoints = [ "websecure" ];
+      entryPoints = [ entryPoint ];
       middlewares = routeMiddlewares name r;
       route = r;
     };
   } // lib.optionalAttrs (r.loginPaths != [ ]) {
     # password endpoints: the route's rule and chain plus the login limit; the longer rule outranks the route's own
-    "${name}-login-tls" = {
-      rule = "${routeRule r} && ${anyOf "PathPrefix" r.loginPaths}";
+    "${name}-login-${tag}" = {
+      rule = "${routeRule host r} && ${anyOf "PathPrefix" r.loginPaths}";
       service = name;
-      entryPoints = [ "websecure" ];
+      entryPoints = [ entryPoint ];
       middlewares = routeMiddlewares name r ++ [ "rate-limit-login" ];
       route = r;
     };
@@ -446,8 +456,14 @@ let
     };
   }) // lib.optionalAttrs (anubisOn r) {
     # what anubis lets through comes back on loopback and goes to the route's backend
-    "${name}-balancer" = { rule = fqdnRule r; service = name; entryPoints = [ "anubis-balancer" ]; middlewares = [ "client-ip-anubis" ]; };
-  }) cfg.routes;
+    "${name}-balancer${lib.optionalString (tag != "tls") "-${tag}"}" = {
+      rule = hostRule host r; service = name; entryPoints = [ "anubis-balancer" ]; middlewares = [ "client-ip-anubis" ];
+    };
+  }) routes;
+  routeRouters = routeRoutersOf { tag = "tls"; entryPoint = "websecure"; hostOf = r: net.fqdn r.host; routes = cfg.routes; };
+  # an onion route without an address yet (secrets-sync.sh writes it) is served at its name alone
+  onionRoutes = lib.filterAttrs (_: r: r.onionAddress != null) cfg.routes;
+  onionRouters = routeRoutersOf { tag = "onion"; entryPoint = onionEntryPoint; hostOf = r: r.onionAddress; routes = onionRoutes; };
 
   # the probers' door: GET and HEAD of the health path from their addresses, to the backend past sso and anubis
   probeOn = r: r.health != null && on r "probe";
@@ -596,12 +612,15 @@ let
     else "(${rule}) && " + lib.concatMapStringsSep " && " (range: "!ClientIP(`${range}`)") cfg.refusedClients;
 
   websecure = router: lib.elem "websecure" (router.entryPoints or [ ]);
+  # a router the chain protects: on websecure with tls, on the onion entrypoint without
+  chained = router: websecure router || lib.elem onionEntryPoint (router.entryPoints or [ ]);
   routersWithTls = lib.concatMapAttrs (name: router: let
     r = recordOf router;
     rule = refuse r router.rule;
     plain = removeAttrs router [ "route" "off" ] // lib.optionalAttrs (!(on r "accessLog")) { observability.accessLogs = false; };
-    secured = withBody: plain // {
+    secured = withBody: plain // lib.optionalAttrs (websecure router) {
       tls = wildcardTls // (router.tls or { });
+    } // {
       middlewares = chainOf name r withBody ++ (router.middlewares or [ ]);
     };
     splits = lib.optional (splitsByBody r) { suffix = bodyRouterSuffix; matcher = bodyMatcher; withBody = true; }
@@ -614,7 +633,7 @@ let
     # what no split takes, bodyless: a route limiting bodies that admits a GET splits by body as well
     rest = part (lib.concatMapStringsSep " && " (s: "!${s.matcher}") splits) false;
   in
-    if !(websecure router) then { ${name} = plain; }
+    if !(chained router) then { ${name} = plain; }
     else if splits == [ ] then { ${name} = secured (limitsBody r) // { inherit rule; }; }
     else { ${name} = rest; } // lib.listToAttrs (map (s: lib.nameValuePair "${name}${s.suffix}" (part s.matcher s.withBody)) splits)
   ) allRouters;
@@ -624,8 +643,8 @@ let
     (routeRouters // relayRouters // frontendRouters) ? ${unsplit name}
     && (router.priority or (lib.stringLength router.rule)) >= probePriority) routersWithTls);
   splitClashes = lib.concatMap (name: lib.filter (split: allRouters ? ${split}) (map (suffix: "${name}${suffix}") routerSuffixes))
-    (lib.attrNames (lib.filterAttrs (_: router: let r = recordOf router; in websecure router && (splitsByBody r || splitsBySocket r)) allRouters));
-  allRouters = cfg.routers // routeRouters // probeRouters // frontendRouters // relayRouters // botDefenseRouters;
+    (lib.attrNames (lib.filterAttrs (_: router: let r = recordOf router; in chained router && (splitsByBody r || splitsBySocket r)) allRouters));
+  allRouters = cfg.routers // routeRouters // onionRouters // probeRouters // frontendRouters // relayRouters // botDefenseRouters;
   allMiddlewares = cfg.middlewares // routeMiddlewareDefs // frontendMiddlewares // secureHeadersMiddleware // limitMiddlewares
     // bouncerMiddleware // stripClientHeadersMiddleware // autheliaMiddleware;
   missingMiddlewares = lib.subtractLists (lib.attrNames allMiddlewares)
@@ -641,7 +660,8 @@ let
     { name = "anubis"; port = anubisPort; }
     { name = "anubis metrics"; port = anubisMetricsPort; }
     { name = "anubis balancer"; port = anubisBalancerPort; }
-  ] ++ lib.mapAttrsToList (name: port: { name = "port ${name}"; inherit port; }) cfg.loopbackPorts;
+  ] ++ lib.optional (onionRoutes != { }) { name = "the onion entrypoint (every address)"; port = torPorts.onionIngress; }
+    ++ lib.mapAttrsToList (name: port: { name = "port ${name}"; inherit port; }) cfg.loopbackPorts;
   loopbackClashes = lib.filter (group: lib.length group > 1)
     (lib.attrValues (lib.groupBy (p: toString p.port) loopbackPorts));
 in {
@@ -894,6 +914,12 @@ in {
             forwardedHeaders.trustedIPs = trustedHops;
           };
           metrics.address = ":${toString net.ports.traefikMetrics}";
+        } // lib.optionalAttrs (onionRoutes != { }) {
+          # the router's tor alone reaches it (modules/flows.nix guards); it forwards no client headers to believe
+          ${onionEntryPoint} = {
+            address = ":${toString torPorts.onionIngress}";
+            transport = { inherit respondingTimeouts; };
+          };
         } // lib.optionalAttrs (anubisRoutes != { }) {
           # anubis' X-Forwarded-For, X-Real-Ip and -Proto carry the client; loopback is the only sender here
           anubis-balancer = {
@@ -1015,7 +1041,8 @@ in {
     };
 
     # the metrics entrypoint is for the scraper only (modules/flows.nix guards)
-    networking.firewall.allowedTCPPorts = [ net.ports.http net.ports.https net.ports.traefikMetrics ];
-    homelab.ingressOnly.ports = [ net.ports.traefikMetrics ];
+    networking.firewall.allowedTCPPorts = [ net.ports.http net.ports.https net.ports.traefikMetrics ]
+      ++ lib.optional (onionRoutes != { }) torPorts.onionIngress;
+    homelab.ingressOnly.ports = [ net.ports.traefikMetrics ] ++ lib.optional (onionRoutes != { }) torPorts.onionIngress;
   };
 }

@@ -9,6 +9,7 @@
 #     added empty for a human; one found in another file moves there. --prune deletes undeclared ones. A missing
 #     guardsData secret stops the run unless --generate-guarded says it is new
 #   - every host reading shared secrets gets <home>/secrets.shared.sops.json, its part of src/secrets/shared.sops.json
+#   - src/generated/onions.json maps every secret of kind onion to its onion address (lib/onion.sh)
 #   - every file is encrypted to exactly its recipients
 # A secret of kind dotfiles:<file> is copied from that file of the dotfiles' secrets.
 #
@@ -63,12 +64,15 @@ WIREGUARD_KEY_BYTES=32
 # laravel's APP_KEY (firefly): base64: and this many random bytes as base64, aes-256's key size
 LARAVEL_KEY_BYTES=32
 GUARDED_PREFIX=guardsData:
+ONIONS_FILE=generated/onions.json
 
 # shellcheck source=src/scripts/lib/tools.sh
 . "$SRC/scripts/lib/tools.sh"
 # shellcheck source=src/scripts/lib/secrets.sh
 . "$SRC/scripts/lib/secrets.sh"
-tools_require sops jq age-keygen openssl
+# shellcheck source=src/scripts/lib/onion.sh
+. "$SRC/scripts/lib/onion.sh"
+tools_require sops jq age-keygen openssl basenc base32
 [ -n "$PLAN_IN" ] || tools_require nix
 
 export SOPS_AGE_KEY_FILE="${SOPS_AGE_KEY_FILE:-$ROOT_DIR/secrets/age.txt}"
@@ -141,6 +145,7 @@ secret_generate() {
     wireguard) openssl rand -base64 "$WIREGUARD_KEY_BYTES" ;;
     laravel-key) echo "base64:$(openssl rand -base64 "$LARAVEL_KEY_BYTES")" ;;
     garage-key-id) echo "GK$(openssl rand -hex "$GARAGE_KEY_ID_BYTES")" ;;
+    onion) onion_seed_generate ;;
     manual|public|dotfiles:*) ;;
     *) echo "ERROR: unknown kind $1" >&2; exit 1 ;;
   esac
@@ -252,6 +257,19 @@ remove_file() {
   changed=$((changed + 1))
   [ "$APPLY" = 0 ] || rm -f "$SRC/$1"
 }
+
+# the onion addresses follow their keys: the edge's rules and the owner read them, never the keys
+onions='{}'
+while IFS=$'\t' read -r k v; do
+  onions=$(jq --arg k "$k" --arg a "$(onion_address "$v")" '.[$k] = $a' <<<"$onions")
+done < <(jq -r --slurpfile plan "$PLAN" 'to_entries[] | select(.value.value // "" != "")
+  | select($plan[0].secrets[.key].kind | test("^(guardsData:)?onion$")) | [.key, .value.value] | @tsv' "$WORK/found.json")
+jq -S . <<<"$onions" > "$WORK/onions.json"
+if ! cmp -s "$WORK/onions.json" "$SRC/$ONIONS_FILE"; then
+  echo "write   src/$ONIONS_FILE"
+  changed=$((changed + 1))
+  [ "$APPLY" = 0 ] || { mkdir -p "$SRC/$(dirname "$ONIONS_FILE")" && cp "$WORK/onions.json" "$SRC/$ONIONS_FILE"; }
+fi
 
 if ! cmp -s "$WORK/sops.yaml" "$SOPS_CONFIG"; then
   echo "write   .sops.yaml"

@@ -65,6 +65,14 @@ let
     metrics-blocks = network "metrics blocks" (tamper "200-external-traefik" (traefik ++ [ "routers" "control-metrics-block" ])
       { rule = "PathPrefix(`/metrics`)"; priority = 1; service = "noop@internal"; });
     router-order = network "router order" (tamper "300-router" [ "networking" "firewall" "extraForwardRules" ] (natLine + "\n" + forwardRules));
+    # a guest declared a tor member that the router does not render as one
+    egress-killswitch = network "egress killswitch" (facts // { lab = facts.lab // {
+      egress = facts.lab.egress // { "121" = { via = "tor"; inbound = false; vmid = 121; }; };
+    }; });
+    # a route declared onion, with an address, that neither the edge nor the router's tor serves
+    onion = network "onion" (facts // { catalog = catalog // { external = catalog.external // {
+      privatebin = catalog.external.privatebin // { onion = true; onionAddress = "${lib.fixedWidthString 56 "a" ""}.onion"; };
+    }; }; });
     inventory = network "inventory" (facts // { inventory = inventory // { "206" = inventory."206" // { ip = poolStart; }; }; });
     ingress-guards = network "ingress guards" (tamper "121-internal-paperless" [ "homelab" "ingressOnly" "trusted" ]
       [ "${inventory.${facts.lab.roles.operator}.ip}/32" ]);

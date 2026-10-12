@@ -27,6 +27,7 @@
 #   lab.roles.collector           # "105": the vmid of the one instance declaring a role (instance.nix `roles`)
 #   lab.alerts.backup_stale       # an instance's own alert rule (instance.nix `alerts`) plus its vmid
 #   lab.upstreams.aur             # { url; } a third-party service the lab depends on (src/lab/upstreams.nix, modules/upstream)
+#   lab.onions."paste-onion-key"  # "<56 base32>.onion": an onion route's address (src/generated/onions.json)
 #
 # problems: every broken lab-wide rule (zones.json against the instances, vmid ranges, vm shapes, duplicate names),
 # one line each; the flake refuses to evaluate past one, so no host and no terraform plan proceeds.
@@ -43,6 +44,8 @@ let
   appsDir = root + "/apps";
   site = lib.importJSON (root + "/generated/site.json");
   zonesRaw = lib.importJSON (root + "/generated/zones.json");
+  # secret name -> the onion address of its key, written by scripts/secrets-sync.sh; a fixture tree has none
+  onionsFile = root + "/generated/onions.json";
   swarm = import (appsDir + "/swarm.nix");
 
   cidr = import ../cidr.nix { inherit lib; };
@@ -327,7 +330,10 @@ let
       "${where}: idle needs a zone whose ingress wakes it; ${i.zone} has none"
     # a static address inside the zone's lease pool flaps with whatever the dhcp server leased it to
     ++ lib.optional (pool != null && lib.toInt i.id >= pool.first && lib.toInt i.id <= pool.last)
-      "${where}: vm-${i.id}'s address lies in zone ${i.zone}'s dhcp pool ${toString pool.first}..${toString pool.last}";
+      "${where}: vm-${i.id}'s address lies in zone ${i.zone}'s dhcp pool ${toString pool.first}..${toString pool.last}"
+    # tor has no forwarded port: nothing on the internet can open a connection to a tor member
+    ++ lib.optional (i.config.egress != null && i.config.egress.via != "vpn" && i.config.egress.inbound)
+      "${where}: egress.inbound is the vpn exit's forwarded port; ${i.config.egress.via} has none";
 
   problems = lib.filter (p: p != null) (map folderProblemOf allFolders)
     ++ zoneProblems
@@ -349,6 +355,7 @@ let
   result = {
     inherit site instances inventory appsCatalog catalog homepage oidc grants tokens tokenReads tokenShare egress secrets roles
       shares nasClients problems;
+    onions = if builtins.pathExists onionsFile then lib.importJSON onionsFile else { };
     alerts = lib.listToAttrs (map (e: lib.nameValuePair e.name (e.v // { vmid = idOf e.i; })) alertEntries);
     upstreams = import (root + "/lab/upstreams.nix");
     withApps = f: import ./. { inherit lib root; apps = folders: f (apps folders); };

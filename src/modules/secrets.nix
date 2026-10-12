@@ -5,6 +5,7 @@
 #     secrets.sops.json, encrypted to the admins and that guest
 #   - apps/<name>/app.nix `secrets`, plus app-<name>-redeploy-token for every app: in the app folder's
 #     secrets.sops.json, encrypted to the admins and every host that reads one of them (the manager, an own guest)
+#   - the router's own secrets.sops.json also holds <route>-onion-key for every onion route (modules/service.nix)
 #   - src/secrets/shared.nix, plus <client>-oidc-secret for every oidc client: read by two or more hosts, or by
 #     none; the value lives in src/secrets/shared.sops.json, admins only, and each reader gets the ones it reads in
 #     its own generated secrets.shared.sops.json
@@ -20,6 +21,7 @@
 # `catalog` is src/secrets/shared.nix; a test passes its own.
 { lib, lab ? null, catalog ? import ../secrets/shared.nix }:
 let
+  service = import ./service.nix { inherit lib; };
   # -------------------------------------------------------------------------------------------------------------
   # CONSTANTS
   # -------------------------------------------------------------------------------------------------------------
@@ -31,7 +33,7 @@ let
   keyName = "age.sops";
   # the kinds scripts/secrets-sync.sh generates a value of, adds empty (manual, public), or copies from the dotfiles;
   # guardsData:<generated kind> is generated only on --generate-guarded (src/secrets/shared.nix)
-  generatedKindPattern = "hex:[1-9][0-9]*|wireguard|laravel-key|garage-key-id";
+  generatedKindPattern = "hex:[1-9][0-9]*|wireguard|laravel-key|garage-key-id|onion";
   kindPattern = "(guardsData:)?(${generatedKindPattern})|manual|public|dotfiles:[A-Za-z0-9._-]+";
   # terraform's connection variables (terraform/main.tf), written by scripts/lib/proxmox.sh, read by no guest
   tfvars = {
@@ -43,6 +45,7 @@ let
   };
   # the token a ci job posts to deploy.<domain>/redeploy/<app> with (modules/swarm)
   deployTokenKind = "hex:32";
+  onionKind = "guardsData:onion";
   oidcSecretKind = "hex:24";
 
   # -------------------------------------------------------------------------------------------------------------
@@ -58,8 +61,14 @@ let
     else "generated/nodes/${i.name}";
 
   entriesOf = { file, home ? null }: lib.mapAttrsToList (name: kind: { inherit name kind file home; });
+  ownEntriesOf = i: entriesOf { file = "${homeOf i}/${ownName}"; home = homeOf i; };
+  # the router's tor publishes every onion route with its own key; a lost key loses the address
+  router = lib.findFirst (i: i.zone == "router") (throw "modules/secrets.nix: no instance is the router") instanceList;
+  onionKeys = lib.mapAttrs' (name: _: lib.nameValuePair (service.onionKeyOf name) onionKind)
+    (lib.filterAttrs (_: r: r.onion) lab.catalog.external);
   entries =
-    lib.concatMap (i: entriesOf { file = "${homeOf i}/${ownName}"; home = homeOf i; } i.config.secrets) instanceList
+    lib.concatMap (i: ownEntriesOf i i.config.secrets) instanceList
+    ++ ownEntriesOf router onionKeys
     ++ lib.concatLists (lib.mapAttrsToList (app: a: entriesOf { file = "apps/${app}/${ownName}"; }
       (a.secrets // { "app-${app}-redeploy-token" = deployTokenKind; })) lab.appsCatalog.apps)
     ++ entriesOf { file = catalogFile; } catalog

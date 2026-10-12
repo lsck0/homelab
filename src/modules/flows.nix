@@ -58,6 +58,8 @@ let
 
   nfsPorts = [ ports.rpcbind ports.nfs ];
   torPorts = import ./tor-ports.nix;
+  # the guests whose internet traffic leaves through the router's tor (instance.nix `egress`), by zone
+  torMembersByZone = lib.groupBy (id: (net.zoneOf id).name) (lib.attrNames (lib.filterAttrs (_: e: e.via == "tor") lab.egress));
   # the push doors only: no sender outside the internal zone reaches a query api
   appTelemetryPorts = with telemetry.ports; [ journalRemote otlpGrpc otlpHttp pyroscope lokiPush ];
 
@@ -119,7 +121,13 @@ let
     why = "vm-105 probes the lab-only tcp route ${r.host}";
   }) (lib.filter (r: r.vmid != null && r.protocol == "tcp" && r.publicPort == null && r.off.probe == null) (lib.attrValues catalog.l4));
 
-  guards = routeGrants ++ widgetGrants ++ wakerGrants ++ ingressMetricsGrants ++ metricsGrants ++ probeGrants
+  # the router's tor hands an onion route's visitors to the edge (instances/300-router/lib/onion-services.nix)
+  onionGrants = lib.optional (lib.any (r: r.onionAddress != null) (lib.attrValues catalog.external)) {
+    from = [ "router" ]; to = edge; tcp = [ torPorts.onionIngress ];
+    why = "the router's tor hands the onion routes' visitors to the edge";
+  };
+
+  guards = routeGrants ++ widgetGrants ++ wakerGrants ++ ingressMetricsGrants ++ metricsGrants ++ probeGrants ++ onionGrants
     # an instance's own `grants`: who may reach which of its guarded ports
     ++ lab.grants;
 
@@ -258,7 +266,11 @@ in
       from = all "apps"; tcp = [ ports.dns ]; udp = [ ports.dns ];
       why = "dns for the workers; their addresses are static, no dhcp";
     }
-  ];
+  ]
+  ++ lib.mapAttrsToList (zone: ids: {
+    from = hosts ids; tcp = [ torPorts.trans ];
+    why = "the tor egress members in ${zone}: their internet tcp, redirected into tor's transparent port";
+  }) torMembersByZone;
 
   # -------------------------------------------------------------------------------------------------------------
   # PORT FORWARDS: the house's public address, forwarded

@@ -1,4 +1,4 @@
-# the lab's router: nat, the zone firewall, dhcp, split-horizon dns, wireguard, the vpn exit, ddns
+# the lab's router: nat, the zone firewall, dhcp, split-horizon dns, wireguard, the vpn and tor exits, ddns
 #
 # The policy is data (modules/flows.nix); this file renders it into nftables, in this order of the forward chain:
 #   1. nixos' own `ct status dnat accept`: every port forward below, and the vpn exit's forwarded port
@@ -8,6 +8,13 @@
 #   4. nixos nat's own accepts, which the drops above must precede (lib.mkBefore; tests/policy/network.nix holds it)
 # Sources are bound to their interface before any of it (table antispoof), and proxmox binds a guest to its address
 # inside a zone (lib.tf FIREWALL).
+#
+# Egress classes (instance.nix `egress`): a member's internet-bound traffic leaves through its exit or not at all,
+# its lab traffic (any private destination) stays direct. vpn marks it into the tunnel's routing table; tor redirects
+# its tcp into tor's TransPort and answers its dns from tor's DNSPort (coredns view), and the killswitch drops the
+# rest (udp, icmp), which tor cannot carry. Transparent on the router, so a member needs no proxy setting per app and
+# a program that ignores one leaks nothing; a socks proxy per app (prowlarr's, 130-internal-arr) isolates circuits
+# per destination, which the transparent port does per client address only.
 { config, pkgs, lib, inventory, nasClients, site, catalog, lab, upstream, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
@@ -68,7 +75,9 @@ let
   # the blackhole only answers while the tunnel's own default (metric 1, egress-vpn.nix) is missing
   egressBlackholeMetric = 1000;
   vpnEntries = lib.filterAttrs (_: e: e.via == "vpn") lab.egress;
-  vpnMembers = lib.sort (a: b: a < b) (map (e: net.ipOf (toString e.vmid)) (lib.attrValues vpnEntries));
+  membersOf = via: lib.sort (a: b: a < b) (map net.ipOf (lib.attrNames (lib.filterAttrs (_: e: e.via == via) lab.egress)));
+  vpnMembers = membersOf "vpn";
+  torMembers = membersOf "tor";
   vpnInbound = lib.filter (e: e.inbound) (lib.attrValues vpnEntries);
   vpnInboundIp = net.ipOf (toString (lib.head vpnInbound).vmid);
   vpnCfg = config.homelab.egress.vpn;
@@ -78,12 +87,28 @@ let
   protonLeaseS = 60;
 
   # -------------------------------------------------------------------------------------------------------------
-  # TOR (socks only: prowlarr's indexers, one circuit per destination; the owner's own checks on 9050)
+  # TOR (socks: prowlarr's indexers, one circuit per destination; the owner's own checks on 9050; the tor egress)
   # -------------------------------------------------------------------------------------------------------------
 
   torPorts = import ../../modules/tor-ports.nix;
-  torSocksClients = lib.concatMap (f: addressesOf f.from)
-    (lib.filter (f: lib.elem torPorts.socksIsolated (f.tcp or [ ])) flows.router);
+  torFlowsOn = port: lib.filter (f: lib.elem port (f.tcp or [ ])) flows.router;
+  # who flows.nix lets reach a tor listener: socks and the transparent port alike are tor's SocksPolicy
+  torClients = lib.concatMap (f: addressesOf f.from) (torFlowsOn torPorts.socksIsolated ++ torFlowsOn torPorts.trans);
+  # a redirect lands on the address of the interface it came in by: the router's own in each zone with members
+  torTransAddresses = map (f: zones.${f.from.network}.routerIp) (torFlowsOn torPorts.trans);
+  # coredns asks tor's DNSPort from loopback
+  torDnsAddress = "127.0.0.1";
+  torCookie = "/var/lib/tor/control_auth_cookie";
+  torControlTimeoutS = 5;
+  # tor-control <command>: one command on the control port, its answer on stdout
+  torControl = pkgs.writeShellScript "tor-control" ''
+    set -euo pipefail
+    cookie=$(${pkgs.xxd}/bin/xxd -p -c 256 ${torCookie})
+    printf 'AUTHENTICATE %s\r\n%s\r\nQUIT\r\n' "$cookie" "$1" | ${pkgs.netcat-gnu}/bin/nc -w ${toString torControlTimeoutS} 127.0.0.1 ${toString torPorts.control}
+  '';
+  # homelab_tor_circuit_established, the router's tor_unavailable alert (instance.nix)
+  torTextfile = "tor";
+
 
   # -------------------------------------------------------------------------------------------------------------
   # DNS AND DDNS NAMES
@@ -137,8 +162,8 @@ let
   blockyUpstream = "tcp-tls:1.1.1.1:853";
   # dns over tls when blocky is down: a fallback, but never a plaintext one
   dnsFallback = { servers = [ "tls://1.1.1.1" "tls://1.0.0.1" ]; name = "cloudflare-dns.com"; };
-  # vpn members resolve inside the tunnel and fail with it, so no name they look up leaves through the house
-  vpnView = lib.concatMapStringsSep " || " (ip: "incidr(client_ip(), '${ip}/32')") vpnMembers;
+  # an egress class's members resolve through its exit and fail with it, so no name they look up leaves through the house
+  viewOf = members: lib.concatMapStringsSep " || " (ip: "incidr(client_ip(), '${ip}/32')") members;
 
   # -------------------------------------------------------------------------------------------------------------
   # WAN LIMITS
@@ -165,6 +190,8 @@ let
   # a dhcp discover's source before it has an address
   dhcpUnaddressed = "0.0.0.0";
 in {
+  imports = [ ./lib/onion-services.nix ];
+
   assertions = [
     {
       assertion = vpnMembers == [ ] || vpnCfg.enable;
@@ -238,20 +265,31 @@ in {
     '';
   };
 
-  # EGRESS CLASSES: mark by source, the marked table ends in a blackhole
-  networking.nftables.tables.egress = lib.mkIf (vpnMembers != [ ]) {
+  # EGRESS CLASSES: vpn marks by source into a table ending in a blackhole, tor redirects tcp into its TransPort
+  networking.nftables.tables.egress = lib.mkIf (vpnMembers != [ ] || torMembers != [ ]) {
     family = "ip";
-    content = ''
+    content = lib.optionalString (vpnMembers != [ ]) ''
       chain premark {
         type filter hook prerouting priority mangle; policy accept;
         # never divert lab or house traffic: replies to them would blackhole
         ip daddr ${privateRanges} return
         ip saddr ${set vpnMembers} meta mark set ${toString egressMarks.vpn.mark}
       }
+    '' + lib.optionalString (torMembers != [ ]) ''
+      chain torredirect {
+        type nat hook prerouting priority dstnat; policy accept;
+        ip saddr ${set torMembers} ip daddr != ${privateRanges} meta l4proto tcp counter redirect to :${toString torPorts.trans}
+      }
+    '' + ''
       # stateless, ahead of nixos-fw: a lost rule or route must never leak through the house
       chain killswitch {
         type filter hook forward priority filter - 5; policy accept;
+    '' + lib.optionalString (vpnMembers != [ ]) ''
         ip saddr ${set vpnMembers} oifname "${wan}" ip daddr != ${privateRanges} counter drop
+    '' + lib.optionalString (torMembers != [ ]) ''
+        # through no interface: what tor carries never reaches forward, the rest has no exit
+        ip saddr ${set torMembers} ip daddr != ${privateRanges} counter drop
+    '' + ''
       }
     '';
   };
@@ -325,7 +363,7 @@ in {
     timerConfig = { OnBootSec = "90s"; OnUnitActiveSec = "45s"; AccuracySec = "5s"; };
   };
 
-  # TOR SOCKS
+  # TOR: socks, and the transparent and dns ports of the tor egress members
   services.tor = {
     enable = true;
     enableGeoIP = false;
@@ -336,7 +374,7 @@ in {
       socksListenAddress = { addr = zones.internal.routerIp; port = torPorts.socks; };
     };
     settings = {
-      SocksPolicy = map (ip: "accept ${ip}") (torSocksClients ++ [ zones.internal.routerIp ]) ++ [ "reject *" ];
+      SocksPolicy = map (ip: "accept ${ip}") (torClients ++ [ zones.internal.routerIp torDnsAddress ]) ++ [ "reject *" ];
       # one circuit per indexer: no exit sees two of them from one client
       SOCKSPort = [{
         addr = zones.internal.routerIp;
@@ -344,6 +382,8 @@ in {
         IsolateDestAddr = true;
         IsolateDestPort = true;
       }];
+      TransPort = map (addr: { inherit addr; port = torPorts.trans; }) torTransAddresses;
+      DNSPort = lib.optional (torMembers != [ ]) { addr = torDnsAddress; port = torPorts.dns; };
       ClientUseIPv6 = false;
       # path rotation
       MaxCircuitDirtiness = 600;
@@ -359,18 +399,35 @@ in {
     description = "Ask Tor for a fresh set of circuits";
     after = [ "tor.service" ];
     requires = [ "tor.service" ];
-    path = [ pkgs.coreutils pkgs.netcat-gnu pkgs.xxd ];
     serviceConfig.Type = "oneshot";
-    script = ''
-      set -euo pipefail
-      cookie=$(xxd -p -c 256 /var/lib/tor/control_auth_cookie)
-      printf 'AUTHENTICATE %s\r\nSIGNAL NEWNYM\r\nQUIT\r\n' "$cookie" | nc -w 5 127.0.0.1 ${toString torPorts.control}
-    '';
+    script = "${torControl} 'SIGNAL NEWNYM'";
   };
   systemd.timers.tor-new-circuits = {
     wantedBy = [ "timers.target" ];
     # jitter so rotation is no clock fingerprint
     timerConfig = { OnBootSec = "10m"; OnUnitActiveSec = "30m"; RandomizedDelaySec = "10m"; };
+  };
+
+  # tor down or without a circuit: the gauge says 0, never its last 1
+  homelab.textfiles = [ torTextfile ];
+  systemd.services.tor-status = {
+    description = "Publish whether tor has a circuit";
+    after = [ "tor.service" ];
+    path = [ pkgs.coreutils pkgs.gnugrep ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      metrics=${config.homelab.textfileDir}/${torTextfile}.prom
+      established=0
+      if answer=$(${torControl} 'GETINFO status/circuit-established') && grep -q '^250-status/circuit-established=1' <<<"$answer"; then
+        established=1
+      fi
+      printf '# TYPE homelab_tor_circuit_established gauge\nhomelab_tor_circuit_established %s\n' "$established" > "$metrics.tmp"
+      mv "$metrics.tmp" "$metrics"
+    '';
+  };
+  systemd.timers.tor-status = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnBootSec = "5m"; OnUnitActiveSec = "5m"; };
   };
 
   # every port is opened by flows.nix `router` below, per network and source
@@ -484,7 +541,7 @@ in {
     };
   };
 
-  # DNS SERVER (COREDNS): split horizon for the lab domain, blocky for the rest, the tunnel's resolver for vpn members
+  # DNS SERVER (COREDNS): split horizon for the lab domain, blocky for the rest, its exit's resolver for an egress member
   services.resolved.enable = false;
   services.coredns = {
     enable = true;
@@ -512,9 +569,17 @@ in {
 
       .:53 {
         view vpn {
-          expr ${vpnView}
+          expr ${viewOf vpnMembers}
         }
         forward . ${vpnCfg.dns}
+      }
+    '' + lib.optionalString (torMembers != [ ]) ''
+
+      .:53 {
+        view tor {
+          expr ${viewOf torMembers}
+        }
+        forward . ${torDnsAddress}:${toString torPorts.dns}
       }
     '' + ''
 

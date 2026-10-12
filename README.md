@@ -37,8 +37,8 @@ src/
   flake.nix                 hosts, checks and the `lab` facts, all discovered from the folders below
   instances/<vmid>-<zone>-<service>/
     main.nix                the guest's nixos configuration
-    instance.nix            what others need to know: vm shape, services (exposure, protection, card, oidc),
-                            idle, grants, tokens, egress, secrets
+    instance.nix            what others need to know: vm shape, services (exposure, protection, card, oidc, onion),
+                            idle, grants, tokens, egress (the vpn exit or tor), secrets
     lib/                    what only this guest uses: its modules, scripts, templates, dashboards
     tests/  skill.md        its checks, and hermes' skill about it
     secrets.sops.json       its own secrets; age.pub and age.sops its key; secrets.shared.sops.json generated

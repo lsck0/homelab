@@ -7,7 +7,7 @@
 #
 #   apps            the enabled apps, normalized by the schema, `{{homelab.*}}` endpoints resolved
 #   internal        route name -> route served by vm-100, behind authelia unless its `off.sso` says why not
-#   external        route name -> route served by the edge, vm-200
+#   external        route name -> route served by the edge, vm-200; onionAddress its onion service's (lab.onions) or null
 #   l4              route name -> tcp or udp route: forwarded from the house's publicPort, or lab-only without one
 #   forwarded       the l4 routes the router forwards from the house's public address
 #   access          { admins; groups.<name>; } the lldap groups authelia admits: admins everywhere, else the sso
@@ -131,17 +131,19 @@ let
     inherit (appsCatalog.swarm) taskDefaults;
   };
 
+  # an onion route's address, null until secrets-sync.sh generated its key
+  onionAddressOf = name: r: if r.onion then lab.onions.${service.onionKeyOf name} or null else null;
   # route name -> { name; owner; route; } for every route of the lab, so a collision can name both owners; an
   # instance service's route is its own exposure, an app's route runs on the app's cluster
   routeEntries = lib.mapAttrsToList (name: r: {
     inherit name;
     owner = "vm-${toString r.vmid}";
-    route = r // { app = null; nodes = [ ]; };
+    route = r // { app = null; nodes = [ ]; onionAddress = onionAddressOf name r; };
   }) lab.routes
   ++ lib.concatLists (lib.mapAttrsToList (app: a: lib.mapAttrsToList (name: r: {
     inherit name;
     owner = "apps.${app}";
-    route = r // { vmid = null; inherit app; inherit (a.cluster) nodes; };
+    route = r // { vmid = null; inherit app; inherit (a.cluster) nodes; onionAddress = onionAddressOf name r; };
   }) a.routes) apps);
   routesOf = zone: lib.listToAttrs (map (e: lib.nameValuePair e.name e.route)
     (lib.filter (e: e.route.protocol == "http" && e.route.zone == zone) routeEntries));
@@ -301,6 +303,9 @@ in {
       (lib.filter (e: e.route.srv != null && e.route.publicPort == null) l4Entries)
     ++ map (e: "${e.owner} route ${e.name}: an http route goes through its zone's ingress, publicPort is for tcp and udp")
       (lib.filter (e: e.route.protocol == "http" && e.route.publicPort != null) routeEntries)
+    # authelia's session is bound to the lab's domain, which an onion origin never carries
+    ++ map (e: "${e.owner} route ${e.name}: onion serves a public http route of the edge only")
+      (lib.filter (e: e.route.onion && (e.route.protocol != "http" || e.route.zone != "external")) routeEntries)
     # an idle deployment sleeps until an ingress's wake proxy sees a connection; the router forwards past it
     ++ map (e: "${e.owner} route ${e.name}: a ${e.route.protocol} route goes from the router straight to its backend, which no wake proxy sees; its deployment cannot idle")
       (lib.filter (e: if e.route.app != null then apps.${e.route.app}.idle.stopAfter != null

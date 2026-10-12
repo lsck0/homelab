@@ -237,12 +237,15 @@ in {
     egress = mkOption {
       type = types.nullOr (types.submodule {
         options = {
-          via = mkOption { type = types.enum [ "vpn" ]; description = "vpn: the router's shared wireguard exit, with a killswitch."; };
-          inbound = mkOption { type = types.bool; description = "The exit's one forwarded port leads here."; };
+          via = mkOption {
+            type = types.enum [ "vpn" "tor" ];
+            description = "vpn: the router's shared wireguard exit; tor: the router's tor, tcp and dns only. Each with a killswitch.";
+          };
+          inbound = mkOption { type = types.bool; default = false; description = "vpn only: the exit's one forwarded port leads here."; };
         };
       });
       default = null;
-      description = "Which exit the guest's internet traffic leaves through; null: the house's own address.";
+      description = "Which exit the guest's internet traffic leaves through, lab traffic staying direct; null: the house's own address.";
     };
     secrets = mkOption {
       type = types.attrsOf secretKind;

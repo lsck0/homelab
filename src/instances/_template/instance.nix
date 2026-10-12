@@ -9,6 +9,9 @@
 { ... }: {
   vm.bootPhase = "apps";
 
+  # its internet traffic through the router's vpn exit or tor, with a killswitch; lab traffic stays direct
+  # egress.via = "tor";
+
   services.demo = {
     port = 80;
     homepage.icon = "mdi-web";

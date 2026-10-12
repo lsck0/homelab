@@ -7,6 +7,8 @@
 #   "wireguard"            a wireguard private key: 32 random bytes as base64, clamped by wireguard
 #   "laravel-key"          a laravel APP_KEY: base64: and 32 random bytes as base64
 #   "garage-key-id"        GK and 12 random bytes as hex (apps)
+#   "onion"                a tor onion service's ed25519 seed: 32 random bytes as base64; secrets-sync.sh writes its
+#                          address to src/generated/onions.json (src/scripts/lib/onion.sh)
 #   "guardsData:<kind>"    a key that data or logins depend on (a backup repository, an encrypted db, an app login
 #                          set once): generated as <kind> only on secrets-sync.sh --generate-guarded, a missing one
 #                          stops every other run, since a fresh value would lock the data out
