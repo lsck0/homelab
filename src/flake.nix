@@ -35,7 +35,8 @@
       assert lib.assertMsg (collected.problems == [ ]) "the lab's instances break its rules:\n${lib.concatLines collected.problems}";
       collected;
     # every host's facts; each host also gets its own instance record as `instance` (modules/network.nix)
-    specialArgs = { inherit inputs lab; inherit (lab) inventory site nasClients; };
+    specialArgsOf = lab: { inherit inputs lab; inherit (lab) inventory site nasClients; };
+    specialArgs = specialArgsOf lab;
 
     common = {
       imports = [
@@ -65,6 +66,14 @@
     testIsSeeded = name: (builtins.functionArgs (import testFiles.${name})) ? seed;
     # seeds are 16 bit: enough schedules to sample from, few enough to list as attribute names
     seedMax = 65535;
+
+    # a host of a collected lab: its folder's main.nix (none for a swarm node) over the platform of its guest kind; the
+    # hostname comes from the instance record, so a host cannot claim another's
+    hostOf = lab: name: let host = lab.hosts.${name}; in lib.nixosSystem {
+      inherit system;
+      specialArgs = specialArgsOf lab // { instance = host; };
+      modules = [ common ./modules/platform-${host.config.vm.guestKind}.nix ] ++ lib.optional (host.main != null) host.main;
+    };
   in {
     checks.${system} = lib.genAttrs testNames (name: let test = testOf name { }; in
       if !(testIsSeeded name) || (test.regressionSeeds or [ ]) == [ ] then test
@@ -111,12 +120,10 @@
     # sync.sh writes `lab.export` to generated/lab.json, the desktop clients' interface (modules/lab-export.nix)
     lab = lab // { export = import ./modules/lab-export.nix { inherit lib lab; }; };
 
-    # one configuration per instance folder (its main.nix) and per generated swarm node (modules/swarm alone); the
-    # hostname comes from the instance record, so a host cannot claim another's
-    nixosConfigurations = lib.mapAttrs (_: host: lib.nixosSystem {
-      inherit system;
-      specialArgs = specialArgs // { instance = host; };
-      modules = [ common ./modules/platform-${host.config.vm.guestKind}.nix ] ++ lib.optional (host.main != null) host.main;
-    }) lab.hosts;
+    # one configuration per instance folder and per generated swarm node
+    nixosConfigurations = lib.mapAttrs (name: _: hostOf lab name) lab.hosts;
+
+    # a host of another collected lab (modules/lab over a fixture tree, withApps), as the flake would build it there
+    lib.hostOf = hostOf;
   };
 }
