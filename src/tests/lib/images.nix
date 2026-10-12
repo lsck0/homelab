@@ -33,6 +33,17 @@ in {
     arch = "amd64";
   };
 
+  # modules/traefik's crowdsec as it runs on the ingresses, for the vm tests that need its scenarios and profiles
+  crowdsec = pkgs.dockerTools.pullImage {
+    imageName = "crowdsecurity/crowdsec";
+    imageDigest = "sha256:6ca53ad26196ca59ddd4fa692a586b73d8fcde085046163b9ca2f04887dca563";
+    hash = "sha256-UbRH7QWi0jG9pQujzAzQIJkiW+HuihJt05LR76MxKLU=";
+    finalImageName = "crowdsecurity/crowdsec";
+    finalImageTag = "v1.7.7";
+    os = "linux";
+    arch = "amd64";
+  };
+
   # labprobe inside a container: a probe from a container's network namespace (ci jobs, swarm tasks)
   labprobe = pkgs.dockerTools.buildLayeredImage {
     name = "labprobe";
@@ -41,8 +52,8 @@ in {
     config.Entrypoint = [ "/bin/labprobe" ];
   };
 
-  # the crowdsec container of modules/traefik, answering the bouncer plugin (lib/crowdsec-stub.py); cscli
-  # answers the bouncer registration and nothing else
+  # the crowdsec container of modules/traefik, answering the bouncer plugin and the gate (lib/crowdsec-stub.py);
+  # cscli answers the bouncers' registration and nothing else
   crowdsec-stub = pkgs.dockerTools.buildLayeredImage {
     name = "crowdsec-stub";
     tag = "test";
@@ -50,8 +61,8 @@ in {
       pkgs.busybox
       (pkgs.writeShellScriptBin "cscli" ''
         case "$*" in
-          "bouncers list -o json") echo '[{"name": "traefik-bouncer"}]' ;;
-          "bouncers add traefik-bouncer -o raw") echo stub-bouncer-key ;;
+          "bouncers list -o json") echo '[]' ;;
+          "bouncers add "*" -o raw") echo stub-bouncer-key ;;
           *) echo "crowdsec-stub: cscli $*" >&2 ;;
         esac
       '')

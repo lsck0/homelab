@@ -37,6 +37,8 @@ let
   localRanges = privateRanges ++ [ tailnet ];
   # the internal ingress's own pages (its hand-written routers), relayed by the edge and named by the router's dns
   ingressPages = { dashboard = "traefik"; proxmox = "proxmox"; };
+  # the cookie authelia keeps a session in, on the domain; the ingresses' gate asks authelia about it
+  autheliaSessionCookie = "authelia_session";
 
   # https://www.cloudflare.com/ips-v4/ as of 2026-10-06; the edge trusts their forwarded headers and nothing else
   cloudflareRanges = [
@@ -95,7 +97,7 @@ let
   vmOf = id: inventory.${id} or (throw "net.nix: the inventory has no guest ${id}");
 in
 {
-  inherit domain privateRanges tailnet localRanges cloudflareRanges ports zones ingressPages;
+  inherit domain privateRanges tailnet localRanges cloudflareRanges ports zones ingressPages autheliaSessionCookie;
   cidrContains = cidr.contains;
   # the domain as an ldap base dn (authelia and its lldap, the proxmox realm)
   domainDn = lib.concatMapStringsSep "," (part: "dc=${part}") (lib.splitString "." domain);

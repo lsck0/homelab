@@ -4,6 +4,7 @@
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   authelia = catalog.internal.authelia;
+  loopback = "127.0.0.1";
 in {
   # backends wake via homelab.onDemand, with the internal zone's token (granted on that zone's sleepers only)
   homelab.onDemand = {
@@ -23,6 +24,9 @@ in {
 
     # the edge's defence here too, for lan clients and relayed ones alike; never ban the house or the lab
     crowdsecBouncer = { enable = true; whitelistCidrs = net.privateRanges; };
+    # captcha-less: the internet reaches this ingress through the edge, whose gate asks it; users are asked about
+    # through this ingress itself, as the portal's name
+    gate.session = { url = "https://${loopback}:${toString net.ports.https}/api/state"; host = net.fqdn authelia.host; };
     # robots.txt, llms.txt and the labyrinth, as on the edge
     botDefense.enable = true;
 

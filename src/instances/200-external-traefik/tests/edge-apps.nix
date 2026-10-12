@@ -43,6 +43,8 @@ let
   uploadLimit = wat.routes.wat-user-files.bodyLimitBytes;
   # a few seconds per transfer, long enough to look at /tmp while it runs
   transferRate = "1M";
+  # the worker appnodes does not stand in for: its ports never answer
+  absentWorker = "${ip "252"}";
 
   guest = vmid: instance: memory: {
     imports = [ (lab.guest vmid { flat = true; inherit instance; }) ../../../tests/lib/offline-traefik.nix ];
@@ -104,6 +106,9 @@ pkgs.testers.runNixOSTest {
         entries = [json.loads(l) for l in appnodes.succeed("cat /run/echo/requests.jsonl").splitlines() if l]
         return [e for e in entries if "x-forwarded-for" in e["headers"]]
 
+    # long enough for the tarpit's first chunks
+    TRICKLE_S = 3
+
     def backend_reset():
         appnodes.succeed(": > /run/echo/requests.jsonl")
 
@@ -141,6 +146,9 @@ pkgs.testers.runNixOSTest {
     # the health check drops the absent third worker before the first request counts
     world.wait_until_succeeds(f"[ $(curl -s -o /dev/null -w '%{{http_code}}' --interface {CF} -H 'X-Forwarded-For: ${realClient}' "
                               f"--resolve ${watHost}.${net.domain}:443:{EDGE} {WAT}/api/health) = 200 ]", timeout=120)
+    # a 200 above may come from a live node while the absent one is still in a rotation: wait for every one to drop it
+    vm_200.wait_until_succeeds("m=$(curl -s http://127.0.0.1:${toString net.ports.traefikMetrics}/metrics | grep '^traefik_service_server_up{.*${absentWorker}'); "
+                               "[ -n \"$m\" ] && ! grep -q ' 1$' <<<\"$m\"", timeout=120)
 
     # sockets that idle through the other subtests: straight to the api, through anubis, and relayed to the internal
     # ingress, past its sso, from the house; each is open, greeted and echoed before a subtest reads the backend's log
@@ -284,9 +292,12 @@ pkgs.testers.runNixOSTest {
         backend_reset()
         r = get("/robots.txt")
         assert "User-agent: GPTBot" in r["body"] and "Disallow: /internal/export" in r["body"], r["body"]
-        for path, headers in (("/api/x", {"User-Agent": "GPTBot/1.0"}), ("/.env", {}), ("/wp-login.php", {})):
-            r = get(path, headers=headers)
-            assert r["status"] == 200 and "{" not in r["body"][:1], path
+        # the labyrinth trickles through the gate's tarpit (edge-antibot measures it): its first bytes, never the app's
+        for path, agent in (("/api/x", "GPTBot/1.0"), ("/.env", "curl"), ("/wp-login.php", "curl")):
+            status, out = world.execute(f"curl -s --max-time {TRICKLE_S} -o /tmp/trickle -w '%{{http_code}}' -A {agent} --interface {CF} "
+                                        f"-H 'X-Forwarded-For: ${realClient}' --resolve ${watHost}.${net.domain}:443:{EDGE} {WAT}{path}")
+            first = world.succeed("head -c 1 /tmp/trickle")
+            assert out == "200" and first not in ("", "{"), (path, status, out, first)
         assert backend_log() == [], backend_log()
 
     with subtest("crowdsec bans and the waf answer at the edge"):
@@ -300,13 +311,14 @@ pkgs.testers.runNixOSTest {
 
     with subtest("a client's open websockets fill their own in-flight limit, never its requests'"):
         world.succeed("rm -f /tmp/hold-release && mkfifo /tmp/hold-release")
+        # a logged-in client: an anonymous one meets the gate's tighter rate limit long before its in-flight limit
         sockets_start("hold", f"{WAT_SOCKET}/api/socket", xff="203.0.113.30", count=${toString socketInFlight} + 1,
-                      release="/tmp/hold-release")
+                      headers=["Cookie: ${sessionCookie}"], release="/tmp/hold-release")
         r = sockets_report("hold")
         # the in-flight limit's refusal: the rate limit's would name when to retry
         assert r["opened"] == ${toString socketInFlight} and r["refused"] == {"status": 429, "retry_after": None}, r
         for path in ("/api/health", "/api/x"):
-            assert get(path, xff="203.0.113.30")["status"] == 200, path
+            assert get(path, xff="203.0.113.30", headers={"Cookie": "${sessionCookie}"})["status"] == 200, path
         world.succeed("echo release > /tmp/hold-release")
         world.wait_until_succeeds("[ -s /tmp/hold.exit ]", timeout=60)
         assert world.succeed("cat /tmp/hold.exit").strip() == "0", world.succeed("cat /tmp/hold.log")

@@ -26,10 +26,11 @@ let
     "crowdsecurity/appsec-crs-inband"
   ];
 
-  # a release names its own hub branch; a nix build asks version.crowdsec.net unless told
+  # a release names its own hub branch; cscli asks version.crowdsec.net for it unless told, at every install
+  hubBranch = "master";
   cscliConfig = pkgs.writeText "config.yaml" (builtins.toJSON {
     common.log_media = "stdout";
-    cscli.hub_branch = "master";
+    cscli.hub_branch = hubBranch;
     config_paths = { config_dir = "@etc@"; data_dir = "@data@"; hub_dir = "@etc@/hub"; index_path = "@etc@/hub/.index.json"; };
   });
 
@@ -52,5 +53,5 @@ let
       done
   '');
 in {
-  inherit hub collections install data;
+  inherit hub hubBranch collections install data;
 }

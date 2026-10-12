@@ -3,7 +3,8 @@
 # The routes an ingress serves (`routes`, modules/catalog.nix records of modules/service.nix) become its routers,
 # services and middlewares here, each feature on unless the route's `off` names it: cloudflare-only on the socket peer,
 # client-ip (the real client into X-Real-Ip, lib/traefik-clientip), the strip of client-sent identity and target
-# headers, the crowdsec bouncer with its AppSec waf and the core rule set, the per-client and per-route rate and
+# headers, the gate (lib/gate: crowdsec's decisions as a captcha or a ban page, the anonymous limit), the crowdsec
+# bouncer with its AppSec waf and the core rule set, the per-client and per-route rate and
 # in-flight limits, the body limit, retries, the security headers, then sso, anubis, basic auth and the route's own
 # headers. A router splits by what a request holds: body methods pass the body limit on a router of their own, a
 # websocket upgrade holds the in-flight slots of its own router for the socket's life. A hand-written router gets the
@@ -43,6 +44,8 @@ let
   # whose X-Forwarded-For hops count: the entrypoint keeps them, client-ip and the bouncer walk past them
   trustedHops = cfg.trustedProxies ++ lib.optionals cfg.trustCloudflare cloudflareRanges;
   loopback = "127.0.0.1";
+  # the host's own calls, the gate's session check through this ingress among them
+  loopbackRange = "127.0.0.0/8";
   logDir = "/var/log/traefik";
   crowdsecDir = "/var/lib/crowdsec";
 
@@ -116,6 +119,8 @@ let
   # per-client dos limits: a page load fans out to tens of requests, an api client to a few a second
   rateLimitAverage = 50;   # req/s sustained
   rateLimitBurst = 100;    # spikes above average
+  # a client without an authelia session gets this share of them at the gate: still a page load's fan-out
+  anonymousLimitDivisor = 2;
   inFlightAmount = 100;    # concurrent requests
   # a login is a person typing: five tries a minute, a burst of ten for a password manager retrying
   loginRateLimitAverage = 5;
@@ -265,35 +270,41 @@ let
   # traefik loads local plugins from plugins-local/src/<moduleName> below its working directory, its dataDir
   pluginsLocal = pkgs.linkFarm "traefik-plugins-local" (map (p: { name = "src/${p.moduleName}"; path = p.src; }) plugins);
 
-  mkBouncer = appsec: {
+  # the bouncer is the waf alone: the gate answers crowdsec's decisions, with pages the plugin cannot serve
+  bouncer = {
     plugin.crowdsec-bouncer = {
       enabled = true;
-      crowdsecMode = "live";
+      crowdsecMode = "appsec";
       crowdsecLapiScheme = "http";
       crowdsecLapiHost = "${loopback}:${toString crowdsecLapiPort}";
-      crowdsecLapiKeyFile = bouncerKeyFile;
-      crowdsecAppsecEnabled = appsec;
+      crowdsecLapiKeyFile = bouncers.${bouncerName}.keyFile;
+      crowdsecAppsecEnabled = true;
       crowdsecAppsecHost = "${loopback}:${toString appsecPort}";
-      # the same hops client-ip walks, so a ban lands on the client client-ip names
+      # the same hops client-ip walks, so the waf's alert lands on the client client-ip names
       forwardedHeadersTrustedIPs = trustedHops;
     };
   };
 
   bouncerName = "traefik-bouncer";
-  # cscli makes the key; beside crowdsec's database, so a wiped database takes its key along
-  bouncerKeyFile = "${crowdsecDir}/data/${bouncerName}.key";
+  gateBouncerName = "traefik-gate";
+  # cscli makes each key; beside crowdsec's database, so a wiped database takes its keys along. The group reads it.
+  bouncers = {
+    ${bouncerName} = { keyFile = "${crowdsecDir}/data/${bouncerName}.key"; group = "traefik"; unit = "traefik.service"; };
+    # the gate takes it as a credential, root reads it
+    ${gateBouncerName} = { keyFile = "${crowdsecDir}/data/${gateBouncerName}.key"; group = "root"; unit = "lab-gate.service"; };
+  };
 
   # a start never fetches or upgrades a rule or its data
   crowdsecHub = import ./lib/crowdsec-hub.nix { inherit pkgs lib; };
+  # without it every start asks version.crowdsec.net which hub branch to install from, and a start without internet
+  # fails (the image's entrypoint installs its docker parsers at every start)
+  crowdsecLocalConfig = yamlDocs "config.yaml.local" [ { cscli.hub_branch = crowdsecHub.hubBranch; } ];
   # the owner's choice: the community api (CAPI) gets each ban's attacker ip, scenario and time, and returns the
   # community blocklist; an outage keeps the last decisions
   crowdsecCommunity = true;
 
-  # the waf bouncer, and an ip-reputation-only one for routes whose `off.waf` says why
-  bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable {
-    crowdsec = mkBouncer true;
-    crowdsec-noappsec = mkBouncer false;
-  };
+  # the waf, on routes whose `off.waf` does not say why not
+  bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable { crowdsec = bouncer; };
 
   # -- bot defence: robots.txt / llms.txt and the labyrinth --------------------
   robotsTxt = pkgs.writeText "robots.txt" (''
@@ -367,6 +378,8 @@ let
     else "(${rule}) && " + lib.concatMapStringsSep " && " (host: "!Host(`${net.fqdn host}`)") botExcluded;
   # unproxied hosts serve robots.txt and the labyrinth too, to clients that reach them directly
   botOff = { cloudflare = "it answers every host, unproxied ones included"; };
+  # the labyrinth trickles through the gate's tarpit unless the router says why not
+  labyrinthService = off: if gateOn && (off.tarpit or null) == null then "tarpit" else "labyrinth";
   botDefenseRouters = lib.optionalAttrs cfg.botDefense.enable {
     wellknown-tls = {
       rule = botRule "Path(`/robots.txt`) || Path(`/llms.txt`) || Path(`/.well-known/llms.txt`)";
@@ -377,7 +390,7 @@ let
     };
     labyrinth-tls = {
       rule = botRule labyrinthRule;
-      service = "labyrinth";
+      service = labyrinthService botOff;
       entryPoints = [ "websecure" ];
       priority = 9000;
       off = botOff;
@@ -385,7 +398,7 @@ let
     # above real routes, below robots.txt
     honeypot-tls = {
       rule = botRule honeypotRule;
-      service = "labyrinth";
+      service = labyrinthService { };
       entryPoints = [ "websecure" ];
       priority = 9500;
     };
@@ -394,7 +407,71 @@ let
   botDefenseServices = lib.optionalAttrs cfg.botDefense.enable {
     wellknown.loadBalancer.servers = [{ url = "http://${loopback}:${toString wellKnownPort}"; }];
     labyrinth.loadBalancer.servers = [{ url = "http://${loopback}:${toString iocainePort}"; }];
+  } // lib.optionalAttrs (cfg.botDefense.enable && gateOn) {
+    tarpit.loadBalancer.servers = [{ url = "http://${gate.loopback}:${toString gate.tarpitPort}"; }];
   };
+
+  # -- the gate: crowdsec's decisions as pages, the captcha, the anonymous limit (lib/gate) -------------------
+
+  gate = import ./lib/gate.nix { inherit pkgs lib; };
+  ladder = import ./lib/ladder.nix { inherit lib yamlDocs; };
+  # it asks crowdsec, so it runs where the bouncer does
+  gateOn = cfg.crowdsecBouncer.enable;
+  gateFlagsOf = r: { captcha = on r "captcha"; limit = on r "anonymousLimit"; tarpit = on r "tarpit"; scale = r.limitScale; };
+  gatedRecords = lib.filter (r: on r "crowdsec") (map recordOf (lib.attrValues (lib.filterAttrs (_: chained) allRouters)));
+  gateMiddlewares = lib.optionalAttrs gateOn (lib.listToAttrs (map (flags: lib.nameValuePair (gate.middlewareName flags) (gate.middleware flags))
+    (lib.unique (map gateFlagsOf gatedRecords))));
+  captchaOn = gateOn && cfg.gate.captcha.enable;
+  # the captcha form posts here on every host, above every route; the gate lets the answer through itself
+  gateRouters = lib.optionalAttrs captchaOn {
+    gate-answer-tls = {
+      rule = "Path(`${gate.answerPath}`) && Method(`POST`)";
+      service = "gate";
+      entryPoints = [ "websecure" ];
+      priority = gateAnswerPriority;
+      route = {
+        off = { cloudflare = "the captcha answers on every host, unproxied ones included"; };
+        methods = [ "POST" ];
+        frames = "deny";
+        referrer = true;
+        bodyLimitBytes = gateAnswerBodyBytes;
+        limitScale = 1;
+        sources = null;
+      };
+    };
+  };
+  gateServices = lib.optionalAttrs captchaOn {
+    gate.loadBalancer.servers = [{ url = "http://${gate.loopback}:${toString gate.port}"; }];
+  };
+  # below robots.txt (10000), above the honeypot (9500): an answer is never mistaken for a probe
+  gateAnswerPriority = 9800;
+  # one form field of six characters
+  gateAnswerBodyBytes = 4096;
+  gateDir = "/run/lab-gate";
+  gateSettings = {
+    listen = "${gate.loopback}:${toString gate.port}";
+    tarpitListen = "${gate.loopback}:${toString gate.tarpitPort}";
+    lapi = { url = "http://${loopback}:${toString crowdsecLapiPort}"; keyFile = "/run/credentials/lab-gate.service/bouncer"; };
+    allow = {
+      cidrs = cfg.crowdsecBouncer.whitelistCidrs ++ [ loopbackRange ];
+      # the house behind cloudflare is its public address (as crowdsec's home whitelist)
+      hosts = [ (net.fqdn net.wan.publicHost) ];
+    };
+    captcha = if !captchaOn then null else {
+      keyFile = "/run/credentials/lab-gate.service/captcha";
+      cookieDomain = net.domain;
+      inherit (gate) answerPath;
+      regenerationsMax = ladder.captchaRegenerationsMax;
+      answerLog = if cfg.gate.captcha.answerLog then "${gateDir}/answers" else null;
+    };
+    session = if cfg.gate.session == null then null else cfg.gate.session // { cookie = net.autheliaSessionCookie; };
+    anonymous = { averagePerSecond = rateLimitAverage / anonymousLimitDivisor; burst = rateLimitBurst / anonymousLimitDivisor; };
+    tarpit.upstream = "http://${loopback}:${toString iocainePort}";
+  };
+  gateSettingsFile = pkgs.writeText "lab-gate.json" (builtins.toJSON gateSettings);
+  gateMetricsName = "lab_gate";
+  # a loopback answer in milliseconds; this only bounds a hung gate
+  gateMetricsTimeoutS = 5;
 
   # -- routes: every router, service and middleware a route needs -------------------------------------------
 
@@ -587,9 +664,9 @@ let
     # a route kept off the internet admits private sources only, cloudflare's included in none
     lib.optional (cfg.cloudflareOnly.enable && on r "cloudflare" && on r "internet") "cloudflare-only"
     ++ [ "client-ip" "strip-client-headers" ]
+    ++ lib.optional (gateOn && on r "crowdsec") (gate.middlewareName (gateFlagsOf r))
     # scanners must reach the labyrinth, past the waf
-    ++ lib.optional (cfg.crowdsecBouncer.enable && on r "crowdsec")
-      (if on r "waf" && name != "honeypot-tls" then "crowdsec" else "crowdsec-noappsec")
+    ++ lib.optional (gateOn && on r "crowdsec" && on r "waf" && name != "honeypot-tls") "crowdsec"
     ++ lib.optionals (on r "rateLimit") [ "rate-limit${limitSuffix r.limitScale}" "route-rate-limit${limitSuffix r.limitScale}" ]
     ++ lib.optionals (on r "inflightLimit") [ "inflight-limit${limitSuffix r.limitScale}" "route-inflight-limit${limitSuffix r.limitScale}" ]
     # buffered once, outside the retry: a retry inside the buffer re-read a consumed body and sent it empty
@@ -644,9 +721,9 @@ let
     && (router.priority or (lib.stringLength router.rule)) >= probePriority) routersWithTls);
   splitClashes = lib.concatMap (name: lib.filter (split: allRouters ? ${split}) (map (suffix: "${name}${suffix}") routerSuffixes))
     (lib.attrNames (lib.filterAttrs (_: router: let r = recordOf router; in chained router && (splitsByBody r || splitsBySocket r)) allRouters));
-  allRouters = cfg.routers // routeRouters // onionRouters // probeRouters // frontendRouters // relayRouters // botDefenseRouters;
+  allRouters = cfg.routers // routeRouters // onionRouters // probeRouters // frontendRouters // relayRouters // botDefenseRouters // gateRouters;
   allMiddlewares = cfg.middlewares // routeMiddlewareDefs // frontendMiddlewares // secureHeadersMiddleware // limitMiddlewares
-    // bouncerMiddleware // stripClientHeadersMiddleware // autheliaMiddleware;
+    // bouncerMiddleware // gateMiddlewares // stripClientHeadersMiddleware // autheliaMiddleware;
   missingMiddlewares = lib.subtractLists (lib.attrNames allMiddlewares)
     (lib.unique (lib.concatMap (r: r.middlewares or [ ]) (lib.attrValues routersWithTls)));
 
@@ -656,6 +733,9 @@ let
     { name = "wellknown nginx"; port = wellKnownPort; }
     { name = "crowdsec lapi"; port = crowdsecLapiPort; }
     { name = "crowdsec appsec"; port = appsecPort; }
+  ] ++ lib.optionals gateOn [
+    { name = "gate"; port = gate.port; }
+    { name = "gate tarpit"; port = gate.tarpitPort; }
   ] ++ lib.optionals (anubisRoutes != { }) [
     { name = "anubis"; port = anubisPort; }
     { name = "anubis metrics"; port = anubisMetricsPort; }
@@ -695,8 +775,30 @@ in {
     botDefense.enable = lib.mkEnableOption "robots.txt and llms.txt on every host, the iocaine labyrinth for crawlers ignoring them";
 
     crowdsecBouncer = {
-      enable = lib.mkEnableOption "crowdsec on the access log and its bouncer, with the waf, on every route";
-      whitelistCidrs = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; description = "Sources crowdsec never bans."; };
+      enable = lib.mkEnableOption "crowdsec on the access log, the gate and the waf bouncer on every route";
+      whitelistCidrs = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; description = "Sources crowdsec never bans and the gate never stops."; };
+    };
+
+    gate = {
+      # one ingress per client asks: the answer path is the internet's ingress's on every host
+      captcha.enable = lib.mkEnableOption "the gate's captcha for clients crowdsec flags; without it captcha decisions pass (left to the ingress in front)";
+      captcha.answerLog = lib.mkEnableOption "logging every puzzle's answer, for vm tests only (tests/policy forbids it on a lab host)";
+      session = lib.mkOption {
+        type = lib.types.nullOr (lib.types.submodule {
+          options = {
+            url = lib.mkOption { type = lib.types.str; description = "Authelia's /api/state through an ingress (https://<ingress>/api/state)."; };
+            host = lib.mkOption { type = lib.types.str; description = "The portal's name, which the ingress routes and verifies."; };
+          };
+        });
+        default = null;
+        description = "Where the gate asks whether a session cookie is a logged-in user's, who it never stops; null: nobody is asked.";
+      };
+      settings = lib.mkOption {
+        type = lib.types.attrsOf lib.types.anything;
+        readOnly = true;
+        default = gateSettings;
+        description = "The gate's settings file as rendered (lib/gate settings.go), for tests/policy.";
+      };
     };
 
     # set, it defines the `authelia` middleware; a client's X-Forwarded-* never reaches it, only its Remote-* the app
@@ -722,7 +824,7 @@ in {
     accessLog = lib.mkOption { type = lib.types.str; readOnly = true; default = "${logDir}/access.log"; description = "Traefik's json access log."; };
   };
 
-  config = lib.mkIf cfg.enable {
+  config = lib.mkIf cfg.enable (lib.mkMerge [ {
     assertions = [{
       assertion = loopbackClashes == [ ];
       message = "${config.networking.hostName}: loopback ports bound twice: "
@@ -816,39 +918,13 @@ in {
       missingok = true;
     };
 
-    systemd.services.crowdsec-register-bouncer = lib.mkIf cfg.crowdsecBouncer.enable {
-      description = "Register the Traefik bouncer with CrowdSec";
-      after = [ "podman-crowdsec.service" ];
-      # traefik reads the key at start; once it exists this returns at once
-      before = [ "traefik.service" ];
-      wantedBy = [ "traefik.service" ];
-      path = [ pkgs.podman pkgs.coreutils pkgs.jq pkgs.systemd ];
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        Restart = "on-failure";
-        RestartSec = 15;
-      };
-      script = ''
-        [ -s ${bouncerKeyFile} ] && exit 0
-        ${retry} 60 5 podman exec crowdsec cscli lapi status
-        if podman exec crowdsec cscli bouncers list -o json | jq -e '.[] | select(.name == "${bouncerName}")' >/dev/null; then
-          podman exec crowdsec cscli bouncers delete ${bouncerName}
-        fi
-        # cscli makes the key and prints it: never on an argv
-        key=$(podman exec crowdsec cscli bouncers add ${bouncerName} -o raw)
-        install -m 0440 -g traefik /dev/null ${bouncerKeyFile}.tmp
-        printf '%s' "$key" > ${bouncerKeyFile}.tmp
-        mv ${bouncerKeyFile}.tmp ${bouncerKeyFile}
-        systemctl try-restart --no-block traefik.service
-      '';
-    };
-
     systemd.tmpfiles.rules = [
       "d /var/lib/traefik 0700 traefik traefik -"
       "d /var/lib/traefik/acme 0700 traefik traefik -"
       # traefik writes access.log, crowdsec reads it
       "d ${logDir} 0755 traefik traefik -"
+      # crowdsec tails it from its start, and a file acquisition never picks up a file that appears later
+      "f ${cfg.accessLog} 0644 traefik traefik -"
       "L+ ${config.services.traefik.dataDir}/plugins-local - - - - ${pluginsLocal}"
     ];
 
@@ -863,6 +939,13 @@ in {
         install -m 0644 ${traefikAcquis} ${crowdsecDir}/config/acquis.d/traefik.yaml
         install -m 0644 ${appsecAcquis} ${crowdsecDir}/config/acquis.d/appsec.yaml
         install -m 0644 ${crsConfig} ${crowdsecDir}/config/appsec-configs/homelab-crs.yaml
+        # crowdsec merges it over the image's config.yaml: the entrypoint's hub installs never ask the internet
+        install -m 0644 ${crowdsecLocalConfig} ${crowdsecDir}/config/config.yaml.local
+        # the ladder: its signals and the profiles that turn their alerts into rungs (lib/ladder.nix)
+        install -d -m 0755 ${crowdsecDir}/config/scenarios
+        rm -f ${crowdsecDir}/config/scenarios/homelab-*.yaml
+        ${lib.concatLines (lib.mapAttrsToList (file: scenario: "install -m 0644 ${scenario} ${crowdsecDir}/config/scenarios/${file}") ladder.scenarios)}
+        install -m 0644 ${ladder.profiles} ${crowdsecDir}/config/profiles.yaml
         rm -rf ${crowdsecDir}/config/hub
         cp -r --no-preserve=mode ${crowdsecHub.hub} ${crowdsecDir}/config/hub
         # the image's entrypoint refreshes only an index older than a day
@@ -889,6 +972,8 @@ in {
             "Cf-Ipcountry" = "keep";
             # the client client-ip named, which the limits and the bouncer acted on
             "X-Real-Ip" = "keep";
+            # the gate's verdict and answer outcomes, which crowdsec's ladder scenarios read (lib/ladder.nix)
+            ${ladder.outcomeHeader} = "keep";
             "User-Agent" = "keep";
             "Referer" = "keep";
           };
@@ -944,7 +1029,7 @@ in {
       dynamicConfigOptions = {
         http = {
           routers = routersWithTls;
-          services = cfg.services // routeServices // frontendServices // relayServices // botDefenseServices;
+          services = cfg.services // routeServices // frontendServices // relayServices // botDefenseServices // gateServices;
           middlewares = allMiddlewares;
         }
           // lib.optionalAttrs (cfg.serversTransports // relayTransports != { }) {
@@ -1046,5 +1131,87 @@ in {
     networking.firewall.allowedTCPPorts = [ net.ports.http net.ports.https net.ports.traefikMetrics ]
       ++ lib.optional (onionRoutes != { }) torPorts.onionIngress;
     homelab.ingressOnly.ports = [ net.ports.traefikMetrics ] ++ lib.optional (onionRoutes != { }) torPorts.onionIngress;
-  };
+  }
+
+  # crowdsec's bouncers and the gate in front of every gated router
+  (lib.mkIf cfg.crowdsecBouncer.enable (lib.mkMerge [ {
+    # one key per bouncer, made by crowdsec on first start; its unit reads it at start, so this runs before it
+    systemd.services = lib.mapAttrs' (name: b: lib.nameValuePair "crowdsec-register-${name}" {
+      description = "Register the ${name} bouncer with CrowdSec";
+      after = [ "podman-crowdsec.service" ];
+      before = [ b.unit ];
+      wantedBy = [ b.unit ];
+      path = [ pkgs.podman pkgs.coreutils pkgs.jq pkgs.systemd ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        Restart = "on-failure";
+        RestartSec = 15;
+      };
+      script = ''
+        [ -s ${b.keyFile} ] && exit 0
+        ${retry} 60 5 podman exec crowdsec cscli lapi status
+        if podman exec crowdsec cscli bouncers list -o json | jq -e '.[] | select(.name == "${name}")' >/dev/null; then
+          podman exec crowdsec cscli bouncers delete ${name}
+        fi
+        # cscli makes the key and prints it: never on an argv
+        key=$(podman exec crowdsec cscli bouncers add ${name} -o raw)
+        install -m 0440 -g ${b.group} /dev/null ${b.keyFile}.tmp
+        printf '%s' "$key" > ${b.keyFile}.tmp
+        mv ${b.keyFile}.tmp ${b.keyFile}
+        systemctl try-restart --no-block ${b.unit}
+      '';
+    }) bouncers;
+  } {
+    # crowdsec reads what prepare-dirs installs at its start only
+    systemd.services.podman-crowdsec.restartTriggers = [ config.systemd.services.crowdsec-prepare-dirs.script ];
+
+    systemd.services.lab-gate = {
+      description = "lab-gate: crowdsec's decisions as a captcha or a ban page, the anonymous limit, the tarpit";
+      wantedBy = [ "multi-user.target" ];
+      # traefik's first gated request finds it listening
+      before = [ "traefik.service" ];
+      after = [ "network.target" "crowdsec-register-${gateBouncerName}.service" ];
+      requires = [ "crowdsec-register-${gateBouncerName}.service" ];
+      restartTriggers = [ gateSettingsFile ];
+      serviceConfig = {
+        ExecStart = "${lib.getExe gate.package} -settings ${gateSettingsFile}";
+        Restart = "always";
+        RestartSec = 5;
+        DynamicUser = true;
+        LoadCredential = [ "bouncer:${bouncers.${gateBouncerName}.keyFile}" ]
+          ++ lib.optional captchaOn "captcha:${config.sops.secrets.lab-gate-key.path}";
+        RuntimeDirectory = baseNameOf gateDir;
+        # answers on loopback, asks crowdsec and the ingress, reads nothing but its credentials and the store
+        ProtectSystem = "strict";
+        ProtectHome = true;
+        PrivateTmp = true;
+        PrivateDevices = true;
+        NoNewPrivileges = true;
+        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" ];
+        SystemCallFilter = [ "@system-service" ];
+      };
+    };
+
+    # the gate's counters into the node exporter, as the spool metric does
+    systemd.services.lab-gate-metrics = {
+      description = "Copy the gate's counters into the node exporter's textfile directory";
+      after = [ "lab-gate.service" ];
+      path = [ pkgs.curl pkgs.coreutils ];
+      serviceConfig.Type = "oneshot";
+      script = ''
+        metric=${config.homelab.textfileDir}/${gateMetricsName}.prom
+        curl -sf --max-time ${toString gateMetricsTimeoutS} http://${gate.loopback}:${toString gate.port}${gate.metricsPath} > "$metric.tmp"
+        mv "$metric.tmp" "$metric"
+      '';
+    };
+    systemd.timers.lab-gate-metrics = {
+      wantedBy = [ "timers.target" ];
+      timerConfig = { OnBootSec = "1min"; OnUnitActiveSec = "1min"; };
+    };
+    homelab.textfiles = [ gateMetricsName ];
+
+    sops.secrets = lib.mkIf captchaOn { lab-gate-key.restartUnits = [ "lab-gate.service" ]; };
+  } ]))
+  ]);
 }

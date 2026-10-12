@@ -4,14 +4,18 @@ instances/200-external-traefik/tests/edge-apps.nix.
     authelia-stub --port 9091 --portal auth.lsck0.dev --session authelia_session=valid --log-dir /tmp
 
 The portal host is bypass (200); a request carrying the session cookie is a user's (200 with Remote-User alice,
-Remote-Groups users); anything else is sent to the portal (302). Every call appends the X-Forwarded-Host it
+Remote-Groups users); anything else is sent to the portal (302). /api/state answers as authelia's does: level 1 for
+the session cookie, 0 for anything else (the ingresses' gate asks it). Every call appends the X-Forwarded-Host it
 was asked about to <log-dir>/forward-auth-hosts and the X-Forwarded-For, whose first entry authelia takes for the
 client (its logs and its ip regulation), to <log-dir>/forward-auth-clients, one per line.
 """
 
 import argparse
 import http.server
+import json
 import os
+
+STATE_PATH = "/api/state"
 
 
 def handler_for(portal, session, log_dir):
@@ -20,7 +24,19 @@ def handler_for(portal, session, log_dir):
             with open(os.path.join(log_dir, name), "a", encoding="utf-8") as f:
                 f.write(value + "\n")
 
+        def state(self):
+            level = 1 if session in self.headers.get("Cookie", "") else 0
+            body = json.dumps({"status": "OK", "data": {"username": "alice" if level else "", "authentication_level": level}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
+            if self.path.startswith(STATE_PATH):
+                self.state()
+                return
             host = self.headers.get("X-Forwarded-Host", "")
             self.log_append("forward-auth-hosts", host)
             self.log_append("forward-auth-clients", self.headers.get("X-Forwarded-For", ""))

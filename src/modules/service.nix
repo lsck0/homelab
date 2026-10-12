@@ -15,6 +15,8 @@
 # external route opts out of sso explicitly. A public route of the internal zone may still put prefixes of itself
 # behind authelia, `ssoPaths = [ "/metrics" ];`: the internal ingress sends them through authelia ahead of every other
 # router of the route, and authelia admits them like a route behind sso (admins and the route's own group).
+# captcha, anonymousLimit and tarpit act through the gate that crowdsec puts in front of a route, so they need crowdsec
+# on; the gate never stops the house, the lab, wireguard or a user authelia knows, whatever a route says.
 { lib }:
 let
   inherit (lib) mkOption types;
@@ -26,6 +28,12 @@ let
   # what the ingress does for a route
   protectionFeatures = [
     "sso" "anubis" "waf" "crowdsec" "rateLimit" "inflightLimit" "bodyLimit" "botDefense" "secureHeaders" "accessLog"
+    # the gate (modules/traefik/lib/gate) asks a client crowdsec flagged its captcha; off, its captcha decisions pass
+    "captcha"
+    # the gate's token bucket for clients without an authelia session, below rateLimit's for everyone
+    "anonymousLimit"
+    # a banned client waits for its ban page; on the bot defence's own routers, the labyrinth trickles
+    "tarpit"
     # the dns record goes through cloudflare's proxy and the origin refuses anyone else
     "cloudflare"
     # an internal route is relayed by the edge, so it is reachable from the internet behind authelia

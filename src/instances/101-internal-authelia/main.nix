@@ -154,7 +154,7 @@ in {
       };
 
       session = {
-        name = "authelia_session";
+        name = net.autheliaSessionCookie;
         expiration = "12h";
         inactivity = "45m";
         remember_me = "1M";
