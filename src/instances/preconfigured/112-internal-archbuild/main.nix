@@ -108,6 +108,8 @@ in {
       ARCHBUILD_BUILD_BUDGET_S = toString buildBudgetS;
       # relative: the key on vm-210 runs rrsync rooted at the repo
       ARCHBUILD_PUSH_TARGET = "archrepo@${inventory.${toString lab.routes.mirror.vmid}.ip}:.";
+      # the tree the edge shows the internet: the mirror route's publicPrefix (archrepo-build.sh header)
+      ARCHBUILD_INTERNET_PREFIX = lab.routes.mirror.publicPrefix;
     };
     serviceConfig = {
       Type = "oneshot";
@@ -156,7 +158,7 @@ in {
           -v ${listScript}:/list.sh:ro \
           ${buildImage} bash /build.sh build || return
         podman run --rm --init --replace --pull=missing --name ${containerPublish} \
-          ${runEnv} -e ARCHBUILD_PUSH_TARGET \
+          ${runEnv} -e ARCHBUILD_PUSH_TARGET -e ARCHBUILD_INTERNET_PREFIX \
           -v ${repoDir}:/repo \
           -v ${dotfilesDir}:/dotfiles:ro \
           -v ${outboxDir}:/outbox:ro \

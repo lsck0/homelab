@@ -45,6 +45,10 @@ let
     guest-names-itself = { folders."199-internal-demo" = instance ''{ hostName = "demo"; }''; expect = "hostName is vm-199"; };
     idle-without-ingress = { folders."260-apps-demo" = instance ''{ idle.stopAfter = "30m"; }''; expect = "idle needs a zone whose ingress"; };
     role-named-like-a-source = { folders."199-internal-demo" = instance ''{ roles = [ "lan" ]; }''; expect = "is a grant source's name already"; };
+    prefix-without-house = {
+      folders."249-external-demo" = instance ''{ services.demo = { port = 80; publicPrefix = "/public"; }; }'';
+      expect = "publicPrefix narrows what everyone but the house sees";
+    };
   };
 
   # -----------------------------------------------------------------------------

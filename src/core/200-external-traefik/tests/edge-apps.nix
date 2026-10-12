@@ -2,7 +2,8 @@
 # crowdsec stand-in: anubis, the metrics block, body limits, methods, compression, security headers, the client-header
 # strip, cloudflare-only, the real client behind cloudflare, rate limits, health-checked balancing, the relays, the
 # bot defences, crowdsec's bans and waf, and websockets: through the api, anubis and the relay with sso, idle past
-# both ingresses' timeouts, and a client's full in-flight limit of them beside its requests
+# both ingresses' timeouts, and a client's full in-flight limit of them beside its requests; the mirror's publicPrefix
+# for the internet, past it for the house
 #
 # The fixture is the real `wat` app (src/instances/custom/wat), enabled for this test (every edge feature: anubis on /, a direct
 # /api with its metrics on the same port, an upload path without the waf and a 100 MiB limit, an internal route).
@@ -36,6 +37,8 @@ let
 
   appPorts = lib.unique (map (p: p.port) (lib.attrValues wat.routes ++ lib.attrValues wat.metrics));
   feed = internalRoutes.calendar;
+  # the pacman mirror: the internet reads the subtree its publicPrefix names, the house the whole backend
+  mirror = lab.routes.external.mirror;
   outside = { internet = "198.51.100.7"; cloudflare = "104.16.0.10"; lan = net.wan.workstation; };
   realClient = "203.0.113.9";
   bannedClient = "203.0.113.66";
@@ -58,10 +61,10 @@ pkgs.testers.runNixOSTest {
   nodes.vm-200 = guest "200" ../main.nix 1536;
   nodes.vm-100 = guest "100" ../../100-internal-traefik/main.nix 1024;
   nodes.appnodes = {
-    imports = [ (lab.multi { addresses = map (a: "${a}/8") [ (ip "250") (ip "251") (ip "114") (ip "101") ]; }) ];
+    imports = [ (lab.multi { addresses = map (a: "${a}/8") [ (ip "250") (ip "251") (ip "114") (ip "101") (ip "210") ]; }) ];
     systemd.services.echo-backend = {
       wantedBy = [ "multi-user.target" ];
-      serviceConfig.ExecStart = "${echoBackend}/bin/echo-backend --ports ${lib.concatMapStringsSep "," toString (appPorts ++ [ feed.port ])} --log /run/echo/requests.jsonl";
+      serviceConfig.ExecStart = "${echoBackend}/bin/echo-backend --ports ${lib.concatMapStringsSep "," toString (appPorts ++ [ feed.port mirror.port ])} --log /run/echo/requests.jsonl";
     };
     systemd.services.authelia-stub = {
       wantedBy = [ "multi-user.target" ];
@@ -249,6 +252,14 @@ pkgs.testers.runNixOSTest {
         assert get("/api/health", src=NET, headers={"X-Forwarded-For": "${realClient}"})["status"] == 403
         assert get("/api/health", src=LAN)["status"] == 200
         assert get("/api/health")["status"] == 200
+
+    with subtest("the mirror shows the internet its publicPrefix alone, the house the whole backend"):
+        backend_reset()
+        for src in (NET, LAN):
+            r = get("/x86_64/lsck0.db", src=src, host="https://${net.fqdn mirror.host}")
+            assert r["status"] == 200, (src, r["status"])
+        paths = [e["path"] for e in backend_log()]
+        assert paths == ["${mirror.publicPrefix}/x86_64/lsck0.db", "/x86_64/lsck0.db"], paths
 
     with subtest("the app sees the client cloudflare saw, never a forged one"):
         # straight and through anubis's hop: X-Forwarded-For is the client alone, what a backend trusting its ingress reads

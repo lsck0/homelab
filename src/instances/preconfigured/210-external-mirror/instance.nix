@@ -13,6 +13,8 @@
       methods = [ "GET" "HEAD" ];
       # a pacman sync fetches hundreds of packages back to back: the default burst cut it off every ~100 files
       limitScale = 20;
+      # the internet gets the owner's own builds alone (archrepo-build.sh's internet tree), the house the full snapshot
+      publicPrefix = "/public";
       homepage = {
         group = "Dev";
         icon = "arch-linux";

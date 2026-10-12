@@ -27,8 +27,8 @@
 #
 # Mounts:
 #   /repo        served tree on the nas: <date>/x86_64 dated snapshots, current -> the newest one,
-#                x86_64/ the pool of signed files plus the newest db, status.{txt,json}, .state/;
-#                read-only for build
+#                x86_64/ the pool of signed files plus the newest db, status.{txt,json}, .state/, and the internet's
+#                tree in <prefix>/ (<date>/x86_64, current, x86_64/), hardlinks of the pool; read-only for build
 #   /dotfiles    the verified arch-dotfiles checkout, read-only
 #   /outbox      build writes it, publish reads it read-only
 #   /cache       build only: pacman cache, sources, cargo and go caches, the staging db
@@ -53,6 +53,11 @@
 # its signed packages wait in the pool for the next night. Old files leave the pool only after the db
 # that replaced them is published, and live on as hardlinks in every dated snapshot that names them.
 # Crash-only: all state is per base, a killed run is picked up by the next one.
+#
+# Two trees: the full one above for the house, and beside it the internet's (ARCHBUILD_INTERNET_PREFIX, the mirror
+# route's publicPrefix, which the edge puts before every path but the house's): the same layout and snapshots, its db
+# the night's without the official names, so it names and links the owner's own builds alone; an internet client
+# takes the official packages from arch's mirrors.
 #
 # Completeness: arch-dotfiles' install.sh no longer builds what the mirror lacks, so every listed name must
 # stay installable from the served snapshot. A failed base keeps its last build staged while that still
@@ -82,7 +87,12 @@ ARCH=x86_64
 SERVED=/repo
 REPO_DIR=$SERVED/$ARCH
 SERVED_STATE_DIR=$SERVED/.state
-SNAPSHOT_CURRENT=$SERVED/current
+CURRENT_NAME=current
+SNAPSHOT_CURRENT=$SERVED/$CURRENT_NAME
+# the internet's tree (header), publish only; one or more path segments, never one that climbs or hides
+INTERNET_PREFIX=${ARCHBUILD_INTERNET_PREFIX:-}
+INTERNET_PREFIX_PATTERN='^(/[A-Za-z0-9_~-][A-Za-z0-9._~-]*)+$'
+INTERNET_SERVED=$SERVED$INTERNET_PREFIX
 SNAPSHOT_MANIFEST=manifest.json
 SNAPSHOT_GLOB='[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'
 # Dated snapshots stay this many days, so a dotfiles generation can pin <date>/x86_64. A snapshot
@@ -225,6 +235,8 @@ BASELINE_PACKAGES=
 # publish: the served db (name -> file), the signed state (file -> name, name -> base), arch's names
 # today, and the db it serves next (name -> file)
 declare -A served=() state_file=() owner_of=() official_name=() final=()
+# publish: the files of the internet's db
+internet_files=()
 # publish: the listed names the served db lacks, then the proposed one, one per line
 snapshot_missing=
 proposed_missing=
@@ -1247,57 +1259,85 @@ db_put() {
   symlink_set "$REPO.files.tar.gz.sig" "$dir/$REPO.files.sig"
 }
 
-# <date>/x86_64 hardlinks every file of the db, and current moves to it only once it is whole; a second
-# publish the same day updates that day's snapshot in place, file by file like x86_64/
-snapshot_publish() {
-  local dir=$SERVED/$SNAPSHOT/$ARCH file manifest=$WORK/$SNAPSHOT_MANIFEST
+# <file> <dir>: the pool's file and its signature hardlinked into dir, unless it holds them already (the pool does)
+pool_link() {
+  [ -e "$2/$1" ] || ln "$REPO_DIR/$1" "$2/$1"
+  [ -e "$2/$1.sig" ] || ln "$REPO_DIR/$1.sig" "$2/$1.sig"
+}
+
+# <root> <db dir> <file>...: <root>/<date>/x86_64 hardlinks the files and gets the db, current moves to it only once it
+# is whole, then <root>/x86_64, what every client without a pin reads, gets them too; a second publish the same day
+# updates that day's snapshot in place, file by file like x86_64/. The full tree's x86_64/ is the pool itself
+tree_publish() {
+  local root=$1 db=$2 dir=$1/$SNAPSHOT/$ARCH latest=$1/$ARCH manifest=$2/$SNAPSHOT_MANIFEST file
+  shift 2
   declare -A keep=()
-  mkdir -p "$dir"
-  for file in "${final[@]}"; do
+  mkdir -p "$dir" "$latest"
+  for file; do
     keep[$file]=1
-    [ -e "$dir/$file" ] || ln "$REPO_DIR/$file" "$dir/$file"
-    [ -e "$dir/$file.sig" ] || ln "$REPO_DIR/$file.sig" "$dir/$file.sig"
+    pool_link "$file" "$dir"
   done
-  db_put put "$WORK/db" "$dir"
+  db_put put "$db" "$dir"
   jq -n --arg date "$SNAPSHOT" --arg started "$STARTED" --arg published "$(date -u "$TIME_FORMAT")" \
-    --arg source "$SOURCE" --arg ref "$REF" --arg commit "$COMMIT" --arg key "$KEY" --argjson packages "${#final[@]}" \
+    --arg source "$SOURCE" --arg ref "$REF" --arg commit "$COMMIT" --arg key "$KEY" --argjson packages "$#" \
     '{ date: $date, started: $started, published: $published, source: $source, ref: $ref, commit: $commit,
        signing_key: $key, packages: $packages }' > "$manifest"
   sign "$manifest"
-  put "$manifest.sig" "$SERVED/$SNAPSHOT"
-  put "$manifest" "$SERVED/$SNAPSHOT"
-  symlink_set "$SNAPSHOT" "$SNAPSHOT_CURRENT"
+  put "$manifest.sig" "$root/$SNAPSHOT"
+  put "$manifest" "$root/$SNAPSHOT"
+  symlink_set "$SNAPSHOT" "$root/$CURRENT_NAME"
   for file in "$dir"/*.pkg.tar.zst; do
     [ -n "${keep[$(basename "$file")]:-}" ] || rm -f "$file" "$file.sig"
   done
+  for file; do pool_link "$file" "$latest"; done
+  db_put link_into "$dir" "$latest"
+}
+
+# the owner's own build: the name's final file is a signed build of it, a local recipe's over an official name
+# included; every other name is an official package, which arch's mirrors serve the internet
+is_own_build() { [ "${state_file[${final[$1]}]:-}" = "$1" ]; }
+
+# the internet's db: the night's without the official names, into WORK/internet; its files into internet_files
+internet_assemble() {
+  local dir=$WORK/internet name f official=()
+  internet_files=()
+  rm -rf "$dir"
+  mkdir -p "$dir"
+  for f in "${DB_FILES[@]}"; do cp "$WORK/db/$f" "$dir/$f"; done
+  for name in "${!final[@]}"; do
+    if is_own_build "$name"; then internet_files+=("${final[$name]}"); else official+=("$name"); fi
+  done
+  log "internet: ${#internet_files[@]} own builds of ${#final[@]} packages"
+  (( ${#official[@]} == 0 )) || repo-remove -q "$dir/$REPO.db.tar.gz" "${official[@]}"
 }
 
 db_publish() {
-  local f
-  for f in "${DB_FILES[@]}"; do
-    sign "$WORK/db/$f"
+  local dir f
+  for dir in "$WORK/db" "$WORK/internet"; do
+    for f in "${DB_FILES[@]}"; do sign "$dir/$f"; done
   done
-  snapshot_publish
-  # x86_64/ is the pool and the newest db at once, what every client without a pin reads
-  db_put link_into "$SERVED/$SNAPSHOT/$ARCH" "$REPO_DIR"
+  tree_publish "$SERVED" "$WORK/db" "${final[@]}"
+  tree_publish "$INTERNET_SERVED" "$WORK/internet" "${internet_files[@]}"
 }
 
-# superseded, removed and held back files leave the pool once no served db references them; the
-# dated snapshots keep their hardlinks
-prune_files() {
-  local file
+# <dir> <file>...: superseded, removed and held back package files leave dir once its db no longer references them;
+# the dated snapshots keep their hardlinks
+files_prune() {
+  local dir=$1 file
+  shift
   declare -A referenced=()
-  for file in "${final[@]}"; do referenced[$file]=1; done
-  for file in "$REPO_DIR"/*.pkg.tar.zst; do
+  for file; do referenced[$file]=1; done
+  for file in "$dir"/*.pkg.tar.zst; do
     [ -n "${referenced[$(basename "$file")]:-}" ] || rm -f "$file" "$file.sig"
   done
 }
 
+# <root>: its dated snapshots past the kept days, but the current one
 snapshot_prune() {
-  local dir cutoff current
+  local root=$1 dir cutoff current
   cutoff=$(date -u -d "@$(( RUN_STARTED - SNAPSHOT_KEEP_DAYS * SECONDS_PER_DAY ))" "$DATE_FORMAT")
-  current=$(readlink "$SNAPSHOT_CURRENT")
-  for dir in "$SERVED"/$SNAPSHOT_GLOB; do
+  current=$(readlink "$root/$CURRENT_NAME")
+  for dir in "$root"/$SNAPSHOT_GLOB; do
     [[ $(basename "$dir") < $cutoff ]] && [ "$(basename "$dir")" != "$current" ] || continue
     log "removing snapshot $(basename "$dir")"
     rm -rf "$dir"
@@ -1369,7 +1409,8 @@ push() {
   [ -n "$PUSH_TARGET" ] && [ -f "$PUSH_KEY_FILE" ] || return 0
   [ -f "$REPO_DIR/$REPO.db" ] || return 0
   log "pushing the repo to $PUSH_TARGET"
-  if push_rsync --exclude "$REPO.db*" --exclude "$REPO.files*" --exclude '/current' --exclude '/status.*' "$SERVED/" "$PUSH_TARGET/" \
+  if push_rsync --exclude "$REPO.db*" --exclude "$REPO.files*" --exclude "/$CURRENT_NAME" --exclude "$INTERNET_PREFIX/$CURRENT_NAME" \
+    --exclude '/status.*' "$SERVED/" "$PUSH_TARGET/" \
     && push_rsync --delay-updates --exclude '/status.*' "$SERVED/" "$PUSH_TARGET/" \
     && push_logs \
     && push_rsync "$SERVED/status.txt" "$SERVED/status.json" "$PUSH_TARGET/" \
@@ -1414,6 +1455,8 @@ build_main() {
 publish_main() {
   local base
   log "setting up the publish"
+  # empty, the internet's tree would be the full one, and its prune would take the pool
+  [[ $INTERNET_PREFIX =~ $INTERNET_PREFIX_PATTERN ]] || { log "ARCHBUILD_INTERNET_PREFIX '$INTERNET_PREFIX' is no path prefix"; exit 1; }
   STATE_DIR=$SERVED_STATE_DIR
   outbox_check
   rm -rf "$WORK"
@@ -1434,9 +1477,12 @@ publish_main() {
   if [ -z "$held_back" ]; then
     log "publishing snapshot $SNAPSHOT"
     snapshot_missing=$proposed_missing
+    internet_assemble
     db_publish
-    prune_files
-    snapshot_prune
+    files_prune "$REPO_DIR" "${final[@]}"
+    files_prune "$INTERNET_SERVED/$ARCH" "${internet_files[@]}"
+    snapshot_prune "$SERVED"
+    snapshot_prune "$INTERNET_SERVED"
     state_prune
   else
     log "held back: $held_back"

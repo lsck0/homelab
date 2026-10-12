@@ -6,6 +6,10 @@ let
   pusher = lib.findSingle (i: i.config.secrets ? ${pushSecret}) (throw "no instance holds ${pushSecret}")
     (throw "two instances hold ${pushSecret}") (lib.attrValues lab.instances);
   pushKey = lib.fileContents (pusher.dir + "/${pushSecret}.pub");
+  # the internet's tree, which the edge puts before the internet's every path (instance.nix publicPrefix)
+  internetPrefix = lab.routes.mirror.publicPrefix;
+  # the status and the logs it names live in the full tree alone, the internet reads them there too
+  sharedPaths = "status\\.(json|txt)|build\\.log|logs/.*";
 in {
   # push target for the builder; owns the served tree, the key only runs a write-only rsync into it
   users.users.archrepo = {
@@ -25,6 +29,7 @@ in {
       root = repoDir;
       extraConfig = ''
         autoindex on;
+        rewrite "^${lib.escapeRegex internetPrefix}/(${sharedPaths})$" /$1 last;
       '';
       # the builder's dot directories are its state, not the repo
       locations."~ /\\.".return = "404";

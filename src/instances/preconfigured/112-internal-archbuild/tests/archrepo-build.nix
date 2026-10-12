@@ -5,7 +5,8 @@
 # by provides, versioned or not; every other depends and makedepends stays, a name that only shares a prefix with a
 # sibling included.
 #
-# The push to the mirror into a local directory: the served tree, the status and the logs status.txt names arrive,
+# The push to the mirror into a local directory: the served tree (the internet's as hardlinks of the pool), the status
+# and the logs status.txt names arrive,
 # the final --delete keeps the logs and drops stale repo files, a stale log goes. What the build container could
 # plant in the logs never leaves: a link (to the signing key here), a fifo, a directory, a file that is no .log, one
 # above the size cap, a build.log that is a link, a logs/ that is a link.
@@ -18,6 +19,10 @@
 #
 # A local recipe over an official package of its name (quickshell, 2026-10-12): the staged db and the final db
 # serve the local build whether its version is newer or older than the official one, against real pacman dbs.
+#
+# The internet's tree beside the full one, published with a real repo key: its db and files db name the own builds
+# alone (a local recipe's over an official name included), signed, its files hardlinks of the pool's; it switches and
+# prunes like the full one. A prefix that is none, or that would make it the full tree, stops the publish.
 #
 # The night's budget: a recipe starts only while its whole bound still ends within the budget. A keyserver outage
 # defers only the recipes with validpgpkeys.
@@ -67,7 +72,7 @@ let
 in
 pkgs.runCommand "archrepo-build" {
   nativeBuildInputs = [ pkgs.coreutils pkgs.gnused pkgs.gawk pkgs.gnugrep pkgs.findutils pkgs.rsync pkgs.jq pkgs.curl
-    pkgs.git pkgs.python3 pkgs.pacman pkgs.libarchive pkgs.zstd ];
+    pkgs.git pkgs.python3 pkgs.pacman pkgs.libarchive pkgs.zstd pkgs.gnupg ];
 } ''
   set -euo pipefail
   # a run that started now with an hour of recipes: the budget cases below move the clock against it
@@ -141,13 +146,18 @@ pkgs.runCommand "archrepo-build" {
 
   # <public dir>: a served tree and a status page with everything the build container could plant in logs/
   fixture() {
-    SERVED=$PWD/served REPO_DIR=$PWD/served/$ARCH PUBLIC=$PWD/$1 PUSH_TARGET=$PWD/mirror
+    SERVED=$PWD/served REPO_DIR=$PWD/served/$ARCH PUBLIC=$PWD/$1 PUSH_TARGET=$PWD/mirror INTERNET_PREFIX=/public
     PUBLIC_LOGS=$PUBLIC/$LOGS_NAME BUILD_LOG=$PUBLIC/$BUILD_LOG_NAME
     rm -rf "$SERVED" "$PUBLIC" "$PUSH_TARGET"
     mkdir -p "$REPO_DIR" "$SERVED/.state" "$PUBLIC_LOGS/sub" "$PUSH_TARGET/$LOGS_NAME" "$PUSH_TARGET/$ARCH"
     echo db > "$REPO_DIR/$REPO.db.tar.gz"
     ln -s "$REPO.db.tar.gz" "$REPO_DIR/$REPO.db"
     echo pkg > "$REPO_DIR/a-1-1.1-x86_64.pkg.tar.zst"
+    # the internet's tree: its db, current and a hardlink of the pool's file
+    mkdir -p "$SERVED$INTERNET_PREFIX/$ARCH" "$SERVED$INTERNET_PREFIX/$SNAPSHOT"
+    echo internet-db > "$SERVED$INTERNET_PREFIX/$ARCH/$REPO.db.tar.gz"
+    ln "$REPO_DIR/a-1-1.1-x86_64.pkg.tar.zst" "$SERVED$INTERNET_PREFIX/$ARCH/"
+    ln -s "$SNAPSHOT" "$SERVED$INTERNET_PREFIX/$CURRENT_NAME"
     echo state > "$SERVED/.state/a"
     echo "failed: a: build failed, $LOGS_NAME/a.log" > "$SERVED/status.txt"
     echo '{}' > "$SERVED/status.json"
@@ -172,7 +182,8 @@ pkgs.runCommand "archrepo-build" {
     if grep -rqF "$secret" "$PUSH_TARGET"; then flunk "$1: the signing key reached the mirror"; fi
     pass "$1"
   }
-  served="status.txt status.json $ARCH/$REPO.db $ARCH/$REPO.db.tar.gz $ARCH/a-1-1.1-x86_64.pkg.tar.zst"
+  served="status.txt status.json $ARCH/$REPO.db $ARCH/$REPO.db.tar.gz $ARCH/a-1-1.1-x86_64.pkg.tar.zst
+    public/$CURRENT_NAME public/$ARCH/$REPO.db.tar.gz public/$ARCH/a-1-1.1-x86_64.pkg.tar.zst"
   planted="$LOGS_NAME/notes.txt $LOGS_NAME/sub $LOGS_NAME/key.log $LOGS_NAME/fifo.log $LOGS_NAME/huge.log"
   stale="$LOGS_NAME/gone.log $ARCH/gone-1-1.1-x86_64.pkg.tar.zst .state"
 
@@ -180,6 +191,9 @@ pkgs.runCommand "archrepo-build" {
   check_push "the repo, the status and the logs it names arrive; links, fifos, dirs, other files, oversized logs and stale files do not" \
     "$served $BUILD_LOG_NAME $LOGS_NAME/a.log $LOGS_NAME/snapshot.log" "$planted $stale"
   [ "$(cat "$PUSH_TARGET/$LOGS_NAME/a.log")" = a ] || flunk "a.log arrived with other contents"
+  [ "$(stat -c %i "$PUSH_TARGET/public/$ARCH/a-1-1.1-x86_64.pkg.tar.zst")" = "$(stat -c %i "$PUSH_TARGET/$ARCH/a-1-1.1-x86_64.pkg.tar.zst")" ] \
+    || flunk "the internet's tree arrived as copies, not hardlinks of the pool"
+  pass "the internet's tree arrives as hardlinks of the pool"
 
   fixture public-link
   rm "$BUILD_LOG"
@@ -351,6 +365,79 @@ pkgs.runCommand "archrepo-build" {
   check_local_over_official "a local recipe newer than the official package serves its build (quickshell, 2026-10-12)" \
     0.3.2-1 0.3.2-2.9
   check_local_over_official "a local recipe older than the official package still serves its build" 0.3.2-5 0.3.2-2.9
+
+  # ---- the internet's tree ----
+  export GNUPGHOME=$PWD/gnupg
+  mkdir -m 700 "$GNUPGHOME"
+  gpg --batch --pinentry-mode loopback --passphrase "" --quick-gen-key "archbuild test <test@invalid>" ed25519 sign never 2>/dev/null
+  KEY=$(gpg --with-colons --list-secret-keys | awk -F: '$1 == "fpr" { print $10; exit }')
+  SERVED=$PWD/trees REPO_DIR=$PWD/trees/$ARCH WORK=$PWD/trees-work INTERNET_PREFIX=/public
+  INTERNET_SERVED=$SERVED$INTERNET_PREFIX
+  internet_dir=$INTERNET_SERVED/$ARCH
+  mkdir -p "$REPO_DIR" "$WORK/db" "$internet_dir"
+  # an aur build, a local recipe's over an official name (quickshell) and an official package; final names all three
+  own_aur=tool-1-1.2-any.pkg.tar.zst own_local=quickshell-0.3.2-2.9-any.pkg.tar.zst official_file=glibc-2.40-1-any.pkg.tar.zst
+  for file in $own_aur $own_local $official_file; do
+    name=$(file_package_name "$file")
+    version=''${file#"$name"-}
+    package_make "$REPO_DIR" "$name" "''${version%-any.pkg.tar.zst}" > /dev/null
+    sign "$REPO_DIR/$file"
+  done
+  repo-add -q "$WORK/db/$REPO.db.tar.gz" "$REPO_DIR"/*.pkg.tar.zst 2>/dev/null
+  final=([tool]=$own_aur [quickshell]=$own_local [glibc]=$official_file)
+  state_file=([$own_aur]=tool [$own_local]=quickshell)
+  # yesterday's build of tool in the internet's tree, and a snapshot past the kept days
+  stale_own=tool-1-1.1-any.pkg.tar.zst
+  touch "$internet_dir/$stale_own" "$internet_dir/$stale_own.sig"
+  mkdir -p "$INTERNET_SERVED/2000-01-01/$ARCH"
+  {
+    internet_assemble
+    db_publish
+    files_prune "$REPO_DIR" "''${final[@]}"
+    files_prune "$internet_dir" "''${internet_files[@]}"
+    snapshot_prune "$SERVED"
+    snapshot_prune "$INTERNET_SERVED"
+  } > trees.log 2>&1 || flunk "publishing the trees: $(cat trees.log)"
+  # <case> <db> <names, sorted>
+  check_db_names() {
+    load_db_index "$2" || flunk "$1: $2 cannot be read"
+    [ "$(printf '%s\n' "''${!db_file[@]}" | sort | xargs)" = "$3" ] || flunk "$1: names '$(printf '%s\n' "''${!db_file[@]}" | sort | xargs)', want '$3'"
+    pass "$1"
+  }
+  for tree in "$internet_dir" "$INTERNET_SERVED/$SNAPSHOT/$ARCH"; do
+    check_db_names "the internet's db names the own builds alone, a local recipe's over an official name included ($tree)" \
+      "$tree/$REPO.db" "quickshell tool"
+    check_db_names "the internet's files db names the same ($tree)" "$tree/$REPO.files" "quickshell tool"
+  done
+  check_db_names "the house's db keeps the official packages" "$REPO_DIR/$REPO.db" "glibc quickshell tool"
+  for path in "$internet_dir/$REPO.db" "$internet_dir/$REPO.files" "$INTERNET_SERVED/$SNAPSHOT/$SNAPSHOT_MANIFEST"; do
+    gpg --batch --verify "$path.sig" "$path" 2>/dev/null || flunk "$path carries no valid signature of the repo key"
+  done
+  jq -e '.packages == 2' "$INTERNET_SERVED/$SNAPSHOT/$SNAPSHOT_MANIFEST" > /dev/null || flunk "the internet's manifest counts other packages"
+  pass "the internet's db, files db and manifest are signed by the repo key"
+  for tree in "$internet_dir" "$INTERNET_SERVED/$SNAPSHOT/$ARCH"; do
+    for file in $own_aur $own_aur.sig $own_local $own_local.sig; do
+      [ "$(stat -c %i "$tree/$file")" = "$(stat -c %i "$REPO_DIR/$file")" ] || flunk "$tree/$file is no hardlink of the pool's"
+    done
+    [ ! -e "$tree/$official_file" ] && [ ! -e "$tree/$official_file.sig" ] || flunk "$tree serves the official $official_file"
+  done
+  pass "the internet's trees hardlink the pool's own builds and their signatures, never an official package"
+  [ "$(readlink "$INTERNET_SERVED/$CURRENT_NAME")" = "$SNAPSHOT" ] || flunk "the internet's current is not $SNAPSHOT"
+  [ ! -e "$internet_dir/$stale_own" ] && [ ! -e "$internet_dir/$stale_own.sig" ] || flunk "a superseded build stayed in the internet's tree"
+  [ ! -e "$INTERNET_SERVED/2000-01-01" ] || flunk "a snapshot past the kept days stayed in the internet's tree"
+  [ -f "$REPO_DIR/$official_file" ] || flunk "the internet's prune took the pool's official package"
+  pass "the internet's tree switches and prunes like the full one, the pool keeps every file"
+
+  # <case> <prefix>: the publish stops before it reads or writes anything
+  check_prefix_refused() {
+    if (INTERNET_PREFIX=$2; publish_main) > prefix.log 2>&1; then flunk "$1: published"; fi
+    grep -q "is no path prefix" prefix.log || flunk "$1: $(cat prefix.log)"
+    pass "$1"
+  }
+  check_prefix_refused "no prefix would make the internet's tree the full one" ""
+  check_prefix_refused "a bare slash is no prefix" /
+  check_prefix_refused "a prefix that climbs is refused" /..
+  check_prefix_refused "a relative prefix is refused" public
 
   # ---- a skipped night in the served status ----
   skip() { bash ${../lib/archrepo-skip.sh} skipped "$1" github aur archlinux; }
