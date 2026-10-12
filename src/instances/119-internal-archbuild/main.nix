@@ -99,7 +99,7 @@ in {
     # the automount, not the mount (RequiresMountsFor): an idle expiry or a restart of the mount would stop the build
     requires = [ repoAutomount ];
     after = [ "network-online.target" repoAutomount ];
-    path = [ pkgs.podman pkgs.coreutils pkgs.git pkgs.gnupg pkgs.jq pkgs.gnugrep ];
+    path = [ pkgs.podman pkgs.coreutils pkgs.git pkgs.gnupg pkgs.jq pkgs.gnugrep pkgs.gawk ];
     # a deploy must not kill a running build
     restartIfChanged = false;
     environment = {
