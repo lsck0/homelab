@@ -295,6 +295,18 @@ tests += [
             {"eval_time": "27h", "alertname": "smartd_warning", "exp_alerts": []},
         ],
     },
+    {
+        "name": "attack: a ban wave on one ingress pages, the other's scanner trickle stays quiet",
+        "interval": "1m",
+        "input_series": [
+            {"series": 'homelab_gate_bans_total{vm="traefik-external"}', "values": "0+3x90"},
+            {"series": 'homelab_gate_bans_total{vm="traefik-internal"}', "values": "0+1x90"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "20m", "alertname": "ingress_ban_surge", "exp_alerts": []},
+            {"eval_time": "80m", "alertname": "ingress_ban_surge", "exp_alerts": [expect("ingress_ban_surge", vm="traefik-external")]},
+        ],
+    },
 ]
 
 # the oracle's own premises: the rules it tests exist, and their paging is what the policy says

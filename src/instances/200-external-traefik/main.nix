@@ -29,6 +29,8 @@ let
   installHosts = import ../../modules/install-hosts.nix;
   installPort = 8084;
   installRule = lib.concatMapStringsSep " || " (h: "Host(`${net.fqdn h}`)") (lib.attrNames installHosts);
+
+  relayTarget = "https://${net.ipOf net.zones.internal.ingress}:${toString net.ports.https}";
 in {
   homelab.onDemand = {
     enable = true;
@@ -39,11 +41,16 @@ in {
     enable = true;
     routes = catalog.external;
     relays = catalog.internal // ingressPages;
-    relayTarget = "https://${net.ipOf net.zones.internal.ingress}:${toString net.ports.https}";
+    inherit relayTarget;
 
     # cloudflare connects here and appends the client it saw
     trustCloudflare = true;
     crowdsecBouncer = { enable = true; whitelistCidrs = net.privateRanges; };
+    # the internet's ingress asks the captcha; a logged-in user is known by authelia behind the internal ingress
+    gate = {
+      captcha.enable = true;
+      session = { url = "${relayTarget}/api/state"; host = net.fqdn catalog.internal.authelia.host; };
+    };
     botDefense.enable = true;
     cloudflareOnly.enable = true;
 
@@ -62,7 +69,10 @@ in {
         rule = installRule;
         service = "install";
         entryPoints = [ "websecure" ];
-        off.cloudflare = "the install lines are published raw for a bare arch iso's curl";
+        off = {
+          cloudflare = "the install lines are published raw for a bare arch iso's curl";
+          captcha = "curl piped into sh solves no captcha";
+        };
       };
     };
 

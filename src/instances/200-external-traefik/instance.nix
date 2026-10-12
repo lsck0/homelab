@@ -19,6 +19,7 @@
 
   secrets = {
     anubis-ed25519-key = "hex:32"; # ed25519 seed as hex, the form anubis reads
+    lab-gate-key = "hex:32"; # the captcha cookie's hmac key (modules/traefik lib/gate cookie.go)
     proxmox-wake-token-external = "manual"; # init.sh: the on-demand token, powers the dmz's onDemand guests only
   };
 }

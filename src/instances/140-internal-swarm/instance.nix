@@ -26,6 +26,7 @@
     off = {
       sso = "ci jobs call it with the app's own bearer token";
       anubis = "ci jobs run no proof of work";
+      captcha = "ci jobs solve no captcha";
       homepage = "an endpoint, no page";
       probe = "POST only; socket activated, idle costs nothing";
       cloudflare = "a ci bearer token is nobody else's to decrypt";

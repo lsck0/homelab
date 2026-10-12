@@ -19,6 +19,7 @@ in {
       off = {
         sso = "public push notifications; ntfy checks its own accounts";
         anubis = "the phone app and vm-105 publish natively";
+        captcha = "the phone app subscribes natively, it shows no page";
         waf = "publishers and subscribers are api clients the rules misread";
         bodyLimit = "attachments";
       };

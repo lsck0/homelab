@@ -6,6 +6,7 @@ let
   feedOff = {
     sso = "the trmnl cloud polls it with a token";
     anubis = "the trmnl cloud runs no proof of work";
+    captcha = "the trmnl cloud solves no captcha";
     cloudflare = "the trmnl cloud fetches it directly";
     homepage = "a feed, no page";
     accessLog = "the path carries the feed's token";

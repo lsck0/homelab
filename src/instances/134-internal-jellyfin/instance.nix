@@ -57,6 +57,8 @@ in {
       off = {
         sso = "logs in itself through authelia oidc (sso plugin); apps use quick connect";
         anubis = "the jellyfin apps run no proof of work";
+        captcha = "the jellyfin apps solve no captcha";
+        anonymousLimit = "the apps fetch a library's posters in bursts; jellyfin checks its own accounts";
         bodyLimit = "image and plugin uploads";
       };
     };

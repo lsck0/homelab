@@ -25,6 +25,9 @@ let
   ingressSpoolBytesMax = 1024 * 1024 * 1024;
   # traefik renews at 30 days left; two weeks of failed retries is time to fix the dns token by hand
   certificateExpiryDaysMin = 14;
+  # an exposed address collects tens of new bans a day from scanners; a hundred in an hour is a campaign or a gate
+  # banning people
+  ingressBansPerHourMax = 100;
   thinpoolDataWarnPercent = 80;
   thinpoolDataCriticalPercent = 90;
   # metadata exhaustion corrupts every thin volume at once, so it warns earlier than data
@@ -212,6 +215,17 @@ let
       telegram = true;
       summary = "{{ $labels.vm }}: {{ humanize1024 $values.A.Value }}B of traefik buffering files in /tmp";
       description = "traefik's buffering middleware (the body limit) leaks temp-multibuf-* files when a copy fails; past the disk they fail every buffered request with 500. `systemctl restart traefik` clears its private /tmp.";
+    };
+    ingress_ban_surge = {
+      title = "Unusual ban rate";
+      category = "attack";
+      # each ingress's gate counts a crowdsec ban the first time it enforces it (modules/traefik lib/gate)
+      expr = "max by (vm) (increase(homelab_gate_bans_total[1h]))";
+      threshold = ingressBansPerHourMax;
+      for = "10m";
+      telegram = true;
+      summary = "{{ $labels.vm }}: {{ $values.A.Value | printf \"%.0f\" }} new bans in the last hour";
+      description = "Far more clients were banned than scanners cause. Check `cscli alerts list` and `cscli decisions list` in the crowdsec container for one scenario or one range behind them; a wave of a scenario on real users (the rate-limited or captcha-failed ladder signals) means a limit is too tight.";
     };
     certificate_expiring = {
       title = "Ingress certificate expiring";

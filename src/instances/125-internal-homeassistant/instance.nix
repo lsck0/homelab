@@ -35,6 +35,7 @@
       off = {
         sso = "the companion app calls /auth/token and /api/websocket natively, it cannot pass a portal";
         anubis = "the companion app runs no proof of work";
+        captcha = "the companion app solves no captcha";
         waf = "the companion app's api calls the rules misread";
         bodyLimit = "backup uploads";
       };

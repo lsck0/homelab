@@ -41,8 +41,8 @@ in {
     config.Entrypoint = [ "/bin/labprobe" ];
   };
 
-  # the crowdsec container of modules/traefik, answering the bouncer plugin (lib/crowdsec-stub.py); cscli
-  # answers the bouncer registration and nothing else
+  # the crowdsec container of modules/traefik, answering the bouncer plugin and the gate (lib/crowdsec-stub.py);
+  # cscli answers the bouncers' registration and nothing else
   crowdsec-stub = pkgs.dockerTools.buildLayeredImage {
     name = "crowdsec-stub";
     tag = "test";
@@ -50,8 +50,8 @@ in {
       pkgs.busybox
       (pkgs.writeShellScriptBin "cscli" ''
         case "$*" in
-          "bouncers list -o json") echo '[{"name": "traefik-bouncer"}]' ;;
-          "bouncers add traefik-bouncer -o raw") echo stub-bouncer-key ;;
+          "bouncers list -o json") echo '[]' ;;
+          "bouncers add "*" -o raw") echo stub-bouncer-key ;;
           *) echo "crowdsec-stub: cscli $*" >&2 ;;
         esac
       '')

@@ -43,6 +43,7 @@
       off = {
         sso = "tailscale clients cannot log in to authelia";
         anubis = "tailscale clients run no proof of work";
+        captcha = "tailscale clients solve no captcha";
         waf = "tailscale's control protocol the rules misread";
       };
     };
