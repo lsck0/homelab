@@ -1,7 +1,8 @@
 # on-demand guests (modules/on-demand) against a fake proxmox api: wake on connect, sleep after the cooldown,
 # the reaper, sibling routes on one guest, an lxc, a non-http backend, a boot past its timeout, the deploy pause, an
-# orphaned proxy, each proxy's port fixed by its own guest, and the api call itself: its token from a header file
-# (never in an argv) over tls pinned to the proxmox ca, a failed call an error the reaper exports
+# orphaned proxy, each proxy's port fixed by its own guest, a port a switch moves rebound, and the api call itself:
+# its token from a header file (never in an argv) over tls pinned to the proxmox ca, a failed call an error the
+# reaper exports
 #
 # `backend` stands in for proxmox and the guests: each fake guest is a unit there the fake api starts and stops.
 # Nothing waits on the clock but the guest's own cooldown, observed through the fake api's call log and uptime.
@@ -31,6 +32,15 @@ let
   caFile = "/run/pve-ca.pem";
   # portBase + vmid x portsPerGuest + the slot in name order (modules/on-demand)
   listenPorts = { app = 21500; app2 = 21501; ct = 21600; slow = 21700; };
+  # a deploy that drops the guest's first route: app2 moves into its slot, its socket unit changes in place
+  movedSpecialisation = "app-dropped";
+
+  services = {
+    app = { vmid = 150; targetPort = ports.app; bootTimeout = bootTimeoutSeconds; busyPath = "/busy"; wakeAt = "03:00"; };
+    app2 = { vmid = 150; targetPort = ports.app2; bootTimeout = bootTimeoutSeconds; };
+    ct = { vmid = 160; targetPort = ports.ct; bootTimeout = bootTimeoutSeconds; httpCheck = false; };
+    slow = { vmid = 170; targetPort = ports.slow; bootTimeout = slowBootTimeoutSeconds; };
+  };
 
   pki = pkgs.runCommand "fake-pve-pki" { nativeBuildInputs = [ pkgs.openssl ]; } ''
     mkdir $out && cd $out
@@ -187,17 +197,14 @@ pkgs.testers.runNixOSTest {
       apiUrl = "https://${apiName}:${toString apiPort}/api2/json";
       inherit caFile;
       node = "pve";
-      services = {
-        app = { vmid = 150; targetPort = ports.app; bootTimeout = bootTimeoutSeconds; busyPath = "/busy"; wakeAt = "03:00"; };
-        app2 = { vmid = 150; targetPort = ports.app2; bootTimeout = bootTimeoutSeconds; };
-        ct = { vmid = 160; targetPort = ports.ct; bootTimeout = bootTimeoutSeconds; httpCheck = false; };
-        slow = { vmid = 170; targetPort = ports.slow; bootTimeout = slowBootTimeoutSeconds; };
-      };
+      inherit services;
     };
+    specialisation.${movedSpecialisation}.configuration.homelab.onDemand.services = lib.mkForce (removeAttrs services [ "app" ]);
   };
 
   testScript = { nodes, ... }: let
     port = name: toString nodes.proxy.homelab.onDemand.services.${name}.listenPort;
+    movedPort = toString nodes.proxy.specialisation.${movedSpecialisation}.configuration.homelab.onDemand.services.app2.listenPort;
     pauseFile = nodes.proxy.homelab.onDemand.pauseFile;
     metrics = "${nodes.proxy.homelab.textfileDir}/ondemand.prom";
     wakeMetrics = name: "${nodes.proxy.homelab.textfileDir}/ondemand_wake_${name}.prom";
@@ -336,5 +343,16 @@ pkgs.testers.runNixOSTest {
         proxy.succeed("systemctl list-timers --all | grep -q ondemand-wakeat-app.timer")
         proxy.succeed("systemctl start ondemand-wakeat-app.service")
         backend.succeed("systemctl is-active nginx")
+
+    with subtest("a switch that moves a socket's port rebinds it: the new port wakes the guest, the old one is closed"):
+        assert "${movedPort}" != "${port "app2"}"
+        proxy.succeed(f"curl -sf -X POST --cacert ${pki}/ca.pem -H 'Authorization: PVEAPIToken=${token}' {API}/qemu/150/status/shutdown")
+        backend.wait_until_fails("systemctl is-active nginx", timeout=30)
+        backend.succeed("rm -f /tmp/pve-calls")
+        proxy.succeed("/run/booted-system/specialisation/${movedSpecialisation}/bin/switch-to-configuration test")
+        proxy.fail("nc -z 127.0.0.1 ${port "app2"}")
+        out = proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${movedPort}/")
+        assert "hello from the second route" in out, out
+        assert "/qemu/150/status/start" in calls()
   '';
 }
