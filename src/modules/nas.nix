@@ -106,12 +106,13 @@ in {
     system.activationScripts.nasMountsPrune.text = ''
       if [ -d /run/systemd/system ]; then
         systemctl=${config.systemd.package}/bin/systemctl
+        # "--" before every unit: the root mount is -.mount, which systemctl would take for an option
         "$systemctl" list-units --all --plain --no-legend --type=automount,mount | while read -r unit _; do
-          where=$("$systemctl" show -P Where "$unit")
+          where=$("$systemctl" show -P Where -- "$unit")
           if ${pkgs.gnugrep}/bin/grep -qxF -- "$where" ${declaredMountpoints}; then continue; fi
-          case "$("$systemctl" show -P What "''${unit%.*}.mount")" in ${nasIP}:*) ;; *) continue ;; esac
+          case "$("$systemctl" show -P What -- "''${unit%.*}.mount")" in ${nasIP}:*) ;; *) continue ;; esac
           echo "stopping $unit ($where), a nas mount this configuration no longer declares"
-          "$systemctl" stop "$unit"
+          "$systemctl" stop -- "$unit"
         done
       fi
     '';

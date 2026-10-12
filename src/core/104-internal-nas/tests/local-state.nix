@@ -62,8 +62,10 @@ pkgs.testers.runNixOSTest {
     def restart_app():
         vm_131.succeed("systemctl reset-failed ${name}-seed demo; systemctl restart demo")
 
+    # nasMountsPrune walks every mount, the root's -.mount among them, which systemctl must not take for an option
     def switch(configuration):
-        vm_131.succeed(f"{configuration}/bin/switch-to-configuration test")
+        out = vm_131.succeed(f"{configuration}/bin/switch-to-configuration test 2>&1")
+        assert "invalid option" not in out, out
 
     start_all()
     vm_104.wait_for_unit("nfs-exports-reload.service")

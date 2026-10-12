@@ -13,7 +13,7 @@ if [ -z "$units" ]; then
   exit 0
 fi
 for unit in $units; do
-  if [ "$(systemctl show -P Transient "$unit")" = no ] && [ "$(systemctl show -P LoadState "$unit")" != not-found ]; then
+  if [ "$(systemctl show -P Transient -- "$unit")" = no ] && [ "$(systemctl show -P LoadState -- "$unit")" != not-found ]; then
     echo "$unit"
   fi
 done
