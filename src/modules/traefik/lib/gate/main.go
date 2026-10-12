@@ -19,6 +19,14 @@
 // many (modules/traefik/lib/ladder.nix). A right one sets a cookie, an hmac over the client's address and an expiry,
 // that passes the client's captcha decisions until it expires.
 //
+// An onion route (its address in settings captcha.onions) is the owner's exception: every tor visitor arrives from the
+// router, so no address, allow list or crowdsec decision tells them apart. Every browser session there is asked,
+// whatever the route's flags: four rows of an onion address and a label, the route's own address among lookalikes
+// sharing its ends, and the label beside the address in the visitor's address bar answers. A phishing proxy relays
+// the page unchanged from the real address, which then matches no row its visitor's bar shows; a lookalike's label
+// is counted per route (homelab_gate_onion_decoys_total). A session is a random id in a cookie: its puzzle, its
+// failures and its ban (an hour, past the same count crowdsec bans an address for) are its own, never the router's.
+//
 // Rejected: the bouncer plugin's captcha. It serves hcaptcha, recaptcha or turnstile, or a "custom" provider whose
 // page loads the provider's script and checks a token at its server; none is offline, script-free or self-hosted, and
 // its ban page is a fixed file that cannot say how long a ban lasts.
@@ -77,12 +85,16 @@ func gateCreate(settings Settings) (*Gate, error) {
 		if err != nil {
 			return nil, fmt.Errorf("captcha key: %w", err)
 		}
+		onions, err := onionRoutes(c.Onions)
+		if err != nil {
+			return nil, fmt.Errorf("captcha onions: %w", err)
+		}
 		challenges, err := challengesCreate(c.RegenerationsMax, c.AnswerLog)
 		if err != nil {
 			return nil, fmt.Errorf("captcha answer log: %w", err)
 		}
-		g.captcha = &Captcha{key: key, cookieDomain: c.CookieDomain, answerPath: c.AnswerPath, challenges: challenges,
-			renders: make(chan struct{}, renderSlots)}
+		g.captcha = &Captcha{key: key, cookieDomain: c.CookieDomain, answerPath: c.AnswerPath, onions: onions,
+			challenges: challenges, renders: make(chan struct{}, renderSlots)}
 	}
 	return g, nil
 }

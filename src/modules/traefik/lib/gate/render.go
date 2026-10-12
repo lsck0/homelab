@@ -28,7 +28,21 @@ const (
 	supersample = 4
 )
 
-// Lowercase hex: a, b, d and e stay distinct from 8, 6, 0 and 3 at a glance; the zero carries a stroke.
+// An onion route's rows: each address in two lines of the same font, smaller, on a panel, its label's plate beside it.
+const (
+	rowPitchPx       = 72
+	rowMarginPx      = 12
+	rowPaddingPx     = 12
+	rowRadiusPx      = 10
+	addressScale     = 2
+	addressGapPx     = 1
+	addressLineGapPx = 6
+	// two lines of the 62 characters fit beside the plate at the scene's width
+	addressLines = 2
+)
+
+// Lowercase hex and onion base32: a, b, d and e stay distinct from 8, 6, 0 and 3 at a glance; the zero carries a
+// stroke; g, q and y differ in their tops and tails.
 var glyphs = map[rune][glyphRows]string{
 	'0': {".###.", "#...#", "#..##", "#.#.#", "##..#", "#...#", ".###."},
 	'1': {"..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."},
@@ -46,6 +60,27 @@ var glyphs = map[rune][glyphRows]string{
 	'd': {"....#", "....#", ".####", "#...#", "#...#", "#...#", ".####"},
 	'e': {".....", ".....", ".###.", "#...#", "#####", "#....", ".####"},
 	'f': {"..##.", ".#...", "####.", ".#...", ".#...", ".#...", ".#..."},
+	'g': {".....", ".####", "#...#", "#...#", ".####", "....#", ".###."},
+	'h': {"#....", "#....", "####.", "#...#", "#...#", "#...#", "#...#"},
+	'i': {"..#..", ".....", ".##..", "..#..", "..#..", "..#..", ".###."},
+	'j': {"...#.", ".....", "..##.", "...#.", "...#.", "#..#.", ".##.."},
+	'k': {"#....", "#....", "#..#.", "#.#..", "##...", "#.#..", "#..#."},
+	'l': {".##..", "..#..", "..#..", "..#..", "..#..", "..#..", "..##."},
+	'm': {".....", ".....", "##.#.", "#.#.#", "#.#.#", "#.#.#", "#.#.#"},
+	'n': {".....", ".....", "####.", "#...#", "#...#", "#...#", "#...#"},
+	'o': {".....", ".....", ".###.", "#...#", "#...#", "#...#", ".###."},
+	'p': {".....", "####.", "#...#", "#...#", "####.", "#....", "#...."},
+	'q': {".....", ".####", "#...#", "#...#", ".####", "....#", "....#"},
+	'r': {".....", ".....", "#.##.", "##..#", "#....", "#....", "#...."},
+	's': {".....", ".....", ".####", "#....", ".###.", "....#", "####."},
+	't': {".#...", ".#...", "####.", ".#...", ".#...", ".#..#", "..##."},
+	'u': {".....", ".....", "#...#", "#...#", "#...#", "#..##", ".##.#"},
+	'v': {".....", ".....", "#...#", "#...#", "#...#", ".#.#.", "..#.."},
+	'w': {".....", ".....", "#...#", "#...#", "#.#.#", "#.#.#", ".#.#."},
+	'x': {".....", ".....", "#...#", ".#.#.", "..#..", ".#.#.", "#...#"},
+	'y': {".....", "#...#", "#...#", "#...#", ".####", "....#", ".###."},
+	'z': {".....", ".....", "#####", "...#.", "..#..", ".#...", "#####"},
+	'.': {".....", ".....", ".....", ".....", ".....", ".##..", ".##.."},
 }
 
 // Tailwind's 500 shades: mid tones that hold contrast against slate-50 and slate-800 alike.
@@ -63,6 +98,8 @@ var (
 	plateFill   = color.NRGBA{0xff, 0xff, 0xff, 0xff}
 	plateBorder = color.NRGBA{0x94, 0xa3, 0xb8, 0xff}
 	plateInk    = color.NRGBA{0x0f, 0x17, 0x2a, 0xff}
+	// slate-100: a row's panel sets its white plate apart
+	rowFill = color.NRGBA{0xf1, 0xf5, 0xf9, 0xff}
 )
 
 // A square's half side and a diamond's half diagonal per unit of circumradius, so shapes of one size look as big.
@@ -146,32 +183,72 @@ func roundedRectInside(r image.Rectangle, radius float64) func(x, y float64) boo
 	}
 }
 
-func plateDraw(canvas *image.NRGBA, o Object) {
-	textWidth := labelChars*glyphColumns*glyphScale + (labelChars-1)*glyphGapPx
-	width := textWidth + 2*platePaddingX
-	height := glyphRows*glyphScale + 2*platePaddingY
-	left := int(math.Round(o.X)) - width/2
-	top := int(math.Round(o.Y + o.SizePx + plateMarginPx))
-	outer := image.Rect(left, top, left+width, top+height)
-	fill(canvas, outer, plateBorder, roundedRectInside(outer, plateRadiusPx))
-	inner := outer.Inset(1)
-	fill(canvas, inner, plateFill, roundedRectInside(inner, plateRadiusPx-1))
-	for i, char := range o.Label {
-		glyph := glyphs[char]
-		originX := left + platePaddingX + i*(glyphColumns*glyphScale+glyphGapPx)
-		originY := top + platePaddingY
+func textWidthPx(chars, scale, gapPx int) int {
+	return chars*glyphColumns*scale + (chars-1)*gapPx
+}
+
+// textDraw sets text in the pixel font, each font pixel a scale x scale square, its top left corner at left, top.
+func textDraw(canvas *image.NRGBA, left, top int, text string, scale, gapPx int) {
+	for i, char := range []rune(text) {
+		glyph, found := glyphs[char]
+		if !found {
+			panic("render: no glyph for " + string(char))
+		}
+		originX := left + i*(glyphColumns*scale+gapPx)
 		for row, bits := range glyph {
 			for column, bit := range bits {
 				if bit != '#' {
 					continue
 				}
-				for dy := range glyphScale {
-					for dx := range glyphScale {
-						blend(canvas, originX+column*glyphScale+dx, originY+row*glyphScale+dy, plateInk, 1)
+				for dy := range scale {
+					for dx := range scale {
+						blend(canvas, originX+column*scale+dx, top+row*scale+dy, plateInk, 1)
 					}
 				}
 			}
 		}
+	}
+}
+
+func plateSize() image.Point {
+	return image.Pt(textWidthPx(labelChars, glyphScale, glyphGapPx)+2*platePaddingX, glyphRows*glyphScale+2*platePaddingY)
+}
+
+func panelDraw(canvas *image.NRGBA, outer image.Rectangle, inside color.NRGBA, radiusPx float64) {
+	fill(canvas, outer, plateBorder, roundedRectInside(outer, radiusPx))
+	inner := outer.Inset(1)
+	fill(canvas, inner, inside, roundedRectInside(inner, radiusPx-1))
+}
+
+func plateDraw(canvas *image.NRGBA, topLeft image.Point, label string) {
+	panelDraw(canvas, image.Rectangle{Min: topLeft, Max: topLeft.Add(plateSize())}, plateFill, plateRadiusPx)
+	textDraw(canvas, topLeft.X+platePaddingX, topLeft.Y+platePaddingY, label, glyphScale, glyphGapPx)
+}
+
+func objectDraw(canvas *image.NRGBA, o Object) {
+	reach := int(math.Ceil(o.SizePx*diamondHalfPerSize)) + 1
+	center := image.Pt(int(o.X), int(o.Y))
+	bounds := image.Rectangle{Min: center.Sub(image.Pt(reach, reach)), Max: center.Add(image.Pt(reach, reach))}
+	fill(canvas, bounds.Intersect(canvas.Rect), shapeColors[o.ColorID], shapeInside(o))
+	plateDraw(canvas, image.Pt(int(math.Round(o.X))-plateSize().X/2, int(math.Round(o.Y+o.SizePx+plateMarginPx))), o.Label)
+}
+
+// rowDraw is the index-th row: its panel, the address in lines on the left, the label's plate on the right.
+func rowDraw(canvas *image.NRGBA, index int, row Row) {
+	panel := image.Rect(rowMarginPx, rowMarginPx+index*rowPitchPx, canvasWidthPx-rowMarginPx, (index+1)*rowPitchPx)
+	panelDraw(canvas, panel, rowFill, rowRadiusPx)
+	plate := plateSize()
+	plateTopLeft := image.Pt(panel.Max.X-rowPaddingPx-plate.X, panel.Min.Y+(panel.Dy()-plate.Y)/2)
+	plateDraw(canvas, plateTopLeft, row.Code)
+	lineChars := (len(row.Address) + addressLines - 1) / addressLines
+	if panel.Min.X+rowPaddingPx+textWidthPx(lineChars, addressScale, addressGapPx) >= plateTopLeft.X {
+		panic("render: an address runs into its plate")
+	}
+	lineHeight := glyphRows*addressScale + addressLineGapPx
+	top := panel.Min.Y + (panel.Dy()-addressLines*lineHeight+addressLineGapPx)/2
+	for line := range addressLines {
+		text := row.Address[min(line*lineChars, len(row.Address)):min((line+1)*lineChars, len(row.Address))]
+		textDraw(canvas, panel.Min.X+rowPaddingPx, top+line*lineHeight, text, addressScale, addressGapPx)
 	}
 }
 
@@ -181,15 +258,23 @@ func plateDraw(canvas *image.NRGBA, o Object) {
  * -----------------------------------------------------------------------------
  */
 
-// puzzleRender draws the scene as a png with a transparent background; nothing but pixels carries the labels.
+// puzzleSize is the picture's size in pixels: the scene's, or as many rows as the puzzle has.
+func puzzleSize(puzzle Puzzle) image.Point {
+	if len(puzzle.Rows) > 0 {
+		return image.Pt(canvasWidthPx, rowMarginPx+len(puzzle.Rows)*rowPitchPx)
+	}
+	return image.Pt(canvasWidthPx, canvasHeightPx)
+}
+
+// puzzleRender draws the scene or the rows as a png with a transparent background; nothing but pixels carries the
+// labels and the addresses, so a proxy rewriting the page's text leaves them as the lab drew them.
 func puzzleRender(puzzle Puzzle) ([]byte, error) {
-	canvas := image.NewNRGBA(image.Rect(0, 0, canvasWidthPx, canvasHeightPx))
+	canvas := image.NewNRGBA(image.Rectangle{Max: puzzleSize(puzzle)})
 	for _, o := range puzzle.Objects {
-		reach := int(math.Ceil(o.SizePx*diamondHalfPerSize)) + 1
-		center := image.Pt(int(o.X), int(o.Y))
-		bounds := image.Rectangle{Min: center.Sub(image.Pt(reach, reach)), Max: center.Add(image.Pt(reach, reach))}
-		fill(canvas, bounds.Intersect(canvas.Rect), shapeColors[o.ColorID], shapeInside(o))
-		plateDraw(canvas, o)
+		objectDraw(canvas, o)
+	}
+	for i, row := range puzzle.Rows {
+		rowDraw(canvas, i, row)
 	}
 	var out bytes.Buffer
 	encoder := png.Encoder{CompressionLevel: png.BestSpeed}

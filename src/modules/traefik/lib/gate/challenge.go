@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
+	"slices"
 	"sync"
 	"time"
 )
@@ -20,6 +21,8 @@ const (
 	puzzleLifetime = 10 * time.Minute
 	// the window the page counts wrong answers in, the same crowdsec's captcha scenario leaks over
 	failureWindow = time.Hour
+	// what crowdsec gives an address past the same count (the ladder's hardBan rung), the gate gives an onion session
+	onionBanDuration = time.Hour
 	// clients holding a puzzle at once
 	challengeCountMax = 16384
 )
@@ -37,29 +40,37 @@ const (
 	NoticeNone Notice = iota
 	NoticeWrong
 	NoticeExpired
+	NoticeDecoy
 )
 
-// Outcome is what one answer did; wrong and expired both regenerate the puzzle and count against the client.
+// Outcome is what one answer did; all but solved regenerate the puzzle and count against the client.
 type Outcome int
 
 const (
 	OutcomeSolved Outcome = iota
 	OutcomeWrong
 	OutcomeExpired
+	// another row's label: wrong, and the sign of a visitor shown a lookalike address
+	OutcomeDecoy
 )
 
-var outcomeNames = map[Outcome]string{OutcomeSolved: "solved", OutcomeWrong: "wrong", OutcomeExpired: "expired"}
+var outcomeNames = map[Outcome]string{OutcomeSolved: "solved", OutcomeWrong: "wrong", OutcomeExpired: "expired", OutcomeDecoy: "decoy"}
 
-// challenge is one client's captcha state: the seed of its current puzzle, if any, and its recent failures.
+var outcomeNotices = map[Outcome]Notice{OutcomeWrong: NoticeWrong, OutcomeExpired: NoticeExpired, OutcomeDecoy: NoticeDecoy}
+
+// challenge is one client's captcha state: the seed of its current puzzle, if any, and its recent failures. An onion
+// session's puzzle shows its route's address, and the gate bans the session itself: crowdsec sees only the router.
 type challenge struct {
-	seed       uint64
-	issuedAt   time.Time
-	hasPuzzle  bool
-	notice     Notice
-	failuresAt []time.Time
+	seed        uint64
+	address     string
+	issuedAt    time.Time
+	hasPuzzle   bool
+	notice      Notice
+	failuresAt  []time.Time
+	bannedUntil time.Time
 }
 
-// Challenges holds every flagged client's current puzzle; one try each.
+// Challenges holds every flagged client's and onion session's current puzzle; one try each.
 type Challenges struct {
 	colorCount       int
 	regenerationsMax int
@@ -120,7 +131,15 @@ func failuresRecent(failures []time.Time, now time.Time) []time.Time {
 }
 
 func challengeStale(c challenge, now time.Time) bool {
-	return (!c.hasPuzzle || now.Sub(c.issuedAt) >= puzzleLifetime) && len(failuresRecent(c.failuresAt, now)) == 0
+	return (!c.hasPuzzle || now.Sub(c.issuedAt) >= puzzleLifetime) && len(failuresRecent(c.failuresAt, now)) == 0 &&
+		!now.Before(c.bannedUntil)
+}
+
+func challengePuzzle(c *Challenges, state challenge) Puzzle {
+	if state.address != "" {
+		return onionPuzzleFromSeed(state.seed, state.address)
+	}
+	return puzzleFromSeed(state.seed, c.colorCount)
 }
 
 /*
@@ -129,9 +148,10 @@ func challengeStale(c challenge, now time.Time) bool {
  * -----------------------------------------------------------------------------
  */
 
-// challengesShow is the puzzle a client sees now: its current one while it lasts, else a new one. A reload shows the
-// same puzzle, so reloading earns nothing; the notice is shown once.
-func challengesShow(c *Challenges, client string, now time.Time) (puzzle Puzzle, notice Notice, triesLeft int, err error) {
+// challengesShow is the puzzle a client sees now: its current one while it lasts, else a new one, a scene or, for an
+// onion session, its route's address among lookalikes. A reload shows the same puzzle, so reloading earns nothing;
+// the notice is shown once.
+func challengesShow(c *Challenges, client, address string, now time.Time) (puzzle Puzzle, notice Notice, triesLeft int, err error) {
 	c.clients.mu.Lock()
 	state, found := c.clients.entries[client]
 	if !found {
@@ -139,7 +159,7 @@ func challengesShow(c *Challenges, client string, now time.Time) (puzzle Puzzle,
 	}
 	fresh := !state.hasPuzzle || now.Sub(state.issuedAt) >= puzzleLifetime
 	if fresh {
-		state.seed, state.issuedAt, state.hasPuzzle = seedRandom(), now, true
+		state.seed, state.address, state.issuedAt, state.hasPuzzle = seedRandom(), address, now, true
 	}
 	notice = state.notice
 	state.notice = NoticeNone
@@ -148,7 +168,7 @@ func challengesShow(c *Challenges, client string, now time.Time) (puzzle Puzzle,
 	c.clients.entries[client] = state
 	c.clients.mu.Unlock()
 
-	puzzle = puzzleFromSeed(state.seed, c.colorCount)
+	puzzle = challengePuzzle(c, state)
 	if fresh && c.answerLog != nil {
 		c.answerLogMu.Lock()
 		_, err = fmt.Fprintf(c.answerLog, "%s %s\n", client, puzzle.Answer)
@@ -157,7 +177,8 @@ func challengesShow(c *Challenges, client string, now time.Time) (puzzle Puzzle,
 	return puzzle, notice, triesLeft, err
 }
 
-// challengesAnswer spends the client's one try: the puzzle is gone afterwards whatever the answer was.
+// challengesAnswer spends the client's one try: the puzzle is gone afterwards whatever the answer was. An onion
+// session past the failures crowdsec bans an address for is banned here, its count starting over.
 func challengesAnswer(c *Challenges, client string, typed string, now time.Time) Outcome {
 	c.clients.mu.Lock()
 	defer c.clients.mu.Unlock()
@@ -167,10 +188,15 @@ func challengesAnswer(c *Challenges, client string, typed string, now time.Time)
 	}
 	outcome := OutcomeExpired
 	if state.hasPuzzle && now.Sub(state.issuedAt) < puzzleLifetime {
-		outcome = OutcomeWrong
+		puzzle := challengePuzzle(c, state)
 		answer, valid := answerNormalize(typed)
-		if valid && answer == puzzleFromSeed(state.seed, c.colorCount).Answer {
+		switch {
+		case valid && answer == puzzle.Answer:
 			outcome = OutcomeSolved
+		case valid && slices.Contains(puzzle.Decoys, answer):
+			outcome = OutcomeDecoy
+		default:
+			outcome = OutcomeWrong
 		}
 	}
 	if outcome == OutcomeSolved {
@@ -178,12 +204,24 @@ func challengesAnswer(c *Challenges, client string, typed string, now time.Time)
 		return outcome
 	}
 	state.hasPuzzle = false
-	state.notice = map[Outcome]Notice{OutcomeWrong: NoticeWrong, OutcomeExpired: NoticeExpired}[outcome]
+	state.notice = outcomeNotices[outcome]
 	state.failuresAt = append(failuresRecent(state.failuresAt, now), now)
-	// the page counts up to the limit, crowdsec bans past it: more than that is never read
-	if excess := len(state.failuresAt) - c.regenerationsMax; excess > 0 {
+	excess := len(state.failuresAt) - c.regenerationsMax
+	switch {
+	case excess > 0 && state.address != "":
+		state.bannedUntil, state.failuresAt, state.notice = now.Add(onionBanDuration), nil, NoticeNone
+	case excess > 0:
+		// the page counts up to the limit, crowdsec bans past it: more than that is never read
 		state.failuresAt = state.failuresAt[excess:]
 	}
 	c.clients.entries[client] = state
 	return outcome
+}
+
+// challengesBanned is when an onion session's ban lifts, while it lasts.
+func challengesBanned(c *Challenges, client string, now time.Time) (time.Time, bool) {
+	c.clients.mu.Lock()
+	defer c.clients.mu.Unlock()
+	until := c.clients.entries[client].bannedUntil
+	return until, now.Before(until)
 }

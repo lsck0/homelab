@@ -18,7 +18,8 @@
 # the onion entrypoint, plain http from the router's tor (core/300-router/lib/onion-services.nix), with the same
 # routers, chain and backend as its name; tls is the onion service's. Every onion visitor arrives from the router, so
 # the per-client limits and crowdsec see one client there: crowdsec never bans it (private), the waf still judges
-# each request. The bot defence and the browser telemetry intake stay on the name.
+# each request, and the gate asks every browser session its anti-phishing captcha, whatever the route's features say.
+# The bot defence and the browser telemetry intake stay on the name.
 { config, lib, pkgs, retry, inventory, site, lab, catalog, ... }:
 let
   cfg = config.homelab.traefik;
@@ -424,22 +425,23 @@ let
     (lib.unique (map gateFlagsOf gatedRecords))));
   captchaOn = gateOn && cfg.gate.captcha.enable;
   # the captcha form posts here on every host, above every route; the gate lets the answer through itself
-  gateRouters = lib.optionalAttrs captchaOn {
-    gate-answer-tls = {
-      rule = "Path(`${gate.answerPath}`) && Method(`POST`)";
-      service = "gate";
-      entryPoints = [ "websecure" ];
-      priority = gateAnswerPriority;
-      route = {
-        # the captcha answers on every host, unproxied ones included
-        on = lib.remove "cloudflare" service.protectionFeatures;
-        methods = [ "POST" ];
-        frames = "deny";
-        referrer = true;
-        bodyLimitBytes = gateAnswerBodyBytes;
-        limitScale = 1;
-        sources = null;
-      };
+  gateRouters = lib.optionalAttrs captchaOn ({ gate-answer-tls = gateAnswerRouter "websecure"; }
+    # an onion visitor answers at its onion address
+    // lib.optionalAttrs (onionRoutes != { }) { gate-answer-onion = gateAnswerRouter onionEntryPoint; });
+  gateAnswerRouter = entryPoint: {
+    rule = "Path(`${gate.answerPath}`) && Method(`POST`)";
+    service = "gate";
+    entryPoints = [ entryPoint ];
+    priority = gateAnswerPriority;
+    route = {
+      # the captcha answers on every host, unproxied ones included
+      on = lib.remove "cloudflare" service.protectionFeatures;
+      methods = [ "POST" ];
+      frames = "deny";
+      referrer = true;
+      bodyLimitBytes = gateAnswerBodyBytes;
+      limitScale = 1;
+      sources = null;
     };
   };
   gateServices = lib.optionalAttrs captchaOn {
@@ -465,6 +467,8 @@ let
       inherit (gate) answerPath;
       regenerationsMax = ladder.captchaRegenerationsMax;
       answerLog = if cfg.gate.captcha.answerLog then "${gateDir}/answers" else null;
+      # a request to one of these gets the onion captcha: its address among lookalikes
+      onions = lib.mapAttrs (_: r: r.onionAddress) onionRoutes;
     };
     session = if cfg.gate.session == null then null else cfg.gate.session // { cookie = net.autheliaSessionCookie; };
     anonymous = { averagePerSecond = rateLimitAverage / anonymousLimitDivisor; burst = rateLimitBurst / anonymousLimitDivisor; };
@@ -542,8 +546,9 @@ let
   routeRouters = routeRoutersOf { tag = "tls"; entryPoint = "websecure"; hostOf = r: net.fqdn r.host; routes = cfg.routes; };
   # an onion route without an address yet (secrets-sync.sh writes it) is served at its name alone
   onionRoutes = lib.filterAttrs (_: r: r.onionAddress != null) cfg.routes;
-  # every onion visitor passes the gate, whatever the route takes on its name: the onion routers' chain is built here
-  onionGate = [ "crowdsec" ];
+  # every onion visitor passes the gate and its anti-phishing captcha, whatever the route takes on its name: nothing but
+  # the captcha tells one tor visitor from another, all arriving from the router; the onion routers' chain is built here
+  onionGate = [ "crowdsec" "captcha" ];
   onionRouters = routeRoutersOf {
     tag = "onion";
     entryPoint = onionEntryPoint;

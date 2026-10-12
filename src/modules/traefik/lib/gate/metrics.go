@@ -20,6 +20,7 @@ const (
 	metricTarpit       = "homelab_gate_tarpit_total"
 	metricErrors       = "homelab_gate_errors_total"
 	metricTarpitActive = "homelab_gate_tarpit_active"
+	metricOnionDecoys  = "homelab_gate_onion_decoys_total"
 )
 
 /*
@@ -43,6 +44,7 @@ var metricSpecs = []metricSpec{
 	{metricTarpit, "Labyrinth requests, trickled or refused at the tarpit's bounds.", false, "outcome"},
 	{metricErrors, "Failed calls to crowdsec or authelia, by upstream.", false, "upstream"},
 	{metricTarpitActive, "Labyrinth answers trickling now.", true, ""},
+	{metricOnionDecoys, "Onion captcha answers naming a lookalike address's label: visitors of a phishing copy, by route.", false, "route"},
 }
 
 // Metrics are the gate's counters, served in prometheus' text format on its loopback listener, where a timer copies

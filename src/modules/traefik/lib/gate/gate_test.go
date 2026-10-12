@@ -1,12 +1,16 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -257,11 +261,11 @@ func TestChallengesOneTry(t *testing.T) {
 	if got := challengesAnswer(c, client, "000000", now); got != OutcomeExpired {
 		t.Fatalf("an answer without a puzzle: %s", outcomeNames[got])
 	}
-	first, notice, tries, _ := challengesShow(c, client, now)
+	first, notice, tries, _ := challengesShow(c, client, "", now)
 	if notice != NoticeExpired || tries != regenerationsMax-1 {
 		t.Fatalf("after one failure: notice %d tries %d", notice, tries)
 	}
-	again, notice, _, _ := challengesShow(c, client, now.Add(time.Second))
+	again, notice, _, _ := challengesShow(c, client, "", now.Add(time.Second))
 	if again.Answer != first.Answer || notice != NoticeNone {
 		t.Fatal("a reload changed the puzzle or repeated the notice")
 	}
@@ -276,19 +280,19 @@ func TestChallengesOneTry(t *testing.T) {
 	if got := challengesAnswer(c, client, first.Answer, now); got != OutcomeExpired {
 		t.Fatalf("a second try: %s", outcomeNames[got])
 	}
-	second, _, tries, _ := challengesShow(c, client, now)
+	second, _, tries, _ := challengesShow(c, client, "", now)
 	if tries != regenerationsMax-3 {
 		t.Fatalf("after three failures: tries %d", tries)
 	}
 	if got := challengesAnswer(c, client, "0x"+strings.ToUpper(second.Answer), now.Add(puzzleLifetime)); got != OutcomeExpired {
 		t.Fatalf("a late answer: %s", outcomeNames[got])
 	}
-	third, _, _, _ := challengesShow(c, client, now)
+	third, _, _, _ := challengesShow(c, client, "", now)
 	if got := challengesAnswer(c, client, "0x"+strings.ToUpper(third.Answer), now); got != OutcomeSolved {
 		t.Fatalf("the right answer: %s", outcomeNames[got])
 	}
 	// failures leave the window after an hour
-	_, _, tries, _ = challengesShow(c, client, now.Add(failureWindow))
+	_, _, tries, _ = challengesShow(c, client, "", now.Add(failureWindow))
 	if tries != regenerationsMax {
 		t.Fatalf("an hour later: tries %d", tries)
 	}
@@ -395,7 +399,8 @@ func gateFixtureCreate(t *testing.T) *gateFixture {
 		tarpit:    tarpitCreate(labyrinth.URL, metrics),
 		metrics:   metrics,
 		captcha: &Captcha{key: []byte(strings.Repeat("k", captchaKeyBytesMin)), cookieDomain: "lsck0.dev",
-			answerPath: "/.lab-gate/answer", challenges: challenges, renders: make(chan struct{}, renderSlots)},
+			answerPath: "/.lab-gate/answer", onions: map[string]string{testOnion: testOnionRoute}, challenges: challenges,
+			renders: make(chan struct{}, renderSlots)},
 	}
 	f.gate.tarpit.interval = time.Millisecond
 	f.server = httptest.NewServer(gateMux(f.gate))
@@ -405,9 +410,15 @@ func gateFixtureCreate(t *testing.T) *gateFixture {
 
 func gateFixtureAuth(t *testing.T, f *gateFixture, client, query string, cookies ...*http.Cookie) (int, string, http.Header) {
 	t.Helper()
+	return gateFixtureAuthHost(t, f, testHost, client, query, cookies...)
+}
+
+func gateFixtureAuthHost(t *testing.T, f *gateFixture, host, client, query string, cookies ...*http.Cookie) (int, string, http.Header) {
+	t.Helper()
 	request, _ := http.NewRequest(http.MethodGet, f.server.URL+pathAuth+"?"+query, nil)
 	request.Header.Set(headerClient, client)
 	request.Header.Set(headerForwardedURI, "/page?x=1")
+	request.Header.Set(headerForwardedHost, host)
 	for _, cookie := range cookies {
 		request.AddCookie(cookie)
 	}
@@ -422,10 +433,19 @@ func gateFixtureAuth(t *testing.T, f *gateFixture, client, query string, cookies
 
 func gateFixtureAnswer(t *testing.T, f *gateFixture, client, answer string) *http.Response {
 	t.Helper()
+	return gateFixtureAnswerHost(t, f, testHost, client, answer)
+}
+
+func gateFixtureAnswerHost(t *testing.T, f *gateFixture, host, client, answer string, cookies ...*http.Cookie) *http.Response {
+	t.Helper()
 	form := url.Values{answerField: {answer}}
 	request, _ := http.NewRequest(http.MethodPost, f.server.URL+"/.lab-gate/answer?return=%2Fpage%3Fx%3D1", strings.NewReader(form.Encode()))
+	request.Host = host
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	request.Header.Set(headerClient, client)
+	for _, cookie := range cookies {
+		request.AddCookie(cookie)
+	}
 	noRedirect := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := noRedirect.Do(request)
 	if err != nil {
@@ -538,5 +558,304 @@ func TestTarpitServe(t *testing.T) {
 	response.Body.Close()
 	if string(body) != strings.Repeat("nonsense ", 8) {
 		t.Fatalf("trickled %q", body)
+	}
+}
+
+/*
+ * -----------------------------------------------------------------------------
+ * ONION
+ * -----------------------------------------------------------------------------
+ */
+
+const (
+	// hello's address (src/generated/onions.json)
+	testOnion      = "tqxs4mr42gshsz5u6x472i3adx3bltm7hyn4tn664w3q72p7a6pguzad.onion"
+	testOnionRoute = "hello"
+	testHost       = "wat.lsck0.dev"
+	// every tor visitor's address at the gate: the router, a private address the allow list passes
+	testRouter = "10.30.0.1"
+)
+
+func TestOnionAddressValid(t *testing.T) {
+	cases := map[string]bool{
+		testOnion:                  true,
+		strings.ToUpper(testOnion): false,
+		strings.TrimSuffix(testOnion, onionSuffix): false,
+		testOnion[1:]:       false,
+		"0" + testOnion[1:]: false,
+		testHost:            false,
+		"":                  false,
+	}
+	for address, valid := range cases {
+		if got := onionAddressValid(address); got != valid {
+			t.Errorf("%q: got %v", address, got)
+		}
+	}
+	if _, err := onionRoutes(map[string]string{"a": testOnion, "b": testOnion}); err == nil {
+		t.Fatal("two routes share an address")
+	}
+	if _, err := onionRoutes(map[string]string{"a": testHost}); err == nil {
+		t.Fatal("a name that is no onion address")
+	}
+}
+
+func TestHostNormalize(t *testing.T) {
+	for host, want := range map[string]string{
+		testOnion:                          testOnion,
+		strings.ToUpper(testOnion) + ":80": testOnion,
+		"Wat.Lsck0.Dev":                    testHost,
+	} {
+		if got := hostNormalize(host); got != want {
+			t.Errorf("%q: got %q", host, got)
+		}
+	}
+}
+
+// every glyph the rows and plates set is in the font, five columns by seven rows
+func TestGlyphsCover(t *testing.T) {
+	for _, char := range onionAlphabet + onionSuffix + hexDigits {
+		glyph, found := glyphs[char]
+		if !found {
+			t.Fatalf("no glyph for %q", char)
+		}
+		for _, row := range glyph {
+			if len(row) != glyphColumns {
+				t.Fatalf("glyph %q: row %q", char, row)
+			}
+		}
+	}
+}
+
+// the rows over seeds: the real address once, decoys alike at both ends yet distinct, the real row's label the
+// answer, every other row's label a decoy answer, none naming another
+func TestOnionPuzzleEverySeed(t *testing.T) {
+	const seeds = 5000
+	prefix, suffix := testOnion[:onionKeptPrefix], testOnion[onionKeyChars-onionKeptSuffix:]
+	backwards := 0
+	for seed := range uint64(seeds) {
+		puzzle := onionPuzzleFromSeed(seed, testOnion)
+		if len(puzzle.Rows) != onionRows || len(puzzle.Decoys) != onionRows-1 || len(puzzle.Objects) != 0 {
+			t.Fatalf("seed %d: %d rows, %d decoys", seed, len(puzzle.Rows), len(puzzle.Decoys))
+		}
+		reversed := strings.HasSuffix(puzzle.Question, backwardsSentence)
+		if reversed {
+			backwards++
+		}
+		addresses, answers := map[string]bool{}, map[string]bool{}
+		realRows := 0
+		for _, row := range puzzle.Rows {
+			if !onionAddressValid(row.Address) || !strings.HasPrefix(row.Address, prefix) || !strings.HasSuffix(row.Address, suffix) {
+				t.Fatalf("seed %d: row %s is no lookalike", seed, row.Address)
+			}
+			answer := row.Code
+			if reversed {
+				answer = labelReverse(answer)
+			}
+			addresses[row.Address], answers[answer] = true, true
+			if row.Address == testOnion {
+				realRows++
+				if answer != puzzle.Answer {
+					t.Fatalf("seed %d: the real row says %s, the answer is %s", seed, answer, puzzle.Answer)
+				}
+			} else if !slices.Contains(puzzle.Decoys, answer) {
+				t.Fatalf("seed %d: decoy row %s's label is no decoy answer", seed, row.Address)
+			}
+		}
+		if realRows != 1 || len(addresses) != onionRows || len(answers) != onionRows || slices.Contains(puzzle.Decoys, puzzle.Answer) {
+			t.Fatalf("seed %d: %d real rows, %d addresses, %d answers", seed, realRows, len(addresses), len(answers))
+		}
+	}
+	if backwards == 0 || backwards == seeds {
+		t.Fatalf("%d of %d puzzles backwards", backwards, seeds)
+	}
+	positions := map[int]bool{}
+	for seed := range uint64(64) {
+		positions[slices.IndexFunc(onionPuzzleFromSeed(seed, testOnion).Rows, func(r Row) bool { return r.Address == testOnion })] = true
+	}
+	if len(positions) != onionRows {
+		t.Fatalf("the real row stands in %d of %d places", len(positions), onionRows)
+	}
+}
+
+func TestOnionPuzzleRenderPng(t *testing.T) {
+	puzzle := onionPuzzleFromSeed(7, testOnion)
+	data, err := puzzleRender(puzzle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := png.Decode(bytes.NewReader(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size := decoded.Bounds().Size(); size != puzzleSize(puzzle) || size.Y >= canvasHeightPx {
+		t.Fatalf("size %v", size)
+	}
+}
+
+func TestVerdictDecideOnion(t *testing.T) {
+	for bits := range 8 {
+		answering, cookie, banned := bits&1 != 0, bits&2 != 0, bits&4 != 0
+		want := VerdictCaptcha
+		switch {
+		case answering || cookie:
+			want = VerdictPass
+		case banned:
+			want = VerdictBan
+		}
+		if got := verdictDecideOnion(answering, cookie, banned); got != want {
+			t.Errorf("answering %v cookie %v banned %v: got %s", answering, cookie, banned, verdictNames[got])
+		}
+	}
+}
+
+// an onion session's state: a decoy's label counts as a failure of its own kind, past the limit the session alone is
+// banned for an hour, and the count starts over after
+func TestChallengesOnion(t *testing.T) {
+	const regenerationsMax = 5
+	c, err := challengesCreate(regenerationsMax, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer challengesDestroy(c)
+	now := time.Unix(1_700_000_000, 0)
+	a, b := onionClient(testOnion, onionSessionNew()), onionClient(testOnion, onionSessionNew())
+
+	puzzle, _, _, _ := challengesShow(c, a, testOnion, now)
+	if len(puzzle.Rows) != onionRows {
+		t.Fatal("an onion session got no rows")
+	}
+	if got := challengesAnswer(c, a, puzzle.Decoys[0], now); got != OutcomeDecoy {
+		t.Fatalf("a decoy's label: %s", outcomeNames[got])
+	}
+	_, notice, tries, _ := challengesShow(c, a, testOnion, now)
+	if notice != NoticeDecoy || tries != regenerationsMax-1 {
+		t.Fatalf("after a decoy: notice %d tries %d", notice, tries)
+	}
+	for range regenerationsMax {
+		if _, banned := challengesBanned(c, a, now); banned {
+			t.Fatal("banned within the limit")
+		}
+		challengesShow(c, a, testOnion, now)
+		challengesAnswer(c, a, "000000", now)
+	}
+	until, banned := challengesBanned(c, a, now)
+	if !banned || !until.Equal(now.Add(onionBanDuration)) {
+		t.Fatalf("past the limit: banned %v until %v", banned, until)
+	}
+	if _, banned := challengesBanned(c, b, now); banned {
+		t.Fatal("another session of the same router is banned")
+	}
+	shown, _, _, _ := challengesShow(c, b, testOnion, now)
+	if got := challengesAnswer(c, b, shown.Answer, now); got != OutcomeSolved {
+		t.Fatalf("another session's right answer: %s", outcomeNames[got])
+	}
+	if _, banned := challengesBanned(c, a, now.Add(onionBanDuration)); banned {
+		t.Fatal("the ban outlasts its hour")
+	}
+	if _, _, tries, _ := challengesShow(c, a, testOnion, now.Add(onionBanDuration)); tries != regenerationsMax {
+		t.Fatalf("after the ban: tries %d", tries)
+	}
+}
+
+func onionPuzzleOf(f *gateFixture, session string) Puzzle {
+	f.gate.captcha.challenges.clients.mu.Lock()
+	defer f.gate.captcha.challenges.clients.mu.Unlock()
+	return onionPuzzleFromSeed(f.gate.captcha.challenges.clients.entries[onionClient(testOnion, session)].seed, testOnion)
+}
+
+func cookieNamed(cookies []*http.Cookie, name string) *http.Cookie {
+	for _, cookie := range cookies {
+		if cookie.Name == name {
+			return cookie
+		}
+	}
+	return nil
+}
+
+// the onion captcha end to end: every session is asked, whatever the allow list or the route's feature say; a
+// decoy's label fails and is counted per route; the right one passes this session alone
+func TestGateOnionFlow(t *testing.T) {
+	f := gateFixtureCreate(t)
+	routeOff := strings.Replace(routeAll, "captcha=1", "captcha=0", 1)
+
+	// clearnet unchanged: the router's address is allowed at a name
+	if status, _, _ := gateFixtureAuth(t, f, testRouter, routeAll); status != http.StatusOK {
+		t.Fatalf("the router at a name: %d", status)
+	}
+	status, page, header := gateFixtureAuthHost(t, f, testOnion, testRouter, routeOff)
+	session := cookieNamed((&http.Response{Header: header}).Cookies(), onionSessionCookie)
+	if status != captchaStatus || header.Get(headerOutcome) != "captcha" || session == nil || session.Secure || session.Domain != "" || !session.HttpOnly {
+		t.Fatalf("a new onion session: %d %v", status, session)
+	}
+	puzzle := onionPuzzleOf(f, session.Value)
+	for _, forbidden := range append([]string{"<script", testOnion, puzzle.Answer}, puzzle.Decoys...) {
+		if strings.Contains(strings.ToLower(page), forbidden) {
+			t.Fatalf("the page contains %q", forbidden)
+		}
+	}
+	if strings.Count(page, "<input") != 1 || !strings.Contains(page, `src="data:image/png;base64,`) || !strings.Contains(page, "address bar") {
+		t.Fatal("the page is not one text box, one image and the address bar's question")
+	}
+	// a reload keeps the session's puzzle; an answer without the session finds none
+	gateFixtureAuthHost(t, f, testOnion, testRouter, routeAll, session)
+	if onionPuzzleOf(f, session.Value).Answer != puzzle.Answer {
+		t.Fatal("a reload changed the puzzle")
+	}
+	if got := gateFixtureAnswerHost(t, f, testOnion, testRouter, puzzle.Answer).Header.Get(headerOutcome); got != "expired" {
+		t.Fatalf("an answer without a session: %s", got)
+	}
+
+	response := gateFixtureAnswerHost(t, f, testOnion, testRouter, puzzle.Decoys[0], session)
+	if response.Header.Get(headerOutcome) != "decoy" || cookieNamed(response.Cookies(), cookieName) != nil {
+		t.Fatalf("a decoy's label: %s", response.Header.Get(headerOutcome))
+	}
+	var metrics strings.Builder
+	if err := metricsRender(f.gate.metrics, &metrics); err != nil || !strings.Contains(metrics.String(), `homelab_gate_onion_decoys_total{route="hello"} 1`) {
+		t.Fatalf("metrics:\n%s", metrics.String())
+	}
+	_, page, _ = gateFixtureAuthHost(t, f, testOnion, testRouter, routeAll, session)
+	if !strings.Contains(page, "another address") {
+		t.Fatal("the new puzzle does not say the label was a decoy's")
+	}
+	response = gateFixtureAnswerHost(t, f, testOnion, testRouter, onionPuzzleOf(f, session.Value).Answer, session)
+	pass := cookieNamed(response.Cookies(), cookieName)
+	if response.Header.Get(headerOutcome) != "solved" || pass == nil || pass.Domain != "" || pass.Secure || !pass.HttpOnly {
+		t.Fatalf("the right answer: %s %v", response.Header.Get(headerOutcome), pass)
+	}
+	if status, _, _ := gateFixtureAuthHost(t, f, testOnion, testRouter, routeAll, session, pass); status != http.StatusOK {
+		t.Fatalf("with the pass: %d", status)
+	}
+	// the pass is its session's: with another session, or none, it is worth nothing
+	other := &http.Cookie{Name: onionSessionCookie, Value: onionSessionNew()}
+	if status, _, _ := gateFixtureAuthHost(t, f, testOnion, testRouter, routeAll, other, pass); status != captchaStatus {
+		t.Fatalf("another session with the pass: %d", status)
+	}
+	if status, _, _ := gateFixtureAuthHost(t, f, testOnion, testRouter, routeAll, pass); status != captchaStatus {
+		t.Fatalf("the pass without its session: %d", status)
+	}
+}
+
+// the regeneration ban on an onion host lands on the session that failed, never on the router every visitor shares
+func TestGateOnionBanPerSession(t *testing.T) {
+	f := gateFixtureCreate(t)
+	failing := &http.Cookie{Name: onionSessionCookie, Value: onionSessionNew()}
+	for range f.gate.captcha.challenges.regenerationsMax + 1 {
+		gateFixtureAuthHost(t, f, testOnion, testRouter, routeAll, failing)
+		if got := gateFixtureAnswerHost(t, f, testOnion, testRouter, "000000", failing).Header.Get(headerOutcome); got != "wrong" {
+			t.Fatalf("a wrong answer: %s", got)
+		}
+	}
+	status, page, header := gateFixtureAuthHost(t, f, testOnion, testRouter, routeAll, failing)
+	if status != http.StatusForbidden || !strings.Contains(page, "You have been banned for 59 minutes") || header.Get(headerOutcome) != "ban" {
+		t.Fatalf("the failing session: %d", status)
+	}
+	if retry, _ := strconv.Atoi(header.Get("Retry-After")); retry <= 3500 || retry > 3600 {
+		t.Fatalf("retry-after %s", header.Get("Retry-After"))
+	}
+	if status, _, _ := gateFixtureAuthHost(t, f, testOnion, testRouter, routeAll); status != captchaStatus {
+		t.Fatalf("a new session from the same router: %d", status)
+	}
+	if status, _, _ := gateFixtureAuth(t, f, testRouter, routeAll); status != http.StatusOK {
+		t.Fatalf("the router at a name: %d", status)
 	}
 }

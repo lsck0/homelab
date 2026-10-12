@@ -46,7 +46,9 @@ const (
 	labelMutations   = 2
 	sceneAttemptsMax = 64
 	// one question in this many asks for the label backwards
-	backwardsOneIn = 3
+	backwardsOneIn    = 3
+	backwardsSentence = " Type that label backwards, last character first."
+	hexDigits         = "0123456789abcdef"
 )
 
 /*
@@ -77,11 +79,21 @@ type Object struct {
 	ColorID int
 }
 
-// Puzzle is one generated scene, its question and the answer, all from one seed.
+// Row is one line of an onion route's puzzle: an address and the code beside it.
+type Row struct {
+	Address string
+	Code    string
+}
+
+// Puzzle is one generated picture, a scene of objects or an onion route's rows, its question and the answer, all from
+// one seed.
 type Puzzle struct {
 	Objects  []Object
+	Rows     []Row
 	Question string
 	Answer   string
+	// what the other rows' codes answer: only a person shown a lookalike address has a reason to type one
+	Decoys []string
 }
 
 /*
@@ -92,24 +104,22 @@ type Puzzle struct {
 
 var ordinalNames = []string{"first", "second", "third", "fourth", "fifth", "sixth", "seventh"}
 
-// labelsGenerate makes labels that differ from a base in a few characters each: a misread or a confused neighbour
-// yields a plausible wrong label, never a near miss that happens to be right.
-func labelsGenerate(rng *rand.Rand) []string {
-	const hexDigits = "0123456789abcdef"
-	base := make([]byte, labelChars)
-	for i := range base {
-		base[i] = hexDigits[rng.IntN(len(hexDigits))]
+func labelRandom(rng *rand.Rand) []byte {
+	label := make([]byte, labelChars)
+	for i := range label {
+		label[i] = hexDigits[rng.IntN(len(hexDigits))]
 	}
-	labels := make([]string, 0, objectCount)
+	return label
+}
+
+// labelsGenerate draws count distinct labels from next, none another's reversal nor its own: a "backwards" question
+// must have one answer on the plates.
+func labelsGenerate(rng *rand.Rand, count int, next func() []byte) []string {
+	labels := make([]string, 0, count)
 	seen := map[string]bool{}
-	for len(labels) < objectCount {
-		label := slices.Clone(base)
-		for range labelMutations {
-			label[rng.IntN(labelChars)] = hexDigits[rng.IntN(len(hexDigits))]
-		}
-		text := string(label)
+	for len(labels) < count {
+		text := string(next())
 		reversed := labelReverse(text)
-		// a label must not be another's reversal: "backwards" questions would have two answers on the plates
 		if seen[text] || seen[reversed] || text == reversed {
 			continue
 		}
@@ -117,6 +127,19 @@ func labelsGenerate(rng *rand.Rand) []string {
 		labels = append(labels, text)
 	}
 	return labels
+}
+
+// labelsRelated differ from a base in a few characters each: a misread or a confused neighbour yields a plausible
+// wrong label, never a near miss that happens to be right.
+func labelsRelated(rng *rand.Rand) []string {
+	base := labelRandom(rng)
+	return labelsGenerate(rng, objectCount, func() []byte {
+		label := slices.Clone(base)
+		for range labelMutations {
+			label[rng.IntN(labelChars)] = hexDigits[rng.IntN(len(hexDigits))]
+		}
+		return label
+	})
 }
 
 func labelReverse(label string) string {
@@ -127,7 +150,7 @@ func labelReverse(label string) string {
 
 func sceneGenerate(rng *rand.Rand, colorCount int) []Object {
 	cells := rng.Perm(gridColumns * gridRows)[:objectCount]
-	labels := labelsGenerate(rng)
+	labels := labelsRelated(rng)
 	objects := make([]Object, objectCount)
 	for i, cell := range cells {
 		column, row := cell%gridColumns, cell/gridColumns
@@ -260,10 +283,15 @@ func candidatesAll(objects []Object) []candidate {
  * -----------------------------------------------------------------------------
  */
 
+// puzzleRandom is a seed's one stream: every choice of a puzzle comes from it, so the seed alone recreates the puzzle.
+func puzzleRandom(seed uint64) *rand.Rand {
+	return rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)) // the golden ratio's bits: any fixed odd stream works
+}
+
 // puzzleFromSeed generates the scene, the question and its answer; the same seed always yields the same puzzle, so
 // the gate keeps only the seed and the answer never leaves the server.
 func puzzleFromSeed(seed uint64, colorCount int) Puzzle {
-	rng := rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)) // the golden ratio's bits: any fixed odd stream works
+	rng := puzzleRandom(seed)
 	for range sceneAttemptsMax {
 		objects := sceneGenerate(rng, colorCount)
 		candidates := candidatesAll(objects)
@@ -275,7 +303,7 @@ func puzzleFromSeed(seed uint64, colorCount int) Puzzle {
 		question := chosen.text
 		if rng.IntN(backwardsOneIn) == 0 {
 			answer = labelReverse(answer)
-			question += " Type that label backwards, last character first."
+			question += backwardsSentence
 		}
 		return Puzzle{Objects: objects, Question: question, Answer: answer}
 	}
@@ -291,7 +319,7 @@ func answerNormalize(typed string) (string, bool) {
 		return "", false
 	}
 	for _, c := range text {
-		if !strings.ContainsRune("0123456789abcdef", c) {
+		if !strings.ContainsRune(hexDigits, c) {
 			return "", false
 		}
 	}

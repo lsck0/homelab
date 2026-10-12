@@ -3,8 +3,8 @@
 # Never hit: the house, wireguard, the internal zone and the ingress itself pass every gate untouched, as crowdsec
 # never decides against them; a logged-in user is asked about. As the route opts in: a route taking crowdsec has the
 # gate, which asks the captcha, limits anonymous clients and holds banned ones where the route takes each, read off
-# the forwardauth address of its router.
-# No lab host logs the captcha's answers.
+# the forwardauth address of its router. Onion captcha: every router on the onion entrypoint asks the captcha, no
+# route can say otherwise, and the gate knows every onion address it guards. No lab host logs the captcha's answers.
 { lib, configs, inventory, site, catalog, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
@@ -36,6 +36,13 @@ let
   edgeRoutersOf = name: lib.filterAttrs (router: _: lib.elem router [ "${name}-tls" "${name}-relay" ]) (httpOf edge).routers;
   features = { captcha = "captcha"; limit = "anonymousLimit"; tarpit = "tarpit"; };
   edgeRoutes = catalog.external // catalog.internal;
+
+  # the edge's onion entrypoint (the one at tor's onionIngress port) and every router on it
+  torPorts = import ../../modules/tor-ports.nix;
+  onionEntryPoints = lib.attrNames (lib.filterAttrs (_: e: e.address or "" == ":${toString torPorts.onionIngress}")
+    edge.services.traefik.staticConfigOptions.entryPoints);
+  onionRouters = lib.filterAttrs (_: router: lib.any (e: lib.elem e onionEntryPoints) (router.entryPoints or [ ])) (httpOf edge).routers;
+  onionAddresses = lib.filter (address: address != null) (map (r: r.onionAddress or null) (lib.attrValues catalog.external));
 in
 lib.concatLists (lib.mapAttrsToList (law: violations: map (v: "${law}: ${v}") violations) {
   "never hit" = lib.concatLists (lib.mapAttrsToList (host: config: let
@@ -62,6 +69,14 @@ lib.concatLists (lib.mapAttrsToList (law: violations: map (v: "${law}: ${v}") vi
         "vm-200 router ${router}: the gate's ${flag} is ${flags.${flag} or "absent"}, its route's ${feature} says ${says feature}"
     ) features)
   ) (edgeRoutersOf name))) edgeRoutes);
+
+  # the owner's rule: an onion visitor is always asked, whatever its route's features say
+  "onion captcha" = lib.concatLists (lib.mapAttrsToList (name: router: let flags = gateFlags edge router; in
+    if flags == null then [ "vm-200 onion router ${name} has no gate" ]
+    else lib.optional ((flags.captcha or "0") != "1") "vm-200 onion router ${name}: the gate's captcha is ${flags.captcha or "absent"}"
+  ) onionRouters)
+    ++ map (address: "vm-200's gate does not know the onion address ${address}")
+      (lib.subtractLists (lib.attrValues ((gateOf edge).captcha.onions or { })) onionAddresses);
 
   "captcha" = lib.optional ((gateOf edge).captcha == null) "vm-200, the internet's ingress, asks no captcha"
     ++ lib.concatLists (lib.mapAttrsToList (host: config:

@@ -25,6 +25,8 @@ const (
 	headerClient = "X-Real-Ip"
 	// forwardauth's copy of the request's path and query
 	headerForwardedURI = "X-Forwarded-Uri"
+	// forwardauth's copy of the request's host, which the router's rule matched (traefik trusts no client's here)
+	headerForwardedHost = "X-Forwarded-Host"
 
 	pathAuth    = "/auth"
 	pathMetrics = "/metrics"
@@ -77,8 +79,10 @@ type Captcha struct {
 	key          []byte
 	cookieDomain string
 	answerPath   string
-	challenges   *Challenges
-	renders      chan struct{}
+	// onion address -> its route
+	onions     map[string]string
+	challenges *Challenges
+	renders    chan struct{}
 }
 
 // Gate is everything a request is judged by.
@@ -147,6 +151,42 @@ func verdictDecide(kind DecisionKind, routeCaptcha, captchaEnabled, answering, c
 	panic("verdict: no such decision kind")
 }
 
+// verdictDecideOnion is the policy for an onion session, which no source, login or crowdsec decision tells apart
+// from the others: every session without a solved captcha is asked one, a session failing too many is banned.
+func verdictDecideOnion(answering, cookieValid, banned bool) Verdict {
+	switch {
+	case answering, cookieValid:
+		return VerdictPass
+	case banned:
+		return VerdictBan
+	}
+	return VerdictCaptcha
+}
+
+// onionOf is the onion address a request names, if any: the onion captcha is the owner's rule for every onion
+// route, whatever its captcha feature says, for nothing else tells a tor visitor from a bot.
+func onionOf(g *Gate, host string) (string, bool) {
+	if g.captcha == nil {
+		return "", false
+	}
+	address := hostNormalize(host)
+	_, onion := g.captcha.onions[address]
+	return address, onion
+}
+
+// onionCookieSet sets a cookie for the onion address alone: no domain, and not Secure, the page being plain http
+// inside tor's encryption, where a browser that counts no onion as secure would drop a Secure cookie.
+func onionCookieSet(w http.ResponseWriter, name, value string, maxAge time.Duration) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    value,
+		Path:     "/",
+		MaxAge:   int(maxAge / time.Second),
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
 func cookieValid(g *Gate, r *http.Request, client string, now time.Time) bool {
 	if g.captcha == nil {
 		return false
@@ -167,8 +207,10 @@ func lapiStateLog(g *Gate, err error) {
 	}
 }
 
-func captchaPageWrite(ctx context.Context, g *Gate, w http.ResponseWriter, client, uri string, now time.Time) {
-	puzzle, notice, triesLeft, err := challengesShow(g.captcha.challenges, client, now)
+// captchaPageWrite asks the client its puzzle: a scene, or for an onion session (address set) its route's address
+// among lookalikes.
+func captchaPageWrite(ctx context.Context, g *Gate, w http.ResponseWriter, client, address, uri string, now time.Time) {
+	puzzle, notice, triesLeft, err := challengesShow(g.captcha.challenges, client, address, now)
 	if err != nil {
 		slog.Error("captcha: answer log", "err", err)
 	}
@@ -184,23 +226,38 @@ func captchaPageWrite(ctx context.Context, g *Gate, w http.ResponseWriter, clien
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	notices := map[Notice]string{
-		NoticeNone:    "",
-		NoticeWrong:   "That answer was not right. Here is a new picture.",
-		NoticeExpired: "That picture had expired. Here is a new one.",
+	wording := sceneWording
+	if address != "" {
+		wording = onionWording
 	}
+	size := puzzleSize(puzzle)
 	action := g.captcha.answerPath + "?" + url.Values{returnQuery: {returnPathParse(uri)}}.Encode()
 	pageWrite(w, captchaStatus, verdictNames[VerdictCaptcha], pageData{
-		Title:     "One question before you continue",
+		Title:     wording.title,
+		Lead:      wording.lead,
 		Captcha:   true,
-		Notice:    notices[notice],
+		Notice:    wording.notices[notice],
 		Image:     template.URL("data:image/png;base64," + base64.StdEncoding.EncodeToString(image)),
-		Width:     canvasWidthPx,
-		Height:    canvasHeightPx,
+		Width:     size.X,
+		Height:    size.Y,
+		Alt:       wording.alt,
 		Question:  puzzle.Question,
 		Action:    action,
 		TriesLeft: triesLeft,
 		TriesMax:  g.captcha.challenges.regenerationsMax,
+		Subject:   wording.subject,
+		Aside:     wording.aside,
+	})
+}
+
+// banPageRender says how long the ban lasts and why: lead names what is banned, an address or an onion session.
+func banPageRender(w http.ResponseWriter, until time.Time, lead string, now time.Time) {
+	remaining := until.Sub(now)
+	w.Header().Set("Retry-After", strconv.FormatInt(int64(max(remaining, 0)/time.Second), 10))
+	pageWrite(w, http.StatusForbidden, verdictNames[VerdictBan], pageData{
+		Title: "You have been banned for " + durationHuman(remaining),
+		Lead:  lead,
+		Until: until.UTC().Format("15:04 UTC on 2 January"),
 	})
 }
 
@@ -214,13 +271,33 @@ func banPageWrite(ctx context.Context, g *Gate, w http.ResponseWriter, client st
 		timer.Stop()
 		tarpitRelease(g.tarpit, client)
 	}
-	remaining := decision.Until.Sub(now)
-	w.Header().Set("Retry-After", strconv.FormatInt(int64(max(remaining, 0)/time.Second), 10))
-	pageWrite(w, http.StatusForbidden, verdictNames[VerdictBan], pageData{
-		Title: "You have been banned for " + durationHuman(remaining),
-		Lead:  "Requests from this address looked automated to the lab, so it refuses them for now.",
-		Until: decision.Until.UTC().Format("15:04 UTC on 2 January"),
-	})
+	banPageRender(w, decision.Until, "Requests from this address looked automated to the lab, so it refuses them for now.", now)
+}
+
+// gateAuthOnion judges a request to an onion route asking the captcha by its browser's session, never its address:
+// every tor visitor arrives from the router, which the allow list, crowdsec and the limits all see as one client.
+func gateAuthOnion(ctx context.Context, g *Gate, w http.ResponseWriter, r *http.Request, address, uri string, answering bool, now time.Time) Verdict {
+	session, hasSession := onionSessionOf(r)
+	client := onionClient(address, session)
+	var bannedUntil time.Time
+	banned := false
+	if hasSession {
+		bannedUntil, banned = challengesBanned(g.captcha.challenges, client, now)
+	}
+	verdict := verdictDecideOnion(answering, hasSession && cookieValid(g, r, client, now), banned)
+	switch verdict {
+	case VerdictCaptcha:
+		if !hasSession {
+			session = onionSessionNew()
+			client = onionClient(address, session)
+			// a browser session's cookie: its puzzles and its ban live as long as the gate remembers them
+			onionCookieSet(w, onionSessionCookie, session, 0)
+		}
+		captchaPageWrite(ctx, g, w, client, address, uri, now)
+	case VerdictBan:
+		banPageRender(w, bannedUntil, "This browser answered too many puzzles wrong, so the lab refuses it for now.", now)
+	}
+	return verdict
 }
 
 /*
@@ -242,6 +319,13 @@ func gateAuth(g *Gate, w http.ResponseWriter, r *http.Request) {
 	}
 	verdict := VerdictPass
 	defer func() { metricsAdd(g.metrics, metricVerdicts, verdictNames[verdict], 1) }()
+	uri := r.Header.Get(headerForwardedURI)
+	path, _, _ := strings.Cut(uri, "?")
+	answering := g.captcha != nil && path == g.captcha.answerPath
+	if address, onion := onionOf(g, r.Header.Get(headerForwardedHost)); onion {
+		verdict = gateAuthOnion(r.Context(), g, w, r, address, uri, answering, now)
+		return
+	}
 	if allowContains(g.allow, client, now) {
 		return
 	}
@@ -261,9 +345,6 @@ func gateAuth(g *Gate, w http.ResponseWriter, r *http.Request) {
 		metricsAdd(g.metrics, metricBans, "", 1)
 		slog.Info("ban enforced", "client", clientText, "until", decision.Until.UTC())
 	}
-	uri := r.Header.Get(headerForwardedURI)
-	path, _, _ := strings.Cut(uri, "?")
-	answering := g.captcha != nil && path == g.captcha.answerPath
 	needsCookie := decision.Kind == DecisionCaptcha || decision.Kind == DecisionUnknown
 	verdict = verdictDecide(decision.Kind, flags.Captcha, g.captcha != nil, answering, needsCookie && cookieValid(g, r, clientText, now))
 	if verdict == VerdictPass && flags.Limit && !answering && !limiterTake(g.limiter, clientText, flags.Scale, now) {
@@ -272,7 +353,7 @@ func gateAuth(g *Gate, w http.ResponseWriter, r *http.Request) {
 	switch verdict {
 	case VerdictPass:
 	case VerdictCaptcha:
-		captchaPageWrite(r.Context(), g, w, clientText, uri, now)
+		captchaPageWrite(r.Context(), g, w, clientText, "", uri, now)
 	case VerdictBan:
 		banPageWrite(r.Context(), g, w, clientText, flags, decision, now)
 	case VerdictLimited:
@@ -308,10 +389,26 @@ func gateAnswer(g *Gate, w http.ResponseWriter, r *http.Request) {
 	r.Body = http.MaxBytesReader(w, r.Body, answerBodyBytesMax)
 	// an oversized or malformed body is an empty answer: wrong, like any other
 	_ = r.ParseForm()
-	outcome := challengesAnswer(g.captcha.challenges, client, r.PostForm.Get(answerField), now)
+	address, onion := onionOf(g, r.Host)
+	session, hasSession := onionSessionOf(r)
+	if onion {
+		client = onionClient(address, session)
+	}
+	// an onion answer without a session has no puzzle: expired, and no state for the empty session to share
+	outcome := OutcomeExpired
+	if !onion || hasSession {
+		outcome = challengesAnswer(g.captcha.challenges, client, r.PostForm.Get(answerField), now)
+	}
 	metricsAdd(g.metrics, metricAnswers, outcomeNames[outcome], 1)
+	if outcome == OutcomeDecoy {
+		metricsAdd(g.metrics, metricOnionDecoys, g.captcha.onions[address], 1)
+	}
 	slog.Info("captcha answer", "client", client, "outcome", outcomeNames[outcome])
-	if outcome == OutcomeSolved {
+	switch {
+	case outcome != OutcomeSolved:
+	case onion:
+		onionCookieSet(w, cookieName, cookieEncode(g.captcha.key, client, now.Add(cookieLifetime)), cookieLifetime)
+	default:
 		http.SetCookie(w, &http.Cookie{
 			Name:     cookieName,
 			Value:    cookieEncode(g.captcha.key, client, now.Add(cookieLifetime)),

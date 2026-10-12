@@ -20,7 +20,7 @@ let
   # the go module's binary
   binary = "gate";
   # what forwardauth passes the gate: the client client-ip named and the cookies (its own, authelia's); nothing else
-  # of the request leaves traefik
+  # of the request leaves traefik but forwardauth's own X-Forwarded-Host and -Uri (an onion route's address, the path)
   authRequestHeaders = [ "X-Real-Ip" "Cookie" ];
   flagNames = [ "captcha" "limit" "tarpit" ];
   # a captcha page is under 32 KiB (a png of flat shapes); traefik reads no gate answer past this

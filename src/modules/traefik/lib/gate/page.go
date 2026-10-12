@@ -66,10 +66,10 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
 </head>
 <body>
 <main>
-{{if .Captcha}}<h1>One question before you continue</h1>
-<p class="lead">This address looked automated to the lab. Answer one question about the picture to go on.</p>
+{{if .Captcha}}<h1>{{.Title}}</h1>
+<p class="lead">{{.Lead}}</p>
 {{if .Notice}}<p class="notice" role="status">{{.Notice}}</p>{{end}}
-<figure><img src="{{.Image}}" width="{{.Width}}" height="{{.Height}}" alt="Coloured shapes, each with a six-character label beneath it"></figure>
+<figure><img src="{{.Image}}" width="{{.Width}}" height="{{.Height}}" alt="{{.Alt}}"></figure>
 <p class="question" id="question">{{.Question}}</p>
 <form method="post" action="{{.Action}}">
 <label for="answer">Answer: six characters, 0-9 and a-f
@@ -77,8 +77,8 @@ var pageTemplate = template.Must(template.New("page").Parse(`<!doctype html>
  autocomplete="off" autocapitalize="off" spellcheck="false" autofocus aria-describedby="question"></label>
 <button type="submit">Continue</button>
 </form>
-<p class="small">A wrong answer brings a new picture. {{.TriesLeft}} of {{.TriesMax}} wrong answers left this hour; past them this address is banned.
-No script, no tracking, nothing from anyone else. Can't solve it? The house network and WireGuard are never asked.</p>
+<p class="small">A wrong answer brings a new picture. {{.TriesLeft}} of {{.TriesMax}} wrong answers left this hour; past them {{.Subject}} is banned.
+No script, no tracking, nothing from anyone else. {{.Aside}}</p>
 {{else}}<h1 class="stop">{{.Title}}</h1>
 <p class="lead">{{.Lead}}</p>
 {{if .Until}}<p class="small">It lifts on its own at {{.Until}}.</p>{{end}}{{end}}
@@ -101,12 +101,57 @@ type pageData struct {
 	Image     template.URL
 	Width     int
 	Height    int
+	Alt       string
 	Question  string
 	Action    string
 	TriesLeft int
 	TriesMax  int
+	Subject   string
+	Aside     string
 	Lead      string
 	Until     string
+}
+
+// captchaWording is what a captcha page says around its picture: a scene for a flagged address, the rows for an
+// onion session.
+type captchaWording struct {
+	title   string
+	lead    string
+	alt     string
+	subject string
+	aside   string
+	notices map[Notice]string
+}
+
+var captchaNoticesCommon = map[Notice]string{
+	NoticeNone:    "",
+	NoticeWrong:   "That answer was not right. Here is a new picture.",
+	NoticeExpired: "That picture had expired. Here is a new one.",
+}
+
+var sceneWording = captchaWording{
+	title:   "One question before you continue",
+	lead:    "This address looked automated to the lab. Answer one question about the picture to go on.",
+	alt:     "Coloured shapes, each with a six-character label beneath it",
+	subject: "this address",
+	aside:   "Can't solve it? The house network and WireGuard are never asked.",
+	notices: captchaNoticesCommon,
+}
+
+var onionWording = captchaWording{
+	title: "Check the address before you continue",
+	lead: "Copies of onion sites pass the real one through to read what you type. Exactly one address in the picture " +
+		"is this site's: the one in your address bar, every character of it.",
+	alt:     "Onion addresses, each with a six-character label beside it",
+	subject: "this browser",
+	aside:   "Does no address in the picture match yours exactly? Then this page is a copy: close it.",
+	notices: map[Notice]string{
+		NoticeNone:    captchaNoticesCommon[NoticeNone],
+		NoticeWrong:   captchaNoticesCommon[NoticeWrong],
+		NoticeExpired: captchaNoticesCommon[NoticeExpired],
+		NoticeDecoy: "That label stood beside another address than this site's. Compare every character with your " +
+			"address bar: if no row matches it, this page is a copy.",
+	},
 }
 
 /*

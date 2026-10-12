@@ -95,6 +95,12 @@ let
     captcha-default = { file = "antibot"; marker = "router share-tls: the gate's captcha is 0";
       tampered = tamper "200-external-traefik" (traefik ++ [ "middlewares" "gate" "forwardAuth" "address" ])
         (lib.replaceStrings [ "captcha=1" ] [ "captcha=0" ] (http "200-external-traefik").middlewares.gate.forwardAuth.address); };
+    onion-captcha = { file = "antibot"; marker = "vm-200 onion router hello-onion has no gate";
+      tampered = tamper "200-external-traefik" (traefik ++ [ "routers" "hello-onion" "middlewares" ])
+        (lib.filter (m: !(lib.hasPrefix "gate" m)) (http "200-external-traefik").routers.hello-onion.middlewares); };
+    onion-captcha-addresses = { file = "antibot"; marker = "vm-200's gate does not know the onion address";
+      tampered = tamper "200-external-traefik" (gate ++ [ "captcha" "onions" ])
+        (lib.mapAttrs (_: _: "${lib.fixedWidthString 56 "a" ""}.onion") configs."200-external-traefik".homelab.traefik.gate.settings.captcha.onions); };
     captcha-answer-log = { file = "antibot"; marker = "200-external-traefik logs every captcha's answer";
       tampered = tamper "200-external-traefik" (gate ++ [ "captcha" "answerLog" ]) "/run/lab-gate/answers"; };
 

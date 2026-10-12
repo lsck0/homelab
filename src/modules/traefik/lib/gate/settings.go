@@ -49,6 +49,8 @@ type SettingsCaptcha struct {
 	AnswerPath       string  `json:"answerPath"`
 	RegenerationsMax int     `json:"regenerationsMax"`
 	AnswerLog        *string `json:"answerLog"`
+	// route name -> its onion address (src/generated/onions.json): a request to one gets the onion captcha
+	Onions map[string]string `json:"onions"`
 }
 
 // SettingsSession is authelia's session state endpoint, reached through an ingress under the portal's name.
@@ -108,6 +110,9 @@ func settingsParse(data []byte) (Settings, error) {
 	if captcha := settings.Captcha; captcha != nil {
 		if !strings.HasPrefix(captcha.AnswerPath, "/") || captcha.CookieDomain == "" || captcha.RegenerationsMax < 1 {
 			return Settings{}, errors.New("settings: captcha: answerPath must start with /, cookieDomain be set, regenerationsMax be positive")
+		}
+		if _, err := onionRoutes(captcha.Onions); err != nil {
+			return Settings{}, fmt.Errorf("settings: captcha.onions: %w", err)
 		}
 	}
 	if session := settings.Session; session != nil {
