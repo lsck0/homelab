@@ -14,7 +14,6 @@ let
   net = import ../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
   service = import ../modules/service.nix { inherit lib; };
   torPorts = import ../modules/tor-ports.nix;
-  secretValues = import ./lib/secret-values.nix { inherit pkgs; };
   ip = id: lab.inventory.${id}.ip;
 
   routeName = "privatebin";
@@ -35,9 +34,8 @@ pkgs.testers.runNixOSTest {
 
   nodes.luca-router = {
     imports = [ lab.router tools ];
-    # the lab's own onion routes start beside it, each from a well-formed seed of its own
-    testing.secretValues = lib.mapAttrs' (name: _: lib.nameValuePair (service.onionKeyOf name) (secretValues.onionSeedOf name))
-      (lib.filterAttrs (_: r: r.onion) catalog.external) // { ${service.onionKeyOf routeName} = seed; };
+    # the lab's own onion routes start beside it, each from a seed of its own (lib/offline-router.nix)
+    testing.secretValues.${service.onionKeyOf routeName} = seed;
     virtualisation.memorySize = 1024;
   };
   nodes.vm-200 = {
