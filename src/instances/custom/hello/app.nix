@@ -19,7 +19,7 @@ in
   # this repo moves with every sync; hello only with its own folder
   watch = [ dir ];
   # main.c's port
-  routes.hello = { service = "web"; targetPort = 8000; port = 20100; off.sso = "the public demo"; };
+  routes.hello = { service = "web"; targetPort = 8000; port = 20100; onion = true; off.sso = "the public demo"; };
   homepage = { name = "Hello"; icon = "mdi-hand-wave"; };
   # one static c server
   resources.web.memoryMiB = 128;

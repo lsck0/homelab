@@ -14,7 +14,7 @@ pkgs.runCommandCC "hello" { nativeBuildInputs = [ pkgs.gnumake pkgs.curl ]; } ''
   cp ${header} httpserver.h
   make CC=cc
   ./server &
-  curl -sf --retry-connrefused --retry ${toString startRetries} http://127.0.0.1:${port}/ | grep -qx 'Hello, World!'
+  curl -sf --retry-connrefused --retry ${toString startRetries} http://127.0.0.1:${port}/ | grep -qx 'hello dino you smell like pee'
   kill %1
   touch $out
 ''

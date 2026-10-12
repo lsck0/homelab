@@ -3,7 +3,7 @@
 
 #include <string.h>
 
-#define BODY "Hello, World!\n"
+#define BODY "hello dino you smell like pee\n"
 /* app.nix targetPort and the Dockerfile EXPOSE */
 #define HELLO_PORT 8000
 
