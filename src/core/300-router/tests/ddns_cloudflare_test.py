@@ -30,6 +30,8 @@ RECORDS = [
     {"name": f"grafana.{ZONE}", "proxied": True},
     {"name": f"share.{ZONE}", "proxied": False},
 ]
+# a route the lab gains between two runs at the same address
+GAINED = {"name": f"mc.{ZONE}", "proxied": False}
 
 # -----------------------------------------------------------------------------
 # FAKE API
@@ -148,8 +150,9 @@ def converged(address):
 
 
 def synced(env_base):
-    path = os.path.join(env_base["DDNS_STATE_DIR"], "ip")
-    return open(path).read() if os.path.exists(path) else None
+    """The address the last full sync put to the records, None before any."""
+    path = os.path.join(env_base["DDNS_STATE_DIR"], "state")
+    return open(path).read().split()[0] if os.path.exists(path) else None
 
 
 def fault_arm(method, prefix, status, skip=0):
@@ -185,6 +188,17 @@ def main():
     code, calls = run(env)
     assert code == 0 and calls == [], calls
 
+    print("case: a name the lab gains is published on the next run, the address unchanged")
+    with open(env["DDNS_RECORDS"], "w") as f:
+        json.dump(RECORDS + [GAINED], f)
+    code, calls = run(env)
+    assert code == 0 and [c["method"] for c in calls if c["method"] != "GET"] == ["POST"], calls
+    with open(env["DDNS_RECORDS"], "w") as f:
+        json.dump(RECORDS, f)
+    code, calls = run(env)
+    assert code == 0 and [c["method"] for c in calls if c["method"] != "GET"] == ["DELETE"], calls
+    assert converged(ADDRESS_OLD) and all(r["name"] != GAINED["name"] for r in FAKE.records.values()), FAKE.records
+
     print("case: a changed address is put to every record, and only once")
     FAKE.address = ADDRESS_NEW
     code, calls = run(env)
@@ -192,7 +206,7 @@ def main():
     assert sorted(c["method"] for c in calls if c["method"] != "GET") == ["PUT"] * len(RECORDS), calls
 
     print("case: matching records, proxied or not, are left alone on a resync")
-    os.utime(os.path.join(env["DDNS_STATE_DIR"], "ip"), (0, 0))
+    os.utime(os.path.join(env["DDNS_STATE_DIR"], "state"), (0, 0))
     code, calls = run(env)
     assert code == 0 and [c for c in calls if c["method"] != "GET"] == [], calls
 
@@ -223,7 +237,7 @@ def main():
 
     print("case: duplicate records of a name are deleted down to one")
     FAKE.record_add(f"grafana.{ZONE}", ADDRESS_OLD, True)
-    os.utime(os.path.join(env["DDNS_STATE_DIR"], "ip"), (0, 0))
+    os.utime(os.path.join(env["DDNS_STATE_DIR"], "state"), (0, 0))
     code, calls = run(env)
     assert code == 0 and converged(ADDRESS_NEW), FAKE.records
     assert [c["method"] for c in calls].count("DELETE") == 1, calls
@@ -232,7 +246,7 @@ def main():
     FAKE.record_add(f"*.{ZONE}", ADDRESS_NEW, False)
     FAKE.record_add(f"registry.{ZONE}", ADDRESS_NEW, True)
     foreign = FAKE.record_add(f"mail.{ZONE}", "192.0.2.25", False)
-    os.utime(os.path.join(env["DDNS_STATE_DIR"], "ip"), (0, 0))
+    os.utime(os.path.join(env["DDNS_STATE_DIR"], "state"), (0, 0))
     fault_arm("DELETE", f"/zones/{ZONE_ID}/dns_records/", 500)
     code, calls = run(env)
     assert code != 0 and len(FAKE.records) == len(RECORDS) + 2, (code, FAKE.records)
@@ -243,7 +257,7 @@ def main():
 
     print("case: a garbled address file is no address")
     FAKE.address = "<html>rate limited</html>"
-    os.utime(os.path.join(env["DDNS_STATE_DIR"], "ip"), (0, 0))
+    os.utime(os.path.join(env["DDNS_STATE_DIR"], "state"), (0, 0))
     code, calls = run(env)
     assert code != 0 and calls == [] and synced(env) == ADDRESS_NEW, (code, calls)
 

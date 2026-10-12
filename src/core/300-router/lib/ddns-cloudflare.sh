@@ -32,7 +32,7 @@ RECORD_TTL=1
 # the lab publishes some tens of names; one page holds them all, a second page fails loudly
 RECORDS_PAGE_SIZE=1000
 
-LAST="$DDNS_STATE_DIR/ip"
+LAST="$DDNS_STATE_DIR/state"
 
 ip=$(head -n 1 "$DDNS_ADDRESS_FILE" | cut -d ' ' -f 1)
 if [ -z "$ip" ]; then
@@ -44,7 +44,9 @@ if ! [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
     exit 1
 fi
 
-if [ -f "$LAST" ] && [ "$(cat "$LAST")" = "$ip" ] && [ -n "$(find "$LAST" -mmin "-$DDNS_RESYNC_MIN")" ]; then
+# the address and the record list: a name the lab gains is published on the next run, not after the resync
+state="$ip $(sha256sum "$DDNS_RECORDS" | cut -d ' ' -f 1)"
+if [ -f "$LAST" ] && [ "$(cat "$LAST")" = "$state" ] && [ -n "$(find "$LAST" -mmin "-$DDNS_RESYNC_MIN")" ]; then
     exit 0
 fi
 
@@ -133,5 +135,5 @@ if [ "$failures" -ne 0 ]; then
     echo "ddns: $failures record(s) not converged, $ip stays unsynced for the next run" >&2
     exit 1
 fi
-printf '%s' "$ip" > "$LAST.tmp"
+printf '%s' "$state" > "$LAST.tmp"
 mv "$LAST.tmp" "$LAST"
