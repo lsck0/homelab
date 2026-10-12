@@ -23,7 +23,9 @@
 # anonymousLimit and tarpit act through the gate that crowdsec puts in front of a route, so they need crowdsec; the
 # gate never stops the house, the lab, wireguard or a user authelia knows, whatever a route says. cloudflare proxies
 # the route's public name, which an internal route has with `internet` alone. An onion route's onion routers pass the gate whatever its
-# `on` takes for its name (modules/traefik).
+# `on` takes for its name (modules/traefik). houseUnlimited gives the house, wireguard and the internal zone a router
+# of the route's own with none of its limits, gate, proof of work or body limit, whoever else it protects; it takes no
+# `sources`, which name a route's clients alone.
 { lib }:
 let
   inherit (lib) mkOption types;
@@ -52,6 +54,11 @@ let
   ];
   # what acts through the gate crowdsec puts in front of a route
   crowdsecFeatures = [ "waf" "captcha" "anonymousLimit" "tarpit" ];
+  # what the ingress spares some clients of a route, which keeps its protection for everyone else (modules/traefik)
+  exemptionFeatures = [
+    # the house, wireguard and the internal zone pass no limit, gate, proof of work or body limit: a router of their own
+    "houseUnlimited"
+  ];
   # frontend: the browser's otlp beacons at <host>/otlp, relayed by the ingress to the collector (modules/traefik)
   telemetryFeatures = [ "metrics" "logs" "traces" "profiles" "dashboard" "alerts" "frontend" ];
   # what the platform runs for a swarm app besides its telemetry: sleeping when idle, its card on the dashboard
@@ -97,7 +104,7 @@ let
     };
   };
 in rec {
-  inherit protectionFeatures telemetryFeatures platformFeatures webMethods bodyLimitDefaultBytes featuresType urlPath why serviceName onionKeyOf;
+  inherit protectionFeatures crowdsecFeatures exemptionFeatures telemetryFeatures platformFeatures webMethods bodyLimitDefaultBytes featuresType urlPath why serviceName onionKeyOf;
 
   # the dashboard card; a deployment's defaults name its kind (an instance service, an app)
   cardType = { name, group, icon, description }: types.submodule {
@@ -221,7 +228,9 @@ in rec {
     ++ lib.optional (r.zone == "external" && has "internet")
       "${where}: internet relays an internal route through the edge; an external route is public already: drop it"
     ++ lib.optional (!(publicOf r) && has "cloudflare")
-      "${where}: cloudflare proxies the route's public name, which an internal route has with internet alone";
+      "${where}: cloudflare proxies the route's public name, which an internal route has with internet alone"
+    ++ lib.optional (has "houseUnlimited" && r.sources != null)
+      "${where}: houseUnlimited admits the house past the limits, sources admit named clients alone: drop one";
 
   # the route has a name on the internet: an external one always, an internal one relayed by the edge
   # (a hand-written traefik router names no zone: its `on` says)

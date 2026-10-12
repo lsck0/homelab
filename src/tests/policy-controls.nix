@@ -63,6 +63,9 @@ let
     reach = network "reach" (tamper "300-router" [ "networking" "firewall" "extraForwardRules" ]
       (lib.concatStringsSep "\n" (lib.filter (l: !(lib.hasInfix "dport { ${toString facts.catalog.swarm.controllerPort} }" l))
         (lib.splitString "\n" forwardRules))));
+    # the mirror's unlimited router answering the internet too
+    house-routers = network "house routers" (tamper "200-external-traefik" (traefik ++ [ "routers" "mirror-house" "rule" ])
+      "${(http "200-external-traefik").routers.mirror-house.rule} || ClientIP(`0.0.0.0/0`)");
     no-catch-all = network "no catch-all" (tamper "200-external-traefik" (traefik ++ [ "routers" "catch-all" ])
       { rule = "HostRegexp(`.+`)"; service = "noop@internal"; });
     client-identity = network "client identity" (tamper "100-internal-traefik" (traefik ++ [ "middlewares" "client-ip" "plugin" "client-ip" "trustedIPs" ])

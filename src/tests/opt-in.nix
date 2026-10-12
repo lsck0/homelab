@@ -4,7 +4,9 @@
 # real client, the strip of client-sent identity headers, the retry), no card, no probe, no scrape, no guard on its
 # port; an internal one has no public name, an external one its raw public name and nothing more. Its guest's firewall
 # opens ssh, node-exporter and its http port. Per path, one host and one backend: `/api` rate limited under a plain
-# `/`, a plain `/public` under a hardened `/`, each prefix ranked above its parent.
+# `/`, a plain `/public` under a hardened `/`, each prefix ranked above its parent. A houseUnlimited route (the real
+# mirror) answers the house on a router of its own without limits, everyone else with them, and the router's dns sends
+# the house straight to the edge.
 { pkgs, lib, inputs, ... }:
 let
   # -----------------------------------------------------------------------------
@@ -84,6 +86,13 @@ let
   recordOf = host: lib.findFirst (r: r.name == net.fqdn host) null ddnsRecords;
   scrapes = builtins.toJSON grafana.services.prometheus.scrapeConfigs;
   bareRoute = grown.routes.bare;
+  # the real tree's houseUnlimited route: the pacman mirror, which the house syncs from past every limit
+  unlimited = "mirror";
+  houseRanges = [ net.wan.subnet net.wireguard.subnet net.zones.internal.subnet ];
+  admitsHouseAlone = rule: lib.hasSuffix "(${lib.concatMapStringsSep " || " (range: "ClientIP(`${range}`)") houseRanges})" rule;
+  limits = rateLimits ++ [ "inflight-limit" "route-inflight-limit" "gate" ];
+  limited = middlewares: lib.all (limit: lib.any (lib.hasPrefix limit) middlewares) limits;
+  edgeAddress = net.ipOf net.zones.external.ingress;
 
   # -----------------------------------------------------------------------------
   # CHECKS
@@ -124,6 +133,16 @@ let
     "a hardened route has its card, its proxied name and its guard" = lib.any (c: c.route == "hardened") grown.homepage
       && (recordOf "hardened").proxied && (guestOf hardened).homelab.ingressOnly.ports == [ hardened.port ];
     "the relay of a plain /public outranks its parent's" = rankOf edge.hardened-public-relay > rankOf edge.hardened-relay;
+
+    "a houseUnlimited route's house router has the plumbing and its headers alone" =
+      edge."${unlimited}-house".middlewares == plumbing ++ [ "secure-headers" ];
+    "a houseUnlimited route's house router admits the house alone" = admitsHouseAlone edge."${unlimited}-house".rule;
+    "a houseUnlimited route keeps every limit for everyone else" = lib.all (part: limited part.middlewares)
+      (lib.attrValues (partsOf edge "${unlimited}-tls"));
+    "a houseUnlimited route's house router outranks its public ones" = outranks edge "${unlimited}-house" "${unlimited}-tls";
+    "a route without houseUnlimited has no house router" = !(edge ? open-house) && !(internal ? hardened-house);
+    "the router answers every public route's name with the edge, which the house reaches as itself" = lib.all
+      (r: lib.hasInfix "${edgeAddress} ${net.fqdn r.host}\n" router.services.coredns.config) (lib.attrValues grown.catalog.external);
   };
   failures = lib.attrNames (lib.filterAttrs (_: ok: !ok) checks);
 in

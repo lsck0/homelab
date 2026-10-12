@@ -50,7 +50,7 @@ let
   # an app publishes a port for each http route by its zone, each l4 route by its protocol, and each exporter
   groups = [ "external" "internal" "metrics" "tcp" "udp" ];
   # the switches of a service record (`services`): an instance service's own, an app's beside its routes'
-  instanceFeatures = service.protectionFeatures ++ service.telemetryFeatures;
+  instanceFeatures = service.protectionFeatures ++ service.exemptionFeatures ++ service.telemetryFeatures;
   appFeatures = service.telemetryFeatures ++ service.platformFeatures;
 
   # `{{homelab.<name>}}` in an app's env or override: lab endpoints an app may not hard-code. Telemetry at the relay

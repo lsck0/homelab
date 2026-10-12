@@ -39,7 +39,7 @@ let
   # visit, not per page; shorter only adds wakes, longer only holds memory
   stopAfterDefault = "15m";
   # an app's card is the app's own (platformFeatures), its routes have none
-  routeFeatures = lib.remove "homepage" service.protectionFeatures;
+  routeFeatures = lib.remove "homepage" service.protectionFeatures ++ service.exemptionFeatures;
 
   # -----------------------------------------------------------------------------
   # TYPES

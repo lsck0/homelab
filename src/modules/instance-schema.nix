@@ -74,7 +74,7 @@ let
   serviceType = types.submodule ({ name, config, ... }: {
     # the probers check the backend itself, not the sso portal in front of it
     config.health = lib.mkDefault config.path;
-    options = service.exposureOptions { inherit name zone; features = service.protectionFeatures ++ service.telemetryFeatures; } // {
+    options = service.exposureOptions { inherit name zone; features = service.protectionFeatures ++ service.exemptionFeatures ++ service.telemetryFeatures; } // {
       homepage = mkOption {
         type = service.cardType { inherit name; group = "Apps"; icon = "mdi-web"; description = ""; };
         default = { };

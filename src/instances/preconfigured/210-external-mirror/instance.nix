@@ -24,9 +24,10 @@
         };
       };
       # pacman, public and signed: the house fetches straight from here (arch-dotfiles pacman.conf), large binaries
-      # past the proxy, with no proof of work or captcha; crs rule 920440 refuses the repo database lsck0.db
+      # past the proxy, with no proof of work or captcha; crs rule 920440 refuses the repo database lsck0.db. The
+      # house syncs at the full speed of its network, past every limit
       on = lib.subtractLists [ "anubis" "captcha" "cloudflare" "guard" "waf" ] profiles.hardenedExternal
-        ++ profiles.listed ++ profiles.observed;
+        ++ profiles.listed ++ profiles.observed ++ [ "houseUnlimited" ];
     };
   };
 }

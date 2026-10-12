@@ -12,7 +12,8 @@
 # X-Real-Ip, which client-ip sets from the socket peer and the X-Forwarded-For hops of trustedProxies and Cloudflare
 # only; the backend's X-Forwarded-For is that client alone. The probers check a route at its health path through the
 # ingress, past sso and anubis but nowhere else (probe routers below). A public
-# route's ssoPaths get a router of their own with authelia, ranked above the route's others.
+# route's ssoPaths get a router of their own with authelia, ranked above the route's others. A houseUnlimited route
+# gets routers of its own for the house's sources (by socket peer), its chain without limits, gate or proof of work.
 #
 # An onion route (modules/service.nix `onion`, the edge's routes only) is served a second time at its onion address on
 # the onion entrypoint, plain http from the router's tor (core/300-router/lib/onion-services.nix), with the same
@@ -39,8 +40,12 @@ let
   probePriority = 1000;
   # a route's ssoPaths router outranks every other router of it, login and frontend included, the probes alone above
   ssoPathPriority = probePriority - 1;
-  # a route kept off the internet answers the networks the router lets into the internal zone, never a dmz
-  internalOnlySources = [ net.wan.subnet net.wireguard.subnet net.zones.internal.subnet ];
+  # the house: the networks the router lets into the internal zone, never a dmz. A route kept off the internet answers
+  # them alone, a houseUnlimited route answers them past its limits
+  houseSources = [ net.wan.subnet net.wireguard.subnet net.zones.internal.subnet ];
+  # what a houseUnlimited route spares the house: every limit, the gate and its waf, the proof of work; cloudflare-only
+  # admits private sources anyway
+  houseSpared = [ "anubis" "cloudflare" "crowdsec" "rateLimit" "inflightLimit" "bodyLimit" ] ++ service.crowdsecFeatures;
 
   # whose X-Forwarded-For hops count: the entrypoint keeps them, client-ip and the bouncer walk past them
   trustedHops = cfg.trustedProxies ++ lib.optionals cfg.trustCloudflare cloudflareRanges;
@@ -543,7 +548,17 @@ let
       on = [ "accessLog" ];
     };
   }) routes;
-  routeRouters = routeRoutersOf { tag = "tls"; entryPoint = "websecure"; hostOf = r: net.fqdn r.host; routes = cfg.routes; };
+  routeRouters = routeRoutersOf { tag = "tls"; entryPoint = "websecure"; hostOf = r: net.fqdn r.host; routes = cfg.routes; }
+    // houseRouters;
+  # a houseUnlimited route's routers for the house: its rule admitting the house alone, longer, so ranked above the
+  # route's own but those of its longer prefixes, logins and sso paths; its chain without what the house is spared
+  houseRouters = routeRoutersOf {
+    tag = "house";
+    entryPoint = "websecure";
+    hostOf = r: net.fqdn r.host;
+    routes = lib.mapAttrs (_: r: r // { on = lib.subtractLists houseSpared r.on; sources = houseSources; })
+      (lib.filterAttrs (_: r: on r "houseUnlimited") cfg.routes);
+  };
   # an onion route without an address yet (secrets-sync.sh writes it) is served at its name alone
   onionRoutes = lib.filterAttrs (_: r: r.onionAddress != null) cfg.routes;
   # every onion visitor passes the gate and its anti-phishing captcha, whatever the route takes on its name: nothing but
@@ -599,7 +614,7 @@ let
     compress.compress = { };
   } // lib.optionalAttrs (cfg.relays != { }) {
     # a route without `internet`: the edge relays it to the house, wireguard and the internal zone only
-    internal-only.ipAllowList.sourceRange = internalOnlySources;
+    internal-only.ipAllowList.sourceRange = houseSources;
   };
 
   # -- frontend telemetry: the browser's otlp beacons on the app's own origin, to the collector ----------------

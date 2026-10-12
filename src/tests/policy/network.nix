@@ -204,6 +204,18 @@ let
     lib.optionals (to != from && running to) (reach from to call.port))
     (lib.filter (call: guestOfIp ? ${call.ip}) (callsOf config));
 
+  # a route's routers without its limits answer the house alone: its lan, wireguard and the internal zone, by socket
+  # peer; never a dmz, the apps zone or an address of the internet
+  houseNetworks = [ net.wan.subnet net.wireguard.subnet net.zones.internal.subnet ];
+  admittedRanges = rule: map lib.head (lib.filter lib.isList (builtins.split "ClientIP\\(`([^`]+)`\\)" rule));
+  # a ClientIP range inside one network: its first address in it, no wider than it (a bare address is a /32)
+  within = network: range: let prefix = if lib.hasInfix "/" range then cidr.prefix range else 32; in
+    cidr.contains network (lib.head (lib.splitString "/" range)) && prefix >= cidr.prefix network;
+  houseLaw = host: config: lib.concatLists (lib.mapAttrsToList (name: r: let ranges = admittedRanges r.rule; in
+    lib.optional (ranges == [ ] || lib.any (range: !(lib.any (house: within house range) houseNetworks)) ranges)
+      "${host} router ${name} answers more than the house without its limits: ${toString ranges}"
+  ) (lib.filterAttrs (name: _: lib.hasSuffix "-house" name) (websecure config)));
+
   kea = router.services.kea.dhcp4.settings.subnet4;
   inPool = ip: pool: let bounds = map lib.trim (lib.splitString "-" pool.pool);
     toInt = a: lib.foldl' (acc: o: acc * 256 + lib.toInt o) 0 (lib.splitString "." a); in
@@ -267,6 +279,9 @@ lawsOf {
   "internal only" = map (range: "vm-200 internal-only admits ${range}, which overlaps a dmz")
     (lib.filter (range: lib.any (z: cidr.overlaps range net.zones.${z}.subnet) [ "external" "apps" ])
       (httpOf edge).middlewares.internal-only.ipAllowList.sourceRange);
+
+  # what a houseUnlimited route spares the house it spares nobody else
+  "house routers" = houseLaw "vm-100" internalIngress ++ houseLaw "vm-200" edge;
 
   # an unknown name gets a 404 at the edge, nothing travels inward for it
   "no catch-all" = lib.mapAttrsToList (name: _: "vm-200 router ${name} matches any host")
