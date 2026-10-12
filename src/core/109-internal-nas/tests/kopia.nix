@@ -108,6 +108,10 @@ pkgs.testers.runNixOSTest {
         assert "homelab_backup_verify_last_success_timestamp_seconds" in prom, prom
         machine.succeed("journalctl -u kopia-verify --no-pager | grep -q 'no proton session'")
         machine.fail("test -e /var/lib/node-exporter-textfile/backup_verify_offsite.prom")
+        # the off-site sample picks pack blobs by the path kopia writes them under (lib/kopia.nix): sharded as
+        # p00/2ab/<rest>, so a match on the file name alone found none in the real repository
+        packs = machine.succeed("cd /srv/nas/BACKUPS/kopia && find . -type f | sed 's|^[.]/||' | grep -cE '^[pq][0-9a-f]'")
+        assert int(packs) > 0, "the off-site sample's pack pattern matches no blob of a real repository"
 
     with subtest("web UI answers"):
         machine.fail("curl -sf http://127.0.0.1:51515/")

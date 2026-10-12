@@ -491,8 +491,9 @@ in {
       flock 9
       sample=$(mktemp -d)
       trap 'rm -rf "$sample"' EXIT
-      # pack blobs only: written once, so the remote copy of an uploaded one equals the local one
-      grep -E '(^|/)[pq][0-9a-f]+[^/]*$' ${manifest} | while IFS= read -r rel; do [ -f "${repo}/$rel" ] && echo "$rel"; done \
+      # pack blobs only (p and q, flat or sharded as p00/2ab/<rest>): written once, so the remote copy of an uploaded one
+      # equals the local one
+      grep -E '^[pq][0-9a-f]' ${manifest} | while IFS= read -r rel; do [ -f "${repo}/$rel" ] && echo "$rel"; done \
         | shuf -n ${toString offsiteSampleCount} > "$sample/list"
       [ -s "$sample/list" ] || { echo "no uploaded pack blob to sample yet"; exit 0; }
       while IFS= read -r rel; do
