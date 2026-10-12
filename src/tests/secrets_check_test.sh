@@ -33,7 +33,7 @@ SHORT=abc
 # the base repo every case starts from
 # -----------------------------------------------------------------------------
 B=$T/base
-H=src/instances/1-internal-x
+H=src/instances/preconfigured/1-internal-x
 mkdir -p "$B/$H" "$B/src/secrets" "$B/src/terraform"
 cp -r "$FIXTURE/.githooks" "$B/"
 cp -r "$FIXTURE/src/scripts" "$B/src/"

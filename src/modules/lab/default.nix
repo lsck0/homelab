@@ -1,11 +1,13 @@
 # the collector: every fact about the lab's guests and apps, read from their folders, computed once
 #
-# An instance is a folder src/instances/<vmid>-<zone>-<service>/ (the router: 300-router/) holding main.nix (its
-# nixos configuration) and instance.nix (what other hosts and terraform need to know about it, typed by
-# modules/instance-schema.nix). The vmid and the zone come from the folder name; the name is the configuration's
-# name and the proxmox guest's. The swarm's worker nodes have no folder: src/apps/swarm.nix `nodes` generates them,
-# each running modules/swarm alone. An app is a folder src/apps/<name>/ with app.nix (typed by
-# modules/apps-catalog). Folders starting with `_` (the template) are no instance.
+# An instance is a folder <vmid>-<zone>-<service>/ (the router: 300-router/) holding main.nix (its nixos
+# configuration) and instance.nix (what other hosts and terraform need to know about it, typed by
+# modules/instance-schema.nix): in src/core/ when the lab needs it to function, in src/instances/preconfigured/ when
+# it is a third-party service the lab runs. The vmid and the zone come from the folder name; the name is the
+# configuration's name and the proxmox guest's. The swarm's worker nodes have no folder: src/core/swarm.nix `nodes`
+# generates them, each running modules/swarm alone. An app, the owner's own software, is a folder
+# src/instances/custom/<name>/ with app.nix (typed by modules/apps-catalog). Folders starting with `_` (the
+# templates) are no instance.
 #
 # Everything below derives from those files plus src/generated/zones.json and src/generated/site.json; nothing reads
 # a host's evaluated configuration, so the flake, every module (argument `lab`), every test and terraform
@@ -15,9 +17,10 @@
 #   lab = import ./modules/lab { inherit lib; };
 #   lab.inventory."134"           # { name; type; kind; privileged; features; ip; prefix; gateway; powered; idle; roles; }
 #                                 # powered: vm.power is on; idle: idle.stopAfter, null for a guest that never idles
-#   lab.instances."134"           # { id; zone; name; dir; main; source; config; }, config the evaluated instance.nix
+#   lab.instances."134"           # { id; zone; name; dir; folder; main; source; config; }, config the evaluated instance.nix,
+#                                 # folder its home relative to src/ (an app's own guest: the app's), null for a worker
 #   lab.routes.jellyfin           # an instance service's route with every field (modules/service.nix), plus vmid
-#   lab.appsCatalog               # src/apps/ typed by modules/apps-catalog: { apps; builder; swarm; cadvisorPort; controllerPort; }
+#   lab.appsCatalog               # the apps typed by modules/apps-catalog: { apps; builder; swarm; cadvisorPort; controllerPort; }
 #   lab.catalog                   # modules/catalog.nix over it: every route and app, what every host gets as `catalog`
 #   lab.withApps f                # the lab collected again with its app folders passed through f (a test's fixture
 #                                 # apps): workers, inventory and catalog follow them
@@ -28,6 +31,7 @@
 #   lab.alerts.backup_stale       # an instance's own alert rule (instance.nix `alerts`) plus its vmid
 #   lab.upstreams.aur             # { url; } a third-party service the lab depends on (src/lab/upstreams.nix, modules/upstream)
 #   lab.onions."paste-onion-key"  # "<56 base32>.onion": an onion route's address (src/generated/onions.json)
+#   lab.layout.custom             # "instances/custom": where each kind of folder lives, relative to src/
 #
 # problems: every broken lab-wide rule (zones.json against the instances, vmid ranges, vm shapes, duplicate names),
 # one line each; the flake refuses to evaluate past one, so no host and no terraform plan proceeds.
@@ -40,13 +44,20 @@ let
   # CONSTANTS
   # -------------------------------------------------------------------------------------------------------------
 
-  instancesDir = root + "/instances";
-  appsDir = root + "/apps";
+  # relative to src/: the instances the lab needs to function, the third-party ones, the owner's apps
+  layout = {
+    core = "core";
+    preconfigured = "instances/preconfigured";
+    custom = "instances/custom";
+    swarm = "core/swarm.nix";
+  };
+  instanceKinds = [ layout.core layout.preconfigured ];
+  appsDir = root + "/${layout.custom}";
   site = lib.importJSON (root + "/generated/site.json");
   zonesRaw = lib.importJSON (root + "/generated/zones.json");
   # secret name -> the onion address of its key, written by scripts/secrets-sync.sh; a fixture tree has none
   onionsFile = root + "/generated/onions.json";
-  swarm = import (appsDir + "/swarm.nix");
+  swarm = import (root + "/${layout.swarm}");
 
   cidr = import ../cidr.nix { inherit lib; };
   limits = import ../limits { inherit lib; };
@@ -68,7 +79,7 @@ let
   # INSTANCES
   # -------------------------------------------------------------------------------------------------------------
 
-  # the visible subfolders of instances/ or apps/
+  # the visible subfolders of an instance kind's or the apps' directory
   foldersOf = dir: lib.attrNames (lib.filterAttrs (name: kind: kind == "directory" && !(lib.hasPrefix hiddenPrefix name))
     (builtins.readDir dir));
 
@@ -83,13 +94,13 @@ let
     else null;
 
   # a folder that is no instance is a problem below, never half an instance
-  folderProblemOf = folder: let files = builtins.readDir (instancesDir + "/${folder}"); in
-    if folderParse folder == null then
-      "src/instances/${folder}: an instance folder is <vmid>-<zone>-<service> (zones: ${zonePattern}) or <vmid>-${routerZone}"
+  folderProblemOf = folder: let files = builtins.readDir (root + "/${folder}"); in
+    if folderParse (baseNameOf folder) == null then
+      "src/${folder}: an instance folder is <vmid>-<zone>-<service> (zones: ${zonePattern}) or <vmid>-${routerZone}"
     else if !(files ? "main.nix" && files ? "instance.nix") then
-      "src/instances/${folder}: an instance folder holds main.nix and instance.nix (see src/instances/_template)"
+      "src/${folder}: an instance folder holds main.nix and instance.nix (see src/${layout.preconfigured}/_template)"
     else null;
-  allFolders = foldersOf instancesDir;
+  allFolders = lib.concatMap (kind: map (name: "${kind}/${name}") (foldersOf (root + "/${kind}"))) instanceKinds;
   folders = lib.filter (folder: folderProblemOf folder == null) allFolders;
 
   # instance.nix over the schema; net, telemetry and roles read the collected instances, lazily
@@ -100,14 +111,14 @@ let
 
   instanceOfFolder = folder:
     let
-      parsed = folderParse folder;
-      dir = instancesDir + "/${folder}";
+      parsed = folderParse (baseNameOf folder);
+      dir = root + "/${folder}";
     in
     parsed // {
-      name = folder;
-      inherit dir;
+      name = baseNameOf folder;
+      inherit dir folder;
       main = dir + "/main.nix";
-      source = "instances/${folder}/instance.nix";
+      source = "${folder}/instance.nix";
       config = instanceEval { inherit (parsed) id zone; module = dir + "/instance.nix"; };
     };
 
@@ -120,8 +131,9 @@ let
     zone = nodeZone;
     name = "${id}-${nodeZone}-${nodeService}";
     dir = null;
+    folder = null;
     main = null;
-    source = "apps/swarm.nix";
+    source = layout.swarm;
     config = instanceEval { inherit id; zone = nodeZone; module = removeAttrs swarm.nodes [ "first" ]; };
   };
 
@@ -136,8 +148,9 @@ let
     inherit (a.placement) zone;
     name = "${id}-${a.placement.zone}-${app}";
     dir = null;
+    folder = "${layout.custom}/${app}";
     main = null;
-    source = "apps/${app}/app.nix";
+    source = "${layout.custom}/${app}/app.nix";
     config = instanceEval {
       inherit id;
       inherit (a.placement) zone;
@@ -257,10 +270,11 @@ let
   appFolders = foldersOf appsDir;
   appOf = name:
     let dir = appsDir + "/${name}"; in
-    assert lib.assertMsg ((builtins.readDir dir) ? "app.nix") "src/apps/${name}: an app folder holds app.nix (see src/apps/_template)";
+    assert lib.assertMsg ((builtins.readDir dir) ? "app.nix")
+      "src/${layout.custom}/${name}: an app folder holds app.nix (see src/${layout.custom}/_template)";
     import (dir + "/app.nix");
 
-  # the app folders and src/apps/swarm.nix over modules/apps-catalog: every field typed and defaulted, once
+  # the app folders and src/core/swarm.nix over modules/apps-catalog: every field typed and defaulted, once
   appsCatalog = removeAttrs (lib.evalModules {
     modules = [ ../apps-catalog {
       config = {
@@ -350,11 +364,11 @@ let
     ++ lib.concatMap (i: map (t: "src/${i.source}: tokenReads names ${t}, which no instance mints")
       (lib.filter (t: !(tokens ? ${t})) i.config.tokenReads)) instanceList
     ++ duplicates "alert" alertEntries
-    ++ map (p: "src/apps: ${p}") catalog.problems;
+    ++ map (p: "src/${layout.custom}: ${p}") catalog.problems;
 
   result = {
     inherit site instances inventory appsCatalog catalog homepage oidc grants tokens tokenReads tokenShare egress secrets roles
-      shares nasClients problems;
+      shares nasClients problems layout;
     onions = if builtins.pathExists onionsFile then lib.importJSON onionsFile else { };
     alerts = lib.listToAttrs (map (e: lib.nameValuePair e.name (e.v // { vmid = idOf e.i; })) alertEntries);
     upstreams = import (root + "/lab/upstreams.nix");

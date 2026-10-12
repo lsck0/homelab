@@ -37,7 +37,7 @@ pkgs.testers.runNixOSTest {
     virtualisation.memorySize = 1024;
   };
   nodes.vm-200 = {
-    imports = [ (lab.guest "200" { instance = ../instances/200-external-traefik/main.nix; }) ./lib/offline-traefik.nix ];
+    imports = [ (lab.guest "200" { instance = ../core/200-external-traefik/main.nix; }) ./lib/offline-traefik.nix ];
     virtualisation.memorySize = 1536;
   };
   nodes.backend = {

@@ -1,21 +1,23 @@
 # the collector's rules (modules/lab `problems`), table by table: every broken tree below is refused with a
 # line naming the fix, and the real tree holds. A tree is the real zones, site and swarm plus the given folders.
-# Adding is one folder: the real tree plus a copy of each template (instances/_template, apps/_template) is a lab
-# whose new guest is a host with an address, a route, a card, its grants and shares, and whose new app is in the
-# catalog. The desktop clients' lab.json (modules/lab-export.nix) keeps its guests' shape.
+# Adding is one folder: the real tree plus a copy of each template (instances/preconfigured/_template,
+# instances/custom/_template) is a lab whose new guest is a host with an address, a route, a card, its grants and
+# shares, and whose new app is in the catalog. The desktop clients' lab.json (modules/lab-export.nix) keeps its
+# guests' shape.
 { pkgs, lib, ... }:
 let
   # -----------------------------------------------------------------------------
   # INTERNAL
   # -----------------------------------------------------------------------------
 
+  inherit ((import ../default.nix { inherit lib; }).layout) core preconfigured custom swarm;
   treeOf = folders: pkgs.runCommand "lab-fixture" { } (''
-    mkdir -p $out/instances $out/apps $out/generated
+    mkdir -p $out/${core} $out/${preconfigured} $out/${custom} $out/generated
     cp ${../../../generated/zones.json} $out/generated/zones.json
     cp ${../../../generated/site.json} $out/generated/site.json
-    cp ${../../../apps/swarm.nix} $out/apps/swarm.nix
-  '' + lib.concatStrings (lib.mapAttrsToList (folder: files: "mkdir -p $out/instances/${folder}\n"
-    + lib.concatStrings (lib.mapAttrsToList (file: text: "cp ${pkgs.writeText file text} $out/instances/${folder}/${file}\n") files)
+    cp ${../../../core/swarm.nix} $out/${swarm}
+  '' + lib.concatStrings (lib.mapAttrsToList (folder: files: "mkdir -p $out/${preconfigured}/${folder}\n"
+    + lib.concatStrings (lib.mapAttrsToList (file: text: "cp ${pkgs.writeText file text} $out/${preconfigured}/${folder}/${file}\n") files)
   ) folders));
   instance = text: { "main.nix" = "{ ... }: { }"; "instance.nix" = text; };
   problemsOf = folders: (import ../default.nix { inherit lib; root = treeOf folders; }).problems;
@@ -61,10 +63,10 @@ let
   '';
   addedTree = pkgs.runCommand "lab-added" { } ''
     cp -r ${../../..} $out && chmod -R u+w $out
-    cp -r $out/instances/_template $out/instances/${addedFolder}
-    mv $out/instances/${addedFolder}/instance.nix $out/instances/${addedFolder}/template.nix
-    cp ${addedInstance} $out/instances/${addedFolder}/instance.nix
-    cp -r $out/apps/_template $out/apps/${added.app}
+    cp -r $out/${preconfigured}/_template $out/${preconfigured}/${addedFolder}
+    mv $out/${preconfigured}/${addedFolder}/instance.nix $out/${preconfigured}/${addedFolder}/template.nix
+    cp ${addedInstance} $out/${preconfigured}/${addedFolder}/instance.nix
+    cp -r $out/${custom}/_template $out/${custom}/${added.app}
   '';
   grown = import ../default.nix { inherit lib; root = addedTree; };
   addedIp = grown.inventory.${added.id}.ip or null;
@@ -95,7 +97,7 @@ let
     lib.optional (!(lib.any (lib.hasInfix c.expect) problems))
       "refused.${name}: no problem says \"${c.expect}\"; problems: ${builtins.toJSON problems}") refused)
     ++ map (p: "the real tree: ${p}") (import ../default.nix { inherit lib; }).problems
-    ++ map (check: "adding ${addedFolder} and apps/${added.app}: ${check} fails; problems: ${builtins.toJSON grown.problems}")
+    ++ map (check: "adding ${addedFolder} and ${custom}/${added.app}: ${check} fails; problems: ${builtins.toJSON grown.problems}")
       (lib.attrNames (lib.filterAttrs (_: ok: !ok) addedChecks))
     ++ exportProblems;
 in

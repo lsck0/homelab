@@ -128,7 +128,7 @@ in rec {
 
   # the real router at its real nic names, with the lab's real nas clients (they shape its nfs rules)
   router = {
-    imports = production ++ [ node ../../instances/300-router/main.nix ./offline-router.nix ];
+    imports = production ++ [ node ../../core/300-router/main.nix ./offline-router.nix ];
     _module.args.nasClients = facts.nasClients;
     virtualisation.vlans = lib.mkForce [ ];
     virtualisation.interfaces = { ${net.wan.interface}.vlan = vlans.lan; }
@@ -137,7 +137,7 @@ in rec {
 
   # the nas at 10.100.0.109, exporting exactly what the test's guests mount, by the real export rules
   nas = { flat ? false, vlan ? (if flat then vlans.lan else vlans.internal) }: { nodes, ... }: {
-    imports = [ (guest nasId { inherit flat vlan; }) ../../instances/109-internal-nas/lib/nas-exports.nix ];
+    imports = [ (guest nasId { inherit flat vlan; }) ../../core/109-internal-nas/lib/nas-exports.nix ];
     homelab.nasExports.enable = true;
     _module.args.nasClients = import ./nas-clients.nix {
       inherit lib inventory;

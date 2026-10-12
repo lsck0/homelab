@@ -7,9 +7,13 @@
 let
   system = pkgs.stdenv.hostPlatform.system;
 
-  # a guest of the fake lab: a folder unless it is a swarm worker; `reads` are the sops keys its config reads
+  folders = inputs.self.lab.layout;
+  # a guest of the fake lab: a folder (the router's in core) unless it is a swarm worker; `reads` are the sops keys its
+  # config reads
+  folderOf = name: if lib.hasSuffix "-apps-swarm" name then null
+    else if lib.hasSuffix "-router" name then "${folders.core}/${name}" else "${folders.preconfigured}/${name}";
   guest = { id, name, hostName ? "vm-${id}", secrets ? { }, reads }: {
-    instance = { inherit id name; dir = if lib.hasSuffix "-apps-swarm" name then null else "fixture"; config = { inherit hostName secrets; }; };
+    instance = { inherit id name; folder = folderOf name; config = { inherit hostName secrets; }; };
     config.sops.secrets = lib.genAttrs reads (key: { inherit key; });
   };
   # an app as modules/apps-catalog types it, its fields all present
@@ -21,6 +25,7 @@ let
           instances = lib.listToAttrs (map (g: lib.nameValuePair g.instance.id g.instance) guests);
           hosts = lib.listToAttrs (map (g: lib.nameValuePair g.instance.name { inherit (g.instance) id; }) guests);
           appsCatalog.apps = apps;
+          layout = folders;
           oidc = [ { secret = "b-oidc-secret"; } ];
           catalog.external = { };
         };

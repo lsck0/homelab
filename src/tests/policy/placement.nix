@@ -1,8 +1,8 @@
 # where a file lives: every file has one owner, and it lives in that owner's folder
 #
-# Owners: an instance (src/instances/<folder>/), an app (src/apps/<name>/), a module (src/modules/<name>.nix or
-# src/modules/<name>/) and the lab itself (the flake, src/scripts, src/terraform, src/secrets, src/generated, src/lab,
-# src/tests, src/apps/swarm.nix, sync.sh). A file's users are the owners of the code that names it: a path literal in
+# Owners: an instance (src/core/<folder>/ or src/instances/preconfigured/<folder>/), an app
+# (src/instances/custom/<name>/), a module (src/modules/<name>.nix or src/modules/<name>/) and the lab itself (the
+# flake, src/scripts, src/terraform, src/secrets, src/generated, src/lab, src/tests, src/core/swarm.nix, sync.sh). A file's users are the owners of the code that names it: a path literal in
 # a .nix file, "$SRC/<path>" in a shell script, "${local.src}/<path>" in terraform, resolved against the file's
 # directory; comment lines name what they describe without using it. Tests (anything under a tests/ folder), laws,
 # docs and skills never make a file shared: a test lives with what it tests. A module counts as used by whoever uses
@@ -19,13 +19,15 @@
 #     there, and an instance's test may run another's host but never tests its lib/; a test's own files sit beside
 #     the test that names them; every test in src/tests says why it is lab-wide in its first lines (`# lab-wide: <why>`)
 #   - an instance folder holds main.nix and instance.nix, a module folder default.nix, lib/ and tests/ only
-{ lib, src, ... }:
+{ lib, src, lab, ... }:
 let
   # -------------------------------------------------------------------------------------------------------------
   # CONSTANTS
   # -------------------------------------------------------------------------------------------------------------
 
-  topAllowed = [ "flake.nix" "flake.lock" "apps" "generated" "instances" "lab" "modules" "scripts" "secrets" "terraform" "tests" ];
+  topAllowed = [ "flake.nix" "flake.lock" "core" "generated" "instances" "lab" "modules" "scripts" "secrets" "terraform" "tests" ];
+  instanceKinds = [ lab.layout.core lab.layout.preconfigured ];
+  folderKinds = instanceKinds ++ [ lab.layout.custom ];
   moduleFolderAllowed = [ "default.nix" "lib" "tests" ];
   # src/tests: the harness folders beside the lab-wide tests
   harnessDirs = [ "lib" "policy" "stubs" ];
@@ -70,16 +72,19 @@ let
   dirOfPath = path: let parts = lib.splitString "/" path; in lib.concatStringsSep "/" (lib.init parts);
 
   isTest = path: lib.hasPrefix "tests/" path || lib.hasInfix "/tests/" path;
+  # an owner is its folder: "core/<folder>", "instances/preconfigured/<folder>", "instances/custom/<name>", "modules/<name>"
   ownerOf = path: let
-    instance = builtins.match "instances/([^/]+)(/.*)?" path;
-    app = builtins.match "apps/([^/]+)/.*" path;
+    folder = lib.findFirst (m: m != null) null (map (kind: builtins.match "(${kind}/[^/.]+)(/.*)?" path) folderKinds);
     module = builtins.match "modules/([^/.]+)(\\.nix|/.*)?" path;
   in
-    if instance != null then "instances/${lib.head instance}"
-    else if app != null then "apps/${lib.head app}"
+    if folder != null then lib.head folder
     else if module != null then "modules/${lib.head module}"
     else "lab";
-  kindOf = owner: lib.head (lib.splitString "/" owner);
+  kindOf = owner:
+    if owner == "lab" then "lab"
+    else if lib.hasPrefix "modules/" owner then "modules"
+    else if lib.hasPrefix "${lab.layout.custom}/" owner then "apps"
+    else "instances";
 
   # -------------------------------------------------------------------------------------------------------------
   # READERS: every code file, what it names
@@ -100,7 +105,7 @@ let
   readerPaths = lib.filter (path: lib.any (suffix: lib.hasSuffix suffix path) codeSuffixes) allFiles
     ++ lib.optional (builtins.pathExists (src + "/${syncScript}")) syncScript;
   # a reference to a whole tree of owners (the flake discovering every folder) is no use of any of them
-  discoveryRoots = [ "" "apps" "instances" "modules" "tests" ];
+  discoveryRoots = [ "" "instances" "modules" "tests" ] ++ folderKinds;
   readers = map (path: {
     inherit path;
     owner = ownerOf path;
@@ -169,11 +174,12 @@ let
   namedBeside = path: lib.any (r: r.path != path && testDirOf r.path == testDirOf path && lib.elem path r.refs) readers;
   # a test runnable by hand (media-stack.sh): it starts with its interpreter
   isScript = path: lib.hasPrefix "#!" (builtins.readFile (src + "/${path}"));
-  instanceFolders = lib.filter (f: (builtins.readDir (src + "/instances")).${f} == "directory") (entriesOf "instances");
+  instanceFolders = lib.concatMap (kind: lib.optionals (builtins.pathExists (src + "/${kind}")) (map (f: "${kind}/${f}")
+    (lib.filter (f: (builtins.readDir (src + "/${kind}")).${f} == "directory") (entriesOf kind)))) instanceKinds;
   # a test reaches its host by path or by configuration name (inputs.self.nixosConfigurations."<folder>")
   # an instance's or app's own code (a script, a template): a test of another owner may run its host, never test it
-  libOfFolder = path: builtins.match "(instances|apps)/[^/]+/lib/.+" path != null;
-  hostsNamedIn = path: map (f: "instances/${f}") (lib.filter (f: lib.hasInfix "\"${f}\"" (codeOf path)) instanceFolders);
+  libOfFolder = path: lib.elem (kindOf (ownerOf path)) [ "instances" "apps" ] && lib.hasPrefix "${ownerOf path}/lib/" path;
+  hostsNamedIn = path: lib.filter (f: lib.hasInfix "\"${baseNameOf f}\"" (codeOf path)) instanceFolders;
   labWideLaws = lib.concatMap (path: let head = lib.take labWideLines (lib.splitString "\n" (builtins.readFile (src + "/${path}"))); in
     lib.optional (path != "tests/${sharedStubs}" && !(namedBeside path) && !(lib.any (lib.hasPrefix labWideMark) head))
       "src/${path} is in src/tests without `${labWideMark}<why>` in its first lines: a test of one owner lives in its tests/"
@@ -193,10 +199,10 @@ let
     ++ map (t: "src/${path} tests ${t}: its cases belong in src/${ownerOf t}/tests/")
       (lib.filter (t: kindOf owner == "instances" && ownerOf t != owner && libOfFolder t)
         (lib.optionals (r != null) r.refs))
-  ) (lib.filter (path: ownerOf path != "lab" && builtins.match "[^/]+/[^/]+/tests/[^/]+" path != null) testFiles);
+  ) (lib.filter (path: ownerOf path != "lab" && testDirOf path == "${ownerOf path}/tests") testFiles);
 
-  folderLaws = lib.concatMap (folder: let files = builtins.readDir (src + "/instances/${folder}"); in
-    map (f: "src/instances/${folder} has no ${f}") (lib.filter (f: !(files ? ${f})) [ "main.nix" "instance.nix" ])
+  folderLaws = lib.concatMap (folder: let files = builtins.readDir (src + "/${folder}"); in
+    map (f: "src/${folder} has no ${f}") (lib.filter (f: !(files ? ${f})) [ "main.nix" "instance.nix" ])
   ) instanceFolders
   ++ lib.concatMap (folder: let entries = entriesOf "modules/${folder}"; in
     lib.optional (!(lib.elem "default.nix" entries)) "src/modules/${folder} has no default.nix"

@@ -1,7 +1,7 @@
 # the lab: one nixos configuration per instance folder and swarm node, the collected facts (`lab`), the checks
 #
 # Checks: every src/tests/<name>.nix but the shared stand-ins (the lab-wide tests), every
-# src/{instances,modules,apps}/<name>/tests/<test>.nix (a test lives with what it tests)
+# src/{core,instances/preconfigured,instances/custom,modules}/<name>/tests/<test>.nix (a test lives with what it tests)
 # is a check named by its file; adding a test is adding its file. A test is a function of
 # { pkgs, lib, inputs, specialArgs, ... } (specialArgs: the hosts' own, the lab's facts) returning a derivation; a
 # seeded one also takes `seed` with a default and lists past failing seeds in passthru.regressionSeeds, and its check
@@ -30,7 +30,7 @@
     pkgs = nixpkgs.legacyPackages.${system};
     lib = nixpkgs.lib;
 
-    # every fact about the guests and apps, collected from src/instances/*/ and src/apps/*/ (modules/lab)
+    # every fact about the guests and apps, collected from src/core/, src/instances/*/ and src/core/swarm.nix (modules/lab)
     lab = let collected = import ./modules/lab { inherit lib; }; in
       assert lib.assertMsg (collected.problems == [ ]) "the lab's instances break its rules:\n${lib.concatLines collected.problems}";
       collected;
@@ -51,7 +51,8 @@
     folderTests = dir: map (folder: testsIn (dir + "/${folder}/tests"))
       (lib.attrNames (lib.filterAttrs (folder: kind: kind == "directory" && builtins.pathExists (dir + "/${folder}/tests"))
         (builtins.readDir dir)));
-    testSets = [ (removeAttrs (testsIn ./tests) [ "stubs" ]) ] ++ folderTests ./instances ++ folderTests ./modules ++ folderTests ./apps;
+    testSets = [ (removeAttrs (testsIn ./tests) [ "stubs" ]) ] ++ folderTests ./modules
+      ++ lib.concatMap (kind: folderTests (./. + "/${kind}")) (with lab.layout; [ core preconfigured custom ]);
     testNamesTwice = lib.attrNames (lib.filterAttrs (_: names: lib.length names > 1)
       (lib.groupBy (name: name) (lib.concatMap lib.attrNames testSets)));
     testFiles = assert lib.assertMsg (testNamesTwice == [ ]) "two tests share a name, which names their check: ${toString testNamesTwice}";

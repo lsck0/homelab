@@ -78,7 +78,7 @@ pkgs.testers.runNixOSTest {
   nodes.vm-250 = swarmNode "250";
   nodes."vm-${placedId}" = swarmNode placedId;
   nodes.vm-200 = {
-    imports = [ (lab.guest "200" { flat = true; instance = ../../../instances/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
+    imports = [ (lab.guest "200" { flat = true; instance = ../../../core/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
     virtualisation.memorySize = 1536;
   };
   nodes.world = {

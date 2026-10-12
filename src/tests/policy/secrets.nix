@@ -35,7 +35,8 @@ let
   # one secret only a single folder host reads, declared as shared: it belongs in that folder
   readersOf = key: lib.attrNames (lib.filterAttrs (_: h: lib.elem key (h.shared)) plan.hosts);
   placementLaws = lib.concatMap (key: let readers = readersOf key; in
-    lib.optional (lib.length readers == 1 && lib.hasPrefix "instances/" plan.hosts.${lib.head readers}.home)
+    lib.optional (lib.length readers == 1 && lib.any (kind: lib.hasPrefix "${kind}/" plan.hosts.${lib.head readers}.home)
+        [ lab.layout.core lab.layout.preconfigured ])
       ("src/secrets/shared.nix declares ${key}, which only ${lib.head readers} reads: "
         + "move it to ${plan.hosts.${lib.head readers}.home}/instance.nix `secrets`")
   ) (lib.attrNames catalog);

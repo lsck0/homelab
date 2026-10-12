@@ -14,7 +14,7 @@ let
   telemetry = import ../../telemetry.nix { inherit lib; inherit (lab) inventory; };
   limits = import ../../limits { inherit lib; };
   # the builder's import of an app's own boards (140-internal-swarm)
-  dashboardsImport = ../../../instances/140-internal-swarm/lib/dashboards-import.py;
+  dashboardsImport = ../../../core/140-internal-swarm/lib/dashboards-import.py;
   ip = id: lab.inventory.${id}.ip;
 
   # -----------------------------------------------------------------------------
@@ -100,11 +100,11 @@ pkgs.testers.runNixOSTest {
   nodes.vm-250 = { imports = [ (swarmNode "250" 2560) ]; virtualisation.cores = workerShape.cores; };
   nodes.vm-251 = { imports = [ (swarmNode "251" 2560) ]; virtualisation.cores = workerShape.cores; };
   nodes.vm-105 = {
-    imports = [ (lab.guest telemetry.collectorVmid { flat = true; nas = true; instance = ../../../instances/105-internal-grafana/main.nix; }) common ];
+    imports = [ (lab.guest telemetry.collectorVmid { flat = true; nas = true; instance = ../../../core/105-internal-grafana/main.nix; }) common ];
     virtualisation.memorySize = 3072;
   };
   nodes.vm-200 = {
-    imports = [ (lab.guest "200" { flat = true; instance = ../../../instances/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
+    imports = [ (lab.guest "200" { flat = true; instance = ../../../core/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
     virtualisation.memorySize = 1536;
   };
   nodes.world = {

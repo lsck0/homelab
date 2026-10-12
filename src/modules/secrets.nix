@@ -1,9 +1,9 @@
 # where every sops secret lives and who may open it: the one place that knows the secrets layout
 #
 # A secret is declared once, with the kind of its value (src/secrets/shared.nix lists the kinds):
-#   - instances/<n>/instance.nix `secrets`: only that guest reads it; the value lives in its folder's
+#   - an instance folder's instance.nix `secrets`: only that guest reads it; the value lives in its folder's
 #     secrets.sops.json, encrypted to the admins and that guest
-#   - apps/<name>/app.nix `secrets`, plus app-<name>-redeploy-token for every app: in the app folder's
+#   - an app folder's app.nix `secrets`, plus app-<name>-redeploy-token for every app: in the app folder's
 #     secrets.sops.json, encrypted to the admins and every host that reads one of them (the manager, an own guest)
 #   - the router's own secrets.sops.json also holds <route>-onion-key for every onion route (modules/service.nix)
 #   - src/secrets/shared.nix, plus <client>-oidc-secret for every oidc client: read by two or more hosts, or by
@@ -14,8 +14,8 @@
 # src/scripts/secrets-sync.sh writes the files from `planOf`; modules/base points every secret at its file.
 #
 #   secrets = import ./secrets.nix { inherit lib lab; };
-#   secrets.declared.kopia-password     # { kind = "guardsData:hex:24"; file = "instances/109-internal-nas/secrets.sops.json"; home = ...; }
-#   secrets.fileOf host "attic-pull-token"   # "instances/109-internal-nas/secrets.shared.sops.json" (paths relative to src/)
+#   secrets.declared.kopia-password     # { kind = "guardsData:hex:24"; file = "core/109-internal-nas/secrets.sops.json"; home = ...; }
+#   secrets.fileOf host "attic-pull-token"   # "core/109-internal-nas/secrets.shared.sops.json" (paths relative to src/)
 #   secrets.planOf configs              # what secrets-sync.sh converges to, and the problems that stop it
 #   (import ./secrets.nix { inherit lib; }).kindPattern   # the kinds alone, for a schema (no `lab` needed)
 # `catalog` is src/secrets/shared.nix; a test passes its own.
@@ -53,12 +53,7 @@ let
   # -------------------------------------------------------------------------------------------------------------
 
   instanceList = lib.attrValues lab.instances;
-  guestApps = lib.listToAttrs (lib.concatLists (lib.mapAttrsToList (app: a:
-    lib.optional (a.placement != null) (lib.nameValuePair (toString a.placement.vmid) app)) lab.appsCatalog.apps));
-  homeOf = i:
-    if i.dir != null then "instances/${i.name}"
-    else if guestApps ? ${i.id} then "apps/${guestApps.${i.id}}"
-    else "generated/nodes/${i.name}";
+  homeOf = i: if i.folder != null then i.folder else "generated/nodes/${i.name}";
 
   entriesOf = { file, home ? null }: lib.mapAttrsToList (name: kind: { inherit name kind file home; });
   ownEntriesOf = i: entriesOf { file = "${homeOf i}/${ownName}"; home = homeOf i; };
@@ -69,7 +64,7 @@ let
   entries =
     lib.concatMap (i: ownEntriesOf i i.config.secrets) instanceList
     ++ ownEntriesOf router onionKeys
-    ++ lib.concatLists (lib.mapAttrsToList (app: a: entriesOf { file = "apps/${app}/${ownName}"; }
+    ++ lib.concatLists (lib.mapAttrsToList (app: a: entriesOf { file = "${lab.layout.custom}/${app}/${ownName}"; }
       (a.secrets // { "app-${app}-redeploy-token" = deployTokenKind; })) lab.appsCatalog.apps)
     ++ entriesOf { file = catalogFile; } catalog
     ++ entriesOf { file = tfvarsFile; } tfvars

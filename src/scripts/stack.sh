@@ -6,7 +6,7 @@
 #
 # Every guest's phase, power and declaring file come from the collector (`nix eval .#lab.instances`); a write edits
 # only that file: its `power` line, or a new one after its bootPhase line where the schema's default held. The swarm's
-# workers share one file (src/apps/swarm.nix) and turn together; an app's own guest follows the app's `enable`.
+# workers share one file (src/core/swarm.nix) and turn together; an app's own guest follows the app's `enable`.
 # Whether a guest idles is its instance.nix `idle`, not a group's state.
 set -euo pipefail
 
@@ -28,6 +28,7 @@ STATES = ("on", "off")
 # what the collector says of each guest, the one json `nix eval` prints
 INSTANCES_PROJECTION = "is: builtins.mapAttrs (_: i: { inherit (i) source; inherit (i.config.vm) bootPhase power; }) is"
 APP_SOURCE_SUFFIX = "/app.nix"
+INSTANCE_SOURCE_SUFFIX = "/instance.nix"
 
 src, args = Path(sys.argv[1]), sys.argv[2:]
 
@@ -57,7 +58,7 @@ def guests_load():
 
 
 def guest_name(source):
-    return Path(source).parent.name if source.startswith("instances/") else source
+    return Path(source).parent.name if source.endswith(INSTANCE_SOURCE_SUFFIX) else source
 
 
 guests = guests_load()

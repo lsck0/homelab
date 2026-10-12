@@ -114,7 +114,7 @@ CAT=secrets/shared.sops.json
 [[ "$(value "$R" "$CAT" A1.key gen)" =~ ^[0-9a-f]{32}$ ]] || fail "gen (hex:16) is $(value "$R" "$CAT" A1.key gen)"
 lk=$(value "$R" "$CAT" A1.key lk)
 [ "${lk#base64:}" != "$lk" ] && [ "$(printf '%s' "${lk#base64:}" | base64 -d | wc -c)" = 32 ] || fail "lk is no laravel key: $lk"
-[[ "$(value "$R" apps/x/secrets.sops.json A1.key x-app)" =~ ^GK[0-9a-f]{24}$ ]] || fail "x-app is no garage key id"
+[[ "$(value "$R" instances/custom/x/secrets.sops.json A1.key x-app)" =~ ^GK[0-9a-f]{24}$ ]] || fail "x-app is no garage key id"
 [[ "$(value "$R" "$CAT" A1.key vault)" =~ ^[0-9a-f]{32}$ ]] || fail "vault (guardsData:hex:16) is $(value "$R" "$CAT" A1.key vault)"
 [ "$(value "$R" "$CAT" A1.key wg | base64 -d | wc -c)" = 32 ] || fail "wg is no 32-byte base64 wireguard key"
 [ -z "$(value "$R" "$CAT" A1.key man)" ] && [ -z "$(value "$R" "$CAT" A1.key pub)" ] || fail "manual and public are not empty"
@@ -128,7 +128,7 @@ hs=$(value "$R" "$CAT" A1.key hs)
 onion=$(jq -r .hs "$R/src/generated/onions.json")
 [[ "$onion" =~ ^[a-z2-7]{56}\.onion$ ]] && [ "$onion" = "$(onion_address "$hs")" ] || fail "generated/onions.json names hs $onion"
 grep -qF "add     man -> $CAT (empty, fill it: sops src/$CAT)" run1.log || fail "an empty manual secret is not reported"
-[ "$(value "$R" instances/100-internal-a/secrets.shared.sops.json A1.key shared)" = "$(value "$R" "$CAT" A1.key shared)" ] \
+[ "$(value "$R" instances/preconfigured/100-internal-a/secrets.shared.sops.json A1.key shared)" = "$(value "$R" "$CAT" A1.key shared)" ] \
   || fail "a's shared copy differs from src/secrets/shared.sops.json"
 ok "2 values by kind (hex, wireguard, laravel key, garage key id, guarded hex, onion and its address; manual and public empty), shared copies equal the source"
 
@@ -165,14 +165,14 @@ grep -q '0 file(s) changed' run2.log || fail "a second run reports changes: $(ca
 ok "5 a second run changes no byte"
 
 gen=$(value "$R" "$CAT" A1.key gen)
-router=$(hash_of "$R/src/instances/300-router/secrets.sops.json")
+router=$(hash_of "$R/src/core/300-router/secrets.sops.json")
 sync "$R" A1.key "$A1 $A2" moved > dry.log
 [ "$(tree_hash "$R")" = "$before" ] || fail "a dry run wrote"
-grep -qF "move    gen: $CAT -> instances/100-internal-a/secrets.sops.json" dry.log || fail "the dry run does not report the move: $(cat dry.log)"
+grep -qF "move    gen: $CAT -> instances/preconfigured/100-internal-a/secrets.sops.json" dry.log || fail "the dry run does not report the move: $(cat dry.log)"
 sync "$R" A1.key "$A1 $A2" moved --apply > moved.log
 check_layout "$R" moved A1.key "$A1" "$A2"
-[ "$(value "$R" instances/100-internal-a/secrets.sops.json A1.key gen)" = "$gen" ] || fail "gen changed value on its move"
-[ "$(hash_of "$R/src/instances/300-router/secrets.sops.json")" = "$router" ] || fail "the move rewrote an unrelated file"
+[ "$(value "$R" instances/preconfigured/100-internal-a/secrets.sops.json A1.key gen)" = "$gen" ] || fail "gen changed value on its move"
+[ "$(hash_of "$R/src/core/300-router/secrets.sops.json")" = "$router" ] || fail "the move rewrote an unrelated file"
 sync "$R" A1.key "$A1 $A2" base --apply > back.log
 [ "$(value "$R" "$CAT" A1.key gen)" = "$gen" ] || fail "gen changed value on its way back"
 ok "6 a dry run reports and writes nothing; a value moves into its new file and back unchanged, unrelated files untouched"
@@ -189,13 +189,13 @@ dec A1.key "$R/src/$TFV" | jq -e 'has("proxmox_ssh_password") | not' >/dev/null 
 sync "$R" A1.key "$A1 $A2" base --apply > /dev/null
 ok "7 an undeclared value is kept and reported, --prune deletes it, in the terraform vars too"
 
-a_before=$(hash_of "$R/src/instances/100-internal-a/secrets.sops.json")
+a_before=$(hash_of "$R/src/instances/preconfigured/100-internal-a/secrets.sops.json")
 sync "$R" A1.key "$A1 $A2" minus --apply > minus.log
 check_layout "$R" minus A1.key "$A1" "$A2"
-[ ! -e "$R/src/instances/101-internal-b/age.sops" ] && [ ! -e "$R/src/instances/101-internal-b/secrets.shared.sops.json" ] \
+[ ! -e "$R/src/instances/preconfigured/101-internal-b/age.sops" ] && [ ! -e "$R/src/instances/preconfigured/101-internal-b/secrets.shared.sops.json" ] \
   || fail "a removed host keeps its key or copy"
 [ ! -e "$R/src/generated/nodes/250-apps-swarm" ] || fail "a removed worker keeps its folder"
-[ "$(hash_of "$R/src/instances/100-internal-a/secrets.sops.json")" = "$a_before" ] || fail "removing hosts rewrote a's file"
+[ "$(hash_of "$R/src/instances/preconfigured/100-internal-a/secrets.sops.json")" = "$a_before" ] || fail "removing hosts rewrote a's file"
 sync "$R" A1.key "$A1 $A2" base --apply > /dev/null
 check_layout "$R" base A1.key "$A1" "$A2"
 ok "8 removed hosts lose key, copy and folder, the app's file its reader; others byte-identical; they come back"
@@ -206,9 +206,9 @@ ok "8 removed hosts lose key, copy and folder, the app's file its reader; others
 refuses "$R" "101-internal-b reads nope, which nothing declares" A1.key "$A1 $A2" problem --apply
 refuses "$R" "vault2 in src/secrets/shared.sops.json" A1.key "$A1 $A2" renamed --apply
 refuses "$R" "is not an admin recipient" A1.key "$A2 $A3" base --apply
-cp "$R/src/instances/300-router/age.pub" "$T/pub.saved"; age-keygen -y A3.key > "$R/src/instances/300-router/age.pub"
-refuses "$R" "instances/300-router/age.pub is not the public half" A1.key "$A1 $A2" base --apply
-cp "$T/pub.saved" "$R/src/instances/300-router/age.pub"
+cp "$R/src/core/300-router/age.pub" "$T/pub.saved"; age-keygen -y A3.key > "$R/src/core/300-router/age.pub"
+refuses "$R" "core/300-router/age.pub is not the public half" A1.key "$A1 $A2" base --apply
+cp "$T/pub.saved" "$R/src/core/300-router/age.pub"
 ok "9 refused, nothing written: an undeclared read, a guarded secret without its value, a run locking its own key out, a foreign age.pub"
 
 # -----------------------------------------------------------------------------
@@ -228,7 +228,7 @@ done
 while IFS= read -r f; do opens A1.key "$R/src/$f" && fail "A1 opens $f after its removal"; done < <(plan_q base '.files | keys[]')
 [ "$(dec A3.key "$R/src/$CAT" | jq -S .)" = "$(dec A1.key "$T/history/$CAT" | jq -S .)" ] || fail "the rotation changed values"
 splice() { jq --slurpfile old "$1" --arg a1 "$A1" '.sops.age += [$old[0].sops.age[] | select(.recipient == $a1)]' "$2" > "$3"; }
-for f in "$CAT" instances/100-internal-a/age.sops instances/100-internal-a/secrets.sops.json; do
+for f in "$CAT" instances/preconfigured/100-internal-a/age.sops instances/preconfigured/100-internal-a/secrets.sops.json; do
   # the same name, so sops reads the splice in the file's own format
   spliced=$T/spliced-$(basename "$f")
   splice "$T/history/$f" "$R/src/$f" "$spliced"

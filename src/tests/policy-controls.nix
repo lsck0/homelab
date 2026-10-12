@@ -32,6 +32,7 @@ let
   runner = lib.head (lib.attrNames configs.${ci}.services.github-runners);
   builder = inventory.${catalog.swarm.builderId}.name;
   owner = "101-internal-authelia";
+  ownerFolder = facts.lab.hosts.${owner}.folder;
 
   network = law: tampered: { file = "network"; marker = "${law}: "; inherit tampered; };
   controls = {
@@ -150,8 +151,8 @@ let
       tampered = tamper owner [ "sops" "age" "sshKeyPaths" ] [ "/etc/ssh/ssh_host_ed25519_key" ]; };
     secret-placeholder = { file = "secrets"; marker = "contains a sops placeholder";
       tampered = tamper owner [ "systemd" "services" "sshd" "environment" "CONTROL" ] "<SOPS:0:PLACEHOLDER>"; };
-    secret-file-missing = { file = "secrets"; marker = "src/instances/${owner}/secrets.sops.json is missing";
-      tampered = srcWithout "src-without-a-secrets-file" (lib.hasSuffix "/instances/${owner}/secrets.sops.json"); };
+    secret-file-missing = { file = "secrets"; marker = "src/${ownerFolder}/secrets.sops.json is missing";
+      tampered = srcWithout "src-without-a-secrets-file" (lib.hasSuffix "/${ownerFolder}/secrets.sops.json"); };
     token-share = { file = "secrets"; marker = "mounts another producer's";
       tampered = mounting "121-internal-paperless" "/srv/nas/data/tokens/vm-999"; };
     dump-share = { file = "secrets"; marker = "not its own dump dir";
@@ -171,10 +172,10 @@ let
         (map (j: j // { pipeline_stages = lib.filter (s: !(s ? replace)) (j.pipeline_stages or [ ]); })
           configs."200-external-traefik".services.promtail.configuration.scrape_configs); };
 
-    test-of-another-instance = { file = "placement"; marker = "tests instances/101-internal-b/lib/b.nix";
+    test-of-another-instance = { file = "placement"; marker = "tests instances/preconfigured/101-internal-b/lib/b.nix";
       tampered = facts // { src = ./policy/lib/placement-fixture; }; };
-    instance-folder = { file = "placement"; marker = "src/instances/${owner} has no main.nix";
-      tampered = srcWithout "src-without-a-main" (lib.hasSuffix "/instances/${owner}/main.nix"); };
+    instance-folder = { file = "placement"; marker = "src/${ownerFolder} has no main.nix";
+      tampered = srcWithout "src-without-a-main" (lib.hasSuffix "/${ownerFolder}/main.nix"); };
     module-folder = { file = "placement"; marker = "src/modules/traefik has no default.nix";
       tampered = srcWithout "src-without-a-module" (lib.hasSuffix "/modules/traefik/default.nix"); };
   };

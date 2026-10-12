@@ -10,20 +10,23 @@ import tempfile
 from pathlib import Path
 
 PHASES = ("apps", "media", "public")
+# modules/lab layout: the instance folders' homes and the swarm workers' file
+INSTANCE_DIRS = ("core", "instances/preconfigured")
+SWARM_FILE = "core/swarm.nix"
 STATES = ("on", "off")
 
 
 def guest_files(src):
     """file (relative to src) -> (boot phase, text) for every guest file stack.sh edits."""
-    files = [p for p in sorted((src / "instances").glob("*/instance.nix")) if not p.parent.name.startswith("_")]
-    files.append(src / "apps/swarm.nix")
+    files = [p for d in INSTANCE_DIRS for p in sorted((src / d).glob("*/instance.nix")) if not p.parent.name.startswith("_")]
+    files.append(src / SWARM_FILE)
     return {str(p.relative_to(src)): (re.search(r'bootPhase\s*=\s*"([^"]+)"', p.read_text()).group(1), p.read_text())
             for p in files}
 
 
 def status_name(file):
     """the name stack.sh's status prints for a guest file."""
-    return file if file == "apps/swarm.nix" else Path(file).parent.name
+    return file if file == SWARM_FILE else Path(file).parent.name
 
 
 def stack(root, *args):

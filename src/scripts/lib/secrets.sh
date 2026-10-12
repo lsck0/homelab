@@ -19,7 +19,7 @@ SECRETS_ATTR="legacyPackages.x86_64-linux.secrets"
 # the layout's names (modules/secrets.nix): the folders holding host homes, and the files a home holds
 # shellcheck disable=SC2034 # read by the scripts sourcing this
 {
-  SECRETS_HOME_DIRS=(instances apps generated/nodes)
+  SECRETS_HOME_DIRS=(core instances/preconfigured instances/custom generated/nodes)
   # relative to src/, like every path of the plan
   SECRETS_CATALOG_FILE=secrets/shared.sops.json
   SECRETS_TFVARS_FILE=terraform/terraform.tfvars.sops.json
