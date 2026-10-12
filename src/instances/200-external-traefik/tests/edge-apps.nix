@@ -106,6 +106,9 @@ pkgs.testers.runNixOSTest {
         entries = [json.loads(l) for l in appnodes.succeed("cat /run/echo/requests.jsonl").splitlines() if l]
         return [e for e in entries if "x-forwarded-for" in e["headers"]]
 
+    # long enough for the tarpit's first chunks
+    TRICKLE_S = 3
+
     def backend_reset():
         appnodes.succeed(": > /run/echo/requests.jsonl")
 
@@ -289,9 +292,12 @@ pkgs.testers.runNixOSTest {
         backend_reset()
         r = get("/robots.txt")
         assert "User-agent: GPTBot" in r["body"] and "Disallow: /internal/export" in r["body"], r["body"]
-        for path, headers in (("/api/x", {"User-Agent": "GPTBot/1.0"}), ("/.env", {}), ("/wp-login.php", {})):
-            r = get(path, headers=headers)
-            assert r["status"] == 200 and "{" not in r["body"][:1], path
+        # the labyrinth trickles through the gate's tarpit (edge-antibot measures it): its first bytes, never the app's
+        for path, agent in (("/api/x", "GPTBot/1.0"), ("/.env", "curl"), ("/wp-login.php", "curl")):
+            status, out = world.execute(f"curl -s --max-time {TRICKLE_S} -o /tmp/trickle -w '%{{http_code}}' -A {agent} --interface {CF} "
+                                        f"-H 'X-Forwarded-For: ${realClient}' --resolve ${watHost}.${net.domain}:443:{EDGE} {WAT}{path}")
+            first = world.succeed("head -c 1 /tmp/trickle")
+            assert out == "200" and first not in ("", "{"), (path, status, out, first)
         assert backend_log() == [], backend_log()
 
     with subtest("crowdsec bans and the waf answer at the edge"):
