@@ -102,7 +102,8 @@ resource "proxmox_virtual_environment_vm" "vm" {
   name      = each.value.name
   node_name = local.site.node
   vm_id     = tonumber(each.key)
-  # idling vms start once so the first deploy reaches them
+  # at creation only (ignore_changes below): afterwards sync.sh wakes every powered guest for its deploy and the
+  # ingresses' reaper sleeps the idling ones, so terraform starting them each run would only fight the reaper
   started = each.value.powered
   # idling vms stay off at host boot
   on_boot = each.value.powered && each.value.idle == null
@@ -126,6 +127,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   lifecycle {
     # file_id only seeds a new disk, never replace
     ignore_changes = [
+      started,
       initialization[0].user_account,
       mac_addresses,
       disk[0].file_id,
@@ -232,7 +234,8 @@ resource "proxmox_virtual_environment_container" "ct" {
 
   lifecycle {
     # the template only seeds a new container, never replace; sync.sh sets features as root
-    ignore_changes = [operating_system[0].template_file_id, initialization[0].user_account, features]
+    # started as for the vms above
+    ignore_changes = [started, operating_system[0].template_file_id, initialization[0].user_account, features]
   }
 
   cpu {
