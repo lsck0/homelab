@@ -9,6 +9,7 @@ let
     repo = "lsck0/arcade";
     branch = "master";
     routes.arcade = { protocol = "tcp"; publicPort = 25565; port = 20199; };
+    off.scaleToZero = "the router forwards its tcp route past every wake proxy";
   };
   hostWith = import ../../../tests/lib/host-with.nix { inherit inputs; };
   grafana = hostWith (specialArgs.lab.withApps (apps: lib.recursiveUpdate apps { ${fixtureApp}.enable = true; arcade = tcpApp; }))

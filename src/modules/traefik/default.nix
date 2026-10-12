@@ -1006,11 +1006,13 @@ in {
       lib.mapAttrs (_: r: {
         inherit (r) vmid busyPath;
         targetPort = r.port;
+        healthPath = if r.health == null then "/" else r.health;
         inherit (lab.instances.${toString r.vmid}.config.idle) wakeAt;
       }) (lib.filterAttrs (_: r: r.vmid != null) cfg.routes)
       // lib.mapAttrs (_: r: let a = catalog.apps.${r.app}; in {
         inherit (r) app busyPath;
         targetPort = r.port;
+        healthPath = if r.health == null then "/" else r.health;
         manager = "http://${inventory.${a.cluster.manager}.ip}:${toString catalog.swarm.controllerPort}";
         host = lib.head r.nodes;
         idleAfter = a.idle.stopAfter;

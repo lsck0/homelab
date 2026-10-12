@@ -233,6 +233,8 @@ pkgs.testers.runNixOSTest {
   nodes.vm-200 = {
     imports = [ (lab.guest "200" { flat = true; instance = ../../200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
     virtualisation.memorySize = 1536;
+    # hello and own scale to zero; the reaper would put them to sleep under the deploys this test watches (app-idle's subject)
+    systemd.timers.ondemand-reaper.wantedBy = lib.mkForce [ ];
   };
 
   testScript = { nodes, ... }: ''

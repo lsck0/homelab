@@ -24,6 +24,7 @@ let
     routes.${name} = { port = ports.${name}; health = "/"; off = { sso = "the fixture is public"; anubis = "no browser here"; }; };
     resources.web = task;
     reservation = { memoryMiB = 256; cpus = 0.5; };
+    off.scaleToZero = "the test places apps; app-idle wakes them";
   } // extra;
   apps = {
     level = appOf "level" { };

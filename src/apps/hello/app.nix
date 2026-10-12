@@ -24,5 +24,6 @@ in
   # one static c server
   resources.web.memoryMiB = 128;
   reservation.memoryMiB = 128;
+  # scales to zero: a static page with no job of its own and no client holding a connection
   off = { traces = silent; profiles = silent; };
 }

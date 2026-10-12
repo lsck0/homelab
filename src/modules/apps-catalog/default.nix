@@ -35,6 +35,12 @@ let
   taskDefaults = { memoryMiB = 512; cpus = 1.0; pids = 512; };
   taskMax = { memoryMiB = 2048; cpus = 2.0; pids = 4096; };
 
+  # scale to zero unless the app says why it stays up: a quarter hour covers a reading session's pauses, so a user
+  # waits on a cold start once per visit, not per page; shorter only adds wakes, longer only holds memory
+  stopAfterDefault = "15m";
+  # what the platform runs for an app besides its telemetry, each on unless `off` says why
+  platformFeatures = [ "scaleToZero" ];
+
   # -----------------------------------------------------------------------------
   # TYPES
   # -----------------------------------------------------------------------------
@@ -189,7 +195,11 @@ let
         default = { };
         description = "The app's card on the dashboard (vm-103).";
       };
-      off = mkOption { type = service.offType service.telemetryFeatures; default = { }; description = "Telemetry feature -> why it is off."; };
+      off = mkOption {
+        type = service.offType (service.telemetryFeatures ++ platformFeatures);
+        default = { };
+        description = "Telemetry or platform feature -> why it is off; scaleToZero: why the app stays up (a job of its own, clients holding a connection).";
+      };
       dashboards = mkOption {
         type = types.listOf types.str;
         default = [ ];
@@ -199,7 +209,11 @@ let
           fails the deploy.
         '';
       };
-      idle = mkOption { type = service.idleType; default = { }; description = "When the stack stops on its own; the ingress wakes it."; };
+      idle = mkOption {
+        type = service.idleType;
+        default = { };
+        description = "When the stack scales to zero on its own (stopAfter ${stopAfterDefault} unless `off.scaleToZero`); the ingress wakes it.";
+      };
       placement = mkOption {
         type = types.nullOr (types.submodule {
           options = {
@@ -212,6 +226,7 @@ let
         description = "null: the shared apps swarm; else the app's own guest, a single-node swarm.";
       };
     };
+    config.idle.stopAfter = lib.mkDefault (if config.off.scaleToZero == null then stopAfterDefault else null);
   });
 in {
   options = {

@@ -240,6 +240,11 @@ let
       (lib.filter (d: !(lib.elem a.dumps.${d}.service a.stateful)) (lib.attrNames a.dumps))
     ++ map (s: "${where}.exclude drops ${s}, which the catalog still uses (stateful, published, env or resources)")
       (lib.intersectLists a.exclude (a.stateful ++ published ++ envServices ++ lib.attrNames a.resources))
+    # every app scales to zero (modules/apps-catalog stopAfterDefault); staying up is a decision with its reason
+    ++ lib.optional (a.idle.stopAfter == null && a.off.scaleToZero == null)
+      "${where}.idle.stopAfter is null without a reason: an app that stays up says why in `off.scaleToZero`"
+    ++ lib.optional (a.idle.stopAfter != null && a.off.scaleToZero != null)
+      "${where}: off.scaleToZero says it stays up, idle.stopAfter ${a.idle.stopAfter} stops it: keep one"
     ++ lib.optional (a.enable && a.routes == { } && a.metrics == { })
       "${where} publishes nothing: give it `routes` or `metrics`, or disable it"
     ++ lib.concatLists (lib.mapAttrsToList (service: r: map (limit:
@@ -307,7 +312,7 @@ in {
     ++ map (e: "${e.owner} route ${e.name}: onion serves a public http route of the edge only")
       (lib.filter (e: e.route.onion && (e.route.protocol != "http" || e.route.zone != "external")) routeEntries)
     # an idle deployment sleeps until an ingress's wake proxy sees a connection; the router forwards past it
-    ++ map (e: "${e.owner} route ${e.name}: a ${e.route.protocol} route goes from the router straight to its backend, which no wake proxy sees; its deployment cannot idle")
+    ++ map (e: "${e.owner} route ${e.name}: a ${e.route.protocol} route goes from the router straight to its backend, which no wake proxy sees; its deployment cannot idle${lib.optionalString (e.route.app != null) ": keep it up with off.scaleToZero"}")
       (lib.filter (e: if e.route.app != null then apps.${e.route.app}.idle.stopAfter != null
         else inventory.${toString e.route.vmid}.idle != null) l4Entries)
     # the house's public address: https for the ingresses, wireguard for the owner's devices, every l4 route once

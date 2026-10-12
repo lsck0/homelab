@@ -83,13 +83,23 @@ Copy `src/apps/_template/` to `src/apps/<name>/`: a repo and a branch are enough
 app is built from the repo's Dockerfile or compose file and answers at `<name>.lsck0.dev` behind the edge and
 authelia; `routes`, `off`, `resources`, `placement` and the rest are in `src/modules/apps-catalog`.
 
+An app owns its features and its own authentication and authorization; the platform owns tls, bot defence, rate
+limits, telemetry plumbing, backups and scale to zero. The app declares what only it knows: its routes (host, path,
+service, port and `health`, a path answering below 500 when up), its `metrics` endpoints, its `stateful` services and
+`volumes`, and whether it must stay up.
+
+Every app scales to zero: after `idle.stopAfter` (15 minutes unless set) without a request its stack runs no task,
+and its next request wakes it, held at the ingress until the app answers its health path (a few seconds: a scale
+of a service whose image is already on the worker). An app that must stay up says why, `off.scaleToZero = "<why>";`:
+a job of its own (wat's backup loop), clients that hold a connection (websockets), a tcp or udp route, which the
+router forwards past every wake proxy. A sleeping app keeps its `reservation`, since all may wake at once.
+
 The deploy controller vm-140 builds every new commit, parks the images in `registry.lsck0.dev` and deploys them to
 the app's cluster. Editing an app's folder and syncing redeploys it without an app commit; disabling it removes its
 stack (its volumes stay on the state worker). A failed build or deploy keeps the old version running, alerts, and is
 retried with backoff or on the next commit. `app-builder-redeploy <app>` on vm-140 rebuilds one now; a ci job does it
-with `curl -fsS -X POST -H "Authorization: Bearer $DEPLOY_TOKEN" https://deploy.lsck0.dev/redeploy/<app>`. An app with
-`idle.stopAfter` stops after that long without traffic, and its first request wakes it; only over http: the router
-forwards a tcp or udp route straight to its backend, past every wake proxy, so the catalog refuses `idle` there.
+with `curl -fsS -X POST -H "Authorization: Bearer $DEPLOY_TOKEN" https://deploy.lsck0.dev/redeploy/<app>`. A deploy of
+a sleeping app runs the new version until it is up, then puts it back to sleep.
 
 An app cannot take the lab down: it holds a `reservation` of the workers (checked at sync and at deploy), each task
 its `resources` limits, each route a request budget at the edge, and its logs, traces, profiles and metrics their own

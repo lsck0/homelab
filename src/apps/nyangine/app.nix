@@ -13,5 +13,6 @@ in
   # the notes
   volumes.web_server_data.backup = true;
   env.web.WEB_SERVER_ORIGIN = "{{homelab.origin-nyangine}}";
+  # scales to zero: the notes are read and written per request, the volume is archived asleep as awake
   off = { traces = silent; profiles = silent; };
 }

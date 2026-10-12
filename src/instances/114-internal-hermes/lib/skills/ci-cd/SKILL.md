@@ -60,9 +60,10 @@ Flow on every push to that branch:
   it the app's own data is dropped or refused (429) and shows on its board, nobody else's.
 - Each route admits 100 requests/s (burst 200, 200 at once) from all clients together, beside the per-client
   limits.
-- `idle.stopAfter = "30m"`: the stack scales to 0 after that long without requests and the edge wakes it on the
-  next one (holding the request); a deploy of a sleeping app keeps it asleep. State: `GET
-  http://10.100.0.140:8095/state/<app>` from an ingress, metric `homelab_app_idle_stopped{app}`.
+- Every app scales to 0 after `idle.stopAfter` (15m unless set) without requests and the ingress wakes it on the
+  next one (holding the request); an app that stays up says why in `off.scaleToZero`. A deploy of a sleeping app
+  runs the new version once, then puts it back to sleep. State: `GET http://10.100.0.140:8095/state/<app>` from an
+  ingress, metric `homelab_app_idle_stopped{app}`.
 
 ## Look
 

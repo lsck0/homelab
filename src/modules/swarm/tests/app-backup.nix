@@ -29,7 +29,7 @@ let
     reservation.memoryMiB = 256;
   } extra;
   apps = {
-    keep = appOf "keep" 20160 { };
+    keep = appOf "keep" 20160 { off.scaleToZero = "the test's app that never sleeps, whose wake the controller refuses"; };
     sleepy = appOf "sleepy" 20170 {
       volumes.data.backup = lib.mkForce false;
       dumps.page = { service = "web"; command = "cat /data/index.html"; };

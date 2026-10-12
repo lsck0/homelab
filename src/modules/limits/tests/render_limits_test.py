@@ -166,17 +166,12 @@ class Capabilities(unittest.TestCase):
 
 
 class Idle(unittest.TestCase):
-    def test_a_stopped_app_renders_at_zero_replicas_and_is_admitted_at_its_own(self):
+    def test_a_sleeping_app_is_admitted_at_its_running_replicas(self):
+        # render knows no sleep: a sleeping app's deploy runs it awake once (modules/swarm), inside its reservation
         stack = stack_of(worker={"deploy": {"replicas": 2}})
-        rendered = render_module.render(APP, catalog_of(memory=2048, cpu=1000), {}, stack)
-        stopped = yaml.safe_load(render_module.replicas_stop(rendered))
-        self.assertEqual({n: s["deploy"]["replicas"] for n, s in stopped["services"].items()}, {"web": 0, "worker": 0})
-        # everything else is the running app's: the image and limits update while it sleeps
-        running = yaml.safe_load(rendered)
-        for svc in running["services"].values():
-            svc["deploy"]["replicas"] = 0
-        self.assertEqual(stopped, running)
         self.assertIn("need 1536 MiB", refusal(self, stack, catalog_of(memory=1024, cpu=1000)))
+        rendered = yaml.safe_load(render_module.render(APP, catalog_of(memory=2048, cpu=1000), {}, stack))
+        self.assertEqual({n: s["deploy"]["replicas"] for n, s in rendered["services"].items()}, {"web": 1, "worker": 2})
 
 
 if __name__ == "__main__":

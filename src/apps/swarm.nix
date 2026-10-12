@@ -15,8 +15,8 @@
 
   nodes = {
     first = 250;
-    # the join token the manager mints (modules/swarm)
-    tokenReads = [ "swarm-worker-token" ];
+    # the join token the manager mints, and the images its services name, which a worker's prune keeps (modules/swarm)
+    tokenReads = [ "swarm-worker-token" "swarm-images" ];
     vm = {
       bootPhase = "public";
       needs = [ "containers" "nfs" ];

@@ -60,10 +60,13 @@ let
       lab = { catalog = import ../../catalog.nix { inherit lib lab; inherit (lab) inventory site; appsCatalog = lab.appsCatalog // { cadvisorPort = 20500; }; }; };
       expect = "cadvisorPort 20500 lies inside";
     };
+    # scale to zero is the default: a tcp route needs the opt-out
     idle-tcp = {
-      lab = withDemo { routes.demo-game = { protocol = "tcp"; publicPort = 25565; port = 20131; }; idle.stopAfter = "30m"; };
+      lab = withDemo { routes.demo-game = { protocol = "tcp"; publicPort = 25565; port = 20131; }; };
       expect = "route demo-game: a tcp route goes from the router straight to its backend";
     };
+    up-without-reason = { lab = withDemo { idle.stopAfter = null; }; expect = "idle.stopAfter is null without a reason"; };
+    up-and-asleep = { lab = withDemo { off.scaleToZero = "clients hold a websocket"; idle.stopAfter = "30m"; }; expect = "keep one"; };
   };
 
   # catalogs the schema itself rejects: an unknown field, a wrong type, a missing field
@@ -86,6 +89,14 @@ let
     internal-only = withApps { demo = removeAttrs demo [ "routes" ] // { routes.demo-admin = { zone = "internal"; port = 20131; }; }; };
     # repo and branch only: one route at demo.<domain>, behind the edge and authelia
     defaults-only = withApps { demo = removeAttrs demo [ "routes" ]; };
+    tcp-stays-up = withDemo { routes.demo-game = { protocol = "tcp"; port = 20131; }; off.scaleToZero = "a game server's clients hold their connection"; };
+  };
+
+  # a lab -> the demo app's idle.stopAfter: scale to zero unless the app says why not
+  stopAfter = {
+    by-default = { lab = withDemo { }; expect = "15m"; };
+    tuned = { lab = withDemo { idle.stopAfter = "1h"; }; expect = "1h"; };
+    stays-up = { lab = withDemo { off.scaleToZero = "a worker drains a queue"; }; expect = null; };
   };
 
   # the hosts that read the catalog, evaluated with it: what a consumer would choke on shows here
@@ -111,6 +122,8 @@ let
         "refused.${name}: no problem says \"${c.expect}\"; problems: ${builtins.toJSON problems}") refused)
     ++ lib.concatLists (lib.mapAttrsToList (name: case:
       lib.optional (evaluates case) "invalid.${name}: the schema accepted it") invalid)
+    ++ lib.concatLists (lib.mapAttrsToList (name: c: let got = c.lab.appsCatalog.apps.demo.idle.stopAfter; in
+      lib.optional (got != c.expect) "stopAfter.${name}: ${builtins.toJSON got}, expected ${builtins.toJSON c.expect}") stopAfter)
     ++ lib.concatLists (lib.mapAttrsToList (name: case: let problems = problemsOf case; in
       lib.optional (!(evaluates case)) "accepted.${name}: the schema rejected it"
       ++ map (p: "accepted.${name}: ${p}") problems
@@ -120,7 +133,7 @@ let
   count = attrs: toString (lib.length (lib.attrNames attrs));
 in
 pkgs.runCommand "apps-catalog" { } (if failures == [ ] then ''
-  echo "apps-catalog: ${count refused} refusals, ${count invalid} schema rejections and ${count accepted} accepted catalogs hold"
+  echo "apps-catalog: ${count refused} refusals, ${count invalid} schema rejections, ${count stopAfter} idle defaults and ${count accepted} accepted catalogs hold"
   touch $out
 '' else ''
   echo "apps-catalog: ${toString (lib.length failures)} failure(s):" >&2

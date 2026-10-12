@@ -43,6 +43,7 @@ let
       demo-udp = { protocol = "udp"; service = "echo"; targetPort = echoPort; port = udpPort; publicPort = udpPort; };
     };
     resources = { web.memoryMiB = 256; echo.memoryMiB = 128; };
+    off.scaleToZero = "its tcp and udp routes go from the router straight to the workers, past every wake proxy";
     # more than one worker holds beside a deploy's surge: the swarm gets two (modules/limits workerCountOf)
     reservation.memoryMiB = 768;
   };

@@ -25,6 +25,9 @@
 # (modules/swarm/lib/swarm-render.py) holds each app inside its reservation at deploy; swarm holds each worker inside its
 # allocatable at scheduling, so a task that fits no worker stays pending and fails its deploy, never a neighbour.
 # Memory is reserved at its limit and never overcommitted; cpu reserves a fixed share per task and shares the rest.
+# An app asleep (scaled to zero, apps-catalog `idle`) keeps its whole reservation, as the host budget counts onDemand
+# guests (tests/policy/guests.nix): all may wake at once, and a wake or a sleeping app's deploy (modules/swarm runs it
+# awake once) must never find its worker full. Sleep frees a worker's cpu and page cache, not admission room.
 #
 # Every service gets the same telemetry budget; a service that needs more gets its own field the day one does.
 #
