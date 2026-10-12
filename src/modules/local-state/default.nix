@@ -60,23 +60,25 @@ let
     nas_gen=$(generation_of ${nas}/${generationFile})
   '';
 
-  # the app's own user owns its state directory; a copy from the share must not hand it to the share's squashed owner
+  # a state directory the seed creates belongs to the app's unit user; a container's is declared by tmpfiles
   ownerOf = s: let sc = config.systemd.services.${s.unit}.serviceConfig; user = sc.User or "root"; in
     "${user}:${sc.Group or user}";
 
   reconcile = name: s: let local = s.path; nas = nasDir name; in pkgs.writeShellScript "${name}-reconcile" ''
     set -euo pipefail
     export PATH=${lib.makeBinPath [ pkgs.rsync pkgs.findutils pkgs.coreutils pkgs.util-linux ]}
-    mkdir -p ${local}
+    if [ ! -d ${local} ]; then mkdir -p ${local}; chown ${ownerOf s} ${local}; fi
     # the nas share itself, still mounted from before localState: copying it onto itself would destroy it
     if mountpoint -q ${local}; then echo "${name}: ${local} is a mount, not the guest's disk; unmount it" >&2; exit 1; fi
     ${generationsRead local nas}
     # the local id first: a crash between the writes leaves the mark, and the next seed copies again
     from_nas() {
+      owner=$(stat -c %u:%g ${local})
       mode=$(stat -c %a ${local})
       ${rsyncCopy} ${excludes s} ${nas}/ ${local}/
-      # rsync gave the directory itself the share's owner and mode (root squashed to nobody)
-      chown ${ownerOf s} ${local}
+      # rsync gave the directory itself the share's owner and mode (root squashed to nobody): it keeps its own, the
+      # container's uid of a tmpfiles rule included, which no unit's User names
+      chown "$owner" ${local}
       chmod "$mode" ${local}
       printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${local}/${generationFile}
       printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${nas}/${generationFile}
