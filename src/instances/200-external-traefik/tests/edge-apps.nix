@@ -43,6 +43,8 @@ let
   uploadLimit = wat.routes.wat-user-files.bodyLimitBytes;
   # a few seconds per transfer, long enough to look at /tmp while it runs
   transferRate = "1M";
+  # the worker appnodes does not stand in for: its ports never answer
+  absentWorker = "${ip "252"}";
 
   guest = vmid: instance: memory: {
     imports = [ (lab.guest vmid { flat = true; inherit instance; }) ../../../tests/lib/offline-traefik.nix ];
@@ -141,6 +143,9 @@ pkgs.testers.runNixOSTest {
     # the health check drops the absent third worker before the first request counts
     world.wait_until_succeeds(f"[ $(curl -s -o /dev/null -w '%{{http_code}}' --interface {CF} -H 'X-Forwarded-For: ${realClient}' "
                               f"--resolve ${watHost}.${net.domain}:443:{EDGE} {WAT}/api/health) = 200 ]", timeout=120)
+    # a 200 above may come from a live node while the absent one is still in a rotation: wait for every one to drop it
+    vm_200.wait_until_succeeds("m=$(curl -s http://127.0.0.1:${toString net.ports.traefikMetrics}/metrics | grep '^traefik_service_server_up{.*${absentWorker}'); "
+                               "[ -n \"$m\" ] && ! grep -q ' 1$' <<<\"$m\"", timeout=120)
 
     # sockets that idle through the other subtests: straight to the api, through anubis, and relayed to the internal
     # ingress, past its sso, from the house; each is open, greeted and echoed before a subtest reads the backend's log
