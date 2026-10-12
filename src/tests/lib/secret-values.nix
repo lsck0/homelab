@@ -50,6 +50,7 @@ in {
   wireguard-private-key = wireguardOf "wireguard-private-key";
   protonvpn-private-key = wireguardOf "protonvpn-private-key";
   anubis-ed25519-key = hexOf "anubis-ed25519-key";
+  lab-gate-key = hexOf "lab-gate-key";
   authelia-oidc-hmac = hexOf "authelia-oidc-hmac";
   inherit authelia-oidc-issuer-key app-deploy-key lldap-server-key;
 
