@@ -37,12 +37,8 @@ let
   listScript = ./lib/archrepo-list.sh;
   containerBuild = "archbuild-build";
   containerPublish = "archbuild-publish";
-  # memory one compile job may take: one rustc of a large crate (artcraft) peaked at 2.9 GiB and was oom killed in 2
-  buildJobMemoryMiB = 3072;
-  # disk swap behind zram: the overflow of one large compile, on the 100 GiB build disk
-  diskSwapMiB = 16384;
-  zramPriority = 10;
-  diskSwapPriority = 1;
+  # memory one compile job may take: c++ with lto peaks near 2 GiB
+  buildJobMemoryMiB = 2048;
   # nginx, sshd, conmon, node-exporter and the kernel stay outside the build container's limit
   systemReserveMiB = 768;
   # jobs from the balloon floor, which the host cannot take back mid-build
@@ -93,10 +89,8 @@ in {
 
   virtualisation.podman.enable = true;
 
-  # the host balloons this guest to its floor while it is busy elsewhere, and one rustc of a large crate (artcraft) needs
-  # 7-8 GiB: zram first, then the disk, so such a crate builds slowly instead of being oom killed every night
-  zramSwap = { enable = true; memoryPercent = 100; priority = zramPriority; };
-  swapDevices = [ { device = "/var/lib/swapfile"; size = diskSwapMiB; priority = diskSwapPriority; } ];
+  # 5-6 GiB of ram and no swap; a parallel rust build peaked at all of it
+  zramSwap = { enable = true; memoryPercent = 100; };
 
   # build runs the recipes without secrets, publish holds the keys and signs only what it can vouch for (archrepo-build.sh)
   systemd.services.archbuild = {
@@ -150,7 +144,7 @@ in {
         ARCHBUILD_COMMIT=$(${pkgs.bash}/bin/bash ${./lib/archrepo-fetch.sh} ${dotfilesSource} ${dotfilesRef} ${dotfilesDir} \
           ${dotfilesSigningKey} ${upstream.run} github) || { unavailable_note github "$?"; return; }
         podman run --rm --init --replace --pull=newer --name ${containerBuild} \
-          --memory ${toString buildMemoryMiB}m --memory-swap -1 --oom-score-adj ${toString oomScoreAdjMax} \
+          --memory ${toString buildMemoryMiB}m --oom-score-adj ${toString oomScoreAdjMax} \
           --cpuset-cpus 0-${toString (buildJobs - 1)} \
           ${runEnv} -e ARCHBUILD_JOBS=${toString buildJobs} \
           -v ${repoDir}:/repo:ro \

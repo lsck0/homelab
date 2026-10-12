@@ -3,8 +3,6 @@
   vm = {
     bootPhase = "network";
     needs = [ "nfs" ];
-    # authelia and lldap use under 300 MiB; the rest of the floor builds packages on vm-119
-    balloonMiB = 512;
   };
 
   services = {
