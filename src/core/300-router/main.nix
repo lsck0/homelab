@@ -79,7 +79,8 @@ let
   membersOf = via: lib.sort (a: b: a < b) (map net.ipOf (lib.attrNames (lib.filterAttrs (_: e: e.via == via) lab.egress)));
   vpnMembers = membersOf "vpn";
   torMembers = membersOf "tor";
-  vpnInbound = lib.filter (e: e.inbound) (lib.attrValues vpnEntries);
+  # a parked guest takes no forwarded port: renewing one for it only fails
+  vpnInbound = lib.filter (e: e.inbound && lab.inventory.${toString e.vmid}.powered) (lib.attrValues vpnEntries);
   vpnInboundIp = net.ipOf (toString (lib.head vpnInbound).vmid);
   vpnCfg = config.homelab.egress.vpn;
   # modules/egress-vpn.nix's tunnel
