@@ -17,10 +17,16 @@ let
 
   # ext4 data filesystems; /nix/store is a bind of / and would double every alert
   diskSelector = "fstype=\"ext4\",mountpoint!=\"/nix/store\"";
-  diskUsedPercent = "100 * (1 - node_filesystem_avail_bytes{${diskSelector}} / node_filesystem_size_bytes{${diskSelector}})";
-  # a 3d trend smooths nightly dumps and gc; two weeks is time to order a disk or clean up
-  diskForecastWindow = "3d";
+  diskFreePercent = selector: "100 * node_filesystem_avail_bytes{${selector}} / node_filesystem_size_bytes{${selector}}";
+  diskUsedPercent = "100 - ${diskFreePercent diskSelector}";
+  # a week's trend smooths nightly dumps, builds and gc, which a regression over days takes for a slope; two weeks is
+  # time to order a disk or clean up
+  diskForecastWindow = "7d";
   diskForecastHorizonSeconds = 14 * 86400;
+  # with half the disk free a forecast fill is a step (an import, a build), not a trend; disk_full catches a runaway
+  diskForecastFreePercentMax = 50;
+  # an idle guest's samples are its short wakes, each after a reboot: no trend, and stale while it sleeps
+  diskForecastSelector = "${diskSelector},idle=\"\"";
   # a buffered upload holds at most its body limit there briefly; a gigabyte that stays is leaked responses
   ingressSpoolBytesMax = 1024 * 1024 * 1024;
   # traefik renews at 30 days left; two weeks of failed retries is time to fix the dns token by hand
@@ -199,12 +205,14 @@ let
     disk_fill_predicted = {
       title = "Disk fills within two weeks";
       category = "storage";
-      expr = "predict_linear(node_filesystem_avail_bytes{${diskSelector}}[${diskForecastWindow}], ${toString diskForecastHorizonSeconds})";
+      # the free share is a current sample: a guest that went down has none, while its window's samples outlive it
+      expr = "predict_linear(node_filesystem_avail_bytes{${diskForecastSelector}}[${diskForecastWindow}], ${toString diskForecastHorizonSeconds})"
+        + " and ${diskFreePercent diskForecastSelector} < ${toString diskForecastFreePercentMax}";
       op = "lt"; threshold = 0;
-      # a trend, not a spike: nightly dumps and downloads come and go within hours
-      for = "2h";
-      summary = "{{ $labels.vm }} {{ $labels.mountpoint }}: full within 14 days at the 3-day trend";
-      description = "The free space trend of the last 3 days reaches zero within two weeks. Find what grows before it is full.";
+      # a trend, not a spike: nightly dumps, builds and downloads come and go within hours
+      for = "6h";
+      summary = "{{ $labels.vm }} {{ $labels.mountpoint }}: full within 14 days at the 7-day trend";
+      description = "Less than half of this filesystem is free and its free space trend of the last 7 days reaches zero within two weeks. Find what grows before it is full.";
     };
     ingress_spool = {
       title = "Ingress spool files pile up";

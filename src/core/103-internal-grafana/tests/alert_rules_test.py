@@ -10,7 +10,7 @@ cases below in promtool's unit test format. tests/alert-rules.nix runs `promtool
 rules` on them.
 
 The cases are the policy, written out as an oracle: which series make which rule fire with which labels, and which
-must stay quiet (an idle guest asleep, a service on a guest that is down, a 5xx share at noise traffic, a dump
+must stay quiet (an idle guest asleep, a disk forecast with headroom or from an idle or down guest, a service on a guest that is down, a 5xx share at noise traffic, a dump
 stale only because its guest just woke up, a stale deploy metric on a guest that is no builder, a manager failure the
 builder already reports).
 """
@@ -161,21 +161,44 @@ tests = [
         ],
     },
     {
-        "name": "storage: a linear decline is forecast, every thin pool names its volume group",
+        "name": "storage: every thin pool names its volume group",
         "interval": "1m",
         "input_series": [
-            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/data",vm="nas"}', "values": "100000000000-10000000x200"},
-            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="nas"}', "values": "100000000000x200"},
-            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/data",vm="nas"}', "values": "1000000000000x200"},
-            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="nas"}', "values": "1000000000000x200"},
             {"series": 'homelab_thinpool_data_percent{vm="proxmox",vg="bulk"}', "values": "85x40"},
             {"series": 'homelab_thinpool_data_percent{vm="proxmox",vg="pve"}', "values": "40x40"},
         ],
         "alert_rule_test": [
-            {"eval_time": "100m", "alertname": "disk_fill_predicted", "exp_alerts": []},
-            {"eval_time": "125m", "alertname": "disk_fill_predicted",
-             "exp_alerts": [expect("disk_fill_predicted", fstype="ext4", mountpoint="/data", vm="nas")]},
             {"eval_time": "35m", "alertname": "thinpool_data_warn", "exp_alerts": [expect("thinpool_data_warn", vm="proxmox", vg="bulk")]},
+        ],
+    },
+    {
+        "name": "storage: a sustained decline on a fuller disk is forecast; one with headroom, an idle guest's and a "
+                "down guest's stale samples are not",
+        "interval": "1m",
+        "input_series": [
+            # 10% free, 100 megabytes less a minute
+            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/data",vm="nas"}', "values": "100000000000-100000000x400"},
+            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/data",vm="nas"}', "values": "1000000000000x400"},
+            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="nas"}', "values": "100000000000x400"},
+            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="nas"}', "values": "1000000000000x400"},
+            {"series": f'up{{{NODE},vm="nas"}}', "values": "1x400"},
+            # the same decline with over half the disk free: a step, not a trend
+            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="forgejo"}', "values": "180000000000-100000000x400"},
+            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="forgejo"}', "values": "250000000000x400"},
+            {"series": f'up{{{NODE},vm="forgejo"}}', "values": "1x400"},
+            # an idle guest awake for a build
+            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="archbuild",idle="true"}', "values": "100000000000-100000000x400"},
+            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="archbuild",idle="true"}', "values": "1000000000000x400"},
+            {"series": f'up{{{NODE},vm="archbuild",idle="true"}}', "values": "1x400"},
+            # a guest that went down: its samples stay in the window
+            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="paperless"}', "values": "100000000000-100000000x20 _x380"},
+            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="paperless"}', "values": "1000000000000x20 _x380"},
+            {"series": f'up{{{NODE},vm="paperless"}}', "values": "1x20 0x380"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "355m", "alertname": "disk_fill_predicted", "exp_alerts": []},
+            {"eval_time": "365m", "alertname": "disk_fill_predicted",
+             "exp_alerts": [expect("disk_fill_predicted", fstype="ext4", mountpoint="/data", vm="nas")]},
         ],
     },
     {
