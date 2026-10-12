@@ -1,5 +1,6 @@
 # the provisioned alert rules of vm-105, evaluated by promtool against synthetic series
 # (tests/alert_rules_test.py holds the cases): every PromQL rule parses, and the policy's cases fire or stay quiet.
+# Every annotation expands with and without a value (tests/annotations_render.go): grafana sends one it cannot raw.
 # What the rules rely on is checked at evaluation: every powered guest is scraped and an idle one labeled so, a
 # powered-off one is not, and no probe reaches a guest that is not always on (it would wake it, or alarm while it sleeps).
 { pkgs, lib, inputs, specialArgs, ... }:
@@ -24,8 +25,9 @@ let
   rules = assert lib.assertMsg (problems == [ ]) (lib.concatLines problems); pkgs.writeText "grafana-rules.json"
     (builtins.toJSON grafana.services.grafana.provision.alerting.rules.settings.groups);
 in
-pkgs.runCommand "alert-rules" { nativeBuildInputs = [ pkgs.python3 pkgs.prometheus.cli ]; } ''
+pkgs.runCommand "alert-rules" { nativeBuildInputs = [ pkgs.python3 pkgs.prometheus.cli pkgs.go ]; } ''
   mkdir -p $out
+  HOME=$TMPDIR GOCACHE=$TMPDIR/go-cache go run ${./annotations_render.go} ${rules}
   python3 ${./alert_rules_test.py} ${rules} ${fixtureApp} ${builder} $out
   cd $out
   promtool check rules rules.json

@@ -1,11 +1,13 @@
 # vm-105, the real instance at its real address, among three lab guests: the ingress (vm-100), a reader of the query
 # api whom the guard keeps off grafana (vm-103, the dashboard), and a guest to watch (vm-121). Checks that every
 # provisioned rule evaluates, the boards are there, only the ingress may name a grafana user, prometheus is read-only
-# from other hosts, the watchdog beats, and a guest going down pages through both contact points and resolves.
+# from other hosts, the watchdog beats, a guest going down pages through both contact points and resolves, and the
+# provisioned telegram template names an alert whose summary grafana left unexpanded by its labels.
 { pkgs, lib, specialArgs, ... }:
 let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
   telemetry = import ../../../modules/telemetry.nix { inherit lib; inherit (lab) inventory; };
+  notifications = import ../lib/notifications.nix { inherit lib; };
   inherit (telemetry) ports;
   collector = lab.inventory.${telemetry.collectorVmid}.ip;
   watched = lab.inventory."121";
@@ -18,6 +20,7 @@ let
   activeAlerts = "${localApi}/alertmanager/grafana/api/v2/alerts?active=true";
   # a request the guard drops gets no answer at all; this is ample on the test's one bridge
   droppedTimeoutS = 5;
+  templateTest = "${localApi}/alertmanager/grafana/config/api/v1/templates/test";
 in
 pkgs.testers.runNixOSTest {
   name = "monitoring";
@@ -106,6 +109,29 @@ pkgs.testers.runNixOSTest {
             timeout=300)
         # no internet: the failed delivery in the log proves the route
         vm_105.wait_until_succeeds("journalctl -u grafana | grep -i 'heartbeat' | grep -qi 'notif\\|webhook\\|deliver'", timeout=300)
+
+    with subtest("telegram: a summary grafana left raw reads as the rule and its labels, a resolved line as over"):
+        offline = {"alertname": "Guest offline", "vm": "paperless", "severity": "critical", "category": "offline"}
+        headers = {"firing": "Offline", "resolved": "Back online"}
+        probe = {
+            "name": "probe",
+            "template": '{{ define "probe" }}{{ template "${notifications.telegramTemplateName}" . }}{{ end }}',
+            "alerts": [
+                # restored after a restart and gone at the next evaluation: the rule's text, never expanded
+                {"labels": offline, "annotations": dict(headers, summary="{{ $labels.vm }} is offline"),
+                 "startsAt": "2026-01-01T00:00:00Z", "endsAt": "2026-01-01T01:00:00Z"},
+                {"labels": dict(offline, vm="nas"), "annotations": dict(headers, summary="nas <id> is offline"),
+                 "startsAt": "2026-01-01T00:00:00Z", "endsAt": "2099-01-01T00:00:00Z"},
+            ],
+        }
+        vm_105.succeed(f"cat > /tmp/probe.json <<'EOF'\n{json.dumps(probe)}\nEOF")
+        out = json.loads(vm_105.succeed(
+            "curl -sf -H 'Remote-User: admin' -H 'Content-Type: application/json' --data @/tmp/probe.json ${templateTest}"))
+        assert not out.get("errors"), out
+        text = out["results"][0]["text"]
+        assert "{{" not in text, text
+        assert "<s>Guest offline: vm=paperless</s>" in text, text
+        assert "nas &lt;id&gt; is offline" in text, text
 
     with subtest("a guest meant to run is up: no alert for it"):
         vm_105.wait_until_succeeds(

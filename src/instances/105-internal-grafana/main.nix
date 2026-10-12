@@ -10,6 +10,7 @@ let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   limits = import ../../modules/limits { inherit lib; };
   ntfy = import ../../modules/ntfy.nix;
+  notifications = import ./lib/notifications.nix { inherit lib; };
   inherit (telemetry) vmName ports;
 
   # -----------------------------------------------------------------------------
@@ -94,21 +95,8 @@ let
   frontendMetricAttributes = [ "web_vital.name" ];
   frontendIntakeMemoryMiB = 128;
 
-  # ntfy renders go templates on the webhook body; one message per category (the grouping below)
-  ntfyQuery = lib.concatStringsSep "&" [
-    "template=yes"
-    "title=${lib.escapeURL "{{if eq .status \"firing\"}}FIRING{{else}}RESOLVED{{end}}: {{if eq .status \"firing\"}}{{.commonAnnotations.firing}}{{else}}{{.commonAnnotations.resolved}}{{end}}"}"
-    "message=${lib.escapeURL "{{range .alerts}}{{if .annotations.summary}}{{.annotations.summary}}{{else}}{{.labels.alertname}}{{end}}\n{{end}}"}"
-    "tags=${lib.escapeURL "rotating_light"}"
-  ];
   ntfyHeartbeatQuery = "template=yes&message=${lib.escapeURL "vm-105 alerting alive, {{.status}}"}";
-  # html-escaped: telegram rejects a whole message with 400 over one unescaped "<id>"
-  telegramMessage = ''
-    {{ if .Alerts.Firing }}🔴 <b>{{ .CommonAnnotations.firing | html }}</b>
-    {{ range .Alerts.Firing }}• {{ .Annotations.summary | html }}
-    {{ end }}{{ end }}{{ if .Alerts.Resolved }}✅ <b>{{ .CommonAnnotations.resolved | html }}</b>
-    {{ range .Alerts.Resolved }}• {{ .Annotations.summary | html }}
-    {{ end }}{{ end }}'';
+  telegramMessage = "{{ template \"${notifications.telegramTemplateName}\" . }}";
 
   # each app's folder: its generated board here, the boards it ships on the share the deploy controller writes
   appBoardsDir = "grafana-apps";
@@ -241,6 +229,15 @@ let
   rules = assert lib.assertMsg (rulesTwice == [ ]) "105-internal-grafana: alert uids declared twice: ${toString rulesTwice}";
     labRules // ownRules;
 
+  # an evaluation that errors or finds no data has no value A, and grafana keeps a template it cannot expand raw: such
+  # a text reads each value as grafana's own marker for a missing one instead
+  valueAction = "[{][{][^}]*[$]values[^}]*[}][}]";
+  missingValue = "[no value]";
+  valueSafe = text: let parts = builtins.split valueAction text; in
+    if lib.length parts == 1 then text
+    else "{{ if $values.A }}${text}{{ else }}${lib.concatMapStrings (p: if lib.isList p then missingValue else p) parts}{{ end }}";
+  ruleLabelsOf = r: { inherit (r) severity category; } // lib.optionalAttrs r.telegram { notify = "telegram"; };
+
   # one Grafana-managed rule, query A thresholded by C; a rule that cannot evaluate shows health "error", which
   # tests/monitoring.nix holds at none
   ruleOf = uid: r: {
@@ -262,8 +259,10 @@ let
     ];
     noDataState = r.noData;
     execErrState = r.execErr;
-    labels = { inherit (r) severity category; } // lib.optionalAttrs r.telegram { notify = "telegram"; };
-    annotations = { inherit (r) summary description; } // telemetry.categories.${r.category};
+    labels = let unshared = lib.subtractLists notifications.ruleLabels (lib.attrNames (ruleLabelsOf r)); in
+      assert lib.assertMsg (unshared == [ ]) "105-internal-grafana: lib/notifications.nix ruleLabels lacks ${toString unshared}";
+      ruleLabelsOf r;
+    annotations = lib.mapAttrs (_: valueSafe) { inherit (r) summary description; } // telemetry.categories.${r.category};
   };
 
   # straight to ntfy's own port on vm-203: an edge fault must not swallow the alerts (instance.nix grant there)
@@ -283,7 +282,7 @@ let
   contactPoints = {
     apiVersion = 1;
     contactPoints = [
-      { orgId = 1; name = "ntfy"; receivers = [ (ntfyReceiver "ntfy_cp" ntfy.topics.alerts ntfyQuery // { disableResolveMessage = false; }) ]; }
+      { orgId = 1; name = "ntfy"; receivers = [ (ntfyReceiver "ntfy_cp" ntfy.topics.alerts notifications.ntfyQuery // { disableResolveMessage = false; }) ]; }
       # silence is the signal; a resolve message would be one more heartbeat
       { orgId = 1; name = "heartbeat"; receivers = [ (ntfyReceiver "heartbeat_cp" ntfy.topics.heartbeat ntfyHeartbeatQuery // { disableResolveMessage = true; }) ]; }
       {
@@ -946,6 +945,10 @@ in {
       ];
       alerting = {
         contactPoints.path = config.sops.templates."grafana-contact-points.yaml".path;
+        templates.settings = {
+          apiVersion = 1;
+          templates = [{ orgId = 1; name = "homelab"; template = notifications.telegramTemplate; }];
+        };
         policies.settings = {
           apiVersion = 1;
           # one message per category, re-sent at most daily while it lasts
@@ -1046,7 +1049,8 @@ in {
         # the watchdog fires by design and is no alert
         echo "$json" | jq -r '
           def esc: tostring | gsub("\\\\"; "\\\\") | gsub("\""; "\\\"") | gsub("\n"; "\\n");
-          .[] | select(.labels.category != "heartbeat") | "homelab_alert_firing{alertname=\"\(.labels.alertname // "alert" | esc)\",target=\"\(.labels.vm // .labels.instance // "" | esc)\",severity=\"\(.labels.severity // "" | esc)\",summary=\"\(.annotations.summary // "" | esc)\",fingerprint=\"\(.fingerprint | esc)\"} \(.startsAt | sub("\\.[0-9]+"; "") | try fromdateiso8601 catch now | floor)"'
+          def summary: ${notifications.exportSummaryJq};
+          .[] | select(.labels.category != "heartbeat") | "homelab_alert_firing{alertname=\"\(.labels.alertname // "alert" | esc)\",target=\"\(.labels.vm // .labels.instance // "" | esc)\",severity=\"\(.labels.severity // "" | esc)\",summary=\"\(summary | esc)\",fingerprint=\"\(.fingerprint | esc)\"} \(.startsAt | sub("\\.[0-9]+"; "") | try fromdateiso8601 catch now | floor)"'
       } > "$out.tmp"
       mv "$out.tmp" "$out"
     '';
