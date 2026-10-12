@@ -31,7 +31,9 @@ metadata:
   straight to its backend while its guest is enabled (25565 -> vm-214). `nft list table ip port-forwards`.
 - DNS: CoreDNS (split horizon: *.lsck0.dev -> the ingresses) -> blocky (ad block, DoT); blocky down: DoT to
   Cloudflare, never plain dns. VPN members (`profiles.vpnEgress`) resolve through Proton's resolver inside the
-  tunnel and nothing else, tor members through tor. Test: `dig +short grafana.lsck0.dev @10.100.0.1`.
+  tunnel and nothing else, tor members through tor. Test: `dig +short grafana.lsck0.dev @10.100.0.1`. A house
+  client asking the FritzBox gets the public address and hairpins through it (the edge sees the house's public
+  address); one asking the router (src/scripts/setup-dns.sh) goes straight to the ingress as itself.
   Blocky: `journalctl -u blocky -n 50`.
 - DHCP: Kea on the zones with a pool in zones.json, leases `/var/lib/kea/dhcp4.leases`.
 - VPN exit: `wg show wg-egress`, `ip rule` (fwmark 0x1 lookup 100), `nft list chain ip egress killswitch`.
@@ -45,7 +47,7 @@ metadata:
   Nix config; generate the client keys and tell the owner the peer block to add.
 - DDNS: `systemctl start ddns-cloudflare` then `journalctl -u ddns-cloudflare -n 30` (src/core/300-router/lib/ddns-cloudflare.sh).
   Public records come from the route catalog; a failed run leaves the address unsynced and the next run retries.
-- WAN limits: `nft list table ip wan-limits` (per internet source syn rate and connection count; the house and
-  Cloudflare exempt).
+- WAN limits: `nft list table ip wan-limits` (per internet source syn rate and connection count; the house, by its
+  lan or its public address (set house_public, `systemctl status wan-limits-house`), and Cloudflare exempt).
 - Wake the owner's PC: `ssh 192.168.178.29 wol-pc` (its mac is the router's secret `workstation-mac`).
 - Debug reachability: `ping`, `tcpdump -ni ens19 host <ip>`, `conntrack -L` (if installed).

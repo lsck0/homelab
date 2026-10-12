@@ -24,6 +24,8 @@ let
     internet = "198.51.100.7";
     cloudflare = "104.16.0.10";
   };
+  # the house's public address, the source a house client hairpinned through the fritzbox arrives from
+  housePublic = "198.51.100.8";
   zoneAddresses = {
     internal = map ip [ "100" "101" "103" "104" "107" "111" "120" "121" ];
     external = map ip [ "200" "201" "210" "211" "212" "213" ];
@@ -94,7 +96,7 @@ pkgs.testers.runNixOSTest {
   nodes.house = {
     imports = [ (lab.multi {
       vlan = vlans.lan;
-      addresses = map (a: "${a}/24") [ house.fritzbox house.workstation house.proxmox house.device house.internet ]
+      addresses = map (a: "${a}/24") [ house.fritzbox house.workstation house.proxmox house.device house.internet housePublic ]
         ++ [ "${house.cloudflare}/13" ];
       routes = [ { address = "10.0.0.0"; prefixLength = 8; via = routerWan; } ];
     }) tools ];
@@ -116,6 +118,7 @@ pkgs.testers.runNixOSTest {
     DNS = json.loads('${builtins.toJSON dnsExpected}')
     ROUTER_WAN = "${routerWan}"
     HOUSE = json.loads('${builtins.toJSON house}')
+    HOUSE_PUBLIC = "${housePublic}"
     ZONES = json.loads('${builtins.toJSON zoneAddresses}')
     POOL = (ipaddress.IPv4Address("${dhcpPool.first}"), ipaddress.IPv4Address("${dhcpPool.last}"))
     ORACLE = ZoneOracle(FACTS)
@@ -214,12 +217,15 @@ pkgs.testers.runNixOSTest {
         wrong = [c[1:] for c in cases if reach(*c[:4]) != c[4]]
         assert not wrong, f"router services: (src, dst, port, expected) wrong for {wrong}"
 
-    with subtest("the split horizon answers from the catalog in every zone"):
+    with subtest("the split horizon answers from the catalog in every zone and the house, ipv4 alone"):
         for machine, src, server in ((internal, ZONES["internal"][1], "10.100.0.1"), (dmz, ZONES["external"][1], "10.200.0.1"),
-                                     (apps, ZONES["apps"][0], "10.250.0.1")):
+                                     (apps, ZONES["apps"][0], "10.250.0.1"), (house, HOUSE["device"], ROUTER_WAN)):
             for name, address in DNS.items():
                 got = machine.succeed(f"dig +short +time=3 -b {src} @{server} {name}").strip()
                 assert got == address, f"{name} from {src}: {got!r}, expected {address}"
+                # a public name's proxied AAAA would send the house around the edge's own address
+                got = machine.succeed(f"dig +short +time=3 -b {src} @{server} AAAA {name}").strip()
+                assert not got, f"{name} AAAA from {src}: {got!r}"
         # retired and disabled names are gone
         internal.fail("dig +short +time=3 @10.100.0.1 tor.${net.domain} | grep -q .")
         internal.fail("dig +short +time=3 @10.100.0.1 mc.${net.domain} | grep -q .")
@@ -305,8 +311,13 @@ pkgs.testers.runNixOSTest {
         last_drop = max(i for i, l in enumerate(rules) if l.endswith("drop"))
         assert last_drop < nat, rules
 
-    with subtest("an internet source flooding syns is metered, the house and cloudflare are not"):
-        for src, metered in ((HOUSE["device"], False), (HOUSE["cloudflare"], False), (HOUSE["internet"], True)):
+    with subtest("an internet source flooding syns is metered, the house, hairpinned or not, and cloudflare are not"):
+        luca_router.succeed(f"echo '{HOUSE_PUBLIC} ${net.fqdn net.wan.publicHost}' > /run/public-address/hosts")
+        luca_router.wait_until_succeeds(f"nft list set ip wan-limits house_public | grep -q {HOUSE_PUBLIC}", timeout=30)
+        # a reload empties the set and fills it again
+        luca_router.succeed("systemctl reload nftables")
+        luca_router.succeed(f"nft list set ip wan-limits house_public | grep -q {HOUSE_PUBLIC}")
+        for src, metered in ((HOUSE["device"], False), (HOUSE_PUBLIC, False), (HOUSE["cloudflare"], False), (HOUSE["internet"], True)):
             before = counter("wan-limits", "prerouting", "wan-syn")
             house.succeed(f"${synFlood} {src} {ROUTER_WAN} 443 ${toString synFloodCount}")
             grew = counter("wan-limits", "prerouting", "wan-syn") > before

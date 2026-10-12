@@ -176,6 +176,16 @@ let
   wanConnsMax = 200;
   # sources tracked per meter: the conntrack table's headroom above, at a quarter of nf_conntrack_max
   wanMeterSize = 65535;
+  # the house's own public address, the source the fritzbox's hairpin gives a house client calling a public name; the
+  # fritzbox drops the internet's packets claiming it
+  houseAddressSet = "house_public";
+  # fills the set from the address coredns serves; a reload empties it, a missing address leaves it empty
+  houseAddressFill = pkgs.writeShellScript "wan-limits-house" ''
+    set -euo pipefail
+    ip=$(${pkgs.coreutils}/bin/cut -d ' ' -f 1 ${publicAddressFile})
+    ${pkgs.nftables}/bin/nft flush set ip wan-limits ${houseAddressSet}
+    if [ -n "$ip" ]; then ${pkgs.nftables}/bin/nft add element ip wan-limits ${houseAddressSet} "{ $ip }"; fi
+  '';
   # one forward's concurrent connections over every client: a game server's players and a flood's leftovers alike
   forwardConnsMax = 256;
   # client ips of new connections to a forward, logged; the rate bounds the journal under a flood
@@ -458,13 +468,18 @@ in {
     extraForwardRules = lib.mkBefore forwardRules;
   };
 
-  # per internet source, ahead of every accept and dnat; exempt: the house lan and cloudflare (the edge limits it)
+  # per internet source, ahead of every accept and dnat; exempt: the house lan, by its own address or hairpinned through
+  # its public one, and cloudflare (the edge limits it)
   networking.nftables.tables.wan-limits = {
     family = "ip";
     content = ''
+      set ${houseAddressSet} {
+        type ipv4_addr;
+      }
       chain prerouting {
         type filter hook prerouting priority filter - 1; policy accept;
         ip saddr ${set [ net.wan.subnet ]} return
+        ip saddr @${houseAddressSet} return
         ip saddr ${set net.cloudflareRanges} return
         iifname "${wan}" tcp flags & (fin|syn|rst|ack) == syn \
           meter wan-syn size ${toString wanMeterSize} { ip saddr limit rate over ${toString wanSynPerSecond}/second burst ${toString wanSynBurst} packets } \
@@ -474,6 +489,20 @@ in {
           counter drop
       }
     '';
+  };
+  # refilled whenever the ruleset is loaded or the address is learned; "-": a failed fill never fails the firewall
+  systemd.services.nftables.serviceConfig = {
+    ExecStartPost = lib.mkAfter [ "-${houseAddressFill}" ];
+    ExecReload = lib.mkAfter [ "-${houseAddressFill}" ];
+  };
+  systemd.services.wan-limits-house = {
+    description = "Exempt the house's public address from the wan limits";
+    after = [ "nftables.service" ];
+    serviceConfig = { Type = "oneshot"; ExecStart = houseAddressFill; };
+  };
+  systemd.paths.wan-limits-house = {
+    wantedBy = [ "paths.target" ];
+    pathConfig.PathChanged = publicAddressFile;
   };
 
   # PORT FORWARDS: the wan address only, from forwardSources; capped and its clients logged where its route opts in
