@@ -14,6 +14,13 @@
 # Each proxy listens on loopback at a port its own deployment fixes: a guest's services from portBase + vmid x
 # portsPerGuest on, in name order; an app's at its published port, unique in the lab already. Adding a service
 # renumbers no other deployment's proxy, so no unrelated socket restarts.
+#
+# switch-to-configuration never restarts a changed .socket unit (nixpkgs issue 74899, the FIXME in
+# switch-to-configuration-ng's handle_modified_unit; it restarts one only with a changed service of its own that runs).
+# A moved ListenStream then closes the old fds on the daemon reload and the socket listens nowhere until restarted by
+# hand. So each socket is PartOf a oneshot anchor whose restart triggers are the socket's own unit file: the switch
+# restarts the anchor on any change of the socket, and systemd carries that restart to the socket. Delete the anchors
+# once the switcher restarts changed sockets itself.
 { config, lib, pkgs, inventory, site, ... }:
 let
   # -----------------------------------------------------------------------------
@@ -47,6 +54,7 @@ let
   # the time a proxy may take to answer beyond its backend's boot
   startSlackS = 60;
   reaperFirstAfter = "5m";
+  socketAnchorOf = name: "ondemand-${name}-bind";
   reaperEvery = "2m";
 
   # -----------------------------------------------------------------------------
@@ -351,6 +359,7 @@ in {
       lib.nameValuePair "ondemand-${name}" {
         description = "On-demand activation socket for ${name}";
         wantedBy = [ "sockets.target" ];
+        partOf = [ "${socketAnchorOf name}.service" ];
         socketConfig = {
           ListenStream = "${loopback}:${toString svc.listenPort}";
           # one proxy for all connections
@@ -375,6 +384,15 @@ in {
           # next connection retries a failed wake
           Restart = "no";
         };
+      }
+    ) active // lib.mapAttrs' (name: _:
+      lib.nameValuePair (socketAnchorOf name) {
+        description = "Rebinds ondemand-${name}.socket when its definition changes";
+        wantedBy = [ "multi-user.target" ];
+        restartTriggers = [ config.systemd.units."ondemand-${name}.socket".unit ];
+        # a restart, never a stop before the daemon reload: the socket must come back with its new definition
+        stopIfChanged = false;
+        serviceConfig = { Type = "oneshot"; RemainAfterExit = true; ExecStart = "${pkgs.coreutils}/bin/true"; };
       }
     ) active // lib.mapAttrs' (name: svc:
       lib.nameValuePair "ondemand-wakeat-${name}" {
