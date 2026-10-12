@@ -86,9 +86,9 @@ let
       [ "${inventory.${facts.lab.roles.operator}.ip}/32" ]);
     probes-through-ingress = network "probes through the ingress" (tamper "131-internal-paperless" [ "homelab" "ingressOnly" "allowed" ]
       { ${toString catalog.internal.paperless.port} = [ "${inventory.${facts.lab.roles.collector}.ip}/32" ]; });
-    # paperless configured with qbittorrent's api, whose guard admits it nowhere
+    # paperless configured with grafana's port, whose guard admits it nowhere (the target must run: a parked one is no call)
     direct-calls = network "direct calls" (tamper "131-internal-paperless" [ "systemd" "services" "paperless-scheduler" "environment" "CONTROL_URL" ]
-      "http://${inventory.${toString catalog.internal.qbittorrent.vmid}.ip}:${toString catalog.internal.qbittorrent.port}/api");
+      "http://${inventory.${toString catalog.internal.grafana.vmid}.ip}:${toString catalog.internal.grafana.port}/api");
     port-forwards = network "port forwards" (tamper "300-router" [ "networking" "nftables" "tables" "port-forwards" "content" ]
       "tcp dport  dnat to ${inventory.${facts.lab.roles.collector}.ip}:${toString catalog.internal.paperless.port}");
 
