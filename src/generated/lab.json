@@ -66,19 +66,19 @@
       "zone": "internal"
     },
     "110": {
-      "enabled": "true",
+      "enabled": "false",
       "idle": null,
       "ip": "10.100.0.110",
       "name": "110-internal-forgejo",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "111": {
-      "enabled": "true",
+      "enabled": "false",
       "idle": null,
       "ip": "10.100.0.111",
       "name": "111-internal-github-runner",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "112": {
@@ -106,67 +106,67 @@
       "zone": "internal"
     },
     "120": {
-      "enabled": "true",
+      "enabled": "false",
       "idle": null,
       "ip": "10.100.0.120",
       "name": "120-internal-qbittorrent",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "121": {
-      "enabled": "true",
+      "enabled": "false",
       "idle": null,
       "ip": "10.100.0.121",
       "name": "121-internal-arr",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "122": {
-      "enabled": "true",
+      "enabled": "false",
       "idle": null,
       "ip": "10.100.0.122",
       "name": "122-internal-jellyfin",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "123": {
-      "enabled": "onDemand",
+      "enabled": "false",
       "idle": "30m",
       "ip": "10.100.0.123",
       "name": "123-internal-jellyseerr",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "124": {
-      "enabled": "onDemand",
+      "enabled": "false",
       "idle": "30m",
       "ip": "10.100.0.124",
       "name": "124-internal-navidrome",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "130": {
-      "enabled": "true",
+      "enabled": "false",
       "idle": null,
       "ip": "10.100.0.130",
       "name": "130-internal-homeassistant",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "131": {
-      "enabled": "true",
+      "enabled": "false",
       "idle": null,
       "ip": "10.100.0.131",
       "name": "131-internal-paperless",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "132": {
-      "enabled": "onDemand",
+      "enabled": "false",
       "idle": "1h",
       "ip": "10.100.0.132",
       "name": "132-internal-firefly",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "133": {
@@ -234,11 +234,11 @@
       "zone": "external"
     },
     "214": {
-      "enabled": "false",
+      "enabled": "true",
       "idle": null,
       "ip": "10.200.0.214",
       "name": "214-external-minecraft",
-      "powered": false,
+      "powered": true,
       "zone": "external"
     },
     "250": {
