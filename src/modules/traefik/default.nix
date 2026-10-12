@@ -415,7 +415,7 @@ let
   # it asks crowdsec, so it runs where the bouncer does
   gateOn = cfg.crowdsecBouncer.enable;
   gateFlagsOf = r: { captcha = on r "captcha"; limit = on r "anonymousLimit"; tarpit = on r "tarpit"; scale = r.limitScale; };
-  gatedRecords = lib.filter (r: on r "crowdsec") (map recordOf (lib.attrValues (lib.filterAttrs (_: websecure) allRouters)));
+  gatedRecords = lib.filter (r: on r "crowdsec") (map recordOf (lib.attrValues (lib.filterAttrs (_: chained) allRouters)));
   gateMiddlewares = lib.optionalAttrs gateOn (lib.listToAttrs (map (flags: lib.nameValuePair (gate.middlewareName flags) (gate.middleware flags))
     (lib.unique (map gateFlagsOf gatedRecords))));
   captchaOn = gateOn && cfg.gate.captcha.enable;
