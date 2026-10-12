@@ -11,8 +11,12 @@
 let
   lab = import ../../../tests/lib/lab.nix {
     inherit pkgs lib specialArgs;
-    # hello, a public demo, moved to the internal zone with its metrics behind authelia: a public route's ssoPaths
-    apps = apps: lib.recursiveUpdate apps { wat.enable = true; hello.routes.hello = { zone = "internal"; ssoPaths = [ metricsPath ]; }; };
+    # hello, a public demo, moved to the internal zone with its metrics behind authelia: a public route's ssoPaths;
+    # its onion stays with the edge, its name on the internet comes through the edge's relay
+    apps = apps: lib.recursiveUpdate apps {
+      wat.enable = true;
+      hello.routes.hello = { zone = "internal"; onion = false; ssoPaths = [ metricsPath ]; on = apps.hello.routes.hello.on ++ [ "internet" ]; };
+    };
   };
   metricsPath = "/metrics";
   net = import ../../../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
