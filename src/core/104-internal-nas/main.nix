@@ -1,5 +1,5 @@
-# the nas: nfs exports (lib/nas-exports.nix), smb guest shares, syncthing, filebrowser, kopia (lib/kopia.nix), the
-# lsck0 pacman repo vm-112 builds, and a full official arch mirror beside it
+# the nas: nfs exports (lib/nas-exports.nix), the owner's smb shares (lib/samba.nix), syncthing, filebrowser, kopia
+# (lib/kopia.nix), the lsck0 pacman repo vm-112 builds, and a full official arch mirror beside it
 #
 # The mirror (core/extra/multilib, x86_64) lives on the bulk hdd next to the lsck0 repo, so a -Syu or a pacstrap whose
 # exact version is not in last night's lsck0 snapshot pulls from the lan instead of a 1.3 MB/s public mirror; the nvme
@@ -37,17 +37,8 @@ let
   mirrorBwlimitKBps = 60 * 1024;
   mirrorLock = "/run/archmirror-sync.lock";
   mirrorSync = import ./lib/archmirror-sync.nix { inherit pkgs; };
-
-  # every smb share is a guest share acting as nobody
-  guestShare = { browseable = "yes"; "guest ok" = "yes"; "force user" = "nobody"; "force group" = "nogroup"; };
-  guestShareWritable = path: guestShare // {
-    inherit path;
-    "read only" = "no";
-    "create mask" = "0664";
-    "directory mask" = "0775";
-  };
 in {
-  imports = [ ./lib/kopia.nix ./lib/nas-exports.nix ];
+  imports = [ ./lib/kopia.nix ./lib/nas-exports.nix ./lib/samba.nix ];
 
   homelab.textfiles = [ "media_quota" ];
 
@@ -125,24 +116,12 @@ in {
 
   homelab.nasExports.enable = true;
 
-  services.samba = {
-    enable = true;
-    openFirewall = true;
-    settings = {
-      global = {
-        workgroup = "WORKGROUP";
-        "server string" = "vm-104-nas";
-        "map to guest" = "Bad User";
-        # owner pc and notebook (dhcp-reserved in the fritzbox), wireguard and tailnet only
-        "hosts allow" = "${site.lan.workstation} ${site.lan.notebook} ${net.wireguard.subnet} ${tailnet} 127.0.0.1";
-        "hosts deny" = "0.0.0.0/0";
-      };
-      public = guestShareWritable "/srv/nas/public";
-      media = guestShareWritable "${bulk}/media";
-      documents = guestShareWritable "/srv/nas/documents";
-      BACKUPS = guestShare // { path = "/srv/nas/BACKUPS"; "read only" = "yes"; };
-      syncthing = guestShareWritable "/srv/nas/syncthing";
-    };
+  homelab.smb.shares = {
+    public = { path = "/srv/nas/public"; writable = true; };
+    media = { path = "${bulk}/media"; writable = true; };
+    documents = { path = "/srv/nas/documents"; writable = true; };
+    BACKUPS.path = "/srv/nas/BACKUPS";
+    syncthing = { path = "/srv/nas/syncthing"; writable = true; };
   };
 
   services.samba-wsdd = {
@@ -171,7 +150,7 @@ in {
     "d ${bulk}/media 0775 1000 1000 -"
   ] ++ map (library: "d ${bulk}/media/${library} 0775 1000 1000 -") mediaLibraries ++ [
     "d /srv/nas/BACKUPS 0700 root root -"
-    # terraform state, pushed by sync.sh; it holds secrets, so neither smb nor filebrowser may read it
+    # terraform state, pushed by sync.sh; it holds secrets: closed to filebrowser, open to the owner's smb share
     "d /srv/nas/terraform 0700 root root -"
     # read-only root: documents go into inbox/, archive/ is the paperless view
     "d /srv/nas/documents 0755 nobody nogroup -"

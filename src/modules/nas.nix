@@ -42,7 +42,7 @@ in {
           default = null;
           description = ''
             Mode of the shared directory on the NAS, owned by root: for a share only root writes (no_root_squash
-            carries the guest's root through), so neither another uid of the guest nor the NAS's own smb guest and
+            carries the guest's root through), so neither another uid of the guest nor the NAS's nobody smb shares and
             filebrowser can. null: 0777, any uid may write, for services that run as their own user.
           '';
         };

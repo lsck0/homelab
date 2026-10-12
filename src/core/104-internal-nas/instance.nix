@@ -94,5 +94,7 @@
   secrets = {
     kopia-password = "guardsData:hex:24"; # the backup repository's key, see README restore
     kopia-server-password = "hex:24"; # the web ui's basic auth, user kopia
+    # the owner's cifs credentials file the desktops mount with; lib/samba.nix sets the samba password from it
+    samba-homelab = "dotfiles:samba-homelab";
   };
 }

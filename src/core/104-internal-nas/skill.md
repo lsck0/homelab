@@ -1,7 +1,7 @@
 ---
 name: nas
 description: NAS shares, disk space, Syncthing and FileBrowser.
-version: 1.1.0
+version: 1.2.0
 author: homelab
 license: MIT
 platforms: [linux]
@@ -27,8 +27,9 @@ Layout under `/srv/nas`:
 - Find big files: `ssh 10.100.0.104 'find /srv/nas/bulk/media -size +10G -printf "%s %p\n" | sort -n | tail'`
 - NFS: `exportfs -v`, clients `ss -tn sport = :2049`. A client VM hangs on I/O
   if the NAS is down (hard mounts) and recovers when it is back.
-- SMB shares (guest): public, media, documents, syncthing, BACKUPS (read-only). There is no share of the whole tree: the
-  service state under `data/` is NFS only, each guest mounting just its own shares.
+- SMB shares, all for the one samba user `luca` (no guest), encrypted, SMB 3.1.1 only: `homelab` (the whole of
+  `/srv/nas` as root, `data/` and `BACKUPS/` included), public, media, documents, syncthing, BACKUPS (read-only), the
+  last five acting as nobody. The guests mount `data/` over NFS, each just its own shares. Sessions: `smbstatus --brief`.
 - `data/tokens/vm-<id>` and `data/db-dumps/<vm>` belong to root (0755 and 0700): only the producing guest's root
   writes them. Never loosen their modes; vm-104's tmpfiles rules set them back on every boot.
 - Syncthing GUI https://sync.lsck0.dev; API on the VM: `curl -s localhost:8384/rest/system/status -H "X-API-Key: $(xmllint --xpath 'string(//apikey)' /var/lib/syncthing/config.xml)"`.

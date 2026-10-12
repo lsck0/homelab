@@ -152,6 +152,12 @@ endpoints and the ntfy server with its topics. `src/modules/lab-export.nix` defi
 sync.sh rewrites it on every run (`nix eval --json ./src#lab.export`). It is public like the rest of the repo and holds
 no secret; `schema` changes only when a key changes meaning or goes away.
 
+The owner's machines mount the nas's whole tree over smb, sealed: `//10.100.0.104/homelab` with
+`credentials=/etc/samba/homelab.cred,seal,vers=3.1.1`. That credentials file is the dotfiles' secret `samba-homelab`,
+two lines `username=luca` and `password=<a long random value, e.g. openssl rand -hex 32>`; secrets-sync.sh copies it
+to the nas (`samba-homelab`, kind `dotfiles:`), whose samba-user sets the password from it
+(`src/core/104-internal-nas/lib/samba.nix`). Changing the password is changing that file, then `./sync.sh`.
+
 ## Proxmox host
 
 `src/scripts/pve-install.sh` converges the host on every `init.sh` and `sync.sh` run: apt sources, the zone
