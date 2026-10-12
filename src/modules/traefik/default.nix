@@ -15,7 +15,7 @@
 # route's ssoPaths get a router of their own with authelia, ranked above the route's others.
 #
 # An onion route (modules/service.nix `onion`, the edge's routes only) is served a second time at its onion address on
-# the onion entrypoint, plain http from the router's tor (instances/300-router/lib/onion-services.nix), with the same
+# the onion entrypoint, plain http from the router's tor (core/300-router/lib/onion-services.nix), with the same
 # routers, chain and backend as its name; tls is the onion service's. Every onion visitor arrives from the router, so
 # the per-client limits and crowdsec see one client there: crowdsec never bans it (private), the waf still judges
 # each request. The bot defence and the browser telemetry intake stay on the name.

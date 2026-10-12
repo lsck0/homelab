@@ -1,4 +1,4 @@
-# vm-203's ntfy as it ships (instances/203-external-ntfy/main.nix): the declared accounts and their topic grants, an
+# vm-203's ntfy as it ships (core/203-external-ntfy/main.nix): the declared accounts and their topic grants, an
 # account made by hand removed on the next start, the heartbeat check alerting once per outage and clearing when
 # the beat is back whether or not the off-site dead man's switch answers, and the ingress guard admitting the edge
 # alone. The expected grants are stated here.

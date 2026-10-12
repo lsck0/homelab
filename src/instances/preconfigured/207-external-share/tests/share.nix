@@ -1,4 +1,4 @@
-# vm-207's file share (instances/207-external-share/main.nix) from archived Pingvin Share to the Pingvin Share X image it
+# vm-207's file share (instances/preconfigured/207-external-share/main.nix) from archived Pingvin Share to the Pingvin Share X image it
 # ships now: an account made on the old image signs in on the new one, so the data dir and its sqlite carry over, and
 # the declared config.yaml closes sign up.
 # Images are pinned here and fetched at build time, nothing pulls at run time.

@@ -80,7 +80,7 @@ let
       libraries = [ energyModel feedIo ];
       arguments = [ (feedDir "energy") energyState ];
       stateDirectory = baseNameOf energyState;
-      # the board's per-day and per-month bars (instances/105-internal-grafana/lib/dashboards/energy.py)
+      # the board's per-day and per-month bars (core/105-internal-grafana/lib/dashboards/energy.py)
       exports = [ "energy.prom" ];
       description = "Collect house energy for the TRMNL terminal";
       environment.ENERGY_PROMETHEUS = telemetry.urls.prometheus;

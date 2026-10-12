@@ -1,9 +1,9 @@
 # what an instance.nix may say: the facts other hosts and terraform read about one guest, typed and defaulted once
 #
-# An instance folder is src/instances/<vmid>-<zone>-<service>/: main.nix is the guest's nixos configuration,
-# instance.nix the data below, and modules/lab collects every instance.nix into the lab's facts. An unknown key,
-# a wrong type or a missing required field fails every host's evaluation naming the option. Cross-instance rules
-# (unique hosts, ports, tokens, vmids) are modules/lab's and modules/catalog.nix's.
+# An instance folder is <vmid>-<zone>-<service>/ in src/core/ or src/instances/preconfigured/: main.nix is the guest's
+# nixos configuration, instance.nix the data below, and modules/lab collects every instance.nix into the lab's facts.
+# An unknown key, a wrong type or a missing required field fails every host's evaluation naming the option.
+# Cross-instance rules (unique hosts, ports, tokens, vmids) are modules/lab's and modules/catalog.nix's.
 #
 # instance.nix is a module over this schema with the arguments id (the vmid, a string), zone, site (site.json), net
 # (modules/net.nix over the collected inventory), telemetry (modules/telemetry.nix), roles (lab.roles: role -> vmid),

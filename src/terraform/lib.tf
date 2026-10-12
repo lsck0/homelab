@@ -1,7 +1,7 @@
 # vm plumbing: the lab's guests (nix, modules/lab) -> proxmox vms and containers
 
 # -----------------------------------------------------------------------------
-# GUESTS: src/instances/*/instance.nix and the swarm nodes of src/apps/swarm.nix, collected and checked by nix
+# GUESTS: every instance folder's instance.nix and the swarm nodes of src/core/swarm.nix, collected and checked by nix
 #
 # One direction, no generated file: nix computes every guest's shape, defaults and address (modules/lab, typed by
 # modules/instance-schema.nix) and fails on any broken invariant (zones, privileges, dhcp pools), so a plan never
@@ -283,7 +283,7 @@ resource "proxmox_virtual_environment_container" "ct" {
 # both guest policies are ACCEPT, proxmox only checks who is speaking.
 #
 # The host drops what its rules do not name. Lab traffic reaches it masqueraded as the router's lan address
-# (instances/300-router), so the router stands for the ingresses' wake and proxmox route, the homepage and grafana.
+# (core/300-router), so the router stands for the ingresses' wake and proxmox route, the homepage and grafana.
 # The datacenter switch comes last: no guest is filtered before its ipset exists, and the host rules exist before
 # the DROP policy does. sync.sh fails while the firewall is not running (README, "Proxmox firewall").
 locals {

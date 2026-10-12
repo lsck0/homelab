@@ -11,7 +11,7 @@
 # - portForwards: the house's public address forwarded: https to the edge, every tcp and udp route with a publicPort
 #   to its backend.
 #
-# instances/300-router/main.nix renders networks, forward, router and portForwards; modules/network.nix renders the
+# core/300-router/main.nix renders networks, forward, router and portForwards; modules/network.nix renders the
 # grants onto the guest it runs on. A grant onto one instance lives in its instance.nix (`grants`, collected by
 # modules/lab), a route's own path from its ingress is derived from the route; what spans the lab stays here.
 # tests/lib/zones.py states the router's part independently and tests/router-zones.nix holds the running router to it.
@@ -121,7 +121,7 @@ let
     why = "vm-105 probes the lab-only tcp route ${r.host}";
   }) (lib.filter (r: r.vmid != null && r.protocol == "tcp" && r.publicPort == null && r.off.probe == null) (lib.attrValues catalog.l4));
 
-  # the router's tor hands an onion route's visitors to the edge (instances/300-router/lib/onion-services.nix)
+  # the router's tor hands an onion route's visitors to the edge (core/300-router/lib/onion-services.nix)
   onionGrants = lib.optional (lib.any (r: r.onionAddress != null) (lib.attrValues catalog.external)) {
     from = [ "router" ]; to = edge; tcp = [ torPorts.onionIngress ];
     why = "the router's tor hands the onion routes' visitors to the edge";
@@ -154,7 +154,7 @@ let
 
   networks = {
     internal = { interface = zones.internal.interface; sources = [ zones.internal.subnet ]; reaches = "everything"; };
-    # the owner's devices (instances/300-router/main.nix wg0 peers)
+    # the owner's devices (core/300-router/main.nix wg0 peers)
     wireguard = { interface = "wg0"; sources = [ net.wireguard.subnet ]; reaches = "everything"; };
     # the house routes the lab through the router; the apps zone it reaches only through the ingresses
     lan = { interface = net.wan.interface; sources = [ net.wan.subnet ]; reaches = [ "internal" "external" ]; };

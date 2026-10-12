@@ -17,7 +17,7 @@ let
   metricsPath = "/metrics";
   net = import ../../../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
   ip = id: lab.inventory.${id}.ip;
-  # the internal routes under test: the instances' nixos services and wat's internal page (src/apps/wat)
+  # the internal routes under test: the instances' nixos services and wat's internal page (src/instances/custom/wat)
   routes = lab.routes.internal // {
     wat-db = { host = "wat-db"; inherit (lab.appsCatalog.apps.wat.routes.wat-db) port; };
     inherit (lab.catalog.internal) hello;

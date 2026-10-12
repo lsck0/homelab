@@ -4,7 +4,7 @@
 # bot defences, crowdsec's bans and waf, and websockets: through the api, anubis and the relay with sso, idle past
 # both ingresses' timeouts, and a client's full in-flight limit of them beside its requests
 #
-# The fixture is the real `wat` app (src/apps/wat), enabled for this test (every edge feature: anubis on /, a direct
+# The fixture is the real `wat` app (src/instances/custom/wat), enabled for this test (every edge feature: anubis on /, a direct
 # /api with its metrics on the same port, an upload path without the waf and a 100 MiB limit, an internal route).
 # Its reservation here needs three swarm workers (modules/limits workerCountOf); `appnodes` serves its ports on
 # two of their addresses (the third is absent: the health check must drop it), the terminal's feed (vm-104) and authelia's forwardauth (vm-101, lib/authelia_stub.py: no session
@@ -18,7 +18,7 @@ let
   };
   net = import ../../../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
   ip = id: lab.inventory.${id}.ip;
-  # the internal routes (the instances') the edge relays, and the fixture app as src/apps/wat states it
+  # the internal routes (the instances') the edge relays, and the fixture app as src/instances/custom/wat states it
   internalRoutes = lab.routes.internal;
   wat = assert lib.assertMsg (lib.length lab.appsCatalog.swarm.workers == 3) "edge-apps: the fixture needs three workers";
     lab.appsCatalog.apps.wat;

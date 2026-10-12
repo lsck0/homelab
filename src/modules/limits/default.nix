@@ -119,7 +119,7 @@ let
       lib.optional (apps != { } && (demandOf apps).${key} > capacity.${key})
         ("the apps reserve ${toString reserved.${key}} ${unit} plus ${toString surge.${key}} ${unit} for a rolling deploy, "
           + "the workers hold ${toString capacity.${key}} ${unit}: lower apps.<app>.reservation.${knob} "
-          + "(the largest: ${largestOf key}) or grow the workers (apps/swarm.nix nodes.vm, an app's placement.vm)");
+          + "(the largest: ${largestOf key}) or grow the workers (core/swarm.nix nodes.vm, an app's placement.vm)");
 
     # the smallest worker bounds a task: a larger one finds no worker once another is down
     taskProblems = app: a: let smallest = minOf "memoryMiB" (lib.attrValues allocatable); in

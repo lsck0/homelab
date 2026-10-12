@@ -16,26 +16,32 @@ every guest, the router and Proxmox root, so the deploying machine's `~/.ssh/id_
 
 ## Layout
 
-Three planes:
+The lab is its core and its instances:
 
-1. Platform: `src/modules/`, what every deployment composes (network, ingress, identity, telemetry, storage,
-   secrets, the swarm), and the platform's own instances (router, ingresses, authelia, grafana, nas, registry, the
-   deploy controller).
-2. Instances: `src/instances/<vmid>-<zone>-<service>/`, one folder per guest, in the internal zone (1xx, staff only,
-   behind authelia) or the external zone (200-249, public, behind the edge); `src/instances/300-router/` is the
-   router, on the house lan and a leg in every zone. A guest is a vm, or an unprivileged lxc where nothing it
-   `needs` asks for a vm (`src/modules/instance-schema.nix`); `vm.kind.<kind> = "<why>"` overrides that, and
-   `vm.privileged` (internal zone only) makes an lxc privileged for its nfs mounts.
-3. Apps: `src/apps/<name>/`, one folder per app built from its own repo, run on the apps swarm (workers 250 and up)
-   or on a guest of its own. Each app has its own overlay network, secrets, resource reservation, telemetry tenant
-   and lldap group `app-<route>`. The registry's htpasswd auth has no per-repository rule, so every cluster can pull
-   every app's images.
+1. Core: `src/modules/`, what every deployment composes (network, ingress, identity, telemetry, storage, secrets,
+   the swarm), and `src/core/<vmid>-<zone>-<service>/`, the guests the lab needs to function: the router
+   (`300-router/`, on the house lan with a leg in every zone), the ingresses, authelia and lldap, the homepage,
+   grafana and the telemetry stack, ntfy (alerts), the nas and its backups, the nix cache, the registry and the
+   deploy controller with the shared swarm (`src/core/swarm.nix`).
+2. Preconfigured instances: `src/instances/preconfigured/<vmid>-<zone>-<service>/`, one folder per third-party
+   service the lab runs and configures (jellyfin, paperless, forgejo, hermes, ...).
+3. Custom instances: `src/instances/custom/<name>/`, one folder per app of the owner's own, built from its own repo
+   and run on the apps swarm (workers 250 and up) or on a guest of its own. Each app has its own overlay network,
+   secrets, resource reservation, telemetry tenant and lldap group `app-<route>`. The registry's htpasswd auth has
+   no per-repository rule, so every cluster can pull every app's images.
+
+A guest folder of core or preconfigured is the same kind of folder, in the internal zone (1xx, staff only, behind
+authelia) or the external zone (200-249, public, behind the edge). A guest is a vm, or an unprivileged lxc where
+nothing it `needs` asks for a vm (`src/modules/instance-schema.nix`); `vm.kind.<kind> = "<why>"` overrides that, and
+`vm.privileged` (internal zone only) makes an lxc privileged for its nfs mounts.
 
 ```
 sync.sh                     deploy everything
 src/
   flake.nix                 hosts, checks and the `lab` facts, all discovered from the folders below
-  instances/<vmid>-<zone>-<service>/
+  core/<vmid>-<zone>-<service>/
+                            a guest the lab needs to function; instances/preconfigured/<vmid>-<zone>-<service>/
+                            a third-party one, the same folder:
     main.nix                the guest's nixos configuration
     instance.nix            what others need to know: vm shape, services (exposure, protection, card, oidc, onion),
                             idle, grants, tokens, egress (the vpn exit or tor), secrets
@@ -45,8 +51,9 @@ src/
   modules/                  the platform: what two or more guests use
     <name>.nix              a module of one file
     <name>/                 a module of more: default.nix, lib/ (its scripts and templates), tests/
-  apps/swarm.nix            the shared swarm: state worker, ports, worker shape (manager and builder: vm-140)
-  apps/<name>/app.nix       an app: repo, branch and the same service properties; secrets.sops.json its secrets
+  core/swarm.nix            the shared swarm: state worker, ports, worker shape (manager and builder: vm-140)
+  instances/custom/<name>/  an app: app.nix (repo, branch and the same service properties), secrets.sops.json its
+                            secrets, lib/ and tests/ as a guest's
   lab/keys/                 the ssh public keys authorized everywhere (hand-written)
   secrets/                  admins.txt (the admins' age recipients), shared.nix and shared.sops.json (the
                             secrets two or more guests read, or the operator alone)
@@ -72,17 +79,18 @@ external route are denied there for everyone instead (`catalog.metricsBlocks`).
 
 ### Adding an instance
 
-Copy `src/instances/_template/` to `src/instances/<vmid>-<zone>-<service>/`, the vmid inside the zone's range, fill
-in `main.nix` and `instance.nix`, `git add` it, then `./sync.sh`. Terraform creates the guest (a vm or an
-unprivileged lxc, as `vm.needs` decides); the ingress, authelia, the homepage, the prober and the router pick up its
-services. Nothing else is edited.
+Copy `src/instances/preconfigured/_template/` to `src/instances/preconfigured/<vmid>-<zone>-<service>/` (or to
+`src/core/` when the lab needs it to function), the vmid inside the zone's range, fill in `main.nix` and
+`instance.nix`, `git add` it, then `./sync.sh`. Terraform creates the guest (a vm or an unprivileged lxc, as
+`vm.needs` decides); the ingress, authelia, the homepage, the prober and the router pick up its services. Nothing else
+is edited.
 
 ### Adding an app
 
-Copy `src/apps/_template/` to `src/apps/<name>/`: a repo and a branch are enough. `git add` it, then `./sync.sh`. The
-app is built from the repo's Dockerfile or compose file and answers at `<name>.lsck0.dev` behind the edge and
-authelia; `routes`, `off`, `resources`, `placement` and the rest are in `src/modules/apps-catalog`.
-
+Copy `src/instances/custom/_template/` to `src/instances/custom/<name>/`: a repo and a branch are enough. `git add`
+it, then `./sync.sh`. The app is built from the repo's Dockerfile or compose file and answers at `<name>.lsck0.dev`
+behind the edge and authelia; `routes`, `off`, `resources`, `placement` and the rest are in
+`src/modules/apps-catalog`.
 An app owns its features and its own authentication and authorization; the platform owns tls, bot defence, rate
 limits, telemetry plumbing, backups and scale to zero. The app declares what only it knows: its routes (host, path,
 service, port and `health`, a path answering below 500 when up), its `metrics` endpoints, its `stateful` services and
@@ -120,7 +128,7 @@ registerInstrumentations({ instrumentations: [new FetchInstrumentation({ propaga
 
 ```sh
 src/scripts/init.sh <proxmox-ip>      # once: pin proxmox's host key, site, secrets, golden image, converge the host
-src/instances/114-internal-hermes/lib/hermes-secrets.sh   # once: hermes' ssh key, github app, api key, telegram bot
+src/instances/preconfigured/114-internal-hermes/lib/hermes-secrets.sh   # once: hermes' ssh key, github app, api key, telegram bot
 TF_STATE_FRESH=1 ./sync.sh            # the first deploy: no terraform state on the nas yet
 ./sync.sh                             # every deploy after
 TF_STATE_OFFLINE=1 ./sync.sh          # the nas is down: apply from the local state copy
@@ -202,14 +210,15 @@ Set the key of every realm user who logs in before the deploy that turns the rea
 any time, and a realm user without one cannot log in. root@pam is outside the realm and keeps its own password
 (`proxmox-root-pass`, `sops -d src/secrets/shared.sops.json`), the way back in. lldap's own `admin` takes its password
 from `lldap-admin-password` at every start: rotate it with `sops unset
-src/instances/101-internal-authelia/secrets.sops.json '["lldap-admin-password"]'`, then `./sync.sh` generates a new one.
+src/core/101-internal-authelia/secrets.sops.json '["lldap-admin-password"]'`, then `./sync.sh` generates a new one.
 
 ## Secrets
 
 A secret lives next to what reads it (`src/modules/secrets.nix` holds the layout). One a single guest reads is
 declared in its `instance.nix` (`secrets.<name> = "<kind>";`) with its value in that folder's `secrets.sops.json`; an
-app's in its `app.nix` and `apps/<name>/secrets.sops.json`; one two or more guests read in `src/secrets/shared.nix`
-and `src/secrets/shared.sops.json`, of which every reader gets its own generated copy, `secrets.shared.sops.json`.
+app's in its `app.nix` and `src/instances/custom/<name>/secrets.sops.json`; one two or more guests read in
+`src/secrets/shared.nix` and `src/secrets/shared.sops.json`, of which every reader gets its own generated copy,
+`secrets.shared.sops.json`.
 Every guest has its own age key in its folder (`age.pub`, and `age.sops` encrypted to the admins only); each file is
 encrypted to the admin recipients of `src/secrets/admins.txt` and the guests that read it. `sync.sh` runs
 `src/scripts/secrets-sync.sh --apply`, which writes keys, rules, missing values and copies, and hands each guest only
@@ -265,7 +274,7 @@ the old key still opens all of them in the public history. Inside `nix develop .
 - The lab is gone, the nas with it: the off-site copy is the kopia repository on Proton Drive. Sign in with the
   proton account of `src/secrets/shared.sops.json` (`proton-drive auth login`), `proton-drive filesystem download
   /my-files/homelab-offsite/BACKUPS/kopia <dir>`, then `kopia repository connect filesystem --path <dir>` with
-  `kopia-password` from `src/instances/109-internal-nas/secrets.sops.json`, and `kopia snapshot list` /
+  `kopia-password` from `src/core/109-internal-nas/secrets.sops.json`, and `kopia snapshot list` /
   `kopia restore <snapshot> <target>`.
 - Terraform state: the nas holds it (`/srv/nas/terraform`), sync.sh works on a copy outside the repo,
   `~/.local/state/homelab/terraform/` (`$XDG_STATE_HOME`), where terraform's providers live too: a `path:` evaluation
@@ -283,11 +292,11 @@ nix eval ./src#checks.x86_64-linux --apply builtins.attrNames                   
 nix build ./src#checks.x86_64-linux.<name> -L --no-link --max-jobs 1           # one check
 nix build ./src#legacyPackages.x86_64-linux.seeded.<name>.<seed> -L --no-link   # one seed of a seeded test
 src/tests/media-stack.sh                                  # media stack against the real containers (docker)
-src/instances/114-internal-hermes/tests/hermes-agent.sh   # hermes scenarios (free nous model, or ANTHROPIC_API_KEY)
+src/instances/preconfigured/114-internal-hermes/tests/hermes-agent.sh   # hermes scenarios (free nous model, or ANTHROPIC_API_KEY)
 ```
 
-Every `src/tests/<name>.nix`, `src/instances/<folder>/tests/<name>.nix` and `src/modules/<name>/tests/<name>.nix` is
-a check, named by its file: a function of
+Every `src/tests/<name>.nix` and every `tests/<name>.nix` of a folder in `src/core/`, `src/instances/preconfigured/`,
+`src/instances/custom/` or `src/modules/` is a check, named by its file: a function of
 `{ pkgs, lib, inputs, specialArgs, ... }` (`specialArgs` are the hosts' own: lab, inventory, site, nasClients)
 returning a derivation. A new file needs `git add`, since the flake sees tracked files only. A test that takes `seed`
 prints `seed=<n>` first and draws all randomness from it; a seed that once failed goes into its

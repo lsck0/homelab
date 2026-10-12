@@ -1,6 +1,6 @@
 # The house's hand-typed energy inputs: gas and water meter readings and the contract tariffs.
 #
-# One definition for every consumer. instances/125-internal-homeassistant/lib/home-assistant.nix renders the helpers, the guarded meter
+# One definition for every consumer. instances/preconfigured/125-internal-homeassistant/lib/home-assistant.nix renders the helpers, the guarded meter
 # sensors and their prometheus names from it; ../default.nix hands the same attrset, as json, to energy_model.py,
 # which builds the grafana board's and the trmnl panel's queries. A renamed helper or metric is one edit here.
 #

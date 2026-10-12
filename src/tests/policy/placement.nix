@@ -2,9 +2,10 @@
 #
 # Owners: an instance (src/core/<folder>/ or src/instances/preconfigured/<folder>/), an app
 # (src/instances/custom/<name>/), a module (src/modules/<name>.nix or src/modules/<name>/) and the lab itself (the
-# flake, src/scripts, src/terraform, src/secrets, src/generated, src/lab, src/tests, src/core/swarm.nix, sync.sh). A file's users are the owners of the code that names it: a path literal in
-# a .nix file, "$SRC/<path>" in a shell script, "${local.src}/<path>" in terraform, resolved against the file's
-# directory; comment lines name what they describe without using it. Tests (anything under a tests/ folder), laws,
+# flake, src/scripts, src/terraform, src/secrets, src/generated, src/lab, src/tests, src/core/swarm.nix, sync.sh). A
+# file's users are the owners of the code that names it: a path literal in a .nix file, "$SRC/<path>" in a shell
+# script, "${local.src}/<path>" in terraform, resolved against the file's directory; comment lines name what they
+# describe without using it. Tests (anything under a tests/ folder), laws,
 # docs and skills never make a file shared: a test lives with what it tests. A module counts as used by whoever uses
 # the module, so the users of a file are, in the end, instances, apps or the lab.
 #

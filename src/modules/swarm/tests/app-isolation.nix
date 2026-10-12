@@ -62,7 +62,7 @@ let
     enable = true;
     repo = "lsck0/${name}";
     branch = "master";
-    # anubis is instances/200-external-traefik/tests/edge-apps.nix's subject; a flood here must reach the app's own limits, not a challenge
+    # anubis is core/200-external-traefik/tests/edge-apps.nix's subject; a flood here must reach the app's own limits, not a challenge
     routes.${name} = { port = ports.${name}; health = "/"; off = { sso = "the fixture is public"; anubis = "no browser here"; }; };
     metrics.web = { service = "web"; targetPort = 8000; port = ports.${name} + 1; path = metricsPath; };
     resources.web = task;

@@ -1,6 +1,6 @@
 # every route in the lab, one shape for the ingresses, the router, authelia and the prober, plus the swarm's shape
 #
-# An instance service's route (modules/lab: a vm and a port) and a swarm app's route (src/apps/: the cluster's
+# An instance service's route (modules/lab: a vm and a port) and a swarm app's route (src/instances/custom/: the cluster's
 # nodes and a published port) are the same exposure (modules/service.nix); here they meet, plus vmid (null for an
 # app's), app (null for an instance's) and nodes (an app's cluster). modules/lab evaluates this once over the typed
 # catalog (`lab.catalog`, its `problems` stopping the flake) and every host gets it as the argument `catalog`.
@@ -104,7 +104,7 @@ let
   };
   apps = lib.mapAttrs (_: normalize) enabledRaw;
 
-  # every swarm by name: `shared` (the workers of apps/swarm.nix, the apps without placement) and `app-<name>` per
+  # every swarm by name: `shared` (the workers of core/swarm.nix, the apps without placement) and `app-<name>` per
   # app on its own guest, a swarm of one; admission (modules/limits) holds each to its own workers
   wakersOf = stateId: lib.unique (lib.attrValues ingressIds ++ [ stateId ]);
   sharedStateId = toString appsCatalog.swarm.state;

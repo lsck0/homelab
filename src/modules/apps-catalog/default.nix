@@ -1,6 +1,6 @@
-# the app catalog's schema: what an app's src/apps/<name>/app.nix (and src/apps/swarm.nix) may say, typed once
+# the app catalog's schema: what an app's src/instances/custom/<name>/app.nix (and src/core/swarm.nix) may say, typed once
 #
-# modules/lab evaluates this module over the app folders and src/apps/swarm.nix: `lab.appsCatalog` is the typed
+# modules/lab evaluates this module over the app folders and src/core/swarm.nix: `lab.appsCatalog` is the typed
 # result, `lab.catalog` (modules/catalog.nix) the lab-wide view over it that every host gets as the argument
 # `catalog`. Routes, cards and telemetry share modules/service.nix with the instances. Lab-wide rules (unique
 # routes, hosts and ports, every secret reference generated) are modules/catalog.nix's `problems`, which stop the
@@ -205,7 +205,7 @@ let
         default = [ ];
         description = ''
           Globs in the repo (`grafana/*.json`): Grafana boards of the deployed commit, in the app's folder beside its
-          generated board, every datasource the app's own (instances/140-internal-swarm/lib/dashboards-import.py); one that does not parse
+          generated board, every datasource the app's own (core/140-internal-swarm/lib/dashboards-import.py); one that does not parse
           fails the deploy.
         '';
       };
@@ -238,7 +238,7 @@ in {
     swarm = {
       manager = mkOption { type = types.ints.positive; description = "Vmid of the swarm manager, a guest of the internal zone."; };
       state = mkOption { type = types.ints.positive; description = "Vmid of the worker holding every stateful service's volumes; moving it moves no data."; };
-      workers = mkOption { type = types.listOf types.ints.positive; description = "Vmids of the shared swarm's workers (apps/swarm.nix `nodes`); an app's own guest is not one."; };
+      workers = mkOption { type = types.listOf types.ints.positive; description = "Vmids of the shared swarm's workers (core/swarm.nix `nodes`); an app's own guest is not one."; };
       portRange = {
         first = mkOption { type = types.port; default = 20100; description = "First port an app may publish."; };
         last = mkOption { type = types.port; default = 20999; description = "Last port an app may publish."; };

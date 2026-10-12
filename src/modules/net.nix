@@ -29,9 +29,9 @@ let
 
   # rfc 1918: the house, the lab, the wireguard peers and every container bridge
   privateRanges = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
-  # the owner's devices dialing in (instances/300-router/main.nix wg0)
+  # the owner's devices dialing in (core/300-router/main.nix wg0)
   wireguardSubnet = "10.0.0.0/24";
-  # headscale's tailnet (instances/138-internal-headscale), rfc 6598 carrier-grade nat: never the internet either
+  # headscale's tailnet (instances/preconfigured/138-internal-headscale), rfc 6598 carrier-grade nat: never the internet either
   tailnet = "100.64.0.0/10";
   # never the internet: what a stranger's process (ci jobs, swarm tasks) is refused, named exceptions in front
   localRanges = privateRanges ++ [ tailnet ];
@@ -61,7 +61,7 @@ let
     mdns = 5353;
     swarmGossip = 7946;
     proxmoxApi = 8006;
-    # lldap's ldaps listener (instances/101-internal-authelia), which the proxmox realm binds to
+    # lldap's ldaps listener (core/101-internal-authelia), which the proxmox realm binds to
     ldaps = 6360;
     nodeExporter = 9100;
     traefikMetrics = 8082;

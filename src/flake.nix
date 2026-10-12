@@ -30,7 +30,7 @@
     pkgs = nixpkgs.legacyPackages.${system};
     lib = nixpkgs.lib;
 
-    # every fact about the guests and apps, collected from src/core/, src/instances/*/ and src/core/swarm.nix (modules/lab)
+    # every fact about the guests and apps, collected from their folders (modules/lab: lab.layout)
     lab = let collected = import ./modules/lab { inherit lib; }; in
       assert lib.assertMsg (collected.problems == [ ]) "the lab's instances break its rules:\n${lib.concatLines collected.problems}";
       collected;

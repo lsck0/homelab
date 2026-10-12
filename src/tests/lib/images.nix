@@ -13,7 +13,7 @@
 let
   labprobe = import ./labprobe.nix { inherit pkgs; };
 in {
-  # instances/118-internal-registry/main.nix
+  # core/118-internal-registry/main.nix
   registry = pkgs.dockerTools.pullImage {
     imageName = "registry";
     imageDigest = "sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373";

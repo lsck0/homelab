@@ -1,5 +1,5 @@
 # lab-wide: the policy between every zone (tests/lib/zones.py), across the real router
-# the real router (instances/300-router/main.nix) between the house, the internet and the three zones: every flow across
+# the real router (core/300-router/main.nix) between the house, the internet and the three zones: every flow across
 # it against the policy as tests/lib/zones.py states it, its own services, the port forwards, the split horizon,
 # dhcp, the vpn exit's killswitch and dns, anti-spoofing, the wan limits, and no window while it reloads or boots
 #

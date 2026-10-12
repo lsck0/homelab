@@ -57,7 +57,7 @@ if [ ! -f "$DEPLOY_PUB" ]; then
   DEPLOY_KEY="$SECRETS_DOTFILES_DIR/ssh_privatekey.asc"
   DEPLOY_PUB="$SECRETS_DOTFILES_DIR/ssh_publickey.asc"
 fi
-# the guests, collected by nix from src/instances/ and src/apps/swarm.nix (modules/lab); filled below
+# the guests, collected by nix from their folders and src/core/swarm.nix (modules/lab); filled below
 INVENTORY=""
 # the desktop clients' interface (modules/lab-export.nix), written below and committed with the generation; the
 # lab facts below are read from it

@@ -104,7 +104,7 @@ let
   controllerState = "/run/controller-api";
   # a request reads a few headers; a client that dribbles them holds a process no longer than this
   controllerRequestMaxS = 10;
-  # the boards apps ship, which vm-105 provisions (instances/140-internal-swarm/lib/dashboards-import.py)
+  # the boards apps ship, which vm-105 provisions (core/140-internal-swarm/lib/dashboards-import.py)
   appDashboardsMount = "/var/lib/app-dashboards";
   # a woken app's task starts within a deploy's image pull; the dump waits that long, then fails and alerts
   dumpWakeWait = { attempts = 60; intervalS = 5; };
@@ -632,7 +632,7 @@ in {
       default = null;
       description = ''
         A directory of stacks (<app>.yaml) that `swarm-deploy@<app>` deploys on this manager: the builder's, on the
-        host that builds (instances/140-internal-swarm/lib/app-builder.nix), which may start that unit and nothing else of it.
+        host that builds (core/140-internal-swarm/lib/app-builder.nix), which may start that unit and nothing else of it.
       '';
     };
     deployUnit = lib.mkOption {
@@ -645,7 +645,7 @@ in {
       type = lib.types.str;
       readOnly = true;
       default = "${appDashboardsMount}/${telemetry.appDashboardsDir}";
-      description = "Where the controller writes the boards apps ship (instances/140-internal-swarm/lib/dashboards-import.py), vm-105 reads them.";
+      description = "Where the controller writes the boards apps ship (core/140-internal-swarm/lib/dashboards-import.py), vm-105 reads them.";
     };
   };
 
@@ -654,7 +654,7 @@ in {
       assertions = [
         { assertion = single || manager.type == "internal"; message = "the shared swarm's manager must sit in the internal zone"; }
         { assertion = workerIds != [ ]; message = "the apps swarm has no worker: add an instance of type \"apps\""; }
-        { assertion = lib.elem stateId workerIds; message = "src/apps/swarm.nix state (vm-${stateId}) is not a running apps worker"; }
+        { assertion = lib.elem stateId workerIds; message = "src/core/swarm.nix state (vm-${stateId}) is not a running apps worker"; }
         {
           assertion = !(lib.any (z: cidr.overlaps overlayPool z.subnet) (lib.attrValues (lib.importJSON ../../generated/zones.json)));
           message = "modules/swarm: the overlay pool ${overlayPool} overlaps a zone of zones.json";

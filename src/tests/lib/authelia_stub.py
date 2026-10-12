@@ -1,5 +1,5 @@
 """authelia_stub: authelia's forwardauth decision as the real access_control makes it, for modules/traefik/tests/auth-chain.nix and
-instances/200-external-traefik/tests/edge-apps.nix.
+core/200-external-traefik/tests/edge-apps.nix.
 
     authelia-stub --port 9091 --portal auth.lsck0.dev --session authelia_session=valid --log-dir /tmp
 

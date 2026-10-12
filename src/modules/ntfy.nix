@@ -1,4 +1,4 @@
-# ntfy on vm-203 (instances/203-external-ntfy/main.nix): its topics, one place for the server's grants and the publishers
+# ntfy on vm-203 (core/203-external-ntfy/main.nix): its topics, one place for the server's grants and the publishers
 # (grafana on vm-105, hermes' lab-notify on vm-114) and the owner's desktop client (lab.export)
 let
   topics = {

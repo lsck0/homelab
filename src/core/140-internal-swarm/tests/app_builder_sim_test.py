@@ -10,7 +10,7 @@ public registry down for a whole run) and where the
 process crashes between two of its writes. Everything above the boundary is the real code. After every
 simulated run the invariants are checked; a failing seed is a complete, replayable bug report:
 
-    app_builder_sim_test.py src/instances/140-internal-swarm/lib/app-builder.py 4711
+    app_builder_sim_test.py src/core/140-internal-swarm/lib/app-builder.py 4711
 
 I1 an app's recorded sha is a commit whose stack, with exactly that commit's images, the manager accepted
 I2 a run that finds the newest watched commit deployed, with the same catalog entry, builds and deploys nothing

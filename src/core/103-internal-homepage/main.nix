@@ -74,7 +74,7 @@ let
     widget = widgetOf c;
   };
 
-  # swarm apps (src/apps/), one card each, the cluster's in front; numbers from prometheus, never the docker api
+  # swarm apps (src/instances/custom/), one card each, the cluster's in front; numbers from prometheus, never the docker api
   nodeCount = lib.length catalog.nodes;
   promWidget = metrics: { type = "prometheusmetric"; url = prometheus; inherit metrics; };
   # vm-105's scrape job of the nodes' cadvisor; it labels each task container with its stack
@@ -115,7 +115,7 @@ let
       label = "Healthy"; query = "sum(traefik_service_server_up{service=\"${r.name}@file\"})"; format.suffix = "/${toString nodeCount}";
     } ++ [
       { label = "Memory"; query = "sum(container_memory_working_set_bytes${own})"; format.type = "bytes"; }
-      # the builder's textfile metric (instances/140-internal-swarm/lib/app-builder.nix)
+      # the builder's textfile metric (core/140-internal-swarm/lib/app-builder.nix)
       { label = "Deployed"; query = "time() - homelab_app_deploy_last_success_timestamp_seconds{vm=\"${builderVm}\",app=\"${app}\"}"; format.type = "duration"; }
     ]);
   };
