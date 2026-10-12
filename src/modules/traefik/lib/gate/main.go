@@ -8,7 +8,7 @@
 // time.
 //
 // A request is judged in this order, cheapest and most trusted first:
-//   - the source is allowed (the house, the lab, wireguard, loopback, the house's public address): pass
+//   - the source is allowed (the house, the lab, wireguard, loopback, the house's public address and v6 prefix): pass
 //   - it carries an authelia session authelia confirms: pass, whatever crowdsec says
 //   - crowdsec's decision for the client (ban beats captcha), cached for seconds: verdictDecide
 //   - an anonymous client over its token bucket: 429

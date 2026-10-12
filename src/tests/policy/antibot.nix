@@ -22,6 +22,11 @@ let
     "the internal zone" = net.zones.internal.subnet;
   };
   gateNeverHit = neverHit // { "the ingress itself" = "127.0.0.1/32"; };
+  # the house behind cloudflare by the names the router serves: its v4 address, every address of its v6 prefix
+  houseHosts = {
+    "v4 address" = { name = net.fqdn net.wan.publicHost; network = "ip4"; bits = 32; };
+    "v6 prefix" = { name = net.fqdn net.wan.publicPrefixHost; network = "ip6"; bits = net.wan.publicPrefixLength; };
+  };
   covered = ranges: network: lib.any (range: cidr.contains range (lib.head (lib.splitString "/" network))) ranges;
 
   # the gate's features in a router's chain: the query of its forwardauth address
@@ -53,7 +58,8 @@ lib.concatLists (lib.mapAttrsToList (law: violations: map (v: "${law}: ${v}") vi
       lib.optional (!(covered settings.allow.cidrs network)) "${host}'s gate stops ${what} (${network})") gateNeverHit)
     ++ lib.concatLists (lib.mapAttrsToList (what: network:
       lib.optional (!(covered whitelist network)) "${host}'s crowdsec may ban ${what} (${network})") neverHit)
-    ++ lib.optional (!(lib.elem (net.fqdn net.wan.publicHost) settings.allow.hosts)) "${host}'s gate stops the house behind cloudflare"
+    ++ lib.concatLists (lib.mapAttrsToList (what: allowed:
+      lib.optional (!(lib.any (h: h == allowed) settings.allow.hosts)) "${host}'s gate stops the house's ${what} behind cloudflare") houseHosts)
     ++ lib.optional (settings.session == null) "${host}'s gate cannot tell a logged-in user"
   ) ingresses);
 

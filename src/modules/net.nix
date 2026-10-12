@@ -115,6 +115,10 @@ in
     address = site.lan.router;
     # the house's public address by name, the wireguard endpoint; the router serves it to the lab as it learns it
     publicHost = "wg";
+    # the house's public ipv6 prefix by name, its network address; the router serves it as the fritzbox delegates it
+    publicPrefixHost = "house-prefix";
+    # deutsche telekom delegates a /56; the router publishes no other length, so the lab knows it without asking
+    publicPrefixLength = 56;
   };
 
   # a guest's address, and the same as a one-host source for a firewall or an allow list

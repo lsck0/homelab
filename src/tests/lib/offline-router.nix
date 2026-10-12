@@ -20,7 +20,7 @@ in {
       config.services.tor.relay.onionServices;
 
   # internet-only work; a test starts a unit itself when it is about it
-  systemd.timers = lib.genAttrs [ "public-address" "blocklists-fetch" "protonvpn-port" "tor-new-circuits" ]
+  systemd.timers = lib.genAttrs [ "public-address" "public-prefix" "blocklists-fetch" "protonvpn-port" "tor-new-circuits" ]
     (_: { wantedBy = lib.mkForce [ ]; });
 
   services.blocky.settings.blocking.denylists.ads = lib.mkForce [ "${denylist}" ];

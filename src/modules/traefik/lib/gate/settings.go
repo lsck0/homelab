@@ -36,10 +36,17 @@ type SettingsLapi struct {
 	KeyFile string `json:"keyFile"`
 }
 
-// SettingsAllow is who the gate never stops: networks, and names resolved to the house's changing address.
+// SettingsAllow is who the gate never stops: networks, and names resolved to the house's changing address and prefix.
 type SettingsAllow struct {
-	Cidrs []string `json:"cidrs"`
-	Hosts []string `json:"hosts"`
+	Cidrs []string            `json:"cidrs"`
+	Hosts []SettingsAllowHost `json:"hosts"`
+}
+
+// SettingsAllowHost is a name whose addresses of one family ("ip4", "ip6") each stand for the prefix of Bits around it.
+type SettingsAllowHost struct {
+	Name    string `json:"name"`
+	Network string `json:"network"`
+	Bits    int    `json:"bits"`
 }
 
 // SettingsCaptcha turns the captcha on; without it captcha decisions pass, left to the ingress in front that asks it.
@@ -102,6 +109,12 @@ func settingsParse(data []byte) (Settings, error) {
 	for _, cidr := range settings.Allow.Cidrs {
 		if _, err := netip.ParsePrefix(cidr); err != nil {
 			return Settings{}, fmt.Errorf("settings: allow.cidrs: %w", err)
+		}
+	}
+	for _, host := range settings.Allow.Hosts {
+		bitsMax, known := allowNetworkBits[host.Network]
+		if host.Name == "" || !known || host.Bits < 1 || host.Bits > bitsMax {
+			return Settings{}, fmt.Errorf("settings: allow.hosts: %q needs a name, network ip4 or ip6 and bits within it", host.Name)
 		}
 	}
 	if settings.Anonymous.AveragePerSecond < 1 || settings.Anonymous.Burst < settings.Anonymous.AveragePerSecond {

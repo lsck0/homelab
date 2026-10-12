@@ -149,6 +149,11 @@ let
   # the house's public address as the router learns it, a hosts line coredns serves as net.wan.publicHost
   publicAddressFile = "/run/public-address/hosts";
   publicAddressTimeoutS = 20;
+  # the house's public ipv6 prefix as the fritzbox delegates it, a hosts line coredns serves as net.wan.publicPrefixHost
+  publicPrefixFile = "/run/public-address/prefix6";
+  # the fritzbox's upnp igd control endpoint, answered on the house lan without a login
+  fritzboxUpnpPort = 49000;
+  fritzboxPrefixUrl = "http://${net.wan.gateway}:${toString fritzboxUpnpPort}/igdupnp/control/WANIPConn1";
   # an answer coredns keeps serving while every upstream is down
   dnsStaleS = 86400;
 
@@ -598,6 +603,11 @@ in {
         # unlisted names (mx, txt, public-only records) resolve like the rest
         forward . ${blockyAddress}
       }
+
+      # the house's ipv6 prefix, a zone of its own: the lab domain's hosts file is the v4 address's alone
+      ${net.fqdn net.wan.publicPrefixHost}:53 {
+        hosts ${publicPrefixFile}
+      }
     '' + lib.optionalString (vpnMembers != [ ]) ''
 
       .:53 {
@@ -635,7 +645,8 @@ in {
   sops.secrets.cloudflare-token = { };
 
   # PUBLIC ADDRESS: learned here once, served to the lab by coredns, pushed to cloudflare by ddns
-  systemd.tmpfiles.rules = [ "d ${dirOf publicAddressFile} 0755 root root -" "f ${publicAddressFile} 0644 root root -" "d ${blocklistDir} 0755 root root -" ];
+  systemd.tmpfiles.rules = [ "d ${dirOf publicAddressFile} 0755 root root -" "f ${publicAddressFile} 0644 root root -"
+    "f ${publicPrefixFile} 0644 root root -""d ${blocklistDir} 0755 root root -" ];
   systemd.services.public-address = {
     description = "Learn the house's public address";
     after = [ "network-online.target" ];
@@ -655,6 +666,26 @@ in {
     '';
   };
   systemd.timers.public-address = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnBootSec = "1min"; OnUnitActiveSec = "5min"; };
+  };
+
+  # PUBLIC PREFIX: the fritzbox's, served to the lab by coredns (lib/public-prefix.sh); the router has no ipv6 to ask
+  systemd.services.public-prefix = {
+    description = "Learn the house's public ipv6 prefix";
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    path = [ pkgs.curl pkgs.gnused pkgs.coreutils ];
+    environment = {
+      PREFIX_URL = fritzboxPrefixUrl;
+      PREFIX_FILE = publicPrefixFile;
+      PREFIX_HOST = net.fqdn net.wan.publicPrefixHost;
+      PREFIX_LENGTH = toString net.wan.publicPrefixLength;
+    };
+    serviceConfig.Type = "oneshot";
+    script = "exec ${pkgs.bash}/bin/bash ${./lib/public-prefix.sh}";
+  };
+  systemd.timers.public-prefix = {
     wantedBy = [ "timers.target" ];
     timerConfig = { OnBootSec = "1min"; OnUnitActiveSec = "5min"; };
   };

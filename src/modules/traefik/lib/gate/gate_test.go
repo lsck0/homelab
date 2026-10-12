@@ -2,16 +2,20 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"image/png"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"net/url"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -318,6 +322,54 @@ func TestLimiter(t *testing.T) {
 	if !limiterTake(l, "203.0.113.10", 1, now) {
 		t.Fatal("another client shares the bucket")
 	}
+}
+
+// the house by name: its v4 address alone, every address of its v6 prefix; a name that stops resolving keeps its
+// last answer while the other one rotates
+func TestAllowHosts(t *testing.T) {
+	var mu sync.Mutex
+	answers := map[string]string{"wg.lsck0.dev": "203.0.113.9", "house-prefix.lsck0.dev": "2003:f7:8f41:6700::"}
+	lookup := func(_ context.Context, network, host string) ([]netip.Addr, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		answer, found := answers[host]
+		if !found {
+			return nil, errors.New("no such host")
+		}
+		if (network == "ip6") != strings.Contains(answer, ":") {
+			t.Errorf("%s asked as %s", host, network)
+		}
+		return []netip.Addr{netip.MustParseAddr(answer)}, nil
+	}
+	a := allowCreateWith(SettingsAllow{Hosts: []SettingsAllowHost{
+		{Name: "wg.lsck0.dev", Network: "ip4", Bits: 32},
+		{Name: "house-prefix.lsck0.dev", Network: "ip6", Bits: 56},
+	}}, lookup)
+	for resolving := true; resolving; {
+		a.mu.Lock()
+		resolving = a.resolving
+		a.mu.Unlock()
+	}
+	check := func(when string, cases map[string]bool) {
+		t.Helper()
+		for client, allowed := range cases {
+			if allowContains(a, netip.MustParseAddr(client), time.Now()) != allowed {
+				t.Errorf("%s: %s allowed is not %v", when, client, allowed)
+			}
+		}
+	}
+	check("resolved", map[string]bool{
+		"203.0.113.9": true, "203.0.113.10": false, "::ffff:203.0.113.9": true,
+		"2003:f7:8f41:6700:a7f0:1274:19c4:a5b1": true, "2003:f7:8f41:67ff::1": true, "2003:f7:8f41:6800::1": false,
+	})
+	mu.Lock()
+	answers["wg.lsck0.dev"] = "198.51.100.4"
+	delete(answers, "house-prefix.lsck0.dev")
+	mu.Unlock()
+	allowResolve(a)
+	check("v4 rotated, v6 gone", map[string]bool{
+		"198.51.100.4": true, "203.0.113.9": false, "2003:f7:8f41:6700::1": true,
+	})
 }
 
 func TestTableBound(t *testing.T) {

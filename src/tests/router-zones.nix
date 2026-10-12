@@ -239,6 +239,13 @@ pkgs.testers.runNixOSTest {
         # a forwarded route's srv record names its public port
         internal.succeed("dig +short +time=3 @10.100.0.1 SRV ${voice.srv}.${net.fqdn voice.host} | grep -qx '0 0 ${toString voice.publicPort} ${net.fqdn voice.host}.'")
 
+    with subtest("the house's v6 prefix is served by name to the v4-only lab, beside its v4 address"):
+        prefix_name = "${net.fqdn net.wan.publicPrefixHost}"
+        luca_router.succeed(f"echo '2001:db8:42:100:: {prefix_name}' > /run/public-address/prefix6")
+        internal.wait_until_succeeds(f"[ \"$(dig +short +time=3 @10.100.0.1 AAAA {prefix_name})\" = 2001:db8:42:100:: ]", timeout=30)
+        # its own zone shadows nothing of the lab domain's
+        assert internal.succeed("dig +short +time=3 @10.100.0.1 grafana.${net.domain}").strip() == "${ip "100"}"
+
     with subtest("third parties down: the public address and the deny lists stay, no unit fails"):
         published = "${net.fqdn net.wan.publicHost}"
         luca_router.succeed(f"echo '203.0.113.77 {published}' > /run/public-address/hosts")

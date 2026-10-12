@@ -94,6 +94,9 @@ let
 
     gate-allow = { file = "antibot"; marker = "vm-200's gate stops wireguard";
       tampered = tamper "200-external-traefik" (gate ++ [ "allow" "cidrs" ]) [ net.wan.subnet ]; };
+    gate-allow-house = { file = "antibot"; marker = "vm-100's gate stops the house's v6 prefix behind cloudflare";
+      tampered = tamper "100-internal-traefik" (gate ++ [ "allow" "hosts" ])
+        (lib.take 1 configs."100-internal-traefik".homelab.traefik.gate.settings.allow.hosts); };
     crowdsec-whitelist = { file = "antibot"; marker = "vm-100's crowdsec may ban the house lan";
       tampered = tamper "100-internal-traefik" [ "homelab" "traefik" "crowdsecBouncer" "whitelistCidrs" ] [ "10.0.0.0/8" ]; };
     gate-session = { file = "antibot"; marker = "vm-200's gate cannot tell a logged-in user";

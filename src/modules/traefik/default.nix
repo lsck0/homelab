@@ -458,14 +458,19 @@ let
   # one form field of six characters
   gateAnswerBodyBytes = 4096;
   gateDir = "/run/lab-gate";
+  # a v4 name stands for its one address
+  ipv4AddressBits = 32;
   gateSettings = {
     listen = "${gate.loopback}:${toString gate.port}";
     tarpitListen = "${gate.loopback}:${toString gate.tarpitPort}";
     lapi = { url = "http://${loopback}:${toString crowdsecLapiPort}"; keyFile = "/run/credentials/lab-gate.service/bouncer"; };
     allow = {
       cidrs = cfg.crowdsecBouncer.whitelistCidrs ++ [ loopbackRange ];
-      # the house behind cloudflare is its public address (as crowdsec's home whitelist)
-      hosts = [ (net.fqdn net.wan.publicHost) ];
+      # the house behind cloudflare: its public address and its v6 prefix (as crowdsec's home whitelist)
+      hosts = [
+        { name = net.fqdn net.wan.publicHost; network = "ip4"; bits = ipv4AddressBits; }
+        { name = net.fqdn net.wan.publicPrefixHost; network = "ip6"; bits = net.wan.publicPrefixLength; }
+      ];
     };
     captcha = if !captchaOn then null else {
       keyFile = "/run/credentials/lab-gate.service/captcha";
@@ -913,8 +918,12 @@ in {
       after = [ "podman-crowdsec.service" ];
       requires = [ "podman-crowdsec.service" ];
       wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.podman pkgs.getent pkgs.coreutils pkgs.diffutils ];
-      environment.PUBLIC_HOST = net.fqdn net.wan.publicHost;
+      path = [ pkgs.podman pkgs.getent pkgs.coreutils pkgs.diffutils pkgs.gnused ];
+      environment = {
+        PUBLIC_HOST = net.fqdn net.wan.publicHost;
+        PUBLIC_PREFIX_HOST = net.fqdn net.wan.publicPrefixHost;
+        PUBLIC_PREFIX_LENGTH = toString net.wan.publicPrefixLength;
+      };
       # no restart: the timer retries, faster retries restart crowdsec
       serviceConfig.Type = "oneshot";
       script = "exec ${pkgs.bash}/bin/bash ${./lib/crowdsec-home-whitelist.sh}";
