@@ -311,13 +311,14 @@ pkgs.testers.runNixOSTest {
 
     with subtest("a client's open websockets fill their own in-flight limit, never its requests'"):
         world.succeed("rm -f /tmp/hold-release && mkfifo /tmp/hold-release")
+        # a logged-in client: an anonymous one meets the gate's tighter rate limit long before its in-flight limit
         sockets_start("hold", f"{WAT_SOCKET}/api/socket", xff="203.0.113.30", count=${toString socketInFlight} + 1,
-                      release="/tmp/hold-release")
+                      headers=["Cookie: ${sessionCookie}"], release="/tmp/hold-release")
         r = sockets_report("hold")
         # the in-flight limit's refusal: the rate limit's would name when to retry
         assert r["opened"] == ${toString socketInFlight} and r["refused"] == {"status": 429, "retry_after": None}, r
         for path in ("/api/health", "/api/x"):
-            assert get(path, xff="203.0.113.30")["status"] == 200, path
+            assert get(path, xff="203.0.113.30", headers={"Cookie": "${sessionCookie}"})["status"] == 200, path
         world.succeed("echo release > /tmp/hold-release")
         world.wait_until_succeeds("[ -s /tmp/hold.exit ]", timeout=60)
         assert world.succeed("cat /tmp/hold.exit").strip() == "0", world.succeed("cat /tmp/hold.log")
