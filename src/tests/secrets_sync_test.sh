@@ -118,10 +118,19 @@ lk=$(value "$R" "$CAT" A1.key lk)
 [[ "$(value "$R" "$CAT" A1.key vault)" =~ ^[0-9a-f]{32}$ ]] || fail "vault (guardsData:hex:16) is $(value "$R" "$CAT" A1.key vault)"
 [ "$(value "$R" "$CAT" A1.key wg | base64 -d | wc -c)" = 32 ] || fail "wg is no 32-byte base64 wireguard key"
 [ -z "$(value "$R" "$CAT" A1.key man)" ] && [ -z "$(value "$R" "$CAT" A1.key pub)" ] || fail "manual and public are not empty"
+hs=$(value "$R" "$CAT" A1.key hs)
+[ "$(printf '%s' "$hs" | base64 -d | wc -c)" = 32 ] || fail "hs is no 32-byte base64 onion seed"
+# shellcheck source=src/scripts/lib/onion.sh
+. "$SRC_IN/scripts/lib/onion.sh"
+# a seed and the address tor 0.4.9 itself derived from it (its hostname file)
+[ "$(onion_address RCFGM1i8J76AFckn7Wjh3q8Plfq84CzNKRtKznH6BKk=)" = 22ymcrqdffp24cxrnkudyhxfy3hbfsmqqcfkra6p7u7r3nqykmaojmqd.onion ] \
+  || fail "lib/onion.sh derives another address than tor"
+onion=$(jq -r .hs "$R/src/generated/onions.json")
+[[ "$onion" =~ ^[a-z2-7]{56}\.onion$ ]] && [ "$onion" = "$(onion_address "$hs")" ] || fail "generated/onions.json names hs $onion"
 grep -qF "add     man -> $CAT (empty, fill it: sops src/$CAT)" run1.log || fail "an empty manual secret is not reported"
 [ "$(value "$R" instances/100-internal-a/secrets.shared.sops.json A1.key shared)" = "$(value "$R" "$CAT" A1.key shared)" ] \
   || fail "a's shared copy differs from src/secrets/shared.sops.json"
-ok "2 values by kind (hex, wireguard, laravel key, garage key id, guarded hex; manual and public empty), shared copies equal the source"
+ok "2 values by kind (hex, wireguard, laravel key, garage key id, guarded hex, onion and its address; manual and public empty), shared copies equal the source"
 
 for v in $(dec A1.key "$R/src/$CAT" | jq -r '.[] | select(length > 0)') tfvars-secret-value; do
   grep -rqF -- "$v" "$R" && fail "plaintext $v lies in the repo"

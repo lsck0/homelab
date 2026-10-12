@@ -109,6 +109,7 @@ let
   # homelab_tor_circuit_established, the router's tor_unavailable alert (instance.nix)
   torTextfile = "tor";
 
+
   # -------------------------------------------------------------------------------------------------------------
   # DNS AND DDNS NAMES
   # -------------------------------------------------------------------------------------------------------------
@@ -188,6 +189,8 @@ let
   # a dhcp discover's source before it has an address
   dhcpUnaddressed = "0.0.0.0";
 in {
+  imports = [ ./lib/onion-services.nix ];
+
   assertions = [
     {
       assertion = vpnMembers == [ ] || vpnCfg.enable;

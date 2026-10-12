@@ -12,8 +12,9 @@
 #   guests       <vmid> -> { name; zone; ip; powered; idle; enabled; }  name <vmid>-<zone>-<service> (the router: its
 #                hostname), zone also "router", powered a bool, idle its stop delay ("30m") or null; enabled the
 #                two as "false" | "onDemand" | "true", which the bar's homelab widget still reads
-#   routes       <route> -> { host; path; zone; protocol; vmid; app; port; health; }  host the fqdn, zone internal or
-#                external, vmid (an instance's) or app (a swarm app's), port the backend's, health null for none
+#   routes       <route> -> { host; path; zone; protocol; vmid; app; port; health; onion; }  host the fqdn, zone internal
+#                or external, vmid (an instance's) or app (a swarm app's), port the backend's, health null for none,
+#                onion its onion address or null
 #   infra        [{ name; href; ping; }]  the lab's frame (modules/infra.nix) in display order, null where none
 #   proxmox      { ip; url; }  the hypervisor and its web ui
 #   monitoring   { prometheus; loki; grafana; dashboard; accessLog; }  the query apis, grafana's url, the overview
@@ -34,6 +35,7 @@ let
   routeOf = r: {
     host = net.fqdn r.host;
     inherit (r) path zone protocol vmid app port health;
+    onion = r.onionAddress;
   };
 in
 {

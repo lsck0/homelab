@@ -49,6 +49,8 @@ let
   # a url prefix: / or /segment[/segment...] without a trailing slash
   urlPrefix = types.strMatching "/|(/[A-Za-z0-9._~-]+)+";
   serviceName = types.strMatching "[A-Za-z0-9][A-Za-z0-9_.-]*";
+  # the router's secret holding an onion route's key (kind onion, scripts/lib/onion.sh)
+  onionKeyOf = name: "${name}-onion-key";
 
   # -----------------------------------------------------------------------------
   # TYPES
@@ -78,7 +80,7 @@ let
     };
   };
 in rec {
-  inherit protectionFeatures telemetryFeatures webMethods bodyLimitDefaultBytes offType urlPath why serviceName;
+  inherit protectionFeatures telemetryFeatures webMethods bodyLimitDefaultBytes offType urlPath why serviceName onionKeyOf;
 
   # the dashboard card; a deployment's defaults name its kind (an instance service, an app)
   cardType = { name, group, icon, description }: types.submodule {
@@ -150,6 +152,11 @@ in rec {
     limitScale = mkOption { type = types.ints.positive; default = 1; description = "Multiplier on the ingress' per-client and per-route rate and in-flight limits."; };
     headers = mkOption { type = types.attrs; default = { }; description = "Extra traefik headers settings (csp, permissions policy, ...)."; };
     guest = mkOption { type = types.bool; default = false; description = "The example guest account (lldap) may open it."; };
+    onion = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Also a tor v3 onion service: the router publishes it, the edge serves its address with the route's chain (external routes only; its key is the router's secret <name>-onion-key, its address src/generated/onions.json).";
+    };
     busyPath = mkOption {
       type = types.nullOr urlPath;
       default = null;

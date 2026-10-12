@@ -19,7 +19,7 @@ let
   # the defences every public request passes, in order; `cloudflare-only` may come first, on the socket peer. Each
   # limit runs per client, then per route (one route's budget over all its clients, modules/limits `route`). The body
   # limit buffers before the retry: a retry inside it would resend a consumed body, empty
-  chainLaw = host: config: lib.concatLists (lib.mapAttrsToList (name: r:
+  chainLawOf = host: routers: lib.concatLists (lib.mapAttrsToList (name: r:
     let
       m = r.middlewares or [ ];
       # padded, so a short chain fails the comparison instead of the evaluation
@@ -38,7 +38,8 @@ let
       || lib.head afterBody != "retry-upstream"
       || !(lib.hasPrefix "secure-headers" (lib.elemAt afterBody 1)))
       "${host} router ${name}: chain ${toString m} is not [cloudflare-only], client-ip, strip-client-headers, crowdsec*, ${toString limits}, [body-limit-*], retry-upstream, secure-headers*"
-  ) (websecure config));
+  ) routers);
+  chainLaw = host: config: chainLawOf host (websecure config);
 
   ssoRoutes = lib.filterAttrs (_: r: r.off.sso == null) catalog.internal;
   autheliaRules = authelia.services.authelia.instances.main.settings.access_control.rules;
@@ -119,6 +120,30 @@ let
     block = lib.findFirst (b: lib.hasInfix "'${ip}/32'" b) "" (lib.splitString ".:53 {" router.services.coredns.config);
     forwards = lib.filter (lib.hasPrefix "forward . ") (map lib.trim (lib.splitString "\n" block));
   in if forwards == [ ] then null else lib.elemAt (lib.splitString " " (lib.head forwards)) 2;
+
+  # an onion route's address: served on the edge's onion entrypoint (the one at tor's onionIngress port) alone
+  torPorts = import ../../modules/tor-ports.nix;
+  serves = host: r: lib.hasInfix "Host(`${host}`)" (r.rule or "");
+  onionEntryPoints = lib.attrNames (lib.filterAttrs (_: e: e.address or "" == ":${toString torPorts.onionIngress}")
+    edge.services.traefik.staticConfigOptions.entryPoints);
+  onionLaw = name: r: let
+    address = r.onionAddress;
+    onionRouters = lib.filterAttrs (_: x: serves address x) (httpOf edge).routers;
+    nameServices = lib.unique (map (x: x.service) (lib.attrValues (lib.filterAttrs (_: x: serves (net.fqdn r.host) x) (websecure edge))));
+    published = map (m: { inherit (m) port; target = { inherit (m.target) addr port; }; })
+      (router.services.tor.relay.onionServices.${name} or { map = [ ]; }).map;
+  in
+    if address == null then [ "${name}: onion without an address in src/generated/onions.json (src/scripts/secrets-sync.sh --apply --generate-guarded)" ]
+    else lib.optional (onionRouters == { }) "${name}: vm-200 serves its onion address with no router"
+    ++ lib.mapAttrsToList (n: _: "${name}: vm-200 router ${n} serves its onion address beside the onion entrypoint")
+      (lib.filterAttrs (_: x: x.entryPoints or [ ] != onionEntryPoints && x.entryPoints or [ ] != [ "anubis-balancer" ]) onionRouters)
+    ++ lib.mapAttrsToList (n: x: "${name}: vm-200 router ${n} sends its onion visitors to ${x.service}, which its name's routers do not use")
+      (lib.filterAttrs (_: x: !(lib.elem x.service nameServices)) onionRouters)
+    ++ chainLawOf "vm-200" (lib.filterAttrs (_: x: x.entryPoints or [ ] == onionEntryPoints) onionRouters)
+    ++ lib.mapAttrsToList (host: _: "${name}: ${host} serves its onion address")
+      (lib.filterAttrs (_: config: lib.any (serves address) (lib.attrValues (httpOf config).routers)) { vm-100 = internalIngress; })
+    ++ lib.optional (published != [ { port = net.ports.http; target = { addr = net.ipOf net.zones.external.ingress; port = torPorts.onionIngress; }; } ])
+      "${name}: the router's tor does not publish it to the edge's onion entrypoint";
 
   kea = router.services.kea.dhcp4.settings.subnet4;
   inPool = ip: pool: let bounds = map lib.trim (lib.splitString "-" pool.pool);
@@ -201,6 +226,9 @@ lawsOf {
   # the router's drops come before nixos nat's blanket accept toward the wan
   "router order" = lib.optional (natAccept == null) "the nat module's accept is missing from the forward rules"
     ++ lib.optional (natAccept != null && natAccept < lastDrop) "a drop of the router's forward policy comes after nat's accept";
+
+  # an onion route is served by the edge alone, with its chain and its name's backend, and published to it by tor
+  "onion" = lib.concatLists (lib.mapAttrsToList onionLaw (lib.filterAttrs (_: r: r.onion) catalog.external));
 
   # an egress member's internet traffic leaves through its exit or not at all: a vpn member's never through the
   # house, a tor member's through no interface, its tcp into tor's TransPort and its names to tor's DNSPort

@@ -22,12 +22,14 @@ let
           hosts = lib.listToAttrs (map (g: lib.nameValuePair g.instance.name { inherit (g.instance) id; }) guests);
           appsCatalog.apps = apps;
           oidc = [ { secret = "b-oidc-secret"; } ];
+          catalog.external = { };
         };
       };
     in builtins.toJSON (layout.planOf (lib.listToAttrs (map (g: lib.nameValuePair g.instance.name g.config) guests)));
 
   catalog = {
     shared = "hex:16"; gen = "hex:16"; lk = "laravel-key"; pub = "public"; man = "manual"; vault = "guardsData:hex:16"; wg = "wireguard";
+    hs = "guardsData:onion";
     df = "dotfiles:desk";
   };
   a = own: guest { id = "100"; name = "100-internal-a"; secrets = { a-own = "hex:16"; } // own; reads = [ "a-own" "shared" "gen" ]; };
@@ -56,7 +58,7 @@ let
       root = ../.;
       fileset = lib.fileset.unions [
         ../scripts/secrets-sync.sh ../scripts/sops-encrypt.sh
-        ../scripts/lib/tools.sh ../scripts/lib/secrets.sh
+        ../scripts/lib/tools.sh ../scripts/lib/secrets.sh ../scripts/lib/onion.sh
       ];
     }} $out
     chmod -R u+w $out

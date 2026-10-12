@@ -38,6 +38,9 @@ metadata:
 - Tor exit (`egress.via = "tor"`): a member's internet tcp is redirected into tor's TransPort 9040, its names go to
   the DNSPort (127.0.0.1:9053), the rest is dropped. `nft list chain ip egress torredirect`, `cat
   /var/lib/node-exporter-textfile/tor.prom` (0: no circuit, the tor_unavailable alert), `journalctl -u tor -n 50`.
+- Onion services (a public route's `onion = true`): tor publishes each from its seed (secret <route>-onion-key, kind
+  onion) to the edge's onion entrypoint 10.200.0.200:8090. Address: `cat /run/tor/onion/<route>/hostname`, the same
+  as src/generated/onions.json. Keys: `systemctl status tor-onion-keys`.
 - WireGuard: `wg show wg0` (peers laptop .2, phone .3, tablet .4, pc .5). New peers are
   Nix config; generate the client keys and tell the owner the peer block to add.
 - DDNS: `systemctl start ddns-cloudflare` then `journalctl -u ddns-cloudflare -n 30` (src/instances/300-router/lib/ddns-cloudflare.sh).
