@@ -446,10 +446,10 @@ let
     };
   } // lib.optionalAttrs (r.ssoPaths != [ ]) (let behind = r // { off = r.off // { sso = null; }; }; in {
     # the prefixes a public route keeps behind authelia: its rule and chain with sso on, straight to the backend
-    "${name}-sso-tls" = {
-      rule = "${routeRule r} && (${lib.concatMapStringsSep " || " (p: "PathRegexp(`${service.prefixPattern p}`)") r.ssoPaths})";
+    "${name}-sso-${tag}" = {
+      rule = "${routeRule host r} && (${lib.concatMapStringsSep " || " (p: "PathRegexp(`${service.prefixPattern p}`)") r.ssoPaths})";
       service = name;
-      entryPoints = [ "websecure" ];
+      entryPoints = [ entryPoint ];
       priority = ssoPathPriority;
       middlewares = routeMiddlewares name behind;
       route = behind;
