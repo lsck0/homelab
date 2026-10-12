@@ -13,7 +13,7 @@
     diskGiB = 40;
   };
 
-  tokens = [ "swarm-worker-token" ];
+  tokens = [ "swarm-worker-token" "swarm-images" ];
 
   services.deploy = {
     path = "/redeploy";

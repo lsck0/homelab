@@ -171,16 +171,13 @@ class Rendered(unittest.TestCase):
         ports = {(p["target"], p["published"], p["protocol"]) for p in render(base(), catalog)["services"]["web"]["ports"]}
         self.assertEqual(ports, {(27015, 20120, "udp"), (27015, 20121, "tcp")})
 
-    def test_every_service_carries_its_replicas_asleep_too(self):
+    def test_every_service_carries_its_replicas(self):
         # an idle app's wake scales each service back to this label (modules/swarm swarm-idle-wake)
         stack = base(deploy={"replicas": 2, "labels": ["keep=1", f"{REPLICAS_LABEL}=9"]})
         stack["services"]["db"]["deploy"] = {"replicas": 3}
         out = render(stack)
         self.assertEqual(out["services"]["web"]["deploy"]["labels"], {"keep": "1", REPLICAS_LABEL: "2"})
         self.assertEqual(out["services"]["db"]["deploy"]["labels"], {REPLICAS_LABEL: "1"})
-        asleep = yaml.safe_load(render_module.replicas_stop(render_module.render(APP, catalog_of(), {}, stack)))
-        self.assertEqual({n: s["deploy"]["replicas"] for n, s in asleep["services"].items()}, {"web": 0, "db": 0})
-        self.assertEqual(asleep["services"]["web"]["deploy"]["labels"][REPLICAS_LABEL], "2")
 
     def test_networks_are_encrypted_overlays(self):
         out = render(base())

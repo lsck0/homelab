@@ -128,6 +128,7 @@ in
     wat-garage-files-secret = "hex:32";
   };
   images = [ socat ];
+  off.scaleToZero = "the postgres service's wal-g loop pushes the nightly base backup from inside the stack; asleep it pushes none (alerts.walg_stale)";
   # the rust server pushes profiles to a hardcoded http://pyroscope:4040; this stand-in forwards them to vm-105
   override.services.pyroscope = {
     image = socat;

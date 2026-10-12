@@ -66,6 +66,7 @@ let
     routes.${name} = { port = ports.${name}; health = "/"; off = { sso = "the fixture is public"; anubis = "no browser here"; }; };
     metrics.web = { service = "web"; targetPort = 8000; port = ports.${name} + 1; path = metricsPath; };
     resources.web = task;
+    off.scaleToZero = "a flood here meets the app's own limits, not its wake proxy (app-idle wakes apps)";
   };
   apps = { quiet = appOf "quiet" "/metrics.txt"; noisy = appOf "noisy" "/big.txt"; };
 

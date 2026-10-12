@@ -44,6 +44,9 @@ let
   portCheckTimeoutS = 2;
   # a wake asks for the power state this often while it waits for the backend
   statusEveryS = 10;
+  # and checks the backend this often: the held client waits at most this past its backend's readiness, at the cost
+  # of a connect on the lab's own network per check
+  readyPollS = "0.2";
   # the time a proxy may take to answer beyond its backend's boot
   startSlackS = 60;
   reaperFirstAfter = "5m";
@@ -146,8 +149,11 @@ let
       api_error=""
       # two good checks: a shutting-down vm still accepts briefly (502)
       good=0
-      for i in $(seq 1 ${toString svc.bootTimeout}); do
-        if [ $((i % ${toString statusEveryS})) -eq 1 ]; then
+      deadline=$((SECONDS + ${toString svc.bootTimeout}))
+      status_at=$SECONDS
+      while [ "$SECONDS" -lt "$deadline" ]; do
+        if [ "$SECONDS" -ge "$status_at" ]; then
+          status_at=$((SECONDS + ${toString statusEveryS}))
           if ! status=$(power_status); then
             api_error="the power api failed"
             echo "${target.key}: $api_error, asking again in ${toString statusEveryS}s" >&2
@@ -158,16 +164,16 @@ let
             good=0
           fi
         fi
-        if nc -z -w ${toString portCheckTimeoutS} ${target.ip} ${toString svc.targetPort}; then
-          ${if svc.httpCheck then ''
-          code=$(curl -s -o /dev/null -w '%{http_code}' -m ${toString httpCheckTimeoutS} "http://${target.ip}:${toString svc.targetPort}/") || code=000
-          case "$code" in 000|5??) good=0 ;; *) good=$((good + 1)) ;; esac
-          '' else "good=$((good + 1))"}
-        else
-          good=0
-        fi
+        ${if svc.httpCheck then ''
+        # a port nothing listens on yet may drop the connect: a new one each poll beats waiting for the retransmit
+        code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout ${readyPollS} -m ${toString httpCheckTimeoutS} \
+          "http://${target.ip}:${toString svc.targetPort}${svc.healthPath}") || code=000
+        case "$code" in 000|5??) good=0 ;; *) good=$((good + 1)) ;; esac
+        '' else ''
+        if nc -z -w ${toString portCheckTimeoutS} ${target.ip} ${toString svc.targetPort}; then good=$((good + 1)); else good=0; fi
+        ''}
         if [ "$good" -ge 2 ]; then wake_ok 1; exit 0; fi
-        sleep 1
+        sleep ${readyPollS}
       done
       echo "${target.key} not ready at ${target.ip}:${toString svc.targetPort} in ${toString svc.bootTimeout}s''${api_error:+; $api_error}" >&2
       wake_ok 0
@@ -273,6 +279,11 @@ let
         type = lib.types.bool;
         default = true;
         description = "Wait for a non-5xx HTTP answer, not just an open port, before releasing the held client; false for non-HTTP backends.";
+      };
+      healthPath = lib.mkOption {
+        type = lib.types.str;
+        default = "/";
+        description = "With httpCheck: the path that answers below 500 once the deployment serves (its route's health).";
       };
     };
   });

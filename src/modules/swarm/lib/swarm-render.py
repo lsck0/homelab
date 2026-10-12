@@ -1,8 +1,6 @@
 """Turn an app's stack, as the builder sent it, into the stack the swarm runs, or refuse it.
 
-Usage: swarm-render.py <app> <catalog.json> <env-file> [stopped] < stack.yaml > rendered.yaml
-       stopped: the app is idle-stopped (modules/swarm swarm-idle); every service is rendered at 0 replicas,
-                admitted at its own, so a deploy updates a sleeping app without waking it
+Usage: swarm-render.py <app> <catalog.json> <env-file> < stack.yaml > rendered.yaml
 
 The builder (instances/140-internal-swarm/lib/app-builder.nix) sends the app's own compose file with every built image pinned by digest
 and every env_file already inlined. This adds the homelab and enforces its policy (modules/swarm runs it):
@@ -80,7 +78,6 @@ VOLUME_MODES = {"ro", "rw", "nocopy", "ro,nocopy", "rw,nocopy"}
 # SYS_CHROOT: what an entrypoint that chowns its data and drops to its user (postgres, redis, nginx) needs
 CAPS_ALLOWED = {"CHOWN", "DAC_OVERRIDE", "FOWNER", "FSETID", "KILL", "SETGID", "SETUID", "NET_BIND_SERVICE"}
 CAPS_DROPPED = ["ALL"]
-STOPPED_ARGUMENT = "stopped"
 MEBIBYTE_SUFFIX = "M"
 MILLIS_PER_CPU = 1000
 
@@ -462,17 +459,9 @@ def render(app, catalog, env, stack):
     return rendered
 
 
-def replicas_stop(rendered):
-    """A rendered stack with every service at 0 replicas: deployed, it runs nothing until woken."""
-    stack = yaml.safe_load(rendered)
-    for svc in stack["services"].values():
-        svc["deploy"]["replicas"] = 0
-    return yaml.safe_dump(stack, sort_keys=True)
-
-
 def main():
-    if len(sys.argv) not in (4, 5) or sys.argv[4:] not in ([], [STOPPED_ARGUMENT]):
-        print(f"usage: swarm-render.py <app> <catalog.json> <env-file> [{STOPPED_ARGUMENT}] < stack.yaml", file=sys.stderr)
+    if len(sys.argv) != 4:
+        print("usage: swarm-render.py <app> <catalog.json> <env-file> < stack.yaml", file=sys.stderr)
         return 2
     app, catalog_path, env_path = sys.argv[1:4]
     with open(catalog_path, encoding="utf-8") as f:
@@ -487,8 +476,7 @@ def main():
         stack = yaml.safe_load(raw) or {}
     except yaml.YAMLError as e:
         refuse("stack", f"not yaml: {e}")
-    rendered = render(app, catalog, env_file_parse(env_path), stack)
-    sys.stdout.write(replicas_stop(rendered) if sys.argv[4:] == [STOPPED_ARGUMENT] else rendered)
+    sys.stdout.write(render(app, catalog, env_file_parse(env_path), stack))
     return 0
 
 

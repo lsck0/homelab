@@ -13,7 +13,8 @@ metadata:
 
 # On-demand VMs
 
-Guests whose `instance.nix` sets `idle.stopAfter` (and apps whose `app.nix` does) sleep until used:
+Guests whose `instance.nix` sets `idle.stopAfter` (and every app unless its `app.nix` sets `off.scaleToZero`) sleep
+until used:
 
 - Traefik (vm-100 internal, vm-200 external) holds a socket proxy per route
   (`systemctl status ondemand-<route>` there). The first connection boots the VM

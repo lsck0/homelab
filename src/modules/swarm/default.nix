@@ -21,7 +21,9 @@
 # unchanged spec creates no new one: each deploy force-updates such a service first.
 #   swarm-prune                         removes the stacks of apps that left the catalog; volumes stay
 # An idle app sleeps and wakes by scaling its services (to 0, and back to the replicas each carries as a label)
-# under its own lock only; a deploy of a sleeping app keeps it asleep. Nothing here polls.
+# under its own lock only. A deploy of a sleeping app runs it awake until it converged, then puts it back to sleep:
+# the new version proves it starts and its images are on the worker, so a wake is a scale that never pulls (the
+# workers' image prune keeps every image a service of the swarm names). Nothing here polls.
 #
 # A service whose published ports change is removed and created anew, never updated in place. Docker 28.5
 # (libnetwork addLBBackend) keys a service's load balancer by its id and ports, so the new ports get a second balancer
@@ -72,8 +74,10 @@ let
   settleWait = { attempts = 60; intervalS = 2; };
   # the manager publishes the join token shortly after it initialised the swarm
   tokenWait = { attempts = 60; intervalS = 5; };
-  # images of past deploys; volumes are never pruned
-  imageKeep = "72h";
+  # images of past deploys, by build time; volumes are never pruned
+  imageKeepH = 72;
+  # the manager's list of the images its services name, for its workers' prune (modules/tokens)
+  imagesToken = "swarm-images";
   restartDelayS = { cluster = 15; reconcile = 10; };
   # a converge that failed for anything but a policy refusal (an outage, workers still booting) marks its app here;
   # swarm-converge-retry runs it again this often
@@ -183,11 +187,30 @@ let
     exec 8>"${appLockDir}/$app.lock"
     flock 8
   '';
+  # every service of the stack $app to `replicas`: 0, or a command printing $service's own
+  servicesScale = replicas: ''
+    for service in $(docker stack services -q "$app"); do
+      docker service scale --detach "$service=${replicas}" >/dev/null
+    done
+  '';
+
+  # the digests of every image a service of the swarm names: what a worker's image prune keeps (header)
+  imagesList = "docker service ls -q | xargs -r docker service inspect --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}' | sed -n 's/.*@//p' | sort -u";
+  # the shared manager's list for its workers (a swarm of one reads its own), after every change of a stack; a nas
+  # outage leaves the last one
+  imagesPublish = ''
+    images_publish() {
+      own=${config.homelab.tokens.ownDir}
+      if ! { ${imagesList} > "$own/${imagesToken}.tmp" && mv "$own/${imagesToken}.tmp" "$own/${imagesToken}.token"; }; then
+        echo "the image list could not be published: the workers prune against the last one" >&2
+      fi
+    }
+  '';
 
   # swarm-deploy <app> <stack file>: render, deploy, check, keep; the one way a stack reaches the swarm
   swarmDeploy = pkgs.writeShellApplication {
     name = "swarm-deploy";
-    runtimeInputs = [ docker pkgs.coreutils pkgs.jq pkgs.util-linux pkgs.gnugrep ];
+    runtimeInputs = [ docker pkgs.coreutils pkgs.jq pkgs.util-linux pkgs.gnugrep pkgs.findutils pkgs.gnused ];
     text = ''
       app=$1 input=$2
       refused=${toString deployRefused}
@@ -211,6 +234,11 @@ let
           fi
         done
       }
+      asleep_keep() {
+        [ -e ${stoppedDir}/"$app" ] || return 0
+        ${servicesScale "0"}
+      }
+      ${lib.optionalString (!single) imagesPublish}
       [ -f "$catalog" ] || { say "$app is not an enabled app" >&2; exit "$refused"; }
       ${appLock}
       exec 9>${deployLock}
@@ -219,10 +247,9 @@ let
       trap 'rm -rf "$work"' EXIT
       # converge passes the kept stack itself, which the last step replaces
       cp "$input" "$work/input.yaml"
-      # a sleeping app is deployed asleep: new images and settings, no task until it is woken
-      mode=()
-      [ ! -e ${stoppedDir}/"$app" ] || mode=(stopped)
-      if ! ${render} "$app" "$catalog" ${envDir}/swarm-app-"$app".env "''${mode[@]}" < "$work/input.yaml" > "$work/stack.yaml"; then
+      # a sleeping app is deployed awake (header) and goes back to sleep however the deploy ends
+      trap 'asleep_keep; ${lib.optionalString (!single) "images_publish; "}rm -rf "$work"' EXIT
+      if ! ${render} "$app" "$catalog" ${envDir}/swarm-app-"$app".env < "$work/input.yaml" > "$work/stack.yaml"; then
         # a policy refusal: render said why, nothing changed on the swarm
         report 0
         exit "$refused"
@@ -321,8 +348,9 @@ let
 
   swarmPrune = pkgs.writeShellApplication {
     name = "swarm-prune";
-    runtimeInputs = [ docker pkgs.coreutils ];
+    runtimeInputs = [ docker pkgs.coreutils pkgs.findutils pkgs.gnused ];
     text = ''
+      ${lib.optionalString (!single) imagesPublish}
       enabled=" ${lib.concatStringsSep " " (lib.attrNames apps)} "
       for stack in $(docker stack ls --format '{{.Name}}'); do
         case "$enabled" in *" $stack "*) continue ;; esac
@@ -331,6 +359,29 @@ let
         docker stack rm "$stack"
         rm -f ${stackDir}/"$stack".yaml ${textfileDir}/swarm_app_"$stack".prom ${textfileDir}/swarm_idle_"$stack".prom ${stoppedDir}/"$stack"
         rm -rf "${appDashboardsMount}/${telemetry.appDashboardsDir}/$stack"
+      done
+      ${lib.optionalString (!single) "images_publish"}
+    '';
+  };
+
+  # the images no container uses and no service of the swarm names, built over imageKeepH ago; without the list
+  # (the manager's token unreadable) it prunes nothing
+  imagePrune = pkgs.writeShellApplication {
+    name = "swarm-image-prune";
+    runtimeInputs = [ docker pkgs.coreutils pkgs.findutils pkgs.gnused pkgs.gnugrep ];
+    text = ''
+      keep=$(mktemp)
+      trap 'rm -f "$keep"' EXIT
+      ${if isManager then "${imagesList} > \"$keep\"" else "cp ${tokens}/${imagesToken}.token \"$keep\""}
+      cutoff=$(date -d "-${toString imageKeepH} hours" +%s)
+      used=" $(docker ps -aq | xargs -r docker inspect --format '{{.Image}}' | tr '\n' ' ') "
+      for image in $(docker image ls -q --no-trunc | sort -u); do
+        case "$used" in *" $image "*) continue ;; esac
+        digests=$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$image" | sed -n 's/.*@//p')
+        if [ -n "$digests" ] && grep -qxFf "$keep" <<< "$digests"; then continue; fi
+        [ "$(date -d "$(docker image inspect --format '{{.Created}}' "$image")" +%s)" -lt "$cutoff" ] || continue
+        # every name of the image goes with it; a container's image was skipped above
+        docker image rm --force "$image" >/dev/null
       done
     '';
   };
@@ -346,9 +397,7 @@ let
       case "$idle" in *" $app "*) ;; *) echo "$app never idles" >&2; exit 2 ;; esac
       ${appLock}
       ${if state == 1 then ''touch ${stoppedDir}/"$app"'' else ''rm -f ${stoppedDir}/"$app"''}
-      for service in $(docker stack services -q "$app"); do
-        docker service scale --detach "$service=${scale}" >/dev/null
-      done
+      ${servicesScale scale}
       printf '# TYPE homelab_app_idle_stopped gauge\nhomelab_app_idle_stopped{app="%s"} ${toString state}\n' "$app" > ${textfileDir}/swarm_idle_"$app".prom.tmp
       mv ${textfileDir}/swarm_idle_"$app".prom.tmp ${textfileDir}/swarm_idle_"$app".prom
     '';
@@ -619,7 +668,8 @@ in {
           no-new-privileges = true;
           userland-proxy = false;
         };
-        autoPrune = { enable = true; dates = "daily"; flags = [ "--all" "--filter" "until=${imageKeep}" ]; };
+        # a node running app tasks drops only dangling images here: swarm-image-prune keeps the ones a sleeping app wakes on
+        autoPrune = { enable = true; dates = "daily"; flags = lib.optionals (!isWorker) [ "--all" "--filter" "until=${toString imageKeepH}h" ]; };
       };
 
       systemd.services.swarm-cluster = {
@@ -843,6 +893,18 @@ in {
       ) { } (lib.attrNames apps));
       systemd.tmpfiles.rules = lib.optional (ownId == stateId) "d ${archiveDir} 0700 root root -";
       environment.systemPackages = lib.optional (ownId == stateId) volumeRestore;
+
+      systemd.services.swarm-image-prune = {
+        description = "Remove the images no app of the swarm runs or wakes on";
+        after = [ "docker.service" ];
+        requires = [ "docker.service" ];
+        unitConfig.RequiresMountsFor = config.homelab.tokens.mountPoints;
+        serviceConfig = { Type = "oneshot"; ExecStart = lib.getExe imagePrune; };
+      };
+      systemd.timers.swarm-image-prune = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = { OnCalendar = "daily"; Persistent = true; };
+      };
     })
   ]);
 }
