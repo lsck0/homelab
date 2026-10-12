@@ -27,7 +27,7 @@ metadata:
 
 Authorisation is lldap group membership. A route (an instance's `services.<name>`, an app's
 `routes.<name>`) carries no group field: authelia derives `app-<route name>` (e.g. `app-homepage`
-for homelab.lsck0.dev) for every route with sso on (no `off.sso`) and turns it into an allow rule
+for homelab.lsck0.dev) for every route with sso in its `on` and turns it into an allow rule
 for `admins` and that group plus a deny rule for the same host. OIDC clients check `app-<client id>` the same way. So:
 
 - **to take a service away from someone**, remove them from that route's group

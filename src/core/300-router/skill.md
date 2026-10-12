@@ -30,12 +30,12 @@ metadata:
 - Port forwards (WAN IP, from the internet, the house and the trusted zones): 443 -> vm-200; every tcp/udp route
   straight to its backend while its guest is enabled (25565 -> vm-208). `nft list table ip port-forwards`.
 - DNS: CoreDNS (split horizon: *.lsck0.dev -> the ingresses) -> blocky (ad block, DoT); blocky down: DoT to
-  Cloudflare, never plain dns. VPN members (an instance.nix `egress`) resolve through Proton's resolver inside the
+  Cloudflare, never plain dns. VPN members (`profiles.vpnEgress`) resolve through Proton's resolver inside the
   tunnel and nothing else, tor members through tor. Test: `dig +short grafana.lsck0.dev @10.100.0.1`.
   Blocky: `journalctl -u blocky -n 50`.
 - DHCP: Kea on the zones with a pool in zones.json, leases `/var/lib/kea/dhcp4.leases`.
 - VPN exit: `wg show wg-egress`, `ip rule` (fwmark 0x1 lookup 100), `nft list chain ip egress killswitch`.
-- Tor exit (`egress.via = "tor"`): a member's internet tcp is redirected into tor's TransPort 9040, its names go to
+- Tor exit (`on = profiles.torEgress`): a member's internet tcp is redirected into tor's TransPort 9040, its names go to
   the DNSPort (127.0.0.1:9053), the rest is dropped. `nft list chain ip egress torredirect`, `cat
   /var/lib/node-exporter-textfile/tor.prom` (0: no circuit, the tor_unavailable alert), `journalctl -u tor -n 50`.
 - Onion services (a public route's `onion = true`): tor publishes each from its seed (secret <route>-onion-key, kind

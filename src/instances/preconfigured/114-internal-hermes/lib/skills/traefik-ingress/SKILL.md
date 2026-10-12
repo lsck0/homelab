@@ -19,7 +19,7 @@ metadata:
   (`<name>-relay`, tls verified for that host). A host no router names gets a 404 at vm-200.
 - Routes are the instances' `services` (`<folder>/instance.nix` in `src/core/` or `src/instances/preconfigured/`) and
   the apps' `routes` (`src/instances/custom/<name>/app.nix`), one schema (`src/modules/service.nix`), merged in
-  `src/modules/catalog.nix`; every protection is on unless a route says `off.<feature> = "<why>"`.
+  `src/modules/catalog.nix`; every protection is off unless a route opts in, `on = [ ... ]` (src/modules/profiles.nix).
 - Every websecure router runs, in order: cloudflare-only (proxied routes on vm-200, on the socket peer), client-ip
   (sets `X-Real-Ip` and the backend's `X-Forwarded-For` to the real client: the socket peer, or the X-Forwarded-For
   hop before Cloudflare and the edge; never a client-sent X-Real-Ip), the header strip, the crowdsec bouncer, rate
@@ -53,7 +53,7 @@ metadata:
   privatebin, share, hello). One instance per ingress listens on 127.0.0.1:27000 and hands solved requests back
   to traefik on 127.0.0.1:28080, so `ss -ltnp` shows Traefik talking to loopback. It reads the client from
   `X-Real-Ip` and issues one clearance cookie for `lsck0.dev`.
-- If a real client is being challenged in a loop, the switch is `off.anubis = "<why>"` on that route plus a
+- If a real client is being challenged in a loop, the switch is dropping `anubis` from that route's `on` plus a
   deploy of the ingress. Say so rather than editing it yourself.
 
 ## Typical problems

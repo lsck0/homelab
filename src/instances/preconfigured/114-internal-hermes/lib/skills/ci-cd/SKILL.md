@@ -40,9 +40,9 @@ Flow on every push to that branch:
    (`swarm-converge-<app>`, one unit per app); `swarm-prune` removes the stacks of disabled or deleted apps. No
    app commit needed.
 5. **Serving.** The workers (apps zone, vm-250 on, as many as the apps' reservations need) serve the app. A route of zone `external` goes
-   through the edge (vm-200), one of zone `internal` through vm-100; on both every protection is on (authelia,
-   crowdsec, the waf, anubis where authelia is off, rate and body limits) unless the route says
-   `off.<feature> = "<why>"`.
+   through the edge (vm-200), one of zone `internal` through vm-100; on both a protection (authelia, crowdsec, the
+   waf, anubis where authelia is not, rate and body limits) runs where the route's `on` names it, usually as
+   `src/modules/profiles.nix` lists (`profiles.hardenedExternal`); a route without `on` is a plain route.
 
 ## Limits: one app never takes the lab down
 
@@ -60,8 +60,8 @@ Flow on every push to that branch:
   it the app's own data is dropped or refused (429) and shows on its board, nobody else's.
 - Each route admits 100 requests/s (burst 200, 200 at once) from all clients together, beside the per-client
   limits.
-- Every app scales to 0 after `idle.stopAfter` (15m unless set) without requests and the ingress wakes it on the
-  next one (holding the request); an app that stays up says why in `off.scaleToZero`. A deploy of a sleeping app
+- An app with scaleToZero scales to 0 after `idle.stopAfter` (15m unless set) without requests and the ingress wakes it on the
+  next one (holding the request); an app stays up without scaleToZero in its `on`. A deploy of a sleeping app
   runs the new version once, then puts it back to sleep. State: `GET http://10.100.0.140:8095/state/<app>` from an
   ingress, metric `homelab_app_idle_stopped{app}`.
 
@@ -97,8 +97,9 @@ Flow on every push to that branch:
 ## Add an app (Nix change for the owner)
 
 Copy `src/instances/custom/_template/` to `src/instances/custom/<name>/` and set `repo` and `branch`: the app answers at
-`<name>.lsck0.dev` behind the edge and authelia, its port drawn from 20100 to 20999. A public app says
-`routes.<name>.off.sso = "<why>"`; more routes, `idle`, `resources` and `placement` are optional. Repos without a
+`<name>.lsck0.dev` on the edge as a plain route, its port drawn from 20100 to 20999. Its protection is
+`routes.<name>.on = profiles.hardenedExternal ++ [ "probe" ];`, its telemetry, card and scale to zero the app's own
+`on`; more routes, `idle`, `resources` and `placement` are optional. Repos without a
 compose file need a root `Dockerfile` (service `web`, port 8000 unless the route says otherwise); a stack whose
 services only name images needs `build` hints. Every named volume needs `volumes.<name>.backup`, its service in `stateful`.
 Secrets go in `env.<service>` as `{{name}}` with a `secrets` generator; the owner then runs

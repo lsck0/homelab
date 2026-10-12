@@ -42,7 +42,7 @@ Ports and addresses are defined once in `src/modules/telemetry.nix`; rules, cont
   board `service-<app>` (deploys, resources per service and task, routes and refusals at the edge, tcp/udp
   forwards, logs, traces, profiles, frontend, scrapes) plus the boards the app ships (`<app>-<uid>`, from its repo
   at deploy), and the folder "Lab services" with the same board for every nixos service (its guest's resources and
-  journal). A service opts out with `off.dashboard`, `off.alerts`, `off.metrics`. It takes the `Remote-User` header
+  journal), each where the service opts into `dashboard`, `alerts`, `metrics`. It takes the `Remote-User` header
   only from the ingress and from vm-105 itself, so its API is called on vm-105:
   `ssh 10.100.0.105 curl -s -H 'Remote-User: hermes' localhost/api/search`.
 - Alerting is Grafana unified alerting only; there is no Alertmanager. It used

@@ -13,7 +13,7 @@ metadata:
 
 # On-demand VMs
 
-Guests whose `instance.nix` sets `idle.stopAfter` (and every app unless its `app.nix` sets `off.scaleToZero`) sleep
+Guests whose `instance.nix` sets `idle.stopAfter` (and every app whose `app.nix` opts into scaleToZero) sleep
 until used:
 
 - Traefik (vm-100 internal, vm-200 external) holds a socket proxy per route

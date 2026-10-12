@@ -28,8 +28,9 @@ through pull requests, and the owner merges and syncs.
     homepage, grafana, ntfy, nas, cache, registry, the deploy controller), `src/instances/preconfigured/` the same
     for every third-party service: `main.nix` its NixOS config, `instance.nix` what
     others need (vm shape incl. `power` on/off, `idle.stopAfter` for on-demand guests, `services` with their host,
-    port and `off.<feature> = "<why>"` opt-outs, grants, tokens, egress, secrets), `lib/` everything only it uses
-    (modules, scripts, templates, dashboards), `tests/` its checks, `skill.md` its Hermes skill.
+    port and the features they opt into with `on`, grants, tokens, the guest's own `on` for egress and firewall
+    openings, secrets), `lib/` everything only it uses (modules, scripts, templates, dashboards), `tests/` its
+    checks, `skill.md` its Hermes skill.
   - `src/modules/` what two or more guests use: `<name>.nix`, or `<name>/` with `default.nix`, `lib/` and `tests/`.
     `lab/` collects every folder, `service.nix` and `instance-schema.nix` type them, `catalog.nix` every route;
     traefik, flows, network, on-demand, swarm derive from them.

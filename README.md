@@ -44,7 +44,8 @@ src/
                             a third-party one, the same folder:
     main.nix                the guest's nixos configuration
     instance.nix            what others need to know: vm shape, services (exposure, protection, card, oidc, onion),
-                            idle, grants, tokens, egress (the vpn exit or tor), secrets
+                            idle, grants, tokens, `on` (the vpn exit or tor, a shared module's firewall openings),
+                            secrets
     lib/                    what only this guest uses: its modules, scripts, templates, dashboards
     tests/  skill.md        its checks, and hermes' skill about it
     secrets.sops.json       its own secrets; age.pub and age.sops its key; secrets.shared.sops.json generated
@@ -71,8 +72,14 @@ in that instance's folder; what two or more instances use is a module; what the 
 workstation's scripts, terraform) has its own folder. Tests, laws and docs do not make a file shared: a test lives
 with what it tests. `src/tests/policy/placement.nix` holds the tree to it.
 
-Every property is on by default and turned off where it does not fit, with its reason: `off.<feature> = "<why>";`
-(`src/modules/service.nix` lists the features). A public route of the internal zone keeps prefixes of itself behind
+Every feature is off by default: a service without `on` is a plain route to its port, nothing more. It opts into
+each by name, `on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;`, from the named lists of
+`src/modules/profiles.nix` concatenated and `lib.subtractLists` where one does not fit (`src/modules/service.nix`
+lists the features and refuses a combination that cannot work, sso on the edge, the waf without crowdsec).
+Protection per path is a second route on the same host and port with its own `path` and `on`. A guest's firewall
+opens ssh, node-exporter and its services' ports; a shared module opening more (an ingress, a swarm node) needs its
+opening in the instance's own `on`, as does an egress exit (`profiles.vpnEgress`, `profiles.torEgress`). A public
+route of the internal zone keeps prefixes of itself behind
 authelia with `ssoPaths = [ "/metrics" "/admin" ];`: the rest stays open, and the lab's own readers (the collector's
 scrapes) reach the backend port directly, never through the ingress. The edge has no authelia: an app's metrics on an
 external route are denied there for everyone instead (`catalog.metricsBlocks`).
@@ -89,18 +96,18 @@ is edited.
 
 Copy `src/instances/custom/_template/` to `src/instances/custom/<name>/`: a repo and a branch are enough. `git add`
 it, then `./sync.sh`. The app is built from the repo's Dockerfile or compose file and answers at `<name>.lsck0.dev`
-behind the edge and authelia; `routes`, `off`, `resources`, `placement` and the rest are in
-`src/modules/apps-catalog`.
-An app owns its features and its own authentication and authorization; the platform owns tls, bot defence, rate
-limits, telemetry plumbing, backups and scale to zero. The app declares what only it knows: its routes (host, path,
-service, port and `health`, a path answering below 500 when up), its `metrics` endpoints, its `stateful` services and
-`volumes`, and whether it must stay up.
+on the edge, a plain route; `routes`, `on`, `resources`, `placement` and the rest are in `src/modules/apps-catalog`.
+An app owns its features and its own authentication and authorization; the platform offers tls, bot defence, rate
+limits, telemetry plumbing, backups and scale to zero, each opted into: a route's protection in its `on`, the app's
+telemetry, card and scaleToZero in the app's. The app declares what only it knows: its routes (host, path, service,
+port and `health`, a path answering below 500 when up), its `metrics` endpoints, its `stateful` services and
+`volumes`, and its features.
 
-Every app scales to zero: after `idle.stopAfter` (15 minutes unless set) without a request its stack runs no task,
-and its next request wakes it, held at the ingress until the app answers its health path (a few seconds: a scale
-of a service whose image is already on the worker). An app that must stay up says why, `off.scaleToZero = "<why>";`:
-a job of its own (wat's backup loop), clients that hold a connection (websockets), a tcp or udp route, which the
-router forwards past every wake proxy. A sleeping app keeps its `reservation`, since all may wake at once.
+An app with scaleToZero sleeps: after `idle.stopAfter` (15 minutes unless set) without a request its stack runs no
+task, and its next request wakes it, held at the ingress until the app answers its health path (a few seconds: a
+scale of a service whose image is already on the worker). An app stays up without it: one with a job of its own
+(wat's backup loop), clients that hold a connection (websockets), a tcp or udp route, which the router forwards past
+every wake proxy. A sleeping app keeps its `reservation`, since all may wake at once.
 
 The deploy controller vm-140 builds every new commit, parks the images in `registry.lsck0.dev` and deploys them to
 the app's cluster. Editing an app's folder and syncing redeploys it without an app commit; disabling it removes its
