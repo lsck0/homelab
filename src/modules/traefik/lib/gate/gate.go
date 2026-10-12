@@ -119,7 +119,8 @@ func returnPathParse(target string) string {
 
 // verdictDecide is the gate's whole policy for a client neither allowed by source nor logged in: crowdsec's
 // decision, the route's captcha feature, whether this ingress asks captchas, whether the request is the answer
-// itself, and whether the client holds a solved captcha.
+// itself, and whether the client holds a solved captcha. An ingress without the captcha sits behind one that asks
+// it (the internal ingress behind the edge, which sees the same requests), so it leaves captcha decisions to that one.
 func verdictDecide(kind DecisionKind, routeCaptcha, captchaEnabled, answering, cookieValid bool) Verdict {
 	switch kind {
 	case DecisionNone:
@@ -127,11 +128,8 @@ func verdictDecide(kind DecisionKind, routeCaptcha, captchaEnabled, answering, c
 	case DecisionBan:
 		return VerdictBan
 	case DecisionCaptcha:
-		switch {
-		case answering, !routeCaptcha, cookieValid && captchaEnabled:
+		if answering || !routeCaptcha || !captchaEnabled || cookieValid {
 			return VerdictPass
-		case !captchaEnabled:
-			return VerdictBan
 		}
 		return VerdictCaptcha
 	case DecisionUnknown:

@@ -42,7 +42,7 @@ type SettingsAllow struct {
 	Hosts []string `json:"hosts"`
 }
 
-// SettingsCaptcha turns the captcha on; without it a captcha decision is answered like a ban.
+// SettingsCaptcha turns the captcha on; without it captcha decisions pass, left to the ingress in front that asks it.
 type SettingsCaptcha struct {
 	KeyFile          string  `json:"keyFile"`
 	CookieDomain     string  `json:"cookieDomain"`

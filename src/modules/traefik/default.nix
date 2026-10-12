@@ -778,7 +778,7 @@ in {
 
     gate = {
       # one ingress per client asks: the answer path is the internet's ingress's on every host
-      captcha.enable = lib.mkEnableOption "the gate's captcha for clients crowdsec flags; without it a captcha decision is a ban";
+      captcha.enable = lib.mkEnableOption "the gate's captcha for clients crowdsec flags; without it captcha decisions pass (left to the ingress in front)";
       captcha.answerLog = lib.mkEnableOption "logging every puzzle's answer, for vm tests only (tests/policy forbids it on a lab host)";
       session = lib.mkOption {
         type = lib.types.nullOr (lib.types.submodule {

@@ -132,7 +132,7 @@ func TestCookie(t *testing.T) {
  */
 
 // the policy, every combination: a ban always stops, a captcha decision asks unless the route opts out, the request
-// is the answer or a cookie proves a solve; an ingress without a captcha bans instead; crowdsec down asks too
+// is the answer, a cookie proves a solve or the ingress asks none; crowdsec down asks too
 func TestVerdictDecide(t *testing.T) {
 	for kind := DecisionNone; kind <= DecisionUnknown; kind++ {
 		for bits := range 16 {
@@ -145,13 +145,9 @@ func TestVerdictDecide(t *testing.T) {
 			case DecisionBan:
 				want = VerdictBan
 			case DecisionCaptcha:
-				switch {
-				case answering || !routeCaptcha || (cookie && captchaEnabled):
+				want = VerdictCaptcha
+				if answering || !routeCaptcha || !captchaEnabled || cookie {
 					want = VerdictPass
-				case !captchaEnabled:
-					want = VerdictBan
-				default:
-					want = VerdictCaptcha
 				}
 			case DecisionUnknown:
 				switch {

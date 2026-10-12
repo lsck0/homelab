@@ -64,7 +64,6 @@ pkgs.testers.runNixOSTest {
   };
 
   testScript = { nodes, ... }: let gate = nodes.vm-200.homelab.traefik.gate.settings; in lab.driverPython + ''
-    import json
     import re
 
     EDGE = "${ip "200"}"
