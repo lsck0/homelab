@@ -11,7 +11,8 @@ let
   # the server's secrets and lazymc's config, rendered by sops under /run: never on the nas, never in a snapshot
   serverEnv = config.sops.templates."minecraft-server.env".path;
   lazymcToml = config.sops.templates."lazymc.toml".path;
-  image = "itzg/minecraft-server:2026.9.1-java25";
+  # the pack (all the mons, neoforge 21.1 for minecraft 1.21.1) runs on java 21
+  image = "itzg/minecraft-server:2026.9.1-java21";
   container = "minecraft";
   # the image's uid and gid
   serverUid = "1000";
