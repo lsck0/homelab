@@ -61,8 +61,8 @@ PROFILE_TYPE = "process_cpu:cpu:nanoseconds:cpu:nanoseconds"
 STARTED_WINDOW_S = 300
 # traefik names a route's service and router after the route, in the file provider
 TRAEFIK_PROVIDER = "@file"
-# a route's router, and its half behind the body limit (modules/traefik bodyRouterSuffix)
-ROUTER_SUFFIXES = ("-tls", "-tls-body")
+# a route's router, and its parts for bodies and websockets (modules/traefik routerSuffixes)
+ROUTER_SUFFIXES = ("-tls", "-tls-body", "-tls-socket")
 # the builder's (instances/140-internal-swarm/lib/app-builder.nix) and the manager's (modules/swarm) gauges
 DEPLOY_OK = "homelab_swarm_deploy_ok"
 DEPLOY_AT = "homelab_swarm_deploy_timestamp_seconds"

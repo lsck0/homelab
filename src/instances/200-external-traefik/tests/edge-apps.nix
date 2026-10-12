@@ -1,7 +1,8 @@
 # the edge (200-external-traefik.nix) in front of the swarm apps and the internal ingress (100), both real, with the
 # crowdsec stand-in: anubis, the metrics block, body limits, methods, compression, security headers, the client-header
 # strip, cloudflare-only, the real client behind cloudflare, rate limits, health-checked balancing, the relays, the
-# bot defences and crowdsec's bans and waf
+# bot defences, crowdsec's bans and waf, and websockets: through the api, anubis and the relay with sso, idle past
+# both ingresses' timeouts, and a client's full in-flight limit of them beside its requests
 #
 # The fixture is the real `wat` app (src/apps/wat), enabled for this test (every edge feature: anubis on /, a direct
 # /api with its metrics on the same port, an upload path without the waf and a 100 MiB limit, an internal route).
@@ -25,6 +26,12 @@ let
   watHost = "wat";
   echoBackend = pkgs.writers.writePython3Bin "echo-backend" { flakeIgnore = [ "E501" ]; } (builtins.readFile ../../../tests/lib/echo_backend.py);
   autheliaStub = pkgs.writers.writePython3Bin "authelia-stub" { flakeIgnore = [ "E501" ]; } (builtins.readFile ../../../tests/lib/authelia_stub.py);
+  websocketClient = pkgs.writers.writePython3Bin "websocket-client" { libraries = [ pkgs.python3Packages.websockets ]; flakeIgnore = [ "E501" ]; }
+    (builtins.readFile ./lib/websocket_client.py);
+  # the cookie the authelia stub takes for a session
+  sessionCookie = "authelia_session=never-issued";
+  # an idle socket outlives the ingresses' longest timeout by this much: the client's own clock and scheduling
+  timeoutMarginS = 10;
   authelia = internalRoutes.authelia;
 
   appPorts = lib.unique (map (p: p.port) (lib.attrValues wat.routes ++ lib.attrValues wat.metrics));
@@ -56,23 +63,34 @@ pkgs.testers.runNixOSTest {
     };
     systemd.services.authelia-stub = {
       wantedBy = [ "multi-user.target" ];
-      serviceConfig.ExecStart = "${autheliaStub}/bin/authelia-stub --port ${toString authelia.port} --portal ${net.fqdn authelia.host} --session authelia_session=never-issued --log-dir /run";
+      serviceConfig.ExecStart = "${autheliaStub}/bin/authelia-stub --port ${toString authelia.port} --portal ${net.fqdn authelia.host} --session ${sessionCookie} --log-dir /run";
     };
   };
   nodes.world = {
     imports = [ (lab.multi { addresses = [ "10.100.0.1/8" "10.200.0.1/8" "10.250.0.1/8" "${outside.internet}/24" "${outside.cloudflare}/13" "${outside.lan}/24" ]; }) ];
-    environment.systemPackages = [ pkgs.curl pkgs.python3 ];
+    environment.systemPackages = [ pkgs.curl pkgs.python3 websocketClient ];
   };
 
   testScript = { nodes, ... }: let
     # past this a buffered body spills to a temp-multibuf file in traefik's /tmp
     spillBytes = (lib.findFirst (m: m ? buffering) null
       (lib.attrValues nodes.vm-200.services.traefik.dynamicConfigOptions.http.middlewares)).buffering.memRequestBodyBytes;
+    # the longest read or idle timeout of the ingresses an idle socket passes
+    timeoutsOf = node: node.services.traefik.staticConfigOptions.entryPoints.websecure.transport.respondingTimeouts;
+    secondsOf = duration: lib.toInt (lib.removeSuffix "s" duration);
+    timeoutMaxS = lib.foldl' lib.max 0
+      (lib.concatMap (node: map secondsOf [ (timeoutsOf node).readTimeout (timeoutsOf node).idleTimeout ]) [ nodes.vm-200 nodes.vm-100 ]);
+    # the per-client in-flight limit the api's socket router names
+    edgeHttp = nodes.vm-200.services.traefik.dynamicConfigOptions.http;
+    socketInFlight = edgeHttp.middlewares.${lib.findFirst (lib.hasPrefix "inflight-limit")
+      (throw "edge-apps: the api's socket router names no in-flight limit") edgeHttp.routers.wat-api-tls-socket.middlewares}.inFlightReq.amount;
   in lab.driverPython + ''
 
     EDGE, INTERNAL = "${ip "200"}", "${ip "100"}"
     CF, NET, LAN = "${outside.cloudflare}", "${outside.internet}", "${outside.lan}"
     WAT = "https://${net.fqdn watHost}"
+    WAT_SOCKET, WAT_DB_SOCKET = "wss://${net.fqdn watHost}", "wss://${net.fqdn wat.routes.wat-db.host}"
+    IDLE_S = ${toString (timeoutMaxS + timeoutMarginS)}
     API_PORT = ${toString wat.routes.wat-api.port}
 
     def get(path, src=CF, host=WAT, address=EDGE, method="GET", headers=None, xff="${realClient}"):
@@ -96,6 +114,23 @@ pkgs.testers.runNixOSTest {
             f"curl -s -o /dev/null -w '%{{http_code}}' --interface {CF} --resolve ${watHost}.${net.domain}:443:{EDGE} "
             f"-H 'X-Forwarded-For: ${realClient}' {extra} --data-binary @/tmp/upload {WAT}{path}"))
 
+    # websocket-client in the background, its report in /tmp/<name>.json, its exit status in /tmp/<name>.exit
+    def sockets_start(name, url, src=CF, xff="${realClient}", headers=(), count=1, idle_s=0, release=None):
+        args = [f"--url {url} --address {EDGE} --source {src} --ca ${lab.pki.ca} --count {count} --idle-s {idle_s}",
+                f"--report /tmp/{name}.json"] + [f"--header '{h}'" for h in headers]
+        if src == CF:
+            args.append(f"--header 'X-Forwarded-For: {xff}'")
+        if release:
+            args.append(f"--release {release}")
+        world.succeed(f"rm -f /tmp/{name}.json /tmp/{name}.exit; (websocket-client {' '.join(args)} > /tmp/{name}.log 2>&1; "
+                      f"echo $? > /tmp/{name}.exit) >/dev/null 2>&1 &")
+
+    def sockets_report(name, idle=False, timeout=60):
+        done = f"grep -q 'idle_echoed.: [0-9]' /tmp/{name}.json" if idle else f"[ -s /tmp/{name}.json ]"
+        world.wait_until_succeeds(f"{done} 2>/dev/null || [ -s /tmp/{name}.exit ]", timeout=timeout)
+        world.succeed(f"{done} || {{ cat /tmp/{name}.log; false; }}")
+        return json.loads(world.succeed(f"cat /tmp/{name}.json"))
+
     start_all()
     for machine in (vm_200, vm_100):
         machine.wait_for_unit("traefik.service")
@@ -106,6 +141,16 @@ pkgs.testers.runNixOSTest {
     # the health check drops the absent third worker before the first request counts
     world.wait_until_succeeds(f"[ $(curl -s -o /dev/null -w '%{{http_code}}' --interface {CF} -H 'X-Forwarded-For: ${realClient}' "
                               f"--resolve ${watHost}.${net.domain}:443:{EDGE} {WAT}/api/health) = 200 ]", timeout=120)
+
+    # sockets that idle through the other subtests: straight to the api, through anubis, and relayed to the internal
+    # ingress, past its sso, from the house; each is open, greeted and echoed before a subtest reads the backend's log
+    idle_sockets = ("idle-api", "idle-anubis", "idle-relay")
+    sockets_start("idle-api", f"{WAT_SOCKET}/api/socket", xff="203.0.113.20", idle_s=IDLE_S)
+    sockets_start("idle-anubis", f"{WAT_SOCKET}/socket", xff="203.0.113.21", idle_s=IDLE_S)
+    sockets_start("idle-relay", f"{WAT_DB_SOCKET}/socket", src=LAN, headers=["Cookie: ${sessionCookie}"], idle_s=IDLE_S)
+    for name in idle_sockets:
+        r = sockets_report(name)
+        assert r == {"opened": 1, "refused": None, "idle_echoed": None}, (name, r)
 
     with subtest("anubis challenges a browser on / and lets apis and uploads through"):
         backend_reset()
@@ -252,5 +297,23 @@ pkgs.testers.runNixOSTest {
         assert get("/api/x", headers={"X-Test-Attack": "1"}, xff="203.0.113.14")["status"] == 403
         # the upload path has the waf off
         assert get("/user-files/x", headers={"X-Test-Attack": "1"}, xff="203.0.113.15")["status"] == 200
+
+    with subtest("a client's open websockets fill their own in-flight limit, never its requests'"):
+        world.succeed("rm -f /tmp/hold-release && mkfifo /tmp/hold-release")
+        sockets_start("hold", f"{WAT_SOCKET}/api/socket", xff="203.0.113.30", count=${toString socketInFlight} + 1,
+                      release="/tmp/hold-release")
+        r = sockets_report("hold")
+        # the in-flight limit's refusal: the rate limit's would name when to retry
+        assert r["opened"] == ${toString socketInFlight} and r["refused"] == {"status": 429, "retry_after": None}, r
+        for path in ("/api/health", "/api/x"):
+            assert get(path, xff="203.0.113.30")["status"] == 200, path
+        world.succeed("echo release > /tmp/hold-release")
+        world.wait_until_succeeds("[ -s /tmp/hold.exit ]", timeout=60)
+        assert world.succeed("cat /tmp/hold.exit").strip() == "0", world.succeed("cat /tmp/hold.log")
+
+    with subtest("an idle websocket outlives the ingresses' read and idle timeouts"):
+        for name in idle_sockets:
+            r = sockets_report(name, idle=True, timeout=IDLE_S)
+            assert r["idle_echoed"] == r["opened"] == 1, (name, r)
   '';
 }

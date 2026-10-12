@@ -5,10 +5,12 @@
 # client-ip (the real client into X-Real-Ip, lib/traefik-clientip), the strip of client-sent identity and target
 # headers, the crowdsec bouncer with its AppSec waf and the core rule set, the per-client and per-route rate and
 # in-flight limits, the body limit, retries, the security headers, then sso, anubis, basic auth and the route's own
-# headers. A hand-written router gets the same chain and may name opt-outs in an `off` attribute of its own. Every
-# quantity that names a client reads X-Real-Ip, which client-ip sets from the socket peer and the X-Forwarded-For
-# hops of trustedProxies and Cloudflare only; the backend's X-Forwarded-For is that client alone. The probers check a
-# route at its health path through the ingress, past sso and anubis but nowhere else (probe routers below).
+# headers. A router splits by what a request holds: body methods pass the body limit on a router of their own, a
+# websocket upgrade holds the in-flight slots of its own router for the socket's life. A hand-written router gets the
+# same chain and may name opt-outs in an `off` attribute of its own. Every quantity that names a client reads
+# X-Real-Ip, which client-ip sets from the socket peer and the X-Forwarded-For hops of trustedProxies and Cloudflare
+# only; the backend's X-Forwarded-For is that client alone. The probers check a route at its health path through the
+# ingress, past sso and anubis but nowhere else (probe routers below).
 { config, lib, pkgs, retry, inventory, site, lab, catalog, ... }:
 let
   cfg = config.homelab.traefik;
@@ -530,7 +532,13 @@ let
 
   # the body limit (buffering) also spools whole responses to /tmp: a router splits so only body methods pass it
   bodyMethods = [ "POST" "PUT" "PATCH" "DELETE" ];
+  bodyMatcher = anyOf "Method" bodyMethods;
   bodyRouterSuffix = "-body";
+  # a websocket holds its in-flight slots for life: its own router has its own limiters, open sockets refuse no request
+  socketMethod = "GET";
+  socketMatcher = "(Method(`${socketMethod}`) && HeaderRegexp(`Upgrade`, `(?i)^websocket$`))";
+  socketRouterSuffix = "-socket";
+  routerSuffixes = [ bodyRouterSuffix socketRouterSuffix ];
   # vulcand/oxy's multibuffer files
   spoolFilePattern = "temp-multibuf-*";
   spoolMetricName = "traefik_spool";
@@ -538,8 +546,10 @@ let
   methodsOf = r: r.methods or null;
   admitsBody = r: methodsOf r == null || lib.any (m: lib.elem m bodyMethods) (methodsOf r);
   admitsBodyless = r: methodsOf r == null || lib.any (m: !(lib.elem m bodyMethods)) (methodsOf r);
+  admitsSocket = r: methodsOf r == null || lib.elem socketMethod (methodsOf r);
   limitsBody = r: on r "bodyLimit" && admitsBody r;
   splitsByBody = r: limitsBody r && admitsBodyless r;
+  splitsBySocket = r: on r "inflightLimit" && admitsSocket r;
 
   # every websecure router's chain, ahead of its own middlewares; cloudflare-only judges the socket peer, before
   # client-ip makes the resolved client the remote address, and refuses a direct caller before the waf spends anything
@@ -561,7 +571,7 @@ let
       else if !r.referrer then "secure-headers-noreferrer"
       else "secure-headers");
 
-  # bound slow-dribbling clients
+  # bound slow-dribbling clients while a request is read; go clears an upgraded socket's deadlines (edge-apps idles one)
   respondingTimeouts = { readTimeout = "120s"; writeTimeout = "0s"; idleTimeout = "180s"; };
 
   # one wildcard certificate per ingress: one acme order, and no route's name in the certificate transparency logs
@@ -581,22 +591,27 @@ let
       tls = wildcardTls // (router.tls or { });
       middlewares = chainOf name r withBody ++ (router.middlewares or [ ]);
     };
-    # both halves keep the priority the whole rule had, so the split moves neither against any other router
-    half = withBody: secured withBody // {
-      rule = "(${rule}) && ${if withBody then "" else "!"}${anyOf "Method" bodyMethods}";
+    splits = lib.optional (splitsByBody r) { suffix = bodyRouterSuffix; matcher = bodyMatcher; withBody = true; }
+      ++ lib.optional (splitsBySocket r) { suffix = socketRouterSuffix; matcher = socketMatcher; withBody = false; };
+    # every part keeps the priority the whole rule had, so a split moves none against any other router
+    part = matcher: withBody: secured withBody // {
+      rule = "(${rule}) && ${matcher}";
       priority = router.priority or (lib.stringLength rule);
     };
+    # what no split takes, bodyless: a route limiting bodies that admits a GET splits by body as well
+    rest = part (lib.concatMapStringsSep " && " (s: "!${s.matcher}") splits) false;
   in
     if !(websecure router) then { ${name} = plain; }
-    else if splitsByBody r then { ${name} = half false; "${name}${bodyRouterSuffix}" = half true; }
-    else { ${name} = secured (limitsBody r) // { inherit rule; }; }
+    else if splits == [ ] then { ${name} = secured (limitsBody r) // { inherit rule; }; }
+    else { ${name} = rest; } // lib.listToAttrs (map (s: lib.nameValuePair "${name}${s.suffix}" (part s.matcher s.withBody)) splits)
   ) allRouters;
+  unsplit = name: lib.foldl' (n: suffix: lib.removeSuffix suffix n) name routerSuffixes;
   # a route router ranked at or above the probes would take their health path back behind sso
   outrankingProbes = lib.attrNames (lib.filterAttrs (name: router:
-    (routeRouters // relayRouters // frontendRouters) ? ${lib.removeSuffix bodyRouterSuffix name}
+    (routeRouters // relayRouters // frontendRouters) ? ${unsplit name}
     && (router.priority or (lib.stringLength router.rule)) >= probePriority) routersWithTls);
-  splitClashes = lib.filter (name: allRouters ? "${name}${bodyRouterSuffix}")
-    (lib.attrNames (lib.filterAttrs (_: router: websecure router && splitsByBody (recordOf router)) allRouters));
+  splitClashes = lib.concatMap (name: lib.filter (split: allRouters ? ${split}) (map (suffix: "${name}${suffix}") routerSuffixes))
+    (lib.attrNames (lib.filterAttrs (_: router: let r = recordOf router; in websecure router && (splitsByBody r || splitsBySocket r)) allRouters));
   allRouters = cfg.routers // routeRouters // probeRouters // frontendRouters // relayRouters // botDefenseRouters;
   allMiddlewares = cfg.middlewares // routeMiddlewareDefs // frontendMiddlewares // secureHeadersMiddleware // limitMiddlewares
     // bouncerMiddleware // stripClientHeadersMiddleware // autheliaMiddleware;
@@ -692,7 +707,7 @@ in {
       message = "${config.networking.hostName}: routers at or above the probes' priority ${toString probePriority}: ${toString outrankingProbes}";
     } {
       assertion = splitClashes == [ ];
-      message = "${config.networking.hostName}: routers whose body half (${bodyRouterSuffix}) would replace another router: ${toString splitClashes}";
+      message = "${config.networking.hostName}: a router's split (${toString routerSuffixes}) would replace these routers: ${toString splitClashes}";
     }];
 
     sops.templates."traefik.env".content = ''
