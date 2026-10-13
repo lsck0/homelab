@@ -1,18 +1,28 @@
-# vm-104's two-way sync of the syncthing folder with proton drive (lib/proton-bisync.sh under the real units of
-# lib/kopia.nix) against a local folder standing in for proton drive: rclone's local backend under the remote's name.
-# Not signed in and no baseline fail before rclone starts, the share's metric at 0 for the stale alert; the baseline
-# merges both sides and deletes nothing; additions, edits and deletions go both ways, what lands in the folder owned by
-# the syncthing user with its modes; a conflict keeps both versions; a mass deletion waits for allow-large; a missing,
-# unmarked or empty folder and a missing check file are refused; syncthing's internals stay local; an hourly run skips
-# while another off-site run holds the proton lock.
+# vm-104's two-way sync of the syncthing folder with proton drive (lib/proton-bisync.sh and its engine under the real
+# units of lib/kopia.nix) against the fake proton-drive cli (lib/fake-proton-drive.nix), its drive a local folder.
+# No session, no baseline and a missing remote root are refused, the share's metric at 0 for the stale alert; the
+# baseline merges both sides, deletes nothing, keeps both versions of a file that differs and transfers none that
+# agrees; additions, edits and deletions go both ways (a local deletion into the quarantine folder), what lands in the
+# folder owned by the syncthing user with its modes and the remote mtime; a conflict keeps both versions; a mass
+# deletion waits for allow-large; a missing, unmarked or empty folder is refused; syncthing's internals and symlinks
+# stay local; a failing item fails the run and the next run resumes with it alone; a run lists only what its budget
+# allows; an hourly run skips while another off-site run holds the proton lock, and a proton outage skips it.
 { pkgs, lib, ... }:
 let
   folder = "/srv/nas/syncthing/sync";
-  # the drive's my-files; the folder's copy sits where the real one does, below homelab-offsite
+  quarantine = "/srv/nas/syncthing/proton-bisync-trash";
+  # the drive's folder; the folder's copy sits where the real one does, below /my-files/homelab-offsite
   drive = "/srv/fake-proton";
-  remote = "${drive}/homelab-offsite/sync";
+  remote = "${drive}/my-files/homelab-offsite/sync";
   user = "nobody";
   group = "nogroup";
+  fakeCli = import ./lib/fake-proton-drive.nix { inherit pkgs; };
+  inherit ((import ../../../modules/upstream { inherit lib pkgs; lab.upstreams = { }; })._module.args.upstream) unavailable;
+  # proton is down while /run/proton-down exists
+  probe = pkgs.writeShellScript "proton-probe-fake" ''
+    down=${toString unavailable}
+    [ ! -e /run/proton-down ] || exit "$down"
+  '';
 in
 pkgs.testers.runNixOSTest {
   name = "proton-bisync";
@@ -23,8 +33,13 @@ pkgs.testers.runNixOSTest {
     # main.nix's folder and owner; syncthing itself stays off
     services.syncthing = { inherit user group; settings.folders.sync.path = folder; };
     systemd.services = lib.genAttrs [ "proton-bisync" "proton-bisync-resync" ] (_: {
-      environment.PROTON_BISYNC_REMOTE = lib.mkForce "proton:${remote}";
-      environment.PROTON_BISYNC_PROBE = lib.mkForce "${pkgs.coreutils}/bin/true";
+      environment = {
+        PROTON_BISYNC_CLI = lib.mkForce (lib.getExe fakeCli);
+        PROTON_BISYNC_PROBE = lib.mkForce "${probe}";
+        FAKE_DRIVE = drive;
+        FAKE_LOG = "/run/fake-proton.log";
+        FAKE_FAIL_FILE = "/run/fake-proton-fail";
+      };
     });
     # the test starts every run itself
     systemd.timers.proton-bisync.wantedBy = lib.mkForce [ ];
@@ -35,16 +50,20 @@ pkgs.testers.runNixOSTest {
 
     F = "${folder}"
     R = "${remote}"
+    Q = "${quarantine}"
     STATE = "/var/lib/proton-bisync"
     PROM = "/var/lib/node-exporter-textfile/proton_bisync.prom"
+    LOG = "/run/fake-proton.log"
+    OWNER = "${user}:${group}"
     FILLERS = 20
 
     def owned(cmd):
-        """runs a shell command as the folder's owner, as syncthing and the owner's edits on proton would write"""
+        """runs a shell command as the folder's owner, as syncthing writes"""
         machine.succeed(f"setpriv --reuid=${user} --regid=${group} --clear-groups -- sh -c {shlex.quote(cmd)}")
 
     def run(unit: str, ok: bool = True) -> str:
-        """starts a run and returns its log"""
+        """starts a run with a fresh cli log and returns the run's log"""
+        machine.succeed(f": > {LOG}")
         if ok:
             machine.succeed(f"systemctl start {unit}")
         else:
@@ -60,88 +79,133 @@ pkgs.testers.runNixOSTest {
     def listing(root):
         return machine.succeed(f"cd {root} && find . | sort")
 
+    def calls(verb):
+        """the cli calls of the last run with this verb"""
+        return [line for line in machine.succeed(f"cat {LOG}").splitlines() if line.startswith(f"filesystem {verb} ")]
+
     def absent(*paths):
         for p in paths:
             machine.fail(f"test -e {shlex.quote(p)}")
 
+    def modes(*paths):
+        quoted = " ".join(shlex.quote(p) for p in paths)
+        return machine.succeed(f"stat -c '%U:%G %a' {quoted}").split()
+
     machine.wait_for_unit("multi-user.target")
-    machine.succeed(f"install -d -o ${user} -g ${group} {F} {F}/.stfolder ${drive} ${drive}/homelab-offsite {R}")
+    machine.succeed(f"install -d -o ${user} -g ${group} {F} {F}/.stfolder && mkdir -p ${drive}/my-files/homelab-offsite")
     owned(f"mkdir -p {F}/docs {F}/.stversions && echo local-a > {F}/docs/a.txt && echo local > {F}/common.txt"
           f" && for i in $(seq {FILLERS}); do echo $i > {F}/docs/fill-$i.txt; done"
+          f" && echo same > {F}/same.txt && touch -d '2020-01-01 00:00:00.123' {F}/same.txt"
           f" && echo old > {F}/.stversions/old.txt && echo pull > {F}/docs/.syncthing.b.txt.tmp"
-          f" && echo pull > {F}/docs/~syncthing~c.txt.tmp")
-    owned(f"mkdir -p {R}/.stversions && echo remote-only > {R}/r.txt && echo remote > {R}/common.txt"
-          f" && echo theirs > {R}/.stversions/rv.txt")
+          f" && echo pull > {F}/docs/~syncthing~c.txt.tmp && ln -s docs/a.txt {F}/link")
 
-    with subtest("not signed in: refused before rclone, the share's metric at 0 so the stale alert fires"):
+    with subtest("no session: refused before the cli, the share's metric at 0 so the stale alert fires"):
         out = run("proton-bisync", ok=False)
-        assert "not signed in" in out, out
+        assert "no proton session" in out, out
         assert metric() == 0, machine.succeed(f"cat {PROM}")
 
-    with subtest("signed in without a baseline: refused, pointing at the resync"):
-        # what proton-bisync-login leaves, for the local stand-in
-        machine.succeed(f"printf '[proton]\\ntype = local\\n' > {STATE}/rclone.conf && chown ${user}:${group} {STATE}/rclone.conf")
+    with subtest("no baseline: refused, pointing at the resync"):
+        machine.succeed("mkdir -p /var/lib/proton-drive && echo '{}' > /var/lib/proton-drive/auth-session.json")
         out = run("proton-bisync", ok=False)
         assert "proton-bisync-resync" in out, out
 
-    with subtest("the baseline merges both sides, deletes nothing, takes the newer version, leaves syncthing's internals out"):
-        run("proton-bisync-resync")
-        assert cat(f"{F}/r.txt") == "remote-only"
-        assert cat(f"{R}/docs/a.txt") == "local-a"
-        assert cat(f"{R}/common.txt") == "remote" and cat(f"{F}/common.txt") == "remote"
-        machine.succeed(f"test -e {F}/RCLONE_TEST && test -e {R}/RCLONE_TEST")
-        absent(f"{R}/.stfolder", f"{R}/.stversions/old.txt", f"{R}/docs/.syncthing.b.txt.tmp",
-               f"{R}/docs/~syncthing~c.txt.tmp", f"{F}/.stversions/rv.txt")
+    with subtest("a missing remote root is refused"):
+        out = run("proton-bisync-resync", ok=False)
+        assert "remote root" in out and "missing" in out, out
+        assert calls("upload") == [] and calls("download") == []
+
+    machine.succeed(f"mkdir -p {R}/.stversions {R}/rdir/sub && echo remote-only > {R}/r.txt && echo remote > {R}/common.txt"
+                    f" && echo theirs > {R}/.stversions/rv.txt && echo deep > {R}/rdir/sub/deep.txt"
+                    f" && echo same > {R}/same.txt && touch -d '2020-01-01 00:00:00.123' {R}/same.txt")
+
+    with subtest("the baseline merges both sides, deletes nothing, keeps both versions of what differs"):
+        out = run("proton-bisync-resync")
+        assert cat(f"{F}/r.txt") == "remote-only" and cat(f"{F}/rdir/sub/deep.txt") == "deep"
+        assert cat(f"{R}/docs/a.txt") == "local-a" and cat(f"{R}/docs/fill-7.txt") == "7"
+        for side in [F, R]:
+            assert cat(f"{side}/common.txt") == "local", side
+            assert cat(f"{side}/common.proton-conflict.txt") == "remote", machine.succeed(f"ls {side}")
+        assert not any("same.txt" in c for c in calls("upload") + calls("download")), "an agreeing file moved"
         assert metric() > 0
 
-    with subtest("additions and edits go both ways; what lands in the folder is the syncthing user's, 0644 and 0755"):
-        owned(f"echo l2 > {F}/l2.txt && mkdir -p {R}/new/sub && echo r2 > {R}/new/sub/r2.txt"
-              f" && echo remote-edit > {R}/docs/a.txt && touch -d '+1 min' {R}/docs/a.txt"
-              f" && echo pull > {F}/.syncthing.d.txt.tmp && echo mine > {F}/.stversions/new.txt"
-              f" && echo theirs > {R}/.stversions/new2.txt")
-        run("proton-bisync")
-        assert cat(f"{R}/l2.txt") == "l2"
-        assert cat(f"{F}/new/sub/r2.txt") == "r2"
-        assert cat(f"{F}/docs/a.txt") == "remote-edit"
-        absent(f"{R}/.syncthing.d.txt.tmp", f"{R}/.stversions/new.txt", f"{F}/.stversions/new2.txt")
-        modes = machine.succeed(f"stat -c '%U:%G %a %n' {F}/new {F}/new/sub {F}/new/sub/r2.txt {F}/r.txt {F}/docs/a.txt")
-        print(modes)
-        assert modes.split("\n")[:5] == [f"${user}:${group} {m} {p}" for m, p in [
-            ("755", f"{F}/new"), ("755", f"{F}/new/sub"), ("644", f"{F}/new/sub/r2.txt"), ("644", f"{F}/r.txt"),
-            ("644", f"{F}/docs/a.txt")]], modes
-        assert machine.succeed(f"find {F} ! -user ${user} -o ! -group ${group}") == ""
+    with subtest("syncthing's internals and symlinks stay local, logged, without failing the run"):
+        absent(f"{R}/.stfolder", f"{R}/.stversions/old.txt", f"{R}/docs/.syncthing.b.txt.tmp",
+               f"{R}/docs/~syncthing~c.txt.tmp", f"{F}/.stversions/rv.txt", f"{R}/link")
+        assert "stay local" in out and "link" in out, out
 
-    with subtest("a file changed on both sides keeps both: the newer under its name, the older with the conflict suffix"):
-        owned(f"echo local-new > {F}/common.txt && touch -d '+2 min' {F}/common.txt"
-              f" && echo remote-new > {R}/common.txt && touch -d '+3 min' {R}/common.txt")
+    with subtest("what lands in the folder is the syncthing user's, 0644 and 0755, with proton's mtime"):
+        assert modes(f"{F}/rdir", f"{F}/rdir/sub", f"{F}/rdir/sub/deep.txt", f"{F}/r.txt",
+                     f"{F}/common.proton-conflict.txt") == [OWNER, "755"] * 2 + [OWNER, "644"] * 3
+        assert machine.succeed(f"find {F} ! -user ${user} -o ! -group ${group}") == ""
+        here, there = machine.succeed(f"stat -c %.3Y {F}/r.txt {R}/r.txt").split()
+        assert here == there, (here, there)
+
+    with subtest("additions and edits go both ways; a run with nothing to do moves nothing"):
+        owned(f"echo l2 > {F}/l2.txt && echo local-a2 > {F}/docs/a.txt")
+        machine.succeed(f"mkdir -p {R}/new/sub && echo r2 > {R}/new/sub/r2.txt"
+                        f" && echo remote-edit > {R}/r.txt && touch -d '+1 min' {R}/r.txt")
+        run("proton-bisync")
+        assert cat(f"{R}/l2.txt") == "l2" and cat(f"{R}/docs/a.txt") == "local-a2"
+        assert cat(f"{F}/new/sub/r2.txt") == "r2" and cat(f"{F}/r.txt") == "remote-edit"
+        assert modes(f"{F}/new", f"{F}/new/sub/r2.txt") == [OWNER, "755", OWNER, "644"]
+        run("proton-bisync")
+        assert calls("upload") + calls("download") + calls("trash") + calls("create-folder") == [], machine.succeed(f"cat {LOG}")
+
+    with subtest("deletions go both ways: proton's into its trash, the folder's into the quarantine"):
+        owned(f"rm {F}/l2.txt")
+        machine.succeed(f"rm {R}/r.txt && rm -r {R}/new")
+        run("proton-bisync")
+        absent(f"{R}/l2.txt", f"{F}/r.txt", f"{F}/new")
+        machine.succeed("test -e ${drive}/trash/l2.txt")
+        day = machine.succeed("date +%F").strip()
+        assert cat(f"{Q}/{day}/r.txt") == "remote-edit" and cat(f"{Q}/{day}/new/sub/r2.txt") == "r2"
+
+    with subtest("a file changed on both sides keeps both: the folder's version under its name, proton's beside it"):
+        owned(f"echo mine > {F}/docs/a.txt")
+        machine.succeed(f"echo theirs > {R}/docs/a.txt && touch -d '+2 min' {R}/docs/a.txt")
         run("proton-bisync")
         for side in [F, R]:
-            assert cat(f"{side}/common.txt") == "remote-new", side
-            assert cat(f"{side}/common.proton-conflict1.txt") == "local-new", machine.succeed(f"ls {side}")
-
-    with subtest("deletions go both ways"):
-        owned(f"rm {F}/l2.txt {R}/r.txt")
-        run("proton-bisync")
-        absent(f"{R}/l2.txt", f"{F}/r.txt")
+            assert cat(f"{side}/docs/a.txt") == "mine", side
+            assert cat(f"{side}/docs/a.proton-conflict.txt") == "theirs", machine.succeed(f"ls {side}/docs")
 
     with subtest("deleting over the limit syncs nothing until allow-large lets one run through"):
-        owned(f"rm {F}/docs/fill-1[0-9].txt {F}/docs/fill-[1-5].txt")
+        owned(f"rm {F}/docs/fill-1[0-9].txt {F}/docs/fill-[1-5].txt && echo l3 > {F}/l3.txt")
         out = run("proton-bisync", ok=False)
         assert "allow-large" in out, out
         machine.succeed(f"test -e {R}/docs/fill-12.txt")
+        absent(f"{R}/l3.txt")
         machine.succeed(f"touch {STATE}/allow-large")
         run("proton-bisync")
         absent(f"{R}/docs/fill-12.txt", f"{R}/docs/fill-3.txt", f"{STATE}/allow-large")
-        machine.succeed(f"test -e {R}/docs/fill-20.txt")
+        machine.succeed(f"test -e {R}/docs/fill-20.txt && test -e {R}/l3.txt")
 
-    with subtest("a side without the check file is refused"):
-        owned(f"mv {R}/RCLONE_TEST {R}/../RCLONE_TEST && echo l3 > {F}/l3.txt")
-        out = run("proton-bisync", ok=False)
-        assert "RCLONE_TEST" in out, out
-        absent(f"{R}/l3.txt")
-        owned(f"mv {R}/../RCLONE_TEST {R}/RCLONE_TEST")
+    with subtest("a failing item fails the run; the next run resumes with it alone"):
+        before = metric()
+        owned(f"echo up1 > {F}/up1.txt")
+        machine.succeed(f"mkdir -p {R}/part && echo p1 > {R}/part/p1.txt && echo p2 > {R}/part/p2.txt"
+                        f" && echo '*/part/p2.txt' > /run/fake-proton-fail")
+        run("proton-bisync", ok=False)
+        assert cat(f"{F}/part/p1.txt") == "p1" and cat(f"{R}/up1.txt") == "up1"
+        absent(f"{F}/part/p2.txt")
+        assert metric() == before
+        machine.succeed("rm /run/fake-proton-fail")
         run("proton-bisync")
-        assert cat(f"{R}/l3.txt") == "l3"
+        assert cat(f"{F}/part/p2.txt") == "p2"
+        moved = calls("upload") + calls("download")
+        assert len(moved) == 1 and "p2.txt" in moved[0], moved
+        assert metric() > before
+
+    with subtest("a run lists what its budget allows; a cold folder's change waits for its turn"):
+        machine.succeed("mkdir -p /run/systemd/system/proton-bisync.service.d"
+                        " && printf '[Service]\\nEnvironment=PROTON_BISYNC_SWEEP_SECONDS=0\\n'"
+                        " > /run/systemd/system/proton-bisync.service.d/budget.conf && systemctl daemon-reload")
+        machine.succeed(f"echo deep2 > {R}/rdir/sub/deep.txt && echo top > {R}/top.txt")
+        run("proton-bisync")
+        assert cat(f"{F}/top.txt") == "top" and cat(f"{F}/rdir/sub/deep.txt") == "deep"
+        assert len(calls("list")) == 2, calls("list")
+        machine.succeed("rm -r /run/systemd/system/proton-bisync.service.d && systemctl daemon-reload")
+        run("proton-bisync")
+        assert cat(f"{F}/rdir/sub/deep.txt") == "deep2"
 
     with subtest("a missing, unmarked or empty folder is refused and leaves the drive alone"):
         before = listing(R)
@@ -155,8 +219,16 @@ pkgs.testers.runNixOSTest {
         assert listing(R) == before
         machine.succeed(f"rm -r {F} && mv {F}.moved {F}")
 
-    with subtest("an hourly run skips while another off-site run holds the proton lock"):
+    with subtest("a proton outage skips the run: nothing moves, no success"):
+        before = metric()
         owned(f"echo l4 > {F}/l4.txt")
+        machine.succeed("touch /run/proton-down")
+        out = run("proton-bisync")
+        absent(f"{R}/l4.txt")
+        assert metric() == before and calls("list") == [], out
+        machine.succeed("rm /run/proton-down")
+
+    with subtest("an hourly run skips while another off-site run holds the proton lock"):
         machine.succeed("systemd-run --unit=hold-proton flock /run/proton-drive.lock ${pkgs.coreutils}/bin/sleep 600")
         machine.wait_until_fails("flock -n /run/proton-drive.lock true")
         assert "skipping this hour" in run("proton-bisync")

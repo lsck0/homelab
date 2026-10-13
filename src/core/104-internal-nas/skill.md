@@ -34,8 +34,9 @@ Layout under `/srv/nas`:
   writes them. Never loosen their modes; vm-104's tmpfiles rules set them back on every boot.
 - Syncthing GUI https://sync.lsck0.dev; API on the VM: `curl -s localhost:8384/rest/system/status -H "X-API-Key: $(xmllint --xpath 'string(//apikey)' /var/lib/syncthing/config.xml)"`.
 - The syncthing folder is also synced both ways with Proton Drive (`/my-files/homelab-offsite/sync`) every hour:
-  `systemctl status proton-bisync`, `journalctl -u proton-bisync`. Its one-time sign-in (`proton-bisync-login`, the
-  owner's 2FA code) and baseline (`proton-bisync-resync`) are the owner's (README.md, Off-site): report, never run them.
+  `systemctl status proton-bisync`, `journalctl -u proton-bisync`. Its one-time baseline (`proton-bisync-resync`) and
+  the proton sign-in (`proton-drive-login`) are the owner's (README.md, Off-site): report, never run them. Files it
+  deleted here wait in `/srv/nas/syncthing/proton-bisync-trash/<date>/` for a month.
 - FileBrowser https://nas.lsck0.dev (whole tree).
 - Share a file publicly: copy into the external share app (see `public-apps`) rather than exposing the NAS.
 - Media deletion: prefer the *arr APIs (see `media`) so libraries stay consistent; delete raw files only for orphans.

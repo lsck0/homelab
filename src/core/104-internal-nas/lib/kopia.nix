@@ -10,10 +10,10 @@
 #
 # Of the raw trees only the syncthing folder goes up, browsable in proton drive (which encrypts end to end itself) and
 # editable there: an edit on the web or the phone comes back to the folder within the hour, and syncthing takes it to
-# the owner's devices. The cli can only upload, so this is rclone bisync over rclone's protondrive backend, alive
-# again since 1.74 (proton's new api host, its external-drive app version); proton-bisync.sh's header says how. Its
-# history is the repository's. A file bisync deletes on proton lands in proton's trash, which stays: rclone's cleanup
-# empties the whole account's trash, the owner's own trashed items with it.
+# the owner's devices. It runs on the same cli, which lists, uploads, downloads and trashes; proton-bisync.py's header
+# says how (rclone's protondrive backend cannot sign in: proton asks it for a captcha it cannot solve). Its history is
+# the repository's. A file the sync deletes on proton lands in proton's trash, which stays until the owner empties it;
+# one it deletes here waits in proton-bisync-trash beside the folder for a month.
 #
 # Retention: prometheus and loki compact, rewriting their blocks, so every snapshot pins fresh copies for up to two
 # years. Loki keeps 14 days of logs, so its tree is not backed up; prometheus keeps 10 years, so it is a source of
@@ -89,31 +89,27 @@ let
   shareSyncDelay = "5m";
   # an hourly run moves what changed in an hour; past this it hangs. No overlap: the timer leaves a running unit be
   shareSyncTimeout = "6h";
-  # the baseline copies whatever one side lacks: the first one-way upload took nights (122 GiB, 2026-10), a resync
-  # after a cut-short one may too; rerun it until it succeeds
+  # the baseline reads every remote folder (~7 h for the 13k of 2026-10) and copies whatever one side lacks; one cut
+  # short resumes with what is left: rerun it until it succeeds
   shareResyncTimeout = "20h";
+  # an hourly run reads remote folders, the longest unread first, this long: the whole tree about every 11 runs
+  shareSweepSeconds = 40 * 60;
   # a run may prune this much of what the repository mirror uploaded: maintenance drops a few percent a night; more is
   # a local loss the off-site copy exists to survive
   repoGoneMaxPercent = 50;
-  # a bisync run may delete this much of either side: a share loses a folder now and then; more is a loss on one side
+  # a sync run may delete this much of either side: a share loses a folder now and then; more is a loss on one side
   # the other must not take over
   shareMaxDeletePercent = 20;
-  # rclone's config section for proton drive, signed in by proton-bisync-login
-  rcloneRemote = "proton";
   bisyncDir = "/var/lib/proton-bisync";
-  # who owns the folder's files: rclone writes as syncthing does
+  # who owns the folder's files: downloads land as syncthing writes
   shareOwner = { inherit (config.services.syncthing) user group; };
-  # bisync's --check-access file, in both roots: a side without it is the wrong folder or gone
-  shareCheckFile = "RCLONE_TEST";
-  # a conflict's older version: notes.txt -> notes.proton-conflict1.txt
+  # a conflict's proton version: notes.txt -> notes.proton-conflict.txt
   shareConflictSuffix = "proton-conflict";
-  # a killed run's bisync lock blocks the next ones this long
-  bisyncMaxLock = "2m";
+  # files the sync deletes here wait beside the folder, on its file system, this long
+  shareTrashDays = 30;
   # syncthing's own stay local: the folder marker, file versions, and temp files of a pull in progress (unix and
-  # windows names); rclone filter rules, a folder by its contents
-  shareFilters = pkgs.writeText "proton-bisync-filters" (lib.concatLines [
-    "- .stfolder" "- .stfolder/**" "- .stversions/**" "- .syncthing.*.tmp" "- ~syncthing~*.tmp"
-  ]);
+  # windows names); name patterns, a folder's matching its whole subtree
+  shareExcludes = [ ".stfolder" ".stversions" ".syncthing.*.tmp" "~syncthing~*.tmp" ];
   probeProton = pkgs.writeShellScript "proton-probe" "exec ${upstream.run} proton";
   protonMirror = import ./proton-mirror.nix { inherit pkgs; };
   protonBisync = import ./proton-bisync.nix { inherit pkgs; };
@@ -145,38 +141,29 @@ let
     wantedBy = [ "timers.target" ];
     timerConfig = { OnCalendar = at; Persistent = true; RandomizedDelaySec = delay; };
   };
-  # proton-bisync.sh's environment, the units' and the login's
-  bisyncEnv = {
+  # proton-bisync.sh's environment, and its engine's (proton-bisync.py)
+  bisyncEnv = protonEnv // {
     PROTON_BISYNC_SOURCE = shareDir;
     PROTON_BISYNC_MARKER = ".stfolder";
-    PROTON_BISYNC_REMOTE = "${rcloneRemote}:${lib.removePrefix "/my-files/" offsiteRoot}/${baseNameOf shareDir}";
+    PROTON_BISYNC_REMOTE = "${offsiteRoot}/${baseNameOf shareDir}";
     PROTON_BISYNC_STATE = bisyncDir;
-    PROTON_BISYNC_FILTERS = shareFilters;
-    PROTON_BISYNC_CHECK_FILE = shareCheckFile;
+    PROTON_BISYNC_SESSION = "${protonDir}/auth-session.json";
+    PROTON_BISYNC_EXCLUDES = toString shareExcludes;
     PROTON_BISYNC_MAX_DELETE_PERCENT = toString shareMaxDeletePercent;
     PROTON_BISYNC_CONFLICT_SUFFIX = shareConflictSuffix;
-    PROTON_BISYNC_MAX_LOCK = bisyncMaxLock;
-    PROTON_BISYNC_RUN_AS = "${shareOwner.user}:${shareOwner.group}";
-    PROTON_BISYNC_USERNAME_FILE = config.sops.secrets.proton-username.path;
-    PROTON_BISYNC_PASSWORD_FILE = config.sops.secrets.proton-password.path;
+    PROTON_BISYNC_TRASH = "${dirOf shareDir}/proton-bisync-trash";
+    PROTON_BISYNC_TRASH_DAYS = toString shareTrashDays;
+    PROTON_BISYNC_SWEEP_SECONDS = toString shareSweepSeconds;
+    PROTON_BISYNC_OWNER = "${shareOwner.user}:${shareOwner.group}";
+    PROTON_BISYNC_CLI = "${protonDriveCli}/bin/proton-drive";
     PROTON_BISYNC_LOCK = protonLock;
     PROTON_BISYNC_PROBE = probeProton;
     PROTON_BISYNC_METRIC = offsiteMetric shareMetric;
-    # an upload cut short leaves a draft that would block the file's next upload
-    RCLONE_PROTONDRIVE_REPLACE_EXISTING_DRAFT = "true";
   };
-  # one-time sign-in on the nas, again whenever proton-bisync says the session expired
-  bisyncLogin = pkgs.writeShellScriptBin "proton-bisync-login" ''
-    ${lib.concatStrings (lib.mapAttrsToList (name: value: "export ${name}=${lib.escapeShellArg value}\n") bisyncEnv)}
-    exec ${lib.getExe protonBisync} login
-  '';
-  bisyncUnit = { description, mode, timeout }: lib.recursiveUpdate (offsiteUnit {
+  bisyncUnit = { description, mode, timeout }: offsiteUnit {
     inherit description timeout;
     exec = "${lib.getExe protonBisync} ${mode}";
     environment = bisyncEnv;
-  }) {
-    # bisync's graceful shutdown: a stopped or timed-out run ends its step cleanly instead of leaving it to --recover
-    serviceConfig.KillSignal = "SIGINT";
   };
   # every guest's local state copy (modules/local-state), "<share name> <guest> <address>" per line: the exported ones
   # (nasClients, a test nas's own) and a powered-off guest's (lab.shares), whose seed takes the restore once powered
@@ -293,14 +280,9 @@ in {
     kopia-password = {};
     # the web ui's basic auth (user kopia) behind authelia: the port stays closed to whoever else reaches it
     kopia-server-password = {};
-  } // lib.optionalAttrs (shareDir != null) {
-    # the proton account rclone signs in with (proton-bisync-login); the 2fa code is asked for, never stored
-    proton-username = {};
-    proton-password = {};
   };
 
-  environment.systemPackages = [ kopiaWrapper restoreScript protonDriveCli protonLogin ]
-    ++ lib.optional (shareDir != null) bisyncLogin;
+  environment.systemPackages = [ kopiaWrapper restoreScript protonDriveCli protonLogin ];
 
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0700 root root -"
@@ -309,8 +291,8 @@ in {
     # the proton session, written by the one-time login and refreshed by proton-sync
     "d ${protonDir} 0700 root root -"
   ] ++ lib.optional (shareDir != null)
-    # rclone's config with its proton session, bisync's listings: rclone runs as the syncthing user
-    "d ${bisyncDir} 0700 ${shareOwner.user} ${shareOwner.group} -";
+    # the sync's state (proton-bisync.py): the agreed snapshot of both sides
+    "d ${bisyncDir} 0700 root root -";
 
   systemd.services.kopia-init = {
     description = "Connect Kopia repository and apply backup policy";
@@ -416,19 +398,19 @@ in {
   } // { path = [ protonDriveCli ]; };
   systemd.timers.proton-sync = offsiteTimer { at = repoSyncAt; delay = repoSyncDelay; };
 
-  # the header says what it syncs, proton-bisync.sh how
+  # the header says what it syncs, proton-bisync.py how
   systemd.services.proton-bisync = lib.mkIf (shareDir != null) (lib.recursiveUpdate (bisyncUnit {
     description = "Sync the Syncthing folder with Proton Drive both ways";
     mode = "sync";
     timeout = shareSyncTimeout;
   }) {
-    # a share that never synced (not signed in, no baseline) reads as stale for the offsite_stale alert, not as absent
+    # a share that never synced (no session, no baseline) reads as stale for the offsite_stale alert, not as absent
     serviceConfig.ExecStartPre = pkgs.writeShellScript "proton-bisync-seed" ''
       [ -e ${config.homelab.textfileDir}/${shareMetric.textfile}.prom ] || exec ${offsiteMetric shareMetric} 0
     '';
   });
   systemd.timers.proton-bisync = lib.mkIf (shareDir != null) (offsiteTimer { at = shareSyncAt; delay = shareSyncDelay; });
-  # by hand only: the baseline decides what both sides hold (proton-bisync.sh, README.md Off-site)
+  # by hand only: the baseline decides what both sides hold (proton-bisync.py, README.md Off-site)
   systemd.services.proton-bisync-resync = lib.mkIf (shareDir != null) (bisyncUnit {
     description = "Lay the baseline of the Syncthing folder's sync with Proton Drive";
     mode = "resync";

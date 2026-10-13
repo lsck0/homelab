@@ -98,8 +98,8 @@
     kopia-server-password = "hex:24"; # the web ui's basic auth, user kopia
     # the owner's cifs credentials file the desktops mount with; lib/samba.nix sets the samba password from it
     samba-homelab = "dotfiles:samba-homelab";
-    # the proton account rclone signs in with (lib/kopia.nix proton-bisync); restoring the off-site backup does too
-    # (README, Recovery), with proton-totp-secret of src/secrets/shared.sops.json
+    # the proton account: restoring the off-site backup signs in with it (README, Recovery), with proton-totp-secret
+    # of src/secrets/shared.sops.json; vm-104 reads neither, its cli keeps the session of proton-drive-login
     proton-username = "public";
     proton-password = "manual";
   };
