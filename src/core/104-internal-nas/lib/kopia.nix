@@ -23,7 +23,7 @@
 # back from proton drive, comparing them with the local ones; each part publishes its own freshness metric.
 #
 # A proton outage (modules/upstream) skips the night's upload or sample: the off-site copy stays as it was.
-{ config, lib, pkgs, catalog, site, inventory, nasClients, upstream, ... }:
+{ config, lib, pkgs, catalog, site, inventory, lab, upstream, ... }:
 let
   protonDir = "/var/lib/proton-drive";
   protonDriveCli = pkgs.stdenv.mkDerivation rec {
@@ -178,11 +178,11 @@ let
     # bisync's graceful shutdown: a stopped or timed-out run ends its step cleanly instead of leaving it to --recover
     serviceConfig.KillSignal = "SIGINT";
   };
-  # every guest's local state copy (modules/local-state), "<share name> <guest> <address>" per line
-  guestOf = ip: "vm-${lib.findFirst (id: inventory.${id}.ip == ip) null (lib.attrNames inventory)}";
-  localStates = pkgs.writeText "local-states" (lib.concatStrings (lib.concatLists (lib.mapAttrsToList (ip: shares:
-    map (s: "${lib.removePrefix "${source}/data/" s.path} ${guestOf ip} ${ip}\n") (lib.filter (s: s.localState) shares)
-  ) nasClients)));
+  # every guest's local state copy (modules/local-state), "<share name> <guest> <address>" per line; a powered-off
+  # guest's too (lab.shares, not the exported nasClients): its seed takes the restore when it is powered again
+  localStates = pkgs.writeText "local-states" (lib.concatStrings (lib.concatLists (lib.mapAttrsToList (id: shares:
+    map (s: "${lib.removePrefix "${source}/data/" s.path} vm-${id} ${inventory.${id}.ip}\n") (lib.filter (s: s.localState) shares)
+  ) lab.shares)));
   # metric-write <file> <name> <help> <value> [labels]: one gauge, renamed into place
   metricWrite = pkgs.writeShellScript "metric-write" ''
     d=${config.homelab.textfileDir}
