@@ -41,8 +41,7 @@
 
   # read by no guest
   proxmox-root-pass = "hex:24"; # proxmox root@pam, set by scripts/pve-install.sh; its own, shared with no guest
-  # the proton account: restoring the off-site backup signs in with it (README, Recovery)
-  proton-username = "public";
-  proton-password = "manual";
+  # the proton account's second factor: restoring the off-site backup signs in with it (README, Recovery); its name
+  # and password are vm-104's (core/104-internal-nas/instance.nix), the nas never holds this
   proton-totp-secret = "manual";
 }

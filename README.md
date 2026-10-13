@@ -285,11 +285,37 @@ the old key still opens all of them in the public history. Inside `nix develop .
   `/srv/nas/data/<share>` in place. A service whose state lives on its guest's disk (`homelab.localState`) takes the
   restore at the app's next start; nas-restore prints the guest and the command that makes it take it now.
 - The lab is gone, the nas with it: the off-site copy is the kopia repository on Proton Drive. Sign in with the
-  proton account of `src/secrets/shared.sops.json` (`proton-drive auth login`), `proton-drive filesystem download
-  /my-files/homelab-offsite/BACKUPS/kopia <dir>`, then `kopia repository connect filesystem --path <dir>` with
+  proton account (`proton-username` and `proton-password` of `src/core/104-internal-nas/secrets.sops.json`, the
+  second factor from `proton-totp-secret` of `src/secrets/shared.sops.json`; `proton-drive auth login`),
+  `proton-drive filesystem download /my-files/homelab-offsite/BACKUPS/kopia <dir>`, then `kopia repository connect filesystem --path <dir>` with
   `kopia-password` from `src/core/104-internal-nas/secrets.sops.json`, and `kopia snapshot list` /
   `kopia restore <snapshot> <target>`. The syncthing folder's latest state is there as plain files too,
   `/my-files/homelab-offsite/sync`, browsable in proton drive without kopia; older versions are in the repository.
+
+### Off-site
+
+`proton-sync` on vm-104 mirrors the kopia repository to Proton Drive every night, one way. `proton-bisync` keeps the
+syncthing folder (`/srv/nas/syncthing/sync`) and `/my-files/homelab-offsite/sync` in sync both ways every hour: what
+changes on the web or the phone reaches the nas, and syncthing takes it to the devices (rclone bisync,
+`src/core/104-internal-nas/lib/proton-bisync.sh`). Until it is set up, "Off-site copy stale" fires: the share
+mirror's metric reads 0. Setting it up, once:
+
+1. The account: `proton-username` and `proton-password` of `src/core/104-internal-nas/secrets.sops.json`. Changed
+   ones go in with `sops set src/core/104-internal-nas/secrets.sops.json '["proton-password"]' '"<password>"'` (and
+   `'["proton-username"]'` alike), then `./sync.sh`.
+2. `ssh -t root@10.100.0.104 proton-bisync-login` asks for the account's 2FA code and signs rclone in; the session
+   lives in `/var/lib/proton-bisync/rclone.conf` and refreshes itself. Again whenever `proton-bisync` says it expired.
+3. The baseline, once the remote holds what it should (the one-way upload of `proton-sync-share` that came before
+   finished, or the remote as it is): `ssh root@10.100.0.104 systemctl start --no-block proton-bisync-resync`, then
+   `journalctl -fu proton-bisync-resync`. It copies what one side lacks to the other and deletes nothing; a file on
+   both sides that differs takes the newer version on both sides, the other stays in proton's revisions or kopia's
+   snapshots. One cut short: start it again.
+
+After that: a file changed on both sides keeps both, the older as `<name>.proton-conflict<n>.<ext>`. A run that
+would delete over 20% of either side, or finds every file changed, syncs nothing until
+`touch /var/lib/proton-bisync/allow-large; systemctl start proton-bisync` lets one run through. `RCLONE_TEST` sits in
+both roots: a side without it is refused. New filters (`shareFilters` in `lib/kopia.nix`) need a new baseline.
+Deleted files wait in proton's trash, which nothing empties but the owner.
 - Terraform state: the nas holds it (`/srv/nas/terraform`), sync.sh works on a copy outside the repo,
   `~/.local/state/homelab/terraform/` (`$XDG_STATE_HOME`), where terraform's providers live too: a `path:` evaluation
   copies the whole flake tree into the world-readable store. `TF_STATE_OFFLINE=1 ./sync.sh` applies from that copy

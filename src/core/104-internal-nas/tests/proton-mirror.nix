@@ -1,9 +1,8 @@
-# vm-104's proton drive mirrors (lib/proton-mirror.sh, the units' own derivation) against a fake proton-drive cli that
-# keeps its drive in a folder of the build sandbox and, like the real one, lets same-named items pile up in the trash
-# and refuses to delete an ambiguous one. The syncthing folder (tree): plain files minus syncthing's internals, a
-# pruned subtree and same-named files deleted for good, the mass-deletion guard and its override, a missing, unmarked
-# or empty source, an outage, no session, a failed upload; the kopia repository (blobs): upload and prune, the stray
-# trees of earlier versions trashed while every mirror's folder stays. The expected trees are stated here.
+# vm-104's mirror of the kopia repository (lib/proton-mirror.sh, the unit's own derivation) against a fake
+# proton-drive cli that keeps its drive in a folder of the build sandbox and, like the real one, lets same-named items
+# pile up in the trash and refuses to delete an ambiguous one: upload and prune for good, the stray trees of earlier
+# versions deleted while the syncthing folder's copy stays, the mass-deletion guard and its override, a missing,
+# unmarked or empty repository, an outage, no session, a failed upload. The expected trees are stated here.
 { pkgs, lib, ... }:
 let
   mirror = import ../lib/proton-mirror.nix { inherit pkgs; };
@@ -86,12 +85,16 @@ pkgs.runCommand "proton-mirror" {
   export FAKE_DRIVE=$W/drive FAKE_LOG=$W/calls.log
   STATE=$W/state
   ROOT=/my-files/homelab-offsite
+  K=$W/BACKUPS/kopia
+  B=$FAKE_DRIVE$ROOT/BACKUPS/kopia
   mkdir -p "$FAKE_DRIVE/my-files" "$FAKE_DRIVE/trash" "$STATE"
   echo '{}' > "$STATE/auth-session.json"
   printf '#!/bin/sh\nexit ${toString unavailable}\n' > probe-down
   printf '#!/bin/sh\necho "$1" > %s/metric.out\n' "$W" > metric
   chmod +x probe-down metric
-  export PROTON_MIRROR_ROOT=$ROOT PROTON_MIRROR_ROOT_KEEP="BACKUPS sync" PROTON_MIRROR_STATE=$STATE \
+  export PROTON_MIRROR_SOURCE=$K PROTON_MIRROR_TARGET=$ROOT/BACKUPS PROTON_MIRROR_ROOT=$ROOT \
+    PROTON_MIRROR_ROOT_KEEP="BACKUPS sync" PROTON_MIRROR_MARKER=kopia.repository.f \
+    PROTON_MIRROR_MANIFEST=$STATE/offsite-manifest.txt PROTON_MIRROR_MAX_GONE_PERCENT=50 PROTON_MIRROR_STATE=$STATE \
     PROTON_MIRROR_LOCK=$W/lock PROTON_MIRROR_PROBE=true PROTON_MIRROR_METRIC=$W/metric
 
   fail() { echo "FAIL: $*" >&2; exit 1; }
@@ -106,123 +109,77 @@ pkgs.runCommand "proton-mirror" {
   run() { local want=$1 status=0; shift; env "$@" proton-mirror > run.log 2>&1 || status=$?
     cat run.log; [ "$status" = "$want" ] || fail "exit $status, not $want"; }
 
-  # -----------------------------------------------------------------------------
-  # SYNCTHING FOLDER (tree)
-  S=$W/share/sync
-  R=$FAKE_DRIVE$ROOT/sync
-  tree_env=(PROTON_MIRROR_MODE=tree PROTON_MIRROR_SOURCE=$S PROTON_MIRROR_TARGET=$ROOT PROTON_MIRROR_MARKER=.stfolder
-    PROTON_MIRROR_MANIFEST=$STATE/share-manifest.txt PROTON_MIRROR_MAX_GONE_PERCENT=50
-    "PROTON_MIRROR_EXCLUDES=.stfolder .stversions .syncthing.*.tmp ~syncthing~*.tmp")
-  mkdir -p "$S"/.stfolder "$S"/.stversions "$S"/docs/sub "$S"/notes
-  echo ignore > "$S"/.stignore
-  echo a > "$S"/a.txt
-  echo spaced > "$S/with space.txt"
-  echo docs > "$S"/docs/README
-  echo sub > "$S"/docs/sub/README
-  echo notes > "$S"/notes/README
-  echo old > "$S"/.stversions/a~20261001.txt
-  echo pulling > "$S"/docs/.syncthing.b.txt.tmp
-  echo pulling > "$S"/notes/~syncthing~c.txt.tmp
-  ln -s a.txt "$S"/link
-  # an earlier version's raw tree beside the mirrors, and the repository's folder
-  mkdir -p "$FAKE_DRIVE$ROOT"/syncthing "$FAKE_DRIVE$ROOT"/BACKUPS
-  echo stale > "$FAKE_DRIVE$ROOT"/syncthing/x
-
-  # 1. FIRST RUN
-  run 0 "''${tree_env[@]}"
-  same "$R" "./.stignore ignore
-  ./a.txt a
-  ./docs/
-  ./docs/README docs
-  ./docs/sub/
-  ./docs/sub/README sub
-  ./notes/
-  ./notes/README notes
-  ./with space.txt spaced" "first run: the remote is not the folder minus syncthing's internals"
-  [ -d "$FAKE_DRIVE$ROOT"/BACKUPS ] && [ ! -e "$FAKE_DRIVE$ROOT"/syncthing ] || fail "first run: strays and kept folders"
-  trash_empty || fail "first run: the stray tree is still in the trash"
-  [ -s metric.out ] || fail "first run: no success time"
-  [ ! -e "$STATE"/stage/sync ] || fail "first run: the stage was left behind"
-  pass "plain files go up minus .stfolder, .stversions and temp files; an earlier version's tree is deleted for good"
-
-  # 2. PRUNE: a whole folder, and two files of the same name, deleted for good
-  rm -r "$S"/docs/sub "$S"/docs/README "$S"/notes/README
-  : > "$FAKE_LOG"
-  run 0 "''${tree_env[@]}"
-  same "$R" "./.stignore ignore
-  ./a.txt a
-  ./docs/
-  ./notes/
-  ./with space.txt spaced" "prune: the remote kept a deleted entry"
-  trash_empty || fail "prune: deleted entries left in the trash ($(ls -R "$FAKE_DRIVE"/trash))"
-  [ "$(grep -c '^filesystem rename' "$FAKE_LOG")" = 3 ] || fail "prune: not one rename per topmost entry: $(grep rename "$FAKE_LOG")"
-  pass "a vanished folder goes as one item, same-named files leave the trash too"
-
-  # 3. MASS DELETION: refused, then allowed once
-  rm "$S"/a.txt "$S/with space.txt" "$S"/.stignore
-  rm metric.out
-  run 1 "''${tree_env[@]}"
-  grep -q 'allow-large' run.log || fail "guard: no hint at the override"
-  [ -e "$R"/a.txt ] && [ ! -e metric.out ] || fail "guard: pruned or reported success"
-  touch "$STATE"/share-manifest.txt.allow-large
-  run 0 "''${tree_env[@]}"
-  same "$R" "./docs/
-  ./notes/" "override: the remote kept a deleted entry"
-  [ ! -e "$STATE"/share-manifest.txt.allow-large ] || fail "override: it outlived its run"
-  pass "pruning over the share stops until allow-large is touched, which holds for one run"
-
-  # 4. NO SOURCE: missing, unmarked (unmounted) or holding nothing but the marker
-  echo back > "$S"/docs/back.txt
-  run 0 "''${tree_env[@]}"
-  before=$(tree "$FAKE_DRIVE")
-  mv "$S" "$W/share/moved"
-  run 1 "''${tree_env[@]}"
-  mkdir "$S"
-  run 1 "''${tree_env[@]}"
-  mkdir "$S"/.stfolder
-  run 1 "''${tree_env[@]}"
-  [ "$(tree "$FAKE_DRIVE")" = "$before" ] || fail "no source: the drive changed"
-  rm -r "$S"
-  mv "$W/share/moved" "$S"
-  pass "a missing, unmarked or empty folder is refused and leaves the drive alone"
-
-  # 5. OUTAGE, NO SESSION, FAILED UPLOAD: nothing pruned, no success time
-  rm "$S"/docs/back.txt
-  rm metric.out
-  run ${toString unavailable} "''${tree_env[@]}" PROTON_MIRROR_PROBE=$W/probe-down
-  run 1 "''${tree_env[@]}" FAKE_UPLOAD_FAIL=1
-  mv "$STATE"/auth-session.json "$W"/session
-  run 0 "''${tree_env[@]}"
-  mv "$W"/session "$STATE"/auth-session.json
-  [ "$(tree "$FAKE_DRIVE")" = "$before" ] && [ ! -e metric.out ] || fail "skipped runs: the drive changed or success was reported"
-  run 0 "''${tree_env[@]}"
-  [ ! -e "$R"/docs/back.txt ] && [ -s metric.out ] || fail "skipped runs: the next run did not catch up"
-  pass "an outage, a missing session or a failed upload prune nothing; the next run catches up"
-
-  # -----------------------------------------------------------------------------
-  # KOPIA REPOSITORY (blobs)
-  K=$W/BACKUPS/kopia
-  B=$FAKE_DRIVE$ROOT/BACKUPS/kopia
-  blobs_env=(PROTON_MIRROR_MODE=blobs PROTON_MIRROR_SOURCE=$K PROTON_MIRROR_TARGET=$ROOT/BACKUPS
-    PROTON_MIRROR_MARKER=kopia.repository.f PROTON_MIRROR_MANIFEST=$STATE/offsite-manifest.txt PROTON_MIRROR_MAX_GONE_PERCENT=50)
-  mkdir -p "$K"/p00/2ab
+  mkdir -p "$K"/p00/2ab "$K"/p00/3cd
   echo format > "$K"/kopia.repository.f
   echo pack > "$K"/p00/2ab/cdef
+  echo pack2 > "$K"/p00/3cd/ef01
   echo index > "$K"/xn0_1
-  run 0 "''${blobs_env[@]}"
+  # an earlier version's raw tree beside the mirrors, and the syncthing folder's copy (proton-bisync)
+  mkdir -p "$FAKE_DRIVE$ROOT"/syncthing "$FAKE_DRIVE$ROOT"/sync
+  echo stale > "$FAKE_DRIVE$ROOT"/syncthing/x
+  echo note > "$FAKE_DRIVE$ROOT"/sync/note
+
+  # 1. FIRST RUN
+  run 0
   same "$B" "./kopia.repository.f format
   ./p00/
   ./p00/2ab/
   ./p00/2ab/cdef pack
-  ./xn0_1 index" "blobs: the remote is not the repository"
-  [ -e "$R"/docs ] || fail "blobs: the syncthing mirror was taken for a stray"
+  ./p00/3cd/
+  ./p00/3cd/ef01 pack2
+  ./xn0_1 index" "first run: the remote is not the repository"
+  [ -e "$FAKE_DRIVE$ROOT"/sync/note ] && [ ! -e "$FAKE_DRIVE$ROOT"/syncthing ] || fail "first run: strays and kept folders"
+  trash_empty || fail "first run: the stray tree is still in the trash"
+  [ -s metric.out ] || fail "first run: no success time"
+  pass "the repository goes up; an earlier version's tree is deleted for good, the syncthing folder's copy stays"
+
+  # 2. PRUNE: a dropped blob, deleted for good
   rm "$K"/xn0_1
-  run 0 "''${blobs_env[@]}"
-  [ ! -e "$B"/xn0_1 ] && trash_empty || fail "blobs: a dropped blob stayed"
-  rm "$K"/kopia.repository.f
-  run 1 "''${blobs_env[@]}"
-  [ -e "$B"/p00/2ab/cdef ] || fail "blobs: an unmarked repository pruned"
-  pass "the repository goes up and drops what kopia dropped, refuses without its format blob, leaves the share alone"
+  run 0
+  [ ! -e "$B"/xn0_1 ] && trash_empty || fail "prune: a dropped blob stayed"
+  pass "a blob kopia dropped leaves the trash too"
+
+  # 3. MASS DELETION: refused, then allowed once
+  rm "$K"/p00/2ab/cdef "$K"/p00/3cd/ef01
+  rm metric.out
+  run 1
+  grep -q 'allow-large' run.log || fail "guard: no hint at the override"
+  [ -e "$B"/p00/2ab/cdef ] && [ ! -e metric.out ] || fail "guard: pruned or reported success"
+  touch "$STATE"/offsite-manifest.txt.allow-large
+  run 0
+  [ ! -e "$B"/p00/2ab/cdef ] && [ ! -e "$B"/p00/3cd/ef01 ] || fail "override: the remote kept a dropped blob"
+  [ ! -e "$STATE"/offsite-manifest.txt.allow-large ] || fail "override: it outlived its run"
+  pass "pruning over the limit stops until allow-large is touched, which holds for one run"
+
+  # 4. NO SOURCE: missing, unmarked (unmounted) or holding nothing but the marker
+  echo back > "$K"/xn0_2
+  run 0
+  before=$(tree "$FAKE_DRIVE")
+  mv "$K" "$W/moved"
+  run 1
+  mkdir "$K"
+  echo pack > "$K"/p_new
+  run 1
+  rm "$K"/p_new
+  echo format > "$K"/kopia.repository.f
+  run 1
+  [ "$(tree "$FAKE_DRIVE")" = "$before" ] || fail "no source: the drive changed"
+  rm -r "$K"
+  mv "$W/moved" "$K"
+  pass "a missing, unmarked or empty repository is refused and leaves the drive alone"
+
+  # 5. OUTAGE, NO SESSION, FAILED UPLOAD: nothing pruned, no success time
+  rm "$K"/xn0_2
+  rm metric.out
+  run ${toString unavailable} PROTON_MIRROR_PROBE=$W/probe-down
+  run 1 FAKE_UPLOAD_FAIL=1
+  mv "$STATE"/auth-session.json "$W"/session
+  run 0
+  mv "$W"/session "$STATE"/auth-session.json
+  [ "$(tree "$FAKE_DRIVE")" = "$before" ] && [ ! -e metric.out ] || fail "skipped runs: the drive changed or success was reported"
+  run 0
+  [ ! -e "$B"/xn0_2 ] && [ -s metric.out ] || fail "skipped runs: the next run did not catch up"
+  pass "an outage, a missing session or a failed upload prune nothing; the next run catches up"
 
   touch $out
 ''

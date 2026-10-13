@@ -50,15 +50,15 @@
     offsite_stale = {
       title = "Off-site copy stale";
       category = "backups";
-      # the stalest mirror (lib/kopia.nix): the repository's or the syncthing folder's, which starts counting at its
-      # first finished upload
+      # the stalest mirror (lib/kopia.nix): the repository's or the syncthing folder's sync, which reads 0 until its
+      # first success (not signed in, no baseline)
       expr = whileProtonUp "time() - min(homelab_offsite_last_success_timestamp_seconds)";
       threshold = offsiteStaleSeconds;
       for = "30m";
       noData = "Alerting";
       severity = "critical"; telegram = true;
       summary = "Off-site (Proton Drive): a mirror has not uploaded in over 60h";
-      description = "proton-sync (kopia repository) or proton-sync-share (syncthing folder) on vm-104 has not finished. Check `journalctl -u proton-sync -u proton-sync-share` and the mirror label of homelab_offsite_last_success_timestamp_seconds.";
+      description = "proton-sync (kopia repository) or proton-bisync (syncthing folder, both ways) on vm-104 has not finished; a share mirror at 0 never synced (README.md, Off-site). Check `journalctl -u proton-sync -u proton-bisync` and the mirror label of homelab_offsite_last_success_timestamp_seconds.";
     };
     backup_verify_stale = {
       title = "NAS backup unverified";
@@ -98,5 +98,9 @@
     kopia-server-password = "hex:24"; # the web ui's basic auth, user kopia
     # the owner's cifs credentials file the desktops mount with; lib/samba.nix sets the samba password from it
     samba-homelab = "dotfiles:samba-homelab";
+    # the proton account rclone signs in with (lib/kopia.nix proton-bisync); restoring the off-site backup does too
+    # (README, Recovery), with proton-totp-secret of src/secrets/shared.sops.json
+    proton-username = "public";
+    proton-password = "manual";
   };
 }
