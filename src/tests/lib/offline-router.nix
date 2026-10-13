@@ -19,9 +19,10 @@ in {
     // lib.mapAttrs' (name: _: lib.nameValuePair (service.onionKeyOf name) (lib.mkDefault (secretValues.onionSeedOf name)))
       config.services.tor.relay.onionServices;
 
-  # internet-only work; a test starts a unit itself when it is about it
+  # internet-only work; a test starts a unit itself when it is about it. Only a job the router runs: protonvpn-port
+  # exists while a powered guest takes inbound vpn traffic, and a timer here without it would start no service
   systemd.timers = lib.genAttrs [ "public-address" "public-prefix" "blocklists-fetch" "protonvpn-port" "tor-new-circuits" ]
-    (_: { wantedBy = lib.mkForce [ ]; });
+    (name: lib.mkIf (config.systemd.services ? ${name}) { wantedBy = lib.mkForce [ ]; });
 
   services.blocky.settings.blocking.denylists.ads = lib.mkForce [ "${denylist}" ];
 }
