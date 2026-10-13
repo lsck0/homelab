@@ -5,7 +5,9 @@
 # - push doors: every request a push door passes carries the tenant the door chose by the sender's address, and an
 #   app node's relay sets it on every request it passes; no client header reaches a store
 # - access logs: a secret in a url (a feed token, a share link) is cut before the line is shipped to loki
-{ lib, configs, inventory, site, ... }:
+# - parked guests: no scrape target or probe points at a powered-off guest, and no guest's own alert rule of one is
+#   provisioned: each would stay down, or alarm, for as long as the guest is parked
+{ lib, configs, inventory, site, lab, ... }:
 let
   net = import ../../modules/net.nix { inherit lib inventory site; };
   telemetry = import ../../modules/telemetry.nix { inherit lib inventory; };
@@ -60,6 +62,21 @@ let
     map (p: "${name}: ${j.job_name} ships ${p} unredacted") (lib.filter (p: !(lib.any (e: redacts e p) (replaces j))) secretPaths)
     ++ map (p: "${name}: ${j.job_name} redacts the plain path ${p}") (lib.filter (p: lib.any (e: redacts e p) (replaces j)) plainPaths)
   ) jobs) (lib.filterAttrs (_: c: c.homelab.traefik.enable or false) configs));
+
+  parked = lib.attrValues (lib.filterAttrs (_: v: !v.powered) inventory);
+  parkedIps = map (v: v.ip) parked;
+  parkedVms = map telemetry.vmName parked;
+  # the host a target names: "10.100.0.130:80", "https://host/path"
+  hostOf = target: lib.head (lib.splitString ":" (lib.head (lib.splitString "/" (lib.last (lib.splitString "://" target)))));
+  scrapeLaw = lib.concatMap (job: lib.concatMap (c:
+    map (t: "${job.job_name} scrapes ${t}, a powered-off guest") (lib.filter (t: lib.elem (hostOf t) parkedIps) c.targets)
+    ++ lib.optional (lib.elem (c.labels.vm or null) parkedVms) "${job.job_name} probes ${c.labels.vm}, a powered-off guest"
+  ) (job.static_configs or [ ])) collector.services.prometheus.scrapeConfigs;
+  provisionedRules = lib.concatMap (g: map (r: r.uid) g.rules) collector.services.grafana.provision.alerting.rules.settings.groups;
+  parkedRules = lib.attrNames (lib.filterAttrs (_: a: !inventory.${toString a.vmid}.powered) lab.alerts);
+  ruleLaw = map (uid: "rule ${uid} is a powered-off guest's own, provisioned")
+    (lib.filter (uid: lib.elem uid provisionedRules) parkedRules);
 in
 map (v: "query api: ${v}") queryLaw ++ map (v: "push door: ${v}") doorLaw ++ map (v: "relay: ${v}") relayLaw
 ++ map (v: "access log: ${v}") accessLogLaw
+++ map (v: "parked guest: ${v}") (scrapeLaw ++ ruleLaw)

@@ -66,12 +66,13 @@ let
   # the dot checks what the prober does (catalog.probeUrlOf)
   monitorOf = r: if lib.elem "probe" r.on then catalog.probeUrlOf r else null;
 
-  routeCard = c: let r = routes.${c.route}; guest = guestOf r; in {
+  # a powered-off guest answers neither the dot nor its widget's api: either would only show an error
+  routeCard = c: let r = routes.${c.route}; guest = guestOf r; off = guest != null && !guest.powered; in {
     inherit (c) name icon;
     href = urlOf c.route;
-    siteMonitor = if guest != null && !guest.powered then null else monitorOf r;
+    siteMonitor = if off then null else monitorOf r;
     description = lib.removePrefix " " (c.description + stateSuffix guest);
-    widget = widgetOf c;
+    widget = if off then null else widgetOf c;
   };
 
   # swarm apps (src/instances/custom/), one card each, the cluster's in front; numbers from prometheus, never the docker api

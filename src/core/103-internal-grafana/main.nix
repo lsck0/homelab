@@ -222,8 +222,8 @@ let
     inherit lib telemetry ntfy catalog nodeJob guestsExpectedUp monitoringUnitsRegex services exportersOf exporterJobOf upstreamJob;
     edgeTraefikTarget = traefikTargetOf "external";
   });
-  # the rules instances and apps declare over their own metrics; an app's uid carries the app
-  ownRules = lib.mapAttrs (_: a: removeAttrs a [ "vmid" ]) lab.alerts
+  # the rules instances and apps declare over their own metrics, a powered-off guest's none; an app's uid carries the app
+  ownRules = lib.mapAttrs (_: a: removeAttrs a [ "vmid" ]) (lib.filterAttrs (_: a: (guest a.vmid).powered) lab.alerts)
     // lib.concatMapAttrs (app: a: lib.mapAttrs' (name: lib.nameValuePair "app_${app}_${name}") a.alerts) catalog.apps;
   rulesTwice = lib.intersectLists (lib.attrNames labRules) (lib.attrNames ownRules);
   rules = assert lib.assertMsg (rulesTwice == [ ]) "103-internal-grafana: alert uids declared twice: ${toString rulesTwice}";
@@ -321,6 +321,8 @@ let
   # local copy: a missing nas token must fail one scrape, not prometheus
   hassScrapeToken = "/run/prometheus-hass/token";
   homeAssistant = catalog.internal.homeassistant;
+  # a powered-off home assistant has no readings to scrape: its target would only stay down
+  homeAssistantPowered = (guest homeAssistant.vmid).powered;
 
   spotPrice = python "spot-price" [ energyModel feedIo ] ./lib/spot-price.py;
   spotPriceState = "/var/lib/spot-price";
@@ -812,16 +814,14 @@ in {
       job_name = "fronius";
       scrape_interval = "10s";
       static_configs = [{ targets = [ froniusListen ]; }];
-    } ++ [
-      {
-        # gas and water readings typed in by hand, the tariffs
-        job_name = "homeassistant";
-        scrape_interval = "60s";
-        metrics_path = "/api/prometheus";
-        authorization.credentials_file = hassScrapeToken;
-        static_configs = [{ targets = [ "${(guest homeAssistant.vmid).ip}:${toString homeAssistant.port}" ]; }];
-      }
-    ] ++ exporterScrapeConfigs ++ appScrapeConfigs;
+    } ++ lib.optional homeAssistantPowered {
+      # gas and water readings typed in by hand, the tariffs
+      job_name = "homeassistant";
+      scrape_interval = "60s";
+      metrics_path = "/api/prometheus";
+      authorization.credentials_file = hassScrapeToken;
+      static_configs = [{ targets = [ "${(guest homeAssistant.vmid).ip}:${toString homeAssistant.port}" ]; }];
+    } ++ exporterScrapeConfigs ++ appScrapeConfigs;
     # the hass token file only exists at runtime
     checkConfig = "syntax-only";
   };
@@ -863,7 +863,7 @@ in {
     };
   };
 
-  systemd.services.prometheus-hass-token = {
+  systemd.services.prometheus-hass-token = lib.mkIf homeAssistantPowered {
     description = "Stage the Home Assistant token for the Prometheus scrape";
     before = [ "prometheus.service" ];
     requiredBy = [ "prometheus.service" ];

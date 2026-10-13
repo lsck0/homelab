@@ -32,6 +32,7 @@ let
   runner = lib.head (lib.attrNames configs.${ci}.services.github-runners);
   builder = inventory.${catalog.swarm.builderId}.name;
   owner = "101-internal-authelia";
+  parkedId = lib.findFirst (id: !inventory.${id}.powered) (throw "policy-controls: no powered-off guest") (lib.attrNames inventory);
   ownerFolder = facts.lab.hosts.${owner}.folder;
 
   network = law: tampered: { file = "network"; marker = "${law}: "; inherit tampered; };
@@ -189,6 +190,16 @@ let
       tampered = tamper "200-external-traefik" [ "services" "promtail" "configuration" "scrape_configs" ]
         (map (j: j // { pipeline_stages = lib.filter (s: !(s ? replace)) (j.pipeline_stages or [ ]); })
           configs."200-external-traefik".services.promtail.configuration.scrape_configs); };
+    parked-scrape = { file = "telemetry"; marker = "a powered-off guest";
+      tampered = tamper "103-internal-grafana" [ "services" "prometheus" "scrapeConfigs" ]
+        (configs."103-internal-grafana".services.prometheus.scrapeConfigs
+          ++ [ { job_name = "control"; static_configs = [ { targets = [ "${inventory.${parkedId}.ip}:${toString net.ports.nodeExporter}" ]; } ]; } ]); };
+    # a powered-off guest's own rule (instance.nix `alerts`), provisioned all the same
+    parked-rule = { file = "telemetry"; marker = "is a powered-off guest's own";
+      tampered = tamper "103-internal-grafana" [ "services" "grafana" "provision" "alerting" "rules" "settings" "groups" ]
+        (configs."103-internal-grafana".services.grafana.provision.alerting.rules.settings.groups
+          ++ [ { name = "control"; rules = [ { uid = "control"; } ]; } ])
+        // { lab = facts.lab // { alerts = facts.lab.alerts // { control.vmid = lib.toInt parkedId; }; }; }; };
 
     test-of-another-instance = { file = "placement"; marker = "tests instances/preconfigured/101-internal-b/lib/b.nix";
       tampered = facts // { src = ./policy/lib/placement-fixture; }; };
