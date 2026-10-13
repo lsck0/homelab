@@ -16,7 +16,7 @@ let
     (lib.attrValues configs);
 
   # the owner's devices, and the internal zone, which reaches everything by decision
-  readers = [ "${net.wan.workstation}/32" net.wireguard.subnet ];
+  readers = [ "${net.wan.workstation}/32" "${net.wan.notebook}/32" net.wireguard.subnet ];
   readerAllowed = source: lib.elem source readers
     || (lib.hasSuffix "/32" source && net.cidrContains net.zones.internal.subnet (lib.removeSuffix "/32" source));
 
