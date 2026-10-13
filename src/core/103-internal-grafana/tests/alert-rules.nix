@@ -12,6 +12,10 @@ let
   telemetry = import ../../../modules/telemetry.nix { inherit lib; inherit (specialArgs) inventory; };
   builder = telemetry.vmName specialArgs.inventory.${toString specialArgs.lab.appsCatalog.builder};
   inherit (specialArgs) inventory;
+  inherit (specialArgs.lab) catalog;
+  # a route of a nixos guest's alerted service on the internal ingress; a powered-off guest's has no rule to fire
+  guestRoute = lib.head (lib.concatMap (s: lib.filter (r: catalog.internal ? ${r}) s.routes)
+    (lib.filter (s: s.app == null && s.on.alerts && inventory.${toString s.vmid}.powered) (lib.attrValues catalog.services)));
   scrapeOf = name: lib.findFirst (j: j.job_name == name) (throw "no scrape job ${name}") grafana.services.prometheus.scrapeConfigs;
   nodeLabels = lib.listToAttrs (map (c: lib.nameValuePair (lib.head c.targets) c.labels) (scrapeOf "homelab-node-exporter").static_configs);
   probedVms = lib.unique (lib.concatMap (job: map (c: c.labels.vm) (scrapeOf job).static_configs) [ "blackbox-http" "blackbox-tcp" ]);
@@ -28,7 +32,7 @@ in
 pkgs.runCommand "alert-rules" { nativeBuildInputs = [ pkgs.python3 pkgs.prometheus.cli pkgs.go ]; } ''
   mkdir -p $out
   HOME=$TMPDIR GOCACHE=$TMPDIR/go-cache go run ${./annotations_render.go} ${rules}
-  python3 ${./alert_rules_test.py} ${rules} ${fixtureApp} ${builder} $out
+  python3 ${./alert_rules_test.py} ${rules} ${fixtureApp} ${builder} ${guestRoute} $out
   cd $out
   promtool check rules rules.json
   promtool test rules tests.json

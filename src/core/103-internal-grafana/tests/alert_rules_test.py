@@ -1,8 +1,9 @@
 """The provisioned Grafana alert rules (103-internal-grafana.nix) as Prometheus rules, for promtool.
 
-Usage: alert_rules_test.py <rules.json> <app> <builder> <out dir>
+Usage: alert_rules_test.py <rules.json> <app> <builder> <guest route> <out dir>
 
-<app>: an app the catalog enables; <builder>: the `vm` label of the app builder's guest.
+<app>: an app the catalog enables; <builder>: the `vm` label of the app builder's guest; <guest route>: a route of a
+powered nixos guest's alerted service on the internal ingress.
 
 Writes <out dir>/rules.json, every Prometheus-backed Grafana rule as an alerting rule with the same expression,
 threshold, `for` and labels (Loki rules stay out: promtool evaluates PromQL only), and <out dir>/tests.json, the
@@ -18,13 +19,13 @@ import json
 import os
 import sys
 
-RULES, APP, BUILDER, OUT = sys.argv[1:5]
+RULES, APP, BUILDER, GUEST, OUT = sys.argv[1:6]
 OPERATORS = {"gt": ">", "lt": "<"}
 NODE = 'job="homelab-node-exporter"'
 EDGE = "10.200.0.200:8082"
 INTERNAL = "10.100.0.100:8082"
-# a nixos guest's route, on the internal ingress
-GUEST_ROUTE = "jellyfin@file"
+# a nixos guest's route as the internal ingress names its service
+GUEST_ROUTE = f"{GUEST}@file"
 
 
 def prometheus_rule(rule):
