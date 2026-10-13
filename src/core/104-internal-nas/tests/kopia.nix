@@ -8,6 +8,8 @@ pkgs.testers.runNixOSTest {
     imports = [ ../../../tests/stubs.nix ../lib/kopia.nix ];
     virtualisation.memorySize = 2048;
     environment.systemPackages = [ pkgs.curl ];
+    # the folder proton-sync-share mirrors; syncthing itself stays off
+    services.syncthing.settings.folders.sync.path = "/srv/nas/syncthing/sync";
     # tiny nas tree
     systemd.tmpfiles.rules = [
       "d /srv/nas/data/paperless 0777 root root -"
@@ -112,6 +114,12 @@ pkgs.testers.runNixOSTest {
         # p00/2ab/<rest>, so a match on the file name alone found none in the real repository
         packs = machine.succeed("cd /srv/nas/BACKUPS/kopia && find . -type f | sed 's|^[.]/||' | grep -cE '^[pq][0-9a-f]'")
         assert int(packs) > 0, "the off-site sample's pack pattern matches no blob of a real repository"
+
+    with subtest("both proton mirrors skip without a proton session and publish no success (tests/proton-mirror.nix runs them)"):
+        for unit in ["proton-sync", "proton-sync-share"]:
+            machine.succeed(f"systemctl start {unit}.service")
+            machine.succeed(f"journalctl -u {unit} --no-pager | grep -q 'no proton session'")
+        machine.fail("ls /var/lib/node-exporter-textfile/proton_sync*.prom")
 
     with subtest("web UI answers"):
         machine.fail("curl -sf http://127.0.0.1:51515/")

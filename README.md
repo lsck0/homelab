@@ -288,7 +288,8 @@ the old key still opens all of them in the public history. Inside `nix develop .
   proton account of `src/secrets/shared.sops.json` (`proton-drive auth login`), `proton-drive filesystem download
   /my-files/homelab-offsite/BACKUPS/kopia <dir>`, then `kopia repository connect filesystem --path <dir>` with
   `kopia-password` from `src/core/104-internal-nas/secrets.sops.json`, and `kopia snapshot list` /
-  `kopia restore <snapshot> <target>`.
+  `kopia restore <snapshot> <target>`. The syncthing folder's latest state is there as plain files too,
+  `/my-files/homelab-offsite/sync`, browsable in proton drive without kopia; older versions are in the repository.
 - Terraform state: the nas holds it (`/srv/nas/terraform`), sync.sh works on a copy outside the repo,
   `~/.local/state/homelab/terraform/` (`$XDG_STATE_HOME`), where terraform's providers live too: a `path:` evaluation
   copies the whole flake tree into the world-readable store. `TF_STATE_OFFLINE=1 ./sync.sh` applies from that copy

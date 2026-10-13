@@ -44,7 +44,9 @@ alert reports. The dump directories belong to root on the NAS (mode 0700).
 ## Off-site
 
 At 04:00 `proton-sync` mirrors the Kopia repository to Proton Drive
-(`/my-files/homelab-offsite/BACKUPS/kopia`). Losing the NAS entirely is the
+(`/my-files/homelab-offsite/BACKUPS/kopia`); at 05:00 `proton-sync-share` mirrors
+the Syncthing folder there as plain files (`/my-files/homelab-offsite/sync`).
+Losing the NAS entirely is the
 owner's runbook (README.md, "Recovery"): it needs the Proton sign-in and the
 `kopia-password`, which only the owner can decrypt. Report the state
 (`systemctl status proton-sync` on vm-104) and point the owner there.

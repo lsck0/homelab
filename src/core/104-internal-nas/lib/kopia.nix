@@ -1,18 +1,16 @@
-# kopia: snapshots the nas it runs on, and proton-sync mirrors the repository off-site to proton drive
+# kopia: snapshots the nas it runs on, and proton-sync mirrors the repository off-site to proton drive;
+# proton-sync-share mirrors the syncthing folder there as plain files beside it
 #
 # Off-site goes through proton's own drive cli, vendored as its prebuilt linux-x64 binary (a bun-compiled elf):
 # rclone's proton backend is dead, proton moved its api past rclone's unmaintained go-proton-api and rejects every
 # rclone version with 422 "no longer supported".
 #
-# Only the repository goes up: it is encrypted, deduplicated and holds every snapshot; uploading the raw trees beside
-# it doubled the remote, and merge uploads never dropped what they deleted. The cli (0.8.0) has no mirror mode (its
-# folder strategies are merge, rename, replace and skip, and replace re-uploads the whole repo), so proton-sync diffs
-# the repo's file list against the previous run's manifest, trashes what vanished by path, then deletes it from the
-# trash (proton never empties it, and trash counts against the quota). The manifest is the only memory of what is
-# remote: lose it and the remote keeps what was deleted before (bounded by the repo's size); to start over, trash
-# /my-files/homelab-offsite/BACKUPS/kopia and the manifest. An upload's verdict comes from the cli's json summary
-# (-j, the last stdout line), never from the log text, where a warning shaped like an item error would flip it:
-# sockets and symlinks are expected skips, a file changed mid-upload (kopia.maintenance rewritten) gets one more try.
+# The repository goes up whole: it is encrypted, deduplicated and holds every snapshot. Of the raw trees only the
+# syncthing folder does, browsable in proton drive (which encrypts end to end itself); its history is the repository's.
+# The cli (0.8.0) has no mirror mode (its folder strategies are merge, rename, replace and skip, and replace re-uploads
+# everything), so both mirrors run proton-mirror.sh, which diffs the upload against the previous run's manifest and
+# prunes what vanished, trash and all (proton never empties it, and trash counts against the quota); its header says
+# how. To start a mirror over, trash its remote folder and delete its manifest.
 #
 # Retention: prometheus and loki compact, rewriting their blocks, so every snapshot pins fresh copies for up to two
 # years. Loki keeps 14 days of logs, so its tree is not backed up; prometheus keeps 10 years, so it is a source of
@@ -72,23 +70,81 @@ let
     PROTON_DRIVE_CREDENTIALS_STORE = "unsafe_file";
     PROTON_DRIVE_CACHE_DIR = protonDir;
   };
-  # the remote layout proton-sync uploads to, posix paths below the drive's /my-files section
+  # the remote layout the mirrors upload to, posix paths below the drive's /my-files section
   offsiteRoot = "/my-files/homelab-offsite";
-  offsiteRepo = "${offsiteRoot}/BACKUPS/${baseNameOf repo}";
+  # same layout as when all of BACKUPS went up, so the repo uploaded before is reused
+  offsiteRepoParent = "${offsiteRoot}/BACKUPS";
+  offsiteRepo = "${offsiteRepoParent}/${baseNameOf repo}";
   manifest = "${protonDir}/offsite-manifest.txt";
+  # the syncthing folder main.nix declares, mirrored as plain files to offsiteRoot/<its name>; none in a test
+  shareDir = config.services.syncthing.settings.folders.sync.path or null;
+  # syncthing's own: the folder marker, file versions, and temp files of a pull in progress (unix and windows names)
+  shareExcludes = [ ".stfolder" ".stversions" ".syncthing.*.tmp" "~syncthing~*.tmp" ];
+  # after the repository's 04:00 upload, usually done within the hour
+  repoSyncAt = "04:00";
+  shareSyncAt = "05:00";
+  syncDelay = "30m";
+  # the share's first upload (122 GiB, 2026-10) spans nights: each run resumes, content-skipping what arrived, and ends
+  # before the next night's repository upload waits on the lock
+  shareSyncTimeout = "20h";
+  # a run may prune this much of what a mirror uploaded; repository maintenance drops a few percent a night, a share
+  # loses a folder now and then; more is a local loss the off-site copy exists to survive
+  repoGoneMaxPercent = 50;
+  shareGoneMaxPercent = 20;
+  probeProton = pkgs.writeShellScript "proton-probe" "exec ${upstream.run} proton";
+  protonMirror = import ./proton-mirror.nix { inherit pkgs; };
+  # one mirror's unit: proton-mirror.sh under the lock, its success time as homelab_offsite_last_success_timestamp_seconds
+  # labelled mirror=<label>, written to <textfile>.prom
+  mirrorUnit = { description, mode, source, target, marker, manifest, maxGonePercent, excludes ? [ ], label, textfile, timeout }: {
+    inherit description;
+    after = [ "network-online.target" "remote-fs.target" ];
+    wants = [ "network-online.target" ];
+    # never restart on a nixos switch: this multi-hour upload would block the whole deploy; the timer picks up changes
+    restartIfChanged = false;
+    serviceConfig = {
+      Type = "oneshot";
+      TimeoutStartSec = timeout;
+      # 1.8G peak on 2026-10-01; above that it is a leak, and nfs and smb keep the rest of the 3G guest
+      MemoryMax = "2G";
+      SuccessExitStatus = [ upstream.unavailable ];
+      CPUWeight = "idle";
+      IOSchedulingClass = "idle";
+      ExecStart = lib.getExe protonMirror;
+    };
+    path = [ protonDriveCli ];
+    environment = protonEnv // {
+      PROTON_MIRROR_MODE = mode;
+      PROTON_MIRROR_SOURCE = source;
+      PROTON_MIRROR_TARGET = target;
+      PROTON_MIRROR_ROOT = offsiteRoot;
+      PROTON_MIRROR_ROOT_KEEP = toString ([ (baseNameOf offsiteRepoParent) ] ++ lib.optional (shareDir != null) (baseNameOf shareDir));
+      PROTON_MIRROR_MARKER = marker;
+      PROTON_MIRROR_MANIFEST = manifest;
+      PROTON_MIRROR_MAX_GONE_PERCENT = toString maxGonePercent;
+      PROTON_MIRROR_EXCLUDES = toString excludes;
+      PROTON_MIRROR_STATE = protonDir;
+      PROTON_MIRROR_LOCK = protonLock;
+      PROTON_MIRROR_PROBE = probeProton;
+      PROTON_MIRROR_METRIC = pkgs.writeShellScript "${textfile}-metric" ''exec ${metricWrite} ${lib.escapeShellArgs [
+        textfile "homelab_offsite_last_success_timestamp_seconds" "Unix time of the last Proton Drive mirror run."
+      ]} "$1" ${lib.escapeShellArg "{mirror=\"${label}\"}"}'';
+    };
+  };
+  mirrorTimer = at: {
+    wantedBy = [ "timers.target" ];
+    timerConfig = { OnCalendar = at; Persistent = true; RandomizedDelaySec = syncDelay; };
+  };
   # every guest's local state copy (modules/local-state), "<share name> <guest> <address>" per line
   guestOf = ip: "vm-${lib.findFirst (id: inventory.${id}.ip == ip) null (lib.attrNames inventory)}";
   localStates = pkgs.writeText "local-states" (lib.concatStrings (lib.concatLists (lib.mapAttrsToList (ip: shares:
     map (s: "${lib.removePrefix "${source}/data/" s.path} ${guestOf ip} ${ip}\n") (lib.filter (s: s.localState) shares)
   ) nasClients)));
-  # metric_write <file> <name> <help> <value>: one gauge, renamed into place
-  metricWrite = ''
-    metric_write() {
-      local d=${config.homelab.textfileDir}
-      mkdir -p "$d"
-      printf '# HELP %s %s\n# TYPE %s gauge\n%s %s\n' "$2" "$3" "$2" "$2" "$4" > "$d/$1.prom.tmp"
-      mv "$d/$1.prom.tmp" "$d/$1.prom"
-    }
+  # metric-write <file> <name> <help> <value> [labels]: one gauge, renamed into place
+  metricWrite = pkgs.writeShellScript "metric-write" ''
+    d=${config.homelab.textfileDir}
+    ${pkgs.coreutils}/bin/mkdir -p "$d"
+    printf '# HELP %s %s\n# TYPE %s gauge\n%s%s %s\n' "$2" "$3" "$2" "$2" "''${5:-}" "$4" > "$d/$1.prom.tmp"
+    ${pkgs.coreutils}/bin/mv "$d/$1.prom.tmp" "$d/$1.prom"
   '';
 
   kopiaEnv = ''
@@ -185,7 +241,7 @@ EOF
     esac
   '';
 in {
-  homelab.textfiles = [ "nas_backup" "proton_sync" "backup_verify_repository" "backup_verify_offsite" ];
+  homelab.textfiles = [ "nas_backup" "proton_sync" "proton_sync_share" "backup_verify_repository" "backup_verify_offsite" ];
 
   sops.secrets.kopia-password = {};
   # the web ui's basic auth (user kopia) behind authelia: the port stays closed to whoever else reaches it
@@ -283,184 +339,37 @@ in {
     timerConfig = { OnBootSec = "10m"; OnUnitActiveSec = "15m"; };
   };
 
-  # the repository shares the data's disk; the header says how the mirror works
-  systemd.services.proton-sync = {
+  # the repository shares the data's disk; the header says how the mirrors work
+  systemd.services.proton-sync = mirrorUnit {
     description = "Mirror the Kopia repository to Proton Drive";
-    after = [ "network-online.target" "remote-fs.target" ];
-    wants = [ "network-online.target" ];
-    # never restart on a nixos switch: this multi-hour upload would block the whole deploy; the timer picks up changes
-    restartIfChanged = false;
-    serviceConfig = {
-      Type = "oneshot";
-      # first run uploads everything; unchanged files are content-skipped on later runs
-      TimeoutStartSec = "12h";
-      # 1.8G peak on 2026-10-01; above that it is a leak, and nfs and smb keep the rest of the 3G guest
-      MemoryMax = "2G";
-      SuccessExitStatus = [ upstream.unavailable ];
-      CPUWeight = "idle";
-      IOSchedulingClass = "idle";
-    };
-    environment = protonEnv;
-    path = [ protonDriveCli pkgs.coreutils pkgs.findutils pkgs.gnugrep pkgs.jq pkgs.util-linux ];
-    script = ''
-      exec 9>${protonLock}
-      flock 9
-      # nixos starts scripts with set -e; a failed batch must not skip the rest
-      set +e -uo pipefail
-      shopt -s nullglob
-
-      # paths per trash or delete call: the cli lists each path's folder, so a bound keeps a call's runtime and argv small
-      PRUNE_BATCH_COUNT=100
-      # maintenance drops a few percent a night; more vanishing is a local loss the off-site copy exists to survive
-      PRUNE_SHARE_MAX_PERCENT=50
-      # touch to let the next run prune past PRUNE_SHARE_MAX_PERCENT once, after checking the loss is intended
-      prune_allow_large=${protonDir}/prune-allow-large
-      # repo files (relative paths) earlier runs uploaded, or failed to trash
-      manifest=${manifest}
-      # remote names trashed but not yet deleted from the trash
-      purge_queue=${protonDir}/offsite-purge.txt
-
-      if [ ! -s ${protonDir}/auth-session.json ]; then
-        echo "no proton session; run 'proton-drive-login' on this host once (opens a sign-in url)"
-        exit 0
-      fi
-      # an unmounted or wiped repo must not read as a repo whose every blob was deleted
-      if [ ! -f ${repo}/kopia.repository.f ]; then
-        echo "no kopia repository at ${repo}; refusing to sync"
-        exit 1
-      fi
-
-      # an outage skips the night: the off-site copy stays as the last run left it
-      ${upstream.run} proton || exit $?
-      # a failure while proton went down is the outage's, any other this run's own
-      failed() { ${upstream.run} proton || exit $?; echo "$1"; exit 1; }
-
-      root=${offsiteRoot}
-      # same remote layout as when all of BACKUPS went up, so the repo uploaded before is reused
-      remote=${offsiteRepo}
-      # remote parents must exist before an upload; create-folder refuses an existing one
-      folder_ensure() { # <parent> <name>
-        proton-drive filesystem list -j "$1" | jq -e --arg n "$2" 'any(.[]; .name.value == $n)' >/dev/null \
-          || proton-drive filesystem create-folder "$1" "$2" >/dev/null
-      }
-      if ! { folder_ensure /my-files "$(basename "$root")" && folder_ensure "$root" BACKUPS; }; then
-        failed "cannot create the remote folders"
-      fi
-
-      # 0 uploaded, 2 only files changed mid-upload (retry once), 1 anything else; unchanged files are skipped by hash
-      upload() {
-        local out err rc real summary
-        out=$(mktemp); err=$(mktemp)
-        proton-drive filesystem upload -j -f create-new-revision -d merge -t "$1" "$2" > "$out" 2> "$err"
-        rc=$?
-        cat "$err" >&2
-        summary=$(tail -n 1 "$out")
-        rm -f "$out" "$err"
-        [ "$rc" = 0 ] && return 0
-        # no summary is the call itself failing: session expired, network down
-        jq -e '.failures | type == "array"' <<<"$summary" >/dev/null 2>&1 || return 1
-        echo ">>> upload failures: $(jq -c '.failures' <<<"$summary")" >&2
-        real=$(jq -c '[.failures[].error | select(contains("Not a regular file or directory") | not)]' <<<"$summary")
-        [ "$real" = "[]" ] && return 0
-        jq -e 'all(.[]; startswith("IntegrityError"))' <<<"$real" >/dev/null && return 2
-        return 1
-      }
-
-      # runs `filesystem <verb>` on the paths, prints those still there; gone_pattern in the error means already gone
-      remote_apply() {
-        local verb=$1 gone_pattern=$2 out err item
-        shift 2
-        err=$(mktemp)
-        if out=$(proton-drive filesystem "$verb" -j "$@" 2>"$err") && jq -e 'all(.[]; .ok == true)' <<<"$out" >/dev/null 2>&1; then
-          rm -f "$err"
-          return 0
-        fi
-        # one unresolvable path fails the whole call before anything moves: retry one by one
-        for item in "$@"; do
-          if out=$(proton-drive filesystem "$verb" -j "$item" 2>"$err") && jq -e 'all(.[]; .ok == true)' <<<"$out" >/dev/null 2>&1; then continue; fi
-          grep -q "$gone_pattern" "$err" && continue
-          echo ">>> $verb $item failed: $(head -c 300 "$err") $(head -c 300 <<<"$out")" >&2
-          echo "$item"
-        done
-        rm -f "$err"
-      }
-
-      # remote_apply over stdin's lines in batches of PRUNE_BATCH_COUNT
-      remote_apply_batched() {
-        local verb=$1 gone_pattern=$2 items i
-        mapfile -t items
-        for ((i = 0; i < ''${#items[@]}; i += PRUNE_BATCH_COUNT)); do
-          remote_apply "$verb" "$gone_pattern" "''${items[@]:i:PRUNE_BATCH_COUNT}"
-        done
-      }
-
-      ok=1
-      touch "$manifest" "$purge_queue"
-      current=$(mktemp)
-      gone=$(mktemp)
-      kept=$(mktemp)
-      # listed before the upload: a blob written during it is in the next run's list and upload
-      find ${repo} -type f -printf '%P\n' | LC_ALL=C sort > "$current"
-
-      echo ">>> ${repo} -> $remote"
-      upload ${repo} "$root/BACKUPS"
-      case $? in
-        0) ;;
-        2) echo ">>> ${repo} changed during the upload, once more"; upload ${repo} "$root/BACKUPS" || ok=0 ;;
-        *) ok=0 ;;
-      esac
-
-      LC_ALL=C sort -u "$manifest" | LC_ALL=C comm -23 - "$current" > "$gone"
-      gone_count=$(wc -l < "$gone")
-      known_count=$(wc -l < "$manifest")
-      if [ "$ok" != 1 ]; then
-        # a failed upload says nothing good about the session or the source; prune next time
-        cp "$gone" "$kept"
-      elif [ "$gone_count" -gt 0 ] && [ $((gone_count * 100)) -gt $((known_count * PRUNE_SHARE_MAX_PERCENT)) ] \
-          && [ ! -e "$prune_allow_large" ]; then
-        echo ">>> $gone_count of $known_count uploaded repo files are gone locally, over $PRUNE_SHARE_MAX_PERCENT%;"
-        echo ">>> not pruning the off-site copy. if intended: touch $prune_allow_large and rerun"
-        cp "$gone" "$kept"
-        ok=0
-      else
-        rm -f "$prune_allow_large"
-        echo ">>> trashing $gone_count remote files the repo dropped"
-        sed "s|^|$remote/|" "$gone" | remote_apply_batched trash 'Node not found' | sed "s|^$remote/||" > "$kept"
-        # blob names are content hashes, unique in the trash, so deleting by name cannot hit another item
-        LC_ALL=C comm -23 "$gone" <(LC_ALL=C sort "$kept") | sed 's|.*/||' >> "$purge_queue"
-        [ -s "$kept" ] && ok=0
-      fi
-      # the next run retries what could not be trashed
-      LC_ALL=C sort -u "$current" "$kept" > "$manifest.tmp" && mv "$manifest.tmp" "$manifest"
-
-      # raw trees earlier versions uploaded beside the repo go, renamed first so a trash delete by name hits only them
-      proton-drive filesystem list -j "$root" 2>/dev/null \
-        | jq -r '.[] | .name.value // empty | select(. != "BACKUPS")' 2>/dev/null \
-        | while IFS= read -r name; do
-            unique="homelab-offsite-stray-$name-$(date +%s)"
-            echo ">>> trashing $root/$name, uploaded by an earlier version"
-            proton-drive filesystem rename "$root/$name" "$unique" </dev/null >/dev/null || exit 1
-            [ -z "$(echo "$root/$unique" | remote_apply_batched trash 'Node not found')" ] || exit 1
-            echo "$unique" >> "$purge_queue"
-          done
-      [ "''${PIPESTATUS[2]}" = 0 ] || ok=0
-
-      if [ -s "$purge_queue" ]; then
-        echo ">>> deleting $(wc -l < "$purge_queue") trashed files for good"
-        sed 's|^|/trash/|' "$purge_queue" | remote_apply_batched delete 'Trashed node not found' \
-          | sed 's|^/trash/||' > "$purge_queue.tmp"
-        mv "$purge_queue.tmp" "$purge_queue"
-        [ -s "$purge_queue" ] && ok=0
-      fi
-      rm -f "$current" "$gone" "$kept"
-
-      [ "$ok" = 1 ] || failed "one or more uploads or prunes failed"
-
-      # freshness metric only on a fully successful run
-      ${metricWrite}
-      metric_write proton_sync homelab_offsite_last_success_timestamp_seconds "Unix time of the last Proton Drive sync." "$(date +%s)"
-    '';
+    mode = "blobs";
+    source = repo;
+    target = offsiteRepoParent;
+    marker = "kopia.repository.f";
+    inherit manifest;
+    maxGonePercent = repoGoneMaxPercent;
+    label = "kopia";
+    textfile = "proton_sync";
+    # first run uploads everything; unchanged files are content-skipped on later runs
+    timeout = "12h";
   };
+  # after the 02:00 snapshot
+  systemd.timers.proton-sync = mirrorTimer repoSyncAt;
+
+  systemd.services.proton-sync-share = lib.mkIf (shareDir != null) (mirrorUnit {
+    description = "Mirror the Syncthing folder to Proton Drive as plain files";
+    mode = "tree";
+    source = shareDir;
+    target = offsiteRoot;
+    marker = ".stfolder";
+    manifest = "${protonDir}/share-manifest.txt";
+    maxGonePercent = shareGoneMaxPercent;
+    excludes = shareExcludes;
+    label = "share";
+    textfile = "proton_sync_share";
+    timeout = shareSyncTimeout;
+  });
+  systemd.timers.proton-sync-share = lib.mkIf (shareDir != null) (mirrorTimer shareSyncAt);
 
   # the header says what a verify reads back; a failed part leaves its metric stale, which grafana alerts on
   systemd.services.kopia-verify = {
@@ -480,9 +389,8 @@ in {
     };
     script = ''
       ${kopiaEnv}
-      ${metricWrite}
       kopia snapshot verify --verify-files-percent=${toString verifyFilesPercent}
-      metric_write backup_verify_repository homelab_backup_verify_last_success_timestamp_seconds \
+      ${metricWrite} backup_verify_repository homelab_backup_verify_last_success_timestamp_seconds \
         "Unix time of the last Kopia repository verify." "$(date +%s)"
 
       [ -s ${protonDir}/auth-session.json ] || { echo "no proton session: off-site copy not sampled"; exit 0; }
@@ -505,18 +413,12 @@ in {
         cmp "$sample/$(basename "$rel")" "${repo}/$rel" || { echo "off-site $rel differs from the local blob" >&2; exit 1; }
         echo "off-site $rel matches"
       done < "$sample/list"
-      metric_write backup_verify_offsite homelab_offsite_verify_last_success_timestamp_seconds \
+      ${metricWrite} backup_verify_offsite homelab_offsite_verify_last_success_timestamp_seconds \
         "Unix time of the last off-site sample that matched the local repository." "$(date +%s)"
     '';
   };
   systemd.timers.kopia-verify = {
     wantedBy = [ "timers.target" ];
     timerConfig = { OnCalendar = verifyAt; Persistent = true; RandomizedDelaySec = "1h"; };
-  };
-
-  # after the 02:00 snapshot
-  systemd.timers.proton-sync = {
-    wantedBy = [ "timers.target" ];
-    timerConfig = { OnCalendar = "04:00"; Persistent = true; RandomizedDelaySec = "30m"; };
   };
 }

@@ -50,13 +50,15 @@
     offsite_stale = {
       title = "Off-site copy stale";
       category = "backups";
-      expr = whileProtonUp "time() - max(homelab_offsite_last_success_timestamp_seconds)";
+      # the stalest mirror (lib/kopia.nix): the repository's or the syncthing folder's, which starts counting at its
+      # first finished upload
+      expr = whileProtonUp "time() - min(homelab_offsite_last_success_timestamp_seconds)";
       threshold = offsiteStaleSeconds;
       for = "30m";
       noData = "Alerting";
       severity = "critical"; telegram = true;
-      summary = "Off-site (Proton Drive): no upload in over 60h";
-      description = "proton-sync on vm-104 has not finished. Check `journalctl -u proton-sync`.";
+      summary = "Off-site (Proton Drive): a mirror has not uploaded in over 60h";
+      description = "proton-sync (kopia repository) or proton-sync-share (syncthing folder) on vm-104 has not finished. Check `journalctl -u proton-sync -u proton-sync-share` and the mirror label of homelab_offsite_last_success_timestamp_seconds.";
     };
     backup_verify_stale = {
       title = "NAS backup unverified";
