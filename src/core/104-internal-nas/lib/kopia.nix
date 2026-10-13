@@ -160,11 +160,14 @@ let
     PROTON_BISYNC_PROBE = probeProton;
     PROTON_BISYNC_METRIC = offsiteMetric shareMetric;
   };
-  bisyncUnit = { description, mode, timeout }: offsiteUnit {
+  # the cli holds a downloaded file's ciphertext in memory: a 1.65G drone video ran the ballooned guest (2.5G) out of
+  # memory on 2026-10-13, an nfsd allocation set off the kill. The cap keeps the oom kill in this unit, and the engine
+  # outlives its cli call, so only that file fails and the run goes on (proton-bisync.py `fail`)
+  bisyncUnit = { description, mode, timeout }: lib.recursiveUpdate (offsiteUnit {
     inherit description timeout;
     exec = "${lib.getExe protonBisync} ${mode}";
     environment = bisyncEnv;
-  };
+  }) { serviceConfig = { MemoryMax = "1536M"; OOMPolicy = "continue"; }; };
   # every guest's local state copy (modules/local-state), "<share name> <guest> <address>" per line: the exported ones
   # (nasClients, a test nas's own) and a powered-off guest's (lab.shares), whose seed takes the restore once powered
   idAt = ip: lib.findFirst (id: inventory.${id}.ip == ip) (throw "kopia: no guest at ${ip}") (lib.attrNames inventory);
