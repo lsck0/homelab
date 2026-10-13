@@ -6,7 +6,10 @@
     # no ballooning: the jvm's growing heap (main.nix heapSize) in a ballooned-down guest gets oom-killed
     memoryMiB = 10240;
     balloonMiB = 10240;
-    cores = 6;
+    # the tick is one thread, but chunk generation, distant horizons and g1 run beside it: 6 ran at load 6.7 with
+    # 20 s stalls exploring; the host has 12 threads, most guests idle, and this one wins when they are not
+    cores = 10;
+    cpuUnits = 200;
     diskGiB = 16;
   };
 

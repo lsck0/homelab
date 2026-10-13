@@ -38,6 +38,7 @@ let
     LEVEL=vanilla
   '';
 
+  # distant horizons draws the far terrain, so the server sends and ticks less of it (view and simulation distance)
   # lazymc runs this and manages it as its child: its rcon stop or signal ends the server and --rm reaps the container
   mcStart = pkgs.writeShellScript "mc-start" ''
     set -euo pipefail
@@ -53,7 +54,9 @@ let
       -e ICON=https://d.furaffinity.net/art/skullfugg/1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png \
       -e OVERRIDE_ICON=TRUE \
       -e "MOTD=nya~ minecwaft sewvew 🐾✨" \
-      -e VIEW_DISTANCE=16 \
+      -e USE_AIKAR_FLAGS=true \
+      -e VIEW_DISTANCE=12 \
+      -e SIMULATION_DISTANCE=8 \
       -e SPAWN_PROTECTION=0 \
       -e MAX_PLAYERS=42069 \
       -e ENABLE_RCON=true \
