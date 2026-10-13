@@ -203,12 +203,13 @@ let
   telemetry = import ../telemetry.nix { inherit lib inventory; };
 
   # a grant's source (instance.nix `grants`, modules/flows.nix `guards`): a guest by vmid or by a role it holds, or
-  # the house lan, the proxmox node, the owner's workstation, the owner's wireguard devices, every address of a zone,
-  # or the router's leg in the granting guest's zone; as the address a guard admits
+  # the house lan, the proxmox node, the owner's workstation and notebook, the owner's wireguard devices, every
+  # address of a zone, or the router's leg in the granting guest's zone; as the address a guard admits
   namedSources = {
     lan = net.wan.subnet;
     proxmox = "${net.wan.proxmox}/32";
     workstation = "${net.wan.workstation}/32";
+    notebook = "${net.wan.notebook}/32";
     wireguard = net.wireguard.subnet;
   } // lib.mapAttrs (_: z: z.subnet) net.zones;
   placeSourceNames = [ "router" ] ++ lib.attrNames namedSources;

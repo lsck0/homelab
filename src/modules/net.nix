@@ -111,7 +111,7 @@ in
   # the router's wan leg: the house lan and, through the fritzbox, the internet
   wan = {
     interface = "ens${toString nicPciSlotFirst}";
-    inherit (site.lan) subnet gateway workstation proxmox;
+    inherit (site.lan) subnet gateway workstation notebook proxmox;
     address = site.lan.router;
     # the house's public address by name, the wireguard endpoint; the router serves it to the lab as it learns it
     publicHost = "wg";

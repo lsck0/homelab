@@ -134,7 +134,7 @@ let
   # a grant's source as the router sees it (modules/lab `sourceOf` names them): the router itself crosses nothing
   endpointOf = from:
     if builtins.match "[0-9]+" from != null then host from
-    else if lib.elem from [ "proxmox" "workstation" ] then house [ net.wan.${from} ]
+    else if lib.elem from [ "proxmox" "workstation" "notebook" ] then house [ net.wan.${from} ]
     else all from;
   reachesByDefault = network: zone: let r = networks.${network}.reaches; in r == "everything" || (lib.isList r && lib.elem zone r);
   # the router's part of a grant: each source network that does not reach the guest's zone by default

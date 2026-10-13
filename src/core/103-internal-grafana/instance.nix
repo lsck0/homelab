@@ -21,7 +21,7 @@
     }
     # the house lan does not: the readings would tell anyone on it when the house is occupied
     {
-      from = [ "workstation" "wireguard" ];
+      from = [ "workstation" "notebook" "wireguard" ];
       tcp = [ telemetry.ports.prometheus ];
       why = "the desktop bar's homelab widget reads the query api (lab.json monitoring), at home and on the road";
     }
