@@ -471,7 +471,8 @@ func deciderStatusAnswer(d *Decider, now time.Time, name string) []byte {
 	if other := deciderOther(d, name); other != nil && other.phase == phaseRunning {
 		running, players = other.name, serverPlayers(other)
 	}
-	description := statusDescription(server.phase, server.lastStartFailed && server.phase == phaseSleeping, running, players)
+	failed := server.lastStartFailed && server.phase == phaseSleeping
+	description := statusTagged(name, statusDescription(server.phase, failed, running, players))
 	answer, err := statusBuild(server.status, server.version, server.protocol, description)
 	if err != nil {
 		d.log.Warn("status", "server", name, "err", err)

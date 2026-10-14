@@ -83,25 +83,25 @@ func Test_spec001_r042_status(t *testing.T) {
 			name: "unknown name", ask: "gamma", setup: func() {}, expect: descriptionUnknown,
 		},
 		{
-			name: "sleeping", ask: "alpha", setup: func() {}, expect: descriptionSleeping,
+			name: "sleeping", ask: "alpha", setup: func() {}, expect: statusTagged("alpha", descriptionSleeping),
 		},
 		{
-			name: "starting", ask: "alpha", expect: descriptionStarting,
+			name: "starting", ask: "alpha", expect: statusTagged("alpha", descriptionStarting),
 			setup: func() { d.servers["alpha"].phase = phaseStarting },
 		},
 		{
-			name: "stopping", ask: "alpha", expect: descriptionStopping,
+			name: "stopping", ask: "alpha", expect: statusTagged("alpha", descriptionStopping),
 			setup: func() { d.servers["alpha"].phase, d.servers["alpha"].stopIssued = phaseStopping, true },
 		},
 		{
-			name: "failed", ask: "alpha", expect: descriptionFailed,
+			name: "failed", ask: "alpha", expect: statusTagged("alpha", descriptionFailed),
 			setup: func() {
 				d.servers["alpha"].phase, d.servers["alpha"].stopIssued = phaseSleeping, false
 				d.servers["alpha"].lastStartFailed = true
 			},
 		},
 		{
-			name: "another one runs", ask: "alpha", expect: fmt.Sprintf(descriptionRunning, "beta", 3),
+			name: "another one runs", ask: "alpha", expect: statusTagged("alpha", fmt.Sprintf(descriptionRunning, "beta", 3)),
 			setup: func() {
 				d.servers["alpha"].phase, d.servers["alpha"].lastStartFailed = phaseSleeping, false
 				d.servers["beta"].phase, d.servers["beta"].playersOnline = phaseRunning, 3

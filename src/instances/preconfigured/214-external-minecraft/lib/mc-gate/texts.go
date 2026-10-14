@@ -47,6 +47,9 @@ const (
 	descriptionUnknown  = "no such server"
 )
 
+// ahead of every description of a declared server, so the server list says which of the servers an entry is
+const descriptionTag = "[%s] "
+
 // what a legacy client is told, which its format shows as both the version and the motd
 const textLegacy = "lsck0.dev minecraft"
 
@@ -78,6 +81,11 @@ func kickText(outcome, server string, players int, servers []string) string {
 		return fmt.Sprintf(textUnknown, server, strings.Join(servers, ", "))
 	}
 	panic("kickText: outcome " + outcome + " has no text")
+}
+
+// statusTagged puts the server's own name ahead of a description.
+func statusTagged(server, description string) string {
+	return fmt.Sprintf(descriptionTag, server) + description
 }
 
 // statusDescription renders what a pinged server says about itself. running names the server that is running instead,

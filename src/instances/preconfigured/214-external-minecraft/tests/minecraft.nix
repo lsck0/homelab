@@ -260,7 +260,7 @@ pkgs.testers.runNixOSTest {
         assert "*:${toString gatePort}" in listener, listener
         # and it is the gate that answers there, not a server: a sleeping name still gets a status
         answer = status("cobblemon")
-        assert answer["description"]["text"] == "sleeping, join to start it", answer
+        assert answer["description"]["text"] == "[cobblemon] sleeping, join to start it", answer
 
     with subtest("spec001_r074a user"):
         gate = show("mc-gate.service", "ExecStart", "User", "Group", "StateDirectory", "StateDirectoryMode",
@@ -293,11 +293,11 @@ pkgs.testers.runNixOSTest {
         sleeping = status("cobblemon")
         assert sleeping["version"] == {"name": "1.21.1", "protocol": 767}, sleeping
         assert sleeping["players"]["online"] == 0 and not sleeping["players"]["sample"], sleeping
-        assert sleeping["description"]["text"] == "sleeping, join to start it", sleeping
+        assert sleeping["description"]["text"] == "[cobblemon] sleeping, join to start it", sleeping
         # a server that declares neither falls back to the same unknown as a name that is no server
         undeclared = status("vanilla")
         assert undeclared["version"] == {"name": "?", "protocol": -1}, undeclared
-        assert undeclared["description"]["text"] == "sleeping, join to start it", undeclared
+        assert undeclared["description"]["text"] == "[vanilla] sleeping, join to start it", undeclared
         unknown = status("nope")
         assert unknown["version"] == {"name": "?", "protocol": -1}, unknown
         assert unknown["description"]["text"] == "no such server", unknown
@@ -401,7 +401,7 @@ pkgs.testers.runNixOSTest {
                 "EULA": "TRUE", "MEMORY": "7G", "DIFFICULTY": "hard",
                 "ICON": "https://d.furaffinity.net/art/skullfugg/1697237475/"
                         "1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png",
-                "OVERRIDE_ICON": "TRUE", "MOTD": "nya~ minecwaft sewvew 🐾✨",
+                "OVERRIDE_ICON": "TRUE", "MOTD": f"[{name}] nya~ minecwaft sewvew 🐾✨",
                 "USE_AIKAR_FLAGS": "true", "VIEW_DISTANCE": "12", "SIMULATION_DISTANCE": "8",
                 "SPAWN_PROTECTION": "0", "MAX_PLAYERS": "42069", "ENABLE_RCON": "true",
                 "ENABLE_WHITELIST": "true", "ENFORCE_WHITELIST": "true", "REMOVE_OLD_MODS": "TRUE",
@@ -543,7 +543,7 @@ pkgs.testers.runNixOSTest {
         extra = status("extra")
         assert extra["version"] == {"name": "?", "protocol": -1}, extra
         # a ping of a sleeping server names the one that is awake instead, and vanilla still is
-        assert re.fullmatch(r"vanilla is running with \d+ players", extra["description"]["text"]), extra
+        assert re.fullmatch(r"\[extra\] vanilla is running with \d+ players", extra["description"]["text"]), extra
         # the session is still there, and still relayed: the reload reloaded, it did not restart
         assert "active" in vm_214.succeed("systemctl is-active r074.service")
         assert server_state("vanilla")["sessions"] == 1

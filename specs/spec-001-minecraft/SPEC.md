@@ -237,7 +237,9 @@ The citations of this phase are relative to `src/instances/preconfigured/214-ext
   | `unknown` | `no server <x> here; servers: a, b, c` |
 
   The status descriptions are `sleeping, join to start it`, `starting, rejoin in about a minute`, `stopping`,
-  `<O> is running with <n> players`, `failed to start, join to try again` and `no such server`.
+  `<O> is running with <n> players`, `failed to start, join to try again` and `no such server`. Every one but
+  `no such server` starts with the pinged server's name in brackets, `[<name>] `, as the servers' own MOTD does
+  (R-071b), so a player's server list says which server an entry is.
 - [x] **R-055a** The gate reads its settings from the path given by `-settings`, in the shape of the data model.
   (`settings.go:98-151`, `main.go:29-36`)
 - [x] **R-055b** On SIGHUP it reads the settings again without closing any connection.
@@ -284,7 +286,7 @@ path says otherwise (those are relative to `src/`).
   - `--env-file` the sops template `minecraft-server.env` (rcon password, CurseForge key), then
     `--env-file /var/lib/minecraft/<name>/modpack.env`;
   - `-e EULA=TRUE -e MEMORY=7G -e DIFFICULTY=hard`;
-  - `-e ICON=${icon} -e OVERRIDE_ICON=TRUE -e "MOTD=${motd}"`, where `main.nix` keeps two let-bindings `icon` and
+  - `-e ICON=${icon} -e OVERRIDE_ICON=TRUE -e "MOTD=[<name>] ${motd}"`, where `main.nix` keeps two let-bindings `icon` and
     `motd` holding the as-built values (`main.nix:72-73`);
   - `-e USE_AIKAR_FLAGS=true -e VIEW_DISTANCE=12 -e SIMULATION_DISTANCE=8 -e SPAWN_PROTECTION=0`;
   - `-e MAX_PLAYERS=42069 -e ENABLE_RCON=true -e ENABLE_WHITELIST=true -e ENFORCE_WHITELIST=true`;
@@ -899,6 +901,8 @@ None: every requirement of this spec is built.
 
 ## Decisions
 
+- 2026-10-14: Every server's MOTD, and every status the gate answers for a declared server, starts with `[<name>]`.
+  The owner asked for it: three entries in one server list otherwise read the same.
 - 2026-10-14: A starting server becomes running only once its own unit is `active`. The first switch on the live lab
   (cobblemon to atm) marked atm running within 50 s: atm's start job was queued behind cobblemon's save, and the probe
   of the shared port got cobblemon's answer. Rejected: one backend port per server (the port is shared on purpose, so

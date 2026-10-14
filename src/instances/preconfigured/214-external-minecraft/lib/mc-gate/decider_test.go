@@ -653,14 +653,14 @@ func Test_spec001_r053c_failed(t *testing.T) {
 	d, _, clock, _ := deciderTestPair(t)
 	d.servers["alpha"].lastStartFailed = true
 	answer := testEvent(d, deciderEvent{kind: eventStatus, name: "alpha"}).status
-	if got := statusTestDescription(t, answer); got != descriptionFailed {
-		t.Fatalf("description %q, want %q", got, descriptionFailed)
+	if got, want := statusTestDescription(t, answer), statusTagged("alpha", descriptionFailed); got != want {
+		t.Fatalf("description %q, want %q", got, want)
 	}
 	// a server that is up again says what it is, not what it was
 	testServerRunning(d, "alpha", clock.Now())
 	d.servers["alpha"].lastStartFailed = false
 	answer = testEvent(d, deciderEvent{kind: eventStatus, name: "beta"}).status
-	if got := statusTestDescription(t, answer); got == descriptionFailed {
+	if got := statusTestDescription(t, answer); got == statusTagged("beta", descriptionFailed) {
 		t.Fatal("beta is described as failed")
 	}
 }

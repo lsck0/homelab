@@ -162,7 +162,7 @@ let
       -e DIFFICULTY=hard \
       -e ICON=${icon} \
       -e OVERRIDE_ICON=TRUE \
-      -e "MOTD=${motd}" \
+      -e "MOTD=[${name}] ${motd}" \
       -e USE_AIKAR_FLAGS=true \
       -e VIEW_DISTANCE=12 \
       -e SIMULATION_DISTANCE=8 \
