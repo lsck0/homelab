@@ -13,8 +13,8 @@ pkgs.testers.runNixOSTest {
       "d /srv/nas/data/paperless 0777 root root -"
       "f /srv/nas/data/paperless/invoice.txt 0644 root root - invoice-v1"
       "f /srv/nas/data/paperless/receipt.txt 0644 root root - receipt-v1"
-      "d /srv/nas/data/minecraft/world 0777 root root -"
-      "f /srv/nas/data/minecraft/world/level.dat 0644 root root - world-v1"
+      "d /srv/nas/data/minecraft/cobblemon/world 0777 root root -"
+      "f /srv/nas/data/minecraft/cobblemon/world/level.dat 0644 root root - world-v1"
       "d /srv/nas/BACKUPS 0700 root root -"
       # kopia-init snapshots the nas's local state too
       "d /var/lib/syncthing 0700 root root -"
@@ -38,7 +38,7 @@ pkgs.testers.runNixOSTest {
         machine.succeed("nas-restore now")
         machine.succeed("echo CORRUPT > /srv/nas/data/paperless/invoice.txt")
         machine.succeed("rm /srv/nas/data/paperless/receipt.txt")
-        machine.succeed("echo CORRUPT > /srv/nas/data/minecraft/world/level.dat")
+        machine.succeed("echo CORRUPT > /srv/nas/data/minecraft/cobblemon/world/level.dat")
         listing = machine.succeed("nas-restore list")
         print(listing)
 
@@ -51,7 +51,7 @@ pkgs.testers.runNixOSTest {
         assert machine.succeed("cat /srv/nas/data/paperless/invoice.txt").strip() == "invoice-v2"
         assert machine.succeed("cat /srv/nas/data/paperless/receipt.txt").strip() == "receipt-v1"
         # other services untouched
-        assert machine.succeed("cat /srv/nas/data/minecraft/world/level.dat").strip() == "CORRUPT"
+        assert machine.succeed("cat /srv/nas/data/minecraft/cobblemon/world/level.dat").strip() == "CORRUPT"
 
     with subtest("a local state copy's restore carries a new generation, marked restored"):
         generation = machine.succeed("cat /srv/nas/data/paperless/.generation").strip()
@@ -60,7 +60,7 @@ pkgs.testers.runNixOSTest {
         assert machine.succeed("cat /srv/nas/data/paperless/.generation").strip() != generation, "no fresh generation"
         machine.succeed("nas-restore service minecraft --yes")
         machine.fail("test -e /srv/nas/data/minecraft/.generation")
-        machine.succeed("echo CORRUPT > /srv/nas/data/minecraft/world/level.dat")
+        machine.succeed("echo CORRUPT > /srv/nas/data/minecraft/cobblemon/world/level.dat")
 
     with subtest("restore an older snapshot by age"):
         machine.succeed("nas-restore service paperless 1 --yes")
@@ -84,13 +84,13 @@ pkgs.testers.runNixOSTest {
         print(listing)
         assert first_id in listing
 
-    with subtest("restore a subtree elsewhere"):
+    with subtest("spec001_r083 restore a subtree elsewhere"):
         machine.succeed(f"nas-restore restore {first_id} data/minecraft /tmp/mc")
-        assert machine.succeed("cat /tmp/mc/world/level.dat").strip() == "world-v1"
+        assert machine.succeed("cat /tmp/mc/cobblemon/world/level.dat").strip() == "world-v1"
 
     with subtest("interactive restore refuses without confirmation"):
         machine.fail("echo no | nas-restore service minecraft")
-        assert machine.succeed("cat /srv/nas/data/minecraft/world/level.dat").strip() == "CORRUPT"
+        assert machine.succeed("cat /srv/nas/data/minecraft/cobblemon/world/level.dat").strip() == "CORRUPT"
 
     with subtest("freshness metric for the backup alert"):
         machine.succeed("nas-restore now")

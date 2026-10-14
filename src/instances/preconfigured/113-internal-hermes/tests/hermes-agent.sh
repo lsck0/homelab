@@ -95,7 +95,7 @@ done
 host=${args[0]#root@}; cmd="${args[*]:1}"
 /work/shims/_log ssh "$host" "$cmd"
 case "$host:$cmd" in
-  10.200.0.214:*mc-modpack\ http*|10.200.0.214:*mc-modpack\ [a-z]*)
+  10.200.0.214:*mc-modpack\ [a-z]*\ *)
     echo ">>> modpack set to ${cmd##*mc-modpack }, restarting server (first start downloads the pack)" ;;
   10.200.0.214:*mc-modpack*) printf 'current:\nTYPE=VANILLA\nVERSION=LATEST\nLEVEL=vanilla\n' ;;
   10.200.0.214:*podman\ logs*|10.200.0.214:*journalctl*) echo '[Server thread/INFO]: Done (41.237s)! For help, type "help"' ;;
@@ -248,8 +248,10 @@ line_of() { cut -f2- "$W/log/calls.log" | grep -nE "$1" | head -1 | cut -d: -f1;
 for s in $SCENARIOS; do
   case "$s" in
   minecraft)
-    ask minecraft "Start the minecraft server with the Adrenaserver modpack please"
-    called 'ssh 10\.200\.0\.208 .*mc-modpack .*adrenaserver' && ok "minecraft: mc-modpack called with the pack" || fail "minecraft: mc-modpack not called with the pack"
+    ask minecraft "Start the cobblemon minecraft server with the Adrenaserver modpack please"
+    called 'ssh 10\.200\.0\.214 .*mc-modpack cobblemon .*adrenaserver' \
+      && ok "spec001_r082: mc-modpack called with the server and the pack" \
+      || fail "spec001_r082: mc-modpack not called with the server and the pack"
     ;;
   backup)
     ask backup "Paperless broke yesterday evening around 20:00. Restore it from the last backup before that."

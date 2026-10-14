@@ -60,7 +60,9 @@ let
     ++ map (h: lib.nameValuePair (net.fqdn h) (ip "200"))
       (map (r: r.host) (lib.attrValues lab.catalog.external))
     ++ map (r: lib.nameValuePair (net.fqdn r.host) (ip (toString r.vmid)))
-      (lib.filter (r: r.vmid != null && lab.inventory.${toString r.vmid}.powered) (lib.attrValues lab.catalog.forwarded))
+      # a wildcard host is no name of its own: the names below it are asserted by the wildcard subtests instead
+      (lib.filter (r: r.vmid != null && !(lib.hasPrefix "*." r.host) && lab.inventory.${toString r.vmid}.powered)
+        (lib.attrValues lab.catalog.forwarded))
     ++ [ (lib.nameValuePair (net.fqdn "smb") (ip "104")) ]);
 
   # a forwarded udp and tcp route of one guest: teamspeak's voice and file transfer, vm-215 a dmz address here
@@ -269,6 +271,12 @@ pkgs.testers.runNixOSTest {
         # spec001_r028: outside the lab the same name is cloudflare's, raw: a proxied record would hide the game port
         records = json.loads(luca_router.succeed("cat $(systemctl show -P Environment ddns-cloudflare | tr ' ' '\\n' | sed -n 's/^DDNS_RECORDS=//p')"))
         assert {"name": "${net.fqdn "*.demo"}", "proxied": False} in records, records
+
+    with subtest("spec001_r077 every minecraft server answers at its own name below *.mc"):
+        for name in ("cobblemon.mc.${net.domain}", "atm10.mc.${net.domain}"):
+            assert internal.succeed(f"dig +short +time=3 @10.100.0.1 {name}").strip() == "${ip "214"}", name
+        # the protocol's srv record is gone: its target would be the one address every client sends instead
+        internal.fail("dig +short +time=3 @10.100.0.1 SRV _minecraft._tcp.mc.${net.domain} | grep -q .")
 
     with subtest("the house's v6 prefix is served by name to the v4-only lab, beside its v4 address"):
         prefix_name = "${net.fqdn net.wan.publicPrefixHost}"
