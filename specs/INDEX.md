@@ -2,7 +2,7 @@
 
 | Spec | Capability | Implemented in | Last reconcile |
 |---|---|---|---|
-| spec-001-minecraft | Minecraft servers on vm-214: sleep, wake, packs, and the target of several servers one at a time | `src/instances/preconfigured/214-external-minecraft/`; partial (the wildcard host of p1): `src/modules/service.nix` `src/modules/catalog.nix` `src/modules/lab-export.nix` `src/core/300-router/main.nix` | 2026-10-14 @ b66f6d0 |
+| spec-001-minecraft | Minecraft servers on vm-214: sleep, wake, packs, and the target of several servers one at a time | `src/instances/preconfigured/214-external-minecraft/`; partial (the wildcard host of p1): `src/modules/service.nix` `src/modules/catalog.nix` `src/modules/lab-export.nix` `src/core/300-router/main.nix` | 2026-10-14 @ ab54d69 |
 
 ## Unspecified
 
