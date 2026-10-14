@@ -6,7 +6,7 @@ Implemented in:
 - partial, the wildcard host of p1: `src/modules/service.nix`, `src/modules/catalog.nix`, `src/modules/lab-export.nix`,
   `src/core/300-router/main.nix`.
 
-Last reconcile: 2026-10-14 @ 67a923d
+Last reconcile: 2026-10-14 @ 0d885f7
 
 The research and design notes behind the target are in `notes/2026-10-14-multi-server/`. Nothing in them is needed to
 build this spec.
@@ -54,7 +54,7 @@ A line struck through was replaced at p3; what replaced it is named at its end.
   started by lazymc. It runs with a 7G heap, and its game and rcon ports are published on loopback only
   (127.0.0.1:25566, :25575). Replaced at p3 by R-071b. (`main.nix#mcStart`, `main.nix:15, 22-23, 29, 43-68`)~~
 - [x] **R-004** The data dir `/var/lib/minecraft` and the pack cache `/var/lib/minecraft-modpacks` are nas mounts of
-  the shares `data/minecraft` and `data/minecraft-modpacks`. (`main.nix:305`, `instance.nix:28-31`)
+  the shares `data/minecraft` and `data/minecraft-modpacks`. (`main.nix:328`, `instance.nix:46-49`)
 - [x] **R-005** ~~The pack is a runtime choice. `mc-modpack <modrinth url|slug|curseforge url|vanilla> [version]`
   writes `modpack.env`, keeps one world per pack (`LEVEL=<slug>`) and restarts lazymc. Without arguments it shows the
   current pack. A first boot writes the vanilla default. Replaced at p3 by R-078 and R-071a. (`main.nix#mcModpack`,
@@ -62,9 +62,9 @@ A line struck through was replaced at p3; what replaced it is named at its end.
 - [x] **R-006** ~~`mc-rcon <command>` runs rcon-cli in the running container. Replaced at p3 by R-079.
   (`main.nix#mcRcon`, `main.nix:97-99`)~~
 - [x] **R-007** The rcon password and the CurseForge key are rendered by sops under /run only, never into the data
-  dir. (`main.nix:307-317`)
+  dir. (`main.nix:330-340`)
 - [x] **R-008** The whitelist is enforced. whitelist.json and ops.json are kept on the nas, not in the repo.
-  (`main.nix:7-8, 56-58, 149-150`)
+  (`main.nix:7-8, 78-80, 172-173`)
 - [x] **R-009** ~~The route `services.minecraft` is tcp 25565, `host = "mc"`, `publicPort = 25565`, `srv =
   "_minecraft._tcp"`, with `inflightLimit`, `accessLog`, `probe` and the observed features. The router forwards 25565
   to vm-214. Replaced at p3 by R-077. (`instance.nix:16-25`, `src/modules/flows.nix:288-293`,
@@ -117,87 +117,87 @@ The citations of this phase are relative to `src/instances/preconfigured/214-ext
   - A server not running, without a cache: the nix version and protocol (`?` and -1 when null), max players 0, no
     favicon, `online` 0, `sample` empty, the phase's description.
   - An unknown name: version `?`, protocol -1, description `no such server`.
-  (`decider.go:436-462`, `status.go:78-99`)
+  (`decider.go:454-480`, `status.go:78-99`)
 - [x] **R-043** A login (intent 2 or 3) reads Login Start within `handshakeTimeoutS`, then asks the decider. A relay
   writes the buffered handshake and Login Start to the backend and copies both ways. A kick sends a login-state
   Disconnect with a JSON text and closes. The player name is used for the log only.
   (`conn.go:148-165`, `conn.go:85-112`)
 - [x] **R-044** One goroutine owns every record of the data model; connections reach it over a channel. Concurrent
   logins are decided one after the other.
-  (`decider.go:571-599`, `decider.go:607-612`)
+  (`decider.go:600-628`, `decider.go:636-641`)
 - [x] **R-045a** Issuing a start sets the target to `starting` and every other active server to `stopping` before any
   reply goes out.
-  (`decider.go:291-315`)
+  (`decider.go:309-330`)
 - [x] **R-045b** The decider runs `systemctl start --no-block <unit>` and `systemctl stop --no-block <unit>`
   synchronously, before it handles the next event.
-  (`decider.go:317-325`)
+  (`decider.go:332-340`)
 - [x] **R-045c** A non-zero exit of that command restores the records, grows the server's `failures`, sets its
   `lastStartFailed`, and gives the login the `failed` kick.
-  (`decider.go:326-334`)
+  (`decider.go:341-350`)
 - [x] **R-046a** Every `reconcileS = 5`, always, the decider reads every server unit's `ActiveState` and `Job` with
   one `systemctl show` call. `active`, `activating` and `reloading` count as started, `deactivating` as stopping,
   `inactive` and `failed` as idle.
   (`reconcile.go:13-46`, `systemd.go:63-73`)
 - [x] **R-046b** A record `starting` or `running` whose unit is idle with no job becomes `sleeping`; when the unit is
   `failed`, `failures` grows and `lastStartFailed` is set.
-  (`reconcile.go:57-65`)
+  (`reconcile.go:58-71`)
 - [x] **R-046c** A record `sleeping` whose unit is started becomes `starting`, and every other active record becomes
   `stopping`.
-  (`reconcile.go:66-72`, `reconcile.go:96-104`)
+  (`reconcile.go:74-78`, `reconcile.go:102-110`)
 - [x] **R-046d** A record `sleeping` whose unit is stopping becomes `stopping`.
-  (`reconcile.go:75-77`)
+  (`reconcile.go:81-83`)
 - [x] **R-046e** A record `stopping` whose unit is idle with no job becomes `sleeping`.
-  (`reconcile.go:81-85`)
+  (`reconcile.go:89-91`)
 - [x] **R-046f** A record `stopping` whose unit is started with no job becomes `running`.
-  (`reconcile.go:86-88`)
+  (`reconcile.go:92-94`)
 - [x] **R-046g** A record `starting` becomes `running` once its unit's `ActiveState` is `active` and its backend
   answers a loopback status ping. Until its unit is active the backend is not asked: every server shares the one
   backend port, and during a switch the old server answers there while it saves.
-  (`reconcile.go:106-124`)
+  (`reconcile.go:115-134`)
 - [x] **R-047** A server is occupied when any of these holds:
   - its last backend `players.online` is above 0;
   - it has a live relayed session older than `loginGraceS = 60`;
   - it has a live relayed session from a source not marked as looping;
   - `now < reservedUntil`.
-  (`decider.go:271-284`)
+  (`decider.go:285-298`)
 - [x] **R-048a** A source whose sessions ended before `loginGraceS` three times (`loopShortSessionsMax = 3`) within
   `loopWindowS = 600` is marked as looping.
   (`sources.go:64-76`)
 - [x] **R-048b** A live session younger than `loginGraceS` from a marked source does not occupy.
-  (`decider.go:258-269`, `decider.go:277-283`)
+  (`decider.go:272-283`, `decider.go:291-296`)
 - [x] **R-048c** A mark clears when a session of the source outlives `loginGraceS`, or after `loopWindowS` without a
   short session.
   (`sources.go:50-57`, `sources.go:66-70`)
 - [x] **R-048d** A source that is not exempt holds at most `sessionsPerSourceMax = 4` live sessions. A login beyond
   that is closed before the decision table (R-052), with the outcome `capped` and no text.
-  (`decider.go:365-372`, `conn.go:161-162`)
+  (`decider.go:387-390`, `conn.go:161-162`)
 - [x] **R-048e** Exempt from marking and from the session cap are the `allow` cidrs and the addresses of the `allow`
   names. nix feeds mc-gate the same values it feeds lab-gate (`src/modules/traefik/default.nix:467-474`): the private
   ranges, wireguard, and the names resolving to the house's public address and v6 prefix. mc-gate carries its own
   check for them: lab-gate's `allow.go` is another Go module, and code one instance uses stays in that instance's
   `lib/` (`src/tests/policy/placement.nix`).
-  (`allow.go:114-139`, `decider.go:424-429`)
+  (`allow.go:114-139`, `decider.go:444-447`)
 - [x] **R-049** A server that becomes `running` after a start gets `reservedUntil = now + rejoinS`, with
   `rejoinS = 180`.
-  (`decider.go:226-238`)
+  (`decider.go:240-252`)
 - [x] **R-050a** `idleSince` is the latest of the last session end, `reservedUntil`, and the moment the server became
   `running`.
-  (`decider.go:216-224`)
+  (`decider.go:230-238`)
 - [x] **R-050b** A `running` server not occupied for `sleepAfterS = 1800` since `idleSince` is stopped.
-  (`reconcile.go:151-161`)
+  (`reconcile.go:162-173`)
 - [x] **R-050c** After a gate restart, a running server gets `idleSince = now`.
-  (`main.go:122-123`, `decider.go:228-234`)
+  (`main.go:122-123`, `decider.go:242-248`)
 - [x] **R-051a** A source causes at most `startsPerSourcePerHourMax = 3` starts per hour.
-  (`sources.go:78-82`, `decider.go:402-405`)
+  (`sources.go:78-82`, `decider.go:420-423`)
 - [x] **R-051b** A start that stops a running server counts against `switchesPerHourMax = 6` per hour across all
   sources. A start from all-asleep does not.
-  (`sources.go:84-88`, `decider.go:338-343`)
+  (`sources.go:84-88`, `decider.go:356-361`)
 - [x] **R-051c** A server stays up `minimumOnlineS = 300` after it became `running` before a switch may stop it. This
   value replaces R-002's 60 at p3.
-  (`decider.go:399-400`)
+  (`decider.go:417-418`)
 - [x] **R-052** A login for server T, with O the other active server, gets the first matching row. Row 0 comes
   first: a login from a source over `sessionsPerSourceMax` (R-048d) is closed: outcome `capped`, no text.
-  (`decider.go:363-407`)
+  (`decider.go:381-425`)
 
   | T | O | outcome |
   |---|---|---|
@@ -215,13 +215,13 @@ The citations of this phase are relative to `src/instances/preconfigured/214-ext
 
 - [x] **R-053a** A start with no answering backend after `startTimeoutS = 300` is stopped, `failures` grows, and
   `lastStartFailed` is set. Every start clears `lastStartFailed`.
-  (`reconcile.go:126-141`)
+  (`reconcile.go:138-152`)
 - [x] **R-053b** The timeout is `firstStartTimeoutS = 1200` when the server's `modpack.env` is newer than its last
   good start, recorded as the mtime of `/var/lib/mc-gate/<name>.started`.
-  (`reconcile.go:143-149`, `state.go:124-135`)
+  (`reconcile.go:154-160`, `state.go:124-135`)
 - [x] **R-053c** A `sleeping` server with `lastStartFailed` set has the status description
   `failed to start, join to try again`.
-  (`decider.go:456-457`, `texts.go:85-88`)
+  (`decider.go:474`, `texts.go:85-88`)
 - [x] **R-054** The texts are named constants in one Go file:
   (`texts.go:28-48`, `texts.go:59-103`)
 
@@ -241,11 +241,11 @@ The citations of this phase are relative to `src/instances/preconfigured/214-ext
 - [x] **R-055a** The gate reads its settings from the path given by `-settings`, in the shape of the data model.
   (`settings.go:98-151`, `main.go:29-36`)
 - [x] **R-055b** On SIGHUP it reads the settings again without closing any connection.
-  (`main.go:38-53`, `decider.go:480-506`)
+  (`main.go:38-53`, `decider.go:498-524`)
 - [x] **R-055c** A reload keeps every server that has sessions, until its sessions end.
-  (`decider.go:493-505`, `decider.go:508-515`)
+  (`decider.go:515-521`, `decider.go:526-533`)
 - [x] **R-056** The gate writes `/run/mc-gate/state.json` on every change, in the shape of the data model.
-  (`decider.go:552-569`, `state.go:33-50`)
+  (`decider.go:570-598`, `state.go:33-50`)
 - [x] **R-057** The gate logs one journal line per event:
   - `login` (source, name, server, outcome);
   - `start` and `stop` (server, reason, and the causing source for a switch);
@@ -259,7 +259,7 @@ The citations of this phase are relative to `src/instances/preconfigured/214-ext
   standard library only, and is packaged by `lib/mc-gate.nix` with `buildGoModule`, whose check phase runs its tests.
   The check `mc-gate` (`tests/mc-gate.nix`) builds it. No unit runs it.
   (`src/instances/preconfigured/214-external-minecraft/lib/mc-gate.nix:19-27`,
-  `src/instances/preconfigured/214-external-minecraft/tests/mc-gate.nix:12-24`)
+  `src/instances/preconfigured/214-external-minecraft/tests/mc-gate.nix:17-20`)
 
 ### p3: several servers on vm-214
 
@@ -275,7 +275,7 @@ path says otherwise (those are relative to `src/`).
   `/var/lib/minecraft/<name>` (0750, 1000:1000) when missing, runs `podman rm --force --ignore minecraft-<name>`,
   writes the server's `pack`, else the vanilla default pack (`TYPE=VANILLA`, `VERSION=LATEST`, `LEVEL=vanilla`), when
   `modpack.env` is missing,
-  and writes an empty json array into each shared file of R-073 that is missing. (`main.nix:138-150, 188`)
+  and writes an empty json array into each shared file of R-073 that is missing. (`main.nix:138-148, 188`)
 - [x] **R-071b** Its `ExecStart` runs `podman run --rm --name minecraft-<name>` with exactly these options:
   - `--dns=1.1.1.1 --dns=8.8.8.8`;
   - `-p 127.0.0.1:25566:25565 -p 127.0.0.1:25575:25575`;
@@ -285,58 +285,58 @@ path says otherwise (those are relative to `src/`).
     `--env-file /var/lib/minecraft/<name>/modpack.env`;
   - `-e EULA=TRUE -e MEMORY=7G -e DIFFICULTY=hard`;
   - `-e ICON=${icon} -e OVERRIDE_ICON=TRUE -e "MOTD=${motd}"`, where `main.nix` keeps two let-bindings `icon` and
-    `motd` holding the as-built values (`main.nix:50-51`);
+    `motd` holding the as-built values (`main.nix:72-73`);
   - `-e USE_AIKAR_FLAGS=true -e VIEW_DISTANCE=12 -e SIMULATION_DISTANCE=8 -e SPAWN_PROTECTION=0`;
   - `-e MAX_PLAYERS=42069 -e ENABLE_RCON=true -e ENABLE_WHITELIST=true -e ENFORCE_WHITELIST=true`;
   - `-e REMOVE_OLD_MODS=TRUE -e MAX_TICK_TIME=-1 -e STOP_DURATION=90`;
   - the server's `image`, `itzg/minecraft-server:2026.9.1-java21` (`imageJava21`) unless it names one;
     `imageJava25` is `itzg/minecraft-server:2026.9.1-java25`. (`main.nix:58-59, 151-177`)
 - [x] **R-071c** Its `ExecStop` is `podman stop --time 120 minecraft-<name>`, and its `ExecStopPost` is
-  `podman rm --force --ignore minecraft-<name>`. (`main.nix:168-169`)
-- [x] **R-071d** It sets `TimeoutStopSec=150` and `TimeoutStartSec=infinity`. (`main.nix:171-173`)
+  `podman rm --force --ignore minecraft-<name>`. (`main.nix:191-192`)
+- [x] **R-071d** It sets `TimeoutStopSec=150` and `TimeoutStartSec=infinity`. (`main.nix:194-196`)
 - [x] **R-071e** It has `RequiresMountsFor=/var/lib/minecraft`, and `Requires=` plus `After=` on `mc-layout.service`.
-  (`main.nix:160-161, 175-177`)
-- [x] **R-071f** It has no `wantedBy`. (`main.nix:157-178, 383`)
+  (`main.nix:183-184, 198-200`)
+- [x] **R-071f** It has no `wantedBy`. (`main.nix:180-201, 408`)
 - [x] **R-072** Each server unit has `Conflicts=` on every other server unit, and `After=` exactly the server units
-  whose names sort before its own. (`main.nix:102-105, 161-162`)
+  whose names sort before its own. (`main.nix:124-127, 184-185`)
 - [x] **R-073** `/var/lib/minecraft/whitelist.json` and `ops.json` are bind mounted file by file onto
-  `/data/whitelist.json` and `/data/ops.json` in every server container. (`main.nix:56-58, 112-113, 119-122, 135`)
+  `/data/whitelist.json` and `/data/ops.json` in every server container. (`main.nix:78-80, 134-135, 141-144, 158`)
 - [x] **R-074a** `mc-gate.service` has `ExecStart=<mc-gate package>/bin/mc-gate -settings /etc/mc-gate/settings.json`,
   listening on 0.0.0.0:25565, as the static system user `mc-gate`, with `StateDirectory=mc-gate` (0755) and
-  `RuntimeDirectory=mc-gate`. (`main.nix:183, 354-372`, `main.nix:325-326`)
-- [x] **R-074b** It has `Restart=always`, and `Wants=` plus `After=` on `mc-layout.service`. (`main.nix:357-358,
-  366`)
-- [x] **R-074c** It has `restartIfChanged = false`. (`main.nix:359-360`)
+  `RuntimeDirectory=mc-gate`. (`main.nix:206, 379-397`, `main.nix:350-351`)
+- [x] **R-074b** It has `Restart=always`, and `Wants=` plus `After=` on `mc-layout.service`. (`main.nix:382-383,
+  391`)
+- [x] **R-074c** It has `restartIfChanged = false`. (`main.nix:384-385`)
 - [x] **R-074d** It has `ExecReload=kill -HUP $MAINPID`, and `reloadTriggers` holding the settings file.
-  (`main.nix:361, 364-365`)
+  (`main.nix:386, 389-390`)
 - [x] **R-075** A polkit rule lets the user `mc-gate` run only the verbs `start` and `stop`, only on the exact server
-  unit names generated from `servers`. (`main.nix:328-340`)
+  unit names generated from `servers`. (`main.nix:353-365`)
 - [x] **R-076a** `mc-layout.service` is a oneshot with `RemainAfterExit` and `RequiresMountsFor=/var/lib/minecraft`.
-  (`main.nix:343-352`)
+  (`main.nix:368-377`)
 - [x] **R-076b** It moves when `/var/lib/minecraft/cobblemon/modpack.env` does not exist and either
   `/var/lib/minecraft/modpack.env` or `/var/lib/minecraft/cobblemon.tmp` does; otherwise it does nothing. Before it
-  moves, it removes the one container of the old layout, `minecraft`. (`main.nix:210-222`)
+  moves, it removes the one container of the old layout, `minecraft`. (`main.nix:233-244`)
 - [x] **R-076c** The move puts every top-level entry, dotfiles included, except `whitelist.json`, `ops.json` and
-  `cobblemon.tmp`, into `cobblemon.tmp/`. (`main.nix:224-231`)
-- [x] **R-076d** After the move it renames `cobblemon.tmp` to `cobblemon`. (`main.nix:232-233`)
+  `cobblemon.tmp`, into `cobblemon.tmp/`. (`main.nix:247-254`)
+- [x] **R-076d** After the move it renames `cobblemon.tmp` to `cobblemon`. (`main.nix:255-256`)
 - [x] **R-077** The route becomes `host = "*.mc"` without `srv`, keeping its key `minecraft`, its port, publicPort and
   `on`. lazymc, its unit, its config template and the old `mcStart` are gone. (`instance.nix:16-26`)
 - [x] **R-078** `mc-modpack <server> [pack] [version]` writes that server's `modpack.env` as R-005 did and restarts
-  its unit when it runs. Without arguments it lists each server with its pack and phase. (`main.nix:239-280`,
-  `main.nix:322`)
+  its unit when it runs. Without arguments it lists each server with its pack and phase. (`main.nix:262-303`,
+  `main.nix:347`)
 - [x] **R-079** `mc-rcon [-s <server>] <command...>` runs rcon-cli in `minecraft-<server>`. Without `-s` it targets
-  the running server, and fails with a message when none runs. (`main.nix:282-297`)
-- [x] **R-080** `mc-state` prints `/run/mc-gate/state.json`. (`main.nix:299-303`)
+  the running server, and fails with a message when none runs. (`main.nix:305-320`)
+- [x] **R-080** `mc-state` prints `/run/mc-gate/state.json`. (`main.nix:322-326`)
 - [x] **R-081a** The 214 `skill.md` gives the addresses `<server>.mc.lsck0.dev`, the servers and the switch rule.
-  (`skill.md:14-27`)
+  (`skill.md:14-32`)
 - [x] **R-081b** It names `mc-state`, `journalctl -u minecraft-<name> -u mc-gate`, `mc-modpack <server>` and
-  `mc-rcon -s`. (`skill.md:33-38, 44-49, 56-58`)
+  `mc-rcon -s`. (`skill.md:38-43, 49-54, 61-63`)
 - [x] **R-081c** It says the whitelist is shared: `mc-rcon whitelist add` only while a server runs, otherwise edit
-  `/var/lib/minecraft/whitelist.json`. (`skill.md:60-62`)
-- [x] **R-081d** It says `nas-restore service minecraft` restores every server at once. (`skill.md:66-67`)
+  `/var/lib/minecraft/whitelist.json`. (`skill.md:65-67`)
+- [x] **R-081d** It says `nas-restore service minecraft` restores every server at once. (`skill.md:71-72`)
 - [x] **R-081e** It says to `systemctl restart mc-gate` only when no one is on, and to remove a server only while it
-  sleeps. (`skill.md:68-72`)
-- [x] **R-081f** `src/core/300-router/skill.md:31-32` and `src/scripts/init.sh:114` name the host as `*.mc`.
+  sleeps. (`skill.md:73-77`)
+- [x] **R-081f** `src/core/300-router/skill.md:30-31` and `src/scripts/init.sh:114` name the host as `*.mc`.
   (`src/core/300-router/skill.md:30-31`, `src/scripts/init.sh:114`)
 - [x] **R-082** `src/instances/preconfigured/113-internal-hermes/tests/hermes-agent.sh` calls
     `mc-modpack <server> <pack>` and expects `ssh 10\.200\.0\.214`, not `.208`.
@@ -354,9 +354,9 @@ path says otherwise (those are relative to `src/`).
   - `homelab_mc_starts_total{server}` and `homelab_mc_start_failures_total{server}`;
   - `homelab_mc_kicks_total{reason}`;
   - `homelab_mc_switches_total`.
-  (`214-external-minecraft/lib/mc-gate/metrics.go:70-129`, `lib/mc-gate/decider.go:154, 572-582`)
+  (`214-external-minecraft/lib/mc-gate/metrics.go:70-129`, `lib/mc-gate/decider.go:157, 575-585`)
 - [x] **R-091** tmpfiles links `/var/lib/node-exporter-textfile/mc-gate.prom` to that file, and vm-214 declares
-  `homelab.textfiles = [ "mc-gate" ]`. (`214-external-minecraft/main.nix:325, 390-392`)
+  `homelab.textfiles = [ "mc-gate" ]`. (`214-external-minecraft/main.nix:345, 410-412`)
 - [x] **R-092** The alert `minecraft_start_failed` (category `service`, no telegram) fires when
   `increase(homelab_mc_start_failures_total[1h]) >= 2`, which its strict comparison writes as a bound of one failure.
   It is a rule over this guest's own metric, so it lives in its instance (`214-external-minecraft/instance.nix:28-44`).
@@ -1002,11 +1002,11 @@ None: every requirement of this spec is built.
 | R-001 | `214-external-minecraft/main.nix:113-142`, `main.nix#systemd.services.lazymc` | none | replaced at p3 |
 | R-002 | `main.nix:31-32, 135-136` | none | replaced at p3 |
 | R-003 | `main.nix#mcStart` | none | replaced at p3 |
-| R-004 | `main.nix:305`, `instance.nix:28-31` | `src/tests/policy/guests.nix` (pre-spec law) | done |
+| R-004 | `main.nix:328`, `instance.nix:46-49` | `src/tests/policy/guests.nix` (pre-spec law) | done |
 | R-005 | `main.nix#mcModpack`, `main.nix#mcModpackDefault` | none (its subtests were replaced at p3) | replaced at p3 |
 | R-006 | `main.nix#mcRcon` | none | replaced at p3 |
-| R-007 | `main.nix:307-317` | VM `spec001_r071b run` | done |
-| R-008 | `main.nix:7-8, 56-58, 149-150` | VM `spec001_r073 shared whitelist` | done |
+| R-007 | `main.nix:330-340` | VM `spec001_r071b run` | done |
+| R-008 | `main.nix:7-8, 78-80, 172-173` | VM `spec001_r073 shared whitelist` | done |
 | R-009 | `instance.nix:16-25`, `src/modules/flows.nix:288-293` | none | replaced at p3 |
 | R-010 | `src/core/103-internal-grafana/main.nix:195-200` | none | done |
 | R-011 | `instance.nix:3-14` | `src/tests/policy/guests.nix` (pre-spec law) | done |
@@ -1061,32 +1061,32 @@ None: every requirement of this spec is built.
 | R-058 | `lib/mc-gate/cmd/fake-server/` | VM `spec001_r058 fake server` | done |
 | R-059 | `lib/mc-gate.nix`, `tests/mc-gate.nix` | check `mc-gate`, derivation `spec001_r059` | done |
 | R-070 | `main.nix:19-45`, `lib/servers.nix:15-39` | `mc-servers` spec001_r070 | done |
-| R-071a | `main.nix:138-150, 188` | VM `spec001_r071a pre start` | done |
+| R-071a | `main.nix:138-148, 188` | VM `spec001_r071a pre start` | done |
 | R-071b | `main.nix:58-59, 151-177` | VM `spec001_r071b run` | done |
-| R-071c | `main.nix:168-169` | VM `spec001_r071c stop` | done |
-| R-071d | `main.nix:171-173` | VM `spec001_r071d timeouts` | done |
-| R-071e | `main.nix:160-161, 175-177` | VM `spec001_r071e requires` | done |
-| R-071f | `main.nix:157-178, 383` | VM `spec001_r071f no wantedby` | done |
-| R-072 | `main.nix:102-105, 161-162` | VM `spec001_r072 conflicts`, `Test_spec001_r044_sim` | done |
-| R-073 | `main.nix:56-58, 112-113, 119-122, 135` | VM `spec001_r073 shared whitelist` | done |
-| R-074a | `main.nix:183, 354-372`, `main.nix:325-326` | VM `spec001_r074a user` | done |
-| R-074b | `main.nix:357-358, 366` | VM `spec001_r074b restart` | done |
-| R-074c | `main.nix:359-360` | VM `spec001_r074c no restart` | done |
-| R-074d | `main.nix:361, 364-365` | VM `spec001_r074d reload` | done |
-| R-075 | `main.nix:328-340` | VM `spec001_r075 polkit` | done |
-| R-076a | `main.nix:343-352` | VM `spec001_r076a layout` | done |
-| R-076b | `main.nix:210-222` | VM `spec001_r076b move` | done |
-| R-076c | `main.nix:224-231` | VM `spec001_r076c entries` | done |
-| R-076d | `main.nix:232-233` | VM `spec001_r076d rename` | done |
+| R-071c | `main.nix:191-192` | VM `spec001_r071c stop` | done |
+| R-071d | `main.nix:194-196` | VM `spec001_r071d timeouts` | done |
+| R-071e | `main.nix:183-184, 198-200` | VM `spec001_r071e requires` | done |
+| R-071f | `main.nix:180-201, 408` | VM `spec001_r071f no wantedby` | done |
+| R-072 | `main.nix:124-127, 184-185` | VM `spec001_r072 conflicts`, `Test_spec001_r044_sim` | done |
+| R-073 | `main.nix:78-80, 134-135, 141-144, 158` | VM `spec001_r073 shared whitelist` | done |
+| R-074a | `main.nix:206, 379-397`, `main.nix:350-351` | VM `spec001_r074a user` | done |
+| R-074b | `main.nix:382-383, 391` | VM `spec001_r074b restart` | done |
+| R-074c | `main.nix:384-385` | VM `spec001_r074c no restart` | done |
+| R-074d | `main.nix:386, 389-390` | VM `spec001_r074d reload` | done |
+| R-075 | `main.nix:353-365` | VM `spec001_r075 polkit` | done |
+| R-076a | `main.nix:368-377` | VM `spec001_r076a layout` | done |
+| R-076b | `main.nix:233-244` | VM `spec001_r076b move` | done |
+| R-076c | `main.nix:247-254` | VM `spec001_r076c entries` | done |
+| R-076d | `main.nix:255-256` | VM `spec001_r076d rename` | done |
 | R-077 | `instance.nix:16-26` | `router-zones` spec001_r077, VM `spec001_r077 route` | done |
-| R-078 | `main.nix:239-280, 322` | VM `spec001_r078 modpack` | done |
-| R-079 | `main.nix:282-297` | VM `spec001_r079 rcon` | done |
-| R-080 | `main.nix:299-303` | VM `spec001_r080 state` | done |
-| R-081a | `skill.md:14-27` | phase review | done |
-| R-081b | `skill.md:33-38, 44-49, 56-58` | phase review | done |
-| R-081c | `skill.md:60-62` | phase review | done |
-| R-081d | `skill.md:66-67` | phase review | done |
-| R-081e | `skill.md:68-72` | phase review | done |
+| R-078 | `main.nix:262-303, 347` | VM `spec001_r078 modpack` | done |
+| R-079 | `main.nix:305-320` | VM `spec001_r079 rcon` | done |
+| R-080 | `main.nix:322-326` | VM `spec001_r080 state` | done |
+| R-081a | `skill.md:14-32` | phase review | done |
+| R-081b | `skill.md:38-43, 49-54, 61-63` | phase review | done |
+| R-081c | `skill.md:65-67` | phase review | done |
+| R-081d | `skill.md:71-72` | phase review | done |
+| R-081e | `skill.md:73-77` | phase review | done |
 | R-081f | `src/core/300-router/skill.md:30-31`, `src/scripts/init.sh:114` | phase review | done |
 | R-082 | `113-internal-hermes/tests/hermes-agent.sh:251-254, 98-99` | `hermes-agent.sh minecraft` case spec001_r082 | done |
 | R-083 | `core/104-internal-nas/tests/kopia.nix:16-17, 86-89` | `kopia` subtest `spec001_r083 restore` | done |
