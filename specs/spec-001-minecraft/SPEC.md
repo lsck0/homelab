@@ -6,7 +6,7 @@ Implemented in:
 - partial, the wildcard host of p1: `src/modules/service.nix`, `src/modules/catalog.nix`, `src/modules/lab-export.nix`,
   `src/core/300-router/main.nix`.
 
-Last reconcile: 2026-10-14 @ ab54d69
+Last reconcile: 2026-10-14 @ e7f3297
 
 The research and design notes behind the target are in `notes/2026-10-14-multi-server/`. Nothing in them is needed to
 build this spec.
