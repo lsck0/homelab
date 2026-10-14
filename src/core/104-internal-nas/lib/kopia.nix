@@ -108,8 +108,9 @@ let
   # files the sync deletes here wait beside the folder, on its file system, this long
   shareTrashDays = 30;
   # syncthing's own stay local: the folder marker, file versions, and temp files of a pull in progress (unix and
-  # windows names); name patterns, a folder's matching its whole subtree
-  shareExcludes = [ ".stfolder" ".stversions" ".syncthing.*.tmp" "~syncthing~*.tmp" ];
+  # windows names); name patterns, a folder's matching its whole subtree. .identity holds a machine's credentials (ssh,
+  # gnupg, aws, kube, gh): synced between the owner's machines, never off-site
+  shareExcludes = [ ".stfolder" ".stversions" ".syncthing.*.tmp" "~syncthing~*.tmp" ".identity" ];
   probeProton = pkgs.writeShellScript "proton-probe" "exec ${upstream.run} proton";
   protonMirror = import ./proton-mirror.nix { inherit pkgs; };
   protonBisync = import ./proton-bisync.nix { inherit pkgs; };

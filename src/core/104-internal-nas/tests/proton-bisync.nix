@@ -97,7 +97,8 @@ pkgs.testers.runNixOSTest {
           f" && for i in $(seq {FILLERS}); do echo $i > {F}/docs/fill-$i.txt; done"
           f" && echo same > {F}/same.txt && touch -d '2020-01-01 00:00:00.123' {F}/same.txt"
           f" && echo old > {F}/.stversions/old.txt && echo pull > {F}/docs/.syncthing.b.txt.tmp"
-          f" && echo pull > {F}/docs/~syncthing~c.txt.tmp && ln -s docs/a.txt {F}/link")
+          f" && echo pull > {F}/docs/~syncthing~c.txt.tmp && ln -s docs/a.txt {F}/link"
+          f" && mkdir -p {F}/work/.identity/ssh && echo key > {F}/work/.identity/ssh/id")
 
     with subtest("no session: refused before the cli, the share's metric at 0 so the stale alert fires"):
         out = run("proton-bisync", ok=False)
@@ -116,6 +117,7 @@ pkgs.testers.runNixOSTest {
 
     machine.succeed(f"mkdir -p {R}/.stversions {R}/rdir/sub && echo remote-only > {R}/r.txt && echo remote > {R}/common.txt"
                     f" && echo theirs > {R}/.stversions/rv.txt && echo deep > {R}/rdir/sub/deep.txt"
+                    f" && mkdir -p {R}/.identity && echo theirs > {R}/.identity/token"
                     f" && echo same > {R}/same.txt && touch -d '2020-01-01 00:00:00.123' {R}/same.txt")
 
     with subtest("the baseline merges both sides, deletes nothing, keeps both versions of what differs"):
@@ -128,9 +130,10 @@ pkgs.testers.runNixOSTest {
         assert not any("same.txt" in c for c in calls("upload") + calls("download")), "an agreeing file moved"
         assert metric() > 0
 
-    with subtest("syncthing's internals and symlinks stay local, logged, without failing the run"):
+    with subtest("syncthing's internals, credentials and symlinks stay local, logged, without failing the run"):
         absent(f"{R}/.stfolder", f"{R}/.stversions/old.txt", f"{R}/docs/.syncthing.b.txt.tmp",
-               f"{R}/docs/~syncthing~c.txt.tmp", f"{F}/.stversions/rv.txt", f"{R}/link")
+               f"{R}/docs/~syncthing~c.txt.tmp", f"{F}/.stversions/rv.txt", f"{R}/link",
+               f"{R}/work/.identity/ssh/id", f"{F}/.identity/token")
         assert "stay local" in out and "link" in out, out
 
     with subtest("what lands in the folder is the syncthing user's, 0644 and 0755, with proton's mtime"):
