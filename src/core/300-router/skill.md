@@ -28,7 +28,8 @@ metadata:
   (`nft list chain ip antispoof prerouting`, counters per interface). Inside a zone Proxmox's ip/mac filter binds
   each guest to its address (src/terraform/lib.tf FIREWALL).
 - Port forwards (WAN IP, from the internet, the house and the trusted zones): 443 -> vm-200; every tcp/udp route
-  straight to its backend while its guest is enabled (25565 -> vm-214; udp 9987, tcp 30033 -> vm-215).
+  straight to its backend while its guest is enabled (25565 -> vm-214, the wildcard host *.mc; udp 9987,
+  tcp 30033 -> vm-215).
   `nft list table ip port-forwards`. The FritzBox forwards only the ports it is told to (443, 25565, udp 9987,
   tcp 30033 to 192.168.178.29): a new public port also needs a FritzBox port share, or it stops at the FritzBox.
 - DNS: CoreDNS (split horizon: *.lsck0.dev -> the ingresses) -> blocky (ad block, DoT); blocky down: DoT to

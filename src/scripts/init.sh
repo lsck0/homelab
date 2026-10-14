@@ -111,7 +111,7 @@ TIME_ZONE=$(ask "the house's time zone (tz database name)" "$(old .timeZone)")
 LATITUDE=$(ask "the house's latitude (weather and sun times)" "$(old .location.latitude)")
 LONGITUDE=$(ask "the house's longitude" "$(old .location.longitude)")
 REPO=$(ask "this repository on github (owner/name), which hermes opens pull requests on" "$(old .repo)")
-ROUTER=$(ask "router address on the lan (forward 443 and 25565 to it)" "$(old .lan.router)")
+ROUTER=$(ask "router address on the lan (forward 443 and 25565, the minecraft hosts *.mc, to it)" "$(old .lan.router)")
 INVERTER=$(ask "fronius inverter address" "$(old .lan.inverter)")
 # vm-104's smb shares admit the workstation and the notebook, both dhcp-reserved in the fritzbox
 NOTEBOOK=$(ask "notebook address on the lan" "$(old .lan.notebook)")
