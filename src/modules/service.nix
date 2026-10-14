@@ -71,7 +71,13 @@ let
   # where a web server in a container listens unless its app says otherwise (the lab's own examples do)
   targetPortDefault = 8000;
 
-  dnsLabel = types.strMatching "[a-z0-9]([a-z0-9-]*[a-z0-9])?";
+  dnsLabelRe = "[a-z0-9]([a-z0-9-]*[a-z0-9])?";
+  # a route's host: one label (grafana), a dotted name (lab.mc), or a wildcard standing for every name one label
+  # below it (*.mc). A wildcard is an l4 route's only: it is forwarded by port, never matched by an ingress rule,
+  # and the catalog refuses the rest (modules/catalog.nix).
+  dnsHost = types.strMatching "(\\*\\.)?${dnsLabelRe}(\\.${dnsLabelRe})*";
+  # `*.mc`: the host stands for every name one label below it
+  wildcardHost = host: lib.hasPrefix "*." host;
   urlPath = types.strMatching "/.*";
   # a reason: any text with a word in it
   why = types.strMatching ".*[a-z].*";
@@ -105,7 +111,7 @@ let
     };
   };
 in rec {
-  inherit protectionFeatures crowdsecFeatures exemptionFeatures telemetryFeatures platformFeatures webMethods bodyLimitDefaultBytes featuresType urlPath why serviceName onionKeyOf;
+  inherit protectionFeatures crowdsecFeatures exemptionFeatures telemetryFeatures platformFeatures webMethods bodyLimitDefaultBytes featuresType urlPath why serviceName onionKeyOf wildcardHost;
 
   # the dashboard card; a deployment's defaults name its kind (an instance service, an app)
   cardType = { name, group, icon, description }: types.submodule {
@@ -121,7 +127,7 @@ in rec {
   # one route: <host>.<domain><path> on the zone's ingress, its backend, its protection; `backend` adds the fields
   # of a swarm app's route (the stack service and its container port), empty for an instance's own port
   exposureOptions = { name, zone, features, backend ? { } }: backend // {
-    host = mkOption { type = dnsLabel; default = name; description = "<host>.<site.domain>."; };
+    host = mkOption { type = dnsHost; default = name; description = "<host>.<site.domain>; `*.<label>`: every name one label below it (tcp, udp)."; };
     path = mkOption { type = urlPrefix; default = "/"; description = "Url prefix the route serves."; };
     zone = mkOption {
       type = types.enum [ "internal" "external" ];

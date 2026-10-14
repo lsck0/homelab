@@ -213,6 +213,15 @@ let
     lib.optional (lib.length owners > 1) "host ${host}.${domain} is claimed by ${lib.concatStringsSep " and " owners}"
   ) (lib.groupBy (e: e.host) hostOwners));
 
+  # a wildcard host, `*.mc`, answers every name one label below it. The ingress certificate covers one level and the
+  # ingress routes by exact host, so such a host is reached by a forwarded port alone, and the names below it are its
+  # own: no other route may take one, and no srv may point a client somewhere else.
+  parentOf = host: lib.concatStringsSep "." (lib.tail (lib.splitString "." host));
+  wildcardEntries = lib.filter (e: service.wildcardHost e.route.host) routeEntries;
+  coveredProblems = lib.concatMap (w: map (e:
+    "${e.owner} route ${e.name}: host ${e.route.host}.${domain} lies under ${w.owner} route ${w.name}'s ${w.route.host}.${domain}, which answers it; rename one"
+  ) (lib.filter (e: !(service.wildcardHost e.route.host) && "*.${parentOf e.route.host}" == w.route.host) routeEntries)) wildcardEntries;
+
   portProblems = lib.concatLists (lib.mapAttrsToList (port: claims:
     lib.optional (lib.length (lib.unique (map (c: c.owner) claims)) > 1)
       "port ${port} is published for ${lib.concatMapStringsSep " and " (c: "${c.owner} (${c.where})") claims}"
@@ -335,6 +344,13 @@ in {
       (lib.intersectLists (lib.attrNames appsCatalog.apps) (lib.attrNames lab.routes))
     ++ hostProblems
     ++ zoneProblems
+    ++ map (e: "${e.owner} route ${e.name}: host ${e.route.host} goes through its zone's ingress, which holds a certificate for one level and routes by exact host; a dotted or wildcard host serves tcp or udp")
+      (lib.filter (e: e.route.protocol == "http" && lib.hasInfix "." e.route.host) routeEntries)
+    ++ map (e: "${e.owner} route ${e.name}: host ${e.route.host} is reached by the house's forwarded port alone, which the route lacks: set publicPort")
+      (lib.filter (e: service.wildcardHost e.route.host && e.route.publicPort == null) routeEntries)
+    ++ map (e: "${e.owner} route ${e.name}: an srv record names one host, which ${e.route.host} is not; drop srv")
+      (lib.filter (e: service.wildcardHost e.route.host && e.route.srv != null) routeEntries)
+    ++ coveredProblems
     ++ ssoPathProblems
     ++ lib.concatLists (lib.mapAttrsToList (name: r: service.featureProblemsOf "vm-${toString r.vmid} route ${name}" r) lab.routes)
     ++ portProblems

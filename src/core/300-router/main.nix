@@ -123,12 +123,15 @@ let
   # the edge answers these itself
   installHosts = lib.attrNames (import ../../modules/install-hosts.nix);
   forwardHosts = lib.filter (h: h != null) (map (f: f.host) flows.portForwards);
-  # names that skip the ingresses: the nas's smb, every lab-only tcp or udp route of an instance at its guest
+  # names that skip the ingresses: the nas's smb, every lab-only tcp or udp route of an instance at its guest. A
+  # wildcard host names no single address a hosts line could carry; the templates below answer it. The catalog
+  # refuses a wildcard without a publicPort (R-022), so the filter is belt and braces behind it.
   directHosts = { smb = net.ipOf lab.roles.nas; } // lib.mapAttrs' (_: r: lib.nameValuePair r.host (net.ipOf (toString r.vmid)))
-    (lib.filterAttrs (_: r: r.vmid != null && r.publicPort == null) catalog.l4);
+    (lib.filterAttrs (_: r: r.vmid != null && r.publicPort == null && !(service.wildcardHost r.host)) catalog.l4);
 
   # public names: the public routes (service.nix publicOf), proxied with cloudflare; install lines, the wireguard
-  # endpoint and port forwards are raw by nature
+  # endpoint and port forwards are raw by nature, a wildcard forward as the wildcard record `*.<rest>.<domain>`,
+  # which cloudflare accepts below the apex
   routeHosts = side: map (r: { inherit (r) host; proxied = lib.elem "cloudflare" r.on; })
     (lib.filter service.publicOf (lib.attrValues catalog.${side}));
   allRouteHosts = routeHosts "internal" ++ routeHosts "external"
@@ -144,7 +147,15 @@ let
   # the forwards a name leads to: inside the lab it resolves straight to the backend
   hostForwards = lib.filter (f: f.host != null) flows.portForwards;
   # one line per name and backend: a name's tcp and udp forwards (teamspeak's voice and files) share its guest
-  forwardHostLines = lib.unique (lib.concatMap (f: map (ip: hostLines ip [ f.host ]) f.addresses) hostForwards);
+  forwardHostLines = lib.unique (lib.concatMap (f: map (ip: hostLines ip [ f.host ]) f.addresses)
+    (lib.filter (f: !(service.wildcardHost f.host)) hostForwards));
+  # a wildcard forward (`*.mc`) is answered by a coredns template instead: one zone per name, the backends of every
+  # forward that name carries
+  wildcardZones = map (host: rec {
+    zone = net.fqdn (lib.removePrefix "*." host);
+    match = "^[a-z0-9-]+\\.${lib.replaceStrings [ "." ] [ "\\." ] zone}\\.$";
+    addresses = lib.unique (lib.concatMap (f: f.addresses) (lib.filter (f: f.host == host) hostForwards));
+  }) (lib.unique (map (f: f.host) (lib.filter (f: service.wildcardHost f.host) hostForwards)));
 
   # the house's public address as the router learns it, a hosts line coredns serves as net.wan.publicHost
   publicAddressFile = "/run/public-address/hosts";
@@ -599,7 +610,21 @@ in {
         template IN SRV ${f.srv}.${net.fqdn f.host} {
           answer "{{ .Name }} 3600 IN SRV 0 0 ${toString f.port} ${net.fqdn f.host}."
         }
-    '') (lib.filter (f: f.srv != null) hostForwards) + ''
+    '') (lib.filter (f: f.srv != null) hostForwards)
+      + lib.concatMapStrings (w: ''
+        # every name one label below a wildcard forward, straight to its backend; coredns runs template before hosts,
+        # so the zone stays this one and falls through to the lines above
+        template IN A ${w.zone} {
+          match ${w.match}
+          ${lib.concatStringsSep "\n          " (map (ip: ''answer "{{ .Name }} 3600 IN A ${ip}"'') w.addresses)}
+          fallthrough
+        }
+        # the nodata the hosts plugin gives an exact name, instead of asking blocky for a name only the lab knows
+        template IN AAAA ${w.zone} {
+          match ${w.match}
+          fallthrough
+        }
+    '') wildcardZones + ''
         # unlisted names (mx, txt, public-only records) resolve like the rest
         forward . ${blockyAddress}
       }

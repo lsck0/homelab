@@ -49,6 +49,10 @@ let
       folders."249-external-demo" = instance ''{ services.demo = { port = 80; publicPrefix = "/public"; }; }'';
       expect = "publicPrefix narrows what everyone but the house sees";
     };
+    spec001_r021-dotted-http-host = {
+      folders."199-internal-demo" = instance ''{ services.demo = { port = 80; host = "lab.demo"; }; }'';
+      expect = "host lab.demo goes through its zone's ingress";
+    };
   };
 
   # -----------------------------------------------------------------------------
@@ -87,20 +91,34 @@ let
   };
 
   # -----------------------------------------------------------------------------
-  # EXPORT: lab.json's guests as the desktop clients read them
+  # EXPORT: lab.json's guests and routes as the desktop clients read them
   # -----------------------------------------------------------------------------
 
+  real = import ../default.nix { inherit lib; };
+  exportOf = lab: import ../../lab-export.nix { inherit lib lab; };
+  # a wildcard tcp route reaches the desktop clients as its fqdn, `*.<rest>.<domain>`
+  wildcardApp = {
+    enable = true;
+    repo = "lsck0/demo";
+    branch = "master";
+    routes.demo-game = { service = "web"; targetPort = 8000; protocol = "tcp"; publicPort = 25566; port = 20131; host = "*.demo"; };
+  };
+  wildcardLab = real.withApps (folders: folders // { demo = wildcardApp; });
+  exportedWildcardHost = (exportOf wildcardLab).routes.demo-game.host;
   exportGuestKeys = [ "enabled" "idle" "ip" "name" "powered" "zone" ];
   exportProblems = lib.concatLists (lib.mapAttrsToList (id: g:
     lib.optional (lib.attrNames g != exportGuestKeys) "lab.export guest ${id} has [ ${toString (lib.attrNames g)} ], not [ ${toString exportGuestKeys} ]"
     ++ lib.optional (!(lib.isBool g.powered && (g.idle == null || lib.isString g.idle) && lib.elem g.enabled [ "true" "false" "onDemand" ]))
       "lab.export guest ${id}: ${builtins.toJSON g}"
-  ) (import ../../lab-export.nix { inherit lib; lab = import ../default.nix { inherit lib; }; }).guests);
+  ) (exportOf real).guests)
+    ++ map (p: "spec001_r029: the wildcard fixture is refused: ${p}") wildcardLab.problems
+    ++ lib.optional (exportedWildcardHost != "*.demo.${real.site.domain}")
+      "spec001_r029: lab.export writes the wildcard route's host as ${exportedWildcardHost}";
 
   failures = lib.concatLists (lib.mapAttrsToList (name: c: let problems = problemsOf c.folders; in
     lib.optional (!(lib.any (lib.hasInfix c.expect) problems))
       "refused.${name}: no problem says \"${c.expect}\"; problems: ${builtins.toJSON problems}") refused)
-    ++ map (p: "the real tree: ${p}") (import ../default.nix { inherit lib; }).problems
+    ++ map (p: "the real tree: ${p}") real.problems
     ++ map (check: "adding ${addedFolder} and ${custom}/${added.app}: ${check} fails; problems: ${builtins.toJSON grown.problems}")
       (lib.attrNames (lib.filterAttrs (_: ok: !ok) addedChecks))
     ++ exportProblems;

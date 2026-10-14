@@ -3,8 +3,8 @@
 Implemented in:
 
 - `src/instances/preconfigured/214-external-minecraft/`;
-- partial, the wildcard host of p1 only: `src/modules/service.nix`, `src/modules/catalog.nix`,
-  `src/modules/lab-export.nix`, `src/core/300-router/main.nix`.
+- partial, the wildcard host of p1: `src/modules/service.nix`, `src/modules/catalog.nix`, `src/modules/lab-export.nix`,
+  `src/core/300-router/main.nix`.
 
 Last reconcile: 2026-10-14 @ b66f6d0
 
@@ -76,23 +76,26 @@ A line marked "Replaced at p3" stays true until p3 merges; the p3 PR strikes it 
 
 ### p1: wildcard hosts in the platform
 
-- [ ] **R-020** A service's `host` accepts dotted labels and an optional leading `*.`:
+- [x] **R-020** A service's `host` accepts dotted labels and an optional leading `*.`:
   `(\*\.)?[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)*`. Instance services and app routes share the
-  type. (`src/modules/service.nix`)
-- [ ] **R-021** The catalog refuses a dotted or wildcard host on an http route, of an instance or of an app.
-- [ ] **R-022** The catalog refuses a wildcard host without `publicPort`.
-- [ ] **R-023** The catalog refuses `srv` on a route with a wildcard host.
-- [ ] **R-024** The catalog refuses an exact host that one label below another route's wildcard matches, e.g. `x.mc`
-  beside `*.mc`.
-- [ ] **R-025** For a wildcard forward host `*.<rest>`, the router's CoreDNS has a `template IN A` block zoned to
+  type. (`src/modules/service.nix:74-80, 130`)
+- [x] **R-021** The catalog refuses a dotted or wildcard host on an http route, of an instance or of an app.
+  (`src/modules/catalog.nix:347-348`)
+- [x] **R-022** The catalog refuses a wildcard host without `publicPort`. (`src/modules/catalog.nix:349-350`)
+- [x] **R-023** The catalog refuses `srv` on a route with a wildcard host. (`src/modules/catalog.nix:351-352`)
+- [x] **R-024** The catalog refuses an exact host that one label below another route's wildcard matches, e.g. `x.mc`
+  beside `*.mc`. (`src/modules/catalog.nix:216-223, 353`)
+- [x] **R-025** For a wildcard forward host `*.<rest>`, the router's CoreDNS has a `template IN A` block zoned to
   `<rest>.<domain>`, matching `^[a-z0-9-]+\.<rest>\.<domain>\.$` (for `*.mc`: `^[a-z0-9-]+\.mc\.lsck0\.dev\.$`),
-  answering the forward's backend address, and carrying `fallthrough`.
-- [ ] **R-026** For the same names, a `template IN AAAA` block with the same zone and regex answers NOERROR with no
-  records, and carries `fallthrough`.
-- [ ] **R-027** `forwardHostLines` and `directHosts` skip wildcard hosts, so no `hosts` line carries a `*`.
-- [ ] **R-028** DDNS publishes a wildcard forward host as the A record `*.<rest>.<domain>` with `proxied = false`.
-  `ddns-cloudflare.sh` stays unchanged.
-- [ ] **R-029** lab-export writes a wildcard host as its fqdn, `*.<rest>.<domain>`.
+  answering the forward's backend address, and carrying `fallthrough`. (`src/core/300-router/main.nix:152-158, 615-621`)
+- [x] **R-026** For the same names, a `template IN AAAA` block with the same zone and regex answers NOERROR with no
+  records, and carries `fallthrough`. (`src/core/300-router/main.nix:622-626`)
+- [x] **R-027** `forwardHostLines` and `directHosts` skip wildcard hosts, so no `hosts` line carries a `*`.
+  (`src/core/300-router/main.nix:126-130, 149-151`)
+- [x] **R-028** DDNS publishes a wildcard forward host as the A record `*.<rest>.<domain>` with `proxied = false`.
+  `ddns-cloudflare.sh` stays unchanged. (`src/core/300-router/main.nix:132-144`)
+- [x] **R-029** lab-export writes a wildcard host as its fqdn, `*.<rest>.<domain>`.
+  (`src/modules/lab-export.nix:15-17, 35-39`)
 
 ### p2: mc-gate, built and tested, not wired
 
@@ -547,8 +550,8 @@ target would change the address the gate sees.
   - Changed: `src/modules/service.nix` (the host type), `src/modules/catalog.nix` (four checks),
     `src/core/300-router/main.nix` (CoreDNS templates, `forwardHostLines`, `directHosts`, the DDNS list),
     `src/modules/lab-export.nix`.
-  - Tests: new `policy-eval` cases, `src/tests/router-zones.nix`,
-    `src/core/300-router/tests/ddns_cloudflare_test.py` and `src/modules/lab/tests/lab.nix`.
+  - Tests: new `src/modules/apps-catalog/tests/apps-catalog.nix` and `src/modules/lab/tests/lab.nix` cases,
+    `src/tests/router-zones.nix` and `src/core/300-router/tests/ddns_cloudflare_test.py`.
   - Existing exact hosts behave as before. Constraint later: dotted hosts stay tcp/udp only until the ingress
     certificate covers more levels.
 - **Guest** (p2 to p4). Everything else lives in `src/instances/preconfigured/214-external-minecraft/`.
@@ -685,14 +688,17 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 
   R-001 to R-003, R-006, R-008, R-009 and R-010 have no test.
 - **p1.**
-  - `nix build ./src#checks.x86_64-linux.policy-eval`: cases `spec001_r020` (an accepted wildcard tcp route) and
-    `spec001_r021` to `spec001_r024` (each refusal).
-  - `nix build ./src#checks.x86_64-linux.router-zones`: subtests `spec001_r025` (a name one label below answers the
-    backend; a two-label name never gets the backend from the template; every other lab name resolves as before),
-    `spec001_r026` (AAAA NODATA) and `spec001_r027` (no `*` in the hosts block).
-  - `nix build ./src#checks.x86_64-linux.ddns-cloudflare`: case `spec001_r028`, with the fake API accepting `*` in a
-    name query.
-  - `nix build ./src#checks.x86_64-linux.lab`: case `spec001_r029`, a wildcard route's export.
+  - `nix build ./src#checks.x86_64-linux.apps-catalog`: cases `spec001_r020` (an accepted wildcard tcp route, which
+    every consumer of the catalog evaluates with, and a host the type rejects because its `*` is not the first label)
+    and `spec001_r021` to `spec001_r024` (each refusal).
+  - `nix build ./src#checks.x86_64-linux.lab`: case `spec001_r021` for an instance's route, and case `spec001_r029`,
+    a wildcard route's export.
+  - `nix build ./src#checks.x86_64-linux.router-zones`: the subtest `spec001_r025 spec001_r026 spec001_r027` (a name
+    one label below answers the backend from every zone and the house; a two-label name never gets it; the zone's own
+    name still resolves through the fallthrough; AAAA is NODATA; no `*` in the hosts block; and the wildcard's raw
+    DDNS record, R-028).
+  - `nix build ./src#checks.x86_64-linux.ddns-cloudflare`: case `spec001_r028`, the script converging a wildcard
+    name against the fake API.
 - **p2.** `nix build ./src#checks.x86_64-linux.mc-gate`, from `tests/mc-gate.nix`. It has two derivations:
   - `spec001_r059`, the package, whose `buildGoModule` check phase runs plain `go test` with the stdlib only:
     - `Test_spec001_r040_frame` and `Test_spec001_r041_normalize`: VarInt edges and overlong encodings, a 255-char
@@ -762,7 +768,7 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 
 | Phase | Delivers (requirements) | Depends on | PRs | State |
 |---|---|---|---|---|
-| p1 | R-020 to R-029: the platform accepts and resolves wildcard tcp hosts; no route uses one, so the lab runs as before | none | none | planned |
+| p1 | R-020 to R-029: the platform accepts and resolves wildcard tcp hosts; no route uses one, so the lab runs as before | none | none | merged |
 | p2 | R-040 to R-059: mc-gate builds with its tests under the check `mc-gate`; nothing runs it, vm-214 still runs lazymc | none | none | planned |
 | p3 | R-070 to R-083: vm-214 runs mc-gate and `cobblemon` at `cobblemon.mc.lsck0.dev`; lazymc and `mc.lsck0.dev` are gone; replaces R-001, R-002, R-003, R-005, R-006, R-009 | p1, p2 | none | planned |
 | p4 | R-090 to R-092: the gate's metrics reach Prometheus, and failed starts alert | p3 | none | planned |
@@ -814,7 +820,6 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 
 | Requirements | What the code does instead | Closed by |
 |---|---|---|
-| R-020 to R-029 | `host` is a single DNS label; no wildcard names exist in DNS | p1 |
 | R-040 to R-059, with R-045a to R-045c, R-046a to R-046g, R-048a to R-048e, R-050a to R-050c, R-051a to R-051c, R-053a to R-053c, R-055a to R-055c | no mc-gate; lazymc fronts one server (R-001, R-002) | p2 |
 | R-070 to R-083, with R-071a to R-071f, R-074a to R-074d, R-076a to R-076d, R-081a to R-081f | one server, one data dir, lazymc on 25565, `mc.lsck0.dev`, tools without a server argument, hermes test expects .208 | p3 |
 | R-090 to R-092 | no Minecraft metrics or alert beyond the tcp probe | p4 |
@@ -843,6 +848,11 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 - 2026-10-14: Polkit by exact unit names. Rejected: a `^minecraft-.*` pattern (matches non-server units).
 - 2026-10-14: Gate settings reload on SIGHUP, the binary only on a manual restart. Rejected: restart on every switch
   (cuts every player).
+- 2026-10-14: The p1 host cases live in the `apps-catalog` and `lab` checks, not in `policy-eval` as Testing first
+  said. `policy-eval` runs the laws of `src/tests/policy/` over the real configurations, and a law states policy
+  instead of copying a module; a refusal of a catalog nobody declares has no real configuration to run over. The two
+  checks already hold the catalog's refusal tables, one for an app's routes and one for an instance's, and
+  `apps-catalog` evaluates every consumer of the catalog with the accepted wildcard route.
 
 ## Coverage
 
@@ -859,16 +869,16 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 | R-009 | `instance.nix:16-25`, `src/modules/flows.nix:288-293` | none | done |
 | R-010 | `src/core/103-internal-grafana/main.nix:195-200` | none | done |
 | R-011 | `instance.nix:3-14` | `src/tests/policy/guests.nix` (pre-spec law) | done |
-| R-020 | `src/modules/service.nix` | `policy-eval` spec001_r020 | gap |
-| R-021 | `src/modules/catalog.nix` | `policy-eval` spec001_r021 | gap |
-| R-022 | `src/modules/catalog.nix` | `policy-eval` spec001_r022 | gap |
-| R-023 | `src/modules/catalog.nix` | `policy-eval` spec001_r023 | gap |
-| R-024 | `src/modules/catalog.nix` | `policy-eval` spec001_r024 | gap |
-| R-025 | `src/core/300-router/main.nix` | `router-zones` spec001_r025 | gap |
-| R-026 | `src/core/300-router/main.nix` | `router-zones` spec001_r026 | gap |
-| R-027 | `src/core/300-router/main.nix` | `router-zones` spec001_r027 | gap |
-| R-028 | `src/core/300-router/main.nix` | `ddns-cloudflare` spec001_r028 | gap |
-| R-029 | `src/modules/lab-export.nix` | `lab` spec001_r029 | gap |
+| R-020 | `src/modules/service.nix:74-80, 130` | `apps-catalog` spec001_r020 | done |
+| R-021 | `src/modules/catalog.nix:348-349` | `apps-catalog` spec001_r021, `lab` spec001_r021 | done |
+| R-022 | `src/modules/catalog.nix:350-351` | `apps-catalog` spec001_r022 | done |
+| R-023 | `src/modules/catalog.nix:352-353` | `apps-catalog` spec001_r023 | done |
+| R-024 | `src/modules/catalog.nix:216-224, 354` | `apps-catalog` spec001_r024 | done |
+| R-025 | `src/core/300-router/main.nix:151-158, 612-620` | `router-zones` spec001_r025 | done |
+| R-026 | `src/core/300-router/main.nix:621-625` | `router-zones` spec001_r026 | done |
+| R-027 | `src/core/300-router/main.nix:126-129, 148-150` | `router-zones` spec001_r027 | done |
+| R-028 | `src/core/300-router/main.nix:131-143` | `ddns-cloudflare` spec001_r028, `router-zones` spec001_r028 | done |
+| R-029 | `src/modules/lab-export.nix:15-16, 35-39` | `lab` spec001_r029 | done |
 | R-040 | `lib/mc-gate/frame.go` | `Test_spec001_r040_frame`, `Fuzz_spec001_r040_frame` | gap |
 | R-041 | `lib/mc-gate/frame.go` | `Test_spec001_r041_normalize` | gap |
 | R-042 | `lib/mc-gate/status.go` | `Test_spec001_r042_status`, VM `spec001_r042 status` | gap |

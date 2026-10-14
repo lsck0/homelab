@@ -199,6 +199,23 @@ def main():
     assert code == 0 and [c["method"] for c in calls if c["method"] != "GET"] == ["DELETE"], calls
     assert converged(ADDRESS_OLD) and all(r["name"] != GAINED["name"] for r in FAKE.records.values()), FAKE.records
 
+    print("case: spec001_r028 a wildcard name converges like any other and is deleted when it leaves the list")
+    wildcard = {"name": f"*.mc.{ZONE}", "proxied": False}
+    with open(env["DDNS_RECORDS"], "w") as f:
+        json.dump(RECORDS + [wildcard], f)
+    code, calls = run(env)
+    assert code == 0 and [c["method"] for c in calls if c["method"] != "GET"] == ["POST"], calls
+    have = [r for r in FAKE.records.values() if r["name"] == wildcard["name"]]
+    assert len(have) == 1 and have[0]["content"] == ADDRESS_OLD and have[0]["proxied"] is False, FAKE.records
+    os.utime(os.path.join(env["DDNS_STATE_DIR"], "state"), (0, 0))
+    code, calls = run(env)
+    assert code == 0 and [c for c in calls if c["method"] != "GET"] == [], calls
+    with open(env["DDNS_RECORDS"], "w") as f:
+        json.dump(RECORDS, f)
+    code, calls = run(env)
+    assert code == 0 and [c["method"] for c in calls if c["method"] != "GET"] == ["DELETE"], calls
+    assert all(r["name"] != wildcard["name"] for r in FAKE.records.values()), FAKE.records
+
     print("case: a changed address is put to every record, and only once")
     FAKE.address = ADDRESS_NEW
     code, calls = run(env)

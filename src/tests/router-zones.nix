@@ -10,7 +10,18 @@
 # a dmz guest claiming the edge's address on the dmz bridge is that layer's to stop, the router sees the edge.
 { pkgs, lib, specialArgs, seed ? 1, ... }:
 let
-  lab = import ./lib/lab.nix { inherit pkgs lib specialArgs; };
+  # spec-001 p1: a fixture app whose tcp route takes a wildcard host, which no route of the lab has yet. Its http
+  # route keeps the zone's own name (demo.<domain>) in the hosts file, so the templates must fall through to reach it.
+  wildcardApp = {
+    enable = true;
+    repo = "lsck0/demo";
+    branch = "master";
+    routes = {
+      demo = { service = "web"; targetPort = 8000; port = 20130; };
+      demo-game = { service = "web"; targetPort = 8001; protocol = "tcp"; publicPort = 25566; port = 20131; host = "*.demo"; };
+    };
+  };
+  lab = import ./lib/lab.nix { inherit pkgs lib specialArgs; apps = folders: folders // { demo = wildcardApp; }; };
   net = import ../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
   inherit (lab) vlans;
 
@@ -55,6 +66,9 @@ let
   # a forwarded udp and tcp route of one guest: teamspeak's voice and file transfer, vm-215 a dmz address here
   voice = lab.catalog.forwarded.teamspeak;
   files = lab.catalog.forwarded.teamspeak-files;
+  # the fixture's wildcard forward: the name one label below it, and the backends it answers with
+  wildcardName = net.fqdn "one.demo";
+  wildcardAddresses = lib.sort (a: b: a < b) lab.catalog.forwarded.demo-game.nodes;
   # the ports the policy names, and 4444, which only the killswitch subtest uses
   killswitchPort = 4444;
   tcpPorts = [ 22 53 80 111 443 2049 2377 3100 3102 4040 4317 4318 4319 7946 8006 8095 9055 9100 19532 25565 killswitchPort ]
@@ -238,6 +252,23 @@ pkgs.testers.runNixOSTest {
         internal.fail("dig +short +time=3 @10.100.0.1 tor.${net.domain} | grep -q .")
         # a forwarded route's srv record names its public port
         internal.succeed("dig +short +time=3 @10.100.0.1 SRV ${voice.srv}.${net.fqdn voice.host} | grep -qx '0 0 ${toString voice.publicPort} ${net.fqdn voice.host}.'")
+
+    with subtest("spec001_r025 spec001_r026 spec001_r027 a wildcard forward answers every name one label below it"):
+        for machine, src, server in ((internal, ZONES["internal"][1], "10.100.0.1"), (dmz, ZONES["external"][1], "10.200.0.1"),
+                                     (apps, ZONES["apps"][0], "10.250.0.1"), (house, HOUSE["device"], ROUTER_WAN)):
+            addresses = sorted(machine.succeed(f"dig +short +time=3 -b {src} @{server} ${wildcardName}").split())
+            assert addresses == ${builtins.toJSON wildcardAddresses}, f"${wildcardName} from {src}: {addresses!r}"
+            # nodata, as the hosts plugin gives an exact name: no AAAA, and no question for blocky either
+            answer = machine.succeed(f"dig +time=3 -b {src} @{server} AAAA ${wildcardName}")
+            assert "status: NOERROR" in answer and "ANSWER: 0" in answer, f"${wildcardName} AAAA from {src}: {answer}"
+        # the templates fall through: the zone's own name is still the hosts file's, at the edge
+        assert internal.succeed("dig +short +time=3 @10.100.0.1 ${net.fqdn "demo"}").strip() == "${ip "200"}"
+        # a name two labels below is below no wildcard, and no hosts line carries the wildcard itself
+        internal.fail("dig +short +time=3 @10.100.0.1 a.${wildcardName} | grep -q .")
+        internal.fail("dig +short +time=3 @10.100.0.1 '${net.fqdn "*.demo"}' | grep -q .")
+        # spec001_r028: outside the lab the same name is cloudflare's, raw: a proxied record would hide the game port
+        records = json.loads(luca_router.succeed("cat $(systemctl show -P Environment ddns-cloudflare | tr ' ' '\\n' | sed -n 's/^DDNS_RECORDS=//p')"))
+        assert {"name": "${net.fqdn "*.demo"}", "proxied": False} in records, records
 
     with subtest("the house's v6 prefix is served by name to the v4-only lab, beside its v4 address"):
         prefix_name = "${net.fqdn net.wan.publicPrefixHost}"

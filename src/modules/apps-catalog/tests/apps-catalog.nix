@@ -20,6 +20,8 @@ let
   # a case: the lab collected with these app folders over the real ones
   withApps = apps: lab.withApps (folders: lib.recursiveUpdate folders apps);
   withDemo = change: withApps { demo = lib.recursiveUpdate demo change; };
+  # a public port no route of the real lab forwards, for the wildcard cases
+  wildcardPort = 25566;
 
   problemsOf = case: case.catalog.problems;
   # a schema error is a throw of the module system, which evaluation can catch
@@ -79,6 +81,29 @@ let
     };
     asleep-never = { lab = withDemo { on = [ "scaleToZero" ]; idle.stopAfter = null; }; expect = "never sleeps"; };
     stopped-unasked = { lab = withDemo { idle.stopAfter = "30m"; }; expect = "without scaleToZero in `on`"; };
+    spec001_r021-dotted-http-host = {
+      lab = withDemo { routes.demo.host = "lab.demo"; };
+      expect = "host lab.demo goes through its zone's ingress";
+    };
+    spec001_r021-wildcard-http-host = {
+      lab = withDemo { routes.demo.host = "*.demo"; };
+      expect = "host *.demo goes through its zone's ingress";
+    };
+    spec001_r022-wildcard-without-publicport = {
+      lab = withDemo { routes.demo-game = { protocol = "tcp"; port = 20131; host = "*.demo"; }; };
+      expect = "host *.demo is reached by the house's forwarded port alone";
+    };
+    spec001_r023-srv-on-a-wildcard = {
+      lab = withDemo { routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "*.demo"; srv = "_demo._tcp"; }; };
+      expect = "an srv record names one host, which *.demo is not";
+    };
+    spec001_r024-exact-host-under-a-wildcard = {
+      lab = withDemo {
+        routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "*.demo"; };
+        routes.demo-one = { protocol = "tcp"; port = 20132; host = "one.demo"; };
+      };
+      expect = "host one.demo.lsck0.dev lies under apps.demo route demo-game's *.demo.lsck0.dev";
+    };
   };
 
   # catalogs the schema itself rejects: an unknown field, a wrong type, a missing field
@@ -94,6 +119,8 @@ let
     unpinned-image = withDemo { images = [ "docker.io/library/redis:8" ]; };
     climbing-build = withDemo { build.web.context = "../other"; };
     unknown-generator = withDemo { secrets.x = "random"; env.web.X = "{{x}}"; };
+    # a wildcard stands for one label below a name: it leads the host, and nothing else about it bends
+    spec001_r020-wildcard-in-the-middle = withDemo { routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "a.*.demo"; }; };
   };
 
   # every app of the real catalog enabled, an app left disabled by omission, an internal-only app
@@ -109,6 +136,10 @@ let
     # an external route's name is public already: the proxy needs nothing more
     cloudflare-on-the-edge = withDemo { routes.demo.on = [ "cloudflare" ]; };
     per-path = withDemo { routes.demo-api = { host = "demo"; path = "/api"; port = 20130; on = [ "rateLimit" ]; }; };
+    # a wildcard tcp route: every name one label below it, forwarded by port, resolved by the router's template
+    spec001_r020-wildcard-tcp-host = withDemo {
+      routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "*.demo"; };
+    };
     hardened = withDemo {
       routes.demo.on = profiles.hardenedExternal ++ [ "probe" ];
       on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" "scaleToZero" ];
