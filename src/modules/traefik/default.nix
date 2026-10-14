@@ -354,9 +354,10 @@ let
     cp ${llmsTxt} $out/.well-known/llms.txt
   '';
 
-  # public-domain prose for the markov generator
+  # public-domain prose for the markov generator; gutenberg regenerates its cache files in place (2026-10-14: the hash
+  # changed under the same url), so the copy is a fixed wayback snapshot
   corpus = pkgs.fetchurl {
-    url = "https://www.gutenberg.org/cache/epub/2701/pg2701.txt";
+    url = "https://web.archive.org/web/20260927171441id_/https://www.gutenberg.org/cache/epub/2701/pg2701.txt";
     hash = "sha256-kHQg22xLaMcOKYjNKtnIz3kThmegG2M3bRjdF/7xoYs=";
   };
   # word list derived from the corpus
