@@ -36,6 +36,8 @@ let
   probeDir = "/run/mc-probe";
   stateFile = "/run/mc-gate/state.json";
   data = "/var/lib/minecraft";
+  # the gate's metrics; the link the node exporter reads them through is the guest's own option (R-090, R-091)
+  metricsFile = "/var/lib/mc-gate/metrics.prom";
 
   # only the bounds a test would otherwise have to sit out; every other limit stays the lab's. The budgets are raised
   # because one test drives more starts in ten minutes than a household does in an hour (they are decided in Go tests).
@@ -133,6 +135,8 @@ pkgs.testers.runNixOSTest {
     PROBE_DIR = "${probeDir}"
     DATA = "${data}"
     STATE = "${stateFile}"
+    METRICS = "${metricsFile}"
+    TEXTFILE = "${nodes.vm-214.homelab.textfileDir}/mc-gate.prom"
     SETTINGS = "${settingsPath}"
     MINIMUM_ONLINE_S = ${toString testLimits.minimumOnlineS}
     # the unit files of the guest with nothing forced: what the lab would really run
@@ -589,6 +593,39 @@ pkgs.testers.runNixOSTest {
         servers_sleep()
         out = vm_214.fail("mc-rcon list 2>&1")
         assert "no server runs" in out, out
+
+    with subtest("spec001_r090 metrics"):
+        # the file the gate keeps beside its state: every family of R-090, and a phase that is no longer true at 0
+        text = vm_214.succeed(f"cat {METRICS}")
+        series = {}
+        for line in text.splitlines():
+            if line.startswith("#") or not line.strip():
+                continue
+            key, value = line.rsplit(" ", 1)
+            series[key] = float(value)
+        for name in SERVERS:
+            assert series[f'homelab_mc_phase{{server="{name}",phase="sleeping"}}'] == 1, text
+            assert series[f'homelab_mc_phase{{server="{name}",phase="running"}}'] == 0, text
+            assert f'homelab_mc_sessions{{server="{name}"}}' in series, text
+            assert f'homelab_mc_players{{server="{name}"}}' in series, text
+            assert series[f'homelab_mc_starts_total{{server="{name}"}}'] >= 1, text
+            assert f'homelab_mc_start_failures_total{{server="{name}"}}' in series, text
+        assert [key for key in series if key.startswith("homelab_mc_kicks_total{")], text
+        assert series["homelab_mc_switches_total"] >= 1, text
+        # one # HELP and one # TYPE per family, so the exporter takes it
+        for family in ["homelab_mc_phase", "homelab_mc_sessions", "homelab_mc_players", "homelab_mc_starts_total",
+                       "homelab_mc_start_failures_total", "homelab_mc_kicks_total", "homelab_mc_switches_total"]:
+            assert f"# TYPE {family} " in text, (family, text)
+        mode = vm_214.succeed(f"stat -c %a {METRICS}").strip()
+        assert mode == "644", mode
+
+    with subtest("spec001_r091 textfile"):
+        # the exporter reads the gate's own file through the link, so a scrape never sees a copy
+        target = vm_214.succeed(f"readlink -f {TEXTFILE}").strip()
+        assert target == METRICS, target
+        scraped = vm_214.succeed("curl -fsS localhost:9100/metrics")
+        assert "homelab_mc_phase{" in scraped, scraped[-2000:]
+        assert 'node_textfile_scrape_error 0' in scraped, scraped[-2000:]
 
     with subtest("spec001_r080 state"):
         printed = state()
