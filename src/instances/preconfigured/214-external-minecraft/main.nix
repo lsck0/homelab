@@ -32,6 +32,9 @@ let
   gateRuntimeDir = "/run/mc-gate";
   gateUser = "mc-gate";
   gateSettingsPath = "/etc/mc-gate/settings.json";
+  # the gate writes its metrics beside its state; the node exporter reads them through a link it owns (R-090, R-091)
+  gateMetricsName = "mc-gate";
+  gateMetricsFile = "${gateStateDir}/metrics.prom";
   # the server's secrets, rendered by sops under /run: never on the nas, never in a snapshot
   serverEnv = config.sops.templates."minecraft-server.env".path;
   image = "itzg/minecraft-server:2026.9.1-java21";
@@ -319,6 +322,8 @@ in {
   # the servers run as raw `podman run`, not via oci-containers
   virtualisation.podman.enable = true;
 
+  homelab.textfiles = [ gateMetricsName ];
+
   environment.systemPackages = [ mcModpack mcRcon mcState ];
   environment.etc."mc-gate/settings.json".source = gateSettingsFile;
 
@@ -383,6 +388,8 @@ in {
   } // lib.listToAttrs (map (name: lib.nameValuePair "minecraft-${name}" (serverUnit name)) names);
 
   systemd.tmpfiles.rules = [
+    # the exporter reads the gate's own file: a link, so no timer copies it and no scrape sees a stale copy
+    "L+ ${config.homelab.textfileDir}/${gateMetricsName}.prom - - - - ${gateMetricsFile}"
     "d ${data} 0750 ${serverUid} ${serverUid} -"
     "d ${modpacksDir} 0750 ${serverUid} ${serverUid} -"
   ];

@@ -61,6 +61,11 @@ func deciderReconcileServer(d *Decider, server *Server, state UnitState, promote
 		// R-046b
 		if state.Active == "failed" {
 			server.failures, server.lastStartFailed = server.failures+1, true
+			// only a start counts as a failed start: a server that dies after hours of play is a crash, and the
+			// alert of R-092 names the pack and the world
+			if before == phaseStarting {
+				server.startFailuresTotal++
+			}
 		}
 		serverSleepSet(server)
 	case phaseSleeping:
@@ -135,6 +140,7 @@ func deciderReconcileTimeouts(d *Decider, now time.Time) {
 			continue
 		}
 		server.failures, server.lastStartFailed = server.failures+1, true
+		server.startFailuresTotal++
 		logStartFailedWrite(d.log, server.name, int(waited.Seconds()), nil)
 		deciderStop(d, server, reasonTimeout)
 	}

@@ -69,6 +69,9 @@ type Server struct {
 	runningSince   time.Time
 	lastSessionEnd time.Time
 	failures       int
+	// what the metrics count: failures resets with a good start, these never go down (R-090)
+	startsTotal        int
+	startFailuresTotal int
 	// set when a start was refused, never answered, or ended in a failed unit; cleared by the next start
 	lastStartFailed bool
 	// true while the decider has issued a stop, or has seen the unit deactivating; it is what makes a stopping
@@ -98,6 +101,11 @@ type Decider struct {
 	names   []string
 	sources map[netip.Addr]*Source
 	budget  Budget
+	// the counters of R-090 the records do not hold themselves: one per kick reason, and every switch ever
+	kicks         map[string]int
+	switchesTotal int
+	// the metrics last written, so a view that did not change is not written again
+	metrics []byte
 
 	systemd Systemd
 	allow   *Allow
@@ -138,9 +146,12 @@ func deciderCreate(settings Settings, systemd Systemd, allow *Allow, fetch Statu
 	d := &Decider{
 		servers: make(map[string]*Server), sources: make(map[netip.Addr]*Source),
 		systemd: systemd, allow: allow, fetch: fetch, log: log, now: now,
+		kicks:  map[string]int{},
 		events: make(chan deciderEvent, deciderEventsQueued), stopped: make(chan struct{}),
 	}
 	deciderSettingsApply(d, settings)
+	// the file exists before the first event, so a scrape right after a restart reads the records (R-090)
+	deciderMetricsSave(d)
 	return d
 }
 
@@ -285,6 +296,7 @@ func deciderOccupied(d *Decider, server *Server, now time.Time) bool {
 
 // deciderKick builds one refusal; the texts are R-054's and live in one file.
 func deciderKick(d *Decider, outcome, server string, players int) Decision {
+	d.kicks[outcome]++
 	return Decision{Outcome: outcome, Text: kickText(outcome, server, players, d.names)}
 }
 
@@ -329,16 +341,19 @@ func deciderStart(d *Decider, now time.Time, target *Server, source netip.Addr) 
 			state.server.lastStartFailed, state.server.stopIssued = state.failed, state.stopIssued
 		}
 		target.failures, target.lastStartFailed = target.failures+1, true
+		target.startFailuresTotal++
 		logStartFailedWrite(d.log, target.name, 0, err)
 		return deciderKick(d, outcomeFailed, target.name, 0)
 	}
 
 	causing := deciderSourceGet(d, source)
 	causing.starts = append(causing.starts, now)
+	target.startsTotal++
 	reason := reasonLogin
 	if len(stops) > 0 {
 		// only a start that stops a running server spends the global budget (R-051b)
 		d.budget.switches = append(d.budget.switches, now)
+		d.switchesTotal++
 		reason = reasonSwitch
 	}
 	for _, server := range stops {
@@ -549,10 +564,21 @@ func deciderRecords(d *Decider) string {
 	return "[" + fmt.Sprint(parts) + "]"
 }
 
-// deciderStateSave writes what a person reads, on every change (R-056).
+// deciderStateSave writes what a person reads and what prometheus scrapes, on every change (R-056, R-090).
 func deciderStateSave(d *Decider) {
 	if err := stateSave(d.settings.RuntimeDir, deciderState(d)); err != nil {
 		d.log.Warn("state", "err", err)
+	}
+	deciderMetricsSave(d)
+}
+
+// deciderMetricsSave writes what prometheus scrapes, when it differs from what is already there (R-090).
+func deciderMetricsSave(d *Decider) {
+	rendered := metricsRender(deciderServers(d), d.kicks, d.switchesTotal)
+	last, err := metricsSave(d.settings.StateDir, d.metrics, rendered)
+	d.metrics = last
+	if err != nil {
+		d.log.Warn("metrics", "err", err)
 	}
 }
 
