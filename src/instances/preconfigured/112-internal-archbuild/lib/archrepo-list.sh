@@ -26,6 +26,7 @@ DB=${2:-}
 MODULES=configs
 MANIFEST=packages.txt
 NATIVE_MANIFEST=packages.native.txt
+MIRROR_MANIFEST=mirror/packages.txt
 PLATFORMS=platforms
 # makepkg's pkgname rule: alphanumerics and @._+-, not starting with a hyphen or a dot
 NAME_PATTERN='^[a-z0-9@_+][a-z0-9@._+-]*$'
@@ -63,13 +64,18 @@ db_provided() {
 # -----------------------------------------------------------------------------
 # MAIN
 names=()
-manifests=("$DOTFILES/$MODULES"/*/"$MANIFEST")
-(( ${#manifests[@]} > 0 )) || die "no $MODULES/<module>/$MANIFEST in $DOTFILES"
-for file in "${manifests[@]}"; do
-  native=${file%/*}/$NATIVE_MANIFEST
-  # a dangling link counts, so it fails as unreadable instead of dropping its names
-  if [ -e "$native" ] || [ -L "$native" ]; then manifests+=("$native"); fi
-done
+# dotfiles with mod.nu modules generate the full module union here (`dot gen`); older checkouts only have the globs
+if [ -f "$DOTFILES/$MIRROR_MANIFEST" ]; then
+  manifests=("$DOTFILES/$MIRROR_MANIFEST")
+else
+  manifests=("$DOTFILES/$MODULES"/*/"$MANIFEST")
+  (( ${#manifests[@]} > 0 )) || die "no $MODULES/<module>/$MANIFEST in $DOTFILES"
+  for file in "${manifests[@]}"; do
+    native=${file%/*}/$NATIVE_MANIFEST
+    # a dangling link counts, so it fails as unreadable instead of dropping its names
+    if [ -e "$native" ] || [ -L "$native" ]; then manifests+=("$native"); fi
+  done
+fi
 for file in "${manifests[@]}"; do
   entries=$(manifest_read "$file") || die "cannot read $file"
   names_add "$file" "$entries"

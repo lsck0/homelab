@@ -177,6 +177,14 @@
       "powered": false,
       "zone": "internal"
     },
+    "134": {
+      "enabled": "true",
+      "idle": null,
+      "ip": "10.100.0.134",
+      "name": "134-internal-taskchampion",
+      "powered": true,
+      "zone": "internal"
+    },
     "140": {
       "enabled": "true",
       "idle": null,
@@ -774,6 +782,17 @@
       "port": 8384,
       "protocol": "http",
       "vmid": 104,
+      "zone": "internal"
+    },
+    "taskchampion": {
+      "app": null,
+      "health": "/",
+      "host": "tasks.lsck0.dev",
+      "onion": null,
+      "path": "/",
+      "port": 10222,
+      "protocol": "http",
+      "vmid": 134,
       "zone": "internal"
     },
     "teamspeak": {

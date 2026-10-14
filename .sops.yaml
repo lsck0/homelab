@@ -145,6 +145,12 @@ creation_rules:
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
   - path_regex: src/instances/preconfigured/133-internal-huginn/secrets\.shared\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1lrztrmyfyyvpq0e77u6durzlj3nynwf2m4wfttxq5z5vk0rm25jslr59cx
+  - path_regex: src/instances/preconfigured/134-internal-taskchampion/age\.sops$
+    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
+  - path_regex: src/instances/preconfigured/134-internal-taskchampion/secrets\.shared\.sops\.json$
+    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1zyznkejqum0rg7d7szx6f0xhpal4j2vz6yznls0m67jeee243sjqzlezca
+  - path_regex: src/instances/preconfigured/134-internal-taskchampion/secrets\.sops\.json$
+    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1zyznkejqum0rg7d7szx6f0xhpal4j2vz6yznls0m67jeee243sjqzlezca
   - path_regex: src/instances/preconfigured/140-internal-headscale/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
   - path_regex: src/instances/preconfigured/140-internal-headscale/secrets\.shared\.sops\.json$
