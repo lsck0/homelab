@@ -28,17 +28,17 @@ let
     cobblemon = { version = "1.21.1"; protocol = 767; };
     # the newest release (VERSION=LATEST, the default pack); 26.3 requires java 25
     vanilla = { image = imageJava25; };
-    # cobblemon with every pokemon: the AllTheMons datapack (modrinth `allthemons`, a datapack, not a modpack) on the
-    # cobblemon mod, neoforge 1.21.1; both pinned by modrinth version id (cobblemon 1.8.2, allthemons 4.0). cobblemon
-    # needs kotlin for forge, which the image fetches only with MODRINTH_DOWNLOAD_DEPENDENCIES
+    # All the Mons, the ATM team's cobblemon modpack: its server files (ServerFiles-<version>.zip from the pack's
+    # curseforge page) sit in the modpack share, unpacked over the data dir by the image; neoforge pinned as its
+    # startserver.sh pins it.
     atm = {
       version = "1.21.1";
       protocol = 767;
       pack = ''
         TYPE=NEOFORGE
         VERSION=1.21.1
-        MODRINTH_PROJECTS=cobblemon:9IXh9584,datapack:allthemons:hSovtvek
-        MODRINTH_DOWNLOAD_DEPENDENCIES=required
+        NEOFORGE_VERSION=21.1.249
+        GENERIC_PACK=/modpacks/allthemons-serverfiles-1.3.0.zip
         LEVEL=allthemons
       '';
     };

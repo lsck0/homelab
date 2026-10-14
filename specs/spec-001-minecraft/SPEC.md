@@ -270,8 +270,9 @@ path says otherwise (those are relative to `src/`).
 
 - [x] **R-070** `main.nix` declares `servers`, an attrset of name to `{ version ? null; protocol ? null; image ?; pack ? }`.
   Names are DNS labels other than `layout`, `gate` and `state`, enforced by an evaluation assert. The lab declares
-  `cobblemon = { version = "1.21.1"; protocol = 767; }`, `vanilla = { image = imageJava25; }` and `atm` (NeoForge
-  1.21.1, the Cobblemon mod and the AllTheMons datapack from Modrinth, both pinned by version id).
+  `cobblemon = { version = "1.21.1"; protocol = 767; }`, `vanilla = { image = imageJava25; }` and `atm` (the All the Mons
+  modpack: its server files `allthemons-serverfiles-1.3.0.zip` in the modpack share as `GENERIC_PACK`, NeoForge
+  21.1.249).
   (`main.nix:19-45`, `lib/servers.nix:15-39`)
 - [x] **R-071a** Each server has a unit `minecraft-<name>.service`. Its `ExecStartPre` creates
   `/var/lib/minecraft/<name>` (0750, 1000:1000) when missing, runs `podman rm --force --ignore minecraft-<name>`,
@@ -901,6 +902,10 @@ None: every requirement of this spec is built.
 
 ## Decisions
 
+- 2026-10-14: `atm` runs the All the Mons modpack from its server files, not the Cobblemon mod plus the AllTheMons
+  datapack. The owner meant the modpack. Its server zip lives in the modpack share beside the cobblemon pack and is
+  applied by the image's `GENERIC_PACK`. The first atm data dir (the datapack test, no player ever joined) was
+  deleted, so the pack starts on an empty dir.
 - 2026-10-14: Every server's MOTD, and every status the gate answers for a declared server, starts with `[<name>]`.
   The owner asked for it: three entries in one server list otherwise read the same.
 - 2026-10-14: A starting server becomes running only once its own unit is `active`. The first switch on the live lab

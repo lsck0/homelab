@@ -20,8 +20,10 @@ owns the public port 25565 for every server.
 The servers, each at its own address:
 - **cobblemon**, `cobblemon.mc.lsck0.dev`: the owner's custom Cobblemon pack, Minecraft 1.21.1.
 - **vanilla**, `vanilla.mc.lsck0.dev`: plain Minecraft, the newest release.
-- **atm**, `atm.mc.lsck0.dev`: Cobblemon with the AllTheMons datapack (every Pokemon), NeoForge 1.21.1. Its client
-  needs NeoForge 1.21.1 with the Cobblemon mod.
+- **atm**, `atm.mc.lsck0.dev`: the All the Mons modpack 1.3.0 (CurseForge), NeoForge 21.1.249. Players install
+  the same pack version in their launcher. A pack update: put the new ServerFiles zip into
+  `/var/lib/minecraft-modpacks/`, change `GENERIC_PACK` in `/var/lib/minecraft/atm/modpack.env` and in the
+  repo's `servers.atm.pack`.
 
 A player picks the server by the address they add in the launcher; the port stays the default 25565.
 
