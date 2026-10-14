@@ -17,8 +17,13 @@ Whether vm-214 runs at all is its power in AGENTS.md: `on`, or `off` when the ow
 (start it with `vm start 214` only when the owner asks for a server). While the VM runs, mc-gate on it
 owns the public port 25565 for every server.
 
-The servers are **cobblemon**, each at its own address: `cobblemon.mc.lsck0.dev`. A player picks the
-server by the address they add in the launcher; the port stays the default 25565.
+The servers, each at its own address:
+- **cobblemon**, `cobblemon.mc.lsck0.dev`: the owner's custom Cobblemon pack, Minecraft 1.21.1.
+- **vanilla**, `vanilla.mc.lsck0.dev`: plain Minecraft, the newest release.
+- **atm**, `atm.mc.lsck0.dev`: Cobblemon with the AllTheMons datapack (every Pokemon), NeoForge 1.21.1. Its client
+  needs NeoForge 1.21.1 with the Cobblemon mod.
+
+A player picks the server by the address they add in the launcher; the port stays the default 25565.
 
 **One server is awake at a time.** mc-gate answers status pings itself, boots the server a real player
 logs in to, and stops it after 30 minutes without players. A login for a second server while someone is

@@ -264,13 +264,16 @@ The citations of this phase are relative to `src/instances/preconfigured/214-ext
 The citations of this phase are relative to `src/instances/preconfigured/214-external-minecraft/`, except where a
 path says otherwise (those are relative to `src/`).
 
-- [x] **R-070** `main.nix` declares `servers`, an attrset of name to `{ version ? null; protocol ? null; }`. Names are
-  DNS labels other than `layout`, `gate` and `state`, enforced by an evaluation assert. p3 declares
-  `cobblemon = { version = "1.21.1"; protocol = 767; }` alone. (`main.nix:19-27`, `lib/servers.nix:15-39`)
+- [x] **R-070** `main.nix` declares `servers`, an attrset of name to `{ version ? null; protocol ? null; image ?; pack ? }`.
+  Names are DNS labels other than `layout`, `gate` and `state`, enforced by an evaluation assert. The lab declares
+  `cobblemon = { version = "1.21.1"; protocol = 767; }`, `vanilla = { image = imageJava25; }` and `atm` (NeoForge
+  1.21.1, the Cobblemon mod and the AllTheMons datapack from Modrinth, both pinned by version id).
+  (`main.nix:19-43`, `lib/servers.nix:15-39`)
 - [x] **R-071a** Each server has a unit `minecraft-<name>.service`. Its `ExecStartPre` creates
   `/var/lib/minecraft/<name>` (0750, 1000:1000) when missing, runs `podman rm --force --ignore minecraft-<name>`,
-  writes the vanilla default pack (`TYPE=VANILLA`, `VERSION=LATEST`, `LEVEL=vanilla`) when `modpack.env` is missing,
-  and writes an empty json array into each shared file of R-073 that is missing. (`main.nix:115-125, 165`)
+  writes the server's `pack`, else the vanilla default pack (`TYPE=VANILLA`, `VERSION=LATEST`, `LEVEL=vanilla`), when
+  `modpack.env` is missing,
+  and writes an empty json array into each shared file of R-073 that is missing. (`main.nix:136-147, 186`)
 - [x] **R-071b** Its `ExecStart` runs `podman run --rm --name minecraft-<name>` with exactly these options:
   - `--dns=1.1.1.1 --dns=8.8.8.8`;
   - `-p 127.0.0.1:25566:25565 -p 127.0.0.1:25575:25575`;
@@ -284,7 +287,8 @@ path says otherwise (those are relative to `src/`).
   - `-e USE_AIKAR_FLAGS=true -e VIEW_DISTANCE=12 -e SIMULATION_DISTANCE=8 -e SPAWN_PROTECTION=0`;
   - `-e MAX_PLAYERS=42069 -e ENABLE_RCON=true -e ENABLE_WHITELIST=true -e ENFORCE_WHITELIST=true`;
   - `-e REMOVE_OLD_MODS=TRUE -e MAX_TICK_TIME=-1 -e STOP_DURATION=90`;
-  - the image `itzg/minecraft-server:2026.9.1-java21`. (`main.nix:127-155, 166`)
+  - the server's `image`, `itzg/minecraft-server:2026.9.1-java21` (`imageJava21`) unless it names one;
+    `imageJava25` is `itzg/minecraft-server:2026.9.1-java25`. (`main.nix:56-57, 149-175`)
 - [x] **R-071c** Its `ExecStop` is `podman stop --time 120 minecraft-<name>`, and its `ExecStopPost` is
   `podman rm --force --ignore minecraft-<name>`. (`main.nix:168-169`)
 - [x] **R-071d** It sets `TimeoutStopSec=150` and `TimeoutStartSec=infinity`. (`main.nix:171-173`)
@@ -893,6 +897,15 @@ None: every requirement of this spec is built.
 
 ## Decisions
 
+- 2026-10-14: A third server, `atm`, is Cobblemon with every Pokemon: the AllTheMons datapack (Modrinth `allthemons`,
+  a datapack for the Cobblemon mod, not the All the Mods modpack) on Cobblemon, NeoForge 1.21.1, through the image's
+  `MODRINTH_PROJECTS` with the `datapack:` prefix. A server may declare the `pack` it starts with, so a new server
+  needs no `mc-modpack` call before its first login. Rejected: writing its modpack.env by hand on the guest (state
+  outside the repo).
+- 2026-10-14: A second server, `vanilla`, runs the newest release through the default pack (`VERSION=LATEST`). The
+  newest release, 26.3, needs java 25 (the version manifest's `javaVersion.majorVersion`), and cobblemon's NeoForge
+  21.1 pack runs on java 21, so each server names its image; java 21 stays the default. Rejected: one java 25 image for
+  both (the pack is built and tested on java 21).
 - 2026-10-14: Several servers on vm-214, each `<name>.mc.lsck0.dev` from one wildcard record, one running at a time.
   The bare `mc.lsck0.dev` is dropped. Rejected: exact DNS records per server (a DNS change per server).
 - 2026-10-14: A login that starts a server is kicked with "rejoin", not held. Rejected: holding (the owner's choice;
@@ -1041,9 +1054,9 @@ None: every requirement of this spec is built.
 | R-057 | `lib/mc-gate/decider.go` | `Test_spec001_r057_log` | done |
 | R-058 | `lib/mc-gate/cmd/fake-server/` | VM `spec001_r058 fake server` | done |
 | R-059 | `lib/mc-gate.nix`, `tests/mc-gate.nix` | check `mc-gate`, derivation `spec001_r059` | done |
-| R-070 | `main.nix:19-27`, `lib/servers.nix:15-39` | `mc-servers` spec001_r070 | done |
-| R-071a | `main.nix:115-125, 165` | VM `spec001_r071a pre start` | done |
-| R-071b | `main.nix:127-155, 166` | VM `spec001_r071b run` | done |
+| R-070 | `main.nix:19-43`, `lib/servers.nix:15-39` | `mc-servers` spec001_r070 | done |
+| R-071a | `main.nix:136-147, 186` | VM `spec001_r071a pre start` | done |
+| R-071b | `main.nix:56-57, 149-175` | VM `spec001_r071b run` | done |
 | R-071c | `main.nix:168-169` | VM `spec001_r071c stop` | done |
 | R-071d | `main.nix:171-173` | VM `spec001_r071d timeouts` | done |
 | R-071e | `main.nix:160-161, 175-177` | VM `spec001_r071e requires` | done |

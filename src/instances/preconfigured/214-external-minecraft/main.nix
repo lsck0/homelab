@@ -17,13 +17,29 @@ let
   # -----------------------------------------------------------------------------
 
   # the servers this guest offers; the key is the dns label below *.mc and the name of everything the server owns.
-  # version and protocol answer a status ping for a server that never answered one itself (mc-gate R-042).
+  # version and protocol answer a status ping for a server that never answered one itself (mc-gate R-042); image is
+  # the server's java, since each minecraft release names the one it needs (the version manifest's javaVersion); pack
+  # is the modpack.env a server starts with before mc-modpack ever wrote one (default: vanilla, newest release).
   # The lab runs the set below; the vm test passes its own as the module argument `mcServers`, because one declared
   # server can prove neither a `Conflicts=` nor a switch (tests/minecraft.nix). A formal with a default would still
   # be looked up in `_module.args` and fail wherever nothing defines it, so it is read from there by hand.
   servers = config._module.args.mcServers or {
     # the as-built world: the pack (all the mons, neoforge 21.1 for minecraft 1.21.1) runs on java 21
     cobblemon = { version = "1.21.1"; protocol = 767; };
+    # the newest release (VERSION=LATEST, the default pack); 26.3 requires java 25
+    vanilla = { image = imageJava25; };
+    # cobblemon with every pokemon: the AllTheMons datapack (modrinth `allthemons`, a datapack, not a modpack) on the
+    # cobblemon mod, neoforge 1.21.1; both pinned by modrinth version id (cobblemon 1.8.2, allthemons 4.0)
+    atm = {
+      version = "1.21.1";
+      protocol = 767;
+      pack = ''
+        TYPE=NEOFORGE
+        VERSION=1.21.1
+        MODRINTH_PROJECTS=cobblemon:9IXh9584,datapack:allthemons:hSovtvek
+        LEVEL=allthemons
+      '';
+    };
   };
 
   data = "/var/lib/minecraft";
@@ -37,7 +53,8 @@ let
   gateMetricsFile = "${gateStateDir}/metrics.prom";
   # the server's secrets, rendered by sops under /run: never on the nas, never in a snapshot
   serverEnv = config.sops.templates."minecraft-server.env".path;
-  image = "itzg/minecraft-server:2026.9.1-java21";
+  imageJava21 = "itzg/minecraft-server:2026.9.1-java21";
+  imageJava25 = "itzg/minecraft-server:2026.9.1-java25";
   # the image's uid and gid
   serverUid = "1000";
 
@@ -123,7 +140,8 @@ let
       [ -s ${data}/${file} ] || install -m 0640 -o ${serverUid} -g ${serverUid} \
         ${pkgs.writeText "minecraft-${file}" sharedEmpty} ${data}/${file}
     '') sharedFiles}
-    [ -s ${modpackEnvOf name} ] || printf '%s' ${lib.escapeShellArg defaultModpack} > ${modpackEnvOf name}
+    [ -s ${modpackEnvOf name} ] || printf '%s' ${lib.escapeShellArg (servers.${name}.pack or defaultModpack)} \
+      > ${modpackEnvOf name}
     ${podman} rm --force --ignore ${containerOf name}
   '';
 
@@ -154,7 +172,7 @@ let
       -e REMOVE_OLD_MODS=TRUE \
       -e MAX_TICK_TIME=-1 \
       -e STOP_DURATION=90 \
-      ${image}
+      ${servers.${name}.image or imageJava21}
   '';
 
   # one server. The gate starts and stops it; nothing else does, so it has no wantedBy (R-071f).
