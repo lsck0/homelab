@@ -6,7 +6,7 @@ Implemented in:
 - partial, the wildcard host of p1: `src/modules/service.nix`, `src/modules/catalog.nix`, `src/modules/lab-export.nix`,
   `src/core/300-router/main.nix`.
 
-Last reconcile: 2026-10-14 @ 3eceb67
+Last reconcile: 2026-10-14 @ 67a923d
 
 The research and design notes behind the target are in `notes/2026-10-14-multi-server/`. Nothing in them is needed to
 build this spec.
@@ -340,7 +340,7 @@ path says otherwise (those are relative to `src/`).
 
 ### p4: metrics and alert
 
-- [ ] **R-090** The gate writes `/var/lib/mc-gate/metrics.prom` (0644) at start and on every change, atomically
+- [x] **R-090** The gate writes `/var/lib/mc-gate/metrics.prom` (0644) at start and on every change, atomically
   through a temp file in the same directory. It holds:
   - `homelab_mc_phase{server,phase}`;
   - `homelab_mc_sessions{server}`;
@@ -348,10 +348,12 @@ path says otherwise (those are relative to `src/`).
   - `homelab_mc_starts_total{server}` and `homelab_mc_start_failures_total{server}`;
   - `homelab_mc_kicks_total{reason}`;
   - `homelab_mc_switches_total`.
-- [ ] **R-091** tmpfiles links `/var/lib/node-exporter-textfile/mc-gate.prom` to that file, and vm-214 declares
-  `homelab.textfiles = [ "mc-gate" ]`.
-- [ ] **R-092** The alert `minecraft_start_failed` (category `service`, no telegram) fires when
-  `increase(homelab_mc_start_failures_total[1h]) >= 2`. (`src/core/103-internal-grafana/lib/rules.nix`)
+  (`214-external-minecraft/lib/mc-gate/metrics.go:70-129`, `lib/mc-gate/decider.go:154, 572-582`)
+- [x] **R-091** tmpfiles links `/var/lib/node-exporter-textfile/mc-gate.prom` to that file, and vm-214 declares
+  `homelab.textfiles = [ "mc-gate" ]`. (`214-external-minecraft/main.nix:325, 390-392`)
+- [x] **R-092** The alert `minecraft_start_failed` (category `service`, no telegram) fires when
+  `increase(homelab_mc_start_failures_total[1h]) >= 2`, which its strict comparison writes as a bound of one failure.
+  It is a rule over this guest's own metric, so it lives in its instance (`214-external-minecraft/instance.nix:28-44`).
 
 ## Design
 
@@ -425,11 +427,16 @@ Server {
   lastStartFailed bool             // set by R-045c, R-046b (unit failed), R-053a; cleared on the next start
   status         []byte            // the backend's last live status JSON (R-042)
   statusAt       time              // when status was fetched; reused within statusCacheS
+  startsTotal    int               // R-090; never pruned, so prometheus sees a counter
+  startFailuresTotal int           // R-090; a start that never came up, not a later crash
 }
 Session { id uint64; source netip.Addr; startedAt time }
 Source  { shortSessionEnds []time; markedLooping bool; starts []time }   // per address, pruned past an hour
 Budget  { switches []time }                                              // pruned past an hour
 ```
+
+The decider holds two counters of its own for R-090, beside the records: `kicks map[reason]int` and
+`switchesTotal int`.
 
 The settings file, `/etc/mc-gate/settings.json`, generated from nix:
 
@@ -463,6 +470,9 @@ The state file, `/run/mc-gate/state.json`, written by the gate:
 
 The status cache, `/var/lib/mc-gate/<name>.json`, is the backend's last status JSON as received. The marker
 `/var/lib/mc-gate/<name>.started` is an empty file whose mtime is the server's last good start (R-053b).
+
+The metrics file, `/var/lib/mc-gate/metrics.prom` (R-090), is the records and those two counters in the prometheus
+text format, written beside the state whenever the rendered view differs from the one on disk.
 
 ### mc-gate (R-040 to R-059, R-090)
 
@@ -819,9 +829,10 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
   - `src/instances/preconfigured/113-internal-hermes/tests/hermes-agent.sh minecraft`, run by hand: its case
     `spec001_r082`;
   - R-081a to R-081f are proven by the phase's review against the listed docs.
-- **p4.** The `minecraft` VM subtests `spec001_r090 metrics` (the file's metrics) and `spec001_r091 textfile` (the
-  node exporter serves `homelab_mc_phase` through the link). `nix build ./src#checks.x86_64-linux.alert-rules`, case
-  `spec001_r092`.
+- **p4.** `Test_spec001_r090_metrics` in `lib/mc-gate/metrics_test.go` (every metric, the types, the atomic write),
+  run by the `mc-gate` check. The `minecraft` VM subtests `spec001_r090 metrics` (the file's metrics and its mode)
+  and `spec001_r091 textfile` (the node exporter serves `homelab_mc_phase` through the link).
+  `nix build ./src#checks.x86_64-linux.alert-rules`, case `spec001_r092`.
 - **Before a phase merges.** `nix flake check ./src`, and `shellcheck` passing.
 
 ## Roadmap
@@ -831,7 +842,7 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 | p1 | R-020 to R-029: the platform accepts and resolves wildcard tcp hosts; no route uses one, so the lab runs as before | none | none | merged |
 | p2 | R-040 to R-059: mc-gate builds with its tests under the check `mc-gate`; nothing runs it, vm-214 still runs lazymc | none | none | merged |
 | p3 | R-070 to R-083: vm-214 runs mc-gate and `cobblemon` at `cobblemon.mc.lsck0.dev`; lazymc and `mc.lsck0.dev` are gone; replaces R-001, R-002, R-003, R-005, R-006, R-009 | p1, p2 | none | merged |
-| p4 | R-090 to R-092: the gate's metrics reach Prometheus, and failed starts alert | p3 | none | planned |
+| p4 | R-090 to R-092: the gate's metrics reach Prometheus, and failed starts alert | p3 | none | merged |
 
 ## Rollout
 
@@ -878,9 +889,7 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 
 ## Gaps
 
-| Requirements | What the code does instead | Closed by |
-|---|---|---|
-| R-090 to R-092 | no Minecraft metrics or alert beyond the tcp probe | p4 |
+None: every requirement of this spec is built.
 
 ## Decisions
 
@@ -953,6 +962,19 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 - 2026-10-14: The sops template has no `restartUnits`. `switch-to-configuration` starts a unit it is told to restart
   even when it was stopped, so a rotated rcon password would wake every server at once, against R-071f. A server
   reads the rendered file at its next start anyway.
+
+- 2026-10-14: R-092's `>= 2` is written as a strict `> 1` over `increase(...[1h])`, because the lab's rule schema
+  (`modules/telemetry.nix` `alertType`) compares with `gt` or `lt` only. The counter moves in whole steps, so the two
+  say the same thing: the second failed start of an hour alerts, the first does not.
+- 2026-10-14: The rule lives in `214-external-minecraft/instance.nix` `alerts`, not in `103-internal-grafana`: it is
+  a rule over one guest's own metric, which is where `lib/rules.nix` and `modules/instance-schema.nix` both say such
+  a rule belongs. Its promtool case stays in the grafana check, which is the only place that evaluates rules.
+- 2026-10-14: The metrics file is written only when the rendered view differs from the one already on disk. Every
+  status ping of the public port reaches the decider, and unlike the state in `/run` this file is on the guest's
+  disk. Freshness is `node_textfile_mtime_seconds`, which the node exporter publishes for the file anyway, so the
+  gate writes no timestamp of its own.
+- 2026-10-14: Only a failed *start* counts in `homelab_mc_start_failures_total`; a server that dies after hours of
+  play raises `failures` (R-046b) but not the counter, so the alert of R-092 keeps naming the pack or the world.
 
 ## Coverage
 
@@ -1049,6 +1071,6 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 | R-081f | `src/core/300-router/skill.md:30-31`, `src/scripts/init.sh:114` | phase review | done |
 | R-082 | `113-internal-hermes/tests/hermes-agent.sh:251-254, 98-99` | `hermes-agent.sh minecraft` case spec001_r082 | done |
 | R-083 | `core/104-internal-nas/tests/kopia.nix:16-17, 86-89` | `kopia` subtest `spec001_r083 restore` | done |
-| R-090 | `lib/mc-gate/metrics.go` | VM `spec001_r090 metrics` | gap |
-| R-091 | `main.nix` tmpfiles, `homelab.textfiles` | VM `spec001_r091 textfile` | gap |
-| R-092 | `src/core/103-internal-grafana/lib/rules.nix` | `alert-rules` spec001_r092 | gap |
+| R-090 | `lib/mc-gate/metrics.go` | `Test_spec001_r090_metrics`, VM `spec001_r090 metrics` | done |
+| R-091 | `main.nix` tmpfiles, `homelab.textfiles` | VM `spec001_r091 textfile` | done |
+| R-092 | `214-external-minecraft/instance.nix` `alerts` | `alert-rules` spec001_r092 | done |
