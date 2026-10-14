@@ -99,73 +99,104 @@ A line marked "Replaced at p3" stays true until p3 merges; the p3 PR strikes it 
 
 ### p2: mc-gate, built and tested, not wired
 
-- [ ] **R-040** mc-gate reads a connection's first frame within `handshakeTimeoutS = 5` and at most
+The citations of this phase are relative to `src/instances/preconfigured/214-external-minecraft/lib/mc-gate/`.
+
+- [x] **R-040** mc-gate reads a connection's first frame within `handshakeTimeoutS = 5` and at most
   `handshakeBytesMax = 1024`.
   - The bytes `FE 01 FA`, or a first byte 0xFE followed by no valid frame, get a legacy 0xFF kick: protocol 127,
     text `lsck0.dev minecraft`.
   - Anything else must be a well-formed handshake, or the connection is closed.
-- [ ] **R-041** The handshake address is normalized in this order: cut at the first `\0`, cut at the first `\`,
+  (`conn.go:120-142`, `frame.go:232-253`)
+- [x] **R-041** The handshake address is normalized in this order: cut at the first `\0`, cut at the first `\`,
   strip one trailing `.`, lowercase, strip the suffix `.mc.lsck0.dev`. A result that is not a declared server name is
   unknown.
-- [ ] **R-042** Status (intent 1) is answered by the gate, and the ping is echoed.
+  (`frame.go:297-309`)
+- [x] **R-042** Status (intent 1) is answered by the gate, and the ping is echoed.
   - A running server: its live status, cached for `statusCacheS = 5`.
   - A server not running, with a cached last status (`/var/lib/mc-gate/<name>.json`): version, protocol, max players
     and favicon from the cache, `online` 0, `sample` empty, the phase's description.
   - A server not running, without a cache: the nix version and protocol (`?` and -1 when null), max players 0, no
     favicon, `online` 0, `sample` empty, the phase's description.
   - An unknown name: version `?`, protocol -1, description `no such server`.
-- [ ] **R-043** A login (intent 2 or 3) reads Login Start within `handshakeTimeoutS`, then asks the decider. A relay
+  (`decider.go:436-462`, `status.go:78-99`)
+- [x] **R-043** A login (intent 2 or 3) reads Login Start within `handshakeTimeoutS`, then asks the decider. A relay
   writes the buffered handshake and Login Start to the backend and copies both ways. A kick sends a login-state
   Disconnect with a JSON text and closes. The player name is used for the log only.
-- [ ] **R-044** One goroutine owns every record of the data model; connections reach it over a channel. Concurrent
+  (`conn.go:148-165`, `conn.go:85-112`)
+- [x] **R-044** One goroutine owns every record of the data model; connections reach it over a channel. Concurrent
   logins are decided one after the other.
-- [ ] **R-045a** Issuing a start sets the target to `starting` and every other active server to `stopping` before any
+  (`decider.go:571-599`, `decider.go:607-612`)
+- [x] **R-045a** Issuing a start sets the target to `starting` and every other active server to `stopping` before any
   reply goes out.
-- [ ] **R-045b** The decider runs `systemctl start --no-block <unit>` and `systemctl stop --no-block <unit>`
+  (`decider.go:291-315`)
+- [x] **R-045b** The decider runs `systemctl start --no-block <unit>` and `systemctl stop --no-block <unit>`
   synchronously, before it handles the next event.
-- [ ] **R-045c** A non-zero exit of that command restores the records, grows the server's `failures`, sets its
+  (`decider.go:317-325`)
+- [x] **R-045c** A non-zero exit of that command restores the records, grows the server's `failures`, sets its
   `lastStartFailed`, and gives the login the `failed` kick.
-- [ ] **R-046a** Every `reconcileS = 5`, always, the decider reads every server unit's `ActiveState` and `Job` with
+  (`decider.go:326-334`)
+- [x] **R-046a** Every `reconcileS = 5`, always, the decider reads every server unit's `ActiveState` and `Job` with
   one `systemctl show` call. `active`, `activating` and `reloading` count as started, `deactivating` as stopping,
   `inactive` and `failed` as idle.
-- [ ] **R-046b** A record `starting` or `running` whose unit is idle with no job becomes `sleeping`; when the unit is
+  (`reconcile.go:13-46`, `systemd.go:63-73`)
+- [x] **R-046b** A record `starting` or `running` whose unit is idle with no job becomes `sleeping`; when the unit is
   `failed`, `failures` grows and `lastStartFailed` is set.
-- [ ] **R-046c** A record `sleeping` whose unit is started becomes `starting`, and every other active record becomes
+  (`reconcile.go:57-65`)
+- [x] **R-046c** A record `sleeping` whose unit is started becomes `starting`, and every other active record becomes
   `stopping`.
-- [ ] **R-046d** A record `sleeping` whose unit is stopping becomes `stopping`.
-- [ ] **R-046e** A record `stopping` whose unit is idle with no job becomes `sleeping`.
-- [ ] **R-046f** A record `stopping` whose unit is started with no job becomes `running`.
-- [ ] **R-046g** A record `starting` becomes `running` once its backend answers a loopback status ping.
-- [ ] **R-047** A server is occupied when any of these holds:
+  (`reconcile.go:66-72`, `reconcile.go:96-104`)
+- [x] **R-046d** A record `sleeping` whose unit is stopping becomes `stopping`.
+  (`reconcile.go:75-77`)
+- [x] **R-046e** A record `stopping` whose unit is idle with no job becomes `sleeping`.
+  (`reconcile.go:81-85`)
+- [x] **R-046f** A record `stopping` whose unit is started with no job becomes `running`.
+  (`reconcile.go:86-88`)
+- [x] **R-046g** A record `starting` becomes `running` once its backend answers a loopback status ping.
+  (`reconcile.go:106-124`)
+- [x] **R-047** A server is occupied when any of these holds:
   - its last backend `players.online` is above 0;
   - it has a live relayed session older than `loginGraceS = 60`;
   - it has a live relayed session from a source not marked as looping;
   - `now < reservedUntil`.
-- [ ] **R-048a** A source whose sessions ended before `loginGraceS` three times (`loopShortSessionsMax = 3`) within
+  (`decider.go:271-284`)
+- [x] **R-048a** A source whose sessions ended before `loginGraceS` three times (`loopShortSessionsMax = 3`) within
   `loopWindowS = 600` is marked as looping.
-- [ ] **R-048b** A live session younger than `loginGraceS` from a marked source does not occupy.
-- [ ] **R-048c** A mark clears when a session of the source outlives `loginGraceS`, or after `loopWindowS` without a
+  (`sources.go:64-76`)
+- [x] **R-048b** A live session younger than `loginGraceS` from a marked source does not occupy.
+  (`decider.go:258-269`, `decider.go:277-283`)
+- [x] **R-048c** A mark clears when a session of the source outlives `loginGraceS`, or after `loopWindowS` without a
   short session.
-- [ ] **R-048d** A source that is not exempt holds at most `sessionsPerSourceMax = 4` live sessions. A login beyond
+  (`sources.go:50-57`, `sources.go:66-70`)
+- [x] **R-048d** A source that is not exempt holds at most `sessionsPerSourceMax = 4` live sessions. A login beyond
   that is closed before the decision table (R-052), with the outcome `capped` and no text.
-- [ ] **R-048e** Exempt from marking and from the session cap are the `allow` cidrs and the addresses of the `allow`
+  (`decider.go:365-372`, `conn.go:161-162`)
+- [x] **R-048e** Exempt from marking and from the session cap are the `allow` cidrs and the addresses of the `allow`
   names. nix feeds mc-gate the same values it feeds lab-gate (`src/modules/traefik/default.nix:467-474`): the private
   ranges, wireguard, and the names resolving to the house's public address and v6 prefix. mc-gate carries its own
   check for them: lab-gate's `allow.go` is another Go module, and code one instance uses stays in that instance's
   `lib/` (`src/tests/policy/placement.nix`).
-- [ ] **R-049** A server that becomes `running` after a start gets `reservedUntil = now + rejoinS`, with
+  (`allow.go:114-139`, `decider.go:424-429`)
+- [x] **R-049** A server that becomes `running` after a start gets `reservedUntil = now + rejoinS`, with
   `rejoinS = 180`.
-- [ ] **R-050a** `idleSince` is the latest of the last session end, `reservedUntil`, and the moment the server became
+  (`decider.go:226-238`)
+- [x] **R-050a** `idleSince` is the latest of the last session end, `reservedUntil`, and the moment the server became
   `running`.
-- [ ] **R-050b** A `running` server not occupied for `sleepAfterS = 1800` since `idleSince` is stopped.
-- [ ] **R-050c** After a gate restart, a running server gets `idleSince = now`.
-- [ ] **R-051a** A source causes at most `startsPerSourcePerHourMax = 3` starts per hour.
-- [ ] **R-051b** A start that stops a running server counts against `switchesPerHourMax = 6` per hour across all
+  (`decider.go:216-224`)
+- [x] **R-050b** A `running` server not occupied for `sleepAfterS = 1800` since `idleSince` is stopped.
+  (`reconcile.go:151-161`)
+- [x] **R-050c** After a gate restart, a running server gets `idleSince = now`.
+  (`main.go:122-123`, `decider.go:228-234`)
+- [x] **R-051a** A source causes at most `startsPerSourcePerHourMax = 3` starts per hour.
+  (`sources.go:78-82`, `decider.go:402-405`)
+- [x] **R-051b** A start that stops a running server counts against `switchesPerHourMax = 6` per hour across all
   sources. A start from all-asleep does not.
-- [ ] **R-051c** A server stays up `minimumOnlineS = 300` after it became `running` before a switch may stop it. This
+  (`sources.go:84-88`, `decider.go:338-343`)
+- [x] **R-051c** A server stays up `minimumOnlineS = 300` after it became `running` before a switch may stop it. This
   value replaces R-002's 60 at p3.
-- [ ] **R-052** A login for server T, with O the other active server, gets the first matching row. Row 0 comes
+  (`decider.go:399-400`)
+- [x] **R-052** A login for server T, with O the other active server, gets the first matching row. Row 0 comes
   first: a login from a source over `sessionsPerSourceMax` (R-048d) is closed: outcome `capped`, no text.
+  (`decider.go:363-407`)
 
   | T | O | outcome |
   |---|---|---|
@@ -181,13 +212,17 @@ A line marked "Replaced at p3" stays true until p3 merges; the p3 PR strikes it 
   | sleeping | running, not occupied | start T, O `stopping`; kick `starting` |
   | sleeping | none | start T; kick `starting` |
 
-- [ ] **R-053a** A start with no answering backend after `startTimeoutS = 300` is stopped, `failures` grows, and
+- [x] **R-053a** A start with no answering backend after `startTimeoutS = 300` is stopped, `failures` grows, and
   `lastStartFailed` is set. Every start clears `lastStartFailed`.
-- [ ] **R-053b** The timeout is `firstStartTimeoutS = 1200` when the server's `modpack.env` is newer than its last
+  (`reconcile.go:126-141`)
+- [x] **R-053b** The timeout is `firstStartTimeoutS = 1200` when the server's `modpack.env` is newer than its last
   good start, recorded as the mtime of `/var/lib/mc-gate/<name>.started`.
-- [ ] **R-053c** A `sleeping` server with `lastStartFailed` set has the status description
+  (`reconcile.go:143-149`, `state.go:124-135`)
+- [x] **R-053c** A `sleeping` server with `lastStartFailed` set has the status description
   `failed to start, join to try again`.
-- [ ] **R-054** The texts are named constants in one Go file:
+  (`decider.go:456-457`, `texts.go:85-88`)
+- [x] **R-054** The texts are named constants in one Go file:
+  (`texts.go:28-48`, `texts.go:59-103`)
 
   | key | text |
   |---|---|
@@ -202,20 +237,28 @@ A line marked "Replaced at p3" stays true until p3 merges; the p3 PR strikes it 
 
   The status descriptions are `sleeping, join to start it`, `starting, rejoin in about a minute`, `stopping`,
   `<O> is running with <n> players`, `failed to start, join to try again` and `no such server`.
-- [ ] **R-055a** The gate reads its settings from the path given by `-settings`, in the shape of the data model.
-- [ ] **R-055b** On SIGHUP it reads the settings again without closing any connection.
-- [ ] **R-055c** A reload keeps every server that has sessions, until its sessions end.
-- [ ] **R-056** The gate writes `/run/mc-gate/state.json` on every change, in the shape of the data model.
-- [ ] **R-057** The gate logs one journal line per event:
+- [x] **R-055a** The gate reads its settings from the path given by `-settings`, in the shape of the data model.
+  (`settings.go:98-151`, `main.go:29-36`)
+- [x] **R-055b** On SIGHUP it reads the settings again without closing any connection.
+  (`main.go:38-53`, `decider.go:480-506`)
+- [x] **R-055c** A reload keeps every server that has sessions, until its sessions end.
+  (`decider.go:493-505`, `decider.go:508-515`)
+- [x] **R-056** The gate writes `/run/mc-gate/state.json` on every change, in the shape of the data model.
+  (`decider.go:552-569`, `state.go:33-50`)
+- [x] **R-057** The gate logs one journal line per event:
   - `login` (source, name, server, outcome);
   - `start` and `stop` (server, reason, and the causing source for a switch);
   - `start-failed` (server, seconds);
   - `reconcile` (the correction).
-- [ ] **R-058** `cmd/fake-server` in the same module is a test backend. It speaks handshake, status and login, reports
+  (`log.go:14-21`, `log.go:37-64`)
+- [x] **R-058** `cmd/fake-server` in the same module is a test backend. It speaks handshake, status and login, reports
   `players.online` from its live sessions, and with a flag ignores SIGTERM.
-- [ ] **R-059** The module lives in `src/instances/preconfigured/214-external-minecraft/lib/mc-gate/`, uses Go's
+  (`cmd/fake-server/main.go:117-131`, `cmd/fake-server/main.go:133-169`)
+- [x] **R-059** The module lives in `src/instances/preconfigured/214-external-minecraft/lib/mc-gate/`, uses Go's
   standard library only, and is packaged by `lib/mc-gate.nix` with `buildGoModule`, whose check phase runs its tests.
   The check `mc-gate` (`tests/mc-gate.nix`) builds it. No unit runs it.
+  (`src/instances/preconfigured/214-external-minecraft/lib/mc-gate.nix:19-27`,
+  `src/instances/preconfigured/214-external-minecraft/tests/mc-gate.nix:12-24`)
 
 ### p3: several servers on vm-214
 
@@ -637,7 +680,10 @@ target would change the address the gate sees.
 ## Performance
 
 - **Handshake decision.** Under 1 ms of gate CPU per connection, with no allocation beyond the frame buffer of at most
-  1 KiB. Measured with a Go benchmark of the frame reader and decider.
+  1 KiB. Measured with a Go benchmark of the frame reader and decider, `Benchmark_spec001_r040_frame` and
+  `Benchmark_spec001_r044_decide` (`lib/mc-gate/bench_test.go`): 128 ns and 144 B for the frame, handshake and
+  normalization, and 9.7 µs and 2.6 KiB for one decision handed to the owning goroutine and waited for (a 9950X3D).
+  The decision's bytes are its reply channel and its kick text, not a buffer that grows with the input.
 - **Relay.** Bytes are copied with `io.Copy` between two TCP sockets. Throughput is bounded by the network, and the
   gate adds no per-packet work after the login decision.
 - **Memory.** The gate stays under 32 MiB RSS with 256 connections (the router's cap). Measured in the VM test
@@ -769,7 +815,7 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 | Phase | Delivers (requirements) | Depends on | PRs | State |
 |---|---|---|---|---|
 | p1 | R-020 to R-029: the platform accepts and resolves wildcard tcp hosts; no route uses one, so the lab runs as before | none | none | merged |
-| p2 | R-040 to R-059: mc-gate builds with its tests under the check `mc-gate`; nothing runs it, vm-214 still runs lazymc | none | none | planned |
+| p2 | R-040 to R-059: mc-gate builds with its tests under the check `mc-gate`; nothing runs it, vm-214 still runs lazymc | none | none | merged |
 | p3 | R-070 to R-083: vm-214 runs mc-gate and `cobblemon` at `cobblemon.mc.lsck0.dev`; lazymc and `mc.lsck0.dev` are gone; replaces R-001, R-002, R-003, R-005, R-006, R-009 | p1, p2 | none | planned |
 | p4 | R-090 to R-092: the gate's metrics reach Prometheus, and failed starts alert | p3 | none | planned |
 
@@ -820,7 +866,6 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 
 | Requirements | What the code does instead | Closed by |
 |---|---|---|
-| R-040 to R-059, with R-045a to R-045c, R-046a to R-046g, R-048a to R-048e, R-050a to R-050c, R-051a to R-051c, R-053a to R-053c, R-055a to R-055c | no mc-gate; lazymc fronts one server (R-001, R-002) | p2 |
 | R-070 to R-083, with R-071a to R-071f, R-074a to R-074d, R-076a to R-076d, R-081a to R-081f | one server, one data dir, lazymc on 25565, `mc.lsck0.dev`, tools without a server argument, hermes test expects .208 | p3 |
 | R-090 to R-092 | no Minecraft metrics or alert beyond the tcp probe | p4 |
 
@@ -848,6 +893,19 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 - 2026-10-14: Polkit by exact unit names. Rejected: a `^minecraft-.*` pattern (matches non-server units).
 - 2026-10-14: Gate settings reload on SIGHUP, the binary only on a manual restart. Rejected: restart on every switch
   (cuts every player).
+- 2026-10-14: The Performance section's benchmark lives beside the module as `bench_test.go` and is run by hand, not
+  by the `mc-gate` check. A benchmark in a nix sandbox measures the sandbox's share of the machine, so a check that
+  asserted a number would fail on load instead of on a regression.
+- 2026-10-14: Where R-054's description `<O> is running with <n> players` applies: a status ping for a sleeping
+  server while another one runs. R-053c's failed description wins over it, since a player who cannot start this
+  server wants its own reason first.
+- 2026-10-14: R-046c and R-046f disagree when two units are active at once (a hand start during a switch): one
+  sleeping record is promoted per pass, the hand-started unit wins over an already-running record, and every further
+  active unit is stopped. Rejected: promoting both (two running records break R-072's one at a time).
+- 2026-10-14: Settings with no server at all are refused at parse time: such a gate could only ever refuse, and a
+  typo in nix would look like a working gate.
+- 2026-10-14: A `systemctl stop` that exits non-zero logs R-057's `stop` event at warning with the error, instead of
+  a sixth event name. Rejected: a `stop-failed` event (the reconcile corrects the record anyway, R-046d to R-046f).
 - 2026-10-14: The p1 host cases live in the `apps-catalog` and `lab` checks, not in `policy-eval` as Testing first
   said. `policy-eval` runs the laws of `src/tests/policy/` over the real configurations, and a law states policy
   instead of copying a module; a refusal of a catalog nobody declares has no real configuration to run over. The two
@@ -870,55 +928,55 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 | R-010 | `src/core/103-internal-grafana/main.nix:195-200` | none | done |
 | R-011 | `instance.nix:3-14` | `src/tests/policy/guests.nix` (pre-spec law) | done |
 | R-020 | `src/modules/service.nix:74-80, 130` | `apps-catalog` spec001_r020 | done |
-| R-021 | `src/modules/catalog.nix:348-349` | `apps-catalog` spec001_r021, `lab` spec001_r021 | done |
-| R-022 | `src/modules/catalog.nix:350-351` | `apps-catalog` spec001_r022 | done |
-| R-023 | `src/modules/catalog.nix:352-353` | `apps-catalog` spec001_r023 | done |
-| R-024 | `src/modules/catalog.nix:216-224, 354` | `apps-catalog` spec001_r024 | done |
-| R-025 | `src/core/300-router/main.nix:151-158, 612-620` | `router-zones` spec001_r025 | done |
-| R-026 | `src/core/300-router/main.nix:621-625` | `router-zones` spec001_r026 | done |
-| R-027 | `src/core/300-router/main.nix:126-129, 148-150` | `router-zones` spec001_r027 | done |
-| R-028 | `src/core/300-router/main.nix:131-143` | `ddns-cloudflare` spec001_r028, `router-zones` spec001_r028 | done |
-| R-029 | `src/modules/lab-export.nix:15-16, 35-39` | `lab` spec001_r029 | done |
-| R-040 | `lib/mc-gate/frame.go` | `Test_spec001_r040_frame`, `Fuzz_spec001_r040_frame` | gap |
-| R-041 | `lib/mc-gate/frame.go` | `Test_spec001_r041_normalize` | gap |
-| R-042 | `lib/mc-gate/status.go` | `Test_spec001_r042_status`, VM `spec001_r042 status` | gap |
-| R-043 | `lib/mc-gate/conn.go` | `Test_spec001_r043_login`, VM `spec001_r043 login` | gap |
-| R-044 | `lib/mc-gate/decider.go` | `Test_spec001_r044_sim` | gap |
-| R-045a | `lib/mc-gate/decider.go` | `Test_spec001_r045a_phase`, `Test_spec001_r044_sim` | gap |
-| R-045b | `lib/mc-gate/decider.go` | `Test_spec001_r045b_sync` | gap |
-| R-045c | `lib/mc-gate/decider.go` | `Test_spec001_r045c_rollback` | gap |
-| R-046a | `lib/mc-gate/reconcile.go` | `Test_spec001_r046a_mapping` | gap |
-| R-046b | `lib/mc-gate/reconcile.go` | `Test_spec001_r046b_idle` | gap |
-| R-046c | `lib/mc-gate/reconcile.go` | `Test_spec001_r046c_hand_start` | gap |
-| R-046d | `lib/mc-gate/reconcile.go` | `Test_spec001_r046d_stopping` | gap |
-| R-046e | `lib/mc-gate/reconcile.go` | `Test_spec001_r046e_stopped` | gap |
-| R-046f | `lib/mc-gate/reconcile.go` | `Test_spec001_r046f_unqueued_stop` | gap |
-| R-046g | `lib/mc-gate/reconcile.go` | `Test_spec001_r046g_running` | gap |
-| R-047 | `lib/mc-gate/decider.go` | `Test_spec001_r047_occupied`, `Test_spec001_r044_sim` | gap |
-| R-048a | `lib/mc-gate/sources.go` | `Test_spec001_r048a_mark` | gap |
-| R-048b | `lib/mc-gate/sources.go` | `Test_spec001_r048b_young` | gap |
-| R-048c | `lib/mc-gate/sources.go` | `Test_spec001_r048c_clear` | gap |
-| R-048d | `lib/mc-gate/sources.go` | `Test_spec001_r048d_cap` | gap |
-| R-048e | `lib/mc-gate/allow.go` | `Test_spec001_r048e_exempt` | gap |
-| R-049 | `lib/mc-gate/decider.go` | `Test_spec001_r049_reservation` | gap |
-| R-050a | `lib/mc-gate/decider.go` | `Test_spec001_r050a_idle_since` | gap |
-| R-050b | `lib/mc-gate/decider.go` | `Test_spec001_r050b_sleep` | gap |
-| R-050c | `lib/mc-gate/decider.go` | `Test_spec001_r050c_restart` | gap |
-| R-051a | `lib/mc-gate/decider.go` | `Test_spec001_r051a_source`, `Test_spec001_r044_sim` | gap |
-| R-051b | `lib/mc-gate/decider.go` | `Test_spec001_r051b_switches`, `Test_spec001_r044_sim` | gap |
-| R-051c | `lib/mc-gate/decider.go` | `Test_spec001_r051c_minimum_online` | gap |
-| R-052 | `lib/mc-gate/decider.go` | `Test_spec001_r052_table`, VM `spec001_r052 decisions` | gap |
-| R-053a | `lib/mc-gate/decider.go` | `Test_spec001_r053a_timeout` | gap |
-| R-053b | `lib/mc-gate/decider.go` | `Test_spec001_r053b_first_start` | gap |
-| R-053c | `lib/mc-gate/decider.go` | `Test_spec001_r053c_failed` | gap |
-| R-054 | `lib/mc-gate/texts.go` | `Test_spec001_r054_texts` | gap |
-| R-055a | `lib/mc-gate/settings.go` | `Test_spec001_r055a_settings` | gap |
-| R-055b | `lib/mc-gate/settings.go` | `Test_spec001_r055b_reload`, VM `spec001_r074d reload` | gap |
-| R-055c | `lib/mc-gate/settings.go` | `Test_spec001_r055c_keep` | gap |
-| R-056 | `lib/mc-gate/state.go` | `Test_spec001_r056_state` | gap |
-| R-057 | `lib/mc-gate/decider.go` | `Test_spec001_r057_log` | gap |
+| R-021 | `src/modules/catalog.nix:347-348` | `apps-catalog` spec001_r021, `lab` spec001_r021 | done |
+| R-022 | `src/modules/catalog.nix:349-350` | `apps-catalog` spec001_r022 | done |
+| R-023 | `src/modules/catalog.nix:351-352` | `apps-catalog` spec001_r023 | done |
+| R-024 | `src/modules/catalog.nix:216-223, 353` | `apps-catalog` spec001_r024 | done |
+| R-025 | `src/core/300-router/main.nix:152-158, 615-621` | `router-zones` spec001_r025 | done |
+| R-026 | `src/core/300-router/main.nix:622-626` | `router-zones` spec001_r026 | done |
+| R-027 | `src/core/300-router/main.nix:126-130, 149-151` | `router-zones` spec001_r027 | done |
+| R-028 | `src/core/300-router/main.nix:132-144` | `ddns-cloudflare` spec001_r028, `router-zones` spec001_r028 | done |
+| R-029 | `src/modules/lab-export.nix:15-17, 35-39` | `lab` spec001_r029 | done |
+| R-040 | `lib/mc-gate/frame.go` | `Test_spec001_r040_frame`, `Fuzz_spec001_r040_frame` | done |
+| R-041 | `lib/mc-gate/frame.go` | `Test_spec001_r041_normalize` | done |
+| R-042 | `lib/mc-gate/status.go` | `Test_spec001_r042_status`, VM `spec001_r042 status` | done |
+| R-043 | `lib/mc-gate/conn.go` | `Test_spec001_r043_login`, VM `spec001_r043 login` | done |
+| R-044 | `lib/mc-gate/decider.go` | `Test_spec001_r044_sim` | done |
+| R-045a | `lib/mc-gate/decider.go` | `Test_spec001_r045a_phase`, `Test_spec001_r044_sim` | done |
+| R-045b | `lib/mc-gate/decider.go` | `Test_spec001_r045b_sync` | done |
+| R-045c | `lib/mc-gate/decider.go` | `Test_spec001_r045c_rollback` | done |
+| R-046a | `lib/mc-gate/reconcile.go` | `Test_spec001_r046a_mapping` | done |
+| R-046b | `lib/mc-gate/reconcile.go` | `Test_spec001_r046b_idle` | done |
+| R-046c | `lib/mc-gate/reconcile.go` | `Test_spec001_r046c_hand_start` | done |
+| R-046d | `lib/mc-gate/reconcile.go` | `Test_spec001_r046d_stopping` | done |
+| R-046e | `lib/mc-gate/reconcile.go` | `Test_spec001_r046e_stopped` | done |
+| R-046f | `lib/mc-gate/reconcile.go` | `Test_spec001_r046f_unqueued_stop` | done |
+| R-046g | `lib/mc-gate/reconcile.go` | `Test_spec001_r046g_running` | done |
+| R-047 | `lib/mc-gate/decider.go` | `Test_spec001_r047_occupied`, `Test_spec001_r044_sim` | done |
+| R-048a | `lib/mc-gate/sources.go` | `Test_spec001_r048a_mark` | done |
+| R-048b | `lib/mc-gate/decider.go`, `lib/mc-gate/sources.go` | `Test_spec001_r048b_young` | done |
+| R-048c | `lib/mc-gate/sources.go` | `Test_spec001_r048c_clear` | done |
+| R-048d | `lib/mc-gate/decider.go` | `Test_spec001_r048d_cap` | done |
+| R-048e | `lib/mc-gate/allow.go` | `Test_spec001_r048e_exempt` | done |
+| R-049 | `lib/mc-gate/decider.go` | `Test_spec001_r049_reservation` | done |
+| R-050a | `lib/mc-gate/decider.go` | `Test_spec001_r050a_idle_since` | done |
+| R-050b | `lib/mc-gate/reconcile.go` | `Test_spec001_r050b_sleep` | done |
+| R-050c | `lib/mc-gate/decider.go` | `Test_spec001_r050c_restart` | done |
+| R-051a | `lib/mc-gate/decider.go` | `Test_spec001_r051a_source`, `Test_spec001_r044_sim` | done |
+| R-051b | `lib/mc-gate/decider.go` | `Test_spec001_r051b_switches`, `Test_spec001_r044_sim` | done |
+| R-051c | `lib/mc-gate/decider.go` | `Test_spec001_r051c_minimum_online` | done |
+| R-052 | `lib/mc-gate/decider.go` | `Test_spec001_r052_table`, VM `spec001_r052 decisions` | done |
+| R-053a | `lib/mc-gate/decider.go` | `Test_spec001_r053a_timeout` | done |
+| R-053b | `lib/mc-gate/decider.go` | `Test_spec001_r053b_first_start` | done |
+| R-053c | `lib/mc-gate/decider.go` | `Test_spec001_r053c_failed` | done |
+| R-054 | `lib/mc-gate/texts.go` | `Test_spec001_r054_texts` | done |
+| R-055a | `lib/mc-gate/settings.go` | `Test_spec001_r055a_settings` | done |
+| R-055b | `lib/mc-gate/settings.go` | `Test_spec001_r055b_reload`, VM `spec001_r074d reload` | done |
+| R-055c | `lib/mc-gate/settings.go` | `Test_spec001_r055c_keep` | done |
+| R-056 | `lib/mc-gate/state.go` | `Test_spec001_r056_state` | done |
+| R-057 | `lib/mc-gate/decider.go` | `Test_spec001_r057_log` | done |
 | R-058 | `lib/mc-gate/cmd/fake-server/` | VM `spec001_r058 fake server` | gap |
-| R-059 | `lib/mc-gate.nix`, `tests/mc-gate.nix` | check `mc-gate`, derivation `spec001_r059` | gap |
+| R-059 | `lib/mc-gate.nix`, `tests/mc-gate.nix` | check `mc-gate`, derivation `spec001_r059` | done |
 | R-070 | `main.nix#servers` | `policy-eval` spec001_r070 | gap |
 | R-071a | `main.nix` server units | VM `spec001_r071a pre start` | gap |
 | R-071b | `main.nix` server units | VM `spec001_r071b start` | gap |
