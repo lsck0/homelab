@@ -6,7 +6,16 @@
 # makes at most one run: the guest has one heap, one game port and one rcon port to give.
 # Who may join and who is op lives in whitelist.json and ops.json beside the server dirs (`mc-rcon whitelist add`,
 # `mc-rcon op`), shared by every server through a file bind mount, not in this public repo.
-{ config, lib, pkgs, inventory, site, nasMount, catalog, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inventory,
+  site,
+  nasMount,
+  catalog,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   mcGate = import ./lib/mc-gate.nix { inherit pkgs lib; };
@@ -23,26 +32,27 @@ let
   # The lab runs the set below; the vm test passes its own as the module argument `mcServers`, because one declared
   # server can prove neither a `Conflicts=` nor a switch (tests/minecraft.nix). A formal with a default would still
   # be looked up in `_module.args` and fail wherever nothing defines it, so it is read from there by hand.
-  servers = config._module.args.mcServers or {
-    # the as-built world: the pack (all the mons, neoforge 21.1 for minecraft 1.21.1) runs on java 21
-    cobblemon = { version = "1.21.1"; protocol = 767; };
-    # the newest release (VERSION=LATEST, the default pack); 26.3 requires java 25
-    vanilla = { image = imageJava25; };
-    # All the Mons, the ATM team's cobblemon modpack: its server files (ServerFiles-<version>.zip from the pack's
-    # curseforge page) sit in the modpack share, unpacked over the data dir by the image; neoforge pinned as its
-    # startserver.sh pins it.
-    atm = {
-      version = "1.21.1";
-      protocol = 767;
-      pack = ''
-        TYPE=NEOFORGE
-        VERSION=1.21.1
-        NEOFORGE_VERSION=21.1.249
-        GENERIC_PACK=/modpacks/allthemons-serverfiles-1.3.0.zip
-        LEVEL=allthemons
-      '';
+  servers =
+    config._module.args.mcServers or {
+      cobblemon = {
+        version = "1.21.1";
+        protocol = 767;
+      };
+      vanilla = {
+        image = imageJava25;
+      };
+      atm = {
+        version = "1.21.1";
+        protocol = 767;
+        pack = ''
+          TYPE=NEOFORGE
+          VERSION=1.21.1
+          NEOFORGE_VERSION=21.1.249
+          GENERIC_PACK=/modpacks/allthemons-serverfiles-1.3.0.zip
+          LEVEL=allthemons
+        '';
+      };
     };
-  };
 
   data = "/var/lib/minecraft";
   modpacksDir = "/var/lib/minecraft-modpacks";
@@ -68,7 +78,10 @@ let
   # instance.nix gives the guest 10 GiB unballooned: the heap plus ~2 GiB off-heap (375 mods) and the os; live data is
   # ~2.6 GiB with a few players (spark heapsummary), a 6 GiB heap in 8 GiB swapped, 5 GiB collected nonstop
   heapSize = "7G";
-  containerDns = [ "1.1.1.1" "8.8.8.8" ];
+  containerDns = [
+    "1.1.1.1"
+    "8.8.8.8"
+  ];
   icon = "https://d.furaffinity.net/art/skullfugg/1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png";
   motd = "nya~ minecwaft sewvew 🐾✨";
 
@@ -76,7 +89,10 @@ let
   legacyServer = "cobblemon";
   layoutUnit = "mc-layout.service";
   # the whitelist and the ops, shared by every server (R-073); an empty json array is what the server expects
-  sharedFiles = [ "whitelist.json" "ops.json" ];
+  sharedFiles = [
+    "whitelist.json"
+    "ops.json"
+  ];
   sharedEmpty = "[]";
 
   # what the gate gives a player and a server, every bound in one place
@@ -135,47 +151,53 @@ let
   sharedMounts = lib.concatMapStringsSep " " (file: "-v ${data}/${file}:/data/${file}") sharedFiles;
 
   # a server's data dir, the shared files and its pack, before the container starts (R-071a)
-  serverPreStart = name: pkgs.writeShellScript "minecraft-${name}-pre-start" ''
-    set -euo pipefail
-    install -d -m 0750 -o ${serverUid} -g ${serverUid} ${dirOf name}
-    ${lib.concatMapStrings (file: ''
-      [ -s ${data}/${file} ] || install -m 0640 -o ${serverUid} -g ${serverUid} \
-        ${pkgs.writeText "minecraft-${file}" sharedEmpty} ${data}/${file}
-    '') sharedFiles}
-    [ -s ${modpackEnvOf name} ] || printf '%s' ${lib.escapeShellArg (servers.${name}.pack or defaultModpack)} \
-      > ${modpackEnvOf name}
-    ${podman} rm --force --ignore ${containerOf name}
-  '';
+  serverPreStart =
+    name:
+    pkgs.writeShellScript "minecraft-${name}-pre-start" ''
+      set -euo pipefail
+      install -d -m 0750 -o ${serverUid} -g ${serverUid} ${dirOf name}
+      ${lib.concatMapStrings (file: ''
+        [ -s ${data}/${file} ] || install -m 0640 -o ${serverUid} -g ${serverUid} \
+          ${pkgs.writeText "minecraft-${file}" sharedEmpty} ${data}/${file}
+      '') sharedFiles}
+      [ -s ${modpackEnvOf name} ] || printf '%s' ${
+        lib.escapeShellArg (servers.${name}.pack or defaultModpack)
+      } \
+        > ${modpackEnvOf name}
+      ${podman} rm --force --ignore ${containerOf name}
+    '';
 
   # distant horizons draws the far terrain, so the server sends and ticks less of it (view and simulation distance)
-  serverStart = name: pkgs.writeShellScript "minecraft-${name}-start" ''
-    set -euo pipefail
-    exec ${podman} run --rm --name ${containerOf name} \
-      ${lib.concatMapStringsSep " " (ip: "--dns=${ip}") containerDns} \
-      -p 127.0.0.1:${toString serverPort}:${toString publicPort} \
-      -p 127.0.0.1:${toString rconPort}:${toString rconPort} \
-      -v ${dirOf name}:/data -v ${modpacksDir}:/modpacks:ro \
-      ${sharedMounts} \
-      --env-file ${serverEnv} --env-file ${modpackEnvOf name} \
-      -e EULA=TRUE \
-      -e MEMORY=${heapSize} \
-      -e DIFFICULTY=hard \
-      -e ICON=${icon} \
-      -e OVERRIDE_ICON=TRUE \
-      -e "MOTD=[${name}] ${motd}" \
-      -e USE_AIKAR_FLAGS=true \
-      -e VIEW_DISTANCE=12 \
-      -e SIMULATION_DISTANCE=8 \
-      -e SPAWN_PROTECTION=0 \
-      -e MAX_PLAYERS=42069 \
-      -e ENABLE_RCON=true \
-      -e ENABLE_WHITELIST=true \
-      -e ENFORCE_WHITELIST=true \
-      -e REMOVE_OLD_MODS=TRUE \
-      -e MAX_TICK_TIME=-1 \
-      -e STOP_DURATION=90 \
-      ${servers.${name}.image or imageJava21}
-  '';
+  serverStart =
+    name:
+    pkgs.writeShellScript "minecraft-${name}-start" ''
+      set -euo pipefail
+      exec ${podman} run --rm --name ${containerOf name} \
+        ${lib.concatMapStringsSep " " (ip: "--dns=${ip}") containerDns} \
+        -p 127.0.0.1:${toString serverPort}:${toString publicPort} \
+        -p 127.0.0.1:${toString rconPort}:${toString rconPort} \
+        -v ${dirOf name}:/data -v ${modpacksDir}:/modpacks:ro \
+        ${sharedMounts} \
+        --env-file ${serverEnv} --env-file ${modpackEnvOf name} \
+        -e EULA=TRUE \
+        -e MEMORY=${heapSize} \
+        -e DIFFICULTY=hard \
+        -e ICON=${icon} \
+        -e OVERRIDE_ICON=TRUE \
+        -e "MOTD=[${name}] ${motd}" \
+        -e USE_AIKAR_FLAGS=true \
+        -e VIEW_DISTANCE=12 \
+        -e SIMULATION_DISTANCE=8 \
+        -e SPAWN_PROTECTION=0 \
+        -e MAX_PLAYERS=42069 \
+        -e ENABLE_RCON=true \
+        -e ENABLE_WHITELIST=true \
+        -e ENFORCE_WHITELIST=true \
+        -e REMOVE_OLD_MODS=TRUE \
+        -e MAX_TICK_TIME=-1 \
+        -e STOP_DURATION=90 \
+        ${servers.${name}.image or imageJava21}
+    '';
 
   # one server. The gate starts and stops it; nothing else does, so it has no wantedBy (R-071f).
   serverUnit = name: {
@@ -202,32 +224,42 @@ let
 
   # -- the gate ---------------------------------------------------------------
 
-  gateSettingsFile = pkgs.writeText "mc-gate-settings.json" (builtins.toJSON {
-    listen = "0.0.0.0:${toString publicPort}";
-    # the route is the wildcard host `*.mc`; what a player dials is one label below it, so the star is no part of
-    # the suffix the gate strips
-    suffix = ".${lib.removePrefix "*." catalog.l4.minecraft.host}.${net.domain}";
-    backend = "127.0.0.1:${toString serverPort}";
-    stateDir = gateStateDir;
-    runtimeDir = gateRuntimeDir;
-    servers = map (name: {
-      inherit name;
-      unit = unitOf name;
-      version = servers.${name}.version or null;
-      protocol = servers.${name}.protocol or null;
-      modpackEnv = modpackEnvOf name;
-    }) names;
-    inherit limits;
-    # who the gate never marks as looping and never caps: the sources lab-gate never stops either
-    # (modules/traefik/default.nix), the house among them, since its players arrive hairpinned as one address
-    allow = {
-      cidrs = net.privateRanges;
-      hosts = [
-        { name = net.fqdn net.wan.publicHost; network = "ip4"; bits = ipv4AddressBits; }
-        { name = net.fqdn net.wan.publicPrefixHost; network = "ip6"; bits = net.wan.publicPrefixLength; }
-      ];
-    };
-  });
+  gateSettingsFile = pkgs.writeText "mc-gate-settings.json" (
+    builtins.toJSON {
+      listen = "0.0.0.0:${toString publicPort}";
+      # the route is the wildcard host `*.mc`; what a player dials is one label below it, so the star is no part of
+      # the suffix the gate strips
+      suffix = ".${lib.removePrefix "*." catalog.l4.minecraft.host}.${net.domain}";
+      backend = "127.0.0.1:${toString serverPort}";
+      stateDir = gateStateDir;
+      runtimeDir = gateRuntimeDir;
+      servers = map (name: {
+        inherit name;
+        unit = unitOf name;
+        version = servers.${name}.version or null;
+        protocol = servers.${name}.protocol or null;
+        modpackEnv = modpackEnvOf name;
+      }) names;
+      inherit limits;
+      # who the gate never marks as looping and never caps: the sources lab-gate never stops either
+      # (modules/traefik/default.nix), the house among them, since its players arrive hairpinned as one address
+      allow = {
+        cidrs = net.privateRanges;
+        hosts = [
+          {
+            name = net.fqdn net.wan.publicHost;
+            network = "ip4";
+            bits = ipv4AddressBits;
+          }
+          {
+            name = net.fqdn net.wan.publicPrefixHost;
+            network = "ip6";
+            bits = net.wan.publicPrefixLength;
+          }
+        ];
+      };
+    }
+  );
 
   # the one move of the as-built layout into the server dirs, through a temp dir so a crash halfway resumes (R-076)
   layoutScript = pkgs.writeShellScript "mc-layout" ''
@@ -324,7 +356,8 @@ let
     [ -s ${stateFile} ] || { echo "mc-state: no ${stateFile}; is mc-gate running?" >&2; exit 1; }
     exec ${jq} . ${stateFile}
   '';
-in {
+in
+{
   homelab.nasMounts = nasMount data "minecraft" // nasMount modpacksDir "minecraft-modpacks";
 
   sops.secrets.minecraft-rcon-password = { };
@@ -344,10 +377,17 @@ in {
 
   homelab.textfiles = [ gateMetricsName ];
 
-  environment.systemPackages = [ mcModpack mcRcon mcState ];
+  environment.systemPackages = [
+    mcModpack
+    mcRcon
+    mcState
+  ];
   environment.etc."mc-gate/settings.json".source = gateSettingsFile;
 
-  users.users.${gateUser} = { isSystemUser = true; group = gateUser; };
+  users.users.${gateUser} = {
+    isSystemUser = true;
+    group = gateUser;
+  };
   users.groups.${gateUser} = { };
 
   # the gate may start and stop the declared servers, by their exact names: a pattern would also match a unit that
@@ -379,8 +419,14 @@ in {
     mc-gate = {
       description = "mc-gate: the Minecraft port, one server awake at a time";
       wantedBy = [ "multi-user.target" ];
-      wants = [ layoutUnit "network-online.target" ];
-      after = [ layoutUnit "network-online.target" ];
+      wants = [
+        layoutUnit
+        "network-online.target"
+      ];
+      after = [
+        layoutUnit
+        "network-online.target"
+      ];
       # a restart cuts every player, since every connection is relayed through it: a new binary waits for the owner
       restartIfChanged = false;
       reloadTriggers = [ gateSettingsFile ];
@@ -401,11 +447,16 @@ in {
         PrivateTmp = true;
         PrivateDevices = true;
         NoNewPrivileges = true;
-        RestrictAddressFamilies = [ "AF_INET" "AF_INET6" "AF_UNIX" ];
+        RestrictAddressFamilies = [
+          "AF_INET"
+          "AF_INET6"
+          "AF_UNIX"
+        ];
         SystemCallFilter = [ "@system-service" ];
       };
     };
-  } // lib.listToAttrs (map (name: lib.nameValuePair "minecraft-${name}" (serverUnit name)) names);
+  }
+  // lib.listToAttrs (map (name: lib.nameValuePair "minecraft-${name}" (serverUnit name)) names);
 
   systemd.tmpfiles.rules = [
     # the exporter reads the gate's own file: a link, so no timer copies it and no scrape sees a stale copy
