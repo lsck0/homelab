@@ -25,6 +25,24 @@
     on = [ "inflightLimit" "accessLog" "probe" ] ++ profiles.observed;
   };
 
+  # a rule over this guest's own metrics (mc-gate writes them, main.nix publishes them): R-092
+  alerts = let
+    # one failed start is a slow first download or a pack being swapped; the comparison is strict, so the second
+    # failure within an hour crosses this and is the pack, the world or the disk
+    startFailuresHourly = 1;
+  in {
+    minecraft_start_failed = {
+      title = "Minecraft server did not start";
+      category = "service";
+      # mc-gate counts a start it issued that never came up: systemd refused it, the unit failed, or it timed out
+      expr = "max by (server) (increase(homelab_mc_start_failures_total[1h]))";
+      threshold = startFailuresHourly;
+      for = "0m";
+      summary = "{{ $labels.server }} did not start: {{ $values.A.Value | printf \"%.0f\" }} failures in the last hour";
+      description = "Players wake the server by joining and it never comes up. `mc-state` and `journalctl -u minecraft-{{ $labels.server }} -u mc-gate` on vm-214; a pack that was just changed downloads on its first start and may simply be slow.";
+    };
+  };
+
   shares = {
     "data/minecraft" = { };
     "data/minecraft-modpacks" = { };

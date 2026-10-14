@@ -320,6 +320,20 @@ tests += [
         ],
     },
     {
+        "name": "spec001_r092: a second failed Minecraft start in an hour alerts, one does not",
+        "interval": "5m",
+        "input_series": [
+            # cobblemon fails once and then a second time; atm10 fails once and comes up
+            {"series": 'homelab_mc_start_failures_total{server="cobblemon"}', "values": "0 0 1 1 1 1 2 2 2 2 2 2"},
+            {"series": 'homelab_mc_start_failures_total{server="atm10"}', "values": "0 0 1 1 1 1 1 1 1 1 1 1"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "25m", "alertname": "minecraft_start_failed", "exp_alerts": []},
+            {"eval_time": "55m", "alertname": "minecraft_start_failed",
+             "exp_alerts": [expect("minecraft_start_failed", server="cobblemon")]},
+        ],
+    },
+    {
         "name": "attack: a ban wave on one ingress pages, the other's scanner trickle stays quiet",
         "interval": "1m",
         "input_series": [
