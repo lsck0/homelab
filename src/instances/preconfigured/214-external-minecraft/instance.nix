@@ -1,4 +1,4 @@
-# Minecraft server; lazymc sleeps/wakes the server per real player logins
+# Minecraft servers; mc-gate sleeps and wakes one of them per real player login
 { config, profiles, ... }: {
   vm = {
     bootPhase = "public";
@@ -14,12 +14,13 @@
   };
 
   services.minecraft = {
-    host = "mc";
+    # one name per server, <server>.mc.lsck0.dev; the gate reads the name the player dialed, so there is no srv
+    # record: an srv target would be the address every client sends instead
+    host = "*.mc";
     protocol = "tcp";
-    # the protocol's default: clients without the srv record dial it
+    # the protocol's default: every client dials it
     port = 25565;
     publicPort = config.services.minecraft.port;
-    srv = "_minecraft._tcp";
     # the router caps and logs its forward; a game server, no page
     on = [ "inflightLimit" "accessLog" "probe" ] ++ profiles.observed;
   };
