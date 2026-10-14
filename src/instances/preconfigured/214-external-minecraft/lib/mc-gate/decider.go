@@ -82,6 +82,9 @@ type Server struct {
 	statusAt time.Time
 	// dropped by a reload, kept until its sessions end (R-055c)
 	removed bool
+	// the unit's own ActiveState was `active` at the last reconcile. Every server shares the one backend port, so
+	// while a switch waits on the old server's save, an answer there is the old server's (R-046g)
+	unitUp bool
 }
 
 // Decision is one login's answer: a relay to the backend, a kick with a text, or a close with neither.

@@ -150,7 +150,9 @@ The citations of this phase are relative to `src/instances/preconfigured/214-ext
   (`reconcile.go:81-85`)
 - [x] **R-046f** A record `stopping` whose unit is started with no job becomes `running`.
   (`reconcile.go:86-88`)
-- [x] **R-046g** A record `starting` becomes `running` once its backend answers a loopback status ping.
+- [x] **R-046g** A record `starting` becomes `running` once its unit's `ActiveState` is `active` and its backend
+  answers a loopback status ping. Until its unit is active the backend is not asked: every server shares the one
+  backend port, and during a switch the old server answers there while it saves.
   (`reconcile.go:106-124`)
 - [x] **R-047** A server is occupied when any of these holds:
   - its last backend `players.online` is above 0;
@@ -268,12 +270,12 @@ path says otherwise (those are relative to `src/`).
   Names are DNS labels other than `layout`, `gate` and `state`, enforced by an evaluation assert. The lab declares
   `cobblemon = { version = "1.21.1"; protocol = 767; }`, `vanilla = { image = imageJava25; }` and `atm` (NeoForge
   1.21.1, the Cobblemon mod and the AllTheMons datapack from Modrinth, both pinned by version id).
-  (`main.nix:19-43`, `lib/servers.nix:15-39`)
+  (`main.nix:19-45`, `lib/servers.nix:15-39`)
 - [x] **R-071a** Each server has a unit `minecraft-<name>.service`. Its `ExecStartPre` creates
   `/var/lib/minecraft/<name>` (0750, 1000:1000) when missing, runs `podman rm --force --ignore minecraft-<name>`,
   writes the server's `pack`, else the vanilla default pack (`TYPE=VANILLA`, `VERSION=LATEST`, `LEVEL=vanilla`), when
   `modpack.env` is missing,
-  and writes an empty json array into each shared file of R-073 that is missing. (`main.nix:136-147, 186`)
+  and writes an empty json array into each shared file of R-073 that is missing. (`main.nix:138-150, 188`)
 - [x] **R-071b** Its `ExecStart` runs `podman run --rm --name minecraft-<name>` with exactly these options:
   - `--dns=1.1.1.1 --dns=8.8.8.8`;
   - `-p 127.0.0.1:25566:25565 -p 127.0.0.1:25575:25575`;
@@ -288,7 +290,7 @@ path says otherwise (those are relative to `src/`).
   - `-e MAX_PLAYERS=42069 -e ENABLE_RCON=true -e ENABLE_WHITELIST=true -e ENFORCE_WHITELIST=true`;
   - `-e REMOVE_OLD_MODS=TRUE -e MAX_TICK_TIME=-1 -e STOP_DURATION=90`;
   - the server's `image`, `itzg/minecraft-server:2026.9.1-java21` (`imageJava21`) unless it names one;
-    `imageJava25` is `itzg/minecraft-server:2026.9.1-java25`. (`main.nix:56-57, 149-175`)
+    `imageJava25` is `itzg/minecraft-server:2026.9.1-java25`. (`main.nix:58-59, 151-177`)
 - [x] **R-071c** Its `ExecStop` is `podman stop --time 120 minecraft-<name>`, and its `ExecStopPost` is
   `podman rm --force --ignore minecraft-<name>`. (`main.nix:168-169`)
 - [x] **R-071d** It sets `TimeoutStopSec=150` and `TimeoutStartSec=infinity`. (`main.nix:171-173`)
@@ -897,6 +899,10 @@ None: every requirement of this spec is built.
 
 ## Decisions
 
+- 2026-10-14: A starting server becomes running only once its own unit is `active`. The first switch on the live lab
+  (cobblemon to atm) marked atm running within 50 s: atm's start job was queued behind cobblemon's save, and the probe
+  of the shared port got cobblemon's answer. Rejected: one backend port per server (the port is shared on purpose, so
+  every server has the same address and nothing else on the guest changes per server).
 - 2026-10-14: A third server, `atm`, is Cobblemon with every Pokemon: the AllTheMons datapack (Modrinth `allthemons`,
   a datapack for the Cobblemon mod, not the All the Mods modpack) on Cobblemon, NeoForge 1.21.1, through the image's
   `MODRINTH_PROJECTS` with the `datapack:` prefix. A server may declare the `pack` it starts with, so a new server
@@ -1028,7 +1034,7 @@ None: every requirement of this spec is built.
 | R-046d | `lib/mc-gate/reconcile.go` | `Test_spec001_r046d_stopping` | done |
 | R-046e | `lib/mc-gate/reconcile.go` | `Test_spec001_r046e_stopped` | done |
 | R-046f | `lib/mc-gate/reconcile.go` | `Test_spec001_r046f_unqueued_stop` | done |
-| R-046g | `lib/mc-gate/reconcile.go` | `Test_spec001_r046g_running` | done |
+| R-046g | `lib/mc-gate/reconcile.go` | `Test_spec001_r046g_running`, `Test_spec001_r046g_switch_port` | done |
 | R-047 | `lib/mc-gate/decider.go` | `Test_spec001_r047_occupied`, `Test_spec001_r044_sim` | done |
 | R-048a | `lib/mc-gate/sources.go` | `Test_spec001_r048a_mark` | done |
 | R-048b | `lib/mc-gate/decider.go`, `lib/mc-gate/sources.go` | `Test_spec001_r048b_young` | done |
@@ -1054,9 +1060,9 @@ None: every requirement of this spec is built.
 | R-057 | `lib/mc-gate/decider.go` | `Test_spec001_r057_log` | done |
 | R-058 | `lib/mc-gate/cmd/fake-server/` | VM `spec001_r058 fake server` | done |
 | R-059 | `lib/mc-gate.nix`, `tests/mc-gate.nix` | check `mc-gate`, derivation `spec001_r059` | done |
-| R-070 | `main.nix:19-43`, `lib/servers.nix:15-39` | `mc-servers` spec001_r070 | done |
-| R-071a | `main.nix:136-147, 186` | VM `spec001_r071a pre start` | done |
-| R-071b | `main.nix:56-57, 149-175` | VM `spec001_r071b run` | done |
+| R-070 | `main.nix:19-45`, `lib/servers.nix:15-39` | `mc-servers` spec001_r070 | done |
+| R-071a | `main.nix:138-150, 188` | VM `spec001_r071a pre start` | done |
+| R-071b | `main.nix:58-59, 151-177` | VM `spec001_r071b run` | done |
 | R-071c | `main.nix:168-169` | VM `spec001_r071c stop` | done |
 | R-071d | `main.nix:171-173` | VM `spec001_r071d timeouts` | done |
 | R-071e | `main.nix:160-161, 175-177` | VM `spec001_r071e requires` | done |

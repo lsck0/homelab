@@ -175,3 +175,28 @@ func Test_spec001_r046g_running(t *testing.T) {
 		t.Fatalf("playersOnline %d, want the backend's 2", server.playersOnline)
 	}
 }
+
+// Test_spec001_r046g_switch_port covers a switch: the new server's start job waits while the old server saves, and
+// the old server still answers on the shared backend port. That answer must not make the new server running (R-046g).
+func Test_spec001_r046g_switch_port(t *testing.T) {
+	d, systemd, clock, settings, backend := deciderTestBackend(t)
+	backend.answering = true
+
+	testLogin(d, "alpha", testSource)
+	fakeSystemdSet(systemd, settings.Servers[0].Unit, unitInactive, true)
+	for range 3 {
+		clock.advance(durationFromSeconds(settings.Limits.StatusCacheS) + time.Second)
+		testTick(d)
+		if d.servers["alpha"].phase != phaseStarting {
+			t.Fatalf("alpha is %q while its start job waits and another server answers, want starting",
+				d.servers["alpha"].phase)
+		}
+	}
+
+	fakeSystemdSet(systemd, settings.Servers[0].Unit, unitActive, false)
+	clock.advance(durationFromSeconds(settings.Limits.StatusCacheS) + time.Second)
+	testTick(d)
+	if d.servers["alpha"].phase != phaseRunning {
+		t.Fatalf("alpha is %q once its unit is active and the port answers, want running", d.servers["alpha"].phase)
+	}
+}

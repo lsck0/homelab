@@ -53,6 +53,7 @@ func deciderReconcile(d *Decider, now time.Time) {
 func deciderReconcileServer(d *Decider, server *Server, state UnitState, promoted *bool) {
 	activity := activityFromUnit(state)
 	before := server.phase
+	server.unitUp = state.Active == "active"
 	switch server.phase {
 	case phaseStarting, phaseRunning:
 		if activity != activityIdle || state.Job {
@@ -109,10 +110,14 @@ func deciderReconcileExclude(d *Decider, target *Server) {
 }
 
 // deciderReconcileStatus asks the backend of the one server that could be answering: a starting server is up once it
-// answers (R-046g), and a running one's player count is what occupancy reads.
+// answers (R-046g), and a running one's player count is what occupancy reads. A starting server whose unit is not yet
+// active is not asked: its start job waits on the old server's stop, and the old server still answers on the port.
 func deciderReconcileStatus(d *Decider, now time.Time) {
 	for _, server := range deciderServers(d) {
 		if server.phase != phaseStarting && server.phase != phaseRunning {
+			continue
+		}
+		if server.phase == phaseStarting && !server.unitUp {
 			continue
 		}
 		if now.Sub(server.statusAt) < durationFromSeconds(d.settings.Limits.StatusCacheS) {
