@@ -6,7 +6,7 @@ Implemented in:
 - partial, the wildcard host of p1: `src/modules/service.nix`, `src/modules/catalog.nix`, `src/modules/lab-export.nix`,
   `src/core/300-router/main.nix`.
 
-Last reconcile: 2026-10-14 @ e7f3297
+Last reconcile: 2026-10-14 @ 3eceb67
 
 The research and design notes behind the target are in `notes/2026-10-14-multi-server/`. Nothing in them is needed to
 build this spec.
@@ -43,33 +43,32 @@ Non-goals:
 
 ### As built
 
-A line marked "Replaced at p3" stays true until p3 merges; the p3 PR strikes it through.
+A line struck through was replaced at p3; what replaced it is named at its end.
 
-- [x] **R-001** lazymc owns 0.0.0.0:25565, answers status pings itself, and starts the server only on a real
-  login. Replaced at p3 by R-040 to R-043 and R-074a.
-  (`src/instances/preconfigured/214-external-minecraft/main.nix:113-142` `lazymc.toml`,
-  `main.nix#systemd.services.lazymc`)
-- [x] **R-002** The server is stopped after `sleepAfterS = 1800` without players, and stays up at least
-  `minimumOnlineS = 60`. Replaced at p3 by R-050a to R-050c and R-051c. (`main.nix:31-32, 135-136`)
-- [x] **R-003** The server is the `itzg/minecraft-server:2026.9.1-java21` image in a podman container `minecraft`,
+- [x] **R-001** ~~lazymc owns 0.0.0.0:25565, answers status pings itself, and starts the server only on a real login.
+  Replaced at p3 by R-040 to R-043 and R-074a. (`src/instances/preconfigured/214-external-minecraft/main.nix:113-142`
+  `lazymc.toml`, `main.nix#systemd.services.lazymc`)~~
+- [x] **R-002** ~~The server is stopped after `sleepAfterS = 1800` without players, and stays up at least
+  `minimumOnlineS = 60`. Replaced at p3 by R-050a to R-050c and R-051c. (`main.nix:31-32, 135-136`)~~
+- [x] **R-003** ~~The server is the `itzg/minecraft-server:2026.9.1-java21` image in a podman container `minecraft`,
   started by lazymc. It runs with a 7G heap, and its game and rcon ports are published on loopback only
-  (127.0.0.1:25566, :25575). Replaced at p3 by R-071b. (`main.nix#mcStart`, `main.nix:15, 22-23, 29, 43-68`)
+  (127.0.0.1:25566, :25575). Replaced at p3 by R-071b. (`main.nix#mcStart`, `main.nix:15, 22-23, 29, 43-68`)~~
 - [x] **R-004** The data dir `/var/lib/minecraft` and the pack cache `/var/lib/minecraft-modpacks` are nas mounts of
-  the shares `data/minecraft` and `data/minecraft-modpacks`. (`main.nix:101`, `instance.nix:27-30`)
-- [x] **R-005** The pack is a runtime choice. `mc-modpack <modrinth url|slug|curseforge url|vanilla> [version]`
+  the shares `data/minecraft` and `data/minecraft-modpacks`. (`main.nix:305`, `instance.nix:28-31`)
+- [x] **R-005** ~~The pack is a runtime choice. `mc-modpack <modrinth url|slug|curseforge url|vanilla> [version]`
   writes `modpack.env`, keeps one world per pack (`LEVEL=<slug>`) and restarts lazymc. Without arguments it shows the
-  current pack. A first boot writes the vanilla default. Replaced at p3 by R-078 and R-071a.
-  (`main.nix#mcModpack`, `main.nix#mcModpackDefault`, `main.nix:71-94`)
-- [x] **R-006** `mc-rcon <command>` runs rcon-cli in the running container. Replaced at p3 by R-079.
-  (`main.nix#mcRcon`, `main.nix:97-99`)
+  current pack. A first boot writes the vanilla default. Replaced at p3 by R-078 and R-071a. (`main.nix#mcModpack`,
+  `main.nix#mcModpackDefault`, `main.nix:71-94`)~~
+- [x] **R-006** ~~`mc-rcon <command>` runs rcon-cli in the running container. Replaced at p3 by R-079.
+  (`main.nix#mcRcon`, `main.nix:97-99`)~~
 - [x] **R-007** The rcon password and the CurseForge key are rendered by sops under /run only, never into the data
-  dir. (`main.nix:103-111`)
+  dir. (`main.nix:307-317`)
 - [x] **R-008** The whitelist is enforced. whitelist.json and ops.json are kept on the nas, not in the repo.
-  (`main.nix:4-5, 63-64`)
-- [x] **R-009** The route `services.minecraft` is tcp 25565, `host = "mc"`, `publicPort = 25565`,
-  `srv = "_minecraft._tcp"`, with `inflightLimit`, `accessLog`, `probe` and the observed features. The router forwards
-  25565 to vm-214. Replaced at p3 by R-077. (`instance.nix:16-25`, `src/modules/flows.nix:288-293`,
-  `src/core/300-router/main.nix:517-533`)
+  (`main.nix:7-8, 56-58, 149-150`)
+- [x] **R-009** ~~The route `services.minecraft` is tcp 25565, `host = "mc"`, `publicPort = 25565`, `srv =
+  "_minecraft._tcp"`, with `inflightLimit`, `accessLog`, `probe` and the observed features. The router forwards 25565
+  to vm-214. Replaced at p3 by R-077. (`instance.nix:16-25`, `src/modules/flows.nix:288-293`,
+  `src/core/300-router/main.nix:517-533`)~~
 - [x] **R-010** The `probe` feature is a blackbox tcp connect to 10.200.0.214:25565 while the guest is awake.
   (`src/core/103-internal-grafana/main.nix:195-200`)
 - [x] **R-011** vm-214 is always on, with 10 GiB unballooned and 10 cores. (`instance.nix:3-14`)
@@ -262,14 +261,17 @@ The citations of this phase are relative to `src/instances/preconfigured/214-ext
 
 ### p3: several servers on vm-214
 
-- [ ] **R-070** `main.nix` declares `servers`, an attrset of name to `{ version ? null; protocol ? null; }`. Names are
+The citations of this phase are relative to `src/instances/preconfigured/214-external-minecraft/`, except where a
+path says otherwise (those are relative to `src/`).
+
+- [x] **R-070** `main.nix` declares `servers`, an attrset of name to `{ version ? null; protocol ? null; }`. Names are
   DNS labels other than `layout`, `gate` and `state`, enforced by an evaluation assert. p3 declares
-  `cobblemon = { version = "1.21.1"; protocol = 767; }` alone.
-- [ ] **R-071a** Each server has a unit `minecraft-<name>.service`. Its `ExecStartPre` creates
+  `cobblemon = { version = "1.21.1"; protocol = 767; }` alone. (`main.nix:19-27`, `lib/servers.nix:15-39`)
+- [x] **R-071a** Each server has a unit `minecraft-<name>.service`. Its `ExecStartPre` creates
   `/var/lib/minecraft/<name>` (0750, 1000:1000) when missing, runs `podman rm --force --ignore minecraft-<name>`,
-  and writes the vanilla default pack (`TYPE=VANILLA`, `VERSION=LATEST`, `LEVEL=vanilla`) when `modpack.env` is
-  missing.
-- [ ] **R-071b** Its `ExecStart` runs `podman run --rm --name minecraft-<name>` with exactly these options:
+  writes the vanilla default pack (`TYPE=VANILLA`, `VERSION=LATEST`, `LEVEL=vanilla`) when `modpack.env` is missing,
+  and writes an empty json array into each shared file of R-073 that is missing. (`main.nix:115-125, 165`)
+- [x] **R-071b** Its `ExecStart` runs `podman run --rm --name minecraft-<name>` with exactly these options:
   - `--dns=1.1.1.1 --dns=8.8.8.8`;
   - `-p 127.0.0.1:25566:25565 -p 127.0.0.1:25575:25575`;
   - `-v /var/lib/minecraft/<name>:/data -v /var/lib/minecraft-modpacks:/modpacks:ro`;
@@ -278,53 +280,63 @@ The citations of this phase are relative to `src/instances/preconfigured/214-ext
     `--env-file /var/lib/minecraft/<name>/modpack.env`;
   - `-e EULA=TRUE -e MEMORY=7G -e DIFFICULTY=hard`;
   - `-e ICON=${icon} -e OVERRIDE_ICON=TRUE -e "MOTD=${motd}"`, where `main.nix` keeps two let-bindings `icon` and
-    `motd` holding the as-built values (`main.nix:54, 56` @ b66f6d0);
+    `motd` holding the as-built values (`main.nix:50-51`);
   - `-e USE_AIKAR_FLAGS=true -e VIEW_DISTANCE=12 -e SIMULATION_DISTANCE=8 -e SPAWN_PROTECTION=0`;
   - `-e MAX_PLAYERS=42069 -e ENABLE_RCON=true -e ENABLE_WHITELIST=true -e ENFORCE_WHITELIST=true`;
   - `-e REMOVE_OLD_MODS=TRUE -e MAX_TICK_TIME=-1 -e STOP_DURATION=90`;
-  - the image `itzg/minecraft-server:2026.9.1-java21`.
-- [ ] **R-071c** Its `ExecStop` is `podman stop --time 120 minecraft-<name>`, and its `ExecStopPost` is
-  `podman rm --force --ignore minecraft-<name>`.
-- [ ] **R-071d** It sets `TimeoutStopSec=150` and `TimeoutStartSec=infinity`.
-- [ ] **R-071e** It has `RequiresMountsFor=/var/lib/minecraft`, and `Requires=` plus `After=` on `mc-layout.service`.
-- [ ] **R-071f** It has no `wantedBy`.
-- [ ] **R-072** Each server unit has `Conflicts=` on every other server unit, and `After=` exactly the server units
-  whose names sort before its own.
-- [ ] **R-073** `/var/lib/minecraft/whitelist.json` and `ops.json` are bind mounted file by file onto
-  `/data/whitelist.json` and `/data/ops.json` in every server container.
-- [ ] **R-074a** `mc-gate.service` has `ExecStart=<mc-gate package>/bin/mc-gate -settings /etc/mc-gate/settings.json`,
+  - the image `itzg/minecraft-server:2026.9.1-java21`. (`main.nix:127-155, 166`)
+- [x] **R-071c** Its `ExecStop` is `podman stop --time 120 minecraft-<name>`, and its `ExecStopPost` is
+  `podman rm --force --ignore minecraft-<name>`. (`main.nix:168-169`)
+- [x] **R-071d** It sets `TimeoutStopSec=150` and `TimeoutStartSec=infinity`. (`main.nix:171-173`)
+- [x] **R-071e** It has `RequiresMountsFor=/var/lib/minecraft`, and `Requires=` plus `After=` on `mc-layout.service`.
+  (`main.nix:160-161, 175-177`)
+- [x] **R-071f** It has no `wantedBy`. (`main.nix:157-178, 383`)
+- [x] **R-072** Each server unit has `Conflicts=` on every other server unit, and `After=` exactly the server units
+  whose names sort before its own. (`main.nix:102-105, 161-162`)
+- [x] **R-073** `/var/lib/minecraft/whitelist.json` and `ops.json` are bind mounted file by file onto
+  `/data/whitelist.json` and `/data/ops.json` in every server container. (`main.nix:56-58, 112-113, 119-122, 135`)
+- [x] **R-074a** `mc-gate.service` has `ExecStart=<mc-gate package>/bin/mc-gate -settings /etc/mc-gate/settings.json`,
   listening on 0.0.0.0:25565, as the static system user `mc-gate`, with `StateDirectory=mc-gate` (0755) and
-  `RuntimeDirectory=mc-gate`.
-- [ ] **R-074b** It has `Restart=always`, and `Wants=` plus `After=` on `mc-layout.service`.
-- [ ] **R-074c** It has `restartIfChanged = false`.
-- [ ] **R-074d** It has `ExecReload=kill -HUP $MAINPID`, and `reloadTriggers` holding the settings file.
-- [ ] **R-075** A polkit rule lets the user `mc-gate` run only the verbs `start` and `stop`, only on the exact server
-  unit names generated from `servers`.
-- [ ] **R-076a** `mc-layout.service` is a oneshot with `RemainAfterExit` and `RequiresMountsFor=/var/lib/minecraft`.
-- [ ] **R-076b** It moves when `/var/lib/minecraft/cobblemon.tmp` exists, or when `/var/lib/minecraft/modpack.env`
-  exists and `/var/lib/minecraft/cobblemon` does not; otherwise it does nothing.
-- [ ] **R-076c** The move puts every top-level entry, dotfiles included, except `whitelist.json`, `ops.json` and
-  `cobblemon.tmp`, into `cobblemon.tmp/`.
-- [ ] **R-076d** After the move it renames `cobblemon.tmp` to `cobblemon`.
-- [ ] **R-077** The route becomes `host = "*.mc"` without `srv`, keeping its key `minecraft`, its port, publicPort and
-  `on`. lazymc, its unit, its config template and the old `mcStart` are gone.
-- [ ] **R-078** `mc-modpack <server> [pack] [version]` writes that server's `modpack.env` as R-005 did and restarts
-  its unit when it runs. Without arguments it lists each server with its pack and phase.
-- [ ] **R-079** `mc-rcon [-s <server>] <command...>` runs rcon-cli in `minecraft-<server>`. Without `-s` it targets
-  the running server, and fails with a message when none runs.
-- [ ] **R-080** `mc-state` prints `/run/mc-gate/state.json`.
-- [ ] **R-081a** The 214 `skill.md` gives the addresses `<server>.mc.lsck0.dev`, the servers and the switch rule.
-- [ ] **R-081b** It names `mc-state`, `journalctl -u minecraft-<name> -u mc-gate`, `mc-modpack <server>` and
-  `mc-rcon -s`.
-- [ ] **R-081c** It says the whitelist is shared: `mc-rcon whitelist add` only while a server runs, otherwise edit
-  `/var/lib/minecraft/whitelist.json`.
-- [ ] **R-081d** It says `nas-restore service minecraft` restores every server at once.
-- [ ] **R-081e** It says to `systemctl restart mc-gate` only when no one is on, and to remove a server only while it
-  sleeps.
-- [ ] **R-081f** `src/core/300-router/skill.md:31-32` and `src/scripts/init.sh:114` name the host as `*.mc`.
-- [ ] **R-082** `src/instances/preconfigured/113-internal-hermes/tests/hermes-agent.sh` calls
-  `mc-modpack <server> <pack>` and expects `ssh 10\.200\.0\.214`, not `.208`.
-- [ ] **R-083** The kopia test fixture is `data/minecraft/cobblemon/world/level.dat`.
+  `RuntimeDirectory=mc-gate`. (`main.nix:183, 354-372`, `main.nix:325-326`)
+- [x] **R-074b** It has `Restart=always`, and `Wants=` plus `After=` on `mc-layout.service`. (`main.nix:357-358,
+  366`)
+- [x] **R-074c** It has `restartIfChanged = false`. (`main.nix:359-360`)
+- [x] **R-074d** It has `ExecReload=kill -HUP $MAINPID`, and `reloadTriggers` holding the settings file.
+  (`main.nix:361, 364-365`)
+- [x] **R-075** A polkit rule lets the user `mc-gate` run only the verbs `start` and `stop`, only on the exact server
+  unit names generated from `servers`. (`main.nix:328-340`)
+- [x] **R-076a** `mc-layout.service` is a oneshot with `RemainAfterExit` and `RequiresMountsFor=/var/lib/minecraft`.
+  (`main.nix:343-352`)
+- [x] **R-076b** It moves when `/var/lib/minecraft/cobblemon/modpack.env` does not exist and either
+  `/var/lib/minecraft/modpack.env` or `/var/lib/minecraft/cobblemon.tmp` does; otherwise it does nothing. Before it
+  moves, it removes the one container of the old layout, `minecraft`. (`main.nix:210-222`)
+- [x] **R-076c** The move puts every top-level entry, dotfiles included, except `whitelist.json`, `ops.json` and
+  `cobblemon.tmp`, into `cobblemon.tmp/`. (`main.nix:224-231`)
+- [x] **R-076d** After the move it renames `cobblemon.tmp` to `cobblemon`. (`main.nix:232-233`)
+- [x] **R-077** The route becomes `host = "*.mc"` without `srv`, keeping its key `minecraft`, its port, publicPort and
+  `on`. lazymc, its unit, its config template and the old `mcStart` are gone. (`instance.nix:16-26`)
+- [x] **R-078** `mc-modpack <server> [pack] [version]` writes that server's `modpack.env` as R-005 did and restarts
+  its unit when it runs. Without arguments it lists each server with its pack and phase. (`main.nix:239-280`,
+  `main.nix:322`)
+- [x] **R-079** `mc-rcon [-s <server>] <command...>` runs rcon-cli in `minecraft-<server>`. Without `-s` it targets
+  the running server, and fails with a message when none runs. (`main.nix:282-297`)
+- [x] **R-080** `mc-state` prints `/run/mc-gate/state.json`. (`main.nix:299-303`)
+- [x] **R-081a** The 214 `skill.md` gives the addresses `<server>.mc.lsck0.dev`, the servers and the switch rule.
+  (`skill.md:14-27`)
+- [x] **R-081b** It names `mc-state`, `journalctl -u minecraft-<name> -u mc-gate`, `mc-modpack <server>` and
+  `mc-rcon -s`. (`skill.md:33-38, 44-49, 56-58`)
+- [x] **R-081c** It says the whitelist is shared: `mc-rcon whitelist add` only while a server runs, otherwise edit
+  `/var/lib/minecraft/whitelist.json`. (`skill.md:60-62`)
+- [x] **R-081d** It says `nas-restore service minecraft` restores every server at once. (`skill.md:66-67`)
+- [x] **R-081e** It says to `systemctl restart mc-gate` only when no one is on, and to remove a server only while it
+  sleeps. (`skill.md:68-72`)
+- [x] **R-081f** `src/core/300-router/skill.md:31-32` and `src/scripts/init.sh:114` name the host as `*.mc`.
+  (`src/core/300-router/skill.md:30-31`, `src/scripts/init.sh:114`)
+- [x] **R-082** `src/instances/preconfigured/113-internal-hermes/tests/hermes-agent.sh` calls
+    `mc-modpack <server> <pack>` and expects `ssh 10\.200\.0\.214`, not `.208`.
+  (`113-internal-hermes/tests/hermes-agent.sh:251-254, 98-99`)
+- [x] **R-083** The kopia test fixture is `data/minecraft/cobblemon/world/level.dat`.
+  (`core/104-internal-nas/tests/kopia.nix:16-17, 86-89`)
 
 ### p4: metrics and alert
 
@@ -726,13 +738,11 @@ server is.
 Every test of this spec carries the requirement in its name: Go tests `Test_spec001_rNNN[x]_<what>`, the fuzz target
 `Fuzz_spec001_r040_frame`, VM subtests `spec001_rNNN[x] <what>`, and policy, DNS and script cases `spec001_rNNN`.
 
-- **As built.** These tests predate the spec and keep their names until p3 rewrites them:
-  - `tests/minecraft.nix` subtests "first boot writes the default pack; the secrets and the lazymc config live under
-    /run only" (R-005, R-007), "switch to another Modrinth pack", "CurseForge URL", "back to vanilla", "no argument
-    shows the current pack and changes nothing" and "choice and secrets survive a restart" (R-005);
-  - the laws `src/tests/policy/guests.nix` (R-004 shares equal mounts, R-011 memory budget).
-
-  R-001 to R-003, R-006, R-008, R-009 and R-010 have no test.
+- **As built.** p3 deleted the pre-spec subtests of `tests/minecraft.nix` along with the lazymc config they named,
+  and rewrote the file as the named subtests below. What they proved and is still true is proven there now: R-007 by
+  `spec001_r071b run` and R-008 by `spec001_r073 shared whitelist`. R-005 and R-006 were replaced, so nothing proves
+  them. What predates the spec and still stands is the law `src/tests/policy/guests.nix` (R-004 shares equal mounts,
+  R-011 memory budget); R-001 to R-003, R-009 and R-010 have no test.
 - **p1.**
   - `nix build ./src#checks.x86_64-linux.apps-catalog`: cases `spec001_r020` (an accepted wildcard tcp route, which
     every consumer of the catalog evaluates with, and a host the type rejects because its `*` is not the first label)
@@ -784,20 +794,24 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
   - `spec001_r052 decisions`: a second server refused while the first has a session; a switch after
     `minimumOnlineS` (shortened by the test's settings); a login for the old server during the switch, kicked with
     `stopping`; an unknown name in login;
-  - `spec001_r071a pre start` to `spec001_r071f no wantedby`, one per unit property, including a fake backend
-    ignoring SIGTERM that is killed while the next server still binds (R-071c);
+  - `spec001_r071a pre start`, `spec001_r071b run`, `spec001_r071c stop`, `spec001_r071d timeouts`,
+    `spec001_r071e requires` and `spec001_r071f no wantedby`, one per unit property, R-071c with a fake backend
+    ignoring SIGTERM that is killed while the next server still binds. What runs no container in a VM (the podman
+    option list, the podman verbs of `ExecStop`) is read off a second, unmodified node's generated unit text;
   - `spec001_r072 conflicts`: a hand start of a second unit stops the first;
   - `spec001_r073 shared whitelist`: written through one container, read in another;
-  - `spec001_r074a user` to `spec001_r074d reload`, the last adding a server on SIGHUP without cutting a session
-    (also R-055b);
+  - `spec001_r074a user`, `spec001_r074b restart`, `spec001_r074c no restart` and `spec001_r074d reload`, the last
+    adding a server on SIGHUP without cutting a session (also R-055b);
   - `spec001_r075 polkit`: the gate's user is refused a unit not in `servers`;
-  - `spec001_r076a layout` to `spec001_r076d rename`: on a fake old data dir, interrupted once and run again;
+  - `spec001_r076a layout`, `spec001_r076b move`, `spec001_r076c entries` and `spec001_r076d rename`: on a fake old
+    data dir, interrupted once and run again;
   - `spec001_r077 route`: no lazymc unit, and 25565 answered by mc-gate;
   - `spec001_r078 modpack`, `spec001_r079 rcon` and `spec001_r080 state`;
   - `spec001_r090 metrics` and `spec001_r091 textfile` (added at p4).
 
   Also, for p3:
-  - `nix build ./src#checks.x86_64-linux.policy-eval`, case `spec001_r070` (a reserved server name is refused);
+  - `nix build ./src#checks.x86_64-linux.mc-servers`, case `spec001_r070` (every reserved and malformed server name
+    is refused with a message naming the rule, every well-formed one accepted);
   - `nix build ./src#checks.x86_64-linux.router-zones`, case `spec001_r077` (`cobblemon.mc.lsck0.dev` answers
     vm-214);
   - `nix build ./src#checks.x86_64-linux.kopia`, subtest `spec001_r083 restore` over
@@ -816,7 +830,7 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 |---|---|---|---|---|
 | p1 | R-020 to R-029: the platform accepts and resolves wildcard tcp hosts; no route uses one, so the lab runs as before | none | none | merged |
 | p2 | R-040 to R-059: mc-gate builds with its tests under the check `mc-gate`; nothing runs it, vm-214 still runs lazymc | none | none | merged |
-| p3 | R-070 to R-083: vm-214 runs mc-gate and `cobblemon` at `cobblemon.mc.lsck0.dev`; lazymc and `mc.lsck0.dev` are gone; replaces R-001, R-002, R-003, R-005, R-006, R-009 | p1, p2 | none | planned |
+| p3 | R-070 to R-083: vm-214 runs mc-gate and `cobblemon` at `cobblemon.mc.lsck0.dev`; lazymc and `mc.lsck0.dev` are gone; replaces R-001, R-002, R-003, R-005, R-006, R-009 | p1, p2 | none | merged |
 | p4 | R-090 to R-092: the gate's metrics reach Prometheus, and failed starts alert | p3 | none | planned |
 
 ## Rollout
@@ -866,7 +880,6 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 
 | Requirements | What the code does instead | Closed by |
 |---|---|---|
-| R-070 to R-083, with R-071a to R-071f, R-074a to R-074d, R-076a to R-076d, R-081a to R-081f | one server, one data dir, lazymc on 25565, `mc.lsck0.dev`, tools without a server argument, hermes test expects .208 | p3 |
 | R-090 to R-092 | no Minecraft metrics or alert beyond the tcp probe | p4 |
 
 ## Decisions
@@ -911,20 +924,49 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
   instead of copying a module; a refusal of a catalog nobody declares has no real configuration to run over. The two
   checks already hold the catalog's refusal tables, one for an app's routes and one for an instance's, and
   `apps-catalog` evaluates every consumer of the catalog with the accepted wildcard route.
+- 2026-10-14: The server-name rule is proven beside the code, not in `policy-eval`. Testing named the case
+  `policy-eval` `spec001_r070`, but a law there is a function of the real configurations, and the lab's placement law
+  forbids a lab-wide test from naming one instance's `lib/`. The refusal table lives in the instance's own check
+  `tests/mc-servers.nix` instead, which also proves the throw itself, something a law over real configs cannot. The p1
+  wildcard refusals took the same route.
+- 2026-10-14: The vm test declares its own servers through the module argument `mcServers`. One declared server proves
+  neither a `Conflicts=` nor a switch, and R-070 fixes the lab's set to `cobblemon` alone. `main.nix` therefore reads
+  `config._module.args.mcServers or { cobblemon = ...; }`: the lab gets the spec's set, the test two servers. A formal
+  argument with a default would be looked up in `_module.args` for every host and break the lab's evaluation.
+- 2026-10-14: `RequiresMountsFor` sits in `unitConfig`. It is a `[Unit]` key; in `serviceConfig` systemd drops it with
+  a warning, which the vm test caught. R-071e is met through `unitConfig.RequiresMountsFor`.
+- 2026-10-14: The gate's suffix strips the route's `*.`. The route host is the wildcard `*.mc` (R-077), while the
+  gate's `suffix` is what it cuts off the dialed name, `.mc.lsck0.dev`. `main.nix` derives one from the other with
+  `lib.removePrefix "*."` rather than repeating the domain.
+- 2026-10-14: The whitelist and the ops files are created in each server's `ExecStartPre`. A file bind mount of a
+  missing path makes podman create a directory, and the files live on an nfs mount, so tmpfiles would race the mount.
+  R-071a writes them when missing; `mc-layout` does not, because R-076b has it do nothing when there is no old layout.
+- 2026-10-14: `mc-modpack` restarts a server only while its unit runs. R-078 says it restarts the unit; restarting a
+  sleeping server would start it with nobody on it, which is what the gate exists to prevent. A sleeping server takes
+  the new pack at its next start, and the tool says so.
+- 2026-10-14: `mc-layout` reads the server dir's own pack as the marker that the move already happened. R-076b said
+  it moves when `cobblemon` does not exist, but the as-built layout keeps one world dir per pack, so a pack whose
+  world is named `cobblemon` would look migrated and a vanilla server would boot on the owner's world. The marker is
+  `cobblemon/modpack.env` instead, a temp dir alone no longer starts a move, the final rename is `mv -T` so a
+  destination that exists stops it, and the one container of the old layout is removed before anything moves. R-076b
+  says so, and `spec001_r076d rename` proves both hazards.
+- 2026-10-14: The sops template has no `restartUnits`. `switch-to-configuration` starts a unit it is told to restart
+  even when it was stopped, so a rotated rcon password would wake every server at once, against R-071f. A server
+  reads the rendered file at its next start anyway.
 
 ## Coverage
 
 | ID | implemented at | proven by | state |
 |---|---|---|---|
-| R-001 | `214-external-minecraft/main.nix:113-142`, `main.nix#systemd.services.lazymc` | none | done |
-| R-002 | `main.nix:31-32, 135-136` | none | done |
-| R-003 | `main.nix#mcStart` | none | done |
-| R-004 | `main.nix:101`, `instance.nix:27-30` | `src/tests/policy/guests.nix` (pre-spec law) | done |
-| R-005 | `main.nix#mcModpack`, `main.nix#mcModpackDefault` | `tests/minecraft.nix` pre-spec subtests listed in Testing | done |
-| R-006 | `main.nix#mcRcon` | none | done |
-| R-007 | `main.nix:103-111` | `tests/minecraft.nix` pre-spec subtest "first boot ..." | done |
-| R-008 | `main.nix:63-64` | none | done |
-| R-009 | `instance.nix:16-25`, `src/modules/flows.nix:288-293` | none | done |
+| R-001 | `214-external-minecraft/main.nix:113-142`, `main.nix#systemd.services.lazymc` | none | replaced at p3 |
+| R-002 | `main.nix:31-32, 135-136` | none | replaced at p3 |
+| R-003 | `main.nix#mcStart` | none | replaced at p3 |
+| R-004 | `main.nix:305`, `instance.nix:28-31` | `src/tests/policy/guests.nix` (pre-spec law) | done |
+| R-005 | `main.nix#mcModpack`, `main.nix#mcModpackDefault` | none (its subtests were replaced at p3) | replaced at p3 |
+| R-006 | `main.nix#mcRcon` | none | replaced at p3 |
+| R-007 | `main.nix:307-317` | VM `spec001_r071b run` | done |
+| R-008 | `main.nix:7-8, 56-58, 149-150` | VM `spec001_r073 shared whitelist` | done |
+| R-009 | `instance.nix:16-25`, `src/modules/flows.nix:288-293` | none | replaced at p3 |
 | R-010 | `src/core/103-internal-grafana/main.nix:195-200` | none | done |
 | R-011 | `instance.nix:3-14` | `src/tests/policy/guests.nix` (pre-spec law) | done |
 | R-020 | `src/modules/service.nix:74-80, 130` | `apps-catalog` spec001_r020 | done |
@@ -975,38 +1017,38 @@ Every test of this spec carries the requirement in its name: Go tests `Test_spec
 | R-055c | `lib/mc-gate/settings.go` | `Test_spec001_r055c_keep` | done |
 | R-056 | `lib/mc-gate/state.go` | `Test_spec001_r056_state` | done |
 | R-057 | `lib/mc-gate/decider.go` | `Test_spec001_r057_log` | done |
-| R-058 | `lib/mc-gate/cmd/fake-server/` | VM `spec001_r058 fake server` | gap |
+| R-058 | `lib/mc-gate/cmd/fake-server/` | VM `spec001_r058 fake server` | done |
 | R-059 | `lib/mc-gate.nix`, `tests/mc-gate.nix` | check `mc-gate`, derivation `spec001_r059` | done |
-| R-070 | `main.nix#servers` | `policy-eval` spec001_r070 | gap |
-| R-071a | `main.nix` server units | VM `spec001_r071a pre start` | gap |
-| R-071b | `main.nix` server units | VM `spec001_r071b start` | gap |
-| R-071c | `main.nix` server units | VM `spec001_r071c stop` | gap |
-| R-071d | `main.nix` server units | VM `spec001_r071d timeouts` | gap |
-| R-071e | `main.nix` server units | VM `spec001_r071e dependencies` | gap |
-| R-071f | `main.nix` server units | VM `spec001_r071f no wantedby` | gap |
-| R-072 | `main.nix` server units | VM `spec001_r072 conflicts`, `Test_spec001_r044_sim` | gap |
-| R-073 | `main.nix` server units | VM `spec001_r073 shared whitelist` | gap |
-| R-074a | `main.nix#systemd.services.mc-gate` | VM `spec001_r074a user` | gap |
-| R-074b | `main.nix#systemd.services.mc-gate` | VM `spec001_r074b restart` | gap |
-| R-074c | `main.nix#systemd.services.mc-gate` | VM `spec001_r074c no restart on switch` | gap |
-| R-074d | `main.nix#systemd.services.mc-gate` | VM `spec001_r074d reload` | gap |
-| R-075 | `main.nix` polkit rule | VM `spec001_r075 polkit` | gap |
-| R-076a | `main.nix#systemd.services.mc-layout` | VM `spec001_r076a layout` | gap |
-| R-076b | `main.nix#systemd.services.mc-layout` | VM `spec001_r076b trigger` | gap |
-| R-076c | `main.nix#systemd.services.mc-layout` | VM `spec001_r076c move` | gap |
-| R-076d | `main.nix#systemd.services.mc-layout` | VM `spec001_r076d rename` | gap |
-| R-077 | `instance.nix#services.minecraft` | `router-zones` spec001_r077, VM `spec001_r077 route` | gap |
-| R-078 | `main.nix#mcModpack` | VM `spec001_r078 modpack` | gap |
-| R-079 | `main.nix#mcRcon` | VM `spec001_r079 rcon` | gap |
-| R-080 | `main.nix#mcState` | VM `spec001_r080 state` | gap |
-| R-081a | `214-external-minecraft/skill.md` | phase review | gap |
-| R-081b | `214-external-minecraft/skill.md` | phase review | gap |
-| R-081c | `214-external-minecraft/skill.md` | phase review | gap |
-| R-081d | `214-external-minecraft/skill.md` | phase review | gap |
-| R-081e | `214-external-minecraft/skill.md` | phase review | gap |
-| R-081f | `src/core/300-router/skill.md`, `src/scripts/init.sh` | phase review | gap |
-| R-082 | `113-internal-hermes/tests/hermes-agent.sh` | `hermes-agent.sh minecraft` case spec001_r082 | gap |
-| R-083 | `src/core/104-internal-nas/tests/kopia.nix` | `kopia` subtest `spec001_r083 restore` over `data/minecraft/cobblemon/world/level.dat` | gap |
+| R-070 | `main.nix:19-27`, `lib/servers.nix:15-39` | `mc-servers` spec001_r070 | done |
+| R-071a | `main.nix:115-125, 165` | VM `spec001_r071a pre start` | done |
+| R-071b | `main.nix:127-155, 166` | VM `spec001_r071b run` | done |
+| R-071c | `main.nix:168-169` | VM `spec001_r071c stop` | done |
+| R-071d | `main.nix:171-173` | VM `spec001_r071d timeouts` | done |
+| R-071e | `main.nix:160-161, 175-177` | VM `spec001_r071e requires` | done |
+| R-071f | `main.nix:157-178, 383` | VM `spec001_r071f no wantedby` | done |
+| R-072 | `main.nix:102-105, 161-162` | VM `spec001_r072 conflicts`, `Test_spec001_r044_sim` | done |
+| R-073 | `main.nix:56-58, 112-113, 119-122, 135` | VM `spec001_r073 shared whitelist` | done |
+| R-074a | `main.nix:183, 354-372`, `main.nix:325-326` | VM `spec001_r074a user` | done |
+| R-074b | `main.nix:357-358, 366` | VM `spec001_r074b restart` | done |
+| R-074c | `main.nix:359-360` | VM `spec001_r074c no restart` | done |
+| R-074d | `main.nix:361, 364-365` | VM `spec001_r074d reload` | done |
+| R-075 | `main.nix:328-340` | VM `spec001_r075 polkit` | done |
+| R-076a | `main.nix:343-352` | VM `spec001_r076a layout` | done |
+| R-076b | `main.nix:210-222` | VM `spec001_r076b move` | done |
+| R-076c | `main.nix:224-231` | VM `spec001_r076c entries` | done |
+| R-076d | `main.nix:232-233` | VM `spec001_r076d rename` | done |
+| R-077 | `instance.nix:16-26` | `router-zones` spec001_r077, VM `spec001_r077 route` | done |
+| R-078 | `main.nix:239-280, 322` | VM `spec001_r078 modpack` | done |
+| R-079 | `main.nix:282-297` | VM `spec001_r079 rcon` | done |
+| R-080 | `main.nix:299-303` | VM `spec001_r080 state` | done |
+| R-081a | `skill.md:14-27` | phase review | done |
+| R-081b | `skill.md:33-38, 44-49, 56-58` | phase review | done |
+| R-081c | `skill.md:60-62` | phase review | done |
+| R-081d | `skill.md:66-67` | phase review | done |
+| R-081e | `skill.md:68-72` | phase review | done |
+| R-081f | `src/core/300-router/skill.md:30-31`, `src/scripts/init.sh:114` | phase review | done |
+| R-082 | `113-internal-hermes/tests/hermes-agent.sh:251-254, 98-99` | `hermes-agent.sh minecraft` case spec001_r082 | done |
+| R-083 | `core/104-internal-nas/tests/kopia.nix:16-17, 86-89` | `kopia` subtest `spec001_r083 restore` | done |
 | R-090 | `lib/mc-gate/metrics.go` | VM `spec001_r090 metrics` | gap |
 | R-091 | `main.nix` tmpfiles, `homelab.textfiles` | VM `spec001_r091 textfile` | gap |
 | R-092 | `src/core/103-internal-grafana/lib/rules.nix` | `alert-rules` spec001_r092 | gap |
