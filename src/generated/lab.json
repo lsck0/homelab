@@ -578,7 +578,7 @@
     "minecraft": {
       "app": null,
       "health": "/",
-      "host": "mc.lsck0.dev",
+      "host": "*.mc.lsck0.dev",
       "onion": null,
       "path": "/",
       "port": 25565,

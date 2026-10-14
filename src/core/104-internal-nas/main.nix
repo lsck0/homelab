@@ -217,6 +217,19 @@ in {
       type = "sendreceive";
       ignorePerms = true;
     };
+    # each machine's borg repo (arch-dotfiles configs/core/borg), encrypted and versioned by borg itself
+    settings.folders.borg-luca-pc = {
+      id = "borg-luca-pc";
+      path = "/srv/nas/syncthing/borg-luca-pc";
+      devices = [ "luca-pc" ];
+      type = "receiveonly";
+    };
+    settings.folders.borg-luca-notebook = {
+      id = "borg-luca-notebook";
+      path = "/srv/nas/syncthing/borg-luca-notebook";
+      devices = [ "luca-notebook" ];
+      type = "receiveonly";
+    };
   };
 
   # plain http: the packages and the db are signed
