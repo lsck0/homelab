@@ -30,6 +30,7 @@ let
   syncthingDiscoveryPort = 21027;
 
   mirrorDir = "${bulk}/archmirror";
+  syncthingDir = "/srv/nas/syncthing";
   # tier 1, german, rsync-enabled; the trailing slash is the module root, already laid out as $repo/os/$arch; its
   # https side is the outage probe, src/modules/upstream/lib/upstreams.nix archmirror
   mirrorUpstream = "rsync://ftp.halifax.rwth-aachen.de/archlinux/";
@@ -48,6 +49,14 @@ in {
     fsType = "ext4";
     # nofail: state exports matter more than media; noatime: a read must not write the hdd awake
     options = [ "defaults" "noatime" "nofail" "x-systemd.device-timeout=30s" ];
+  };
+
+  # syncthing's folders (the sync folder, the machines' borg repos) live on the hdd: they outgrew the root disk
+  # (2026-10-15, 725/739 GiB). A bind keeps /srv/nas/syncthing the one path the smb share, proton-bisync and kopia use.
+  fileSystems.${syncthingDir} = {
+    device = "${bulk}/syncthing";
+    fsType = "none";
+    options = [ "bind" "nofail" "x-systemd.requires-mounts-for=${bulk}" ];
   };
 
   # the documents share's read-only view of the paperless archive; bindfs because paperless keeps the tree 0700
@@ -121,7 +130,7 @@ in {
     media = { path = "${bulk}/media"; writable = true; };
     documents = { path = "/srv/nas/documents"; writable = true; };
     BACKUPS.path = "/srv/nas/BACKUPS";
-    syncthing = { path = "/srv/nas/syncthing"; writable = true; };
+    syncthing = { path = syncthingDir; writable = true; };
   };
 
   services.samba-wsdd = {
@@ -162,8 +171,9 @@ in {
     "d ${mirrorDir} 0755 root root -"
     "d /srv/nas/data/firefly/db 0750 70 70 -"
     "d /srv/nas/data/firefly/upload 0750 1000 1000 -"
-    "d /srv/nas/syncthing 0775 nobody nogroup -"
-    "d /srv/nas/syncthing/sync 0775 nobody nogroup -"
+    "d ${bulk}/syncthing 0775 nobody nogroup -"
+    "d ${syncthingDir} 0775 nobody nogroup -"
+    "d ${syncthingDir}/sync 0775 nobody nogroup -"
     "d /var/lib/syncthing 0700 nobody nogroup -"
     "d /var/lib/filebrowser 0750 1000 1000 -"
     "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
@@ -186,11 +196,13 @@ in {
   };
 
   systemd.services.syncthing.environment.HOME = "/var/lib/syncthing";
+  # without the hdd the bind is missing, and syncthing must not take an empty mountpoint for deleted folders
+  systemd.services.syncthing.unitConfig.RequiresMountsFor = syncthingDir;
   services.syncthing = {
     enable = true;
     user = "nobody";
     group = "nogroup";
-    dataDir = "/srv/nas/syncthing";
+    dataDir = syncthingDir;
     configDir = "/var/lib/syncthing";
     guiAddress = "0.0.0.0:${toString routes.syncthing.port}";
     overrideDevices = false;
@@ -212,7 +224,7 @@ in {
     # also the "syncthing" smb share
     settings.folders.sync = {
       id = "sync";
-      path = "/srv/nas/syncthing/sync";
+      path = "${syncthingDir}/sync";
       devices = [ "luca-pc" "luca-notebook" ];
       type = "sendreceive";
       ignorePerms = true;
@@ -220,13 +232,13 @@ in {
     # each machine's borg repo (arch-dotfiles configs/core/borg), encrypted and versioned by borg itself
     settings.folders.borg-luca-pc = {
       id = "borg-luca-pc";
-      path = "/srv/nas/syncthing/borg-luca-pc";
+      path = "${syncthingDir}/borg-luca-pc";
       devices = [ "luca-pc" ];
       type = "receiveonly";
     };
     settings.folders.borg-luca-notebook = {
       id = "borg-luca-notebook";
-      path = "/srv/nas/syncthing/borg-luca-notebook";
+      path = "${syncthingDir}/borg-luca-notebook";
       devices = [ "luca-notebook" ];
       type = "receiveonly";
     };
