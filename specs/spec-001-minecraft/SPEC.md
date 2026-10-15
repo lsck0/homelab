@@ -287,8 +287,8 @@ path says otherwise (those are relative to `src/`).
   - `--env-file` the sops template `minecraft-server.env` (rcon password, CurseForge key), then
     `--env-file /var/lib/minecraft/<name>/modpack.env`;
   - `-e EULA=TRUE -e MEMORY=7G -e DIFFICULTY=hard`;
-  - `-e ICON=${icon} -e OVERRIDE_ICON=TRUE -e "MOTD=[<name>] ${motd}"`, where `main.nix` keeps two let-bindings `icon` and
-    `motd` holding the as-built values (`main.nix:72-73`);
+  - `-e ICON=${icon} -e OVERRIDE_ICON=TRUE -e "MOTD=[<name>] ${motd}"`, where `main.nix` keeps two let-bindings: `icon`, the
+    cached icon `/modpacks/server-icon.png` in the modpack share, and `motd`, the as-built value;
   - `-e USE_AIKAR_FLAGS=true -e VIEW_DISTANCE=12 -e SIMULATION_DISTANCE=8 -e SPAWN_PROTECTION=0`;
   - `-e MAX_PLAYERS=42069 -e ENABLE_RCON=true -e ENABLE_WHITELIST=true -e ENFORCE_WHITELIST=true`;
   - `-e REMOVE_OLD_MODS=TRUE -e MAX_TICK_TIME=-1 -e STOP_DURATION=90`;
@@ -902,6 +902,9 @@ None: every requirement of this spec is built.
 
 ## Decisions
 
+- 2026-10-15: The server icon is a cached file in the modpack share, `/modpacks/server-icon.png`, not the furaffinity
+  url. The image downloads a url icon on every start and fails the start when the download does; furaffinity began
+  answering 403, and atm failed four starts in a row. Rejected: dropping the icon (the owner wants it).
 - 2026-10-14: `atm` runs the All the Mons modpack from its server files, not the Cobblemon mod plus the AllTheMons
   datapack. The owner meant the modpack. Its server zip lives in the modpack share beside the cobblemon pack and is
   applied by the image's `GENERIC_PACK`. The first atm data dir (the datapack test, no player ever joined) was

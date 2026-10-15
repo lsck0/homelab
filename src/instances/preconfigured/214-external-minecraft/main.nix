@@ -83,7 +83,10 @@ let
     "1.1.1.1"
     "8.8.8.8"
   ];
-  icon = "https://d.furaffinity.net/art/skullfugg/1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png";
+  # a cached copy in the modpack share: the image fetched the original on every start, and since 2026-10-15
+  # furaffinity answers 403, which fails the start (d.furaffinity.net/art/skullfugg/1697237475/
+  # 1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png, as the image scaled it to 64x64)
+  icon = "/modpacks/server-icon.png";
   motd = "nya~ minecwaft sewvew 🐾✨";
 
   # the world the guest ran before it had several (R-076): mc-layout moves it into its own dir once

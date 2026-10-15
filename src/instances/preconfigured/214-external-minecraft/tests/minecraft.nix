@@ -399,8 +399,7 @@ pkgs.testers.runNixOSTest {
             environment = {key: value.strip() for key, value in options}
             assert environment == {
                 "EULA": "TRUE", "MEMORY": "7G", "DIFFICULTY": "hard",
-                "ICON": "https://d.furaffinity.net/art/skullfugg/1697237475/"
-                        "1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png",
+                "ICON": "/modpacks/server-icon.png",
                 "OVERRIDE_ICON": "TRUE", "MOTD": f"[{name}] nya~ minecwaft sewvew 🐾✨",
                 "USE_AIKAR_FLAGS": "true", "VIEW_DISTANCE": "12", "SIMULATION_DISTANCE": "8",
                 "SPAWN_PROTECTION": "0", "MAX_PLAYERS": "42069", "ENABLE_RCON": "true",
