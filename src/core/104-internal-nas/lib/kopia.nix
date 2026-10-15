@@ -51,8 +51,10 @@ let
     exec ${protonDriveCli}/bin/proton-drive auth login "$@"
   '';
   source = "/srv/nas";
-  # ignored in source: the hdd (/bulk), and the machines' borg repos under /syncthing, backups already, whose
-  # encrypted chunks would only double in the repository on the root disk and in the off-site copy
+  # ignored in source: the hdd (/bulk), and /syncthing: its sync folder goes off-site as plain files through
+  # proton-bisync (proton keeps the revisions), the borg repos are backups already, and a second copy of either in
+  # the repository does not fit the proton plan (2026-10-15: 510/510 GB with both). An earlier boot's
+  # '/syncthing/borg-*' stays in the policy's set, covered by this one.
   # vm-103's tsdb, exported from the nas; ignored in source, snapshotted as a source of its own
   prometheusDir = "${source}/data/prometheus";
   repo = "${source}/BACKUPS/kopia";
@@ -318,7 +320,7 @@ in {
         --keep-latest=3 --keep-hourly=0 --keep-daily=7 --keep-weekly=8 --keep-monthly=12 --keep-annual=2 \
         --add-ignore=/BACKUPS --add-ignore=lost+found --add-ignore='*.tmp' \
         --add-ignore=/bulk \
-        --add-ignore='/syncthing/borg-*' \
+        --add-ignore=/syncthing \
         --add-ignore=/documents/archive \
         --add-ignore=/data/prometheus --add-ignore=/data/loki --add-ignore=/data/registry \
         --one-file-system=false
