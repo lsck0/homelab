@@ -49,6 +49,7 @@ let
           VERSION=1.21.1
           NEOFORGE_VERSION=21.1.249
           GENERIC_PACK=/modpacks/allthemons-serverfiles-1.3.0.zip
+          MODS=/modpacks/atm-extra
           LEVEL=allthemons
         '';
       };

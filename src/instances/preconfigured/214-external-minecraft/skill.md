@@ -23,7 +23,8 @@ The servers, each at its own address:
 - **atm**, `atm.mc.lsck0.dev`: the All the Mons modpack 1.3.0 (CurseForge), NeoForge 21.1.249. Players install
   the same pack version in their launcher. A pack update: put the new ServerFiles zip into
   `/var/lib/minecraft-modpacks/`, change `GENERIC_PACK` in `/var/lib/minecraft/atm/modpack.env` and in the
-  repo's `servers.atm.pack`.
+  repo's `servers.atm.pack`. Extra mods beyond the pack (Mahou Tsukai) are jars in
+  `/var/lib/minecraft-modpacks/atm-extra/`, loaded on atm's next start; players need the same jars.
 
 A player picks the server by the address they add in the launcher; the port stays the default 25565.
 

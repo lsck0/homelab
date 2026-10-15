@@ -272,7 +272,7 @@ path says otherwise (those are relative to `src/`).
   Names are DNS labels other than `layout`, `gate` and `state`, enforced by an evaluation assert. The lab declares
   `cobblemon = { version = "1.21.1"; protocol = 767; }`, `vanilla = { image = imageJava25; }` and `atm` (the All the Mons
   modpack: its server files `allthemons-serverfiles-1.3.0.zip` in the modpack share as `GENERIC_PACK`, NeoForge
-  21.1.249).
+  21.1.249, plus the jars in the share's `atm-extra/` as `MODS`).
   (`main.nix:19-45`, `lib/servers.nix:15-39`)
 - [x] **R-071a** Each server has a unit `minecraft-<name>.service`. Its `ExecStartPre` creates
   `/var/lib/minecraft/<name>` (0750, 1000:1000) when missing, runs `podman rm --force --ignore minecraft-<name>`,
