@@ -100,18 +100,24 @@ pkgs.runCommand "proton-mirror" {
   mv "$W/moved" "$K"
   pass "a missing, unmarked or empty repository is refused and leaves the drive alone"
 
-  # 5. OUTAGE, NO SESSION, FAILED UPLOAD: nothing pruned, no success time
+  # 5. OUTAGE, NO SESSION: nothing pruned, no success time
   rm "$K"/xn0_2
   rm metric.out
   run ${toString unavailable} PROTON_MIRROR_PROBE=$W/probe-down
-  run 1 FAKE_UPLOAD_FAIL=1
   mv "$STATE"/auth-session.json "$W"/session
   run 0
   mv "$W"/session "$STATE"/auth-session.json
   [ "$(tree "$FAKE_DRIVE")" = "$before" ] && [ ! -e metric.out ] || fail "skipped runs: the drive changed or success was reported"
+  pass "an outage or a missing session prunes nothing"
+
+  # 6. FAILED UPLOAD: the prune comes first, so a full drive still frees what the source dropped; no success time
+  echo new > "$K"/p_after_full
+  run 1 FAKE_UPLOAD_FAIL=1
+  [ ! -e "$B"/xn0_2 ] && [ ! -e "$B"/p_after_full ] && [ ! -e metric.out ] \
+    || fail "failed upload: the dropped blob stayed, the new one arrived, or success was reported"
   run 0
-  [ ! -e "$B"/xn0_2 ] && [ -s metric.out ] || fail "skipped runs: the next run did not catch up"
-  pass "an outage, a missing session or a failed upload prune nothing; the next run catches up"
+  [ -e "$B"/p_after_full ] && [ -s metric.out ] || fail "failed upload: the next run did not catch up"
+  pass "a failed upload still prunes; the next run uploads what it missed"
 
   touch $out
 ''

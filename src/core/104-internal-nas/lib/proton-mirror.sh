@@ -187,21 +187,13 @@ entries_list "$SOURCE" > "$current"
 # what may be remote once the upload starts: a run cut short (timeout) still prunes it later
 LC_ALL=C sort -u "$MANIFEST" "$current" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
 
-echo ">>> $SOURCE -> $REMOTE"
-upload "$SOURCE" "$TARGET"
-case $? in
-  0) ;;
-  2) echo ">>> $SOURCE changed during the upload, once more"; upload "$SOURCE" "$TARGET" || ok=0 ;;
-  *) ok=0 ;;
-esac
-
+# prune before the upload: a full drive takes no new blob until the dropped ones are gone, and an upload-first order
+# never prunes once the drive is full (2026-10-15: 510/510 GB, kopia had dropped 264 of 281 GiB). The cost: from the
+# prune until the upload ends, the remote copy lacks the newest index blobs that replace the pruned ones
 LC_ALL=C comm -23 "$MANIFEST" "$current" > "$gone"
 gone_count=$(wc -l < "$gone")
 known_count=$(wc -l < "$MANIFEST")
-if [ "$ok" != 1 ]; then
-  # a failed upload says nothing good about the session or the source; prune next time
-  cp "$gone" "$kept"
-elif [ "$gone_count" -gt 0 ] && [ $((gone_count * 100)) -gt $((known_count * MAX_GONE_PERCENT)) ] \
+if [ "$gone_count" -gt 0 ] && [ $((gone_count * 100)) -gt $((known_count * MAX_GONE_PERCENT)) ] \
     && [ ! -e "$ALLOW_LARGE" ]; then
   echo ">>> $gone_count of $known_count uploaded entries are gone locally, over $MAX_GONE_PERCENT%;"
   echo ">>> not pruning the off-site copy. if intended: touch $ALLOW_LARGE and rerun"
@@ -213,6 +205,15 @@ else
   prune "$gone" > "$kept"
   [ -s "$kept" ] && ok=0
 fi
+
+echo ">>> $SOURCE -> $REMOTE"
+upload "$SOURCE" "$TARGET"
+case $? in
+  0) ;;
+  2) echo ">>> $SOURCE changed during the upload, once more"; upload "$SOURCE" "$TARGET" || ok=0 ;;
+  *) ok=0 ;;
+esac
+
 # the next run retries what could not be pruned
 LC_ALL=C sort -u "$current" "$kept" > "$MANIFEST.tmp" && mv "$MANIFEST.tmp" "$MANIFEST"
 
