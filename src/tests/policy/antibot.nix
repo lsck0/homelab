@@ -48,6 +48,15 @@ let
     edge.services.traefik.staticConfigOptions.entryPoints);
   onionRouters = lib.filterAttrs (_: router: lib.any (e: lib.elem e onionEntryPoints) (router.entryPoints or [ ])) (httpOf edge).routers;
   onionAddresses = lib.filter (address: address != null) (map (r: r.onionAddress or null) (lib.attrValues catalog.external));
+
+  # robots.txt: the lab's disallow-all on every defended host, the backend's own on an indexable route's
+  robotsRule = (httpOf edge).routers.robots-tls.rule;
+  edgeHttp = lib.filter (r: r.protocol == "http") (lib.attrValues catalog.external);
+  hostsOf = pred: lib.unique (map (r: r.host) (lib.filter pred edgeHttp));
+  robotsSpared = host: lib.hasInfix "!Host(`${net.fqdn host}`)" robotsRule;
+  indexableHosts = hostsOf (r: r.indexable);
+  robotsCovered = lib.subtractLists (hostsOf (r: r.indexable || !(lib.elem "botDefense" r.on))) (hostsOf (_: true));
+  crowdsecCollections = lib.splitString " " (edge.virtualisation.oci-containers.containers.crowdsec.environment.COLLECTIONS or "");
 in
 lib.concatLists (lib.mapAttrsToList (law: violations: map (v: "${law}: ${v}") violations) {
   "never hit" = lib.concatLists (lib.mapAttrsToList (host: config: let
@@ -83,6 +92,18 @@ lib.concatLists (lib.mapAttrsToList (law: violations: map (v: "${law}: ${v}") vi
   ) onionRouters)
     ++ map (address: "vm-200's gate does not know the onion address ${address}")
       (lib.subtractLists (lib.attrValues ((gateOf edge).captcha.onions or { })) onionAddresses);
+
+  # a search crawler reads an indexable route's own robots.txt and passes anubis' and crowdsec's checks of its ranges
+  # and reverse dns; everywhere else it reads the lab's disallow-all
+  "indexable" = map (h: "vm-200 answers ${net.fqdn h}'s robots.txt with the lab's disallow-all, its route is indexable")
+      (lib.filter (h: !(robotsSpared h)) indexableHosts)
+    ++ map (h: "vm-200 leaves ${net.fqdn h}'s robots.txt to its backend, no route of it is indexable")
+      (lib.filter robotsSpared robotsCovered)
+    ++ lib.optionals (indexableHosts != [ ]) (
+      lib.optional (edge.services.anubis.instances.ingress.botPolicy != null)
+        "vm-200's anubis has a policy of its own, its bundled one admits the verified search crawlers"
+      ++ lib.optional (!(lib.elem "crowdsecurity/whitelist-good-actors" crowdsecCollections))
+        "vm-200's crowdsec may ban search crawlers: crowdsecurity/whitelist-good-actors is not installed");
 
   "captcha" = lib.optional ((gateOf edge).captcha == null) "vm-200, the internet's ingress, asks no captcha"
     ++ lib.concatLists (lib.mapAttrsToList (host: config:

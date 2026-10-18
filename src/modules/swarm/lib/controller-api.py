@@ -6,15 +6,11 @@ Usage: controller-api.py <config.json>   (systemd socket activation, Accept=yes:
     POST /wake/<app>       from a waker, for an app with idle         starts swarm-idle-wake@<app>
     POST /sleep/<app>      from a waker, for an app with idle         starts swarm-idle-sleep@<app>
     GET  /state/<app>      from a waker, for an app with idle         "running" or "stopped"
+    GET  /uptime/<app>     from a waker, for an app with idle         seconds since its last wake
 
-It only ever starts one of those units (polkit allows this user nothing else), takes no payload, and answers
-202 started, 401 wrong token, 403 not a waker, 404 no such app or action, 405, 413 a body, 429 asked too often,
-503 the unit did not start. A redeploy while one runs coalesces into it: starting an active unit starts nothing; a
-redeploy counts against the window only once its unit started. Every token is compared in
-constant time; an unknown app answers 404 before any token is read, so the answer names no app's token.
-
-Config keys: apps { <app>: { tokenFile (null on a guest's own swarm: redeploys are the controller's); idle } }, wakers [ip] (the ingresses, the state worker), redeployIntervalS, stateDir, stoppedDir, units
-{ redeploy; wake; sleep } (unit templates, "%s" the app).
+It only ever starts one of those units (polkit allows this user nothing else) and takes no payload. A redeploy
+while one runs coalesces into it, and counts against the window only once its unit started. An unknown app answers
+404 before any token is read, so the answer names no app's token.
 """
 import hmac
 import json
@@ -31,14 +27,14 @@ import time
 
 HEAD_BYTES_MAX = 8192
 READ_TIMEOUT_S = 5
-# --no-block only queues the job; inside the unit's RuntimeMaxSec with the read
+# --no-block only queues the job
 UNIT_START_TIMEOUT_S = 3
 APP_NAME = re.compile(r"[a-z][a-z0-9-]*")
-PATH = re.compile(r"/(redeploy|wake|sleep|state)/([^/]+)")
+PATH = re.compile(r"/(redeploy|wake|sleep|state|uptime)/([^/]+)")
 BEARER = "Bearer "
 REASONS = {200: "OK", 202: "Accepted", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found",
            405: "Method Not Allowed", 413: "Payload Too Large", 429: "Too Many Requests", 503: "Service Unavailable"}
-METHODS = {"redeploy": "POST", "wake": "POST", "sleep": "POST", "state": "GET"}
+METHODS = {"redeploy": "POST", "wake": "POST", "sleep": "POST", "state": "GET", "uptime": "GET"}
 
 
 # -----------------------------------------------------------------------------
@@ -83,6 +79,11 @@ def respond(config, method, path, headers, remote, now_s, start_unit):
         return 404, "the app never idles\n"
     if action == "state":
         return 200, "stopped\n" if os.path.exists(os.path.join(config["stoppedDir"], app)) else "running\n"
+    if action == "uptime":
+        woke = os.path.join(config["stoppedDir"], app + config["wokeSuffix"])
+        # never woken through the controller: up since its deploy, as old as the epoch to the reaper
+        woke_s = os.path.getmtime(woke) if os.path.exists(woke) else 0
+        return 200, f"{int(now_s - woke_s)}\n"
     if not start_unit(config["units"][action] % app):
         return 503, f"the {action} did not start\n"
     return 202, f"{action} started\n"

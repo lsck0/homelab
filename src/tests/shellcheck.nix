@@ -1,30 +1,17 @@
-# lab-wide: every shell script of the repo
-# every shell script of the repo passes shellcheck at its strictest default (style notes included): sync.sh, the
-# hook, every *.sh under src, and the shell embedded in nix: the bodies of writeShellScript, writeShellScriptBin and
-# writeShellApplication and the systemd `script`, `preStart`, `postStart`, `preStop` and `postStop` strings. A
-# disabled check carries its reason in a directive next to the code.
+# lab-wide: the shell embedded in nix
+# every shell body embedded in nix passes shellcheck at its strictest default (style notes included): the bodies of
+# writeShellScript, writeShellScriptBin and writeShellApplication and the systemd `script`, `preStart`, `postStart`,
+# `preStop` and `postStop` strings. The repo's own scripts are nushell, which nu-check parses. A disabled check
+# carries its reason in a directive next to the code.
 #
 # An embedded body is read from `nix-instantiate --parse`, which has already stripped the indentation and resolved
-# the escapes; each antiquotation becomes a word of its own, __NIX1__, __NIX2__, ... Its file is bodies/<nix file>.<attribute>-<n>.sh, line 1
-# the shebang, so its line N is line N - 1 of the string. A body behind a function call (lib.mkAfter "...") is
-# not reached. An antiquotation hides what it expands to, so three checks cannot judge a body and are off for bodies
-# alone: SC1091 (a sourced store path), SC2043 (a loop over a nix list) and SC2154 (a variable the unit's environment
-# or nix-rendered code sets).
-#
-# sync.sh and the hook live at the repo's top, which only a git flake (git+file:...?dir=src) holds; a path: flake
-# holds src alone, and this check refuses it instead of passing on part of the repo.
+# the escapes; each antiquotation becomes a word of its own, __NIX1__, __NIX2__, ... Its file is
+# bodies/<nix file>.<attribute>-<n>.sh, line 1 the shebang, so its line N is line N - 1 of the string. A body behind
+# a function call (lib.mkAfter "...") is not reached. An antiquotation hides what it expands to, so three checks
+# cannot judge a body: SC1091 (a sourced store path), SC2043 (a loop over a nix list) and SC2154 (a variable the
+# unit's environment or nix-rendered code sets).
 { pkgs, lib, ... }:
 let
-  repo = ../..;
-  wholeRepo = builtins.pathExists (repo + "/sync.sh");
-  scripts = lib.fileset.toSource {
-    root = repo;
-    fileset = lib.fileset.unions [
-      (repo + "/sync.sh")
-      (repo + "/.githooks")
-      (lib.fileset.fileFilter (f: f.hasExt "sh") ../.)
-    ];
-  };
   nixFiles = lib.fileset.toSource { root = ../.; fileset = lib.fileset.fileFilter (f: f.hasExt "nix") ../.; };
 
   extract = pkgs.writeText "shellcheck-bodies.py" ''
@@ -160,21 +147,14 @@ let
     main()
   '';
 in
-assert lib.assertMsg wholeRepo
-  "shellcheck needs the whole repo (sync.sh, .githooks): build it from git, `nix build ./src#checks.x86_64-linux.shellcheck`, not from a path: flake";
 pkgs.runCommand "shellcheck" { nativeBuildInputs = [ pkgs.shellcheck pkgs.findutils pkgs.nix pkgs.python3 ]; } ''
   export HOME=$TMPDIR NIX_STATE_DIR=$TMPDIR/nix
-  mkdir tree && cd tree
-  cp -r ${scripts}/. .
-  chmod -R u+w .
   (cd ${nixFiles} && find . -name '*.nix' -printf '%P\n') | while read -r f; do
     mkdir -p "$TMPDIR/parsed/$(dirname "$f")"
     nix-instantiate --store dummy:// --parse "${nixFiles}/$f" > "$TMPDIR/parsed/$f"
   done
   python3 ${extract} "$TMPDIR/parsed" bodies
-  # -x follows the sourced libraries, whose paths the `source=` directives give relative to the repo root
-  find . -path ./bodies -prune -o -type f \( -name '*.sh' -o -path './.githooks/*' \) -print0 | sort -z | xargs -0 shellcheck -x
   find bodies -type f -print0 | sort -z | xargs -0 shellcheck -e SC1091,SC2043,SC2154
-  echo "shellcheck: $(find . -type f \( -name '*.sh' -o -path './.githooks/*' \) | wc -l) scripts clean, $(find bodies -type f | wc -l) of them embedded in nix"
+  echo "shellcheck: $(find bodies -type f | wc -l) embedded bodies clean"
   touch $out
 ''

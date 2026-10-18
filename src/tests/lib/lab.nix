@@ -1,43 +1,16 @@
 # the lab in a nixos test: nodes that run the production module stack at their inventory addresses
 #
-# Every lab node imports what a lab host runs (modules/base, modules/egress-vpn.nix) with sops-nix and the
-# platform swapped for stand-ins (tests/stubs/), so sshd, node-exporter, the firewall and every module keyed on the
-# hostname are the lab's own; only the boundary is faked. A guest carries its real hostname (vm-<id>) and address,
-# so every address hard-coded in the lab keeps its meaning. Every lab node trusts the test ca (lib/pki.nix) and has
-# labprobe (lib/labprobe.py).
-#
-#   { pkgs, lib, specialArgs, ... }:
-#   let lab = import ./lib/lab.nix { inherit pkgs lib specialArgs; }; in
-#   pkgs.testers.runNixOSTest {
-#     name = "example";
-#     node.specialArgs = lab.specialArgs;
-#     nodes.luca-router = lab.router;
-#     nodes.vm-131 = lab.guest "131" { };                                         # internal zone, vlan 2
-#     nodes.vm-200 = { imports = [ (lab.guest "200" { instance = ../instances/200-external-traefik/main.nix; })
-#                                  ./lib/offline-traefik.nix ]; };
-#     nodes.world = lab.multi { addresses = [ "192.168.178.1/24" "198.51.100.7/24" ]; };
-#     testScript = lab.driverPython + ''
-#       start_all()
-#     '';
-#   }
-#
-# Routed tests put each zone on its own vlan and boot `router`; vlans follow the router's nics (zones.json router_nic):
-# 1 the house lan and wan (proxmox net0), each zone's the number of its router leg plus one. Flat tests (`flat = true`)
-# put every node on vlan 1 with a /8, so all lab subnets are on-link; a guest answers anything else through its
-# gateway, so a `multi` node owning the outside addresses (192.168.178.138/24, ...) must also own the gateways
-# (10.100.0.1/8, ...). The test driver names machines by hostname: vm-131 is `vm_131` in the script.
-#
-# nas: a guest's nas mounts bind-mount directories of its own disk by default (lib/nas-local.nix), so the units
-# keyed on them run as in the lab; `nas = true` mounts them for real from a `nas` node, which exports exactly what
-# the test's guests mount (104-internal-nas/lib/nas-exports.nix over lib/nas-clients.nix, lib/nas-mounts.nix).
-#
-# testDefaults: what every vm test takes; the flake extends each check with it.
-#
-# apps: a test's own app folders, the production ones passed through it (modules/lab withApps): every fact follows,
-# the workers its fixture apps need included. withApps does the same again (a specialisation's edited catalog).
+# every lab node imports what a lab host runs, sops-nix and the platform swapped for stand-ins (tests/stubs/); it keeps
+# its real hostname (vm-<id>, `vm_131` in the script) and address, trusts the test ca and has labprobe.
+#   nodes.vm-131 = lab.guest "131" { };  nodes.luca-router = lab.router;  testScript = lab.driverPython + "...";
+# vlans: a routed test puts each zone on its own vlan and boots `router`: 1 the house lan and wan, each zone's its router
+# leg plus one. A flat test (`flat = true`) puts every node on vlan 1 with a /8, so a `multi` node owning outside
+# addresses must also own the gateways (10.100.0.1/8, ...).
+# nas: a guest's mounts bind its own disk (lib/nas-local.nix); `nas = true` mounts them from a `nas` node exporting
+# exactly what the test's guests mount.
+# apps: a test's own app folders (modules/lab withApps): every fact follows, the workers its apps need included.
 { pkgs, lib, specialArgs, apps ? null }:
 let
-  # the flake's, under another name: the attribute set below exports its own specialArgs
   facts = if apps == null then specialArgs else let collected = specialArgs.lab.withApps apps; in
     assert lib.assertMsg (collected.problems == [ ]) "the test's apps break the lab's rules:\n${lib.concatLines collected.problems}";
     specialArgs // { lab = collected; inherit (collected) inventory site nasClients; };
@@ -78,9 +51,7 @@ in rec {
   testDefaults.globalTimeout = lib.mkDefault globalTimeoutS;
   secretValues = import ./secret-values.nix { inherit pkgs; };
   images = import ./images.nix { inherit pkgs; };
-  # the typed apps and the catalog every node of the test reads (modules/lab, modules/catalog.nix)
   inherit (facts.lab) appsCatalog catalog withApps;
-  # the instances' routes by zone ({ internal; external; }, every field) and vpn egress members (modules/lab)
   routes = lib.genAttrs [ "internal" "external" ] (zone: lib.filterAttrs (_: r: r.zone == zone) facts.lab.routes);
   inherit (facts.lab) egress;
   # runNixOSTest's node.specialArgs: the hosts' facts. nasClients stays out: the router takes the lab's real one
@@ -130,7 +101,7 @@ in rec {
 
   # the real router at its real nic names, with the lab's real nas clients (they shape its nfs rules)
   router = {
-    imports = production ++ [ node ../../core/300-router/main.nix ./offline-router.nix ];
+    imports = production ++ [ node ../../instances/core/300-router/main.nix ./offline-router.nix ];
     _module.args.nasClients = facts.nasClients;
     virtualisation.vlans = lib.mkForce [ ];
     virtualisation.interfaces = { ${net.wan.interface}.vlan = vlans.lan; }
@@ -139,7 +110,7 @@ in rec {
 
   # the nas at 10.100.0.104, exporting exactly what the test's guests mount, by the real export rules
   nas = { flat ? false, vlan ? (if flat then vlans.lan else vlans.internal) }: { nodes, ... }: {
-    imports = [ (guest nasId { inherit flat vlan; }) ../../core/104-internal-nas/lib/nas-exports.nix ];
+    imports = [ (guest nasId { inherit flat vlan; }) ../../instances/core/104-internal-nas/lib/nas-exports.nix ];
     homelab.nasExports.enable = true;
     _module.args.nasClients = import ./nas-clients.nix {
       inherit lib inventory;

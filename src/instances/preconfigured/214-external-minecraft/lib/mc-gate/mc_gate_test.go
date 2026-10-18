@@ -20,7 +20,7 @@ import (
  * -----------------------------------------------------------------------------
  */
 
-// the unit states systemd reports, which R-046a maps onto the three activities
+// the unit states systemd reports, which the reconciler maps onto the three activities
 const (
 	unitInactive     = "inactive"
 	unitActivating   = "activating"
@@ -67,7 +67,7 @@ type fakeUnit struct {
 }
 
 // fakeSystemd answers `systemctl show` from its own units and honours what the real units declare: `Conflicts=`
-// means a start waits until every other unit is gone (R-072), and a transition takes as long as the test says.
+// means a start waits until every other unit is gone, and a transition takes as long as the test says.
 type fakeSystemd struct {
 	clock      *fakeClock
 	units      map[string]*fakeUnit
@@ -284,8 +284,21 @@ func testSessionEnd(d *Decider, name string, session uint64) {
 	testEvent(d, deciderEvent{kind: eventSessionEnd, name: name, session: session})
 }
 
+// testTick is one reconcile pass, the backend asked between its halves the way deciderTick does.
 func testTick(d *Decider) {
-	testEvent(d, deciderEvent{kind: eventTick})
+	reply := testEvent(d, deciderEvent{kind: eventTick})
+	if reply.fetch != "" {
+		testEvent(d, deciderFetchEvent(d, reply, eventTickFetched))
+	}
+}
+
+// testStatus is one ping's answer, the backend asked the way deciderStatus does.
+func testStatus(d *Decider, name string) []byte {
+	reply := testEvent(d, deciderEvent{kind: eventStatus, name: name})
+	if reply.fetch == "" {
+		return reply.status
+	}
+	return testEvent(d, deciderFetchEvent(d, reply, eventStatusFetched)).status
 }
 
 // testRun brings a server up the way the gate does: a login starts it, the unit comes up, a tick sees it.

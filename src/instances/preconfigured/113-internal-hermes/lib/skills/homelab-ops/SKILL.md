@@ -46,7 +46,7 @@ wins over any address or state a skill mentions.
 
 ## Rules
 
-- NixOS config is declarative (git repo `homelab`, deployed by `sync.sh` from
+- NixOS config is declarative (git repo `homelab`, deployed by `sync.nu` from
   the owner's PC; you never deploy). Changes you make to /etc or units on a VM are lost on the
   next deploy. Runtime state (data dirs, app settings via their APIs, files on
   the NAS) persists. When a change must be permanent in Nix, do the runtime fix

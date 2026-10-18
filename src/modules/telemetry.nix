@@ -1,24 +1,10 @@
-# Where the lab's telemetry goes, how it is labeled, and the shape of an alert, defined once for every host.
+# where the lab's telemetry goes, how it is labeled, and the shape of an alert, defined once for every host
 #
-# collector, ports, urls: vm-103 collects metrics, logs, traces and profiles. Senders address its doors (urls), which
-# set the tenant from the sender's address and serve nothing else; the stores listen on loopback (the *Local ports and
-# tempo), where only vm-103 itself queries them. Readers get the query doors (prometheus, loki), each guarded to its
-# named readers. The apps' containers never reach vm-103: they send to the relay on their own node
-# (modules/app-telemetry.nix), which names the app's tenant.
-#
-# vmName: the readable `vm` label of a guest, "router" for the router. The short name of "122-internal-jellyfin" is
-# "jellyfin"; when two guests share it, the zone tells them apart (traefik-internal, traefik-external), and when they
-# share the zone too (the swarm workers), the id does (swarm-250). vm-103 labels node-exporter targets with it and
-# vm-114's stats-sync names guests by it, so Grafana and the TRMNL panel agree.
-#
-# swarmTaskPatterns: swarm names a task's container <stack>_<service>.<slot>.<task id>. The regexes cut the task id
-# (a new one per deploy and restart) and derive service and stack, for modules/base (promtail), modules/app-telemetry.nix
-# and the cadvisor scrape on vm-103.
-#
-# alertType: one Grafana rule, query A thresholded by C. An instance declares the rules over its own metrics as
-# instance.nix `alerts.<uid>` (modules/lab collects them), an app in app.nix `alerts`; vm-103 adds the lab-wide ones and
-# provisions them all. The uid is Grafana's id: a renamed uid loses the rule's history and silences, and the old one
-# stays in Grafana's database until it is deleted there.
+# security: senders address vm-103's push doors, which set the tenant from the sender's address and serve nothing
+# else; the stores listen on loopback; readers get the query doors, each guarded to its named readers. App containers
+# never reach vm-103: they send to the relay on their own node (modules/app-telemetry.nix).
+# alertType: the uid is Grafana's id: a renamed uid loses the rule's history and silences, and the old rule stays in
+# Grafana's database until it is deleted there.
 { lib, inventory }:
 let
   inherit (lib) mkOption types;
@@ -64,7 +50,6 @@ let
   pushPaths = {
     lokiPush = [ "/loki/api/v1/push" ];
     otlpHttp = [ "/v1/traces" ];
-    # tempo's otlp/grpc trace service
     otlpGrpc = [ "/opentelemetry.proto.collector.trace.v1.TraceService/Export" ];
     # the legacy ingest api (pyroscope-rs, the template's agent) and the connect push api (alloy)
     pyroscope = [ "/ingest" "/push.v1.PusherService/Push" ];
@@ -162,18 +147,19 @@ in {
     modules = [{ options.alerts = mkOption { type = types.attrsOf alertType; }; config = { inherit alerts; }; }];
   }).config.alerts;
 
+  # the readable `vm` label: the short name ("jellyfin"), the zone added where two guests share it, the id where they
+  # share the zone too (swarm-250); vm-103's targets and vm-114's stats-sync both name guests by it
   vmName = v:
     if v.type == "router" then "router"
     else if nameCounts.${shortName v} == 1 then shortName v
     else if zonedCounts.${zonedName v} == 1 then zonedName v
     else "${shortName v}-${vmId v}";
 
+  # swarm names a task's container <stack>_<service>.<slot>.<task id>, a new task id per deploy and restart
   swarmTaskPatterns = {
     # <stack>_<service>.<slot>: one stream per slot, stable across deploys
     container = "([^.]+\\.[^.]+)\\.[^.]+";
-    # <stack>_<service>
     service = "([^.]+)\\.[^.]+\\.[^.]+";
-    # <stack>
     stack = "([^_.]+)_[^.]+\\.[^.]+\\.[^.]+";
   };
 

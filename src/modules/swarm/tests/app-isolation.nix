@@ -14,7 +14,7 @@ let
   telemetry = import ../../telemetry.nix { inherit lib; inherit (lab) inventory; };
   limits = import ../../limits { inherit lib; };
   # the builder's import of an app's own boards (107-internal-swarm)
-  dashboardsImport = ../../../core/107-internal-swarm/lib/dashboards-import.py;
+  dashboardsImport = ../../../instances/core/107-internal-swarm/lib/dashboards-import.py;
   ip = id: lab.inventory.${id}.ip;
 
   # -----------------------------------------------------------------------------
@@ -63,7 +63,7 @@ let
     enable = true;
     repo = "lsck0/${name}";
     branch = "master";
-    # anubis is core/200-external-traefik/tests/edge-apps.nix's subject; a flood here must reach the app's own limits, not a challenge
+    # anubis is instances/core/200-external-traefik/tests/edge-apps.nix's subject; a flood here must reach the app's own limits, not a challenge
     routes.${name} = { port = ports.${name}; health = "/"; on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ]; };
     metrics.web = { service = "web"; targetPort = 8000; port = ports.${name} + 1; path = metricsPath; };
     resources.web = task;
@@ -102,11 +102,11 @@ pkgs.testers.runNixOSTest {
   nodes.vm-250 = { imports = [ (swarmNode "250" 2560) ]; virtualisation.cores = workerShape.cores; };
   nodes.vm-251 = { imports = [ (swarmNode "251" 2560) ]; virtualisation.cores = workerShape.cores; };
   nodes.vm-103 = {
-    imports = [ (lab.guest telemetry.collectorVmid { flat = true; nas = true; instance = ../../../core/103-internal-grafana/main.nix; }) common ];
+    imports = [ (lab.guest telemetry.collectorVmid { flat = true; nas = true; instance = ../../../instances/core/103-internal-grafana/main.nix; }) common ];
     virtualisation.memorySize = 3072;
   };
   nodes.vm-200 = {
-    imports = [ (lab.guest "200" { flat = true; instance = ../../../core/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
+    imports = [ (lab.guest "200" { flat = true; instance = ../../../instances/core/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
     virtualisation.memorySize = 1536;
   };
   nodes.world = {

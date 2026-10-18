@@ -36,7 +36,7 @@ func settingsLoad(path string) (Settings, error) {
 }
 
 // mainReload re-reads the settings on SIGHUP, because the unit is reloaded, not restarted, when a server is added
-// while people are playing (R-055b).
+// while people are playing.
 func mainReload(path string, decider *Decider, gate *Gate, log *slog.Logger) {
 	hangups := make(chan os.Signal, 1)
 	signal.Notify(hangups, syscall.SIGHUP)
@@ -119,7 +119,7 @@ func main() {
 	}
 	defer listener.Close()
 
-	// a gate that was restarted learns from systemd what is up before it answers anything (R-050c)
+	// a gate that was restarted learns from systemd what is up before it answers anything
 	deciderTick(decider)
 	go mainReconcile(decider, durationFromSeconds(settings.Limits.ReconcileS))
 	go mainReload(*path, decider, gate, log)

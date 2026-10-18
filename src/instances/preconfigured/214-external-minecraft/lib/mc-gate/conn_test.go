@@ -55,9 +55,9 @@ func connTestKickText(t *testing.T, data []byte) string {
 	return message.Text
 }
 
-// Test_spec001_r043_login covers one connection end to end over a pipe pair: a login for a sleeping server is
-// kicked, and a login for a running one relays every byte the gate has already read (R-043).
-func Test_spec001_r043_login(t *testing.T) {
+// Test_conn_login covers one connection end to end over a pipe pair: a login for a sleeping server is
+// kicked, and a login for a running one relays every byte the gate has already read.
+func Test_conn_login(t *testing.T) {
 	clock := fakeClockCreate()
 	settings := testSettings(t, "alpha")
 	systemd := fakeSystemdCreate(clock, settings.Servers[0].Unit)

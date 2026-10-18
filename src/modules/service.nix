@@ -1,32 +1,15 @@
 # the properties of one deployed service, shared by an instance's services (instance.nix `services`) and a swarm
 # app's routes (app.nix `routes`): where it is exposed, how the ingress protects it, what telemetry it gets
 #
-# Every feature is off unless the service opts in: `on = [ "<feature>" ... ];`, usually named lists of
-# modules/profiles.nix concatenated. A service without `on` is a plain route to its port: no sso, no defences, no
-# card, no probe, no telemetry, no guard on the port. The ingresses (modules/traefik), authelia, lldap, the
-# homepage, the prober and the router derive everything from these records; none keeps a per-service list.
+# every feature is off unless the service names it in `on` (usually profiles of modules/profiles.nix); the ingresses,
+# authelia, lldap, the homepage, the prober and the router derive everything from these records:
+#   services.git = { port = 80; on = lib.subtractLists [ "sso" "waf" ] profiles.hardenedInternal; };
+# protection per path: a second service on the same host and port with its own `path` and `on`, the longer first
 #
-#   services.git = {
-#     port = 80;
-#     # logs in itself through authelia oidc; git clients push packs the waf rules misread
-#     on = lib.subtractLists [ "sso" "waf" ] (profiles.hardenedInternal ++ profiles.listed ++ profiles.observed);
-#   };
-#
-# Protection per path: a second service (or app route) on the same host and port with its own `path` and `on`; the
-# ingress routes the longer prefix first, `/api` rate limited while `/` stays plain.
-#
-# Composition (featureProblemsOf, an evaluation error each): sso and anubis both stop bots before the app, so a route
-# takes one. A route of the external zone is public by definition, its name on the internet whatever it takes: sso
-# cannot run there (the dmz reaches no authelia), internet has nothing to add. A public route of the internal zone may still put prefixes of itself behind authelia,
-# `ssoPaths = [ "/metrics" ];`: the internal ingress sends them through authelia ahead of every other router of the
-# route, and authelia admits them like a route behind sso (admins and the route's own group). waf, captcha,
-# anonymousLimit and tarpit act through the gate that crowdsec puts in front of a route, so they need crowdsec; the
-# gate never stops the house, the lab, wireguard or a user authelia knows, whatever a route says. cloudflare proxies
-# the route's public name, which an internal route has with `internet` alone. An onion route's onion routers pass the gate whatever its
-# `on` takes for its name (modules/traefik). houseUnlimited gives the house, wireguard and the internal zone a router
-# of the route's own with none of its limits, gate, proof of work or body limit, whoever else it protects; it takes no
-# `sources`, which name a route's clients alone. Its `publicPrefix` shows everyone else a subtree of the backend alone
-# (the pacman mirror's own builds), the house the whole of it.
+# composition (featureProblemsOf): sso and anubis both stop bots, so a route takes one. sso cannot run on an external
+# route (the dmz reaches no authelia); a public internal route may put prefixes behind it with `ssoPaths`. waf,
+# captcha, anonymousLimit and tarpit act through crowdsec's gate, which never stops the house, the lab, wireguard or a
+# user authelia knows. houseUnlimited spares the house every limit on a router of its own, no `sources` with it.
 { lib }:
 let
   inherit (lib) mkOption types;
@@ -53,7 +36,6 @@ let
     "probe"
     "homepage"
   ];
-  # what acts through the gate crowdsec puts in front of a route
   crowdsecFeatures = [ "waf" "captcha" "anonymousLimit" "tarpit" ];
   # what the ingress spares some clients of a route, which keeps its protection for everyone else (modules/traefik)
   exemptionFeatures = [
@@ -79,21 +61,17 @@ let
   # `*.mc`: the host stands for every name one label below it
   wildcardHost = host: lib.hasPrefix "*." host;
   urlPath = types.strMatching "/.*";
-  # a reason: any text with a word in it
   why = types.strMatching ".*[a-z].*";
-  # /segment[/segment...] without a trailing slash
   urlSegments = "(/[A-Za-z0-9._~-]+)+";
-  # a url prefix: / or segments
   urlPrefix = types.strMatching "/|${urlSegments}";
   serviceName = types.strMatching "[A-Za-z0-9][A-Za-z0-9_.-]*";
-  # the router's secret holding an onion route's key (kind onion, scripts/lib/onion.sh)
+  # the router's secret holding an onion route's key (kind onion, scripts/lib/onion.nu)
   onionKeyOf = name: "${name}-onion-key";
 
   # -----------------------------------------------------------------------------
   # TYPES
   # -----------------------------------------------------------------------------
 
-  # the features opted into, each one of `features`
   featuresType = features: types.listOf (types.enum features);
 
   widgetType = types.submodule {
@@ -184,6 +162,11 @@ in rec {
     };
     frames = mkOption { type = types.enum [ "deny" "sameorigin" ]; default = "deny"; description = "Who may frame the pages."; };
     referrer = mkOption { type = types.bool; default = true; description = "false: Referrer-Policy no-referrer (queries in urls)."; };
+    indexable = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Search engines may index it: its host serves the backend's robots.txt, not the lab's disallow-all; anubis and crowdsec pass verified crawlers everywhere already.";
+    };
     bodyLimitBytes = mkOption { type = types.ints.positive; default = bodyLimitDefaultBytes; description = "Request body limit."; };
     limitScale = mkOption { type = types.ints.positive; default = 1; description = "Multiplier on the ingress' per-client and per-route rate and in-flight limits."; };
     headers = mkOption { type = types.attrs; default = { }; description = "Extra traefik headers settings (csp, permissions policy, ...)."; };
@@ -244,7 +227,9 @@ in rec {
     ++ lib.optional (has "houseUnlimited" && r.sources != null)
       "${where}: houseUnlimited admits the house past the limits, sources admit named clients alone: drop one"
     ++ lib.optional (r.publicPrefix != null && !(has "houseUnlimited"))
-      "${where}: publicPrefix narrows what everyone but the house sees, which only houseUnlimited sets apart: add it";
+      "${where}: publicPrefix narrows what everyone but the house sees, which only houseUnlimited sets apart: add it"
+    ++ lib.optional ((r.indexable or false) && (r.path != "/" || !(publicOf r)))
+      "${where}: indexable hands the host's robots.txt to the route, which must be public and serve /";
 
   # the route has a name on the internet: an external one always, an internal one relayed by the edge
   # (a hand-written traefik router names no zone: its `on` says)

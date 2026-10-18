@@ -8,12 +8,8 @@
 // appends the address it saw: so the result is the client as the outermost trusted proxy saw it, and an untrusted
 // peer is its own client whatever headers it sends.
 //
-// Traefik's own sources fall short of this: X-Real-Ip from a trusted sender is whatever that sender passed on
-// (Cloudflare passes a client-sent one through), and an ipStrategy over X-Forwarded-For sees no header at all for a
-// direct client, so every direct client shares the key "". Rate limits, anubis and the access log read X-Real-Ip
-// after this middleware (modules/traefik puts it first on every websecure router); the crowdsec bouncer, forwardauth
-// and every backend read the remote address and the X-Forwarded-For traefik derives from it, so no backend has to
-// know the ingress's trusted proxies to find the client.
+// Rejected: traefik's own sources. X-Real-Ip from a trusted sender is whatever it passed on (Cloudflare passes a
+// client-sent one through), and an ipStrategy over X-Forwarded-For keys every direct client as "".
 //
 // Interpreted by traefik's yaegi, so the standard library only.
 package clientip

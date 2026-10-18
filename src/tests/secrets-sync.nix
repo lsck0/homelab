@@ -1,7 +1,7 @@
-# lab-wide: scripts/secrets-sync.sh, the workstation's secrets tool
-# secrets-sync.sh in the sandbox, over plans modules/secrets.nix makes of a small fake lab: placement, isolation, kinds,
+# lab-wide: scripts/secrets-sync.nu, the workstation's secrets tool
+# secrets-sync.nu in the sandbox, over plans modules/secrets.nix makes of a small fake lab: placement, isolation, kinds,
 # guarded secrets, idempotence, moves, prune, hosts leaving, the admin-key rotation, atomicity under injected sops
-# failures, and one run over the real plan (secrets_sync_test.sh says what each numbered assertion claims). Throwaway
+# failures, and one run over the real plan (secrets_sync_test.nu says what each numbered assertion claims). Throwaway
 # age keys, no network; `seed` draws the injected faults and the sampled pairs.
 { pkgs, lib, inputs, seed ? 1, ... }:
 let
@@ -57,24 +57,20 @@ let
     real = builtins.toJSON inputs.self.legacyPackages.${system}.secrets.plan;
   });
 
-  # only what the test runs, so an unrelated edit does not rerun it; the sandbox has no /usr/bin/env
-  scripts = pkgs.runCommand "secrets-sync-scripts" { } ''
-    cp -r ${lib.fileset.toSource {
-      root = ../.;
-      fileset = lib.fileset.unions [
-        ../scripts/secrets-sync.sh ../scripts/sops-encrypt.sh
-        ../scripts/lib/tools.sh ../scripts/lib/secrets.sh ../scripts/lib/onion.sh
-      ];
-    }} $out
-    chmod -R u+w $out
-    patchShebangs $out
-  '';
+  # only what the test runs, so an unrelated edit does not rerun it
+  scripts = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.unions [
+      ../scripts/secrets-sync.nu ../scripts/sops-encrypt.nu
+      ../scripts/lib/tools.nu ../scripts/lib/secrets.nu ../scripts/lib/onion.nu
+    ];
+  };
 in
 pkgs.runCommand "secrets-sync-seed-${toString seed}" {
-  nativeBuildInputs = with pkgs; [ bash sops age jq openssl git coreutils findutils diffutils gnused gnugrep ];
+  nativeBuildInputs = with pkgs; [ nushell sops age openssl git coreutils ];
   passthru.regressionSeeds = [ ];
 } ''
   export HOME=$TMPDIR
-  bash ${./secrets_sync_test.sh} ${scripts} ${toString seed} ${plans}
+  nu --no-config-file ${./secrets_sync_test.nu} ${scripts} ${toString seed} ${plans}
   touch $out
 ''

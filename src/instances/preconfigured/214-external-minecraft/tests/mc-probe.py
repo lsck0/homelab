@@ -2,7 +2,7 @@
 
 It speaks the three packets a real client sends before it plays: the handshake (protocol, the address the player
 typed, port, intent), then either a status request or a login start. The address matters, because that is what the
-gate reads the server's name out of (spec-001 R-041), so the test always dials <server>.mc.lsck0.dev.
+gate reads the server's name out of, so the test always dials <server>.mc.lsck0.dev.
 
   mc-probe status 10.200.0.214:25565 cobblemon.mc.lsck0.dev      # prints the status json, one line
   mc-probe login 10.200.0.214:25565 cobblemon.mc.lsck0.dev       # prints "kick <text>" or "success <player>"

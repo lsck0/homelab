@@ -1,23 +1,12 @@
 # a guest's place in the lab: its name and static address from its own instance record, its firewall's openings, and
 # the ingress guard on the ports only its zone's ingress may reach
 #
-# Every lab host gets its instance record (modules/lab) as the argument `instance`; its hostname, vmid, zone and
-# services come from there. The install images and the router's lan-side tests have none (null).
-#
-# The firewall opens ssh and node-exporter (the recovery path, and vm-103's watch over every guest), the guest's
-# services' ports, and what its own main.nix opens. A shared module opening more (an ingress, a swarm node) names
-# the opening in homelab.openings, and the guest's instance.nix allows it in `on`, or no host evaluates.
-#
-# The guard (homelab.ingressOnly) is one nftables table, homelab-ingress, hooked into prerouting ahead of every
-# dnat, so a podman- or docker-published port is guarded like a native one. Trusted on every guarded port:
-# loopback, the guest's own address (containers calling siblings through it), its zone's ingress and, unless
-# trustContainers is off, whatever enters from the host's own container bridges (by interface: a container range
-# arriving on eth0 is a neighbour's spoof). Anyone else needs a grant: the guest's instance.nix `grants`, or a line
-# in modules/flows.nix `guards` for what spans the lab; flows.nix holds both.
-#
-# The table is its own, not the firewall's: a firewall reload or stop leaves it in place, so the guard never fails
-# open. Where the host runs nixos' nftables firewall the table lives in networking.nftables.tables (that service
-# flushes the ruleset and reloads its tables together); elsewhere a oneshot loads it with `nft -f`, atomically.
+# the firewall opens ssh and node-exporter (the recovery path), the guest's services' ports and what its main.nix
+# opens; a shared module opening more names it in homelab.openings, which the guest's instance.nix allows in `on`.
+# security: the guard is one nftables table hooked into prerouting ahead of every dnat, so a container-published port
+# is guarded like a native one. It trusts loopback, the guest's own address, its zone's ingress and its own container
+# bridges by interface (a container range arriving on eth0 is a neighbour's spoof); anyone else needs a grant.
+# The table is its own, so a firewall reload or stop leaves it in place and the guard never fails open.
 # Rejected: iptables chains rebuilt by networking.firewall.extraCommands, which a restart rebuilds with a window
 # and a stopped firewall deletes.
 { config, lib, pkgs, inventory, site, catalog, lab, instance, ... }:

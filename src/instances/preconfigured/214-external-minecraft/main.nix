@@ -1,19 +1,17 @@
-# Minecraft on vm-214: several servers, one at a time.
+# Minecraft on vm-214: several servers behind mc-gate, at most one running
 #
-# mc-gate (lib/mc-gate, its header says what it does) owns the public port: it reads the name the player dialed
-# (<server>.mc.lsck0.dev), answers status pings itself so an internet port scan never starts anything, and starts or
-# stops servers through systemd. Each declared server is one unit of its own, and `Conflicts=` between them is what
-# makes at most one run: the guest has one heap, one game port and one rcon port to give.
-# Who may join and who is op lives in whitelist.json and ops.json beside the server dirs (`mc-rcon whitelist add`,
-# `mc-rcon op`), shared by every server through a file bind mount, not in this public repo.
+# `Conflicts=` between the server units is what keeps it to one: the guest has one heap, one game port and one rcon
+# port to give. whitelist.json and ops.json (`mc-rcon whitelist add`, `mc-rcon op`) are shared state, not in this repo.
 {
   config,
   lib,
   pkgs,
+  utils,
   inventory,
   site,
   nasMount,
   catalog,
+  instance,
   ...
 }:
 let
@@ -25,13 +23,10 @@ let
   # CONSTANTS
   # -----------------------------------------------------------------------------
 
-  # the servers this guest offers; the key is the dns label below *.mc and the name of everything the server owns.
-  # version and protocol answer a status ping for a server that never answered one itself (mc-gate R-042); image is
-  # the server's java, since each minecraft release names the one it needs (the version manifest's javaVersion); pack
-  # is the modpack.env a server starts with before mc-modpack ever wrote one (default: vanilla, newest release).
-  # The lab runs the set below; the vm test passes its own as the module argument `mcServers`, because one declared
-  # server can prove neither a `Conflicts=` nor a switch (tests/minecraft.nix). A formal with a default would still
-  # be looked up in `_module.args` and fail wherever nothing defines it, so it is read from there by hand.
+  # the key is the dns label below *.mc; version and protocol answer a ping before the server ever answered one; image
+  # is the java its minecraft release names (the version manifest's javaVersion); pack seeds modpack.env.
+  # The vm test passes its own set as `mcServers`. A formal with a default would still be looked up in `_module.args`
+  # and fail wherever nothing defines it, so it is read from there by hand.
   servers =
     config._module.args.mcServers or {
       cobblemon = {
@@ -44,24 +39,27 @@ let
       atm = {
         version = "1.21.1";
         protocol = 767;
+        allowFlight = true;
         pack = ''
           TYPE=NEOFORGE
           VERSION=1.21.1
           NEOFORGE_VERSION=21.1.249
           GENERIC_PACK=/modpacks/allthemons-serverfiles-1.3.0.zip
           MODS=/modpacks/atm-extra
+          COPY_CONFIG_SRC=/modpacks/atm-config
+          SYNC_SKIP_NEWER_IN_DESTINATION=false
           LEVEL=allthemons
         '';
       };
     };
 
   data = "/var/lib/minecraft";
+  dataAutomount = "${utils.escapeSystemdPath data}.automount";
   modpacksDir = "/var/lib/minecraft-modpacks";
   gateStateDir = "/var/lib/mc-gate";
   gateRuntimeDir = "/run/mc-gate";
   gateUser = "mc-gate";
   gateSettingsPath = "/etc/mc-gate/settings.json";
-  # the gate writes its metrics beside its state; the node exporter reads them through a link it owns (R-090, R-091)
   gateMetricsName = "mc-gate";
   gateMetricsFile = "${gateStateDir}/metrics.prom";
   # the server's secrets, rendered by sops under /run: never on the nas, never in a snapshot
@@ -70,36 +68,39 @@ let
   imageJava25 = "itzg/minecraft-server:2026.9.1-java25";
   # the image's uid and gid
   serverUid = "1000";
+  # the gate stats each server's modpack.env through the 0750 data dirs
+  serverGroup = "minecraft";
 
   publicPort = catalog.l4.minecraft.port;
   # the container's game port and rcon port, published on loopback for the gate and mc-rcon only; one server runs at
   # a time, so every server reuses them
   serverPort = 25566;
   rconPort = 25575;
-  # instance.nix gives the guest 10 GiB unballooned: the heap plus ~2 GiB off-heap (375 mods) and the os; live data is
-  # ~2.6 GiB with a few players (spark heapsummary), a 6 GiB heap in 8 GiB swapped, 5 GiB collected nonstop
-  heapSize = "7G";
+  # live data is ~2.6 GiB with a few players (spark heapsummary); a 5 GiB heap collected nonstop
+  heapSize = "6G";
+  # the guest's kernel, sshd and the gate (~440 MiB used beside a running pack); the container gets the rest, and
+  # past it its coldest pages (atm's ~2 GiB off-heap, 375 mods' classes) go to zram instead of the oom killer
+  guestReserveMiB = 768;
+  containerMemoryMiB = instance.config.vm.memoryMiB - guestReserveMiB;
   containerDns = [
     "1.1.1.1"
     "8.8.8.8"
   ];
-  # a cached copy in the modpack share: the image fetched the original on every start, and since 2026-10-15
-  # furaffinity answers 403, which fails the start (d.furaffinity.net/art/skullfugg/1697237475/
-  # 1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png, as the image scaled it to 64x64)
+  # a copy in the share: its origin answers 403, which fails the image's fetch (d.furaffinity.net/art/skullfugg/
+  # 1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png, scaled to 64x64)
   icon = "/modpacks/server-icon.png";
   motd = "nya~ minecwaft sewvew 🐾✨";
 
-  # the world the guest ran before it had several (R-076): mc-layout moves it into its own dir once
+  # the world the guest ran before it had several: mc-layout moves it into its own dir once
   legacyServer = "cobblemon";
   layoutUnit = "mc-layout.service";
-  # the whitelist and the ops, shared by every server (R-073); an empty json array is what the server expects
+  # an empty json array is what the server expects
   sharedFiles = [
     "whitelist.json"
     "ops.json"
   ];
   sharedEmpty = "[]";
 
-  # what the gate gives a player and a server, every bound in one place
   limits = {
     # a client that sends no first frame in five seconds is a scanner holding a socket
     handshakeTimeoutS = 5;
@@ -141,8 +142,7 @@ let
   dirOf = name: "${data}/${name}";
   modpackEnvOf = name: "${dirOf name}/modpack.env";
   containerOf = name: "minecraft-${name}";
-  # the units ordered before this one: `Conflicts=` stops the other, and ordering one way only keeps systemd from
-  # finding a cycle and solving it by deleting a job (R-072)
+  # ordering one way only: a cycle in `Conflicts=` peers makes systemd solve it by deleting a job
   earlierThan = name: map unitOf (lib.filter (other: other < name) names);
   othersThan = name: map unitOf (lib.filter (other: other != name) names);
 
@@ -151,10 +151,9 @@ let
   serverList = lib.concatStringsSep " " names;
   stateFile = "${gateRuntimeDir}/state.json";
 
-  # the files every server shares, as podman options: a file bind mount makes one server's write visible in all
+  # a file bind mount makes one server's write visible in all
   sharedMounts = lib.concatMapStringsSep " " (file: "-v ${data}/${file}:/data/${file}") sharedFiles;
 
-  # a server's data dir, the shared files and its pack, before the container starts (R-071a)
   serverPreStart =
     name:
     pkgs.writeShellScript "minecraft-${name}-pre-start" ''
@@ -176,7 +175,9 @@ let
     name:
     pkgs.writeShellScript "minecraft-${name}-start" ''
       set -euo pipefail
-      exec ${podman} run --rm --name ${containerOf name} \
+      # passthrough: the unit's stdout is the one journal copy, the journald driver would write every line again
+      exec ${podman} run --rm --name ${containerOf name} --log-driver=passthrough \
+        --memory=${toString containerMemoryMiB}m \
         ${lib.concatMapStringsSep " " (ip: "--dns=${ip}") containerDns} \
         -p 127.0.0.1:${toString serverPort}:${toString publicPort} \
         -p 127.0.0.1:${toString rconPort}:${toString rconPort} \
@@ -186,6 +187,7 @@ let
         -e EULA=TRUE \
         -e MEMORY=${heapSize} \
         -e DIFFICULTY=hard \
+        -e ALLOW_FLIGHT=${lib.boolToString (servers.${name}.allowFlight or false)} \
         -e ICON=${icon} \
         -e OVERRIDE_ICON=TRUE \
         -e "MOTD=[${name}] ${motd}" \
@@ -203,11 +205,15 @@ let
         ${servers.${name}.image or imageJava21}
     '';
 
-  # one server. The gate starts and stops it; nothing else does, so it has no wantedBy (R-071f).
+  # only the gate starts a server, so it has no wantedBy
   serverUnit = name: {
     description = "Minecraft server ${name}";
-    requires = [ layoutUnit ];
-    after = [ layoutUnit ] ++ earlierThan name;
+    # a switch would kick every player: a running server takes a new unit when the gate next stops it, after
+    # sleepAfterS with nobody on, or at `systemctl restart`
+    restartIfChanged = false;
+    # the automount, not the mount (RequiresMountsFor): an idle expiry or a restart of the mount would stop the server
+    requires = [ layoutUnit dataAutomount ];
+    after = [ layoutUnit dataAutomount ] ++ earlierThan name;
     conflicts = othersThan name;
     path = [ pkgs.podman ];
     serviceConfig = {
@@ -221,12 +227,7 @@ let
       # the first start downloads a pack of several gigabytes
       TimeoutStartSec = "infinity";
     };
-    # a [Unit] key: systemd drops it from [Service] with a warning, and the world would be written into the
-    # mountpoint instead of onto the nas
-    unitConfig.RequiresMountsFor = data;
   };
-
-  # -- the gate ---------------------------------------------------------------
 
   gateSettingsFile = pkgs.writeText "mc-gate-settings.json" (
     builtins.toJSON {
@@ -265,7 +266,7 @@ let
     }
   );
 
-  # the one move of the as-built layout into the server dirs, through a temp dir so a crash halfway resumes (R-076)
+  # through a temp dir, so a crash halfway resumes
   layoutScript = pkgs.writeShellScript "mc-layout" ''
     set -euo pipefail
     tmp=${data}/${legacyServer}.tmp
@@ -292,8 +293,6 @@ let
     mv -T -- "$tmp" ${dirOf legacyServer}
     echo "mc-layout: moved"
   '';
-
-  # -- the tools --------------------------------------------------------------
 
   mcModpack = pkgs.writeShellScriptBin "mc-modpack" ''
     set -euo pipefail
@@ -371,13 +370,16 @@ in
       RCON_PASSWORD=${config.sops.placeholder.minecraft-rcon-password}
       CF_API_KEY=${config.sops.placeholder.minecraft-cf-api-key}
     '';
-    # no restartUnits: a server unit is normally stopped, and switch-to-configuration starts a stopped unit it is
-    # told to restart. A rotated password would wake every server at once, which is what the gate exists to
-    # prevent (R-071f); the next start reads the new file anyway.
+    # no restartUnits: switch-to-configuration starts a stopped unit it is told to restart, so a rotated password
+    # would wake every server at once; the next start reads the new file anyway
   };
 
-  # the servers run as raw `podman run`, not via oci-containers
   virtualisation.podman.enable = true;
+
+  zramSwap = {
+    enable = true;
+    memoryPercent = 50;
+  };
 
   homelab.textfiles = [ gateMetricsName ];
 
@@ -393,9 +395,10 @@ in
     group = gateUser;
   };
   users.groups.${gateUser} = { };
+  users.groups.${serverGroup}.gid = lib.toInt serverUid;
 
   # the gate may start and stop the declared servers, by their exact names: a pattern would also match a unit that
-  # is no server (core/107-internal-swarm/lib/app-builder.nix)
+  # is no server (instances/core/107-internal-swarm/lib/app-builder.nix)
   security.polkit.enable = true;
   security.polkit.extraConfig = ''
     polkit.addRule(function(action, subject) {
@@ -412,12 +415,15 @@ in
     mc-layout = {
       description = "mc-layout: move the one old Minecraft data dir into its server's dir, once";
       wantedBy = [ "multi-user.target" ];
+      # a restart would carry over to a running server through its Requires=; the move happens once anyway
+      restartIfChanged = false;
+      requires = [ dataAutomount ];
+      after = [ dataAutomount ];
       serviceConfig = {
         Type = "oneshot";
         RemainAfterExit = true;
         ExecStart = layoutScript;
       };
-      unitConfig.RequiresMountsFor = data;
     };
 
     mc-gate = {
@@ -436,12 +442,13 @@ in
       reloadTriggers = [ gateSettingsFile ];
       serviceConfig = {
         ExecStart = "${lib.getExe mcGate.package} -settings ${gateSettingsPath}";
-        # a changed server list reaches the gate without closing a connection (R-055b)
+        # a changed server list reaches the gate without closing a connection
         ExecReload = "${pkgs.coreutils}/bin/kill -HUP $MAINPID";
         Restart = "always";
         RestartSec = 5;
         User = gateUser;
         Group = gateUser;
+        SupplementaryGroups = [ serverGroup ];
         StateDirectory = baseNameOf gateStateDir;
         StateDirectoryMode = "0755";
         RuntimeDirectory = baseNameOf gateRuntimeDir;

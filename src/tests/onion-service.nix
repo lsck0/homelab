@@ -6,7 +6,7 @@
 # first; it logs each puzzle's answer here (captcha.answerLog), so the script answers as a person would.
 #
 # No route is an onion route, so the test makes privatebin one: its key is a seed whose address tor 0.4.9 itself
-# derived (scripts/lib/onion.sh, tests/secrets_sync_test.sh), and the catalog every node reads carries both. Nodes:
+# derived (scripts/lib/onion.nu, tests/secrets_sync_test.nu), and the catalog every node reads carries both. Nodes:
 # the router, the edge (vm-200, offline), `backend` at privatebin's address.
 { pkgs, lib, specialArgs, ... }:
 let
@@ -39,7 +39,7 @@ pkgs.testers.runNixOSTest {
     virtualisation.memorySize = 1024;
   };
   nodes.vm-200 = {
-    imports = [ (lab.guest "200" { instance = ../core/200-external-traefik/main.nix; }) ./lib/offline-traefik.nix ];
+    imports = [ (lab.guest "200" { instance = ../instances/core/200-external-traefik/main.nix; }) ./lib/offline-traefik.nix ];
     virtualisation.memorySize = 1536;
     # the script answers the onion captcha as a person would (tests/policy forbids it on a lab host)
     homelab.traefik.gate.captcha.answerLog = true;
@@ -89,6 +89,8 @@ pkgs.testers.runNixOSTest {
         assert published == ADDRESS, f"tor publishes {published}, the catalog names {ADDRESS}"
 
     vm_200.wait_for_unit("traefik.service")
+    # traefik opens the entrypoint before its file provider loads the routers, which answer 404 until then
+    luca_router.wait_until_succeeds(f"curl -s -o /dev/null -w '%{{http_code}}' -m 5 -H 'Host: {ADDRESS}' {ONION}/paste | grep -qvE '^(000|404)$'")
     vm_200.wait_for_file("/var/lib/crowdsec/data/stub-ready")
     backend.wait_for_file("/run/echo/requests.jsonl.ready")
 

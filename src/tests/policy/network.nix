@@ -172,7 +172,7 @@ let
     published = map (m: { inherit (m) port; target = { inherit (m.target) addr port; }; })
       (router.services.tor.relay.onionServices.${name} or { map = [ ]; }).map;
   in
-    if address == null then [ "${name}: onion without an address in src/generated/onions.json (src/scripts/secrets-sync.sh --apply --generate-guarded)" ]
+    if address == null then [ "${name}: onion without an address in src/generated/onions.json (src/scripts/secrets-sync.nu --apply --generate-guarded)" ]
     else lib.optional (onionRouters == { }) "${name}: vm-200 serves its onion address with no router"
     ++ lib.mapAttrsToList (n: _: "${name}: vm-200 router ${n} serves its onion address beside the onion entrypoint")
       (lib.filterAttrs (_: x: x.entryPoints or [ ] != onionEntryPoints && x.entryPoints or [ ] != [ "anubis-balancer" ]) onionRouters)

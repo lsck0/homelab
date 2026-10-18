@@ -1,35 +1,16 @@
-// Command lab-gate is the ingress's gate in front of every protected route (modules/traefik/gate.nix): it turns
-// crowdsec's decisions into pages a person can read and act on, asks flagged clients a captcha, limits anonymous
-// clients below the ingress's own limit, and trickles the bot labyrinth.
+// Command lab-gate is the ingress's gate in front of every protected route (modules/traefik/lib/gate.nix): it turns
+// crowdsec's decisions into pages a person can read, asks flagged clients a captcha, limits anonymous clients below
+// the ingress's own limit, and trickles the bot labyrinth.
 //
-// One process, two loopback listeners. The gate's own: traefik's forwardauth calls /auth?captcha=&limit=&tarpit=&scale=
-// for every request of a gated route (2xx passes it, any other answer is the client's), the captcha form posts to the
-// answer path, a timer reads /metrics. The tarpit's: the labyrinth routers' service, proxying iocaine a few bytes at a
-// time.
+// A request is judged cheapest and most trusted first: an allowed source passes, then a session authelia confirms,
+// then crowdsec's cached decision (ban beats captcha), then an anonymous client's token bucket (429).
 //
-// A request is judged in this order, cheapest and most trusted first:
-//   - the source is allowed (the house, the lab, wireguard, loopback, the house's public address and v6 prefix): pass
-//   - it carries an authelia session authelia confirms: pass, whatever crowdsec says
-//   - crowdsec's decision for the client (ban beats captcha), cached for seconds: verdictDecide
-//   - an anonymous client over its token bucket: 429
+// Security: an onion visitor always arrives from the router, so nothing tells two apart. Every browser session there
+// picks its route's own address among lookalikes sharing its ends; a phishing proxy relays the page from the real
+// address, which then matches no row its visitor's address bar shows.
 //
-// The captcha: one scene of labelled shapes per client, drawn from a seed only the gate knows, one question needing
-// the picture to answer, exactly six hex characters, one try. A wrong or late answer regenerates the puzzle and is
-// marked in the response (X-Lab-Gate: wrong|expired); crowdsec reads the access log and bans the client after too
-// many (modules/traefik/lib/ladder.nix). A right one sets a cookie, an hmac over the client's address and an expiry,
-// that passes the client's captcha decisions until it expires.
-//
-// An onion route (its address in settings captcha.onions) is the owner's exception: every tor visitor arrives from the
-// router, so no address, allow list or crowdsec decision tells them apart. Every browser session there is asked,
-// whatever the route's flags: four rows of an onion address and a label, the route's own address among lookalikes
-// sharing its ends, and the label beside the address in the visitor's address bar answers. A phishing proxy relays
-// the page unchanged from the real address, which then matches no row its visitor's bar shows; a lookalike's label
-// is counted per route (homelab_gate_onion_decoys_total). A session is a random id in a cookie: its puzzle, its
-// failures and its ban (an hour, past the same count crowdsec bans an address for) are its own, never the router's.
-//
-// Rejected: the bouncer plugin's captcha. It serves hcaptcha, recaptcha or turnstile, or a "custom" provider whose
-// page loads the provider's script and checks a token at its server; none is offline, script-free or self-hosted, and
-// its ban page is a fixed file that cannot say how long a ban lasts.
+// Rejected: the bouncer plugin's captcha. Every provider it offers loads a third-party script and checks a token at
+// its server, and its ban page is a fixed file that cannot say how long a ban lasts.
 //
 //	lab-gate -settings /etc/lab-gate/settings.json
 package main

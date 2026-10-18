@@ -1,7 +1,5 @@
-# TeamSpeak 6 server, the official image: voice and file transfer public through the router's forwards, ServerQuery
-# (ssh, http) left off as the image ships it. Its sqlite db and uploads live on the guest's disk and are mirrored
-# nightly to the nas share data/teamspeak (localState), which the nas's kopia backs up.
-# The first start prints the serveradmin privilege key to the container log (skill.md); it is never in the repo.
+# TeamSpeak 6 server, the official image; ServerQuery (ssh, http) stays off as the image ships it
+# the first start prints the serveradmin privilege key to the container log (skill.md); it is never in the repo
 { catalog, ... }:
 let
   container = "teamspeak";

@@ -23,11 +23,12 @@ images/
 *.sock
 *.tfvars.json
 
-# terraform's state: the nas holds it (/srv/nas/terraform), sync.sh pulls this working copy; it holds secrets
+# terraform's state holds secrets: the nas holds it and sync.nu's copy lives in ~/.local/state/homelab/terraform, so a
+# stray one in the tree never reaches git
 terraform.tfstate
 # terraform's own backups, one per apply and per `state mv`
 terraform.tfstate.backup
-# the hash of the nas state the working copy last agreed with (src/scripts/lib/tfstate.sh)
+# the hash of the nas state a working copy last agreed with (src/scripts/lib/tfstate.nu)
 terraform.tfstate.synced
 *.tfstate.*.backup
 

@@ -1,35 +1,10 @@
-# the lab's shared budgets: what a swarm worker holds, what the apps reserve of it, what every service may send
+# the lab's shared budgets: what a swarm worker holds, what the apps reserve of it, what every service may send;
+# every consumer applies these numbers and none derives its own
 #
-# Every consumer applies these numbers and none derives its own:
-#
-#   limits = import ./default.nix { inherit lib; };
-#   limits.tenant           what one service may send: log lines, trace and profile bytes, scrape samples
-#   limits.route            what one route admits from all its clients together (traefik.nix), beside the per-client
-#                           limits
-#   limits.frontend         what one browser beacon may carry, at the edge and at the intake on vm-103
-#   limits.allocatableOf vm { memoryMiB; cpuMillis; } what a worker of this vm shape holds for apps: swarm advertises
-#                           it as generic resources, apps.slice caps the containers to it (swarm.nix)
-#   limits.lab              what the lab's own journals and access logs may send to loki, one tenant
-#   limits.workerCountOf { apps; vm; }   the fewest workers of that vm shape the apps fit on, at least one: the
-#                           shared swarm's size (modules/lab), so no worker idles and none is missing
-#   limits.clusterOf { apps; workers; taskDefaults; }   one swarm (the shared one, or an app's own guest):
-#     .workers.<vmid>       allocatableOf each worker
-#     .capacity, .reserved, .surge   { memoryMiB; cpuMillis; } over the workers, the apps' sums, the largest single
-#                           reservation (a deploy's transient extra)
-#     .taskOf app service   { memoryMiB; cpus; pids; cpuMillis; } one task of an app's service, defaults applied
-#     .problems             what does not fit, one line each naming the numbers and the knob
-#
-# Admission: a catalog fits when sum(reservations) + max(reservation) <= sum(allocatable), memory and cpu each.
-# Deploys run one at a time (swarm-deploy holds the manager's rollout slot), and a start-first update runs at most one
-# extra task per stateless service, which is at most the deploying app's own reservation again. Render
-# (modules/swarm/lib/swarm-render.py) holds each app inside its reservation at deploy; swarm holds each worker inside its
-# allocatable at scheduling, so a task that fits no worker stays pending and fails its deploy, never a neighbour.
-# Memory is reserved at its limit and never overcommitted; cpu reserves a fixed share per task and shares the rest.
-# An app asleep (scaled to zero, apps-catalog `idle`) keeps its whole reservation, as the host budget counts onDemand
-# guests (tests/policy/guests.nix): all may wake at once, and a wake or a sleeping app's deploy (modules/swarm runs it
-# awake once) must never find its worker full. Sleep frees a worker's cpu and page cache, not admission room.
-#
-# Every service gets the same telemetry budget; a service that needs more gets its own field the day one does.
+# admission: a catalog fits when sum(reservations) + max(reservation) <= sum(allocatable), memory and cpu each: deploys
+# run one at a time and a start-first update adds at most the deploying app's reservation again. Memory is reserved at
+# its limit and never overcommitted; cpu reserves a fixed share per task and shares the rest. An asleep app keeps its
+# whole reservation: all may wake at once, and a wake must never find its worker full.
 #
 # Rejected: admission against the workers' whole ram, as docker reports it. With dockerd and the node's services on
 # top, a full worker ran into global out of memory, and the kernel killed whichever app was largest.
@@ -119,7 +94,7 @@ let
       lib.optional (apps != { } && (demandOf apps).${key} > capacity.${key})
         ("the apps reserve ${toString reserved.${key}} ${unit} plus ${toString surge.${key}} ${unit} for a rolling deploy, "
           + "the workers hold ${toString capacity.${key}} ${unit}: lower apps.<app>.reservation.${knob} "
-          + "(the largest: ${largestOf key}) or grow the workers (core/swarm.nix nodes.vm, an app's placement.vm)");
+          + "(the largest: ${largestOf key}) or grow the workers (instances/core/swarm.nix nodes.vm, an app's placement.vm)");
 
     # the smallest worker bounds a task: a larger one finds no worker once another is down
     taskProblems = app: a: let smallest = minOf "memoryMiB" (lib.attrValues allocatable); in

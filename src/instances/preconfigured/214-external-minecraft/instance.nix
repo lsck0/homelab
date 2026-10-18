@@ -3,9 +3,10 @@
   vm = {
     bootPhase = "public";
     needs = [ "containers" "nfs" ];
-    # no ballooning: the jvm's growing heap (main.nix heapSize) in a ballooned-down guest gets oom-killed
-    memoryMiB = 10240;
-    balloonMiB = 10240;
+    # no ballooning: the jvm's growing heap (main.nix heapSize) in a ballooned-down guest gets oom-killed. 8 GiB keeps
+    # the host under pve's 80% autoballoon line with the rest running (10 GiB squeezed every other guest to its floor)
+    memoryMiB = 8192;
+    balloonMiB = 8192;
     # the tick is one thread, but chunk generation, distant horizons and g1 run beside it: 6 ran at load 6.7 with
     # 20 s stalls exploring; the host has 12 threads, most guests idle, and this one wins when they are not
     cores = 10;
@@ -25,7 +26,6 @@
     on = [ "inflightLimit" "accessLog" "probe" ] ++ profiles.observed;
   };
 
-  # a rule over this guest's own metrics (mc-gate writes them, main.nix publishes them): R-092
   alerts = let
     # one failed start is a slow first download or a pack being swapped; the comparison is strict, so the second
     # failure within an hour crosses this and is the pack, the world or the disk

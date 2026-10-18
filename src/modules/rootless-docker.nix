@@ -1,21 +1,14 @@
 # users with a rootless docker of their own, for work that must never own the vm
 #
-# Docker socket access is root on the vm, whether through the docker group or a socket mounted into a job. Each
-# user here instead runs its own rootless dockerd: container root maps to an unprivileged subuid, so the worst a
-# job or a build can do is what that user can do, and one user's daemon, images and caches are out of another's
-# reach. A trust boundary is a user: the forgejo runner (`ci`), each github repo's runner (`gh-<repo>`, jobs from
-# strangers' pull requests among them) and the app builder (`appbuild`, the registry credential) are three.
-#
-# Per user:
-# - egress: its processes and containers reach the internet, the host's resolvers and exactly its `labAccess` inside
-#   the lab; every other private address is refused. The rules are replaced in one transaction and never removed, so a firewall
-#   restart or stop opens no window (fail closed), and the user's manager starts only after them.
-# - ephemeral: `resetScript` wipes the user's home, images, volumes and caches and restarts its daemon; a runner
-#   runs it before every job, so nothing one job leaves (a retagged base image, a user unit, a poisoned cache)
-#   reaches the next.
-# - storage: the subuid range follows the uid, so adding a user moves nobody's range; a home whose docker storage
-#   was made for another range (a renumbered user) is wiped before the daemon starts instead of failing on it.
-#   Docker storage here is a cache, never state.
+# security: docker socket access is root on the vm. Each user here runs its own rootless dockerd instead, so the worst
+# a job can do is what that user can do; a trust boundary is a user (`ci`, `gh-<repo>` running strangers' pull
+# requests, `appbuild` holding the registry credential). Per user:
+# - egress: the internet, the host's resolvers and exactly its `labAccess`; the rules are replaced in one transaction
+#   and never removed (fail closed), and the user's manager starts only after them
+# - ephemeral: `resetScript` wipes home, images, volumes and caches; a runner runs it before every job, so nothing one
+#   job leaves (a retagged base image, a user unit, a poisoned cache) reaches the next
+# - storage: the subuid range follows the uid; a home whose docker storage was made for another range is wiped before
+#   the daemon starts. Docker storage here is a cache, never state.
 { config, lib, pkgs, inventory, site, retry, ... }:
 let
   # -----------------------------------------------------------------------------

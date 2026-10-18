@@ -1,13 +1,7 @@
 # what the guest is for, in one line
 #
-# Copy this folder to src/instances/preconfigured/<vmid>-<zone>-<service>/ (src/core/ when the lab needs it to
-# function): the vmid inside the zone's range (src/generated/zones.json `vmids`), the zone internal or external.
-# Everything below is optional and defaulted (modules/instance-schema.nix, modules/service.nix): a service is a plain
-# route at <name>.<domain> through its zone's ingress to its port, nothing more; it opts into every protection and
-# telemetry feature by name, usually as lists of modules/profiles.nix. A service of the internal zone without sso keeps
-# prefixes of itself behind authelia, `ssoPaths = [ "/metrics" "/admin" ];`, for admins and its own group; the rest
-# stays open, and the collector scrapes its `metrics` at the backend port, never through the ingress. The guest's
-# firewall opens ssh, node-exporter and its services' ports; main.nix opens anything else itself.
+# copy to src/instances/preconfigured/<vmid>-<zone>-<service>/, the vmid in the zone's range (src/generated/zones.json
+# `vmids`); fields and defaults: modules/instance-schema.nix, modules/service.nix, README.md "Adding an instance"
 { ... }: {
   vm.bootPhase = "apps";
 

@@ -1,4 +1,4 @@
-# the rule a declared server's name obeys (lib/servers.nix, R-070), at evaluation time: every accepted name is one
+# the rule a declared server's name obeys (lib/servers.nix), at evaluation time: every accepted name is one
 # DNS label the player can dial below *.mc, every refused one throws with a message naming what is wrong.
 { pkgs, lib, ... }:
 let
@@ -34,19 +34,19 @@ let
   refusalProblems = lib.concatLists (lib.mapAttrsToList (name: expect:
     let problem = servers.problem name; in
     if problem == null || accepts name then
-      [ "spec001_r070: the name ${builtins.toJSON name} is accepted, it must be refused" ]
-    else lib.optional (!(lib.hasInfix expect problem)) ("spec001_r070: the name ${builtins.toJSON name} is refused"
+      [ "the name ${builtins.toJSON name} is accepted, it must be refused" ]
+    else lib.optional (!(lib.hasInfix expect problem)) ("the name ${builtins.toJSON name} is refused"
       + " with ${builtins.toJSON problem}, which does not say ${builtins.toJSON expect}")
   ) refused);
 
   acceptedProblems = lib.concatLists (map (name:
-    lib.optional (!(accepts name)) "spec001_r070: the name ${builtins.toJSON name} is refused, it must be accepted"
+    lib.optional (!(accepts name)) "the name ${builtins.toJSON name} is refused, it must be accepted"
   ) accepted);
 
   # the real declaration of several servers passes, and reports every bad name at once
   manyProblems = lib.optional
     (builtins.tryEval (builtins.deepSeq (servers.check { cobblemon = { }; layout = { }; "Bad" = { }; }) true)).success
-    "spec001_r070: a declaration holding layout and Bad is accepted, it must throw";
+    "a declaration holding layout and Bad is accepted, it must throw";
 
   problems = refusalProblems ++ acceptedProblems ++ manyProblems;
   report = pkgs.writeText "mc-servers-problems" (lib.concatLines problems);

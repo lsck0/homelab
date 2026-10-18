@@ -1,5 +1,5 @@
-# every ssh host key of the lab, checked strictly by sync.sh, hermes and the owner's ssh config
-# Proxmox: pinned by src/scripts/init.sh --pin after a console check. Guests: written by sync.sh from each
+# every ssh host key of the lab, checked strictly by sync.nu, hermes and the owner's ssh config
+# Proxmox: pinned by src/scripts/init.nu --pin after a console check. Guests: written by sync.nu from each
 # guest's own /etc/ssh/ssh_host_ed25519_key.pub, read through the Proxmox host (qemu agent, pct pull)
 192.168.178.200 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMA/vfP4vx09ykxdZW+t6NO193IvusqFSGjA8a05dGyt
 10.100.0.100 ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMiUGhf2RDXzT8lztWTGXVRggQPlsg3iUpzVBIgG30WC

@@ -5,7 +5,7 @@ let
   mcGate = import ../lib/mc-gate.nix { inherit pkgs lib; };
 
   # the frame reader is the one parser an unauthenticated stranger reaches: fuzz it, with the table's inputs as seeds
-  fuzzTarget = "Fuzz_spec001_r040_frame";
+  fuzzTarget = "Fuzz_frame_read";
   fuzzSeconds = 30;
   fuzz = pkgs.runCommand "mc-gate-fuzz" { nativeBuildInputs = [ pkgs.go ]; } ''
     cp -r ${mcGate.package.src} module && chmod -R u+w module && cd module
@@ -15,6 +15,6 @@ let
   '';
 in
 pkgs.linkFarm "mc-gate" [
-  { name = "spec001_r059"; path = mcGate.package; }
-  { name = "spec001_r040-fuzz"; path = fuzz; }
+  { name = "package"; path = mcGate.package; }
+  { name = "fuzz"; path = fuzz; }
 ]

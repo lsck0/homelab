@@ -1,10 +1,10 @@
 """Build the TRMNL homelab dashboard payload.
 
 Usage: stats-sync.py <out-dir>
-Env:   STATS_PROMETHEUS, STATS_LOKI, STATS_QBITTORRENT (base urls), STATS_INVENTORY (the inventory json with a `vm`
-       name per guest, 114-internal-terminal/main.nix), STATS_CLIENT_INGRESS and
-       STATS_EDGE_ADDRESS (promtail `host` and address of the public ingress), STATS_CLIENT_DOMAIN (suffix stripped
-       from host names), the layout knobs below
+Env:   STATS_PROMETHEUS, STATS_LOKI, STATS_QBITTORRENT (base urls; the last empty while vm-120 is parked),
+       STATS_INVENTORY (the inventory json with a `vm` name per guest, 114-internal-terminal/main.nix),
+       STATS_CLIENT_INGRESS and STATS_EDGE_ADDRESS (promtail `host` and address of the public ingress),
+       STATS_CLIENT_DOMAIN (suffix stripped from host names), the layout knobs below
 
 What reaches TRMNL's cloud: guest names, load and state, request counts per route, visitor countries, agents and
 host names of the public ingress, disk use, and torrent counts and progress. Torrent names only with
@@ -428,10 +428,12 @@ def qb_get(path):
 def torrents():
     empty = {"available": False, "dl": "0B/s", "ul": "0B/s",
              "downloading": 0, "seeding": 0, "paused": 0, "total": 0, "items": []}
-    transfer = qb_get("/api/v2/transfer/info") or {}
+    if not QBITTORRENT:
+        return empty
     listing = qb_get("/api/v2/torrents/info")
     if listing is None:
         return empty
+    transfer = qb_get("/api/v2/transfer/info") or {}
 
     def bucket(state):
         if state in DOWNLOADING:
@@ -484,7 +486,7 @@ def torrents():
 
 
 def main():
-    if len(sys.argv) != 2 or not all((PROMETHEUS, LOKI, QBITTORRENT, INVENTORY, CLIENT_INGRESS, EDGE_ADDRESS)):
+    if len(sys.argv) != 2 or not all((PROMETHEUS, LOKI, INVENTORY, CLIENT_INGRESS, EDGE_ADDRESS)):
         print(__doc__.split("\n\n")[1], file=sys.stderr)
         return 2
     out_dir = sys.argv[1]

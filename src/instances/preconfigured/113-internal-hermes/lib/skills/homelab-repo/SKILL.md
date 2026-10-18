@@ -13,9 +13,9 @@ metadata:
 
 # The homelab repository
 
-Declarative source of truth, deployed from the owner's PC with `./sync.sh`
+Declarative source of truth, deployed from the owner's PC with `./sync.nu`
 (Terraform apply -> build all NixOS configs -> push to every VM -> git commit
-"Generation: N"). You cannot deploy: the admin age key that sync.sh needs stays
+"Generation: N"). You cannot deploy: the admin age key that sync.nu needs stays
 on the owner's PC, and there is no deploy tool on vm-113. You change the repo
 through pull requests, and the owner merges and syncs.
 
@@ -24,7 +24,7 @@ through pull requests, and the owner merges and syncs.
   `git -C homelab fetch origin && git -C homelab checkout master && git -C homelab reset --hard origin/master`
   before every new change.
 - Layout (README.md "Layout" explains it once). Every file has one owner and lives in its folder:
-  - `src/core/<vmid>-<zone>-<service>/` one folder per guest the lab needs to function (router, ingresses, authelia,
+  - `src/instances/core/<vmid>-<zone>-<service>/` one folder per guest the lab needs to function (router, ingresses, authelia,
     homepage, grafana, ntfy, nas, cache, registry, the deploy controller), `src/instances/preconfigured/` the same
     for every third-party service: `main.nix` its NixOS config, `instance.nix` what
     others need (vm shape incl. `power` on/off, `idle.stopAfter` for on-demand guests, `services` with their host,
@@ -35,7 +35,7 @@ through pull requests, and the owner merges and syncs.
     `lab/` collects every folder, `service.nix` and `instance-schema.nix` type them, `catalog.nix` every route;
     traefik, flows, network, on-demand, swarm derive from them.
   - `src/instances/custom/<name>/app.nix` one folder per app of the owner's own (repo, branch, routes, idle,
-    placement); `src/core/swarm.nix` the shared swarm (state worker, ports, worker shape; manager and builder are
+    placement); `src/instances/core/swarm.nix` the shared swarm (state worker, ports, worker shape; manager and builder are
     vm-107's roles).
   - `src/terraform/` terraform, which reads the guests from nix (`nix eval .#lab.terraform`).
   - `src/generated/` what scripts write: `site.json` (the machine and the house), `known_hosts`, `zones.json` (the
@@ -65,7 +65,7 @@ through pull requests, and the owner merges and syncs.
    logical change.
 5. `lab-pr` (inside the clone) pushes the branch, opens the pull request from
    your commit messages and prints its URL.
-6. Tell the owner the URL and that it deploys with `./sync.sh` after merging.
+6. Tell the owner the URL and that it deploys with `./sync.nu` after merging.
 
 To update an open pull request, commit on the same branch and run `lab-pr`
 again. You cannot push to master or change `.github/workflows`: the app is not allowed

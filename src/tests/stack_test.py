@@ -1,4 +1,4 @@
-"""stack.sh over the real instance files: every phase and state touches only that phase's guest files, and status, read
+"""stack.nu over the real instance files: every phase and state touches only that phase's guest files, and status, read
 from the collector again, then reports the wanted state for each of them. Run by tests/stack.nix:
 stack_test.py <dir with src/>."""
 
@@ -11,13 +11,13 @@ from pathlib import Path
 
 PHASES = ("apps", "media", "public")
 # modules/lab layout: the instance folders' homes and the swarm workers' file
-INSTANCE_DIRS = ("core", "instances/preconfigured")
-SWARM_FILE = "core/swarm.nix"
+INSTANCE_DIRS = ("instances/core", "instances/preconfigured")
+SWARM_FILE = "instances/core/swarm.nix"
 STATES = ("on", "off")
 
 
 def guest_files(src):
-    """file (relative to src) -> (boot phase, text) for every guest file stack.sh edits."""
+    """file (relative to src) -> (boot phase, text) for every guest file stack.nu edits."""
     files = [p for d in INSTANCE_DIRS for p in sorted((src / d).glob("*/instance.nix")) if not p.parent.name.startswith("_")]
     files.append(src / SWARM_FILE)
     return {str(p.relative_to(src)): (re.search(r'bootPhase\s*=\s*"([^"]+)"', p.read_text()).group(1), p.read_text())
@@ -25,12 +25,12 @@ def guest_files(src):
 
 
 def status_name(file):
-    """the name stack.sh's status prints for a guest file."""
+    """the name stack.nu's status prints for a guest file."""
     return file if file == SWARM_FILE else Path(file).parent.name
 
 
 def stack(root, *args):
-    return subprocess.run(["bash", str(root / "src/scripts/stack.sh"), *args], capture_output=True, text=True)
+    return subprocess.run(["nu", "--no-config-file", str(root / "src/scripts/stack.nu"), *args], capture_output=True, text=True)
 
 
 def main():

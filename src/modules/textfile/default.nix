@@ -1,19 +1,14 @@
-# the node exporter's textfile collector (modules/base): a service publishes a metric by writing <name>.prom.tmp into
-# textfileDir and renaming it to <name>.prom, so the exporter never reads half a file.
+# the node exporter's textfile collector (modules/base): a service writes <name>.prom.tmp into textfileDir and renames
+# it to <name>.prom, so the exporter never reads half a file
 #
-# Every writer names its files in homelab.textfiles. Activation records them and removes the files of names the
-# previous generation recorded and this one no longer declares (lib/prune.sh): a unit that went away or moved to
-# another host leaves no stale metric behind. A file no generation declared is left alone, so a writer that forgot
-# to declare loses nothing.
-#
-# legacyTextfiles: names hosts wrote before they recorded their files (generation 448 and earlier). A host's first
-# activation takes them as its previous record, so they go wherever no unit writes them now: the builder's file on
-# vm-111, which left for vm-107 and paged "app deploy failed" from its last 0. Delete the list once every host has
-# activated a generation with this module.
+# activation removes the files of names the previous generation declared and this one no longer does (lib/prune.nu);
+# a file no generation declared is left alone, so a writer that forgot to declare loses nothing
 { config, lib, pkgs, ... }:
 let
   cfg = config.homelab;
-  prune = pkgs.writeShellScript "textfile-prune" (builtins.readFile ./lib/prune.sh);
+  prune = pkgs.writers.writeNu "textfile-prune" ./lib/prune.nu;
+  # names written before hosts recorded their files, taken as a host's first record; delete once every host has
+  # activated a generation with this module
   legacyTextfiles = [ "app_builder" ];
 in {
   options.homelab = {

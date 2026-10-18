@@ -1,5 +1,5 @@
 # a guest's secrets as the real sops-nix installs them: modules/base (key at /var/lib/sops-nix/key.txt, no ssh
-# key as a second identity) on vm-100, reading from two files encrypted at build time like secrets-sync.sh writes
+# key as a second identity) on vm-100, reading from two files encrypted at build time like secrets-sync.nu writes
 # them (to an admin key and this host's key): its folder's secrets.sops.json and its shared copy. The host key opens
 # both; the secrets land with their declared owner and mode; another host's key opens neither and leaves the
 # installed secrets in place; the admin key is nowhere on the guest. Throwaway keys, no network.
@@ -8,14 +8,14 @@ let
   secretValue = "t16-value-5c0e7a";
   netrcValue = "t16-attic-pull-token";
 
-  # what sync.sh pushes (host.key) and what the guest must never hold (the admin key)
+  # what sync.nu pushes (host.key) and what the guest must never hold (the admin key)
   keys = pkgs.runCommand "sops-activation-keys" { nativeBuildInputs = [ pkgs.age ]; } ''
     mkdir $out
     for k in admin host other; do age-keygen -o $out/$k.key 2>/dev/null; age-keygen -y $out/$k.key > $out/$k.pub; done
   '';
   hostKey = pkgs.runCommand "host.key" { } "cp ${keys}/host.key $out";
   otherKey = pkgs.runCommand "other.key" { } "cp ${keys}/other.key $out";
-  # the host's own values and its copy of the shared ones: admin and host recipients, as secrets-sync.sh writes them
+  # the host's own values and its copy of the shared ones: admin and host recipients, as secrets-sync.nu writes them
   sopsFileOf = name: values: pkgs.runCommand name { nativeBuildInputs = [ pkgs.sops pkgs.jq ]; } ''
     export HOME=$TMPDIR
     echo '${builtins.toJSON values}' > plain.json
@@ -48,7 +48,7 @@ pkgs.testers.runNixOSTest {
     # the build-time check reads the file at evaluation, which a file built by this test is not yet
     sops.validateSopsFiles = false;
     sops.templates."t16-template" = { owner = "nobody"; content = "token=${config.sops.placeholder.t16-secret}"; };
-    # sync.sh's push before the first activation; later activations keep whatever key is there, as in the lab
+    # sync.nu's push before the first activation; later activations keep whatever key is there, as in the lab
     system.activationScripts.testAgeKey = "[ -e ${keyFile} ] || install -D -m 0400 ${hostKey} ${keyFile}";
     system.activationScripts.setupSecrets.deps = [ "testAgeKey" ];
   };

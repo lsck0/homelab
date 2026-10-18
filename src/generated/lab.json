@@ -219,7 +219,7 @@
     },
     "211": {
       "enabled": "onDemand",
-      "idle": "1h",
+      "idle": "4h",
       "ip": "10.200.0.211",
       "name": "211-external-searxng",
       "powered": true,
@@ -575,6 +575,17 @@
       "vmid": 101,
       "zone": "internal"
     },
+    "math": {
+      "app": "math",
+      "health": "/",
+      "host": "math.lsck0.dev",
+      "onion": null,
+      "path": "/",
+      "port": 20478,
+      "protocol": "http",
+      "vmid": null,
+      "zone": "external"
+    },
     "minecraft": {
       "app": null,
       "health": "/",
@@ -742,7 +753,7 @@
     },
     "searxng": {
       "app": null,
-      "health": "/",
+      "health": "/healthz",
       "host": "search.lsck0.dev",
       "onion": null,
       "path": "/",

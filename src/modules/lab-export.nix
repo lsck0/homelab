@@ -1,6 +1,6 @@
 # the interface for desktop clients: what a workstation's tools need to know about the lab, one json, no nix
 #
-# sync.sh writes it to src/generated/lab.json on every run (`nix eval --json .#lab.export`); the owner's dotfiles read
+# sync.nu writes it to src/generated/lab.json on every run (`nix eval --json .#lab.export`); the owner's dotfiles read
 # that file (the bar's homelab widget, the ntfy notifier) instead of parsing nix. It holds addresses, names and urls,
 # nothing secret: the repo is public. `schema` changes only when a key changes meaning or goes away; a new key is no
 # new schema.

@@ -2,19 +2,19 @@
 #
 # A secret only one guest reads is declared in that guest's instance.nix `secrets`, an app's in its app.nix; every
 # oidc client's secret is derived from its service (modules/secrets.nix). The values of these live in
-# src/secrets/shared.sops.json (`sops src/secrets/shared.sops.json`); src/scripts/secrets-sync.sh adds a missing one by its kind:
+# src/secrets/shared.sops.json (`sops src/secrets/shared.sops.json`); src/scripts/secrets-sync.nu adds a missing one by its kind:
 #   "hex:<bytes>"          that many random bytes as hex
 #   "wireguard"            a wireguard private key: 32 random bytes as base64, clamped by wireguard
 #   "laravel-key"          a laravel APP_KEY: base64: and 32 random bytes as base64
 #   "garage-key-id"        GK and 12 random bytes as hex (apps)
-#   "onion"                a tor onion service's ed25519 seed: 32 random bytes as base64; secrets-sync.sh writes its
-#                          address to src/generated/onions.json (src/scripts/lib/onion.sh)
+#   "onion"                a tor onion service's ed25519 seed: 32 random bytes as base64; secrets-sync.nu writes its
+#                          address to src/generated/onions.json (src/scripts/lib/onion.nu)
 #   "guardsData:<kind>"    a key that data or logins depend on (a backup repository, an encrypted db, an app login
-#                          set once): generated as <kind> only on secrets-sync.sh --generate-guarded, a missing one
+#                          set once): generated as <kind> only on secrets-sync.nu --generate-guarded, a missing one
 #                          stops every other run, since a fresh value would lock the data out
-#   "manual"               a human or src/scripts/init.sh sets it; added empty
+#   "manual"               a human or src/scripts/init.nu sets it; added empty
 #   "public"               set like manual, but no secret (an id or account name): the plaintext guard
-#                          (src/scripts/secrets-check.sh) skips it, since it legitimately appears in code
+#                          (src/scripts/secrets-check.nu) skips it, since it legitimately appears in code
 #   "dotfiles:<file>"      copied from that file of the dotfiles' secrets on every run
 {
   attic-pull-token = "manual"; # atticadm make-token, read-only: every guest substitutes from the cache with it
@@ -36,12 +36,12 @@
   registry-push-password = "hex:24"; # registry user ci: REGISTRY_PASSWORD of the repos that push images
   registry-pull-password = "hex:24"; # registry user puller: read-only pulls
   sccache-redis-pass = "hex:24";
-  telegram-bot-token = "manual"; # hermes-secrets.sh
-  telegram-chat-id = "public"; # hermes-secrets.sh: the owner's telegram user id
+  telegram-bot-token = "manual"; # hermes-secrets.nu
+  telegram-chat-id = "public"; # hermes-secrets.nu: the owner's telegram user id
 
   # read by no guest
-  proxmox-root-pass = "hex:24"; # proxmox root@pam, set by scripts/pve-install.sh; its own, shared with no guest
-  # the proton account's second factor: restoring the off-site backup signs in with it (README, Recovery); its name
-  # and password are vm-104's (core/104-internal-nas/instance.nix), the nas never holds this
+  proxmox-root-pass = "hex:24"; # proxmox root@pam, set by scripts/pve-install.nu; its own, shared with no guest
+  # the proton account's second factor: restoring the off-site backup signs in with it (FEATURES.md, Recovery); its name
+  # and password are vm-104's (instances/core/104-internal-nas/instance.nix), the nas never holds this
   proton-totp-secret = "manual";
 }

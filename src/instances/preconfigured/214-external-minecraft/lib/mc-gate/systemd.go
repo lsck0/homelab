@@ -20,7 +20,7 @@ const systemctlTimeout = 10 * time.Second
 // the absolute path nixos gives systemctl; a binary found on PATH mid-run is a supply chain problem
 const systemctlPath = "/run/current-system/sw/bin/systemctl"
 
-// how a unit's ActiveState reads to the decider (R-046a)
+// how a unit's ActiveState reads to the decider
 const (
 	activityStarted  Activity = "started"
 	activityStopping Activity = "stopping"
@@ -51,7 +51,7 @@ type Systemd interface {
 	Stop(unit string) error
 }
 
-// systemdExec is the real implementation: the polkit rule of R-075 lets the gate's user run exactly these verbs.
+// systemdExec is the real implementation: main.nix's polkit rule lets the gate's user run exactly these verbs.
 type systemdExec struct{}
 
 /*

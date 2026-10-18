@@ -114,7 +114,7 @@ func (sr *sliceReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// statusBuild reports the live sessions, which is what the gate's occupancy reads back (R-058).
+// statusBuild reports the live sessions, which is what the gate's occupancy reads back.
 func statusBuild(version string, protocol int, online int32) []byte {
 	answer := map[string]any{
 		"version": map[string]any{"name": version, "protocol": protocol},

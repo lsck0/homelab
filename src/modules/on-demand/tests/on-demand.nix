@@ -1,11 +1,5 @@
-# on-demand guests (modules/on-demand) against a fake proxmox api: wake on connect, sleep after the cooldown,
-# the reaper, sibling routes on one guest, an lxc, a non-http backend, a boot past its timeout, the deploy pause, an
-# orphaned proxy, each proxy's port fixed by its own guest, a port a switch moves rebound, and the api call itself:
-# its token from a header file (never in an argv) over tls pinned to the proxmox ca, a failed call an error the
-# reaper exports
-#
-# `backend` stands in for proxmox and the guests: each fake guest is a unit there the fake api starts and stops.
-# Nothing waits on the clock but the guest's own cooldown, observed through the fake api's call log and uptime.
+# on-demand guests (modules/on-demand) against a fake proxmox api on `backend`, where each fake guest is a unit the
+# fake api starts and stops; nothing waits on the clock but the guest's own cooldown
 { pkgs, lib, ... }:
 let
   cooldownSeconds = 20;
@@ -14,10 +8,10 @@ let
   apiName = "pve";
   token = "test@pve!t=secret";
   bootTimeoutSeconds = 30;
-  # a boot that never answers within this fails the held connection
   slowBootTimeoutSeconds = 5;
+  # while /run/slow-shutdown exists, a guest keeps serving this long after its shutdown call, as an acpi shutdown does
+  slowShutdownSeconds = 6;
 
-  # the guests: vmid -> the unit that "is" the guest on the backend, and its kind
   guests = {
     "150" = { unit = "nginx"; kind = "vm"; };
     "160" = { unit = "ct-app"; kind = "lxc"; };
@@ -28,7 +22,7 @@ let
   inventoryFor = ip: lib.mapAttrs (id: g: {
     name = "${id}-internal-test"; type = "internal"; inherit ip; powered = true; idle = cooldown; inherit (g) kind;
   }) guests;
-  # the ca the proxy pins, a file the test swaps
+  # a file the test swaps
   caFile = "/run/pve-ca.pem";
   # portBase + vmid x portsPerGuest + the slot in name order (modules/on-demand)
   listenPorts = { app = 21500; app2 = 21501; ct = 21600; slow = 21700; };
@@ -56,8 +50,10 @@ let
   fakePve = pkgs.writers.writePython3 "fake-pve" { flakeIgnore = [ "E501" ]; } ''
     import http.server
     import json
+    import os
     import ssl
     import subprocess
+    import threading
     import time
 
     UNITS = json.loads('${builtins.toJSON (lib.mapAttrs (_: g: g.unit) guests)}')
@@ -67,6 +63,12 @@ let
 
     def running(vmid):
         return subprocess.run(["systemctl", "is-active", "--quiet", UNITS[vmid]]).returncode == 0
+
+
+    def shutdown(vmid):
+        if os.path.exists("/run/slow-shutdown"):
+            time.sleep(${toString slowShutdownSeconds})
+        subprocess.run(["systemctl", "stop", UNITS[vmid]])
 
 
     class H(http.server.BaseHTTPRequestHandler):
@@ -106,7 +108,7 @@ let
                 subprocess.Popen(["systemctl", "start", UNITS[vmid]])
                 self.reply(200, "UPID:start")
             elif self.path.endswith("/status/shutdown"):
-                subprocess.Popen(["systemctl", "stop", UNITS[vmid]])
+                threading.Thread(target=shutdown, args=(vmid,), daemon=True).start()
                 self.reply(200, "UPID:shutdown")
             else:
                 self.reply(404, "no such action")
@@ -314,6 +316,18 @@ pkgs.testers.runNixOSTest {
         proxy.fail("systemctl is-active ondemand-app.service")
         out = proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app"}/")
         assert "hello from the app" in out, out
+        backend.wait_until_fails("systemctl is-active nginx", timeout=150)
+
+    with subtest("a request during the idle shutdown waits for the guest to stop, then starts it again"):
+        proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app"}/")
+        backend.succeed("rm -f /tmp/pve-calls && touch /run/slow-shutdown")
+        backend.wait_until_succeeds("grep -q /status/shutdown /tmp/pve-calls", timeout=90)
+        backend.succeed("systemctl is-active nginx")
+        out = proxy.succeed("curl -sf --max-time 90 http://127.0.0.1:${port "app"}/")
+        assert "hello from the app" in out, out
+        assert calls().split() == ["/api2/json/nodes/pve/qemu/150/status/shutdown", "/api2/json/nodes/pve/qemu/150/status/start"], calls()
+        backend.succeed("rm /run/slow-shutdown")
+        backend.succeed("systemctl is-active nginx")
         backend.wait_until_fails("systemctl is-active nginx", timeout=150)
 
     # the reaper also walks app2, the sibling without a busyPath: busy is the guest's, not the route's

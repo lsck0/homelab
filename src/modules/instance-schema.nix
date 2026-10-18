@@ -1,22 +1,11 @@
 # what an instance.nix may say: the facts other hosts and terraform read about one guest, typed and defaulted once
 #
-# An instance folder is <vmid>-<zone>-<service>/ in src/core/ or src/instances/preconfigured/: main.nix is the guest's
-# nixos configuration, instance.nix the data below, and modules/lab collects every instance.nix into the lab's facts.
-# An unknown key, a wrong type or a missing required field fails every host's evaluation naming the option.
-# Cross-instance rules (unique hosts, ports, tokens, vmids) are modules/lab's and modules/catalog.nix's.
+# instance.nix is a module over this schema with the arguments id, zone, site, net, telemetry, roles, swarmManagers,
+# grantSourceNames and profiles; modules/lab collects every one. Cross-instance rules are modules/lab's and
+# modules/catalog.nix's. The smallest, a plain route to port 80:
+#   { ... }: { vm.bootPhase = "apps"; services.demo.port = 80; }
 #
-# instance.nix is a module over this schema with the arguments id (the vmid, a string), zone, site (site.json), net
-# (modules/net.nix over the collected inventory), telemetry (modules/telemetry.nix), roles (lab.roles: role -> vmid),
-# swarmManagers (the vmids of every enabled swarm's manager), grantSourceNames (modules/lab) and profiles
-# (modules/profiles.nix). The smallest, a plain route to port 80:
-#
-#   # what the guest is for, in one line
-#   { ... }: {
-#     vm.bootPhase = "apps";
-#     services.demo.port = 80;
-#   }
-#
-# Guest kind: a vm when it is the router, sits outside the internal zone (strangers' traffic wants a vm's isolation),
+# guest kind: a vm when it is the router, sits outside the internal zone (strangers' traffic wants a vm's isolation),
 # passes a device through, takes extra disks, or `needs` what an unprivileged container cannot give (its own
 # container runtime, nfs); an unprivileged lxc otherwise. `vm.kind.<kind> = "<why>"` overrides the rule.
 { lib, config, id, zone, telemetry, grantSourceNames, ... }:
@@ -165,7 +154,7 @@ in {
         default = false;
         description = "lxc only, internal zone only: root in the container is root on the host; only for nfs mounts.";
       };
-      features = mkOption { type = types.str; default = "nesting=1"; description = "lxc only: proxmox features, set by sync.sh as root."; };
+      features = mkOption { type = types.str; default = "nesting=1"; description = "lxc only: proxmox features, set by sync.nu as root."; };
       bootPhase = mkOption { type = types.enum bootPhases; default = "apps"; description = "When the host boots it, phases in order."; };
       bootOrder = mkOption {
         type = types.ints.positive;

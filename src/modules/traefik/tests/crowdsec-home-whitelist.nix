@@ -1,9 +1,6 @@
-# lib/crowdsec-home-whitelist.sh against a faked resolver and podman (crowdsec_home_whitelist_test.sh): the house's
-# v4 address and v6 prefix whitelisted and their bans lifted as the router serves them, an unknown prefix kept
+# lib/crowdsec-home-whitelist.nu against a faked resolver and podman (crowdsec_home_whitelist_test.nu)
 { pkgs, ... }:
-pkgs.runCommand "crowdsec-home-whitelist" {
-  nativeBuildInputs = with pkgs; [ bash coreutils diffutils gnused gnugrep yq-go ];
-} ''
-  bash ${./crowdsec_home_whitelist_test.sh} ${../lib/crowdsec-home-whitelist.sh}
+pkgs.runCommand "crowdsec-home-whitelist" { nativeBuildInputs = [ pkgs.nushell pkgs.coreutils ]; } ''
+  nu --no-config-file ${./crowdsec_home_whitelist_test.nu} ${../lib/crowdsec-home-whitelist.nu}
   touch $out
 ''

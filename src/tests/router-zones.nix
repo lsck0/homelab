@@ -1,5 +1,5 @@
 # lab-wide: the policy between every zone (tests/lib/zones.py), across the real router
-# the real router (core/300-router/main.nix) between the house, the internet and the three zones: every flow across
+# the real router (instances/core/300-router/main.nix) between the house, the internet and the three zones: every flow across
 # it against the policy as tests/lib/zones.py states it, its own services, the port forwards, the split horizon,
 # dhcp, the vpn exit's killswitch and dns, anti-spoofing, the wan limits, and no window while it reloads or boots
 #
@@ -10,7 +10,7 @@
 # a dmz guest claiming the edge's address on the dmz bridge is that layer's to stop, the router sees the edge.
 { pkgs, lib, specialArgs, seed ? 1, ... }:
 let
-  # spec-001 p1: a fixture app whose tcp route takes a wildcard host, which no route of the lab has yet. Its http
+  # a fixture app whose tcp route takes a wildcard host, which no route of the lab has yet. Its http
   # route keeps the zone's own name (demo.<domain>) in the hosts file, so the templates must fall through to reach it.
   wildcardApp = {
     enable = true;
@@ -255,7 +255,7 @@ pkgs.testers.runNixOSTest {
         # a forwarded route's srv record names its public port
         internal.succeed("dig +short +time=3 @10.100.0.1 SRV ${voice.srv}.${net.fqdn voice.host} | grep -qx '0 0 ${toString voice.publicPort} ${net.fqdn voice.host}.'")
 
-    with subtest("spec001_r025 spec001_r026 spec001_r027 a wildcard forward answers every name one label below it"):
+    with subtest("a wildcard forward answers every name one label below it"):
         for machine, src, server in ((internal, ZONES["internal"][1], "10.100.0.1"), (dmz, ZONES["external"][1], "10.200.0.1"),
                                      (apps, ZONES["apps"][0], "10.250.0.1"), (house, HOUSE["device"], ROUTER_WAN)):
             addresses = sorted(machine.succeed(f"dig +short +time=3 -b {src} @{server} ${wildcardName}").split())
@@ -268,11 +268,11 @@ pkgs.testers.runNixOSTest {
         # a name two labels below is below no wildcard, and no hosts line carries the wildcard itself
         internal.fail("dig +short +time=3 @10.100.0.1 a.${wildcardName} | grep -q .")
         internal.fail("dig +short +time=3 @10.100.0.1 '${net.fqdn "*.demo"}' | grep -q .")
-        # spec001_r028: outside the lab the same name is cloudflare's, raw: a proxied record would hide the game port
+        # outside the lab the same name is cloudflare's, raw: a proxied record would hide the game port
         records = json.loads(luca_router.succeed("cat $(systemctl show -P Environment ddns-cloudflare | tr ' ' '\\n' | sed -n 's/^DDNS_RECORDS=//p')"))
         assert {"name": "${net.fqdn "*.demo"}", "proxied": False} in records, records
 
-    with subtest("spec001_r077 every minecraft server answers at its own name below *.mc"):
+    with subtest("every minecraft server answers at its own name below *.mc"):
         for name in ("cobblemon.mc.${net.domain}", "atm10.mc.${net.domain}"):
             assert internal.succeed(f"dig +short +time=3 @10.100.0.1 {name}").strip() == "${ip "214"}", name
         # the protocol's srv record is gone: its target would be the one address every client sends instead

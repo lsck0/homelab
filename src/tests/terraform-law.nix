@@ -2,7 +2,7 @@
 # both files parsed by hcl2json and held to the law below: tls to the api verified (no `insecure`), the state's
 # working copy outside the flake tree (no backend path), the datacenter firewall on with the host's input policy DROP
 # and switched on only after the guests' filters and the host rules, every guest bound to its address and mac (the
-# router's nics alone exempt), ssh open to the house lan (the rollback path, README "Proxmox firewall"), the api open
+# router's nics alone exempt), ssh open to the house lan (the rollback path, FEATURES.md "Proxmox host"), the api open
 # to the owner's machines and the router alone, then dropped, and no host rule accepting from everyone. Each
 # mutation in `controls` must break the law.
 { pkgs, lib, ... }:

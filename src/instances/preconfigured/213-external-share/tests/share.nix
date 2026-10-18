@@ -79,10 +79,10 @@ pkgs.testers.runNixOSTest {
         post("/auth/signUp", account)
 
     with subtest("the fork starts on the same data dir and the account signs in"):
-        # podman runs the image's healthcheck as transient units, which fail while the app starts: judged like sync.sh
+        # podman runs the image's healthcheck as transient units, which fail while the app starts: judged like sync.nu
         # judges a deploy's switch
         status, _ = vm_213.execute("/run/booted-system/specialisation/upgraded/bin/switch-to-configuration test > /tmp/switch.log 2>&1")
-        assert status == 0 or vm_213.succeed("${pkgs.bash}/bin/bash ${../../../../scripts/lib/switch-failures.sh} < /tmp/switch.log") == "", \
+        assert status == 0 or vm_213.succeed("${pkgs.nushell}/bin/nu --no-config-file --stdin ${../../../../scripts/lib/switch-failures.nu} < /tmp/switch.log") == "", \
             vm_213.succeed("cat /tmp/switch.log")
         # the state podman's own probe keeps; `podman healthcheck run` here stops on the driver's tty (SIGTTOU) for good
         vm_213.wait_until_succeeds("podman inspect share --format '{{.State.Health.Status}}' | grep -qx healthy", timeout=300)

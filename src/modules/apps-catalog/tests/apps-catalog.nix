@@ -81,23 +81,23 @@ let
     };
     asleep-never = { lab = withDemo { on = [ "scaleToZero" ]; idle.stopAfter = null; }; expect = "never sleeps"; };
     stopped-unasked = { lab = withDemo { idle.stopAfter = "30m"; }; expect = "without scaleToZero in `on`"; };
-    spec001_r021-dotted-http-host = {
+    dotted-http-host = {
       lab = withDemo { routes.demo.host = "lab.demo"; };
       expect = "host lab.demo goes through its zone's ingress";
     };
-    spec001_r021-wildcard-http-host = {
+    wildcard-http-host = {
       lab = withDemo { routes.demo.host = "*.demo"; };
       expect = "host *.demo goes through its zone's ingress";
     };
-    spec001_r022-wildcard-without-publicport = {
+    wildcard-without-publicport = {
       lab = withDemo { routes.demo-game = { protocol = "tcp"; port = 20131; host = "*.demo"; }; };
       expect = "host *.demo is reached by the house's forwarded port alone";
     };
-    spec001_r023-srv-on-a-wildcard = {
+    srv-on-a-wildcard = {
       lab = withDemo { routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "*.demo"; srv = "_demo._tcp"; }; };
       expect = "an srv record names one host, which *.demo is not";
     };
-    spec001_r024-exact-host-under-a-wildcard = {
+    exact-host-under-a-wildcard = {
       lab = withDemo {
         routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "*.demo"; };
         routes.demo-one = { protocol = "tcp"; port = 20132; host = "one.demo"; };
@@ -120,7 +120,7 @@ let
     climbing-build = withDemo { build.web.context = "../other"; };
     unknown-generator = withDemo { secrets.x = "random"; env.web.X = "{{x}}"; };
     # a wildcard stands for one label below a name: it leads the host, and nothing else about it bends
-    spec001_r020-wildcard-in-the-middle = withDemo { routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "a.*.demo"; }; };
+    wildcard-in-the-middle = withDemo { routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "a.*.demo"; }; };
   };
 
   # every app of the real catalog enabled, an app left disabled by omission, an internal-only app
@@ -137,7 +137,7 @@ let
     cloudflare-on-the-edge = withDemo { routes.demo.on = [ "cloudflare" ]; };
     per-path = withDemo { routes.demo-api = { host = "demo"; path = "/api"; port = 20130; on = [ "rateLimit" ]; }; };
     # a wildcard tcp route: every name one label below it, forwarded by port, resolved by the router's template
-    spec001_r020-wildcard-tcp-host = withDemo {
+    wildcard-tcp-host = withDemo {
       routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "*.demo"; };
     };
     hardened = withDemo {

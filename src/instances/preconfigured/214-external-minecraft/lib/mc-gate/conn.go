@@ -18,7 +18,7 @@ import (
  */
 
 // Gate is the listener's side: the settings a connection reads, the decider it asks, and the dial a relay makes.
-// The settings pointer is swapped whole by a reload, so a connection reads one consistent file (R-055b).
+// The settings pointer is swapped whole by a reload, so a connection reads one consistent file.
 type Gate struct {
 	settings atomic.Pointer[Settings]
 	decider  *Decider
@@ -64,7 +64,7 @@ func connKickBuild(text string) []byte {
 }
 
 // connStatusServe answers a ping itself, so a sleeping server needs no backend and a running one is asked at most
-// once per statusCacheS however fast the pings come (R-042).
+// once per statusCacheS however fast the pings come.
 func connStatusServe(g *Gate, conn net.Conn, reader *connReader, name string) {
 	id, _, err := frameRead(reader)
 	if err != nil || id != packetIDStatusRequest {
@@ -118,7 +118,7 @@ func connRelay(g *Gate, conn net.Conn, opening []byte, decision Decision, name s
  */
 
 // connServe takes one connection from its first byte to its end. Everything before the decision is bounded in time
-// and in bytes (R-040), because a stranger opened it.
+// and in bytes, because a stranger opened it.
 func connServe(g *Gate, conn net.Conn, source netip.Addr) {
 	defer conn.Close()
 	settings := g.settings.Load()
@@ -159,7 +159,7 @@ func connServe(g *Gate, conn net.Conn, source netip.Addr) {
 	case outcomeRelay:
 		connRelay(g, conn, reader.buf[:reader.pos], decision, name)
 	case outcomeCapped:
-		// a source over its session cap is closed without a word (R-048d)
+		// a source over its session cap is closed without a word
 	default:
 		conn.Write(connKickBuild(decision.Text))
 	}

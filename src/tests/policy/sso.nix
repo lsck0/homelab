@@ -1,6 +1,6 @@
 # every group authelia admits through (a forwardauth rule's subject, an oidc client's policy) exists in lldap's
 # bootstrap: a group nobody can be put in leaves its page to the admins alone and `lab-user add` fails on it.
-# The proxmox realm binds where the lab export says (scripts/pve-install.sh): that guest serves ldaps there, and its
+# The proxmox realm binds where the lab export says (scripts/pve-install.nu): that guest serves ldaps there, and its
 # plain ldap, which would carry the password in clear, is closed to the network.
 { lib, configs, lab, inventory, ... }:
 let

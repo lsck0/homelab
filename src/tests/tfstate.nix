@@ -1,11 +1,18 @@
-# lab-wide: sync.sh's terraform state (scripts/lib/tfstate.sh)
-# sync.sh's terraform state handling (scripts/lib/tfstate.sh) in the sandbox: the pull and push table, the nas lock,
-# and a seeded simulation of two deployers with failing pushes and nas outages (tfstate_test.sh). No network.
-{ pkgs, seed ? 1, ... }:
+# lab-wide: sync.nu's terraform state (scripts/lib/tfstate.nu)
+# the pull and push table, the nas lock, and a seeded simulation of two deployers with failing pushes and nas outages
+# (tfstate_test.nu), on local files in the sandbox
+{ pkgs, lib, seed ? 1, ... }:
+let
+  tree = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.unions [ ./tfstate_test.nu ../scripts/lib/tfstate.nu ];
+  };
+in
 pkgs.runCommand "tfstate-seed-${toString seed}" {
-  nativeBuildInputs = with pkgs; [ bash jq coreutils util-linux gnugrep diffutils ];
+  nativeBuildInputs = with pkgs; [ nushell util-linux coreutils ];
   passthru.regressionSeeds = [ ];
 } ''
-  bash ${./tfstate_test.sh} ${../scripts/lib/tfstate.sh} ${toString seed}
+  export HOME=$TMPDIR
+  nu --no-config-file ${tree}/tests/tfstate_test.nu ${toString seed}
   touch $out
 ''

@@ -294,7 +294,7 @@ func loginStartParse(id int32, body []byte) (string, error) {
 	return name, nil
 }
 
-// addressNormalize turns the address a client dialed into a server name (R-041): forge appends \0FML\0, proxies
+// addressNormalize turns the address a client dialed into a server name: forge appends \0FML\0, proxies
 // append \-separated parts, resolvers may leave the root dot, and the suffix is the lab's own.
 func addressNormalize(address, suffix string) string {
 	if cut := strings.IndexByte(address, 0); cut >= 0 {

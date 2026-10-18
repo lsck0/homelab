@@ -1,24 +1,10 @@
-# the servers vm-214 may declare, and the rule their names obey (R-070)
-#
-# A name is one dns label, because it is the label below the wildcard host *.mc a player dials, and it names the
-# server's unit, its data dir and its world. Three labels are taken by the guest's own units and files, so a server
-# may not use them: mc-layout, mc-gate and the gate's state.
-#
-#   servers = import ./lib/servers.nix { inherit lib; };
-#   servers.check { cobblemon = { }; }   # the names, or a throw naming every bad one
+# the rule a server's name obeys: one dns label below *.mc, which also names its unit, data dir and world, and
+# none of the guest's own mc-layout, mc-gate and mc-state
 { lib }:
 let
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
-
   # one dns label: lowercase letters and digits, hyphens inside (rfc 1123)
   labelPattern = "[a-z0-9]([a-z0-9-]*[a-z0-9])?";
   reserved = [ "layout" "gate" "state" ];
-
-  # -----------------------------------------------------------------------------
-  # FUNCTIONS
-  # -----------------------------------------------------------------------------
 
   # a name -> what is wrong with it, or null
   problem = name:

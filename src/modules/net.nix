@@ -1,19 +1,9 @@
 # the lab's network facts, defined once: zones, addresses, well-known ports and the outside ranges it trusts
 #
-# zones: src/generated/zones.json, which terraform reads too (main.tf), so a zone's bridge, subnet, router leg, ingress and
-# dhcp pool are one edit for both. A guest's address is host <id> of its zone's subnet (modules/lab), the router
-# is host 1 of every zone, and the router's leg of a zone is proxmox nic `router_nic` (net0 is the wan); modules/lab
-# `problems` holds zones.json to these rules.
-#
-#   net = import ../modules/net.nix { inherit lib inventory site; };
-#   net.zones.internal.subnet        # "10.100.0.0/24"
-#   net.zones.external.interface     # "ens20", the router's nic in the zone
-#   net.ipOf "103"                   # "10.100.0.103"
-#   net.hostSource "200"             # "10.200.0.200/32"
-#   net.ports.nfs                    # 2049
-#
-# Everything here is a constant or derived from the inventory and site.json; nothing reads a host's config, so any
-# module, the router and the policy laws (tests/policy/network.nix) can import it without a cycle.
+# zones: src/generated/zones.json, which terraform reads too, so a zone is one edit for both. A guest's address is host
+# <id> of its zone's subnet, the router is host 1 of every zone, its leg of a zone proxmox nic `router_nic` (net0 is
+# the wan); modules/lab `problems` holds zones.json to these rules.
+# nothing here reads a host's config, so any module, the router and the policy laws import it without a cycle.
 { lib, inventory, site }:
 let
   # -------------------------------------------------------------------------------------------------------------
@@ -29,7 +19,7 @@ let
 
   # rfc 1918: the house, the lab, the wireguard peers and every container bridge
   privateRanges = [ "10.0.0.0/8" "172.16.0.0/12" "192.168.0.0/16" ];
-  # the owner's devices dialing in (core/300-router/main.nix wg0)
+  # the owner's devices dialing in (instances/core/300-router/main.nix wg0)
   wireguardSubnet = "10.0.0.0/24";
   # headscale's tailnet (instances/preconfigured/140-internal-headscale), rfc 6598 carrier-grade nat: never the internet either
   tailnet = "100.64.0.0/10";
@@ -61,7 +51,7 @@ let
     mdns = 5353;
     swarmGossip = 7946;
     proxmoxApi = 8006;
-    # lldap's ldaps listener (core/101-internal-authelia), which the proxmox realm binds to
+    # lldap's ldaps listener (instances/core/101-internal-authelia), which the proxmox realm binds to
     ldaps = 6360;
     nodeExporter = 9100;
     traefikMetrics = 8082;

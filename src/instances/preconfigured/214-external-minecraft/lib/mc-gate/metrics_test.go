@@ -30,10 +30,10 @@ func metricsTestValue(t *testing.T, rendered []byte, series string) string {
 	return ""
 }
 
-// Test_spec001_r090_metrics covers the file prometheus scrapes: every metric of R-090 is rendered, a phase that is
+// Test_metrics_render covers the file prometheus scrapes: every metric the gate exports is rendered, a phase that is
 // not the current one is written as 0 rather than left out, the file is written atomically at 0644, and a view that
 // did not change is not written again.
-func Test_spec001_r090_metrics(t *testing.T) {
+func Test_metrics_render(t *testing.T) {
 	servers := []*Server{
 		{
 			name: "cobblemon", phase: phaseRunning, playersOnline: 3,

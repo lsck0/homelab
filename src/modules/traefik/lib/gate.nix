@@ -17,7 +17,6 @@ let
   metricsPath = "/metrics";
   # the captcha form's target on every host; dotted, so no app's own path is shadowed
   answerPath = "/.lab-gate/answer";
-  # the go module's binary
   binary = "gate";
   # what forwardauth passes the gate: the client client-ip named and the cookies (its own, authelia's); nothing else
   # of the request leaves traefik but forwardauth's own X-Forwarded-Host and -Uri (an onion route's address, the path)

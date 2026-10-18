@@ -1,44 +1,20 @@
 # the apps swarms: the shared one (manager vm-107 in the internal zone, workers in the apps zone) and each
 # guest-placed app's swarm of one, every host taking the role its cluster (catalog.clusters) gives it
 #
-# The control plane stays inside: the manager holds the raft and the stacks' secrets and runs no app (drained); the
-# workers sit in the apps zone, a dmz of their own, and can neither change the cluster nor read what it stores. The
-# manager initialises the swarm autolocked, keeps the unlock key on its own nas share and publishes the worker join
-# token through its token dir (modules/tokens); workers join with it. A node is the inventory's only at the
-# inventory's address, and leaves by leaving it.
+# security: the manager holds the raft and the stacks' secrets and runs no app; workers in the apps zone can neither
+# change the cluster nor read what it stores. The swarm is autolocked, its unlock key on the manager's own nas share.
+# A worker's containers get the internet only (DOCKER-USER, replaced in one iptables-restore and never removed).
+# swarm-deploy is the one way a stack reaches the swarm: the builder's swarm-apply, and swarm-converge-<app> on every
+# switch that changes the app's catalog entry. A sleeping app is deployed awake until it converged, so a wake is a
+# scale that never pulls.
 #
-# One step deploys, swarm-deploy <app> <stack>: render through lib/swarm-render.py (the homelab's ports, env,
-# limits, encryption, policy), `docker stack deploy`, fail when a service rolled back, keep the stack, write the
-# result for prometheus. It holds the app's own lock, then the swarm's one rollout slot (modules/limits admits a
-# single deploy's surge). A deploy that fails while a registry of the stack's public images is down (modules/upstream)
-# exits "unavailable": no failed deploy, the running version stays, the caller tries again later. Its callers:
-#   swarm-apply <app> < stack.yaml      the builder: through swarm-deploy@<app> on its own host, over the forced
-#                                       command on a guest's manager; by hand on any manager
-#   swarm-converge-<app>                the catalog applied to the kept stack: on every switch that changes the app's
-#                                       catalog entry or secrets, and at boot; one unit per app, so one app's failure
-#                                       or edit touches no other; a failed one is tried again (swarm-converge-retry)
-# A task left pending while no node could take it (a lab shutdown) stays pending once the nodes are back and an
-# unchanged spec creates no new one: each deploy force-updates such a service first.
-#   swarm-prune                         removes the stacks of apps that left the catalog; volumes stay
-# An idle app sleeps and wakes by scaling its services (to 0, and back to the replicas each carries as a label)
-# under its own lock only. A deploy of a sleeping app runs it awake until it converged, then puts it back to sleep:
-# the new version proves it starts and its images are on the worker, so a wake is a scale that never pulls (the
-# workers' image prune keeps every image a service of the swarm names). Nothing here polls.
+# workaround: a service whose published ports change is removed and created anew. Docker 28.5 (libnetwork
+# addLBBackend) keys a service's load balancer by its id and ports, so new ports get a second balancer for the same
+# vip, which fails with EEXIST in the ingress sandbox: the app answers on no port. Delete once a docker release
+# programs a changed port in place (the swarm test's catalog edit).
 #
-# A service whose published ports change is removed and created anew, never updated in place. Docker 28.5
-# (libnetwork addLBBackend) keys a service's load balancer by its id and ports, so the new ports get a second balancer
-# for the same vip; adding that vip to the ingress sandbox fails with EEXIST while the old balancer holds it, the
-# new ports are never programmed, and the old ones go when the old tasks do: the app answers on no port at all.
-# Delete the replacement once a docker release programs a changed port in place (the swarm test's catalog edit).
-#
-# Containers on a worker leave through the node's address. Without DOCKER-USER they would speak nfs to the nas as
-# the node, read its tokens, or call any lab service; they get the internet only (telemetry goes to the relay on the
-# node itself, modules/app-telemetry.nix). The chain is replaced in one iptables-restore transaction and never removed, so a firewall restart or
-# stop opens no window. A worker advertises what it holds for apps (catalog admission) as generic resources, which
-# render reserves per task, and runs every container in apps.slice, capped at the same memory.
-#
-# Rejected: deploying from the builder alone. A deploy happened only on a new app commit, so a port, env or secret
-# changed in the catalog never reached the stack, and a disabled app kept running unguarded.
+# Rejected: deploying from the builder alone. A port, env or secret changed in the catalog never reached the stack,
+# and a disabled app kept running unguarded.
 { config, lib, pkgs, inventory, site, nasMount, retry, catalog, lab, upstream, ... }:
 let
   # -----------------------------------------------------------------------------
@@ -104,7 +80,7 @@ let
   controllerState = "/run/controller-api";
   # a request reads a few headers; a client that dribbles them holds a process no longer than this
   controllerRequestMaxS = 10;
-  # the boards apps ship, which vm-103 provisions (core/107-internal-swarm/lib/dashboards-import.py)
+  # the boards apps ship, which vm-103 provisions (instances/core/107-internal-swarm/lib/dashboards-import.py)
   appDashboardsMount = "/var/lib/app-dashboards";
   # a woken app's task starts within a deploy's image pull; the dump waits that long, then fails and alerts
   dumpWakeWait = { attempts = 60; intervalS = 5; };
@@ -114,7 +90,8 @@ let
   archiveDir = "/var/lib/swarm-archive";
   # an idle-stopped app's marker: deploys keep it at 0 replicas, the controller answers its state from here
   stoppedDir = "/var/lib/swarm-idle";
-  # the controller's door (lib/controller-api.py): redeploys from ci, wake and sleep from the ingresses
+  # beside the marker, its mtime the app's last wake: the controller's /uptime, which the reaper's idle check reads
+  wokeSuffix = ".woke";
   inherit (catalog.swarm) controllerPort;
   controllerUser = "controller";
   # one redeploy per app per minute: a ci retry loop costs one build
@@ -143,7 +120,7 @@ let
   convergeUnitOf = app: "swarm-converge-${app}";
   docker = config.virtualisation.docker.package;
 
-  # the one user the registry's read route admits and its write route does not (106's instance.nix): the swarms'
+  # the one user the registry's read route admits and its write route does not (106's instance.nix)
   pullUsers = removeAttrs catalog.internal.registry-api.basicAuth (lib.attrNames catalog.internal.registry-push.basicAuth);
   pullUser = assert lib.length (lib.attrNames pullUsers) == 1; lib.head (lib.attrNames pullUsers);
   pullSecret = pullUsers.${pullUser};
@@ -177,7 +154,6 @@ let
   # one line per value, <service>.<KEY>=<value> (swarm-render.py env_file_parse); generated secrets hold no newline
   envFileOf = a: lib.concatStrings (lib.concatLists (lib.mapAttrsToList (service: env:
     lib.mapAttrsToList (key: value: "${service}.${key}=${withPlaceholders value}\n") env) a.env));
-  # sops-nix renders templates here, as /run/secrets/rendered/swarm-app-<app>.env
   envDir = "/run/secrets/rendered";
 
   python = pkgs.python3.withPackages (ps: [ ps.pyyaml ]);
@@ -357,7 +333,7 @@ let
         # volumes stay on the state worker: data is removed by hand, never by a catalog edit
         echo "swarm-prune: removing $stack, it is not an enabled app"
         docker stack rm "$stack"
-        rm -f ${stackDir}/"$stack".yaml ${textfileDir}/swarm_app_"$stack".prom ${textfileDir}/swarm_idle_"$stack".prom ${stoppedDir}/"$stack"
+        rm -f ${stackDir}/"$stack".yaml ${textfileDir}/swarm_app_"$stack".prom ${textfileDir}/swarm_idle_"$stack".prom ${stoppedDir}/"$stack" ${stoppedDir}/"$stack"${wokeSuffix}
         rm -rf "${appDashboardsMount}/${telemetry.appDashboardsDir}/$stack"
       done
       ${lib.optionalString (!single) "images_publish"}
@@ -396,7 +372,7 @@ let
       idle=" ${lib.concatStringsSep " " idleApps} "
       case "$idle" in *" $app "*) ;; *) echo "$app never idles" >&2; exit 2 ;; esac
       ${appLock}
-      ${if state == 1 then ''touch ${stoppedDir}/"$app"'' else ''rm -f ${stoppedDir}/"$app"''}
+      ${if state == 1 then ''touch ${stoppedDir}/"$app"'' else ''rm -f ${stoppedDir}/"$app"; touch ${stoppedDir}/"$app"${wokeSuffix}''}
       ${servicesScale scale}
       printf '# TYPE homelab_app_idle_stopped gauge\nhomelab_app_idle_stopped{app="%s"} ${toString state}\n' "$app" > ${textfileDir}/swarm_idle_"$app".prom.tmp
       mv ${textfileDir}/swarm_idle_"$app".prom.tmp ${textfileDir}/swarm_idle_"$app".prom
@@ -411,7 +387,7 @@ let
       idle = a.idle.stopAfter != null;
     }) (if isController then catalog.apps else apps);
     wakers = map (id: inventory.${id}.ip) wakers;
-    inherit redeployIntervalS units stoppedDir;
+    inherit redeployIntervalS units stoppedDir wokeSuffix;
     stateDir = controllerState;
   });
 
@@ -520,7 +496,7 @@ let
     '';
   };
 
-  # DOCKER-USER (see the header): the internet only; replaced in one transaction
+  # DOCKER-USER: the internet only, replaced in one transaction
   dockerUserRules = pkgs.writeText "docker-user.rules" (lib.concatLines ([
     "*filter"
     ":DOCKER-USER - [0:0]"
@@ -531,8 +507,8 @@ let
     "COMMIT"
   ]));
 
-  # swarm-dump <app> <service> <idle> <command...>: in the service's container; an asleep app is woken for it and
-  # sleeps again after its idle window
+  # swarm-dump <app> <service> <idle> <command...>: in the service's container; an asleep app is woken for it, and the
+  # wake's stamp keeps the reaper off it for its idle window
   volumeDump = pkgs.writeShellApplication {
     name = "swarm-dump";
     runtimeInputs = [ docker pkgs.curl pkgs.coreutils ];
@@ -632,7 +608,7 @@ in {
       default = null;
       description = ''
         A directory of stacks (<app>.yaml) that `swarm-deploy@<app>` deploys on this manager: the builder's, on the
-        host that builds (core/107-internal-swarm/lib/app-builder.nix), which may start that unit and nothing else of it.
+        host that builds (instances/core/107-internal-swarm/lib/app-builder.nix), which may start that unit and nothing else of it.
       '';
     };
     deployUnit = lib.mkOption {
@@ -645,7 +621,7 @@ in {
       type = lib.types.str;
       readOnly = true;
       default = "${appDashboardsMount}/${telemetry.appDashboardsDir}";
-      description = "Where the controller writes the boards apps ship (core/107-internal-swarm/lib/dashboards-import.py), vm-103 reads them.";
+      description = "Where the controller writes the boards apps ship (instances/core/107-internal-swarm/lib/dashboards-import.py), vm-103 reads them.";
     };
   };
 
@@ -654,7 +630,7 @@ in {
       assertions = [
         { assertion = single || manager.type == "internal"; message = "the shared swarm's manager must sit in the internal zone"; }
         { assertion = workerIds != [ ]; message = "the apps swarm has no worker: add an instance of type \"apps\""; }
-        { assertion = lib.elem stateId workerIds; message = "src/core/swarm.nix state (vm-${stateId}) is not a running apps worker"; }
+        { assertion = lib.elem stateId workerIds; message = "src/instances/core/swarm.nix state (vm-${stateId}) is not a running apps worker"; }
         {
           assertion = !(lib.any (z: cidr.overlaps overlayPool z.subnet) (lib.attrValues (lib.importJSON ../../generated/zones.json)));
           message = "modules/swarm: the overlay pool ${overlayPool} overlaps a zone of zones.json";
@@ -864,7 +840,6 @@ in {
         iptables-restore --noflush < ${dockerUserRules}
       '';
 
-      # container logs and metrics per app (modules/app-telemetry.nix)
       homelab.appTelemetry.enable = true;
 
       # what the worker holds for apps: the scheduler places reservations against it, the slice caps the containers

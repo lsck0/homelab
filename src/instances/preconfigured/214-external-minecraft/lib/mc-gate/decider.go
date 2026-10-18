@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -27,7 +28,9 @@ const (
 	eventLogin eventKind = iota
 	eventSessionEnd
 	eventStatus
+	eventStatusFetched
 	eventTick
+	eventTickFetched
 	eventReload
 	eventSnapshot
 )
@@ -69,7 +72,7 @@ type Server struct {
 	runningSince   time.Time
 	lastSessionEnd time.Time
 	failures       int
-	// what the metrics count: failures resets with a good start, these never go down (R-090)
+	// what the metrics count: failures resets with a good start, these never go down
 	startsTotal        int
 	startFailuresTotal int
 	// set when a start was refused, never answered, or ended in a failed unit; cleared by the next start
@@ -80,10 +83,12 @@ type Server struct {
 	// the backend's last live status, from the cache file at startup and from a fetch afterwards
 	status   []byte
 	statusAt time.Time
-	// dropped by a reload, kept until its sessions end (R-055c)
+	// a fetch was handed out and its answer has not come back: no second caller asks the backend meanwhile
+	statusFetching bool
+	// dropped by a reload, kept until its sessions end
 	removed bool
 	// the unit's own ActiveState was `active` at the last reconcile. Every server shares the one backend port, so
-	// while a switch waits on the old server's save, an answer there is the old server's (R-046g)
+	// while a switch waits on the old server's save, an answer there is the old server's
 	unitUp bool
 }
 
@@ -95,7 +100,7 @@ type Decision struct {
 	Session uint64
 }
 
-// Decider owns every record (R-044). Connections reach it over one channel, so two logins are never decided at once
+// Decider owns every record. Connections reach it over one channel, so two logins are never decided at once
 // and the rules below need no lock.
 type Decider struct {
 	settings Settings
@@ -104,7 +109,7 @@ type Decider struct {
 	names   []string
 	sources map[netip.Addr]*Source
 	budget  Budget
-	// the counters of R-090 the records do not hold themselves: one per kick reason, and every switch ever
+	// the counters the records do not hold themselves: one per kick reason, and every switch ever
 	kicks         map[string]int
 	switchesTotal int
 	// the metrics last written, so a view that did not change is not written again
@@ -130,13 +135,19 @@ type deciderEvent struct {
 	source   netip.Addr
 	session  uint64
 	settings Settings
+	answer   []byte
+	err      error
 	reply    chan deciderReply
 }
 
+// deciderReply names a server in fetch when the caller has to ask the backend at that address and hand the answer
+// back: the decider itself never waits on a socket.
 type deciderReply struct {
 	decision Decision
 	status   []byte
 	state    State
+	fetch    string
+	backend  string
 }
 
 /*
@@ -153,7 +164,7 @@ func deciderCreate(settings Settings, systemd Systemd, allow *Allow, fetch Statu
 		events: make(chan deciderEvent, deciderEventsQueued), stopped: make(chan struct{}),
 	}
 	deciderSettingsApply(d, settings)
-	// the file exists before the first event, so a scrape right after a restart reads the records (R-090)
+	// the file exists before the first event, so a scrape right after a restart reads the records
 	deciderMetricsSave(d)
 	return d
 }
@@ -227,7 +238,7 @@ func serverPlayers(server *Server) int {
 	return max(server.playersOnline, len(server.sessions))
 }
 
-// serverIdleRefresh keeps idleSince the latest of the last session end, the reservation and the start (R-050a).
+// serverIdleRefresh keeps idleSince the latest of the last session end, the reservation and the start.
 func serverIdleRefresh(server *Server) {
 	server.idleSince = server.lastSessionEnd
 	for _, moment := range []time.Time{server.reservedUntil, server.runningSince} {
@@ -237,7 +248,7 @@ func serverIdleRefresh(server *Server) {
 	}
 }
 
-// serverRunningSet marks a server up. A start the gate issued earns the player who was kicked a reservation (R-049);
+// serverRunningSet marks a server up. A start the gate issued earns the player who was kicked a reservation;
 // a unit that came up by itself earns none.
 func serverRunningSet(d *Decider, server *Server, now time.Time) {
 	server.phase, server.runningSince, server.stopIssued = phaseRunning, now, false
@@ -282,8 +293,8 @@ func deciderSourceLooping(d *Decider, address netip.Addr, now time.Time) bool {
 	return source.markedLooping
 }
 
-// deciderOccupied is what a switch or a sleep may not stop (R-047). A young session occupies because a player who
-// joined seconds ago is not in the backend's count yet, unless its source is a known reconnect loop (R-048b).
+// deciderOccupied is what a switch or a sleep may not stop. A young session occupies because a player who
+// joined seconds ago is not in the backend's count yet, unless its source is a known reconnect loop.
 func deciderOccupied(d *Decider, server *Server, now time.Time) bool {
 	if server.playersOnline > 0 {
 		return true
@@ -297,15 +308,14 @@ func deciderOccupied(d *Decider, server *Server, now time.Time) bool {
 	return now.Before(server.reservedUntil)
 }
 
-// deciderKick builds one refusal; the texts are R-054's and live in one file.
+// deciderKick builds one refusal; the texts live in texts.go.
 func deciderKick(d *Decider, outcome, server string, players int) Decision {
 	d.kicks[outcome]++
 	return Decision{Outcome: outcome, Text: kickText(outcome, server, players, d.names)}
 }
 
-// deciderStart issues a start. Every phase is set before any reply and before systemd is asked (R-045a), the asking
-// is synchronous and stops the others first (R-045b), and a command systemd refuses leaves no trace but a failure
-// (R-045c).
+// deciderStart issues a start. Every phase is set before any reply and before systemd is asked, the asking
+// is synchronous and stops the others first, and a command systemd refuses leaves no trace but a failure.
 func deciderStart(d *Decider, now time.Time, target *Server, source netip.Addr) Decision {
 	type savedServer struct {
 		server     *Server
@@ -354,7 +364,7 @@ func deciderStart(d *Decider, now time.Time, target *Server, source netip.Addr) 
 	target.startsTotal++
 	reason := reasonLogin
 	if len(stops) > 0 {
-		// only a start that stops a running server spends the global budget (R-051b)
+		// only a start that stops a running server spends the global budget
 		d.budget.switches = append(d.budget.switches, now)
 		d.switchesTotal++
 		reason = reasonSwitch
@@ -378,13 +388,13 @@ func deciderStop(d *Decider, server *Server, reason string) {
 	logStopWrite(d.log, server.name, reason, netip.Addr{})
 }
 
-// deciderDecide is the table of R-052, its rows in order.
+// deciderDecide is the decision table, its rows in order.
 func deciderDecide(d *Decider, now time.Time, name string, address netip.Addr) Decision {
 	limits := d.settings.Limits
 	exempt := allowContains(d.allow, address, now)
 	source := deciderSourceGet(d, address)
 	sourcePrune(source, now, limits)
-	// row 0: a flood from one address is closed before any rule can spend a server on it (R-048d)
+	// row 0: a flood from one address is closed before any rule can spend a server on it
 	if !exempt && source.live >= limits.SessionsPerSourceMax {
 		return Decision{Outcome: outcomeCapped}
 	}
@@ -441,7 +451,7 @@ func deciderSessionEndRecord(d *Decider, now time.Time, name string, id uint64) 
 	serverIdleRefresh(server)
 	if source, known := d.sources[session.source]; known {
 		source.live = max(source.live-1, 0)
-		// an exempt source is never marked, so one friend's failed joins cannot mark the whole house (R-048e)
+		// an exempt source is never marked, so one friend's failed joins cannot mark the whole house
 		if !allowContains(d.allow, session.source, now) {
 			sourceSessionEnd(source, now, now.Sub(session.startedAt), d.settings.Limits)
 		}
@@ -451,21 +461,21 @@ func deciderSessionEndRecord(d *Decider, now time.Time, name string, id uint64) 
 	}
 }
 
-// deciderStatusAnswer builds what a ping is told (R-042).
-func deciderStatusAnswer(d *Decider, now time.Time, name string) []byte {
+// deciderStatusDue is true when a server's live status is older than statusCacheS and nobody is asking for it yet.
+func deciderStatusDue(d *Decider, server *Server, now time.Time) bool {
+	return !server.statusFetching && now.Sub(server.statusAt) >= durationFromSeconds(d.settings.Limits.StatusCacheS)
+}
+
+// deciderStatusAnswer builds what a ping is told from the records alone.
+func deciderStatusAnswer(d *Decider, name string) []byte {
 	server, declared := d.servers[name]
 	if !declared || server.removed {
 		// a scanner reads this, so it names no server (Security)
 		answer, _ := statusBuild(nil, nil, nil, descriptionUnknown)
 		return answer
 	}
-	if server.phase == phaseRunning {
-		if now.Sub(server.statusAt) >= durationFromSeconds(d.settings.Limits.StatusCacheS) {
-			deciderStatusRefresh(d, server, now)
-		}
-		if !server.statusAt.IsZero() {
-			return server.status
-		}
+	if server.phase == phaseRunning && !server.statusAt.IsZero() {
+		return server.status
 	}
 	running, players := "", 0
 	if other := deciderOther(d, name); other != nil && other.phase == phaseRunning {
@@ -480,24 +490,46 @@ func deciderStatusAnswer(d *Decider, now time.Time, name string) []byte {
 	return answer
 }
 
-// deciderStatusRefresh asks the backend, which is also how a starting server is seen to be up (R-046g).
-func deciderStatusRefresh(d *Decider, server *Server, now time.Time) bool {
-	answer, err := d.fetch(d.settings.Backend)
-	if err != nil {
-		return false
+// deciderStatusPing answers a ping, or hands a stale running server's fetch to the caller.
+func deciderStatusPing(d *Decider, now time.Time, name string) deciderReply {
+	server, declared := d.servers[name]
+	if declared && !server.removed && server.phase == phaseRunning && deciderStatusDue(d, server, now) {
+		server.statusFetching = true
+		return deciderReply{fetch: name, backend: d.settings.Backend}
+	}
+	return deciderReply{status: deciderStatusAnswer(d, name)}
+}
+
+// deciderStatusFetched takes a backend's answer, which is also how a starting server is seen to be up. An
+// answer for a server that left starting or running meanwhile is some other backend's and is dropped.
+func deciderStatusFetched(d *Decider, now time.Time, name string, answer []byte, err error) {
+	server, known := d.servers[name]
+	if !known {
+		return
+	}
+	server.statusFetching = false
+	up := server.phase == phaseRunning || (server.phase == phaseStarting && server.unitUp)
+	if err != nil || !up {
+		return
+	}
+	// the cache is for a restarted gate, so a running server's unchanged answer is not rewritten every statusCacheS
+	if !bytes.Equal(answer, server.status) {
+		if err := statusCacheSave(d.settings.StateDir, server.name, answer); err != nil {
+			d.log.Warn("status cache", "server", server.name, "err", err)
+		}
 	}
 	server.status, server.statusAt = answer, now
 	if parsed, err := statusParse(answer); err == nil {
 		server.playersOnline = parsed.Players.Online
 	}
-	if err := statusCacheSave(d.settings.StateDir, server.name, answer); err != nil {
-		d.log.Warn("status cache", "server", server.name, "err", err)
+	if server.phase == phaseStarting {
+		serverRunningSet(d, server, now)
+		logReconcileWrite(d.log, server.name, phaseStarting, phaseRunning, "backend")
 	}
-	return true
 }
 
 // deciderSettingsApply takes a new settings file. A server it no longer declares is kept while it has sessions, and
-// the records of the others survive untouched, so a reload closes no connection (R-055b, R-055c).
+// the records of the others survive untouched, so a reload closes no connection.
 func deciderSettingsApply(d *Decider, settings Settings) {
 	d.settings = settings
 	kept := make(map[string]*Server, len(settings.Servers))
@@ -524,7 +556,7 @@ func deciderSettingsApply(d *Decider, settings Settings) {
 	d.servers, d.names = kept, names
 }
 
-// deciderPrune drops a server a reload removed once its last session has ended (R-055c).
+// deciderPrune drops a server a reload removed once its last session has ended.
 func deciderPrune(d *Decider) {
 	for name, server := range d.servers {
 		if server.removed && len(server.sessions) == 0 {
@@ -568,7 +600,7 @@ func deciderRecords(d *Decider) string {
 	return "[" + fmt.Sprint(parts) + "]"
 }
 
-// deciderStateSave writes what a person reads and what prometheus scrapes, on every change (R-056, R-090).
+// deciderStateSave writes what a person reads and what prometheus scrapes, on every change.
 func deciderStateSave(d *Decider) {
 	if err := stateSave(d.settings.RuntimeDir, deciderState(d)); err != nil {
 		d.log.Warn("state", "err", err)
@@ -576,7 +608,7 @@ func deciderStateSave(d *Decider) {
 	deciderMetricsSave(d)
 }
 
-// deciderMetricsSave writes what prometheus scrapes, when it differs from what is already there (R-090).
+// deciderMetricsSave writes what prometheus scrapes, when it differs from what is already there.
 func deciderMetricsSave(d *Decider) {
 	rendered := metricsRender(deciderServers(d), d.kicks, d.switchesTotal)
 	last, err := metricsSave(d.settings.StateDir, d.metrics, rendered)
@@ -610,9 +642,19 @@ func deciderHandle(d *Decider, event deciderEvent) {
 	case eventSessionEnd:
 		deciderSessionEndRecord(d, now, event.name, event.session)
 	case eventStatus:
-		reply.status = deciderStatusAnswer(d, now, event.name)
+		reply = deciderStatusPing(d, now, event.name)
+	case eventStatusFetched:
+		deciderStatusFetched(d, now, event.name, event.answer, event.err)
+		reply.status = deciderStatusAnswer(d, event.name)
 	case eventTick:
-		deciderReconcile(d, now)
+		if server := deciderReconcile(d, now); server != nil {
+			reply.fetch, reply.backend = server.name, d.settings.Backend
+		} else {
+			deciderReconcileFinish(d, now)
+		}
+	case eventTickFetched:
+		deciderStatusFetched(d, now, event.name, event.answer, event.err)
+		deciderReconcileFinish(d, now)
 	case eventReload:
 		deciderSettingsApply(d, event.settings)
 	case eventSnapshot:
@@ -620,7 +662,8 @@ func deciderHandle(d *Decider, event deciderEvent) {
 	}
 	deciderPrune(d)
 	deciderAssert(d)
-	if event.kind != eventSnapshot {
+	// a ping changes no record, and a flood of them would rewrite the state file once each
+	if event.kind != eventSnapshot && event.kind != eventStatus {
 		deciderStateSave(d)
 	}
 	if event.reply != nil {
@@ -634,11 +677,18 @@ func deciderHandle(d *Decider, event deciderEvent) {
  * -----------------------------------------------------------------------------
  */
 
-// deciderSend hands one event to the owner and waits for it, which is what serializes two logins (R-044).
+// deciderSend hands one event to the owner and waits for it, which is what serializes two logins.
 func deciderSend(d *Decider, event deciderEvent) deciderReply {
 	event.reply = make(chan deciderReply, 1)
 	d.events <- event
 	return <-event.reply
+}
+
+// deciderFetchEvent asks the backend a reply named, on the caller's goroutine, and is the event that hands the answer
+// back. d.fetch is set once at creation, so calling it here races with nothing.
+func deciderFetchEvent(d *Decider, reply deciderReply, kind eventKind) deciderEvent {
+	answer, err := d.fetch(reply.backend)
+	return deciderEvent{kind: kind, name: reply.fetch, answer: answer, err: err}
 }
 
 func deciderLogin(d *Decider, name, player string, source netip.Addr) Decision {
@@ -650,11 +700,18 @@ func deciderSessionEnd(d *Decider, name string, session uint64) {
 }
 
 func deciderStatus(d *Decider, name string) []byte {
-	return deciderSend(d, deciderEvent{kind: eventStatus, name: name}).status
+	reply := deciderSend(d, deciderEvent{kind: eventStatus, name: name})
+	if reply.fetch == "" {
+		return reply.status
+	}
+	return deciderSend(d, deciderFetchEvent(d, reply, eventStatusFetched)).status
 }
 
 func deciderTick(d *Decider) {
-	deciderSend(d, deciderEvent{kind: eventTick})
+	reply := deciderSend(d, deciderEvent{kind: eventTick})
+	if reply.fetch != "" {
+		deciderSend(d, deciderFetchEvent(d, reply, eventTickFetched))
+	}
 }
 
 func deciderReload(d *Decider, settings Settings) {

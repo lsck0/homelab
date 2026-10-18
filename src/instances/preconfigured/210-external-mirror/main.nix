@@ -33,7 +33,7 @@ in {
       '';
       # the builder's dot directories are its state, not the repo
       locations."~ /\\.".return = "404";
-      # build output the builder's untrusted container wrote (archrepo-build.sh push_logs): read, never rendered
+      # build output the builder's untrusted container wrote (archrepo-build.nu logs-push): read, never rendered
       locations."~ ^/(logs/|build\\.log$)".extraConfig = ''
         types { }
         default_type text/plain;

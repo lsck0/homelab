@@ -1,26 +1,12 @@
 # idle deployments (the `idle` property): an ingress's local proxy wakes a sleeping deployment on its first
-# connection, holds it until the backend answers, and stops the deployment after its idle time without connections
+# connection, holds it until the backend answers, and stops it after its idle time without connections
 #
-# One mechanism, two backends: a vm (an instance with idle set) is powered through the proxmox api, a swarm app
-# through its manager's controller (POST /wake/<app>, POST /sleep/<app>, GET /state/<app>, modules/swarm). Every
-# script below speaks to either through the same power_* shell functions, and a failed call is an error: the reaper
-# fails and exports homelab_ondemand_api_ok 0 for the service, a wake says why it gave up and exports
-# homelab_ondemand_wake_ok 0 until a wake of the service succeeds.
+# a vm is powered through the proxmox api with the side's own token (read by curl from a sops header file, never an
+# argv, over tls pinned to the proxmox ca); a swarm app through its manager's controller (modules/swarm)
 #
-# The proxmox api is called with the side's own token (scripts/pve-install.sh: wake-<side>@pve, VM.Audit and
-# VM.PowerMgmt on each of the side's idle guests, granted per guest by terraform/lib.tf), read by curl from a header
-# file sops renders, never from a command line, over tls verified against the proxmox root ca (site.json).
-#
-# Each proxy listens on loopback at a port its own deployment fixes: a guest's services from portBase + vmid x
-# portsPerGuest on, in name order; an app's at its published port, unique in the lab already. Adding a service
-# renumbers no other deployment's proxy, so no unrelated socket restarts.
-#
-# switch-to-configuration never restarts a changed .socket unit (nixpkgs issue 74899, the FIXME in
-# switch-to-configuration-ng's handle_modified_unit; it restarts one only with a changed service of its own that runs).
-# A moved ListenStream then closes the old fds on the daemon reload and the socket listens nowhere until restarted by
-# hand. So each socket is PartOf a oneshot anchor whose restart triggers are the socket's own unit file: the switch
-# restarts the anchor on any change of the socket, and systemd carries that restart to the socket. Delete the anchors
-# once the switcher restarts changed sockets itself.
+# workaround: switch-to-configuration never restarts a changed .socket unit (nixpkgs issue 74899), so a moved
+# ListenStream listens nowhere after the reload. Each socket is PartOf a oneshot anchor restarted on any change of the
+# socket's unit file. Delete the anchors once the switcher restarts changed sockets itself.
 { config, lib, pkgs, inventory, site, ... }:
 let
   # -----------------------------------------------------------------------------
@@ -38,23 +24,23 @@ let
   portsPerGuest = 10;
   metricsName = "ondemand";
   metricsFile = "${config.homelab.textfileDir}/${metricsName}.prom";
-  # each wake's outcome, its own file: a wake runs beside the reaper and the other wakes
+  # a file per wake: a wake runs beside the reaper and the other wakes
   wakeMetricsName = name: "ondemand_wake_${name}";
+  # written before a stop: a wake that finds the deployment still running waits for it to go first, since a dying
+  # deployment's services keep answering through its acpi shutdown
+  stoppingStampOf = key: "/run/ondemand-stopping-${key}";
 
   # silence from a saturated build counts as busy until this uptime; 21h stays clear of the next daily wakeAt
   silentBusyUptimeMax = 21 * 3600;
-  # an api call on the house lan answers in milliseconds; this only bounds a hung one
   apiTimeoutS = 20;
-  # a busy check, a backend's first http answer, a port probe: each on the lab's own network
   busyTimeoutS = 5;
   httpCheckTimeoutS = 3;
   portCheckTimeoutS = 2;
-  # a wake asks for the power state this often while it waits for the backend
   statusEveryS = 10;
-  # and checks the backend this often: the held client waits at most this past its backend's readiness, at the cost
-  # of a connect on the lab's own network per check
+  # a shutdown takes seconds: polled faster than statusEveryS so the held client is not kept waiting for the poll
+  stoppingPollS = 1;
+  # the held client waits at most this past its backend's readiness, at a connect per check
   readyPollS = "0.2";
-  # the time a proxy may take to answer beyond its backend's boot
   startSlackS = 60;
   reaperFirstAfter = "5m";
   socketAnchorOf = name: "ondemand-${name}-bind";
@@ -64,7 +50,7 @@ let
   # INTERNAL
   # -----------------------------------------------------------------------------
 
-  # what a service wakes: a guest, or an app on its cluster; `key` names it in units, logs and metrics
+  # `key` names the deployment in units, logs and metrics
   vmOf = svc: inventory.${toString svc.vmid};
   targetOf = svc:
     if svc.app == null then {
@@ -79,29 +65,32 @@ let
       sleeps = true;
     };
   active = lib.filterAttrs (_: svc: (targetOf svc).sleeps) cfg.services;
-  # every service of a deployment names its wake time; one wake per deployment, under its first service's name
+  # one scheduled wake per deployment, under its first service's name
   firstServiceOf = key: lib.head (lib.attrNames (lib.filterAttrs (_: s: (targetOf s).key == key) active));
   scheduled = lib.filterAttrs (name: svc: svc.wakeAt != null && name == firstServiceOf (targetOf svc).key) active;
 
-  # a guest's service: its slot among the guest's services, in name order
   slotOf = name: svc: lib.lists.findFirstIndex (n: n == name) null
     (lib.attrNames (lib.filterAttrs (_: s: s.app == null && s.vmid == svc.vmid) cfg.services));
   listenPortOf = name: svc: if svc.app != null then svc.targetPort else portBase + svc.vmid * portsPerGuest + slotOf name svc;
 
-  # several routes can share one deployment
-  siblingsBusy = svc: lib.concatStrings (lib.mapAttrsToList (n: s:
-    lib.optionalString ((targetOf s).key == (targetOf svc).key) ''
-      systemctl is-active --quiet ondemand-${n}.service && exit 0
+  # exits while a proxy of the deployment holds it or wakes it (activating). The reaper also leaves a deactivating one
+  # to its own sleep; a sleep does not, or two siblings exiting together would each leave the stop to the other.
+  # `self` is skipped: a sleep runs inside its own proxy's stop
+  siblingsBusy = svc: self: states: lib.concatStrings (lib.mapAttrsToList (n: s:
+    lib.optionalString ((targetOf s).key == (targetOf svc).key && n != self) ''
+      case "$(systemctl show -p ActiveState --value ondemand-${n}.service)" in ${lib.concatStringsSep "|" states}) exit 0 ;; esac
     '') active);
+  proxyBusyStates = [ "active" "activating" "reloading" ];
 
-  # "15m" -> 900, the shape modules/service.nix types idle.stopAfter to
+  # the shape modules/service.nix types idle.stopAfter to
   toSeconds = s:
     let m = builtins.match "([0-9]+)(s|m|h|d)" s;
         unit = { s = 1; m = 60; h = 3600; d = 86400; };
     in assert lib.assertMsg (m != null) "on-demand stopAfter '${s}' must look like 30s, 15m, 2h or 1d";
     lib.toInt (builtins.elemAt m 0) * unit.${builtins.elemAt m 1};
 
-  # power_status (running or stopped), power_uptime (seconds), power_start, power_stop; each fails with the api
+  # power_status (running or stopped), power_uptime (seconds), power_start, power_stop; each fails with the api.
+  # power_stop marks the deployment stopping first and takes the mark back when the request fails
   powerOf = svc: if svc.app == null then {
     setup = ''
       api="${cfg.apiUrl}/nodes/${cfg.node}/${if (vmOf svc).kind == "lxc" then "lxc" else "qemu"}/${toString svc.vmid}"
@@ -113,24 +102,27 @@ let
     status = ''power_status() { pve "$api/status/current" | jq -er '.data.status'; }'';
     uptime = ''power_uptime() { pve "$api/status/current" | jq -er '.data.uptime'; }'';
     start = ''power_start() { pve -X POST "$api/status/start" >/dev/null; }'';
-    stop = ''power_stop() { pve -X POST "$api/status/shutdown" >/dev/null; }'';
+    stop = stopWith svc ''pve -X POST "$api/status/shutdown" >/dev/null'';
   } else {
     setup = ''controller="${svc.manager}"'';
     status = ''power_status() { curl -sf --max-time ${toString apiTimeoutS} "$controller/state/${svc.app}"; }'';
-    # the controller keeps no uptime: an app is stopped by idle time alone
-    uptime = "power_uptime() { echo ${toString silentBusyUptimeMax}; }";
+    uptime = ''power_uptime() { curl -sf --max-time ${toString apiTimeoutS} "$controller/uptime/${svc.app}"; }'';
     start = ''power_start() { curl -sf --max-time ${toString apiTimeoutS} -X POST "$controller/wake/${svc.app}" >/dev/null; }'';
-    stop = ''power_stop() { curl -sf --max-time ${toString apiTimeoutS} -X POST "$controller/sleep/${svc.app}" >/dev/null; }'';
+    stop = stopWith svc ''curl -sf --max-time ${toString apiTimeoutS} -X POST "$controller/sleep/${svc.app}" >/dev/null'';
   };
-  # the setup and the named functions only: a script defines what it calls
+  stopWith = svc: request: let stamp = stoppingStampOf (targetOf svc).key; in ''
+    power_stop() {
+      touch ${stamp}
+      ${request} || { rm -f ${stamp}; return 1; }
+    }
+  '';
   powerEnv = svc: ops: lib.concatMapStringsSep "\n" (op: (powerOf svc).${op}) ([ "setup" ] ++ ops);
 
   # busy is the guest's: every route to it, a sibling without busyPath included, asks the one route that has it
   busyRouteOf = svc: lib.findFirst (s: (targetOf s).key == (targetOf svc).key && s.busyPath != null) null (lib.attrValues cfg.services);
 
-  # exits the calling script while the deployment reports work that must not be cut off; needs $uptime
+  # exits while the deployment reports work that must not be cut off; needs $uptime
   busyCheck = svc: let busy = busyRouteOf svc; target = targetOf svc; in lib.optionalString (busy != null) ''
-    # no answer at all is 000
     busy=$(curl -s -o /dev/null -w '%{http_code}' -m ${toString busyTimeoutS} "http://${target.ip}:${toString busy.targetPort}${busy.busyPath}") || busy=000
     if [ "$busy" = 200 ]; then echo "${target.key} reports busy, leaving it up"; exit 0; fi
     if [ "$busy" = 000 ] && [ "$uptime" -lt ${toString silentBusyUptimeMax} ]; then
@@ -148,16 +140,17 @@ let
     runtimeInputs = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.netcat-gnu ];
     text = ''
       ${powerEnv svc [ "status" "start" ]}
-      # the last wake's outcome until the next one: a deployment that did not come up stays down for its users
+      stopping=${stoppingStampOf target.key}
       wake_ok() {
         metrics=${config.homelab.textfileDir}/${wakeMetricsName name}.prom
         printf '# TYPE homelab_ondemand_wake_ok gauge\nhomelab_ondemand_wake_ok{service="${name}",target="${target.key}"} %s\n' "$1" > "$metrics.tmp"
         mv "$metrics.tmp" "$metrics"
       }
       api_error=""
-      # two good checks: a shutting-down vm still accepts briefly (502)
       good=0
-      deadline=$((SECONDS + ${toString svc.bootTimeout}))
+      draining=0
+      boot_timeout=${toString svc.bootTimeout}
+      deadline=$((SECONDS + boot_timeout))
       status_at=$SECONDS
       while [ "$SECONDS" -lt "$deadline" ]; do
         if [ "$SECONDS" -ge "$status_at" ]; then
@@ -166,14 +159,23 @@ let
             api_error="the power api failed"
             echo "${target.key}: $api_error, asking again in ${toString statusEveryS}s" >&2
           elif [ "$status" = stopped ]; then
+            rm -f "$stopping"
+            draining=0
             echo "${target.key} is stopped, starting for ${name}"
             power_start || { api_error="the start request failed"; echo "${target.key}: $api_error" >&2; }
-            # earlier answers came from the dying instance
             good=0
+          elif [ -e "$stopping" ] && [ $(($(date +%s) - $(stat -c %Y "$stopping"))) -lt "$boot_timeout" ]; then
+            [ "$draining" = 1 ] || echo "${target.key} is shutting down, starting it again once it stopped"
+            draining=1
+            good=0
+            status_at=$((SECONDS + ${toString stoppingPollS}))
+          else
+            draining=0
           fi
         fi
+        if [ "$draining" = 1 ]; then sleep ${readyPollS}; continue; fi
         ${if svc.httpCheck then ''
-        # a port nothing listens on yet may drop the connect: a new one each poll beats waiting for the retransmit
+        # a fresh connect each poll: a port nothing listens on yet may drop the syn, and the retransmit waits seconds
         code=$(curl -s -o /dev/null -w '%{http_code}' --connect-timeout ${readyPollS} -m ${toString httpCheckTimeoutS} \
           "http://${target.ip}:${toString svc.targetPort}${svc.healthPath}") || code=000
         case "$code" in 000|5??) good=0 ;; *) good=$((good + 1)) ;; esac
@@ -193,10 +195,10 @@ let
     name = "ondemand-sleep-${name}";
     runtimeInputs = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
     text = ''
-      # only after a clean idle exit, never on crash
+      # an idle exit only, never a crash
       [ "''${SERVICE_RESULT:-}" = "success" ] || exit 0
       ${pauseCheck}
-      ${siblingsBusy svc}
+      ${siblingsBusy svc name proxyBusyStates}
       ${powerEnv svc ([ "stop" ] ++ lib.optional (busyRouteOf svc != null) "uptime")}
       ${lib.optionalString (busyRouteOf svc != null) "uptime=$(power_uptime)"}
       ${busyCheck svc}
@@ -205,9 +207,8 @@ let
     '';
   };
 
-  # powers off deployments the proxy never served, and re-arms proxies orphaned by an external stop (terraform
-  # apply, crash, manual stop); one service's failed call fails the run, the others still get their turn (each in a
-  # subshell whose status `||` reads, where errexit does not hold: every call is checked by hand)
+  # powers off deployments the proxy never served and re-arms proxies orphaned by an external stop. Each service runs
+  # in a subshell whose status `||` reads, where errexit does not hold: every call is checked by hand
   reaperScript = pkgs.writeShellApplication {
     name = "ondemand-reaper";
     runtimeInputs = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
@@ -230,14 +231,14 @@ let
             exit 1
           fi
           api_ok 1
-          # a proxy whose deployment was stopped behind its back never re-activates its socket: stop it to re-arm,
-          # before siblingsBusy, which would exit on this proxy itself
+          # a proxy whose deployment was stopped behind its back never re-activates its socket; before siblingsBusy,
+          # which would exit on this proxy itself
           if systemctl is-active --quiet ondemand-${name}.service && [ "$status" = stopped ]; then
             echo "${target.key} (${name}) stopped while its proxy runs, re-arming the socket"
             systemctl stop ondemand-${name}.service || exit 1
             exit 0
           fi
-          ${siblingsBusy svc}
+          ${siblingsBusy svc null (proxyBusyStates ++ [ "deactivating" ])}
           [ "$status" = running ] || exit 0
           uptime=$(power_uptime) || { echo "${target.key} (${name}): the power api failed for its uptime" >&2; exit 1; }
           ${busyCheck svc}
@@ -245,7 +246,7 @@ let
           last_s=0
           if [ -n "$last" ]; then last_s=$(date -d "$last" +%s); fi
           if [ "$uptime" -ge "$stop_after" ] && [ $((now - last_s)) -ge "$stop_after" ]; then
-            echo "${target.key} (${name}) up ''${uptime}s without connections, stopping"
+            echo "${target.key} (${name}) up ''${uptime}s, no connection for $((now - last_s))s, stopping"
             power_stop || { echo "${target.key} (${name}): the stop request failed" >&2; exit 1; }
           fi
         ) || failed=1
@@ -304,7 +305,6 @@ in {
       description = "Which zone's idle guests this host fronts. Every idle guest of that zone must have a service entry.";
     };
 
-    # a test points these at its fake api
     apiUrl = lib.mkOption {
       type = lib.types.str;
       default = "https://${site.lan.proxmox}:${toString net.ports.proxmoxApi}/api2/json";
@@ -322,7 +322,7 @@ in {
       type = lib.types.str;
       default = "/run/ondemand-reaper-pause-until";
       readOnly = true;
-      description = "sync.sh writes a deadline (unix seconds) here so no guest is shut down mid-deploy.";
+      description = "sync.nu writes a deadline (unix seconds) here so no guest is shut down mid-deploy.";
     };
 
     services = lib.mkOption {
@@ -365,7 +365,6 @@ in {
         message = "vm ${id} (${vm.name}) idles but has no homelab.onDemand.services entry on the ${cfg.side} ingress";
       }) inventory);
 
-    # first connection queues while the deployment starts
     systemd.sockets = lib.mapAttrs' (name: svc:
       lib.nameValuePair "ondemand-${name}" {
         description = "On-demand activation socket for ${name}";
@@ -373,7 +372,6 @@ in {
         partOf = [ "${socketAnchorOf name}.service" ];
         socketConfig = {
           ListenStream = "${loopback}:${toString svc.listenPort}";
-          # one proxy for all connections
           Accept = false;
         };
       }
@@ -392,7 +390,7 @@ in {
             + " --exit-idle-time=${(targetOf svc).stopAfter}"
             + " ${(targetOf svc).ip}:${toString svc.targetPort}";
           ExecStopPost = lib.getExe (sleepScript name svc);
-          # next connection retries a failed wake
+          # the next connection retries a failed wake
           Restart = "no";
         };
       }

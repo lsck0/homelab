@@ -1,9 +1,9 @@
 # minecraft on vm-214: mc-gate owns the public port and wakes one server at a time
 #
 # The guest boots as it does in the lab, with two servers declared instead of one (a Conflicts= and a switch need a
-# second one) and the container swapped for cmd/fake-server (R-058): a vm test has no image, no world and no jvm, but
+# second one) and the container swapped for cmd/fake-server: a vm test has no image, no world and no jvm, but
 # every other property of the units is the production one and is really exercised. What runs no container is read off
-# the unmodified guest's own unit text instead (node `plain`), so R-071b's option list and R-071c's podman verbs are
+# the unmodified guest's own unit text instead (node `plain`), so the run options and the podman stop verbs are
 # asserted against what the lab would run, never against something the test wrote itself. The settings file is the
 # generated one with only the waiting times shortened, through a mutable path so a reload can add a server to it.
 { pkgs, lib, specialArgs, ... }:
@@ -16,12 +16,12 @@ let
   # -----------------------------------------------------------------------------
 
   # the test's servers: cobblemon is the lab's (mc-layout moves the old data dir into it), vanilla declares neither a
-  # version nor a protocol, which is the other half of R-042
+  # version nor a protocol, which is the other half of the status answer
   servers = {
     cobblemon = { version = "1.21.1"; protocol = 767; };
     vanilla = { };
   };
-  # whose fake backend ignores SIGTERM: a stop that has to kill is what R-071c and R-058 want to see
+  # whose fake backend ignores SIGTERM: a stop that has to kill is what the stop and fake-server subtests want to see
   stubborn = [ "cobblemon" ];
 
   guestIp = lab.inventory."214".ip;
@@ -29,14 +29,14 @@ let
   backendPort = 25566;
   suffix = "mc.lsck0.dev";
 
-  # the gate reads its settings through /etc as in the lab, but the file below it is the test's, so R-074d can add a
+  # the gate reads its settings through /etc as in the lab, but the file below it is the test's, so the reload subtest can add a
   # server to it and reload
   settingsPath = "/var/lib/mc-gate-test/settings.json";
   settingsDir = builtins.dirOf settingsPath;
   probeDir = "/run/mc-probe";
   stateFile = "/run/mc-gate/state.json";
   data = "/var/lib/minecraft";
-  # the gate's metrics; the link the node exporter reads them through is the guest's own option (R-090, R-091)
+  # the gate's metrics; the link the node exporter reads them through is the guest's own option
   metricsFile = "/var/lib/mc-gate/metrics.prom";
 
   # only the bounds a test would otherwise have to sit out; every other limit stays the lab's. The budgets are raised
@@ -112,7 +112,7 @@ pkgs.testers.runNixOSTest {
     ];
 
     systemd.services = {
-      # a unit of this guest that is no server, for the polkit refusal of R-075
+      # a unit of this guest that is no server, for the polkit refusal
       notaserver = {
         description = "a unit the gate has no business starting";
         serviceConfig = { Type = "oneshot"; ExecStart = "${pkgs.coreutils}/bin/true"; };
@@ -134,6 +134,7 @@ pkgs.testers.runNixOSTest {
     PROBE = "${probe}/bin/mc-probe"
     PROBE_DIR = "${probeDir}"
     DATA = "${data}"
+    DATA_AUTOMOUNT = "${lib.replaceStrings [ "/" ] [ "-" ] (lib.removePrefix "/" data)}.automount"
     STATE = "${stateFile}"
     METRICS = "${metricsFile}"
     TEXTFILE = "${nodes.vm-214.homelab.textfileDir}/mc-gate.prom"
@@ -250,7 +251,7 @@ pkgs.testers.runNixOSTest {
     vm_214.wait_for_unit("mc-gate.service")
     vm_214.wait_for_open_port(${toString gatePort}, GUEST)
 
-    with subtest("spec001_r077 route"):
+    with subtest("route"):
         # lazymc and everything it owned are gone, and the public port is the gate's own
         vm_214.fail("systemctl cat lazymc.service")
         vm_214.fail("test -e /run/secrets/rendered/lazymc.toml")
@@ -262,7 +263,7 @@ pkgs.testers.runNixOSTest {
         answer = status("cobblemon")
         assert answer["description"]["text"] == "[cobblemon] sleeping, join to start it", answer
 
-    with subtest("spec001_r074a user"):
+    with subtest("user"):
         gate = show("mc-gate.service", "ExecStart", "User", "Group", "StateDirectory", "StateDirectoryMode",
                     "RuntimeDirectory")
         assert "/bin/mc-gate -settings /etc/mc-gate/settings.json" in gate["ExecStart"], gate["ExecStart"]
@@ -277,18 +278,22 @@ pkgs.testers.runNixOSTest {
         assert settings["suffix"] == ".${suffix}", settings["suffix"]
         assert [server["name"] for server in settings["servers"]] == SERVERS, settings["servers"]
 
-    with subtest("spec001_r074b restart"):
+    with subtest("restart"):
         gate = show("mc-gate.service", "Restart", "Wants", "After")
         assert gate["Restart"] == "always", gate
         assert "mc-layout.service" in gate["Wants"], gate
         assert "mc-layout.service" in gate["After"], gate
 
-    with subtest("spec001_r074c no restart"):
+    with subtest("no restart"):
         # a restart would cut every player, so a changed binary waits for the owner
         unit = vm_214.succeed("systemctl cat mc-gate.service")
         assert "X-RestartIfChanged=false" in unit, unit
+        # nor does a deploy restart a running server, or mc-layout, which its Requires= would carry over
+        for name in SERVERS:
+            assert "X-RestartIfChanged=false" in plain_unit(name), plain_unit(name)
+        assert "X-RestartIfChanged=false" in vm_214.succeed("systemctl cat mc-layout.service")
 
-    with subtest("spec001_r042 status"):
+    with subtest("status"):
         # nothing has started yet, so no server has ever answered a status of its own: these are the declared values
         sleeping = status("cobblemon")
         assert sleeping["version"] == {"name": "1.21.1", "protocol": 767}, sleeping
@@ -302,13 +307,13 @@ pkgs.testers.runNixOSTest {
         assert unknown["version"] == {"name": "?", "protocol": -1}, unknown
         assert unknown["description"]["text"] == "no such server", unknown
 
-    with subtest("spec001_r076a layout"):
-        layout = show("mc-layout.service", "Type", "RemainAfterExit", "RequiresMountsFor")
+    with subtest("layout"):
+        layout = show("mc-layout.service", "Type", "RemainAfterExit", "Requires", "After")
         assert layout["Type"] == "oneshot" and layout["RemainAfterExit"] == "yes", layout
-        assert DATA in layout["RequiresMountsFor"], layout
+        assert DATA_AUTOMOUNT in layout["Requires"] and DATA_AUTOMOUNT in layout["After"], layout
         assert "active" in vm_214.succeed("systemctl is-active mc-layout.service")
 
-    with subtest("spec001_r076b move"):
+    with subtest("move"):
         # a data dir that holds no old layout is left alone, which is every boot after the one move
         out = layout_restart(journal=True)
         assert "holds no old layout" in out, out
@@ -324,7 +329,7 @@ pkgs.testers.runNixOSTest {
         # and the move happens once: the dir it made is not moved into itself on the next run
         vm_214.succeed(f"rm -rf {DATA}/cobblemon")
 
-    with subtest("spec001_r076c entries"):
+    with subtest("entries"):
         # the same old layout again, with a move that was cut halfway: the temp dir already holds part of it
         vm_214.succeed(f"mkdir -p {DATA}/world {DATA}/mods")
         vm_214.succeed(f"echo level > {DATA}/world/level.dat")
@@ -339,7 +344,7 @@ pkgs.testers.runNixOSTest {
         assert moved == [".cache", "modpack.env", "mods", "world"], moved
         assert vm_214.succeed(f"cat {DATA}/cobblemon/world/level.dat").strip() == "level"
 
-    with subtest("spec001_r076d rename"):
+    with subtest("rename"):
         vm_214.fail(f"test -e {DATA}/cobblemon.tmp")
         assert vm_214.succeed(f"stat -c '%a %u %g' {DATA}/cobblemon").strip() == "750 1000 1000"
         out = layout_restart(journal=True)
@@ -361,7 +366,7 @@ pkgs.testers.runNixOSTest {
         assert vm_214.succeed(f"cat {DATA}/cobblemon/cobblemon/world/level.dat").strip() == "level"
         vm_214.succeed(f"rm -rf {DATA}/cobblemon")
 
-    with subtest("spec001_r071a pre start"):
+    with subtest("pre start"):
         # the script is the lab's own, run here unforced: it makes the dir, clears a leftover container and writes
         # the default pack
         found = re.search(r"path=(\S+)", show("minecraft-vanilla.service", "ExecStartPre")["ExecStartPre"])
@@ -379,12 +384,12 @@ pkgs.testers.runNixOSTest {
             assert vm_214.succeed(f"cat {DATA}/{shared}").strip() == "[]"
         vm_214.succeed("systemctl stop minecraft-vanilla.service")
 
-    with subtest("spec001_r071b run"):
+    with subtest("run"):
         # no container runs in a vm test, so the option list is read off the unit the lab would run
         for name in SERVERS:
             start = plain_start_script(name)
             for option in [
-                f"podman run --rm --name minecraft-{name}",
+                f"podman run --rm --name minecraft-{name} --log-driver=passthrough",
                 "--dns=1.1.1.1 --dns=8.8.8.8",
                 "-p 127.0.0.1:25566:25565",
                 "-p 127.0.0.1:25575:25575",
@@ -393,12 +398,14 @@ pkgs.testers.runNixOSTest {
                 "itzg/minecraft-server:2026.9.1-java21",
             ]:
                 assert option in start, f"{name}: {option} missing from {start}"
+            # a cap below the guest's memory, so an overrun ends in the container and not in sshd or the gate
+            assert re.search(r"--memory=\d+m ", start), start
             # the secrets come before the pack, so a pack file could never shadow the rcon password
             assert start.index("minecraft-server.env") < start.index(f"{DATA}/{name}/modpack.env"), start
             options = re.findall(r'-e "?([A-Z_]+)=([^"\n\\]*)', start)
             environment = {key: value.strip() for key, value in options}
             assert environment == {
-                "EULA": "TRUE", "MEMORY": "7G", "DIFFICULTY": "hard",
+                "EULA": "TRUE", "MEMORY": "6G", "DIFFICULTY": "hard", "ALLOW_FLIGHT": "false",
                 "ICON": "/modpacks/server-icon.png",
                 "OVERRIDE_ICON": "TRUE", "MOTD": f"[{name}] nya~ minecwaft sewvew 🐾✨",
                 "USE_AIKAR_FLAGS": "true", "VIEW_DISTANCE": "12", "SIMULATION_DISTANCE": "8",
@@ -407,20 +414,27 @@ pkgs.testers.runNixOSTest {
                 "MAX_TICK_TIME": "-1", "STOP_DURATION": "90",
             }, environment
 
-    with subtest("spec001_r071d timeouts"):
+    with subtest("gate stats the pack"):
+        # the start timeout reads modpack.env's mtime through the 0750 data dirs, as the unit's supplementary group
+        assert show("mc-gate.service", "SupplementaryGroups")["SupplementaryGroups"] == "minecraft"
+        vm_214.succeed(
+            f"systemd-run --wait --pipe -p User=mc-gate -p SupplementaryGroups=minecraft stat {DATA}/vanilla/modpack.env"
+        )
+
+    with subtest("timeouts"):
         for name in SERVERS:
             unit = show(f"minecraft-{name}.service", "TimeoutStopUSec", "TimeoutStartUSec")
             assert unit["TimeoutStopUSec"] == "2min 30s", unit
             assert unit["TimeoutStartUSec"] == "infinity", unit
 
-    with subtest("spec001_r071e requires"):
+    with subtest("requires"):
         for name in SERVERS:
-            unit = show(f"minecraft-{name}.service", "RequiresMountsFor", "Requires", "After")
-            assert DATA in unit["RequiresMountsFor"], unit
+            unit = show(f"minecraft-{name}.service", "Requires", "After")
+            assert DATA_AUTOMOUNT in unit["Requires"] and DATA_AUTOMOUNT in unit["After"], unit
             assert "mc-layout.service" in unit["Requires"], unit
             assert "mc-layout.service" in unit["After"], unit
 
-    with subtest("spec001_r071f no wantedby"):
+    with subtest("no wantedby"):
         # only the gate starts a server, so nothing pulls one in at boot
         for name in SERVERS:
             unit = show(f"minecraft-{name}.service", "WantedBy", "RequiredBy", "ActiveState")
@@ -428,7 +442,7 @@ pkgs.testers.runNixOSTest {
             assert unit["RequiredBy"] == "", unit
             assert "WantedBy=" not in plain_unit(name), plain_unit(name)
 
-    with subtest("spec001_r072 conflicts"):
+    with subtest("conflicts"):
         for name in SERVERS:
             others = [f"minecraft-{other}.service" for other in SERVERS if other != name]
             earlier = [f"minecraft-{other}.service" for other in SERVERS if other < name]
@@ -443,7 +457,7 @@ pkgs.testers.runNixOSTest {
         vm_214.succeed("systemctl is-active minecraft-vanilla.service")
         vm_214.fail("systemctl is-active --quiet minecraft-cobblemon.service")
 
-    with subtest("spec001_r071c stop"):
+    with subtest("stop"):
         # again the lab's own unit: the client is left alone and the container is stopped and removed
         for name in SERVERS:
             assert plain_property(name, "ExecStop").endswith(f"/bin/podman stop --time 120 minecraft-{name}")
@@ -462,7 +476,7 @@ pkgs.testers.runNixOSTest {
         vm_214.wait_until_succeeds(f"mc-probe status {BACKEND} direct", timeout=120)
         assert status("vanilla", target=BACKEND, address="direct")["version"]["name"] == "vanilla"
 
-    with subtest("spec001_r058 fake server"):
+    with subtest("fake server"):
         # the fake answers with its live sessions, which is what the gate's occupancy reads back
         assert status("vanilla", target=BACKEND, address="direct")["players"]["online"] == 0
         assert session_open("r058", "vanilla", target=BACKEND) == "success tester"
@@ -475,7 +489,7 @@ pkgs.testers.runNixOSTest {
         vm_214.wait_until_fails("systemctl is-active --quiet minecraft-vanilla.service", timeout=60)
         servers_sleep()
 
-    with subtest("spec001_r073 shared whitelist"):
+    with subtest("shared whitelist"):
         # every server mounts the same two files, file by file, onto /data
         mounts = {}
         for name in SERVERS:
@@ -495,7 +509,7 @@ pkgs.testers.runNixOSTest {
                 vm_214.succeed(f"umount /run/mc-shared/{name}{target}")
         vm_214.succeed(f"echo '[]' > {DATA}/whitelist.json")
 
-    with subtest("spec001_r043 login"):
+    with subtest("login"):
         # a login for a sleeping server wakes it and is kicked with the text that says so
         assert login("cobblemon") == "kick cobblemon is starting, rejoin in about a minute", "the wrong kick"
         wait_phase("cobblemon", "running")
@@ -504,7 +518,7 @@ pkgs.testers.runNixOSTest {
         retry_ok(lambda: server_state("cobblemon")["sessions"] == 1)
         session_close("r043")
 
-    with subtest("spec001_r052 decisions"):
+    with subtest("decisions"):
         # one player on cobblemon: the other server is refused rather than taking the heap away from them
         assert session_open("r052", "cobblemon") == "success tester"
         retry_ok(lambda: server_state("cobblemon")["sessions"] == 1)
@@ -521,7 +535,7 @@ pkgs.testers.runNixOSTest {
         assert unknown == "kick no server nope here; servers: %s" % ", ".join(SERVERS), unknown
         wait_phase("vanilla", "running")
 
-    with subtest("spec001_r074d reload"):
+    with subtest("reload"):
         gate = show("mc-gate.service", "ExecReload")
         assert "/bin/kill -HUP $MAINPID" in gate["ExecReload"], gate
         unit = vm_214.succeed("systemctl cat mc-gate.service")
@@ -553,7 +567,7 @@ pkgs.testers.runNixOSTest {
         vm_214.succeed("systemctl reload mc-gate.service")
         retry_ok(lambda: "extra" not in phases())
 
-    with subtest("spec001_r075 polkit"):
+    with subtest("polkit"):
         # the gate's own user may start and stop a server, and nothing else
         vm_214.succeed("runuser -u mc-gate -- systemctl start minecraft-vanilla.service")
         vm_214.succeed("runuser -u mc-gate -- systemctl stop minecraft-vanilla.service")
@@ -562,7 +576,7 @@ pkgs.testers.runNixOSTest {
             assert "denied" in out or "authentication" in out, out
         vm_214.fail("systemctl is-active --quiet notaserver.service")
 
-    with subtest("spec001_r078 modpack"):
+    with subtest("modpack"):
         servers_sleep()
         listing = vm_214.succeed("mc-modpack")
         for name in SERVERS:
@@ -583,7 +597,7 @@ pkgs.testers.runNixOSTest {
             f"test \"$(systemctl show -p MainPID --value minecraft-vanilla.service)\" != {before}", timeout=120)
         assert vm_214.succeed(f"cat {DATA}/vanilla/modpack.env").strip().startswith("TYPE=VANILLA")
 
-    with subtest("spec001_r079 rcon"):
+    with subtest("rcon"):
         # it runs in the container of the running server, named after it
         out = vm_214.fail("mc-rcon list 2>&1")
         assert "minecraft-vanilla" in out, out
@@ -593,8 +607,8 @@ pkgs.testers.runNixOSTest {
         out = vm_214.fail("mc-rcon list 2>&1")
         assert "no server runs" in out, out
 
-    with subtest("spec001_r090 metrics"):
-        # the file the gate keeps beside its state: every family of R-090, and a phase that is no longer true at 0
+    with subtest("metrics"):
+        # the file the gate keeps beside its state: every metric family, and a phase that is no longer true at 0
         text = vm_214.succeed(f"cat {METRICS}")
         series = {}
         for line in text.splitlines():
@@ -618,7 +632,7 @@ pkgs.testers.runNixOSTest {
         mode = vm_214.succeed(f"stat -c %a {METRICS}").strip()
         assert mode == "644", mode
 
-    with subtest("spec001_r091 textfile"):
+    with subtest("textfile"):
         # the exporter reads the gate's own file through the link, so a scrape never sees a copy
         target = vm_214.succeed(f"readlink -f {TEXTFILE}").strip()
         assert target == METRICS, target
@@ -626,7 +640,7 @@ pkgs.testers.runNixOSTest {
         assert "homelab_mc_phase{" in scraped, scraped[-2000:]
         assert 'node_textfile_scrape_error 0' in scraped, scraped[-2000:]
 
-    with subtest("spec001_r080 state"):
+    with subtest("state"):
         printed = state()
         assert printed == json.loads(vm_214.succeed(f"cat {STATE}")), printed
         assert sorted(server["name"] for server in printed["servers"]) == SERVERS, printed

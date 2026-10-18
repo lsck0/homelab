@@ -161,14 +161,14 @@ in {
   };
   networking.firewall.interfaces.${fintsNetwork.interface}.allowedTCPPorts = [ fireflyApiProxyPort ];
 
-  # the patched php comes from the pinned image on every start, so an image bump re-derives it (lib/firefly-fints-patch.py)
+  # the patched php comes from the pinned image on every start, so an image bump re-derives it (lib/firefly-fints-patch.nu)
   systemd.services.firefly-fints-patch = {
     description = "Patch the FinTS importer (chipTAN challenge + persistence dump)";
     before = [ "podman-firefly-fints-importer.service" ];
     requiredBy = [ "podman-firefly-fints-importer.service" ];
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
-    path = [ pkgs.podman pkgs.python3 pkgs.coreutils ];
+    path = [ pkgs.podman pkgs.coreutils ];
     serviceConfig.Type = "oneshot";
     script = ''
       set -euo pipefail
@@ -178,7 +178,7 @@ in {
       podman cp "$cid:/app/TanHandler.php" "$d/TanHandler.php.orig"
       podman cp "$cid:/app/RunImportBatched.php" "$d/RunImportBatched.php.orig"
       podman rm "$cid" >/dev/null
-      python3 ${./lib/firefly-fints-patch.py} "$d"
+      ${pkgs.writers.writeNu "firefly-fints-patch" ./lib/firefly-fints-patch.nu} "$d"
       rm -f "$d"/*.orig
     '';
   };

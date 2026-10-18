@@ -77,7 +77,7 @@ func statusParse(data []byte) (Status, error) {
 
 // statusBuild renders the answer for a server that is not answering itself: the cached version, protocol, player
 // maximum and favicon when there is a cache, the declared ones otherwise, with no one online and the phase's
-// description (R-042).
+// description.
 func statusBuild(cached []byte, version *string, protocol *int, description string) ([]byte, error) {
 	status := Status{Version: StatusVersion{Name: statusVersionUnknown, Protocol: statusProtocolUnknown}}
 	if version != nil {

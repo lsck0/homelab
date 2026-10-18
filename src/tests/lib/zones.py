@@ -1,6 +1,6 @@
 """zones.py: the router's forward policy, stated as the owner means it, for tests/router-zones.nix.
 
-Written from the policy, not from the nftables the router renders (modules/flows.nix, core/300-router/main.nix):
+Written from the policy, not from the nftables the router renders (modules/flows.nix, instances/core/300-router/main.nix):
 if the two disagree, one of them is wrong, and the test says which probe showed it. The only inputs taken from the
 lab are the ones the claim itself is about: which guests vm-104 exports to (nas clients), which ports the enabled
 swarm apps publish, who leaves through the vpn exit, and which worker holds the apps' state.

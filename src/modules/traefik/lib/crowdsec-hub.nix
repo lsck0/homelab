@@ -24,6 +24,8 @@ let
     "crowdsecurity/appsec-virtual-patching"
     "crowdsecurity/appsec-generic-rules"
     "crowdsecurity/appsec-crs-inband"
+    # search crawlers verified by reverse dns and published ranges are never banned (modules/service.nix indexable)
+    "crowdsecurity/whitelist-good-actors"
   ];
 
   # a release names its own hub branch; cscli asks version.crowdsec.net for it unless told, at every install

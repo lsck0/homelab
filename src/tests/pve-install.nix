@@ -1,12 +1,13 @@
-# lab-wide: the Proxmox host's converge (scripts/pve-install.sh)
-# pve-install.sh's own decisions with pveum, qm, pct, apt-get and wget stubbed (pve_install_test.sh): the lldap realm
+# lab-wide: the Proxmox host's converge (scripts/pve-install.nu)
+# pve-install.nu's own decisions with pveum, qm, pct, apt-get and wget stubbed (pve_install_test.nu): the lldap realm
 # fails closed and binds over ldaps, the node address and api certificate converge without touching a cluster or an
-# address the host lacks, the teardown leaves no firewall rule behind, and an unavailable mirror or github never stops
-# the converge. No network.
+# address the host lacks, the recovery settings reboot a hung host, the teardown leaves no firewall rule behind, and an
+# unavailable mirror or github never stops the converge. No network.
 { pkgs, ... }:
 pkgs.runCommand "pve-install" {
-  nativeBuildInputs = with pkgs; [ bash jq coreutils gnugrep diffutils lvm2 ];
+  nativeBuildInputs = with pkgs; [ nushell coreutils gnused lvm2 ];
 } ''
-  bash ${./pve_install_test.sh} ${../scripts/pve-install.sh}
+  export HOME=$TMPDIR
+  nu --no-config-file ${./pve_install_test.nu} ${../scripts/pve-install.nu}
   touch $out
 ''

@@ -1,11 +1,11 @@
 """The house's energy model, defined once: series, cost formula, local days and day-ahead prices.
 
 Consumers:
-- core/103-internal-grafana/lib/dashboards/energy.py builds the Grafana board "Energie" from these queries over $__range.
+- instances/core/103-internal-grafana/lib/dashboards/energy.py builds the Grafana board "Energie" from these queries over $__range.
 - instances/preconfigured/114-internal-terminal/lib/energy-sync.py evaluates the same queries per window for the TRMNL
   panel, and exports local-day and local-month totals as node-exporter gauges that the board's per-day and per-month
   bars read.
-- core/103-internal-grafana/lib/spot-price.py exports the running quarter hour's day-ahead price from the shared price cache.
+- instances/core/103-internal-grafana/lib/spot-price.py exports the running quarter hour's day-ahead price from the shared price cache.
 
 Overview:
     INPUTS                                   the hand-typed inputs, lib/inputs.nix as json
@@ -51,7 +51,9 @@ import urllib.error
 import urllib.parse
 from zoneinfo import ZoneInfo
 
-# ---- constants ----------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# CONSTANTS
+# -----------------------------------------------------------------------------
 
 INPUTS = json.loads((pathlib.Path(__file__).parent / "energy_inputs.json").read_text())
 # local days, the spot price's "today" and the reading clock all follow the house's zone
@@ -73,7 +75,7 @@ COVERAGE_MIN_S = SECONDS_PER_HOUR
 # the subquery step of covered_seconds stays within prometheus' 5 m lookback, or the first samples fall between
 COVERAGE_STEP = "5m"
 
-# the fronius exporter (core/103-internal-grafana/lib/fronius-exporter.py); signs: load and pv positive, grid positive importing,
+# the fronius exporter (instances/core/103-internal-grafana/lib/fronius-exporter.py); signs: load and pv positive, grid positive importing,
 # battery positive discharging
 PV_W = "fronius_pv_watts"
 LOAD_W = "fronius_load_watts"
@@ -133,7 +135,9 @@ SPOT_SLOT_MAX_S = SECONDS_PER_HOUR
 SPOT_TIMEOUT_S = 20
 
 
-# ---- windows ------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# WINDOWS
+# -----------------------------------------------------------------------------
 
 @dataclasses.dataclass(frozen=True)
 class Window:
@@ -156,7 +160,9 @@ def window_from_seconds(seconds, at_s=None):
 WINDOW_RANGE = Window("$__range", "$__range_s")
 
 
-# ---- queries ------------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# QUERIES
+# -----------------------------------------------------------------------------
 
 def energy_kwh(power_w, window):
     """One-minute samples summed: a scrape gap counts as nothing, the same as on the meter.
@@ -283,7 +289,9 @@ def query_batch_parse(result):
     return out
 
 
-# ---- local time ---------------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# LOCAL TIME
+# -----------------------------------------------------------------------------
 
 def local_midnight(day, zone=HOUSE_ZONE):
     """00:00 of a local calendar day as an aware datetime with that day's own offset."""
@@ -309,7 +317,9 @@ def local_today(now_s, zone=HOUSE_ZONE):
     return datetime.datetime.fromtimestamp(now_s, zone).date()
 
 
-# ---- day-ahead prices ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# DAY-AHEAD PRICES
+# -----------------------------------------------------------------------------
 
 def spot_parse(body):
     """An energy-charts answer as sorted (unix_seconds, eur_per_kwh) pairs, or None if malformed."""

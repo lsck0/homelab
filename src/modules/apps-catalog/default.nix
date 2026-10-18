@@ -1,21 +1,9 @@
-# the app catalog's schema: what an app's src/instances/custom/<name>/app.nix (and src/core/swarm.nix) may say, typed once
+# the app catalog's schema: what an app's instances/custom/<name>/app.nix (and instances/core/swarm.nix) may say
 #
-# modules/lab evaluates this module over the app folders and src/core/swarm.nix: `lab.appsCatalog` is the typed
-# result, `lab.catalog` (modules/catalog.nix) the lab-wide view over it that every host gets as the argument
-# `catalog`. Routes, cards and telemetry share modules/service.nix with the instances. Lab-wide rules (unique
-# routes, hosts and ports, every secret reference generated) are modules/catalog.nix's `problems`, which stop the
-# flake's evaluation. A test with a fixture app hands its hosts another catalog:
-#
-#   lab.withApps (apps: lib.recursiveUpdate apps { wat.enable = true; })    (tests/lib/lab.nix `apps`)
-#
-# The smallest app.nix serves one plain public path; app.nix is a function of { lib, profiles } (modules/profiles.nix):
-#
-#   { ... }: {
-#     enable = true;
-#     repo = "lsck0/demo";
-#     branch = "master";
-#     routes.demo = { service = "web"; targetPort = 8000; port = 20130; };
-#   }
+# modules/lab evaluates it: `lab.appsCatalog` is the typed result, `lab.catalog` (modules/catalog.nix) the lab-wide view
+# and its `problems`. Routes, cards and telemetry share modules/service.nix with the instances. The smallest app.nix,
+# a function of { lib, profiles }:
+#   { ... }: { enable = true; repo = "lsck0/demo"; branch = "master"; routes.demo = { targetPort = 8000; port = 20130; }; }
 { config, lib, telemetry, ... }:
 let
   inherit (lib) mkOption types;
@@ -25,7 +13,7 @@ let
   # CONSTANTS
   # -----------------------------------------------------------------------------
 
-  # scripts/secrets-sync.sh knows these generators
+  # scripts/secrets-sync.nu knows these generators
   secretGenerator = types.strMatching "(guardsData:)?(hex:[1-9][0-9]*|garage-key-id)";
   digestPinned = types.strMatching ".+@sha256:[0-9a-f]{64}";
   # a path inside the app's checkout: relative, never climbing out (the builder checks the resolved path too)
@@ -85,6 +73,20 @@ let
     };
   });
 
+  # a site built by a command, served by the platform's static server (107-internal-swarm/lib/static-site.nix)
+  staticType = types.submodule {
+    options = {
+      command = mkOption { type = types.str; description = "Builds the site at the repo root, with no network, as `sh -c`."; };
+      output = mkOption { type = repoPath; description = "The directory the command leaves the site in, relative to the repo root."; };
+      packages = mkOption {
+        type = types.functionTo (types.listOf types.package);
+        default = _: [ ];
+        defaultText = lib.literalExpression "pkgs: [ ]";
+        description = "pkgs -> what the command runs with, its PATH and /usr/bin; a shell and coreutils always.";
+      };
+    };
+  };
+
   dumpType = types.submodule {
     options = {
       service = mkOption { type = serviceName; description = "A stateful service; the command runs in its container."; };
@@ -126,6 +128,16 @@ let
         '';
       };
       build = mkOption { type = types.attrsOf buildType; default = { }; description = "Service -> build, for stack services that only name an image."; };
+      static = mkOption {
+        type = types.nullOr staticType;
+        default = null;
+        description = "A static site instead of a stack: one service \"web\", the platform's server with the built site, no Dockerfile.";
+      };
+      schedule = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "A systemd calendar the builder looks at the app on, instead of every poll: for a build too heavy for every push.";
+      };
       watch = mkOption {
         type = types.listOf repoPath;
         default = [ ];
@@ -164,7 +176,7 @@ let
         type = types.attrsOf secretGenerator;
         default = { };
         description = ''
-          Sops secret name -> its generator for scripts/secrets-sync.sh: "hex:<bytes>" or "garage-key-id", prefixed "guardsData:" when data or logins depend on it.
+          Sops secret name -> its generator for scripts/secrets-sync.nu: "hex:<bytes>" or "garage-key-id", prefixed "guardsData:" when data or logins depend on it.
           Exactly the secrets `env` names.
         '';
       };
@@ -205,7 +217,7 @@ let
         default = [ ];
         description = ''
           Globs in the repo (`grafana/*.json`): Grafana boards of the deployed commit, in the app's folder beside its
-          generated board, every datasource the app's own (core/107-internal-swarm/lib/dashboards-import.py); one that does not parse
+          generated board, every datasource the app's own (instances/core/107-internal-swarm/lib/dashboards-import.py); one that does not parse
           fails the deploy.
         '';
       };
@@ -238,7 +250,7 @@ in {
     swarm = {
       manager = mkOption { type = types.ints.positive; description = "Vmid of the swarm manager, a guest of the internal zone."; };
       state = mkOption { type = types.ints.positive; description = "Vmid of the worker holding every stateful service's volumes; moving it moves no data."; };
-      workers = mkOption { type = types.listOf types.ints.positive; description = "Vmids of the shared swarm's workers (core/swarm.nix `nodes`); an app's own guest is not one."; };
+      workers = mkOption { type = types.listOf types.ints.positive; description = "Vmids of the shared swarm's workers (instances/core/swarm.nix `nodes`); an app's own guest is not one."; };
       portRange = {
         first = mkOption { type = types.port; default = 20100; description = "First port an app may publish."; };
         last = mkOption { type = types.port; default = 20999; description = "Last port an app may publish."; };

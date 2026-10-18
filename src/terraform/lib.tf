@@ -1,12 +1,11 @@
 # vm plumbing: the lab's guests (nix, modules/lab) -> proxmox vms and containers
 
 # -----------------------------------------------------------------------------
-# GUESTS: every instance folder's instance.nix and the swarm nodes of src/core/swarm.nix, collected and checked by nix
-#
-# One direction, no generated file: nix computes every guest's shape, defaults and address (modules/lab, typed by
-# modules/instance-schema.nix) and fails on any broken invariant (zones, privileges, dhcp pools), so a plan never
-# starts past one; terraform turns the result into proxmox resources. The external program's protocol allows string
-# values only, hence the one json string.
+# GUESTS
+# -----------------------------------------------------------------------------
+
+# nix computes every guest (modules/lab) and fails on a broken invariant, so a plan never starts past one; the external
+# program's protocol allows string values only, hence the one json string
 data "external" "lab" {
   program     = ["nix", "eval", "--json", "--no-warn-dirty", ".#lab.terraform"]
   working_dir = local.src
@@ -15,7 +14,7 @@ data "external" "lab" {
 locals {
   instances = jsondecode(data.external.lab.result.json)
 
-  # scripts/pve-install.sh names the lvm-thin storage on the bulk disk
+  # scripts/pve-install.nu names the lvm-thin storage on the bulk disk
   bulk_datastore = "bulk"
   # an instance's extra disk names its store, terraform knows where each one lives
   datastores = { guest = var.proxmox_datastore, bulk = local.bulk_datastore }
@@ -55,7 +54,7 @@ locals {
       prefix  = tostring(i.prefix)
       gateway = i.gateway
 
-      # the zone's ingress wakes its onDemand guests as this proxmox user (scripts/pve-install.sh creates it)
+      # the zone's ingress wakes its onDemand guests as this proxmox user (scripts/pve-install.nu creates it)
       wake_user = i.powered && i.idle != null ? "wake-${i.type}@pve" : null
     }
   }
@@ -102,7 +101,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
   name      = each.value.name
   node_name = local.site.node
   vm_id     = tonumber(each.key)
-  # at creation only (ignore_changes below): afterwards sync.sh wakes every powered guest for its deploy and the
+  # at creation only (ignore_changes below): afterwards sync.nu wakes every powered guest for its deploy and the
   # ingresses' reaper sleeps the idling ones, so terraform starting them each run would only fight the reaper
   started = each.value.powered
   # idling vms stay off at host boot
@@ -114,7 +113,6 @@ resource "proxmox_virtual_environment_vm" "vm" {
     up_delay = each.value.boot_wait
   }
 
-  # one hostpciN per mapping
   dynamic "hostpci" {
     for_each = each.value.hostpci
     content {
@@ -131,7 +129,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
       initialization[0].user_account,
       mac_addresses,
       disk[0].file_id,
-      # scripts/pve-install.sh sets it as root (the nas's bulk storage); the api token may not
+      # scripts/pve-install.nu sets it as root (the nas's bulk storage); the api token may not
       hook_script_file_id,
     ]
   }
@@ -170,7 +168,6 @@ resource "proxmox_virtual_environment_vm" "vm" {
     }
   }
 
-  # scsi1 onward
   dynamic "disk" {
     for_each = each.value.extra_disks
     content {
@@ -233,7 +230,7 @@ resource "proxmox_virtual_environment_container" "ct" {
   }
 
   lifecycle {
-    # the template only seeds a new container, never replace; sync.sh sets features as root
+    # the template only seeds a new container, never replace; sync.nu sets features as root
     # started as for the vms above
     ignore_changes = [started, operating_system[0].template_file_id, initialization[0].user_account, features]
   }
@@ -274,22 +271,23 @@ resource "proxmox_virtual_environment_container" "ct" {
 }
 
 # -----------------------------------------------------------------------------
-# FIREWALL: proxmox binds every guest to its own address and mac, and the host takes only its own traffic
-#
-# Zones are shared bridges, and the router, the nas exports and every ingress guard authorize by source address. A
+# FIREWALL
+# -----------------------------------------------------------------------------
+
+# proxmox binds every guest to its own address and mac, and the host takes only its own traffic. Zones are shared bridges, and the router, the nas exports and every ingress guard authorize by source address. A
 # root guest could take any address of its subnet (a static change, a gratuitous arp) and inherit that host's
 # rights: the edge's api access, a nas client's export. ipfilter drops every packet and arp reply a guest's nic sends
 # from another address, macfilter every frame from another mac. Filtering itself stays with the router and the guests:
 # both guest policies are ACCEPT, proxmox only checks who is speaking.
 #
 # The host drops what its rules do not name. Lab traffic reaches it masqueraded as the router's lan address
-# (core/300-router), so the router stands for the ingresses' wake and proxmox route, the homepage and grafana.
+# (instances/core/300-router), so the router stands for the ingresses' wake and proxmox route, the homepage and grafana.
 # The datacenter switch comes last: no guest is filtered before its ipset exists, and the host rules exist before
-# the DROP policy does. sync.sh fails while the firewall is not running (README, "Proxmox firewall").
+# the DROP policy does. sync.nu fails while the firewall is not running.
 locals {
   # the router forwards every source it routes, no address filter fits it (its nics carry firewall = false)
   firewalled = { for id, v in local.vms : id => v if v.type != "router" }
-  # the owner's machines, dhcp-reserved in the fritzbox; sync.sh refuses to run from any other address
+  # the owner's machines, dhcp-reserved in the fritzbox; sync.nu refuses to run from any other address
   operators = [local.site.lan.workstation, local.site.lan.notebook]
 }
 
@@ -359,7 +357,7 @@ resource "proxmox_virtual_environment_firewall_rules" "host" {
     proto   = "tcp"
     dport   = "22"
     source  = local.site.lan.subnet
-    comment = "ssh from the house lan: sync.sh, init.sh, hermes through the router; keys only"
+    comment = "ssh from the house lan: sync.nu, init.nu, hermes through the router; keys only"
   }
   rule {
     type    = "in"
@@ -367,7 +365,7 @@ resource "proxmox_virtual_environment_firewall_rules" "host" {
     proto   = "tcp"
     dport   = tostring(local.proxmox_api_port)
     source  = join(",", concat(local.operators, [local.site.lan.router]))
-    comment = "api and web ui: the owner's machines (terraform, sync.sh) and the router (the ingresses, homepage)"
+    comment = "api and web ui: the owner's machines (terraform, sync.nu) and the router (the ingresses, homepage)"
   }
   rule {
     type    = "in"

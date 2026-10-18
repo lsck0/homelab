@@ -51,9 +51,9 @@ func handshakeTestPacket(protocol int32, address string, intent int32) []byte {
 	return packetBuild(packetIDHandshake, body)
 }
 
-// Test_spec001_r040_frame covers the untrusted boundary: every frame is read from a bounded reader, and a VarInt
-// that is overlong or too long is rejected rather than read as the value it encodes (R-040).
-func Test_spec001_r040_frame(t *testing.T) {
+// Test_frame_read covers the untrusted boundary: every frame is read from a bounded reader, and a VarInt
+// that is overlong or too long is rejected rather than read as the value it encodes.
+func Test_frame_read(t *testing.T) {
 	cases := []struct {
 		name  string
 		data  []byte
@@ -179,9 +179,9 @@ func Test_spec001_r040_frame(t *testing.T) {
 	})
 }
 
-// Test_spec001_r041_normalize covers the address a client dialed becoming a server name: forge's suffix, a proxy's
-// parts, the root dot, upper case and the lab's own suffix (R-041).
-func Test_spec001_r041_normalize(t *testing.T) {
+// Test_frame_normalize covers the address a client dialed becoming a server name: forge's suffix, a proxy's
+// parts, the root dot, upper case and the lab's own suffix.
+func Test_frame_normalize(t *testing.T) {
 	const suffix = ".mc.lsck0.dev"
 	cases := []struct {
 		name    string
@@ -208,9 +208,9 @@ func Test_spec001_r041_normalize(t *testing.T) {
 	}
 }
 
-// Fuzz_spec001_r040_frame throws the openings of R-040 at the reader: it may reject anything, but it may not panic,
+// Fuzz_frame_read throws hostile frame openings at the reader: it may reject anything, but it may not panic,
 // read past its cap, or hand on a frame whose body it never had.
-func Fuzz_spec001_r040_frame(f *testing.F) {
+func Fuzz_frame_read(f *testing.F) {
 	for _, seed := range frameTestInputs() {
 		f.Add(seed)
 	}

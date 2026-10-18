@@ -25,6 +25,9 @@ The servers, each at its own address:
   `/var/lib/minecraft-modpacks/`, change `GENERIC_PACK` in `/var/lib/minecraft/atm/modpack.env` and in the
   repo's `servers.atm.pack`. Extra mods beyond the pack (Mahou Tsukai) are jars in
   `/var/lib/minecraft-modpacks/atm-extra/`, loaded on atm's next start; players need the same jars.
+  The pack zip ships its own `config/` and the image re-extracts it on every start, so a changed config
+  there is lost: put the changed file into `/var/lib/minecraft-modpacks/atm-config/` (copied over the pack's
+  on every start, e.g. `mahoutsukai-server.toml`) and restart atm while nobody is on.
 
 A player picks the server by the address they add in the launcher; the port stays the default 25565.
 
@@ -76,5 +79,8 @@ needs a running server; with none awake, edit `/var/lib/minecraft/whitelist.json
 - `systemctl restart mc-gate` cuts every player on, since every connection is relayed through it: do it
   only when `mc-state` shows nobody online. A changed server list needs no restart,
   `systemctl reload mc-gate` takes it.
+- A deploy never restarts a running server, so nobody is kicked: a changed server takes effect when the gate
+  next stops it (30 minutes without players). To apply it sooner, `systemctl restart minecraft-<server>`
+  while `mc-state` shows nobody online.
 - Removing a server is a change to `servers` in the repo, and only while that server sleeps: stopping a
   running one drops its players. Its data dir stays until the owner deletes it.

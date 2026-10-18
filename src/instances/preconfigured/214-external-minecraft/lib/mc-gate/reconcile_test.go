@@ -11,8 +11,8 @@ import (
  * -----------------------------------------------------------------------------
  */
 
-// Test_spec001_r046a_mapping covers the three activities every unit state falls into (R-046a).
-func Test_spec001_r046a_mapping(t *testing.T) {
+// Test_reconcile_mapping covers the three activities every unit state falls into.
+func Test_reconcile_mapping(t *testing.T) {
 	cases := []struct {
 		state UnitState
 		want  Activity
@@ -47,7 +47,7 @@ func Test_spec001_r046a_mapping(t *testing.T) {
 	})
 }
 
-// countingSystemd counts what a tick asks systemd, which is the cost of R-046a.
+// countingSystemd counts what a tick asks systemd, which is the cost of mapping unit states.
 type countingSystemd struct {
 	Systemd
 	shows int
@@ -59,9 +59,9 @@ func (c *countingSystemd) Show(units []string) (map[string]UnitState, error) {
 	return c.Systemd.Show(units)
 }
 
-// Test_spec001_r046b_idle covers a server the gate thinks is up whose unit is gone, which is what a crash looks
-// like (R-046b).
-func Test_spec001_r046b_idle(t *testing.T) {
+// Test_reconcile_crash covers a server the gate thinks is up whose unit is gone, which is what a crash looks
+// like.
+func Test_reconcile_crash(t *testing.T) {
 	cases := []struct {
 		name     string
 		active   string
@@ -98,11 +98,11 @@ func Test_spec001_r046b_idle(t *testing.T) {
 	})
 }
 
-// Test_spec001_r046c_hand_start covers a unit somebody started by hand being taken over, and everything else being
-// stopped the way Conflicts= would (R-046c).
-func Test_spec001_r046c_hand_start(t *testing.T) {
+// Test_reconcile_hand_start covers a unit somebody started by hand being taken over, and everything else being
+// stopped the way Conflicts= would.
+func Test_reconcile_hand_start(t *testing.T) {
 	d, systemd, clock, settings, backend := deciderTestBackend(t)
-	// the hand-started unit is still booting, so the record stops at starting (R-046g)
+	// the hand-started unit is still booting, so the record stops at starting
 	backend.answering = false
 	testServerRunning(d, "alpha", clock.Now())
 	fakeSystemdSet(systemd, settings.Servers[0].Unit, unitActive, false)
@@ -117,8 +117,8 @@ func Test_spec001_r046c_hand_start(t *testing.T) {
 	}
 }
 
-// Test_spec001_r046d_stopping covers a unit somebody stopped by hand (R-046d).
-func Test_spec001_r046d_stopping(t *testing.T) {
+// Test_reconcile_hand_stop covers a unit somebody stopped by hand.
+func Test_reconcile_hand_stop(t *testing.T) {
 	d, systemd, _, settings := deciderTestPair(t)
 	fakeSystemdSet(systemd, settings.Servers[0].Unit, unitDeactivating, true)
 	testTick(d)
@@ -127,8 +127,8 @@ func Test_spec001_r046d_stopping(t *testing.T) {
 	}
 }
 
-// Test_spec001_r046e_stopped covers a stop that has completed (R-046e).
-func Test_spec001_r046e_stopped(t *testing.T) {
+// Test_reconcile_stopped covers a stop that has completed.
+func Test_reconcile_stopped(t *testing.T) {
 	d, systemd, _, settings := deciderTestPair(t)
 	d.servers["alpha"].phase, d.servers["alpha"].stopIssued = phaseStopping, true
 	fakeSystemdSet(systemd, settings.Servers[0].Unit, unitInactive, false)
@@ -138,9 +138,8 @@ func Test_spec001_r046e_stopped(t *testing.T) {
 	}
 }
 
-// Test_spec001_r046f_unqueued_stop covers a stop that never took: the unit is up, so the record says so again
-// (R-046f).
-func Test_spec001_r046f_unqueued_stop(t *testing.T) {
+// Test_reconcile_unqueued_stop covers a stop that never took: the unit is up, so the record says so again.
+func Test_reconcile_unqueued_stop(t *testing.T) {
 	d, systemd, _, settings := deciderTestPair(t)
 	d.servers["alpha"].phase, d.servers["alpha"].stopIssued = phaseStopping, true
 	fakeSystemdSet(systemd, settings.Servers[0].Unit, unitActive, false)
@@ -150,9 +149,8 @@ func Test_spec001_r046f_unqueued_stop(t *testing.T) {
 	}
 }
 
-// Test_spec001_r046g_running covers a start becoming running the moment its backend answers, and not before
-// (R-046g).
-func Test_spec001_r046g_running(t *testing.T) {
+// Test_reconcile_running covers a start becoming running the moment its backend answers, and not before.
+func Test_reconcile_running(t *testing.T) {
 	d, systemd, clock, settings, backend := deciderTestBackend(t)
 	backend.answering = false
 
@@ -176,9 +174,9 @@ func Test_spec001_r046g_running(t *testing.T) {
 	}
 }
 
-// Test_spec001_r046g_switch_port covers a switch: the new server's start job waits while the old server saves, and
-// the old server still answers on the shared backend port. That answer must not make the new server running (R-046g).
-func Test_spec001_r046g_switch_port(t *testing.T) {
+// Test_reconcile_switch_port covers a switch: the new server's start job waits while the old server saves, and
+// the old server still answers on the shared backend port. That answer must not make the new server running.
+func Test_reconcile_switch_port(t *testing.T) {
 	d, systemd, clock, settings, backend := deciderTestBackend(t)
 	backend.answering = true
 

@@ -55,19 +55,43 @@ let
       # json for hermes, everyone else is held to the limiter's api cap
       formats = [ "html" "json" ];
     };
-    # a page never waits longer than this on one slow engine (wttr asks 9s, gentoo 10s)
-    outgoing.max_request_timeout = 6.0;
-    # off: html google (403 upstream, google cse stands in), qwant and mojeek (captcha this ip)
+    outgoing = {
+      # a page waits for its slowest engine; every working engine answers under 1.2 s at p95 through the tunnel
+      request_timeout = 2.0;
+      # the cap on an engine's own longer timeout (wttr asks 9 s, gentoo 10 s)
+      max_request_timeout = 6.0;
+    };
+    # off: google html and qwant (403 on this exit), mojeek (altcha captcha, answers nothing), google cse stands in
     engines = [
       { name = "bing"; disabled = false; }
-      # google results, works again since the image's startpage anubis solver
-      { name = "startpage"; inactive = false; disabled = false; }
+      # google's ranking through its anubis solver: bing and duckduckgo web both rank bing's index, so it counts double
+      { name = "startpage"; inactive = false; disabled = false; weight = 2; }
+      # the html endpoint refuses curl_cffi's chrome tls with a 403; duckduckgo web speaks firefox tls and answers
+      { name = "duckduckgo"; disabled = true; }
+      { name = "duckduckgo web"; disabled = false; }
+      # a proof-of-work captcha on this exit: every end of its suspension cost one search the full timeout
+      { name = "brave"; disabled = true; }
+      { name = "brave.images"; disabled = true; }
+      { name = "brave.videos"; disabled = true; }
+      { name = "brave.news"; disabled = true; }
+      # the infobox when sparql answers in time; it missed a few queries in ten and held those pages at the timeout
+      { name = "wikidata"; timeout = 1.5; }
       { name = "nixos wiki"; disabled = false; }
       { name = "duden"; disabled = false; }
       # onion engines need a tor proxy, they fail to load on every start
       { name = "ahmia"; inactive = true; }
       { name = "torch"; inactive = true; }
     ];
+    hostnames = {
+      high_priority = [
+        "(.*\\.)?wikipedia\\.org$"
+        "wiki\\.archlinux\\.org$"
+        "wiki\\.nixos\\.org$"
+        "(.*\\.)?github\\.com$"
+        "(.*\\.)?stackoverflow\\.com$"
+      ];
+      remove = [ "(.*\\.)?pinterest\\.[a-z.]+$" ];
+    };
   };
 
   limiter = (pkgs.formats.toml { }).generate "searxng-limiter.toml" {

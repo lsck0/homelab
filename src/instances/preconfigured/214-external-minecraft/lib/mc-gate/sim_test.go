@@ -150,7 +150,7 @@ func simLiveSession(world *simWorld) (string, uint64) {
 }
 
 // simSessions is true while anybody is on any server, which is when an operator's hand start is not simulated: a
-// hand start makes the gate exclude every other unit, and that stop is not one R-047 covers.
+// hand start makes the gate exclude every other unit, and that stop is not one the occupancy rule covers.
 func simSessions(world *simWorld) bool {
 	for _, server := range world.decider.servers {
 		if len(server.sessions) > 0 {
@@ -160,7 +160,7 @@ func simSessions(world *simWorld) bool {
 	return false
 }
 
-// simOccupiedBySession is the invariant's own reading of R-047: a session past the grace window, or one from a
+// simOccupiedBySession is the invariant's own reading of occupancy: a session past the grace window, or one from a
 // source that is not marked as looping.
 func simOccupiedBySession(world *simWorld, server *Server) bool {
 	now := world.clock.Now()
@@ -214,7 +214,7 @@ func simStep(world *simWorld) string {
 		declared := world.settings.Servers[rng.IntN(len(world.settings.Servers))]
 		world.systemd.Start(declared.Unit)
 		// the gate sees the hand start at its next reconcile; the sim runs that one here, while nobody plays, so
-		// the exclusion R-046c and R-046f ask for can never be mistaken for a stop of an occupied server
+		// the exclusion a hand start triggers can never be mistaken for a stop of an occupied server
 		testTick(world.decider)
 		return "hand start " + declared.Name
 	case simRefuse:
@@ -254,7 +254,7 @@ func simDraw(rng *rand.Rand) int {
 }
 
 // simAssertLogin holds the fourth and the fifth invariant: one outcome per login, and the records set before the
-// reply that announces them (R-044, R-045a).
+// reply that announces them.
 func simAssertLogin(world *simWorld, name string, decision Decision) {
 	outcomes := []string{outcomeRelay, outcomeCapped, outcomeUnknown, outcomeStarting, outcomeStopping,
 		outcomeBusyStarting, outcomeBusy, outcomeJustStarted, outcomeBudget, outcomeFailed}
@@ -340,11 +340,10 @@ func simFail(world *simWorld, message string) {
  * -----------------------------------------------------------------------------
  */
 
-// Test_spec001_r044_sim drives the whole decider over a thousand seeded histories of real and forged logins,
+// Test_decider_sim drives the whole decider over a thousand seeded histories of real and forged logins,
 // leaves, crashes, slow starts and stops, gate restarts, hand-started units and refused commands, and holds the
-// five invariants after every single step. Time is the fake clock, so a day of lab traffic costs no wall time
-// (R-044, R-045a, R-047, R-051a, R-051b, R-072).
-func Test_spec001_r044_sim(t *testing.T) {
+// five invariants after every single step. Time is the fake clock, so a day of lab traffic costs no wall time.
+func Test_decider_sim(t *testing.T) {
 	for seed := range uint64(simSeeds) {
 		world := simCreate(t, seed)
 		for step := range simSteps {

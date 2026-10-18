@@ -11,12 +11,15 @@
   # engine traffic: neither strangers' searches nor the owner's point at the house ip, and engines rate-limit the tunnel
   on = profiles.vpnEgress;
 
-  idle = { stopAfter = "1h"; };
+  # a wake holds the first search 6 to 8 s, and 1h woke it 20 times in 4 days: an idle lxc costs ~165 MiB
+  idle = { stopAfter = "4h"; };
 
   services = {
     searxng = {
       host = "search";
       port = 80;
+      # the limiter passes /healthz alone; at / it answered the probers' user agent with 429
+      health = "/healthz";
       # search forms only; the cap bounds what one client can make the edge buffer
       bodyLimitBytes = 32 * 1024 * 1024;
       # the query is in the url: no referrer leaves

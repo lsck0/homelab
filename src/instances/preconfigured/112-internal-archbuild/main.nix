@@ -13,7 +13,7 @@ let
   dotfilesDir = "/var/lib/archbuild/dotfiles";
   # the status page: build.log, logs/<base>.log, status.{txt,json}; publish pushes the logs to the mirror
   publicDir = "/var/lib/archbuild/public";
-  # flag the busy endpoint answers from, the on-demand reaper leaves the vm up while it exists
+  # the on-demand reaper leaves the vm up while the busy endpoint finds it
   busyFlag = "/run/archbuild.busy";
   # a build started at the nightly wake stays fresh until the next one
   staleMinutes = 20 * 60;
@@ -32,9 +32,41 @@ let
   dotfilesSigningKey = "E7501F533316E9AFC6AAE907122F2CB527D1EFE3";
   dotfilesSource = "https://github.com/lsck0/arch-dotfiles";
   dotfilesRef = "master";
-  buildScript = ./lib/archrepo-build.sh;
+  buildScript = ./lib/archrepo-build.nu;
   # the package list of the checkout; publish gates the snapshot on it
-  listScript = ./lib/archrepo-list.sh;
+  listScript = ./lib/archrepo-list.nu;
+  # archrepo-build.nu's PACMAN_TRANSFER_TIMEOUT_S: a whole night's official downloads, several GiB after a gap
+  pacmanTransferTimeoutS = 7200;
+  # the image has no nushell: the entry readies pacman (arch's keyring, multilib; for the build a cache and whole
+  # packages, the image strips docs and locales), runs the night's only sync with nushell in it, then hands over.
+  # An archlinux outage ends the night like one inside the script (modules/upstream)
+  containerEntry = ''
+    set -eu
+    pacman-key --init >/dev/null
+    pacman-key --populate archlinux >/dev/null
+    printf '\n[multilib]\nInclude = /etc/pacman.d/mirrorlist\n' >> /etc/pacman.conf
+    if [ "$1" = build ]; then
+      mkdir -p /cache/pacman
+      sed -i -e '/^NoExtract/d' -e 's|^#\?CacheDir.*|CacheDir = /cache/pacman/|' /etc/pacman.conf
+    fi
+    status=0
+    UPSTREAM_TIMEOUT_S=${toString pacmanTransferTimeoutS} bash /upstream archlinux \
+      pacman -Syu --noconfirm --needed nushell >/dev/null || status=$?
+    if [ "$status" -eq ${toString upstream.unavailable} ]; then
+      echo "archlinux unavailable, skipping the night"
+      echo archlinux > ${unavailableFile}
+    fi
+    [ "$status" -eq 0 ] || exit "$status"
+    exec nu --no-config-file /build.nu "$1"
+  '';
+  entry = mode: "bash -c ${lib.escapeShellArg containerEntry} archbuild ${mode}";
+  # the gate before every night: only a head the pinned key signed is built
+  fetch = pkgs.writers.writeNu "archrepo-fetch" {
+    makeWrapperArgs = [ "--prefix" "PATH" ":" (lib.makeBinPath [ pkgs.git pkgs.gnupg ]) ];
+  } ./lib/archrepo-fetch.nu;
+  skip = pkgs.writers.writeNu "archrepo-skip" {
+    makeWrapperArgs = [ "--prefix" "PATH" ":" (lib.makeBinPath [ pkgs.coreutils ]) ];
+  } ./lib/archrepo-skip.nu;
   containerBuild = "archbuild-build";
   containerPublish = "archbuild-publish";
   # memory one compile job may take: c++ with lto peaks near 2 GiB
@@ -47,24 +79,22 @@ let
   # the limit is the ceiling: a build may use what the host leaves it, and a squeeze kills the build first
   buildMemoryMiB = vm.memoryMiB - systemReserveMiB;
   oomScoreAdjMax = 1000;
-  # the kernel never picks it
   oomScoreAdjMin = -1000;
   # the third parties a night needs, probed before it in this order (modules/upstream)
   upstreams = [ "github" "aur" "archlinux" ];
   # the upstream that ended the night, written by whichever step met the outage
   unavailableFile = "/run/archbuild.unavailable";
-  # podman rm grace before it kills a container
   containerStopTimeoutS = 30;
-  # podman's cleanup after the kill: conmon, the overlay, the memory of a 4 GiB build
+  # podman rm of a 4 GiB build (conmon, overlay, memory) takes longer than the kill grace
   containerRemoveSlackS = 60;
-  # status.json lies on the hard-mounted nas: a hung read must not hold the stop
+  # status.json is on the hard-mounted nas: a hung read must not hold the stop
   metricsTimeoutS = 20;
-  # the whole stop path: the 2026-10-07 stop overran systemd's 90 s default inside podman rm
+  # systemd's 90 s default is shorter than this path
   stopTimeoutS = metricsTimeoutS + containerStopTimeoutS + containerRemoveSlackS;
   # what both containers get of the run: the verified commit, the run id and the outage primitive
   runEnv = "-e ARCHBUILD_SOURCE -e ARCHBUILD_REF -e ARCHBUILD_COMMIT -e ARCHBUILD_RUN_STARTED -e ARCHBUILD_BUILD_BUDGET_S"
-    + " -v ${upstream.run}:/upstream:ro -v ${unavailableFile}:${unavailableFile}";
-  # node-exporter's textfile collector (modules/base)
+    + " -v ${upstream.run}:/upstream:ro -v ${unavailableFile}:${unavailableFile}"
+    + " -v ${buildScript}:/build.nu:ro -v ${listScript}:/list.nu:ro";
   metricsName = "archrepo";
   metricsFile = "${config.homelab.textfileDir}/${metricsName}.prom";
   # the served status after every run, a failed one included: what a client installing now lacks
@@ -92,14 +122,14 @@ in {
   # 5-6 GiB of ram and no swap; a parallel rust build peaked at all of it
   zramSwap = { enable = true; memoryPercent = 100; };
 
-  # build runs the recipes without secrets, publish holds the keys and signs only what it can vouch for (archrepo-build.sh)
+  # build runs the recipes without secrets, publish holds the keys and signs only what it can vouch for (archrepo-build.nu)
   systemd.services.archbuild = {
     description = "Snapshot and build every package arch-dotfiles lists into the lsck0 pacman repo";
     wants = [ "network-online.target" ];
     # the automount, not the mount (RequiresMountsFor): an idle expiry or a restart of the mount would stop the build
     requires = [ repoAutomount ];
     after = [ "network-online.target" repoAutomount ];
-    path = [ pkgs.podman pkgs.coreutils pkgs.git pkgs.gnupg pkgs.jq pkgs.gnugrep pkgs.gawk ];
+    path = [ pkgs.podman pkgs.coreutils ];
     # a deploy must not kill a running build
     restartIfChanged = false;
     environment = {
@@ -108,7 +138,7 @@ in {
       ARCHBUILD_BUILD_BUDGET_S = toString buildBudgetS;
       # relative: the key on vm-210 runs rrsync rooted at the repo
       ARCHBUILD_PUSH_TARGET = "archrepo@${inventory.${toString lab.routes.mirror.vmid}.ip}:.";
-      # the tree the edge shows the internet: the mirror route's publicPrefix (archrepo-build.sh header)
+      # the tree the edge shows the internet: the mirror route's publicPrefix
       ARCHBUILD_INTERNET_PREFIX = lab.routes.mirror.publicPrefix;
     };
     serviceConfig = {
@@ -143,7 +173,7 @@ in {
           ${upstream.run} "$name" || unavailable_note "$name" "$?" || return
         done
         # an unsigned or foreign-signed head stops here: nothing builds, the published snapshot stays
-        ARCHBUILD_COMMIT=$(${pkgs.bash}/bin/bash ${./lib/archrepo-fetch.sh} ${dotfilesSource} ${dotfilesRef} ${dotfilesDir} \
+        ARCHBUILD_COMMIT=$(${fetch} ${dotfilesSource} ${dotfilesRef} ${dotfilesDir} \
           ${dotfilesSigningKey} ${upstream.run} github) || { unavailable_note github "$?"; return; }
         podman run --rm --init --replace --pull=newer --name ${containerBuild} \
           --memory ${toString buildMemoryMiB}m --oom-score-adj ${toString oomScoreAdjMax} \
@@ -154,9 +184,7 @@ in {
           -v ${cacheDir}:/cache \
           -v ${outboxDir}:/outbox \
           -v ${publicDir}:/public \
-          -v ${buildScript}:/build.sh:ro \
-          -v ${listScript}:/list.sh:ro \
-          ${buildImage} bash /build.sh build || return
+          ${buildImage} ${entry "build"} || return
         podman run --rm --init --replace --pull=missing --name ${containerPublish} \
           ${runEnv} -e ARCHBUILD_PUSH_TARGET -e ARCHBUILD_INTERNET_PREFIX \
           -v ${repoDir}:/repo \
@@ -166,9 +194,7 @@ in {
           -v ${config.sops.secrets.archrepo-signing-key.path}:/run/signing.asc:ro \
           -v ${config.sops.secrets.archrepo-push-key.path}:/run/push-key:ro \
           -v ${knownHosts}:/run/known_hosts:ro \
-          -v ${buildScript}:/build.sh:ro \
-          -v ${listScript}:/list.sh:ro \
-          ${publishImage} bash /build.sh publish
+          ${publishImage} ${entry "publish"}
       }
       # the build container writes publicDir too, so the log is opened once, before it runs
       rm -f ${publicDir}/build.log
@@ -176,7 +202,7 @@ in {
       status=0
       run 2>&1 | tee ${publicDir}/build.log || status=$?
       if [ "$status" -eq "$unavailable" ]; then
-        bash ${./lib/archrepo-skip.sh} ${repoDir} "$(cat ${unavailableFile})" ${toString upstreams} || status=$?
+        ${skip} ${repoDir} "$(cat ${unavailableFile})" ${toString upstreams} || status=$?
       fi
       if [ "$status" -eq 0 ] || [ "$status" -eq "$unavailable" ]; then
         # -P onto fresh names: the build container may have left links here

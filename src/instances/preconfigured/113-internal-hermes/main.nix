@@ -100,13 +100,11 @@ let
   '';
 
   # the github app may push branches and open prs
-  githubAppToken = pkgs.writeShellApplication {
-    name = "github-app-token";
-    runtimeInputs = [ pkgs.openssl pkgs.curl pkgs.jq pkgs.coreutils ];
-    text = builtins.readFile ./lib/github-app-token.sh;
-  };
+  githubAppToken = pkgs.writers.writeNu "github-app-token" {
+    makeWrapperArgs = [ "--prefix" "PATH" ":" (lib.makeBinPath [ pkgs.openssl ]) ];
+  } ./lib/github-app-token.nu;
   labGithubToken = pkgs.writeShellScriptBin "lab-github-token" ''
-    exec ${upstream.run} github ${githubAppToken}/bin/github-app-token ${toString githubApp.id} ${config.sops.secrets.hermes-github-app-key.path} ${githubRepo}
+    exec ${upstream.run} github ${githubAppToken} ${toString githubApp.id} ${config.sops.secrets.hermes-github-app-key.path} ${githubRepo}
   '';
   gitCredential = pkgs.writeShellScript "git-credential-lab-github" ''
     [ "''${1:-}" = get ] || exit 0
@@ -131,7 +129,7 @@ let
     url=$(gh "$api/pulls?state=open&head=${githubOwner}:$branch" | jq -r '.[0].html_url // empty')
     if [ -z "$url" ]; then
       # shellcheck disable=SC2016 # markdown backticks, not a command
-      body=$(printf '%s\n\n---\nOpened by Hermes (${config.networking.hostName}). Deploy after merging with `./sync.sh`.\n' \
+      body=$(printf '%s\n\n---\nOpened by Hermes (${config.networking.hostName}). Deploy after merging with `./sync.nu`.\n' \
         "$(git log --reverse --format='%B%n---' origin/master..HEAD | sed '$d')")
       url=$(gh -X POST "$api/pulls" -d "$(jq -cn --arg head "$branch" --arg body "$body" \
         --arg title "$(git log --reverse --format=%s origin/master..HEAD | head -1)" \
@@ -217,7 +215,7 @@ let
   skillsTree = pkgs.linkFarm "hermes-skills" (
     lib.mapAttrsToList (name: file: { name = "homelab/${name}/SKILL.md"; path = file; }) skills
     ++ map (name: { name = "luca/${name}/SKILL.md"; path = "${lucaSkillsDir}/${name}/SKILL.md"; }) lucaSkillNames);
-  # the copies earlier deploys installed would shadow skillsTree; they are root's, what hermes writes is its own
+  # root's copies in the skills dir would shadow skillsTree; what hermes writes is its own and stays
   skillsCopiesRemove = pkgs.writeShellScript "hermes-skills-copies-remove" ''
     ${pkgs.findutils}/bin/find ${stateDir}/.hermes/skills -mindepth 1 -maxdepth 1 -user root -exec ${pkgs.coreutils}/bin/rm -rf {} +
   '';
@@ -327,9 +325,11 @@ in {
     ReadWritePaths = [ "/srv" ];
     # "-": a fresh home has no skills dir yet
     ExecStartPre = [ "-+${skillsCopiesRemove}" ];
+    # the gateway exits 1 on a clean SIGTERM shutdown, so every deploy or stop would count as a failure
+    SuccessExitStatus = [ 1 ];
   };
 
-  # the agent never deploys and holds no admin key: removes the copies an earlier deploy path left
+  # the agent never deploys and holds no admin key: none may lie in its home
   systemd.tmpfiles.rules = [
     "r ${stateDir}/age.txt - - - - -"
     "r ${config.services.hermes-agent.workingDirectory}/homelab/secrets/age.txt - - - - -"

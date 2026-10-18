@@ -15,13 +15,13 @@ metadata:
 
 Subtitles for the films and shows Radarr/Sonarr manage. Use it when the owner
 says a title has no subtitles or the wrong language. Bazarr pulls from the
-providers and languages configured by `arr-wire.sh`; this skill drives it, it
+providers and languages configured by `arr-wire`; this skill drives it, it
 does not reconfigure it.
 
 Token `lab-token bazarr-key`, header `X-API-KEY: <token>`. Base
 `http://10.100.0.121:6767/api`. Runs on vm-121 with the *arr apps.
 
-Confirmed endpoints (used by `arr-wire.sh`):
+Confirmed endpoints (used by `arr-wire`):
 - Health/config: `GET /api/system/settings`, `GET /api/system/status`.
 - Restart: `POST /api/system?action=restart`.
 

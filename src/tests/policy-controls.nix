@@ -143,6 +143,8 @@ let
       tampered = facts // { lab = facts.lab // { instances = facts.lab.instances // {
         "112" = lib.recursiveUpdate facts.lab.instances."112" { config.vm.balloonMiB = 1024 * 1024; };
       }; }; }; };
+    memory-cap = { file = "guests"; marker = "proton-sync MemoryMax";
+      tampered = tamper "104-internal-nas" [ "systemd" "services" "proton-sync" "serviceConfig" "MemoryMax" ] "2G"; };
 
     port-twice = { file = "ports"; marker = "is published for";
       tampered = facts // { appsCatalog = facts.appsCatalog // { apps = facts.appsCatalog.apps // { twin = hello // { enable = true; }; }; }; }; };

@@ -37,7 +37,7 @@ Two separate things:
   provide) and `held_back` (why the night was not published). A night that would lose a listed name the served
   snapshot provides is held back; a name never served only shows in `missing`. Metrics on vm-112:
   `homelab_archrepo_missing_packages`, `homelab_archrepo_held_back`. Check by hand with
-  `src/instances/preconfigured/112-internal-archbuild/lib/archrepo-list.sh <arch-dotfiles checkout> <lsck0.db>`: it prints
+  `nu --no-config-file src/instances/preconfigured/112-internal-archbuild/lib/archrepo-list.nu <arch-dotfiles checkout> <lsck0.db>`: it prints
   the missing names, nothing when complete.
 - Never stop it mid-publish. A deploy does not restart it (`restartIfChanged = false`).
 - Outages: the AUR, the Arch mirrors and GitHub are probed before a night and every call to them is retried
@@ -55,7 +55,7 @@ Two separate things:
 ## Official mirror (vm-104, /srv/nas/bulk/archmirror)
 
 - `archmirror-sync.service`, hourly timer, from `rsync://ftp.halifax.rwth-aachen.de/archlinux/`,
-  capped at 60 MiB/s, idle I/O priority (script `src/core/104-internal-nas/lib/archmirror-sync.sh`). It checks upstream
+  capped at 60 MiB/s, idle I/O priority (script `src/instances/core/104-internal-nas/lib/archmirror-sync.nu`). It checks upstream
   `lastupdate` first, so an unchanged upstream costs one tiny transfer; the local `lastupdate` is written only
   after a complete pass, so a failed or cut sync is redone in full next hour.
 - Size: about 122 GiB on the bulk HDD.

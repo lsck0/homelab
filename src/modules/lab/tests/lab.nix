@@ -15,7 +15,7 @@ let
     mkdir -p $out/${core} $out/${preconfigured} $out/${custom} $out/generated
     cp ${../../../generated/zones.json} $out/generated/zones.json
     cp ${../../../generated/site.json} $out/generated/site.json
-    cp ${../../../core/swarm.nix} $out/${swarm}
+    cp ${../../../instances/core/swarm.nix} $out/${swarm}
   '' + lib.concatStrings (lib.mapAttrsToList (folder: files: "mkdir -p $out/${preconfigured}/${folder}\n"
     + lib.concatStrings (lib.mapAttrsToList (file: text: "cp ${pkgs.writeText file text} $out/${preconfigured}/${folder}/${file}\n") files)
   ) folders));
@@ -49,7 +49,7 @@ let
       folders."249-external-demo" = instance ''{ services.demo = { port = 80; publicPrefix = "/public"; }; }'';
       expect = "publicPrefix narrows what everyone but the house sees";
     };
-    spec001_r021-dotted-http-host = {
+    dotted-http-host = {
       folders."199-internal-demo" = instance ''{ services.demo = { port = 80; host = "lab.demo"; }; }'';
       expect = "host lab.demo goes through its zone's ingress";
     };
@@ -111,9 +111,9 @@ let
     ++ lib.optional (!(lib.isBool g.powered && (g.idle == null || lib.isString g.idle) && lib.elem g.enabled [ "true" "false" "onDemand" ]))
       "lab.export guest ${id}: ${builtins.toJSON g}"
   ) (exportOf real).guests)
-    ++ map (p: "spec001_r029: the wildcard fixture is refused: ${p}") wildcardLab.problems
+    ++ map (p: "the wildcard fixture is refused: ${p}") wildcardLab.problems
     ++ lib.optional (exportedWildcardHost != "*.demo.${real.site.domain}")
-      "spec001_r029: lab.export writes the wildcard route's host as ${exportedWildcardHost}";
+      "lab.export writes the wildcard route's host as ${exportedWildcardHost}";
 
   failures = lib.concatLists (lib.mapAttrsToList (name: c: let problems = problemsOf c.folders; in
     lib.optional (!(lib.any (lib.hasInfix c.expect) problems))

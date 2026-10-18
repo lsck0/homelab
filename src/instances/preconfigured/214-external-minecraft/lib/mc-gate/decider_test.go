@@ -51,9 +51,9 @@ func deciderTestBackend(t *testing.T) (*Decider, *fakeSystemd, *fakeClock, Setti
 	return d, systemd, clock, settings, backend
 }
 
-// Test_spec001_r045a_phase covers the records being right before the reply leaves: the target is starting and the
-// server it replaces is stopping, so the next login decides against the new picture (R-045a).
-func Test_spec001_r045a_phase(t *testing.T) {
+// Test_decider_phase covers the records being right before the reply leaves: the target is starting and the
+// server it replaces is stopping, so the next login decides against the new picture.
+func Test_decider_phase(t *testing.T) {
 	d, _, clock, _ := deciderTestPair(t)
 	testServerRunning(d, "beta", clock.Now())
 	clock.advance(durationFromSeconds(d.settings.Limits.MinimumOnlineS) + time.Second)
@@ -74,8 +74,8 @@ func Test_spec001_r045a_phase(t *testing.T) {
 	}
 }
 
-// Test_spec001_r045b_sync covers the commands being run inside the event, stop before start (R-045b).
-func Test_spec001_r045b_sync(t *testing.T) {
+// Test_decider_sync covers the commands being run inside the event, stop before start.
+func Test_decider_sync(t *testing.T) {
 	d, systemd, clock, settings := deciderTestPair(t)
 	testServerRunning(d, "beta", clock.Now())
 	clock.advance(durationFromSeconds(d.settings.Limits.MinimumOnlineS) + time.Second)
@@ -87,9 +87,9 @@ func Test_spec001_r045b_sync(t *testing.T) {
 	}
 }
 
-// Test_spec001_r045c_rollback covers a refused command leaving no trace but a failure: the records are what they
-// were, and the login is told so (R-045c).
-func Test_spec001_r045c_rollback(t *testing.T) {
+// Test_decider_rollback covers a refused command leaving no trace but a failure: the records are what they
+// were, and the login is told so.
+func Test_decider_rollback(t *testing.T) {
 	d, systemd, clock, settings := deciderTestPair(t)
 	testServerRunning(d, "beta", clock.Now())
 	clock.advance(durationFromSeconds(d.settings.Limits.MinimumOnlineS) + time.Second)
@@ -107,9 +107,8 @@ func Test_spec001_r045c_rollback(t *testing.T) {
 	}
 }
 
-// Test_spec001_r047_occupied covers every way a server holds people, and the one way a young session does not
-// (R-047, R-048b).
-func Test_spec001_r047_occupied(t *testing.T) {
+// Test_decider_occupied covers every way a server holds people, and the one way a young session does not.
+func Test_decider_occupied(t *testing.T) {
 	cases := []struct {
 		name  string
 		setup func(d *Decider, now time.Time)
@@ -156,8 +155,8 @@ func Test_spec001_r047_occupied(t *testing.T) {
 	}
 }
 
-// Test_spec001_r048a_mark covers a source that reconnects in a loop being marked (R-048a).
-func Test_spec001_r048a_mark(t *testing.T) {
+// Test_decider_mark covers a source that reconnects in a loop being marked.
+func Test_decider_mark(t *testing.T) {
 	d, _, clock, _ := deciderTestPair(t)
 	testServerRunning(d, "alpha", clock.Now())
 	limits := d.settings.Limits
@@ -177,9 +176,8 @@ func Test_spec001_r048a_mark(t *testing.T) {
 	}
 }
 
-// Test_spec001_r048b_young covers a marked source's young session not holding a server against everyone else
-// (R-048b).
-func Test_spec001_r048b_young(t *testing.T) {
+// Test_decider_young covers a marked source's young session not holding a server against everyone else.
+func Test_decider_young(t *testing.T) {
 	d, _, clock, _ := deciderTestPair(t)
 	testServerRunning(d, "alpha", clock.Now())
 	testSessionAdd(d, "alpha", testSource, clock.Now())
@@ -196,8 +194,8 @@ func Test_spec001_r048b_young(t *testing.T) {
 	}
 }
 
-// Test_spec001_r048c_clear covers both ways a mark lapses: a real session, and a quiet window (R-048c).
-func Test_spec001_r048c_clear(t *testing.T) {
+// Test_decider_mark_clear covers both ways a mark lapses: a real session, and a quiet window.
+func Test_decider_mark_clear(t *testing.T) {
 	limits := testSettings(t).Limits
 	t.Run("a long session", func(t *testing.T) {
 		d, _, clock, _ := deciderTestPair(t)
@@ -224,9 +222,9 @@ func Test_spec001_r048c_clear(t *testing.T) {
 	})
 }
 
-// Test_spec001_r048d_cap covers one address holding at most sessionsPerSourceMax live sessions, the row that comes
-// before the table (R-048d).
-func Test_spec001_r048d_cap(t *testing.T) {
+// Test_decider_source_cap covers one address holding at most sessionsPerSourceMax live sessions, the row that comes
+// before the table.
+func Test_decider_source_cap(t *testing.T) {
 	d, _, clock, _ := deciderTestPair(t)
 	testServerRunning(d, "alpha", clock.Now())
 	limits := d.settings.Limits
@@ -253,8 +251,8 @@ func Test_spec001_r048d_cap(t *testing.T) {
 	}
 }
 
-// Test_spec001_r048e_exempt covers the house never being capped and never being marked (R-048e).
-func Test_spec001_r048e_exempt(t *testing.T) {
+// Test_decider_house_exempt covers the house never being capped and never being marked.
+func Test_decider_house_exempt(t *testing.T) {
 	clock := fakeClockCreate()
 	settings := testSettings(t, "alpha")
 	settings.Allow = SettingsAllow{Cidrs: []string{"203.0.113.0/24"}}
@@ -275,9 +273,9 @@ func Test_spec001_r048e_exempt(t *testing.T) {
 	}
 }
 
-// Test_spec001_r049_reservation covers the player who was kicked getting the seat back: a start the gate issued
-// reserves the server for rejoinS, a unit that came up by itself does not (R-049).
-func Test_spec001_r049_reservation(t *testing.T) {
+// Test_decider_reservation covers the player who was kicked getting the seat back: a start the gate issued
+// reserves the server for rejoinS, a unit that came up by itself does not.
+func Test_decider_reservation(t *testing.T) {
 	d, systemd, clock, settings := deciderTestPair(t)
 	testLogin(d, "alpha", testSource)
 	at := clock.Now()
@@ -300,8 +298,8 @@ func Test_spec001_r049_reservation(t *testing.T) {
 	}
 }
 
-// Test_spec001_r050a_idle_since covers idleSince being the latest of the three moments (R-050a).
-func Test_spec001_r050a_idle_since(t *testing.T) {
+// Test_decider_idle_since covers idleSince being the latest of the three moments.
+func Test_decider_idle_since(t *testing.T) {
 	d, _, clock, _ := deciderTestPair(t)
 	server := d.servers["alpha"]
 	running := clock.Now()
@@ -326,8 +324,8 @@ func Test_spec001_r050a_idle_since(t *testing.T) {
 	}
 }
 
-// Test_spec001_r050b_sleep covers a server nobody uses being stopped after sleepAfterS (R-050b).
-func Test_spec001_r050b_sleep(t *testing.T) {
+// Test_decider_sleep covers a server nobody uses being stopped after sleepAfterS.
+func Test_decider_sleep(t *testing.T) {
 	d, systemd, clock, settings := deciderTestPair(t)
 	testServerRunning(d, "alpha", clock.Now())
 	fakeSystemdSet(systemd, settings.Servers[0].Unit, unitActive, false)
@@ -355,9 +353,9 @@ func Test_spec001_r050b_sleep(t *testing.T) {
 	}
 }
 
-// Test_spec001_r050c_restart covers a gate that was restarted taking over a unit that is up, with the idle clock
-// starting now (R-050c).
-func Test_spec001_r050c_restart(t *testing.T) {
+// Test_decider_gate_restart covers a gate that was restarted taking over a unit that is up, with the idle clock
+// starting now.
+func Test_decider_gate_restart(t *testing.T) {
 	clock := fakeClockCreate()
 	settings := testSettings(t, "alpha", "beta")
 	systemd := fakeSystemdCreate(clock, settings.Servers[0].Unit, settings.Servers[1].Unit)
@@ -378,8 +376,8 @@ func Test_spec001_r050c_restart(t *testing.T) {
 	}
 }
 
-// Test_spec001_r051a_source covers one address causing at most startsPerSourcePerHourMax starts an hour (R-051a).
-func Test_spec001_r051a_source(t *testing.T) {
+// Test_decider_source_starts covers one address causing at most startsPerSourcePerHourMax starts an hour.
+func Test_decider_source_starts(t *testing.T) {
 	d, systemd, clock, settings := deciderTestPair(t)
 	limits := settings.Limits
 	for turn := range limits.StartsPerSourcePerHourMax {
@@ -407,9 +405,9 @@ func Test_spec001_r051a_source(t *testing.T) {
 	}
 }
 
-// Test_spec001_r051b_switches covers the global switch budget: a start from all-asleep is free, one that stops a
-// running server is not (R-051b).
-func Test_spec001_r051b_switches(t *testing.T) {
+// Test_decider_switches covers the global switch budget: a start from all-asleep is free, one that stops a
+// running server is not.
+func Test_decider_switches(t *testing.T) {
 	d, _, clock, settings := deciderTestPair(t)
 	limits := settings.Limits
 
@@ -442,8 +440,8 @@ func Test_spec001_r051b_switches(t *testing.T) {
 	}
 }
 
-// Test_spec001_r051c_minimum_online covers a server that just came up being left alone for minimumOnlineS (R-051c).
-func Test_spec001_r051c_minimum_online(t *testing.T) {
+// Test_decider_minimum_online covers a server that just came up being left alone for minimumOnlineS.
+func Test_decider_minimum_online(t *testing.T) {
 	d, _, clock, settings := deciderTestPair(t)
 	testServerRunning(d, "beta", clock.Now())
 	d.servers["beta"].reservedUntil = time.Time{}
@@ -459,8 +457,8 @@ func Test_spec001_r051c_minimum_online(t *testing.T) {
 	}
 }
 
-// Test_spec001_r052_table covers every row of the decision table, in its order (R-052).
-func Test_spec001_r052_table(t *testing.T) {
+// Test_decider_table covers every row of the decision table, in its order.
+func Test_decider_table(t *testing.T) {
 	cases := []struct {
 		name    string
 		ask     string
@@ -571,8 +569,8 @@ func Test_spec001_r052_table(t *testing.T) {
 	})
 }
 
-// Test_spec001_r053a_timeout covers a start that never answers being given up on (R-053a).
-func Test_spec001_r053a_timeout(t *testing.T) {
+// Test_decider_start_timeout covers a start that never answers being given up on.
+func Test_decider_start_timeout(t *testing.T) {
 	d, systemd, clock, settings, backend := deciderTestBackend(t)
 	// the start goes nowhere, so nothing ever answers on the backend port
 	backend.answering = false
@@ -603,7 +601,7 @@ func Test_spec001_r053a_timeout(t *testing.T) {
 	}
 }
 
-// deciderTestMarkStarted writes the marker of a good start, newer than the server's modpack.env (R-053b).
+// deciderTestMarkStarted writes the marker of a good start, newer than the server's modpack.env.
 func deciderTestMarkStarted(t *testing.T, settings Settings, name string, at time.Time) {
 	t.Helper()
 	declared := settings.Servers[slices.IndexFunc(settings.Servers, func(s SettingsServer) bool { return s.Name == name })]
@@ -618,9 +616,9 @@ func deciderTestMarkStarted(t *testing.T, settings Settings, name string, at tim
 	}
 }
 
-// Test_spec001_r053b_first_start covers the longer timeout of a server whose pack changed, which downloads it
-// before it answers anything (R-053b).
-func Test_spec001_r053b_first_start(t *testing.T) {
+// Test_decider_first_start covers the longer timeout of a server whose pack changed, which downloads it
+// before it answers anything.
+func Test_decider_first_start(t *testing.T) {
 	d, systemd, clock, settings, backend := deciderTestBackend(t)
 	backend.answering = false
 	testLogin(d, "alpha", testSource)
@@ -648,25 +646,25 @@ func Test_spec001_r053b_first_start(t *testing.T) {
 	}
 }
 
-// Test_spec001_r053c_failed covers what a ping is told about a server whose start failed (R-053c).
-func Test_spec001_r053c_failed(t *testing.T) {
+// Test_decider_start_failed covers what a ping is told about a server whose start failed.
+func Test_decider_start_failed(t *testing.T) {
 	d, _, clock, _ := deciderTestPair(t)
 	d.servers["alpha"].lastStartFailed = true
-	answer := testEvent(d, deciderEvent{kind: eventStatus, name: "alpha"}).status
+	answer := testStatus(d, "alpha")
 	if got, want := statusTestDescription(t, answer), statusTagged("alpha", descriptionFailed); got != want {
 		t.Fatalf("description %q, want %q", got, want)
 	}
 	// a server that is up again says what it is, not what it was
 	testServerRunning(d, "alpha", clock.Now())
 	d.servers["alpha"].lastStartFailed = false
-	answer = testEvent(d, deciderEvent{kind: eventStatus, name: "beta"}).status
+	answer = testStatus(d, "beta")
 	if got := statusTestDescription(t, answer); got == statusTagged("beta", descriptionFailed) {
 		t.Fatal("beta is described as failed")
 	}
 }
 
-// Test_spec001_r054_texts covers every text of the table, rendered from its key (R-054).
-func Test_spec001_r054_texts(t *testing.T) {
+// Test_decider_texts covers every text of the table, rendered from its key.
+func Test_decider_texts(t *testing.T) {
 	servers := []string{"alpha", "beta"}
 	cases := []struct {
 		outcome string
@@ -718,8 +716,8 @@ func Test_spec001_r054_texts(t *testing.T) {
 	}
 }
 
-// Test_spec001_r056_state covers the state file being written on every change, in the shape a person reads (R-056).
-func Test_spec001_r056_state(t *testing.T) {
+// Test_decider_state_file covers the state file being written on every change, in the shape a person reads.
+func Test_decider_state_file(t *testing.T) {
 	d, _, clock, settings := deciderTestPair(t)
 	testServerRunning(d, "alpha", clock.Now())
 	decision := testLogin(d, "alpha", testSource)
@@ -758,8 +756,8 @@ func Test_spec001_r056_state(t *testing.T) {
 	}
 }
 
-// Test_spec001_r057_log covers one journal line per event, with the fields a person greps for (R-057).
-func Test_spec001_r057_log(t *testing.T) {
+// Test_decider_log covers one journal line per event, with the fields a person greps for.
+func Test_decider_log(t *testing.T) {
 	clock := fakeClockCreate()
 	settings := testSettings(t, "alpha", "beta")
 	systemd := fakeSystemdCreate(clock, settings.Servers[0].Unit, settings.Servers[1].Unit)

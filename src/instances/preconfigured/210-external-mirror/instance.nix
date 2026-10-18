@@ -2,8 +2,9 @@
 { lib, profiles, ... }: {
   vm = {
     bootPhase = "dev";
-    # the packages (30G, growing) plus archrepo-build.sh's hardlinked daily snapshots (~1G each, SNAPSHOT_KEEP_DAYS)
-    diskGiB = 64;
+    # the packages (31G, growing), archrepo-build.nu's three hardlinked snapshots (newest, week start, month start) and
+    # a full rebuild's 7.6G in one night
+    diskGiB = 96;
   };
 
   services = {
@@ -13,7 +14,7 @@
       methods = [ "GET" "HEAD" ];
       # a pacman sync fetches hundreds of packages back to back: the default burst cut it off every ~100 files
       limitScale = 20;
-      # the internet gets the owner's own builds alone (archrepo-build.sh's internet tree), the house the full snapshot
+      # the internet gets the owner's own builds alone (archrepo-build.nu's internet tree), the house the full snapshot
       publicPrefix = "/public";
       homepage = {
         group = "Dev";

@@ -1,4 +1,4 @@
-# the real router (core/300-router/main.nix) in a test vm without internet: lab.router imports it
+# the real router (instances/core/300-router/main.nix) in a test vm without internet: lab.router imports it
 #
 # What changes is only what reaches out of the lab: the tunnels and the onion routes get real-format keys (the stub's
 # test-<name> strings are neither wireguard keys nor base64 seeds: wireguard-wg-egress restarted thousands of times in a

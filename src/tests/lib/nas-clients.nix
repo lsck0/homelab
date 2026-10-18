@@ -4,9 +4,6 @@
 # configs: name -> an evaluated nixos `config`, the nas itself left out. A config counts when its hostName is vm-<id>
 # of an inventory guest and it mounts at least one share (homelab.nasShares); anything else (the router, a test's
 # stand-in nodes) is skipped. A node runs whatever the guest's vm.power: the lab parks a guest, a test boots it.
-#
-#   nasClients = import ./nas-clients.nix { inherit lib inventory; configs = nodes; };
-#   # { "10.100.0.107" = [ { path = "/srv/nas/data/swarm-manager"; readOnly = false; mode = null; localState = false; } ... ]; ... }
 { lib, inventory, configs }:
 let
   vmOf = config: let match = builtins.match "vm-([0-9]+)" config.networking.hostName; in

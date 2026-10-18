@@ -1,23 +1,13 @@
 # where every sops secret lives and who may open it: the one place that knows the secrets layout
 #
-# A secret is declared once, with the kind of its value (src/secrets/shared.nix lists the kinds):
-#   - an instance folder's instance.nix `secrets`: only that guest reads it; the value lives in its folder's
-#     secrets.sops.json, encrypted to the admins and that guest
-#   - an app folder's app.nix `secrets`, plus app-<name>-redeploy-token for every app: in the app folder's
-#     secrets.sops.json, encrypted to the admins and every host that reads one of them (the manager, an own guest)
-#   - the router's own secrets.sops.json also holds <route>-onion-key for every onion route (modules/service.nix)
-#   - src/secrets/shared.nix, plus <client>-oidc-secret for every oidc client: read by two or more hosts, or by
-#     none; the value lives in src/secrets/shared.sops.json, admins only, and each reader gets the ones it reads in
-#     its own generated secrets.shared.sops.json
-# Every host has a home folder holding age.pub (its recipient) and age.sops (its private key, admins only): its
-# instance folder, an app's own guest the app folder, a swarm worker (no folder of its own) generated/nodes/<name>/.
-# src/scripts/secrets-sync.sh writes the files from `planOf`; modules/base points every secret at its file.
-#
-#   secrets = import ./secrets.nix { inherit lib lab; };
-#   secrets.declared.kopia-password     # { kind = "guardsData:hex:24"; file = "core/104-internal-nas/secrets.sops.json"; home = ...; }
-#   secrets.fileOf host "attic-pull-token"   # "core/104-internal-nas/secrets.shared.sops.json" (paths relative to src/)
-#   secrets.planOf configs              # what secrets-sync.sh converges to, and the problems that stop it
-#   (import ./secrets.nix { inherit lib; }).kindPattern   # the kinds alone, for a schema (no `lab` needed)
+# a secret is declared once, with the kind of its value (src/secrets/shared.nix lists the kinds):
+#   - instance.nix `secrets`: that guest's alone, in its folder's secrets.sops.json
+#   - app.nix `secrets` and app-<name>-redeploy-token: in the app folder's, for every host that reads one
+#   - the router's own also holds <route>-onion-key for every onion route
+#   - src/secrets/shared.nix and <client>-oidc-secret: read by two or more hosts, or none; in shared.sops.json, and
+#     each reader's own generated secrets.shared.sops.json
+# every file is encrypted to the admins and its readers. A host's home folder holds age.pub and age.sops (its key,
+# admins only). scripts/secrets-sync.nu writes the files from `planOf`; modules/base points every secret at its file.
 # `catalog` is src/secrets/shared.nix; a test passes its own.
 { lib, lab ? null, catalog ? import ../secrets/shared.nix }:
 let
@@ -31,11 +21,11 @@ let
   ownName = "secrets.sops.json";
   sharedName = "secrets.shared.sops.json";
   keyName = "age.sops";
-  # the kinds scripts/secrets-sync.sh generates a value of, adds empty (manual, public), or copies from the dotfiles;
+  # the kinds scripts/secrets-sync.nu generates a value of, adds empty (manual, public), or copies from the dotfiles;
   # guardsData:<generated kind> is generated only on --generate-guarded (src/secrets/shared.nix)
   generatedKindPattern = "hex:[1-9][0-9]*|wireguard|laravel-key|garage-key-id|onion";
   kindPattern = "(guardsData:)?(${generatedKindPattern})|manual|public|dotfiles:[A-Za-z0-9._-]+";
-  # terraform's connection variables (terraform/main.tf), written by scripts/lib/proxmox.sh, read by no guest
+  # terraform's connection variables (terraform/main.tf), written by scripts/lib/proxmox.nu, read by no guest
   tfvars = {
     proxmox_api_token_id = "public";
     proxmox_api_token_secret = "manual";

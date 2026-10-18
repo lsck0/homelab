@@ -63,7 +63,9 @@ let
       environment = {
         STATS_PROMETHEUS = telemetry.urls.prometheus;
         STATS_LOKI = telemetry.urls.loki;
-        STATS_QBITTORRENT = "http://${net.ipOf (toString qbittorrent.vmid)}:${toString qbittorrent.port}";
+        # a parked vm-120 is not polled: every run would wait out the timeout and log the failure
+        STATS_QBITTORRENT = lib.optionalString inventory.${toString qbittorrent.vmid}.powered
+          "http://${net.ipOf (toString qbittorrent.vmid)}:${toString qbittorrent.port}";
         STATS_INVENTORY = "${terminalInventory}";
         STATS_CLIENT_INGRESS = "vm-${edge}";
         STATS_EDGE_ADDRESS = net.ipOf edge;
@@ -80,7 +82,7 @@ let
       libraries = [ energyModel feedIo ];
       arguments = [ (feedDir "energy") energyState ];
       stateDirectory = baseNameOf energyState;
-      # the board's per-day and per-month bars (core/103-internal-grafana/lib/dashboards/energy.py)
+      # the board's per-day and per-month bars (instances/core/103-internal-grafana/lib/dashboards/energy.py)
       exports = [ "energy.prom" ];
       description = "Collect house energy for the TRMNL terminal";
       environment.ENERGY_PROMETHEUS = telemetry.urls.prometheus;

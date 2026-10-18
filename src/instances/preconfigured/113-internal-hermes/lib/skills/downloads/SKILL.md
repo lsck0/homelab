@@ -23,7 +23,8 @@ metadata:
 - Save path `/data/torrents`, category per *arr.
 - Peer traffic leaves through the router's ProtonVPN WireGuard exit (`wg-egress`), with a killswitch: no tunnel,
   no peers. The listen port is the one ProtonVPN leases, set by the router's `protonvpn-port` timer. Slow swarms
-  are usually few seeders, not the tunnel. Tunnel health: `ssh 10.100.0.1 'wg show wg-egress; journalctl -u protonvpn-port -n 20'`.
+  are usually few seeders, not the tunnel. Tunnel health: `ssh 10.100.0.1 'wg show wg-egress'`; the port lease logs
+  to the router's protonvpn-port unit, which exists only while vm-120 is deployed.
 
 ## Prowlarr (vm-121, `http://10.100.0.121:9696/api/v1`, key `prowlarr-key`)
 

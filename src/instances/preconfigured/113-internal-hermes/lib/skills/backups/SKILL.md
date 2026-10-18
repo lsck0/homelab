@@ -48,9 +48,9 @@ At 04:00 `proton-sync` mirrors the Kopia repository to Proton Drive
 the Syncthing folder with its plain-file copy there (`/my-files/homelab-offsite/sync`)
 both ways, so edits made in Proton Drive reach the NAS and the owner's devices.
 Its baseline (`proton-bisync-resync`) and the Proton sign-in (`proton-drive-login`)
-are the owner's, README.md "Off-site": report a failure, never run them.
+are the owner's, FEATURES.md "Storage, backups and off-site": report a failure, never run them.
 Losing the NAS entirely is the
-owner's runbook (README.md, "Recovery"): it needs the Proton sign-in and the
+owner's runbook (FEATURES.md, "Recovery"): it needs the Proton sign-in and the
 `kopia-password`, which only the owner can decrypt. Report the state
 (`systemctl status proton-sync` on vm-104) and point the owner there.
 

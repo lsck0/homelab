@@ -51,7 +51,7 @@ let
     # more than one worker holds beside a deploy's surge: the swarm gets two (modules/limits workerCountOf)
     reservation.memoryMiB = 768;
   };
-  # a catalog edit as sync.sh deploys it: the lab collected again with the demo changed
+  # a catalog edit as sync.nu deploys it: the lab collected again with the demo changed
   catalogWith = change: lib.mkForce (lab.withApps (apps: lib.recursiveUpdate apps { demo = change; })).catalog;
 
   w1 = assert lib.assertMsg (lab.appsCatalog.swarm.workers == [ 250 251 ]) "swarm: the fixture needs two workers";
@@ -72,7 +72,7 @@ let
     networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
     # no collector (vm-103) here: a failing upload would fail every switch below
     services.journald.upload.enable = lib.mkForce false;
-    # what sync.sh does after an edit of an app, on every node at once
+    # what sync.nu does after an edit of an app, on every node at once
     specialisation.edited.configuration._module.args.catalog = catalogWith {
       routes.demo.port = portChanged;
       env.web.GREETING = "edited";

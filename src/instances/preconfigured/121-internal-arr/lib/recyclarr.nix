@@ -14,7 +14,7 @@ let
     "ebookbay" "internetarchive" "postman"
   ];
 
-  # arr-wire.sh's inputs; src/tests/media-stack.sh runs the same script with its own
+  # arr-wire.nu's inputs; src/tests/media-stack.nu runs the same script with its own
   arrWireEnvironment = {
     TOKEN_DIR = config.homelab.tokens.dir;
     SECRET_DIR = dirOf config.sops.secrets.radarr-key.path;
@@ -35,11 +35,7 @@ let
     JELLYSEERR_ADMIN_EMAIL = "admin@${site.domain}";
   };
 
-  arrWire = pkgs.writeShellScript "arr-wire" ''
-    set -uo pipefail
-    export PATH="${lib.makeBinPath [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.gnugrep ]}"
-    ${builtins.readFile ./arr-wire.sh}
-  '';
+  arrWire = pkgs.writers.writeNu "arr-wire" ./arr-wire.nu;
 
   # the keys go in by sops, never through a store path or an argv
   recyclarrConfig = ''

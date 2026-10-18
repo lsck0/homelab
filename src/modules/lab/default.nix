@@ -1,43 +1,14 @@
 # the collector: every fact about the lab's guests and apps, read from their folders, computed once
 #
-# An instance is a folder <vmid>-<zone>-<service>/ (the router: 300-router/) holding main.nix (its nixos
-# configuration) and instance.nix (what other hosts and terraform need to know about it, typed by
-# modules/instance-schema.nix): in src/core/ when the lab needs it to function, in src/instances/preconfigured/ when
-# it is a third-party service the lab runs. The vmid and the zone come from the folder name; the name is the
-# configuration's name and the proxmox guest's. The swarm's worker nodes have no folder: src/core/swarm.nix `nodes`
-# generates them, each running modules/swarm alone. An app, the owner's own software, is a folder
-# src/instances/custom/<name>/ with app.nix, a function of { lib, profiles } (modules/profiles.nix) typed by
-# modules/apps-catalog. Folders starting with `_` (the templates) are no instance.
+# an instance is a folder <vmid>-<zone>-<service>/ (the router: 300-router/) with main.nix and instance.nix (typed by
+# modules/instance-schema.nix), under layout.core or layout.preconfigured; an app is layout.custom/<name>/app.nix
+# (modules/apps-catalog). The swarm's workers have no folder: layout.swarm generates them. `_` folders are templates.
 #
-# Everything below derives from those files plus src/generated/zones.json and src/generated/site.json; nothing reads
-# a host's evaluated configuration, so the flake, every module (argument `lab`), every test and terraform
-# (`terraform`, through `nix eval .#lab.terraform` in terraform/lib.tf) see the same facts without a generated file
-# that could go stale.
+# nothing reads a host's evaluated configuration, so the flake, every module (argument `lab`), every test and
+# terraform (`nix eval .#lab.terraform`) see the same facts without a generated file that could go stale. Every broken
+# lab-wide rule is one line of `problems`, and the flake refuses to evaluate past one.
 #
-#   lab = import ./modules/lab { inherit lib; };
-#   lab.inventory."122"           # { name; type; kind; privileged; features; ip; prefix; gateway; powered; idle; roles; }
-#                                 # powered: vm.power is on; idle: idle.stopAfter, null for a guest that never idles
-#   lab.instances."122"           # { id; zone; name; dir; folder; main; source; config; }, config the evaluated instance.nix,
-#                                 # folder its home relative to src/ (an app's own guest: the app's), null for a worker
-#   lab.routes.jellyfin           # an instance service's route with every field (modules/service.nix), plus vmid
-#   lab.appsCatalog               # the apps typed by modules/apps-catalog: { apps; builder; swarm; cadvisorPort; controllerPort; }
-#   lab.catalog                   # modules/catalog.nix over it: every route and app, what every host gets as `catalog`
-#   lab.withApps f                # the lab collected again with its app folders passed through f (a test's fixture
-#                                 # apps): workers, inventory and catalog follow them
-#   lab.shares."107"              # [{ path; readOnly; mode; localState; }] the nas paths a guest mounts: its instance.nix `shares`,
-#                                 # its own token dir and those of the tokens it reads (lab.tokenReads."107")
-#   lab.nasClients."10.100.0.107" # the same of every powered guest, by address: what vm-104 exports
-#   lab.roles.collector           # "103": the vmid of the one instance declaring a role (instance.nix `roles`)
-#   lab.alerts.backup_stale       # an instance's own alert rule (instance.nix `alerts`) plus its vmid
-#   lab.upstreams.aur             # { url; } a third-party service the lab depends on (modules/upstream/lib/upstreams.nix)
-#   lab.onions."paste-onion-key"  # "<56 base32>.onion": an onion route's address (src/generated/onions.json)
-#   lab.layout.custom             # "instances/custom": where each kind of folder lives, relative to src/
-#
-# problems: every broken lab-wide rule (zones.json against the instances, vmid ranges, vm shapes, duplicate names),
-# one line each; the flake refuses to evaluate past one, so no host and no terraform plan proceeds.
-#
-# root: the tree to collect, src/ by default; tests/lab.nix collects broken fixture trees. apps: the app folders'
-# app.nix values -> the ones collected (lab.withApps).
+# root: the tree to collect (tests/lab.nix collects broken fixtures); apps: maps the app folders' values (lab.withApps)
 { lib, root ? ../.., apps ? (folders: folders) }:
 let
   # -------------------------------------------------------------------------------------------------------------
@@ -46,16 +17,16 @@ let
 
   # relative to src/: the instances the lab needs to function, the third-party ones, the owner's apps
   layout = {
-    core = "core";
+    core = "instances/core";
     preconfigured = "instances/preconfigured";
     custom = "instances/custom";
-    swarm = "core/swarm.nix";
+    swarm = "instances/core/swarm.nix";
   };
   instanceKinds = [ layout.core layout.preconfigured ];
   appsDir = root + "/${layout.custom}";
   site = lib.importJSON (root + "/generated/site.json");
   zonesRaw = lib.importJSON (root + "/generated/zones.json");
-  # secret name -> the onion address of its key, written by scripts/secrets-sync.sh; a fixture tree has none
+  # secret name -> the onion address of its key, written by scripts/secrets-sync.nu; a fixture tree has none
   onionsFile = root + "/generated/onions.json";
   swarm = import (root + "/${layout.swarm}");
 
@@ -281,7 +252,7 @@ let
       "src/${layout.custom}/${name}: an app folder holds app.nix (see src/${layout.custom}/_template)";
     import (dir + "/app.nix") { inherit lib profiles; };
 
-  # the app folders and src/core/swarm.nix over modules/apps-catalog: every field typed and defaulted, once
+  # the app folders and src/instances/core/swarm.nix over modules/apps-catalog: every field typed and defaulted, once
   appsCatalog = removeAttrs (lib.evalModules {
     modules = [ ../apps-catalog {
       config = {

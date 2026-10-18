@@ -187,11 +187,13 @@ in {
 
   systemd.services.forgejo-mirror = {
     description = "Mirror every GitHub repository into Forgejo";
+    requires = [ "podman-forgejo.service" ];
     after = [ "podman-forgejo.service" "forgejo-init.service" ];
-    path = [ pkgs.curl pkgs.jq pkgs.podman pkgs.coreutils pkgs.gawk ];
+    path = [ pkgs.curl pkgs.podman pkgs.coreutils ];
     serviceConfig = {
       Type = "oneshot";
       StateDirectory = "forgejo-mirror";
+      PrivateTmp = true;
       SuccessExitStatus = [ upstream.unavailable ];
     };
     environment = {
@@ -215,7 +217,7 @@ in {
         chmod 600 "$FORGEJO_TOKEN_FILE.tmp"
         mv "$FORGEJO_TOKEN_FILE.tmp" "$FORGEJO_TOKEN_FILE"
       fi
-      exec ${pkgs.bash}/bin/bash ${./lib/forgejo-mirror.sh}
+      exec ${pkgs.writers.writeNu "forgejo-mirror" ./lib/forgejo-mirror.nu}
     '';
   };
 

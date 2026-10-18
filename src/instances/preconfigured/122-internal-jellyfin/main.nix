@@ -1,13 +1,11 @@
 # jellyfin, janitorr (deletes media nobody watches) and ollama (the lab's local llm), on the site's gpu if it has one
 #
-# Browsers log in only through authelia (jellyfin-plugin-sso), apps and jellyseerr by quick connect from a logged-in
-# browser; password logins remain for the generated admin and janitorr. The lldap plugin is gone: it bound as lldap's
-# admin and made the owner's sso password guessable, single factor, through /Users/AuthenticateByName. Its users keep
-# their libraries and history (the sso plugin finds them by name); jellyfin refuses their old passwords.
+# Security: browsers log in only through authelia (jellyfin-plugin-sso), apps and jellyseerr by quick connect from a
+# logged-in browser; password logins remain for the generated admin and janitorr. No lldap plugin: it binds as lldap's
+# admin and makes the owner's sso password guessable, single factor, through /Users/AuthenticateByName.
 #
-# jellyfin-setup runs on every start: admin, api keys, libraries, janitorr's user, encoding, network, plugins, one
-# restart if a step needs it, the sso plugin's settings. PartOf the container (a restart may bring a db a localState
-# restore swapped), it restarts the server inside the container, never its own unit, so it cannot stop halfway.
+# jellyfin-setup runs on every start, PartOf the container (a restart may bring a db a localState restore swapped); it
+# restarts the server inside the container, never its own unit, so it cannot stop halfway.
 { config, lib, pkgs, inventory, catalog, nasMount, nasPath, setupUnit, site, ... }:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
@@ -80,7 +78,6 @@ let
     };
   };
 
-  # janitorr: delete media unwatched this long
   unwatchedFor = "120d";
   janitorrPort = 8082;
   janitorrStatsPort = 8081;
@@ -261,7 +258,6 @@ in {
     inherit (ollama) port;
     acceleration = if gpu then "cuda" else false;
     loadModels = [ ollama.model ];
-    # drop models no longer listed
     syncModels = true;
     environmentVariables = {
       OLLAMA_KEEP_ALIVE = "10m";
@@ -490,7 +486,6 @@ in {
 
   sops.secrets = lib.genAttrs [ "jellyfin-oidc-secret" "jellyfin-admin-pass" "janitorr-pass" "radarr-key" "sonarr-key" ] (_: { });
 
-  # render janitorr's configs from the api keys
   systemd.services.janitorr-config = setupUnit {
     description = "Render Janitorr configuration from the API keys";
     after = [ "jellyfin-setup.service" ];

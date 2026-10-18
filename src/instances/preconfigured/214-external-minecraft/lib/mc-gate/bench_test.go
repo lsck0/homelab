@@ -11,10 +11,10 @@ import (
  * -----------------------------------------------------------------------------
  */
 
-// Benchmark_spec001_r040_frame measures what the gate spends on a connection before it decides: the frame reader,
+// Benchmark_frame_read measures what the gate spends on a connection before it decides: the frame reader,
 // the handshake parse and the address normalization. The Performance section claims under 1 ms of cpu per
 // connection and no allocation beyond the frame buffer, so allocations are reported.
-func Benchmark_spec001_r040_frame(b *testing.B) {
+func Benchmark_frame_read(b *testing.B) {
 	packet := handshakeTestPacket(handshakeTestProtocol, "cobblemon.mc.lsck0.dev\x00FML2\x00", intentLogin)
 	reader := bytes.NewReader(nil)
 
@@ -36,10 +36,10 @@ func Benchmark_spec001_r040_frame(b *testing.B) {
 	}
 }
 
-// Benchmark_spec001_r044_decide measures one login decision, handed to the owning goroutine and waited for as a
-// real connection does it (R-044). The target is starting, which is the one row of R-052 that decides without
+// Benchmark_decider_decide measures one login decision, handed to the owning goroutine and waited for as a
+// real connection does it. The target is starting, which is the one row of the decision table that decides without
 // changing a record, so every iteration measures the same work.
-func Benchmark_spec001_r044_decide(b *testing.B) {
+func Benchmark_decider_decide(b *testing.B) {
 	clock := fakeClockCreate()
 	settings := testSettings(b, "alpha")
 	systemd := fakeSystemdCreate(clock, settings.Servers[0].Unit)

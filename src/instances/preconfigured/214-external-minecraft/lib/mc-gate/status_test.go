@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -27,9 +29,9 @@ func statusTestDescription(t *testing.T, answer []byte) string {
 	return decoded.Description.Text
 }
 
-// Test_spec001_r042_status covers every answer a ping gets: the gate answers from its own records, a running
-// server's live status is cached for statusCacheS, and a name it does not know names no server (R-042, R-053c).
-func Test_spec001_r042_status(t *testing.T) {
+// Test_status_answer covers every answer a ping gets: the gate answers from its own records, a running
+// server's live status is cached for statusCacheS, and a name it does not know names no server.
+func Test_status_answer(t *testing.T) {
 	t.Run("round trip", func(t *testing.T) {
 		version, protocol := "1.21.1", 767
 		answer, err := statusBuild(fakeStatus(7), &version, &protocol, descriptionSleeping)
@@ -111,7 +113,7 @@ func Test_spec001_r042_status(t *testing.T) {
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			test.setup()
-			answer := testEvent(d, deciderEvent{kind: eventStatus, name: test.ask}).status
+			answer := testStatus(d, test.ask)
 			if got := statusTestDescription(t, answer); got != test.expect {
 				t.Fatalf("description %q, want %q", got, test.expect)
 			}
@@ -120,9 +122,9 @@ func Test_spec001_r042_status(t *testing.T) {
 
 	t.Run("running is fetched and cached", func(t *testing.T) {
 		d.servers["beta"].statusAt, fetches = time.Time{}, 0
-		first := testEvent(d, deciderEvent{kind: eventStatus, name: "beta"}).status
+		first := testStatus(d, "beta")
 		clock.advance(durationFromSeconds(settings.Limits.StatusCacheS) - time.Second)
-		second := testEvent(d, deciderEvent{kind: eventStatus, name: "beta"}).status
+		second := testStatus(d, "beta")
 		if fetches != 1 {
 			t.Fatalf("%d fetches for two pings, want 1", fetches)
 		}
@@ -130,9 +132,47 @@ func Test_spec001_r042_status(t *testing.T) {
 			t.Fatalf("the cached answer changed: %s then %s", first, second)
 		}
 		clock.advance(2 * time.Second)
-		testEvent(d, deciderEvent{kind: eventStatus, name: "beta"})
+		testStatus(d, "beta")
 		if fetches != 2 {
 			t.Fatalf("%d fetches past statusCacheS, want 2", fetches)
 		}
 	})
+}
+
+// Test_status_fetch_outside covers the decider never asking the backend itself: a stale ping hands the fetch to
+// its caller, a second ping meanwhile is answered from the records, and an unchanged answer leaves the cache file alone.
+func Test_status_fetch_outside(t *testing.T) {
+	d, _, clock, settings, backend := deciderTestBackend(t)
+	testServerRunning(d, "beta", clock.Now())
+	backend.online = 2
+
+	reply := testEvent(d, deciderEvent{kind: eventStatus, name: "beta"})
+	if reply.fetch != "beta" || backend.fetches != 0 {
+		t.Fatalf("fetch %q after %d fetches, want beta handed out and none made", reply.fetch, backend.fetches)
+	}
+	if second := testEvent(d, deciderEvent{kind: eventStatus, name: "beta"}); second.fetch != "" {
+		t.Fatal("a second ping asked again while the first fetch was out")
+	}
+	testEvent(d, deciderFetchEvent(d, reply, eventStatusFetched))
+	if d.servers["beta"].playersOnline != 2 {
+		t.Fatalf("%d players online, want 2", d.servers["beta"].playersOnline)
+	}
+
+	cache := filepath.Join(settings.StateDir, "beta"+statusFileSuffix)
+	before, err := os.Stat(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(cache, time.Unix(0, 0), time.Unix(0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	clock.advance(durationFromSeconds(settings.Limits.StatusCacheS) + time.Second)
+	testStatus(d, "beta")
+	after, err := os.Stat(cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(time.Unix(0, 0)) || after.Size() != before.Size() {
+		t.Fatal("an unchanged answer rewrote the status cache")
+	}
 }

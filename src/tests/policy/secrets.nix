@@ -5,8 +5,8 @@
 # - every secret comes from the file the layout names, and every file is on disk holding exactly its declared names
 #   (a host's shared copy exactly the shared ones it reads), encrypted to exactly the admin recipients of
 #   src/secrets/admins.txt plus its readers' age.pub; each host's recipient is its own; .sops.yaml has the same
-#   rule for every file (a forgotten secrets-sync.sh run fails here, before a deploy)
-# - the key that opens them is the one sync.sh pushes, /var/lib/sops-nix/key.txt; no ssh key doubles as an age key
+#   rule for every file (a forgotten secrets-sync.nu run fails here, before a deploy)
+# - the key that opens them is the one sync.nu pushes, /var/lib/sops-nix/key.txt; no ssh key doubles as an age key
 # - no secret file is readable by others, and no sops placeholder leaks into a unit, where nothing would replace it
 # - token shares: a host mounts its own token dir read-write iff it mints a token, every other token dir read-only
 #   (what a producer mints is its instance.nix `tokens`)
@@ -60,11 +60,11 @@ let
     else lib.attrNames (lib.filterAttrs (_: d: d.file == file) plan.secrets);
   isValues = lib.hasSuffix ".json";
   fileLaws = file:
-    if !(builtins.pathExists (src + "/${file}")) then [ "src/${file} is missing: run src/scripts/secrets-sync.sh --apply" ]
+    if !(builtins.pathExists (src + "/${file}")) then [ "src/${file} is missing: run src/scripts/secrets-sync.nu --apply" ]
     else lib.optional (recipientsOf file != wantRecipients file)
       "src/${file} is encrypted to [ ${toString (recipientsOf file)} ], not the admins and its readers [ ${toString plan.files.${file}} ]"
     ++ lib.optional (isValues file && lib.attrNames (removeAttrs (lib.importJSON (src + "/${file}")) [ "sops" ]) != namesWanted file)
-      "src/${file} does not hold exactly [ ${toString (namesWanted file)} ]: run src/scripts/secrets-sync.sh --apply";
+      "src/${file} does not hold exactly [ ${toString (namesWanted file)} ]: run src/scripts/secrets-sync.nu --apply";
   pubs = map (c: { inherit c; pub = pubOf c; }) (lib.filter (c: builtins.pathExists (src + "/${plan.hosts.${c}.home}/age.pub")) (lib.attrNames plan.hosts));
   uniqueRecipients = lib.concatLists (lib.mapAttrsToList (pub: es:
     lib.optional (lib.length es > 1 || lib.elem pub adminRecipients) "hosts ${toString (map (e: e.c) es)} share the recipient ${pub}")

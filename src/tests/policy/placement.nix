@@ -1,12 +1,12 @@
 # where a file lives: every file has one owner, and it lives in that owner's folder
 #
-# Owners: an instance (src/core/<folder>/ or src/instances/preconfigured/<folder>/), an app
+# Owners: an instance (src/instances/core/<folder>/ or src/instances/preconfigured/<folder>/), an app
 # (src/instances/custom/<name>/), a module (src/modules/<name>.nix or src/modules/<name>/) and the lab itself (the
-# flake, src/scripts, src/terraform, src/secrets, src/generated, src/tests, src/core/swarm.nix, sync.sh). A
+# flake, src/scripts, src/terraform, src/secrets, src/generated, src/tests, src/instances/core/swarm.nix, sync.nu). A
 # file's users are the owners of the code that names it: a path literal in a .nix file, "$SRC/<path>" in a shell
-# script, "${local.src}/<path>" in terraform, resolved against the file's directory; comment lines name what they
-# describe without using it. Tests (anything under a tests/ folder), laws,
-# docs and skills never make a file shared: a test lives with what it tests. A module counts as used by whoever uses
+# script, `$SRC | path join <segments>` in a nu script, "${local.src}/<path>" in terraform, resolved against the
+# file's directory; comment lines name what they describe without using it. Tests (anything under a tests/ folder),
+# laws, docs and skills never make a file shared: a test lives with what it tests. A module counts as used by whoever uses
 # the module, so the users of a file are, in the end, instances, apps or the lab.
 #
 # Laws:
@@ -26,7 +26,7 @@ let
   # CONSTANTS
   # -------------------------------------------------------------------------------------------------------------
 
-  topAllowed = [ "flake.nix" "flake.lock" "core" "generated" "instances" "modules" "scripts" "secrets" "terraform" "tests" ];
+  topAllowed = [ "flake.nix" "flake.lock" "generated" "instances" "modules" "scripts" "secrets" "terraform" "tests" ];
   instanceKinds = [ lab.layout.core lab.layout.preconfigured ];
   folderKinds = instanceKinds ++ [ lab.layout.custom ];
   moduleFolderAllowed = [ "default.nix" "lib" "tests" ];
@@ -35,7 +35,7 @@ let
   # what the scripts write, read by name: no code to scan below
   generatedDir = "generated";
   # in the flake's source only when it is evaluated from git; a path: flake holds src alone
-  syncScript = "../sync.sh";
+  syncScript = "../sync.nu";
   # folders starting with this are documentation (the templates), never an owner
   hiddenPrefix = "_";
   # the stand-ins every test shares, no test itself
@@ -43,10 +43,12 @@ let
   labWideMark = "# lab-wide: ";
   # how far a lab-wide test's first lines are read for its reason (a shell test starts with its shebang)
   labWideLines = 3;
-  codeSuffixes = [ ".nix" ".sh" ".tf" ];
+  codeSuffixes = [ ".nix" ".sh" ".nu" ".tf" ];
   # a nix path literal: ./x or ../x, not inside another path or a word
   nixPathPattern = "(^|[^A-Za-z0-9_./~$-])(\\.\\.?(/[A-Za-z0-9._+-]+)+)";
   shellPathPattern = "[$]SRC\"?/([A-Za-z0-9._/+-]+)";
+  # the literal segments of a path join from the source root, up to the first computed one
+  nuPathPattern = "[$](SRC|src|lab[.]src) [|] path join ([A-Za-z0-9._ +-]+)";
   terraformPathPattern = "[$][{]local[.]src[}]/([A-Za-z0-9._/+-]+)";
 
   # -------------------------------------------------------------------------------------------------------------
@@ -73,7 +75,7 @@ let
   dirOfPath = path: let parts = lib.splitString "/" path; in lib.concatStringsSep "/" (lib.init parts);
 
   isTest = path: lib.hasPrefix "tests/" path || lib.hasInfix "/tests/" path;
-  # an owner is its folder: "core/<folder>", "instances/preconfigured/<folder>", "instances/custom/<name>", "modules/<name>"
+  # an owner is its folder: "instances/core/<folder>", "instances/preconfigured/<folder>", "instances/custom/<name>", "modules/<name>"
   ownerOf = path: let
     folder = lib.findFirst (m: m != null) null (map (kind: builtins.match "(${kind}/[^/.]+)(/.*)?" path) folderKinds);
     module = builtins.match "modules/([^/.]+)(\\.nix|/.*)?" path;
@@ -97,6 +99,7 @@ let
   refsOf = path: let text = codeOf path; dir = dirOfPath path; in lib.filter (t: t != null) (
     if lib.hasSuffix ".nix" path then map (p: normalize "${dir}/${p}") (matchesOf nixPathPattern 1 text)
     else if lib.hasSuffix ".sh" path then map normalize (matchesOf shellPathPattern 0 text)
+    else if lib.hasSuffix ".nu" path then map (p: normalize (lib.replaceStrings [ " " ] [ "/" ] p)) (matchesOf nuPathPattern 1 text)
     else map normalize (matchesOf terraformPathPattern 0 text));
 
   allFiles = lib.concatMap (entry:
@@ -173,7 +176,7 @@ let
   testFiles = lib.filter isTest allFiles;
   testDirOf = path: dirOfPath path;
   namedBeside = path: lib.any (r: r.path != path && testDirOf r.path == testDirOf path && lib.elem path r.refs) readers;
-  # a test runnable by hand (media-stack.sh): it starts with its interpreter
+  # a test runnable by hand (media-stack.nu): it starts with its interpreter
   isScript = path: lib.hasPrefix "#!" (builtins.readFile (src + "/${path}"));
   instanceFolders = lib.concatMap (kind: lib.optionals (builtins.pathExists (src + "/${kind}")) (map (f: "${kind}/${f}")
     (lib.filter (f: (builtins.readDir (src + "/${kind}")).${f} == "directory") (entriesOf kind)))) instanceKinds;

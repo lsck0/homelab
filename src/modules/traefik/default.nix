@@ -1,27 +1,12 @@
 # traefik with the lab's defences, for both ingresses (100-internal, 200-external)
 #
-# The routes an ingress serves (`routes`, modules/catalog.nix records of modules/service.nix) become its routers,
-# services and middlewares here, each feature where the route's `on` names it: cloudflare-only on the socket peer,
-# client-ip (the real client into X-Real-Ip, lib/traefik-clientip), the strip of client-sent identity and target
-# headers, the gate (lib/gate: crowdsec's decisions as a captcha or a ban page, the anonymous limit), the crowdsec
-# bouncer with its AppSec waf and the core rule set, the per-client and per-route rate and
-# in-flight limits, the body limit, retries, the security headers, then sso, anubis, basic auth and the route's own
-# headers. A router splits by what a request holds: body methods pass the body limit on a router of their own, a
-# websocket upgrade holds the in-flight slots of its own router for the socket's life. A hand-written router gets the
-# same chain from an `on` attribute of its own, none without. Every quantity that names a client reads
-# X-Real-Ip, which client-ip sets from the socket peer and the X-Forwarded-For hops of trustedProxies and Cloudflare
-# only; the backend's X-Forwarded-For is that client alone. The probers check a route at its health path through the
-# ingress, past sso and anubis but nowhere else (probe routers below). A public
-# route's ssoPaths get a router of their own with authelia, ranked above the route's others. A houseUnlimited route
-# gets routers of its own for the house's sources (by socket peer), its chain without limits, gate or proof of work,
-# and the whole backend where its publicPrefix shows everyone else a subtree of it.
-#
-# An onion route (modules/service.nix `onion`, the edge's routes only) is served a second time at its onion address on
-# the onion entrypoint, plain http from the router's tor (core/300-router/lib/onion-services.nix), with the same
-# routers, chain and backend as its name; tls is the onion service's. Every onion visitor arrives from the router, so
-# the per-client limits and crowdsec see one client there: crowdsec never bans it (private), the waf still judges
-# each request, and the gate asks every browser session its anti-phishing captcha, whatever the route's features say.
-# The bot defence and the browser telemetry intake stay on the name.
+# each route (modules/catalog.nix records of modules/service.nix) becomes routers, services and middlewares, a feature
+# where the route's `on` names it, in chainOf's order. A router splits by what a request holds: body methods pass the
+# body limit on a router of their own, a websocket upgrade holds its in-flight slots on its own router.
+# security: every quantity that names a client reads X-Real-Ip, which client-ip sets from the socket peer and the
+# X-Forwarded-For hops of trustedProxies and cloudflare only; the backend's X-Forwarded-For is that client alone.
+# onion routes (the edge's only) are served again on the onion entrypoint from the router's tor. Every onion visitor
+# arrives from the router, so crowdsec never bans it and the gate asks each browser session its anti-phishing captcha.
 { config, lib, pkgs, retry, inventory, site, lab, catalog, ... }:
 let
   cfg = config.homelab.traefik;
@@ -59,7 +44,6 @@ let
   # loopback ports of the bot defence: iocaine's labyrinth and the nginx serving robots.txt and llms.txt
   iocainePort = 42069;
   wellKnownPort = 8083;
-  # crowdsec's local api, published from its container on loopback
   crowdsecLapiPort = 8180;
   crowdsecLapiContainerPort = 8080;
   # the one anubis instance, its metrics, and the loopback entrypoint it hands solved requests back to
@@ -104,7 +88,6 @@ let
     };
   };
 
-  # header hardening on every websecure route
   baseSecureHeaders = {
     stsSeconds = 31536000;
     stsIncludeSubdomains = true;
@@ -192,7 +175,6 @@ let
   } // lib.listToAttrs (map (bytes: lib.nameValuePair "body-limit-${toString bytes}" {
     buffering = {
       maxRequestBodyBytes = bytes;
-      # spill to disk past 1 mib
       memRequestBodyBytes = 1048576;
       maxResponseBodyBytes = 0;
     };
@@ -247,7 +229,6 @@ let
     labels.type = "traefik";
   }];
 
-  # crowdsec never bans these
   whitelistParser = yamlDocs "homelab-whitelist.yaml" [{
     name = "homelab/whitelist";
     description = "homelab trusted networks";
@@ -303,17 +284,24 @@ let
 
   # a start never fetches or upgrades a rule or its data
   crowdsecHub = import ./lib/crowdsec-hub.nix { inherit pkgs lib; };
-  # without it every start asks version.crowdsec.net which hub branch to install from, and a start without internet
-  # fails (the image's entrypoint installs its docker parsers at every start)
-  crowdsecLocalConfig = yamlDocs "config.yaml.local" [ { cscli.hub_branch = crowdsecHub.hubBranch; } ];
+  # hub_branch: without it every start asks version.crowdsec.net, and a start without internet fails.
+  # log_level: podman's journald driver tags container output err, and the lapi's per-request info lines (5000 a day)
+  # buried every real error. use_wal: without it lapi warns that sqlite may leave it unresponsive
+  crowdsecLocalConfig = yamlDocs "config.yaml.local" [ {
+    cscli.hub_branch = crowdsecHub.hubBranch;
+    api.server.log_level = "warning";
+    db_config.use_wal = true;
+  } ];
   # the owner's choice: the community api (CAPI) gets each ban's attacker ip, scenario and time, and returns the
   # community blocklist; an outage keeps the last decisions
   crowdsecCommunity = true;
 
-  # the waf, on routes taking it
   bouncerMiddleware = lib.optionalAttrs cfg.crowdsecBouncer.enable { crowdsec = bouncer; };
 
-  # -- bot defence: robots.txt / llms.txt and the labyrinth --------------------
+  # -----------------------------------------------------------------------------
+  # BOT DEFENCE
+  # -----------------------------------------------------------------------------
+
   robotsTxt = pkgs.writeText "robots.txt" (''
     # Crawlers that collect training data are not welcome here. The ones that
     # ignore this file are served https://iocaine.madhouse-project.org/ instead.
@@ -354,13 +342,14 @@ let
     cp ${llmsTxt} $out/.well-known/llms.txt
   '';
 
-  # public-domain prose for the markov generator; gutenberg regenerates its cache files in place (2026-10-14: the hash
-  # changed under the same url), so the copy is a fixed wayback snapshot
+  # public-domain prose for the markov generator; gutenberg regenerates its cache files in place, so the hash changes
+  # under the same url: a fixed wayback snapshot
   corpus = pkgs.fetchurl {
     url = "https://web.archive.org/web/20260927171441id_/https://www.gutenberg.org/cache/epub/2701/pg2701.txt";
     hash = "sha256-kHQg22xLaMcOKYjNKtnIz3kThmegG2M3bRjdF/7xoYs=";
+    # the archive serves this snapshot gzip-encoded; the hash is the plain text's
+    curlOptsList = [ "--compressed" ];
   };
-  # word list derived from the corpus
   wordList = pkgs.runCommand "iocaine-words" { } ''
     tr -cs '[:alpha:]' '\n' < ${corpus} | tr '[:upper:]' '[:lower:]' \
       | ${pkgs.gnugrep}/bin/grep -E '^[a-z]{3,}$' | sort -u > $out
@@ -382,15 +371,25 @@ let
 
   # every host, above all routes, no auth in front, but those of routes without botDefense
   botExcluded = lib.unique (map (r: r.host) (lib.filter (r: !(on r "botDefense")) (lib.attrValues allRecords)));
-  botRule = rule: if botExcluded == [ ] then rule
-    else "(${rule}) && " + lib.concatMapStringsSep " && " (host: "!Host(`${net.fqdn host}`)") botExcluded;
+  botRuleExcept = excluded: rule: if excluded == [ ] then rule
+    else "(${rule}) && " + lib.concatMapStringsSep " && " (host: "!Host(`${net.fqdn host}`)") excluded;
+  botRule = botRuleExcept botExcluded;
+  # an indexable route's host answers robots.txt from its backend (modules/service.nix indexable)
+  indexableHosts = lib.unique (map (r: r.host) (lib.filter (r: r.indexable or false) (lib.attrValues allRecords)));
   # the whole chain but cloudflare: unproxied hosts serve robots.txt and the labyrinth too, to clients reaching them
   botOn = lib.remove "cloudflare" service.protectionFeatures;
   # the labyrinth trickles through the gate's tarpit where the router takes it
   labyrinthService = features: if gateOn && lib.elem "tarpit" features then "tarpit" else "labyrinth";
   botDefenseRouters = lib.optionalAttrs cfg.botDefense.enable {
+    robots-tls = {
+      rule = botRuleExcept (lib.unique (botExcluded ++ indexableHosts)) "Path(`/robots.txt`)";
+      service = "wellknown";
+      entryPoints = [ "websecure" ];
+      priority = 10000;
+      on = botOn;
+    };
     wellknown-tls = {
-      rule = botRule "Path(`/robots.txt`) || Path(`/llms.txt`) || Path(`/.well-known/llms.txt`)";
+      rule = botRule "Path(`/llms.txt`) || Path(`/.well-known/llms.txt`)";
       service = "wellknown";
       entryPoints = [ "websecure" ];
       priority = 10000;
@@ -420,7 +419,9 @@ let
     tarpit.loadBalancer.servers = [{ url = "http://${gate.loopback}:${toString gate.tarpitPort}"; }];
   };
 
-  # -- the gate: crowdsec's decisions as pages, the captcha, the anonymous limit (lib/gate) -------------------
+  # -----------------------------------------------------------------------------
+  # GATE (lib/gate)
+  # -----------------------------------------------------------------------------
 
   gate = import ./lib/gate.nix { inherit pkgs lib; };
   ladder = import ./lib/ladder.nix { inherit lib yamlDocs; };
@@ -492,7 +493,9 @@ let
   gateMetricsTimeoutS = 5;
   gateMetricsRetries = 5;
 
-  # -- routes: every router, service and middleware a route needs -------------------------------------------
+  # -----------------------------------------------------------------------------
+  # ROUTES
+  # -----------------------------------------------------------------------------
 
   # a feature is on where the record's `on` names it; a hand-written router's record: its `on`, service.nix's defaults
   on = r: feature: lib.elem feature r.on;
@@ -569,7 +572,7 @@ let
     routes = lib.mapAttrs (_: r: r // { on = lib.subtractLists houseSpared r.on; sources = houseSources; publicPrefix = null; })
       (lib.filterAttrs (_: r: on r "houseUnlimited") cfg.routes);
   };
-  # an onion route without an address yet (secrets-sync.sh writes it) is served at its name alone
+  # an onion route without an address yet (secrets-sync.nu writes it) is served at its name alone
   onionRoutes = lib.filterAttrs (_: r: r.onionAddress != null) cfg.routes;
   # every onion visitor passes the gate and its anti-phishing captcha, whatever the route takes on its name: nothing but
   # the captcha tells one tor visitor from another, all arriving from the router; the onion routers' chain is built here
@@ -630,7 +633,9 @@ let
     internal-only.ipAllowList.sourceRange = houseSources;
   };
 
-  # -- frontend telemetry: the browser's otlp beacons on the app's own origin, to the collector ----------------
+  # -----------------------------------------------------------------------------
+  # FRONTEND TELEMETRY
+  # -----------------------------------------------------------------------------
 
   # same origin: no cors, and a route behind sso keeps it, the session cookie rides along; anubis would stop the
   # beacons, the body limit bounds what an unauthenticated public input may send
@@ -660,7 +665,11 @@ let
     frontend-intake.loadBalancer.servers = [{ url = telemetry.urls.frontendIntake; }];
   };
 
-  # -- relays: the edge forwards every internal route to the internal ingress, over tls verified for its host ---
+  # -----------------------------------------------------------------------------
+  # RELAYS
+  # -----------------------------------------------------------------------------
+
+  # the edge forwards every internal route to the internal ingress, over tls verified for its host
 
   # by its prefix too: the routes of one host may differ in `internet`, the longer prefix ranked first
   relayRouters = lib.mapAttrs' (name: r: lib.nameValuePair "${name}-relay" ({
@@ -675,7 +684,11 @@ let
   }) cfg.relays;
   relayTransports = lib.mapAttrs' (name: r: lib.nameValuePair "${name}-relay" { serverName = net.fqdn r.host; }) cfg.relays;
 
-  # -- basic auth: htpasswd files rendered from sops, the passwords never on an argv ----------------------------
+  # -----------------------------------------------------------------------------
+  # BASIC AUTH
+  # -----------------------------------------------------------------------------
+
+  # htpasswd files rendered from sops, the passwords never on an argv
 
   basicAuthDir = "/run/traefik-auth";
   basicAuthRoutes = lib.filterAttrs (_: r: r.basicAuth != null) cfg.routes;
@@ -794,7 +807,6 @@ in {
   imports = [ ../on-demand ];
 
   options.homelab.traefik = let
-    # traefik's own dynamic configuration, merged with what the routes derive
     passthrough = what: lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; description = "Traefik ${what}."; };
     records = what: lib.mkOption {
       type = lib.types.attrsOf lib.types.anything;
@@ -919,18 +931,20 @@ in {
       after = [ "podman-crowdsec.service" ];
       requires = [ "podman-crowdsec.service" ];
       wantedBy = [ "multi-user.target" ];
-      path = [ pkgs.podman pkgs.getent pkgs.coreutils pkgs.diffutils pkgs.gnused ];
       environment = {
         PUBLIC_HOST = net.fqdn net.wan.publicHost;
         PUBLIC_PREFIX_HOST = net.fqdn net.wan.publicPrefixHost;
         PUBLIC_PREFIX_LENGTH = toString net.wan.publicPrefixLength;
       };
       # no restart: the timer retries, faster retries restart crowdsec
-      serviceConfig.Type = "oneshot";
-      script = "exec ${pkgs.bash}/bin/bash ${./lib/crowdsec-home-whitelist.sh}";
+      serviceConfig = {
+        Type = "oneshot";
+        ExecStart = pkgs.writers.writeNu "crowdsec-home-whitelist" {
+          makeWrapperArgs = [ "--prefix" "PATH" ":" (lib.makeBinPath [ pkgs.podman pkgs.getent ]) ];
+        } ./lib/crowdsec-home-whitelist.nu;
+      };
     };
 
-    # catch ip rotation before anyone notices
     systemd.timers.crowdsec-home-whitelist = lib.mkIf cfg.crowdsecBouncer.enable {
       wantedBy = [ "timers.target" ];
       timerConfig = {
@@ -999,7 +1013,7 @@ in {
         cp -r --no-preserve=mode ${crowdsecHub.hub} ${crowdsecDir}/config/hub
         # the image's entrypoint refreshes only an index older than a day
         touch ${crowdsecDir}/config/hub/.index.json
-        cp -r --no-preserve=mode ${crowdsecHub.data}/. ${crowdsecDir}/data/
+        cp -r --no-preserve=mode --remove-destination ${crowdsecHub.data}/. ${crowdsecDir}/data/
         ${lib.optionalString (cfg.crowdsecBouncer.whitelistCidrs != [ ]) ''
           install -d -m 0755 ${crowdsecDir}/config/parsers/s02-enrich
           install -m 0644 ${whitelistParser} ${crowdsecDir}/config/parsers/s02-enrich/homelab-whitelist.yaml
@@ -1028,7 +1042,6 @@ in {
           };
         };
         api.dashboard = true;
-        # scraped by vm-103
         metrics.prometheus = {
           entryPoint = "metrics";
           addEntryPointsLabels = true;
@@ -1087,7 +1100,6 @@ in {
       };
     };
 
-    # serves robots.txt and llms.txt
     services.nginx = lib.mkIf cfg.botDefense.enable {
       enable = true;
       recommendedGzipSettings = true;

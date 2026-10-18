@@ -1,27 +1,13 @@
-# retrying commands, and the setup units built on them
+# retrying commands, and the setup units built on them; every host gets both as module arguments
 #
-# `retry` runs a command until it succeeds, for the waits of a setup script (an app's port answering, a file
-# appearing). `setupUnit` is the one shape of a unit that configures an app through its api after it started and
-# exports what the app minted (an api key) to the token dirs: a oneshot that retries forever, because what it waits
-# for (the app, the nas, a peer guest) comes up in no fixed order at boot, and that holds the token helpers below.
-# Every host gets both as module arguments:
+# `retry <attempts> <interval s> <command...>` runs a command until it succeeds. `setupUnit` is the one shape of a unit
+# that configures an app through its api and exports what the app minted to the token dirs: a oneshot that retries
+# forever, because what it waits for (the app, the nas, a peer guest) comes up in no fixed order at boot.
+#   script = ''${retry} 90 2 curl -sf http://127.0.0.1/health; curl -sf ... | jq -j .apiKey | token_write foo-key'';
 #
-#   systemd.services.foo-setup = setupUnit {
-#     description = "Configure foo and export its API key";
-#     after = [ "podman-foo.service" ];
-#     path = [ pkgs.curl pkgs.jq ];
-#     script = ''
-#       ${retry} 90 2 curl -sf http://127.0.0.1:80/health
-#       curl -sf ... | jq -j .apiKey | token_write foo-key
-#     '';
-#   };
-#
-# Token helpers in every setupUnit script (modules/tokens has the dirs):
-#   token_write <name>          the value on stdin becomes this host's <name>.token, renamed into its own dir and
-#                               rewritten only when it changed; refuses an empty value or one that is no token
-#   token_read <name>           a token this host reads or mints, refusing a value that is no token
-# Writes go to the real file in tokens.ownDir, never through the links in tokens.dir: a rename or `rm` through a
-# link replaces the link with a local file, and the nas copy, which every consumer reads, goes stale.
+# token_write <name> (stdin) and token_read <name> refuse a value that is no token. Writes go to the real file in
+# tokens.ownDir, never through the links in tokens.dir: a rename through a link replaces the link with a local file,
+# and the nas copy, which every consumer reads, goes stale.
 { config, lib, pkgs, ... }:
 let
   tokens = config.homelab.tokens;

@@ -103,7 +103,7 @@ Copy `src/instances/custom/_template/` to `src/instances/custom/<name>/` and set
 compose file need a root `Dockerfile` (service `web`, port 8000 unless the route says otherwise); a stack whose
 services only name images needs `build` hints. Every named volume needs `volumes.<name>.backup`, its service in `stateful`.
 Secrets go in `env.<service>` as `{{name}}` with a `secrets` generator; the owner then runs
-`src/scripts/secrets-sync.sh --apply` and `./sync.sh`. A broken entry fails every host's build with a message
+`src/scripts/secrets-sync.nu --apply` and `./sync.nu`. A broken entry fails every host's build with a message
 naming the field. Draft the entry; do not deploy it yourself.
 
 ## CI runners (vm-111)

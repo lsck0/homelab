@@ -1,4 +1,4 @@
-# vm-112's gate before every nightly build (lib/archrepo-fetch.sh) in the sandbox: it checks out and prints a
+# vm-112's gate before every nightly build (lib/archrepo-fetch.nu) in the sandbox: it checks out and prints a
 # head signed by the pinned primary key (directly or by its signing subkey), and refuses an unsigned head and one
 # signed by a foreign key, even when the commit swaps the key file in the repo for the foreign key, and a head without
 # the key file (a dotfiles layout this script does not know). A refused head leaves the checkout of the last good one
@@ -14,7 +14,7 @@ let
     lab.upstreams.github.url = "http://127.0.0.1:1/";
   })._module.args.upstream;
 in
-pkgs.runCommand "archrepo-fetch" { nativeBuildInputs = [ pkgs.git pkgs.gnupg pkgs.coreutils pkgs.gawk pkgs.gnugrep ]; } ''
+pkgs.runCommand "archrepo-fetch" { nativeBuildInputs = [ pkgs.nushell pkgs.git pkgs.gnupg pkgs.coreutils pkgs.gawk pkgs.gnugrep ]; } ''
   set -euo pipefail
   export HOME=$PWD/home GNUPGHOME=$PWD/signer
   mkdir -p "$HOME" "$GNUPGHOME"; chmod 700 "$GNUPGHOME"
@@ -41,7 +41,7 @@ pkgs.runCommand "archrepo-fetch" { nativeBuildInputs = [ pkgs.git pkgs.gnupg pkg
     git -C "$repo" commit -q -m "$message" "$@"
     git -C "$repo" rev-parse HEAD
   }
-  fetch() { bash ${../lib/archrepo-fetch.sh} "file://$repo" ${ref} "$PWD/checkout" "$owner" ${upstream.run} github; }
+  fetch() { nu --no-config-file ${../lib/archrepo-fetch.nu} "file://$repo" ${ref} "$PWD/checkout" "$owner" ${upstream.run} github; }
 
   good=$(commit "signed by the owner's subkey" -S"$owner")
   [ "$(fetch)" = "$good" ] || fail "a head signed by the pinned key was not fetched"
@@ -74,7 +74,7 @@ pkgs.runCommand "archrepo-fetch" { nativeBuildInputs = [ pkgs.git pkgs.gnupg pkg
   pass "a head without the key file is refused, the last good checkout stays"
 
   status=0
-  UPSTREAM_BACKOFF_S=0 bash ${../lib/archrepo-fetch.sh} "file://$PWD/unreachable" ${ref} "$PWD/checkout" "$owner" \
+  UPSTREAM_BACKOFF_S=0 nu --no-config-file ${../lib/archrepo-fetch.nu} "file://$PWD/unreachable" ${ref} "$PWD/checkout" "$owner" \
     ${upstream.run} github 2>err || status=$?
   [ "$status" = ${toString upstream.unavailable} ] || fail "an outage exited $status: $(cat err)"
   [ "$(git -C checkout rev-parse HEAD)" = "$good" ] || fail "an outage moved the checkout"

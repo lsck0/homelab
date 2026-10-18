@@ -1,34 +1,8 @@
 # every route in the lab, one shape for the ingresses, the router, authelia and the prober, plus the swarm's shape
 #
-# An instance service's route (modules/lab: a vm and a port) and a swarm app's route (src/instances/custom/: the cluster's
-# nodes and a published port) are the same exposure (modules/service.nix); here they meet, plus vmid (null for an
-# app's), app (null for an instance's) and nodes (an app's cluster). modules/lab evaluates this once over the typed
-# catalog (`lab.catalog`, its `problems` stopping the flake) and every host gets it as the argument `catalog`.
-#
-#   apps            the enabled apps, normalized by the schema, `{{homelab.*}}` endpoints resolved
-#   internal        route name -> route served by vm-100, behind authelia with its sso feature
-#   external        route name -> route served by the edge, vm-200; onionAddress its onion service's (lab.onions) or null
-#   l4              route name -> tcp or udp route: forwarded from the house's publicPort, or lab-only without one
-#   forwarded       the l4 routes the router forwards from the house's public address
-#   access          { admins; groups.<name>; } the lldap groups authelia admits: admins everywhere, else the sso
-#                   route's (its ssoPaths' too) or the oidc client's own group; lldap creates exactly these
-#   nodes           the shared swarm's workers' addresses: the routing mesh answers every published port on each
-#   clusters        swarm name (`shared`, `app-<name>`) -> { managerId; workerIds; stateId; wakers; nodes; zone; apps;
-#                   admission }: wakers the guests calling its controller (the ingresses, the state worker's dumps)
-#   services        service key (an instance service or an app) -> { vmid; app; on.<feature>; metrics; idle; routes; ... }
-#   manager         the swarm manager's inventory entry
-#   builder         the app builder's inventory entry
-#   swarm           { managerId; builderId; stateId; controllerPort; cadvisorPort; taskDefaults; ports; portRange; }
-#   ports           { external; internal; metrics; tcp; udp; } the enabled apps' published ports by group: http by
-#                   its zone, exporters, and the tcp and udp ports of l4 routes, which answer anyone; `guarded` those
-#                   of the routes taking the guard and every exporter's, by group in that order
-#   secretRefs      the sops secrets a string names as {{name}}
-#   metricsBlocks   [{ app; host; path; }] metrics a public route would expose: the edge denies them
-#   appsZone        the workers' subnet (cidr, modules/net.nix)
-#   ingress         { internal; external; } the inventory entries of the two ingresses (modules/net.nix zones)
-#   probeUrlOf r    the url the prober and the status dots check an http route at
-#   registry        the registry's name, which the builder pushes to and every stack's images name
-#   problems        what breaks the lab-wide rules, one line each naming every side; empty when the catalog holds
+# an instance service's route (a vm and a port) and a swarm app's route (its cluster's nodes and a published port) are
+# the same exposure (modules/service.nix), here with vmid, app and nodes added. modules/lab evaluates this once
+# (`lab.catalog`, its `problems` stopping the flake) and every host gets it as the argument `catalog`.
 #
 # Rejected: merging the route sets with `//`. A later app silently replaced an earlier route of the same name, so
 # `wat.internal.grafana` took grafana's authelia route; every collision is a problem instead.
@@ -108,7 +82,7 @@ let
   };
   apps = lib.mapAttrs (_: normalize) enabledRaw;
 
-  # every swarm by name: `shared` (the workers of core/swarm.nix, the apps without placement) and `app-<name>` per
+  # every swarm by name: `shared` (the workers of instances/core/swarm.nix, the apps without placement) and `app-<name>` per
   # app on its own guest, a swarm of one; admission (modules/limits) holds each to its own workers
   wakersOf = stateId: lib.unique (lib.attrValues ingressIds ++ [ stateId ]);
   sharedStateId = toString appsCatalog.swarm.state;
@@ -135,7 +109,7 @@ let
     inherit (appsCatalog.swarm) taskDefaults;
   };
 
-  # an onion route's address, null until secrets-sync.sh generated its key
+  # an onion route's address, null until secrets-sync.nu generated its key
   onionAddressOf = name: r: if r.onion then lab.onions.${service.onionKeyOf name} or null else null;
   # route name -> { name; owner; route; } for every route of the lab, so a collision can name both owners; an
   # instance service's route is its own exposure, an app's route runs on the app's cluster

@@ -9,7 +9,8 @@ let
     ++ (if container then [ "_netdev" ] else [ "x-systemd.automount" "x-systemd.idle-timeout=60" ]);
   # hard: a nas outage blocks writers until it is back, it never corrupts them
   nfsOpts = [ "nfsvers=4" "rw" "hard" "timeo=50" ] ++ mountOpts;
-  nfsOptsRo = [ "nfsvers=4" "ro" "soft" "timeo=15" ] ++ mountOpts;
+  # soft: a reader gets EIO instead of hanging; 5 s x 3 retries ride out a short stall of the nas under load
+  nfsOptsRo = [ "nfsvers=4" "ro" "soft" "timeo=50" "retrans=3" ] ++ mountOpts;
 
   vmid = config.homelab.vmid;
   # the dmz and the apps zone: anything not internal gets per-service state only

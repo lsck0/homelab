@@ -30,7 +30,7 @@ const (
 // AllowLookup resolves a name to its addresses of one network, as net.Resolver.LookupNetIP.
 type AllowLookup func(ctx context.Context, network, host string) ([]netip.Addr, error)
 
-// Allow is every source the gate never marks as looping and never caps (R-048e): fixed networks, and names resolved
+// Allow is every source the gate never marks as looping and never caps: fixed networks, and names resolved
 // lazily to the prefixes around their addresses; a name that stops resolving keeps its last ones.
 //
 // House players who dial the public name arrive hairpinned with the house's own public address, so one friend's

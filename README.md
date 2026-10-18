@@ -1,349 +1,94 @@
 # Homelab
 
+One Proxmox host running a lab of NixOS guests, declared entirely in this repo: a router with a leg in every zone,
+two ingresses, sso, telemetry, a nas with off-site backups, a swarm for the owner's apps and the third-party services
+on top. `./sync.nu` converges the host, the guests and the secrets from the tree; nothing is set by hand on a guest.
+Every script is nushell. FEATURES.md lists what the lab does and holds the runbooks.
+
+## Quick start
+
 ```sh
-git clone https://github.com/lsck0/homelab
-cd homelab
-nix develop ./src
+git clone https://github.com/lsck0/homelab && cd homelab
+nix develop ./src                     # every tool, pinned by src/flake.lock (docker only for the e2e scripts)
+src/scripts/init.nu <proxmox-ip>      # once: pin the host key, site, secrets, golden image, converge the host
+TF_STATE_FRESH=1 ./sync.nu            # the first deploy: no terraform state on the nas yet
+./sync.nu --dry-run                   # evaluate, build and print the plan, touching nothing
+./sync.nu                             # every deploy after; ends in a `Generation: <n>` commit
 ```
 
-Nix with flakes is the one thing to install: every tool comes from the flake's dev shell, pinned by `src/flake.lock`
-(docker only for the e2e scripts). The sops age key is owned by the dotfiles repo at
-`~/projects/arch-dotfiles/secrets/age.txt` (`$DOTFILES` moves the checkout, `$DOTFILES_SECRETS` points at a secrets
-directory of another layout, e.g. `~/projects/arch-dotfiles/configs/secrets`); `secrets/age.txt` is a symlink to it that
-`init.sh` and `sync.sh` keep pointing there, and `sync.sh` unlocks it with the YubiKey
-(`~/projects/arch-dotfiles/scripts/yubikey.sh unlock`) when it is locked. Every key in `src/secrets/keys/` is authorized on
-every guest, the router and Proxmox root, so the deploying machine's `~/.ssh/id_ed25519.pub` must be one of them.
+The sops age key is the dotfiles' `~/projects/arch-dotfiles/secrets/age.txt`; `init.nu` and `sync.nu` keep
+`secrets/age.txt` linked to it, and `sync.nu` unlocks it with the YubiKey (`dot secrets unlock`). The deploying
+machine's `~/.ssh/id_ed25519.pub` must be one of `src/secrets/keys/`, which every guest, the router and Proxmox root
+authorize.
+
+| variable | effect |
+|---|---|
+| `HOMELAB_PARALLEL` | how many guests deploy at once |
+| `TF_STATE_FRESH=1` | start an empty lab: set the local state copy aside, never touch the nas |
+| `TF_STATE_OFFLINE=1` | the nas is down: apply from the local state copy |
+| `DOTFILES`, `DOTFILES_SECRETS` | where the dotfiles checkout and its secrets directory are |
+| `SOPS_AGE_KEY_FILE` | another admin key, e.g. during a rotation |
 
 ## Layout
 
-The lab is its core and its instances:
-
-1. Core: `src/modules/`, what every deployment composes (network, ingress, identity, telemetry, storage, secrets,
-   the swarm), and `src/core/<vmid>-<zone>-<service>/`, the guests the lab needs to function: the router
-   (`300-router/`, on the house lan with a leg in every zone), the ingresses, authelia and lldap, the homepage,
-   grafana and the telemetry stack, ntfy (alerts), the nas and its backups, the nix cache, the registry and the
-   deploy controller with the shared swarm (`src/core/swarm.nix`).
-2. Preconfigured instances: `src/instances/preconfigured/<vmid>-<zone>-<service>/`, one folder per third-party
-   service the lab runs and configures (jellyfin, paperless, forgejo, hermes, ...).
-3. Custom instances: `src/instances/custom/<name>/`, one folder per app of the owner's own, built from its own repo
-   and run on the apps swarm (workers 250 and up) or on a guest of its own. Each app has its own overlay network,
-   secrets, resource reservation, telemetry tenant and lldap group `app-<route>`. The registry's htpasswd auth has
-   no per-repository rule, so every cluster can pull every app's images.
-
-A guest folder of core or preconfigured is the same kind of folder, in the internal zone (1xx, staff only, behind
-authelia) or the external zone (200-249, public, behind the edge). A guest is a vm, or an unprivileged lxc where
-nothing it `needs` asks for a vm (`src/modules/instance-schema.nix`); `vm.kind.<kind> = "<why>"` overrides that, and
-`vm.privileged` (internal zone only) makes an lxc privileged for its nfs mounts.
-
 ```
-sync.sh                     deploy everything
+sync.nu                       deploy everything
 src/
-  flake.nix                 hosts, checks and the `lab` facts, all discovered from the folders below
-  core/<vmid>-<zone>-<service>/
-                            a guest the lab needs to function; instances/preconfigured/<vmid>-<zone>-<service>/
-                            a third-party one, the same folder:
-    main.nix                the guest's nixos configuration
-    instance.nix            what others need to know: vm shape, services (exposure, protection, card, oidc, onion),
-                            idle, grants, tokens, `on` (the vpn exit or tor, a shared module's firewall openings),
-                            secrets
-    lib/                    what only this guest uses: its modules, scripts, templates, dashboards
-    tests/  skill.md        its checks, and hermes' skill about it
-    secrets.sops.json       its own secrets; age.pub and age.sops its key; secrets.shared.sops.json generated
-  modules/                  the platform: what two or more guests use
-    <name>.nix              a module of one file
-    <name>/                 a module of more: default.nix, lib/ (its scripts and templates), tests/
-  core/swarm.nix            the shared swarm: state worker, ports, worker shape (manager and builder: vm-107)
-  instances/custom/<name>/  an app: app.nix (repo, branch and the same service properties), secrets.sops.json its
-                            secrets, lib/ and tests/ as a guest's
-  secrets/                  admins.txt (the admins' age recipients), keys/ (the ssh public keys authorized
-                            everywhere, hand-written), shared.nix and shared.sops.json (the secrets two or more
-                            guests read, or the operator alone)
-  terraform/                main.tf, lib.tf: the guests from `nix eval .#lab.terraform`; its connection vars
-  generated/                what the scripts write: site.json and known_hosts (init.sh, sync.sh), zones.json (the
-                            zones, edited by hand too), lab.json (sync.sh, for desktop clients), nodes/<vmid>-apps-swarm/
-                            (the workers' keys)
-  scripts/                  the workstation's tools: init, deinit, pve-install (the Proxmox host), secrets-*,
-                            sops-encrypt, setup-dns, stack
-  tests/                    the harness (lib/, stubs/, policy/ the lab's laws) and the tests of the whole lab
+  flake.nix                   hosts, checks and the `lab` facts, discovered from the folders below
+  instances/
+    core/<vmid>-<zone>-<service>/
+                              a guest the lab needs: main.nix, instance.nix, lib/, tests/, skill.md, its secrets
+    core/swarm.nix            the shared swarm: state worker, ports, worker shape
+    preconfigured/<vmid>-<zone>-<service>/
+                              a third-party service the lab runs, the same folder
+    custom/<name>/            an app of the owner's own: app.nix, secrets, lib/, tests/
+  modules/                    the platform: what two or more guests use
+  scripts/                    init, deinit, stack, secrets-sync, secrets-check, sops-encrypt, pve-install; lib/
+  tests/                      the harness (lib/, stubs/), policy/ (the lab's laws) and the lab-wide tests
+  terraform/                  the guests and the Proxmox firewall, from `nix eval .#lab.terraform`
+  generated/                  what the scripts write: site.json, known_hosts, zones.json, lab.json, onions.json
 ```
 
-Every file has one owner. What one instance alone uses (a module, a script, a template, a dashboard, a test) lives
-in that instance's folder; what two or more instances use is a module; what the lab itself uses (the flake, the
-workstation's scripts, terraform) has its own folder. Tests, laws and docs do not make a file shared: a test lives
-with what it tests. `src/tests/policy/placement.nix` holds the tree to it.
+Zones by vmid: internal 1xx (staff only, behind authelia), external 200-249 (public, behind the edge), apps swarm
+workers 250 and up, the router 300. Every file has one owner folder; what two or more instances use is a module.
 
-Every feature is off by default: a service without `on` is a plain route to its port, nothing more. It opts into
-each by name, `on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;`, from the named lists of
-`src/modules/profiles.nix` concatenated and `lib.subtractLists` where one does not fit (`src/modules/service.nix`
-lists the features and refuses a combination that cannot work, sso on the edge, the waf without crowdsec).
-Protection per path is a second route on the same host and port with its own `path` and `on`. A guest's firewall
-opens ssh, node-exporter and its services' ports; a shared module opening more (an ingress, a swarm node) needs its
-opening in the instance's own `on`, as does an egress exit (`profiles.vpnEgress`, `profiles.torEgress`). A public
-route of the internal zone keeps prefixes of itself behind
-authelia with `ssoPaths = [ "/metrics" "/admin" ];`: the rest stays open, and the lab's own readers (the collector's
-scrapes) reach the backend port directly, never through the ingress. The edge has no authelia: an app's metrics on an
-external route are denied there for everyone instead (`catalog.metricsBlocks`).
+## Adding an instance
 
-### Adding an instance
+Copy `src/instances/preconfigured/_template/` to `src/instances/preconfigured/<vmid>-<zone>-<service>/` (or under
+`src/instances/core/` when the lab needs it), fill in `main.nix` and `instance.nix`, `git add` it, `./sync.nu`.
+Terraform makes a vm or an unprivileged lxc as `vm.needs` decides; the ingress, authelia, the homepage, the prober and
+the router pick up its services. Features are off until named in a service's `on` (`src/modules/profiles.nix`).
 
-Copy `src/instances/preconfigured/_template/` to `src/instances/preconfigured/<vmid>-<zone>-<service>/` (or to
-`src/core/` when the lab needs it to function), the vmid inside the zone's range, fill in `main.nix` and
-`instance.nix`, `git add` it, then `./sync.sh`. Terraform creates the guest (a vm or an unprivileged lxc, as
-`vm.needs` decides); the ingress, authelia, the homepage, the prober and the router pick up its services. Nothing else
-is edited.
+## Adding an app
 
-### Adding an app
-
-Copy `src/instances/custom/_template/` to `src/instances/custom/<name>/`: a repo and a branch are enough. `git add`
-it, then `./sync.sh`. The app is built from the repo's Dockerfile or compose file and answers at `<name>.lsck0.dev`
-on the edge, a plain route; `routes`, `on`, `resources`, `placement` and the rest are in `src/modules/apps-catalog`.
-An app owns its features and its own authentication and authorization; the platform offers tls, bot defence, rate
-limits, telemetry plumbing, backups and scale to zero, each opted into: a route's protection in its `on`, the app's
-telemetry, card and scaleToZero in the app's. The app declares what only it knows: its routes (host, path, service,
-port and `health`, a path answering below 500 when up), its `metrics` endpoints, its `stateful` services and
-`volumes`, and its features.
-
-An app with scaleToZero sleeps: after `idle.stopAfter` (15 minutes unless set) without a request its stack runs no
-task, and its next request wakes it, held at the ingress until the app answers its health path (a few seconds: a
-scale of a service whose image is already on the worker). An app stays up without it: one with a job of its own
-(wat's backup loop), clients that hold a connection (websockets), a tcp or udp route, which the router forwards past
-every wake proxy. A sleeping app keeps its `reservation`, since all may wake at once.
-
-The deploy controller vm-107 builds every new commit, parks the images in `registry.lsck0.dev` and deploys them to
-the app's cluster. Editing an app's folder and syncing redeploys it without an app commit; disabling it removes its
-stack (its volumes stay on the state worker). A failed build or deploy keeps the old version running, alerts, and is
-retried with backoff or on the next commit. `app-builder-redeploy <app>` on vm-107 rebuilds one now; a ci job does it
-with `curl -fsS -X POST -H "Authorization: Bearer $DEPLOY_TOKEN" https://deploy.lsck0.dev/redeploy/<app>`. A deploy of
-a sleeping app runs the new version until it is up, then puts it back to sleep.
-
-An app cannot take the lab down: it holds a `reservation` of the workers (checked at sync and at deploy), each task
-its `resources` limits, each route a request budget at the edge, and its logs, traces, profiles and metrics their own
-tenant with one budget per app (`src/modules/limits`). Grafana has a folder per app with its generated board
-`service-<app>` and the boards it ships (`dashboards = [ "<glob>" ]`, taken from the deployed commit). A browser
-frontend sends OpenTelemetry to its own origin:
-
-```js
-// @opentelemetry/sdk-trace-web: spans to <app host>/otlp, traceparent on fetch to the app's own backend
-const provider = new WebTracerProvider({ resource: resourceFromAttributes({ "service.name": "web" }),
-  spanProcessors: [new BatchSpanProcessor(new OTLPTraceExporter({ url: "/otlp/v1/traces" }))] });
-provider.register();
-registerInstrumentations({ instrumentations: [new FetchInstrumentation({ propagateTraceHeaderCorsUrls: [/.*/] })] });
-// web vitals: one histogram, browser.web_vital (ms), attribute web_vital.name
-```
-
-## Deploy
-
-```sh
-src/scripts/init.sh <proxmox-ip>      # once: pin proxmox's host key, site, secrets, golden image, converge the host
-src/instances/preconfigured/113-internal-hermes/lib/hermes-secrets.sh   # once: hermes' ssh key, github app, api key, telegram bot
-TF_STATE_FRESH=1 ./sync.sh            # the first deploy: no terraform state on the nas yet
-./sync.sh                             # every deploy after
-TF_STATE_OFFLINE=1 ./sync.sh          # the nas is down: apply from the local state copy
-src/scripts/stack.sh status           # which guest groups are on
-src/scripts/stack.sh {apps|media|public} {on|off} [--apply]   # swap a group in or out (the box cannot host all)
-sudo src/scripts/setup-dns.sh         # workstation: resolve *.lsck0.dev through the lab dns
-src/scripts/init.sh --pin <proxmox-ip>   # (re)pin proxmox's ssh host key
-src/scripts/deinit.sh [--yes] [proxmox-ip]   # tear the lab down again
-```
-
-Desktop clients (the bar's homelab widget and the ntfy notifier in the owner's dotfiles) read
-`src/generated/lab.json` and nothing else of this repo: the guests, the routes, the infra cards, the monitoring
-endpoints and the ntfy server with its topics. `src/modules/lab-export.nix` defines it and documents its schema;
-sync.sh rewrites it on every run (`nix eval --json ./src#lab.export`). It is public like the rest of the repo and holds
-no secret; `schema` changes only when a key changes meaning or goes away.
-
-The owner's machines mount the nas's whole tree over smb, sealed: `//10.100.0.104/homelab` with
-`credentials=/etc/samba/homelab.cred,seal,vers=3.1.1`. That credentials file is the dotfiles' secret `samba-homelab`,
-two lines `username=luca` and `password=<a long random value, e.g. openssl rand -hex 32>`; secrets-sync.sh copies it
-to the nas (`samba-homelab`, kind `dotfiles:`), whose samba-user sets the password from it
-(`src/core/104-internal-nas/lib/samba.nix`). Changing the password is changing that file, then `./sync.sh`.
-
-## Proxmox host
-
-`src/scripts/pve-install.sh` converges the host on every `init.sh` and `sync.sh` run: apt sources, the zone
-bridges, gpu passthrough, power settings, openipmi off without a bmc, root's password (`proxmox-root-pass`) and ssh
-keys (`src/secrets/keys/`), the lab's api users and tokens (created once, never rotated; undeclared `@pve` users and every
-empty pool are removed), the lldap realm, the node's address and the api certificate naming it, the bulk storage
-and its hookscript, the host exporter and OSSEC. While the package mirrors or github are unavailable, what needs them
-waits for the next run; everything else still converges. `src/scripts/deinit.sh` runs its teardown.
-
-The bulk storage (the hdd's lvm-thin pool, vm-104's media disk) stays disabled in Proxmox except while vm-104 starts
-or stops (its hookscript), and pvestatd runs with its own lvm config (`/etc/lvm-pvestatd`) that rejects the hdd, so
-nothing but the nas wakes the disk. Proxmox refuses every operation on a disabled storage, so a resize (a terraform
-`diskGiB` change of vm-104's bulk disk too), a snapshot or a backup of vm-104's bulk disk needs it enabled by hand
-for that operation, as root on the host, whether the nas runs or not:
-
-```sh
-pvesm set bulk --disable 0    # then the resize, snapshot or backup, or ./sync.sh with the disk change
-pvesm set bulk --disable 1    # spun down again; the next converge does it too while vm-104 runs
-```
-
-### Proxmox firewall
-
-Terraform (`src/terraform/lib.tf`, FIREWALL) keeps the datacenter firewall on: every guest's nic may send only from
-its own address and mac (the router's nics are exempt), and the host drops input its rules do not name. It admits
-ssh from the house lan, the api and web ui (8006) from `lan.workstation`, `lan.notebook` and the router (the
-ingresses, the homepage, hermes and grafana reach it masqueraded as the router), node exporter from the router and
-ping from the lan; Proxmox's implicit `management` sources are emptied (ipset `management`, a nomatch of the lan),
-so its own rules admit nothing ahead of these. `sync.sh` refuses to run from any other address and fails while the
-firewall does not enforce: `pve-firewall status` `enabled/running`, or with the nftables backend (`nftables: 1` in the
-host's options) `proxmox-firewall` active with its table loaded.
-
-Turning it on the first time (the generation that brings it):
-
-1. Check `site.json`: `lan.workstation` and `lan.notebook` are the fritzbox's reserved addresses of the two machines.
-2. `./sync.sh`. Its terraform output creates or updates an ipset `ipfilter-net0` and firewall options for every
-   guest but the router, the cluster rules, and last `cluster_firewall.datacenter` with `enabled = true` and
-   `input_policy = "DROP"`; no guest is replaced.
-3. Afterwards, from the workstation: `ssh root@<proxmox> pve-firewall status` says `enabled/running`;
-   `https://<proxmox>:8006` answers; `ssh root@10.100.0.107 docker node ls` and the on-demand wake still work.
-   From the router (`ssh root@<router> ping -c1 10.100.0.100`) the internal zone answers.
-4. A guest that cannot talk any more: `pve-firewall stop` on the host, then compare the guest's address with its
-   ipset (`pvesh get /nodes/<node>/qemu/<vmid>/firewall/ipset/ipfilter-net0`); see Recovery.
-
-Rollback: `ssh root@<proxmox> pve-firewall stop` (ssh stays open to the whole house lan) lifts every rule until the
-host reboots; `pvesh set /cluster/firewall/options --enable 0` keeps it off across reboots until the next `sync.sh`
-turns it on again. Without ssh: the host's console, the same commands. `src/tests/terraform-law.nix` fails the build
-while the declared firewall is off, admits the api from anyone but the operators and the router, or closes ssh to
-the lan.
-
-### Proxmox login
-
-The `lldap` realm binds to lldap over ldaps (vm-101, port 6360), verified against the certificate the guest made for
-itself, which the host reads from inside the guest the way sync.sh reads host keys; it grants Administrator to the
-lldap group `admins` and asks for a TOTP code after the password. Until the guest has a certificate (the sync after
-the one that first deploys it), the group administers nothing. Each realm user needs a key, set by root@pam:
-
-```sh
-head -c 20 /dev/urandom | base32                     # the key; add it to an authenticator app
-pveum user modify <user>@lldap --keys <base32 key>   # on the Proxmox host, as root
-```
-
-Set the key of every realm user who logs in before the deploy that turns the realm's TOTP on: the key can be set
-any time, and a realm user without one cannot log in. root@pam is outside the realm and keeps its own password
-(`proxmox-root-pass`, `sops -d src/secrets/shared.sops.json`), the way back in. lldap's own `admin` takes its password
-from `lldap-admin-password` at every start: rotate it with `sops unset
-src/core/101-internal-authelia/secrets.sops.json '["lldap-admin-password"]'`, then `./sync.sh` generates a new one.
+Copy `src/instances/custom/_template/` to `src/instances/custom/<name>/`: a repo and a branch are enough. `git add`,
+`./sync.nu`. vm-107 builds every new commit (Dockerfile, compose file or `static`), pushes to `registry.lsck0.dev`
+and deploys it at `<name>.lsck0.dev` on the edge; the options are in `src/modules/apps-catalog`.
 
 ## Secrets
 
-A secret lives next to what reads it (`src/modules/secrets.nix` holds the layout). One a single guest reads is
-declared in its `instance.nix` (`secrets.<name> = "<kind>";`) with its value in that folder's `secrets.sops.json`; an
-app's in its `app.nix` and `src/instances/custom/<name>/secrets.sops.json`; one two or more guests read in
-`src/secrets/shared.nix` and `src/secrets/shared.sops.json`, of which every reader gets its own generated copy,
-`secrets.shared.sops.json`.
-Every guest has its own age key in its folder (`age.pub`, and `age.sops` encrypted to the admins only); each file is
-encrypted to the admin recipients of `src/secrets/admins.txt` and the guests that read it. `sync.sh` runs
-`src/scripts/secrets-sync.sh --apply`, which writes keys, rules, missing values and copies, and hands each guest only
-its own key. The admin key never leaves the workstation, Hermes included. Plaintext never touches the repo: write sops
-files with `src/scripts/sops-encrypt.sh`; the pre-commit hook (`.githooks`, set by `init.sh` and `sync.sh`) refuses a
-commit that holds a sops file unencrypted, key material, or any secret value (`src/scripts/secrets-check.sh` runs it
-on the staged tree).
+A secret lives next to what reads it: `secrets.<name> = "<kind>";` in the reading guest's `instance.nix` (or app.nix),
+or in `src/secrets/shared.nix` when several read it; the value is in that folder's `secrets.sops.json`. `./sync.nu`
+runs `src/scripts/secrets-sync.nu --apply`, which generates missing values and hands each guest only its own age
+key. Write sops files with `src/scripts/sops-encrypt.nu`; the pre-commit hook refuses plaintext. Rotating the admin
+key: FEATURES.md, Secrets.
 
-Adding a secret: read it in a config (`sops.secrets.<name>`), declare it with its kind (`src/secrets/shared.nix`
-lists the kinds) in the reading guest's `instance.nix`, or in `src/secrets/shared.nix` when several read it, then
-`./sync.sh`. A generated one appears by itself, a `manual` one is added empty: fill it with `sops <its file>`.
-Moving a declaration moves the value. `src/scripts/secrets-sync.sh [--apply [--prune]]` runs the same step by hand.
-A `guardsData:` secret (a key that stored data or logins depend on) is never generated once the lab is deployed: a
-missing one stops the run until its value is restored, or, for one that guards nothing yet, `--generate-guarded`.
+## Recovery
 
-Every ssh host key is pinned in `src/generated/known_hosts`: Proxmox's by `init.sh` after a console check, each
-guest's by `sync.sh`, which reads it through Proxmox from inside the guest. Any other key stops the run.
+- A guest recreated or its age key lost: `./sync.nu` re-pins and rewrites it. Proxmox reinstalled:
+  `src/scripts/init.nu --pin <proxmox-ip>` after comparing the fingerprint on its console.
+- A service's data broken: `ssh root@10.100.0.104 nas-restore service <share> <snapshot id or date> --yes`.
+- Locked out by the Proxmox firewall: `ssh root@<proxmox> pve-firewall stop` from the house lan, fix `site.json`,
+  `./sync.nu`.
+- The lab and the nas gone: restore the kopia repository from Proton Drive (FEATURES.md, Recovery).
 
-### Rotating the admin key
-
-The dotfiles key sat on every guest before per-host keys existed, and on Hermes after: rotate it once now, and
-whenever it may have leaked. A rotation re-encrypts every file under new data keys and renews every host key, since
-the old key still opens all of them in the public history. Inside `nix develop ./src`, with the dotfiles unlocked:
-
-1. `age-keygen -o ~/projects/arch-dotfiles/secrets/age.new.txt`; it prints the new public key.
-2. Add that public key as a new line of `src/secrets/admins.txt`, keep the old line.
-3. `src/scripts/secrets-sync.sh --apply`: still unlocked by the old key, it re-encrypts every file to old and new key.
-4. Delete the old key's line from `src/secrets/admins.txt`, then
-   `SOPS_AGE_KEY_FILE=~/projects/arch-dotfiles/secrets/age.new.txt src/scripts/secrets-sync.sh --apply`: every file
-   is re-encrypted without the old key and every host gets a new key. It refuses to run unlocked by a key it would
-   lock out.
-5. In the dotfiles repo, replace `age.txt` with `age.new.txt` and commit there; drop any other copy of the old key
-   (`~/.config/sops/age/keys.txt`).
-6. Change every secret value, since the old key reads them in history. Before anything else, change the two that
-   guard stored data where they are used: `kopia-password` with `kopia-nas repository change-password` on vm-104,
-   `authelia-storage-key` with `authelia storage encryption change-key` on vm-101. Generated ones: delete the line
-   with `sops <its file>`, and `src/scripts/secrets-sync.sh --apply` makes a new one (a `guardsData:` one only with
-   `--generate-guarded`, once whatever it guards accepts the new value). A `dotfiles:` one: change its file in the
-   dotfiles' secrets. External ones (cloudflare,
-   github, telegram, attic, proton, trmnl tokens and keys): issue new ones at the provider, revoke the old, put the
-   new ones in with `sops <its file>`.
-7. `./sync.sh`: it pushes the new host keys, re-activates each guest with them, and commits.
-
-### Recovery
-
-- A guest lost its age key, or its key file is broken: `./sync.sh` rewrites it and re-activates the guest. A host
-  key that must be renewed: delete the guest's `age.sops` and `age.pub`, then `./sync.sh`.
-- A guest was recreated: `sync.sh` reads its new ssh host key through Proxmox. Proxmox reinstalled:
-  `src/scripts/init.sh --pin <proxmox-ip>` after comparing the fingerprint on its console.
-- A service's data is broken: `ssh root@10.100.0.104 nas-restore service <share> <snapshot id or date> --yes` restores
-  `/srv/nas/data/<share>` in place. A service whose state lives on its guest's disk (`homelab.localState`) takes the
-  restore at the app's next start; nas-restore prints the guest and the command that makes it take it now.
-- The lab is gone, the nas with it: the off-site copy is the kopia repository on Proton Drive. Sign in with the
-  proton account (`proton-username` and `proton-password` of `src/core/104-internal-nas/secrets.sops.json`, the
-  second factor from `proton-totp-secret` of `src/secrets/shared.sops.json`; `proton-drive auth login`),
-  `proton-drive filesystem download /my-files/homelab-offsite/BACKUPS/kopia <dir>`, then `kopia repository connect filesystem --path <dir>` with
-  `kopia-password` from `src/core/104-internal-nas/secrets.sops.json`, and `kopia snapshot list` /
-  `kopia restore <snapshot> <target>`. The syncthing folder's latest state is there as plain files too,
-  `/my-files/homelab-offsite/sync`, browsable in proton drive without kopia; older versions are in the repository.
-
-### Off-site
-
-`proton-sync` on vm-104 mirrors the kopia repository to Proton Drive every night, one way. `proton-bisync` keeps the
-syncthing folder (`/srv/nas/syncthing/sync`) and `/my-files/homelab-offsite/sync` in sync both ways every hour: what
-changes on the web or the phone reaches the nas, and syncthing takes it to the devices. Both run on Proton's drive
-cli and its session from `proton-drive-login` (`src/core/104-internal-nas/lib/proton-bisync.py` says how). Until
-the baseline is laid, "Off-site copy stale" fires: the share mirror's metric reads 0. Laying it, once, when the
-remote holds what it should (anything only one side holds is copied to the other, so look at the remote first):
-`ssh root@10.100.0.104 systemctl start --no-block proton-bisync-resync`, then `journalctl -fu proton-bisync-resync`.
-It reads every remote folder (about 7 hours for the folder's 13k), copies what one side lacks to the other and
-deletes nothing; a file on both sides that differs keeps both, the remote version as
-`<name>.proton-conflict.<ext>`. One cut short: start it again, it resumes.
-
-After that: local changes go up within the hour; a run reads remote folders for 40 minutes, the longest unread
-first and recently changed ones sooner, so a remote change in a quiet folder can take about half a day. A file
-changed on both sides keeps both the same way. A run that would delete over 20% of either side syncs nothing until
-`touch /var/lib/proton-bisync/allow-large; systemctl start proton-bisync` lets one run through. A file deleted here
-goes to proton's trash, which nothing empties but the owner; one deleted on proton waits a month in
-`/srv/nas/syncthing/proton-bisync-trash/<date>/`. Symlinks stay local.
-- Terraform state: the nas holds it (`/srv/nas/terraform`), sync.sh works on a copy outside the repo,
-  `~/.local/state/homelab/terraform/` (`$XDG_STATE_HOME`), where terraform's providers live too: a `path:` evaluation
-  copies the whole flake tree into the world-readable store. `TF_STATE_OFFLINE=1 ./sync.sh` applies from that copy
-  while the nas is down. `TF_STATE_FRESH=1 ./sync.sh` starts an empty lab: it sets any local copy aside
-  (`terraform.tfstate.<time>.backup`), as `deinit.sh` does, and never pulls from or locks a nas.
-- Proxmox firewall locks out a machine: ssh stays open to the house lan, so `ssh root@<proxmox> pve-firewall stop`
-  from any machine with a key of `src/secrets/keys/`; fix `lan.workstation`/`lan.notebook` (`src/scripts/init.sh`), then
-  `./sync.sh` turns it on again.
-
-## Test
+## Tests
 
 ```sh
 nix eval ./src#checks.x86_64-linux --apply builtins.attrNames                    # every check
 nix build ./src#checks.x86_64-linux.<name> -L --no-link --max-jobs 1           # one check
 nix build ./src#legacyPackages.x86_64-linux.seeded.<name>.<seed> -L --no-link   # one seed of a seeded test
-src/tests/media-stack.sh                                  # media stack against the real containers (docker)
-src/instances/preconfigured/113-internal-hermes/tests/hermes-agent.sh   # hermes scenarios (free nous model, or ANTHROPIC_API_KEY)
 ```
 
-Every `src/tests/<name>.nix` and every `tests/<name>.nix` of a folder in `src/core/`, `src/instances/preconfigured/`,
-`src/instances/custom/` or `src/modules/` is a check, named by its file: a function of
-`{ pkgs, lib, inputs, specialArgs, ... }` (`specialArgs` are the hosts' own: lab, inventory, site, nasClients)
-returning a derivation. A new file needs `git add`, since the flake sees tracked files only. A test that takes `seed`
-prints `seed=<n>` first and draws all randomness from it; a seed that once failed goes into its
-`passthru.regressionSeeds`, which the check reruns. No test reaches the internet: images and plugin sources are
-fixed-output derivations, fetched once at build time.
-
-VM tests run the lab's real modules on stand-in boundaries through `src/tests/lib/`; each file's header says how to
-use it. `lab.nix` makes the nodes: `guest` (a lab host at its inventory address on the production stack, with its
-instance file), `router` (the real router at its real NIC names), `nas` (exports exactly what the test's guests
-mount), `multi` (one VM owning many addresses: a zone's probes, the internet, the house). `labprobe.py` with the
-driver's `probe.py` checks reachability plans (every denial with a positive control), `http.py` makes requests
-through the ingresses; `offline-router.nix`, `offline-traefik.nix`, `pki.nix`, `secret-values.nix`, `images.nix` and
-`nas-mounts.nix` replace what lies outside the lab. Tests of one module without `modules/base` import
-`src/tests/stubs.nix` instead. `policy-eval` checks the lab's laws over every real configuration at evaluation time:
-each `src/tests/policy/<area>.nix` returns its violations, and the check lists them all.
+Every `src/tests/<name>.nix` and every `tests/<name>.nix` of an instance or module is a check named by its file; a
+new file needs `git add`. `policy-eval` holds the lab's laws over every real configuration.

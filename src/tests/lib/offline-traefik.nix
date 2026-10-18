@@ -1,4 +1,4 @@
-# a real ingress (core/100-internal-traefik/main.nix or 200-external-traefik.nix) in a test vm without internet
+# a real ingress (instances/core/100-internal-traefik/main.nix or 200-external-traefik.nix) in a test vm without internet
 #
 # Import it on top of the instance (lab.guest "100" { instance = ...; } plus this module). Every route keeps its
 # rules and middlewares; what changes is where the outside world was:

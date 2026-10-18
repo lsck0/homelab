@@ -22,7 +22,7 @@ until used:
 - Each side has its own token (`wake-internal@pve`, `wake-external@pve`) that can only see, start and shut down
   the idle guests of its zone (a Proxmox permission per guest, which Terraform derives from the instances). The token
   reaches curl in a header file, and the API's certificate is checked against the Proxmox root ca.
-- `sync.sh` pauses the reaper and the idle shutdowns while it deploys (`/run/ondemand-reaper-pause-until`).
+- `sync.nu` pauses the reaper and the idle shutdowns while it deploys (`/run/ondemand-reaper-pause-until`).
 - After `idle.stopAfter` without connections the proxy exits and the VM is shut down; an app is scaled to zero
   through its manager's controller instead, and woken the same way.
 - `ondemand-reaper.timer` (every 2 min) also shuts down VMs that were started
@@ -36,4 +36,4 @@ until used:
 - Why did it not wake? On the Traefik VM: `journalctl -u ondemand-<route> -n 50`
   (wake script logs the Proxmox status and readiness wait).
 - Change the idle time or make a VM always-on: edit `idle` in its
-  `<folder>/instance.nix` (`src/core/` or `src/instances/preconfigured/`); tell the owner (applied by `sync.sh`).
+  `<folder>/instance.nix` (`src/instances/core/` or `src/instances/preconfigured/`); tell the owner (applied by `sync.nu`).

@@ -10,10 +10,11 @@ import (
  * -----------------------------------------------------------------------------
  */
 
-// deciderReconcile runs every reconcileS, always, because a unit started by hand must be seen (R-046a). One
-// `systemctl show` covers every server unit; the records are corrected only in the cases R-046b to R-046f name, so
-// a start job that systemd has queued behind a slow save is never read as a server that is down.
-func deciderReconcile(d *Decider, now time.Time) {
+// deciderReconcile runs every reconcileS, always, because a unit started by hand must be seen. One
+// `systemctl show` covers every server unit; the records are corrected only in the cases below, so
+// a start job that systemd has queued behind a slow save is never read as a server that is down. It returns the
+// server whose backend the caller asks before deciderReconcileFinish runs, or nil when it already ran.
+func deciderReconcile(d *Decider, now time.Time) *Server {
 	servers := deciderServers(d)
 	units := make([]string, 0, len(servers))
 	for _, server := range servers {
@@ -22,7 +23,7 @@ func deciderReconcile(d *Decider, now time.Time) {
 	states, err := d.systemd.Show(units)
 	if err != nil {
 		d.log.Warn(logReconcile, "err", err)
-		return
+		return nil
 	}
 	// a unit started by hand takes the lab over, so at most one sleeping record is promoted per pass
 	promoted := false
@@ -33,7 +34,15 @@ func deciderReconcile(d *Decider, now time.Time) {
 		}
 		deciderReconcileServer(d, server, state, &promoted)
 	}
-	deciderReconcileStatus(d, now)
+	server := deciderReconcileStatus(d, now)
+	if server != nil {
+		server.statusFetching = true
+	}
+	return server
+}
+
+// deciderReconcileFinish is the rest of a pass, after the backend's answer is in.
+func deciderReconcileFinish(d *Decider, now time.Time) {
 	deciderReconcileTimeouts(d, now)
 	deciderReconcileSleep(d, now)
 	for address, source := range d.sources {
@@ -45,10 +54,10 @@ func deciderReconcile(d *Decider, now time.Time) {
 	d.budget.switches = timesPrune(d.budget.switches, now, budgetWindow)
 }
 
-// deciderReconcileServer applies R-046b to R-046f to one record.
+// deciderReconcileServer corrects one record from its unit.
 //
 // A second unit started by hand in the same pass is stopped rather than promoted: two servers at once is what
-// R-072's Conflicts= exists to prevent, and crashing on an invariant an operator can break by hand would take the
+// the units' Conflicts= exists to prevent, and crashing on an invariant an operator can break by hand would take the
 // gate down with it.
 func deciderReconcileServer(d *Decider, server *Server, state UnitState, promoted *bool) {
 	activity := activityFromUnit(state)
@@ -59,11 +68,11 @@ func deciderReconcileServer(d *Decider, server *Server, state UnitState, promote
 		if activity != activityIdle || state.Job {
 			return
 		}
-		// R-046b
+		// the unit went down under a started record
 		if state.Active == "failed" {
 			server.failures, server.lastStartFailed = server.failures+1, true
 			// only a start counts as a failed start: a server that dies after hours of play is a crash, and the
-			// alert of R-092 names the pack and the world
+			// start-failure alert names the pack and the world
 			if before == phaseStarting {
 				server.startFailuresTotal++
 			}
@@ -72,14 +81,13 @@ func deciderReconcileServer(d *Decider, server *Server, state UnitState, promote
 	case phaseSleeping:
 		switch {
 		case activity == activityStarted && !*promoted:
-			// R-046c
+			// started by hand
 			*promoted = true
 			server.phase, server.startedAt = phaseStarting, time.Time{}
 			deciderReconcileExclude(d, server)
 		case activity == activityStarted:
 			deciderStop(d, server, reasonSwitch)
 		case activity == activityStopping:
-			// R-046d
 			server.phase, server.stopIssued = phaseStopping, true
 		default:
 			return
@@ -87,10 +95,9 @@ func deciderReconcileServer(d *Decider, server *Server, state UnitState, promote
 	case phaseStopping:
 		switch {
 		case activity == activityIdle && !state.Job:
-			// R-046e
 			serverSleepSet(server)
 		case activity == activityStarted && !state.Job && deciderActive(d, server.name) == nil:
-			// R-046f
+			// a stop that never happened: the unit is still up and nothing else is
 			serverRunningSet(d, server, d.now())
 		default:
 			return
@@ -99,7 +106,7 @@ func deciderReconcileServer(d *Decider, server *Server, state UnitState, promote
 	logReconcileWrite(d.log, server.name, before, server.phase, state.Active)
 }
 
-// deciderReconcileExclude stops whatever else is up once a unit was started behind the gate's back (R-046c).
+// deciderReconcileExclude stops whatever else is up once a unit was started behind the gate's back.
 func deciderReconcileExclude(d *Decider, target *Server) {
 	for _, server := range deciderServers(d) {
 		if server == target || server.phase == phaseSleeping || server.phase == phaseStopping {
@@ -109,10 +116,10 @@ func deciderReconcileExclude(d *Decider, target *Server) {
 	}
 }
 
-// deciderReconcileStatus asks the backend of the one server that could be answering: a starting server is up once it
-// answers (R-046g), and a running one's player count is what occupancy reads. A starting server whose unit is not yet
-// active is not asked: its start job waits on the old server's stop, and the old server still answers on the port.
-func deciderReconcileStatus(d *Decider, now time.Time) {
+// deciderReconcileStatus is the one server that could be answering: a starting server is up once it answers, and a
+// running one's player count is what occupancy reads. A starting server whose unit is not yet active is not asked:
+// its start job waits on the old server's stop, and the old server still answers on the port.
+func deciderReconcileStatus(d *Decider, now time.Time) *Server {
 	for _, server := range deciderServers(d) {
 		if server.phase != phaseStarting && server.phase != phaseRunning {
 			continue
@@ -120,21 +127,15 @@ func deciderReconcileStatus(d *Decider, now time.Time) {
 		if server.phase == phaseStarting && !server.unitUp {
 			continue
 		}
-		if now.Sub(server.statusAt) < durationFromSeconds(d.settings.Limits.StatusCacheS) {
-			continue
-		}
-		if !deciderStatusRefresh(d, server, now) {
-			continue
-		}
-		if server.phase == phaseStarting {
-			serverRunningSet(d, server, now)
-			logReconcileWrite(d.log, server.name, phaseStarting, phaseRunning, "backend")
+		if deciderStatusDue(d, server, now) {
+			return server
 		}
 	}
+	return nil
 }
 
-// deciderReconcileTimeouts stops a start that never answered (R-053a). The first start after a pack change downloads
-// the pack, which takes minutes, so it gets the longer window (R-053b).
+// deciderReconcileTimeouts stops a start that never answered. The first start after a pack change downloads
+// the pack, which takes minutes, so it gets the longer window.
 func deciderReconcileTimeouts(d *Decider, now time.Time) {
 	for _, server := range deciderServers(d) {
 		if server.phase != phaseStarting || server.startedAt.IsZero() {
@@ -159,7 +160,7 @@ func deciderStartTimeout(d *Decider, server *Server) time.Duration {
 	return durationFromSeconds(d.settings.Limits.FirstStartTimeoutS)
 }
 
-// deciderReconcileSleep stops a server nobody has used for sleepAfterS (R-050b).
+// deciderReconcileSleep stops a server nobody has used for sleepAfterS.
 func deciderReconcileSleep(d *Decider, now time.Time) {
 	for _, server := range deciderServers(d) {
 		if server.phase != phaseRunning || deciderOccupied(d, server, now) {

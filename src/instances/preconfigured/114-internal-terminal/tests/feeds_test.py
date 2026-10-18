@@ -374,6 +374,17 @@ class StatsSync(unittest.TestCase):
         rows = stats_sync.bars([("a", 10), ("b", 5), ("c", 0)])
         self.assertEqual([r["pct"] for r in rows], [100, 50, 0])
 
+    def test_parked_qbittorrent_is_not_called(self):
+        calls = []
+        saved = stats_sync.QBITTORRENT, stats_sync.qb_get
+        try:
+            stats_sync.QBITTORRENT = ""
+            stats_sync.qb_get = lambda path: calls.append(path)
+            self.assertFalse(stats_sync.torrents()["available"])
+        finally:
+            stats_sync.QBITTORRENT, stats_sync.qb_get = saved
+        self.assertEqual(calls, [])
+
     def test_payload_names_guests_like_grafana_and_hides_torrent_names(self):
         inventory = {"131": {"name": "131-internal-paperless", "vm": "paperless", "powered": True, "idle": None},
                      "150": {"name": "150-apps-swarm", "vm": "swarm-150", "powered": True, "idle": None},
@@ -391,7 +402,7 @@ class StatsSync(unittest.TestCase):
 
             listing = [{"name": "Secret.Movie.2026.2160p", "category": "radarr", "state": "downloading",
                         "progress": 0.5, "dlspeed": 1000, "size": 10 ** 9, "eta": 600}]
-            patches = {"INVENTORY": inv, "promql": promql, "logql": lambda query: [],
+            patches = {"INVENTORY": inv, "QBITTORRENT": "http://qbittorrent", "promql": promql, "logql": lambda query: [],
                        "qb_get": lambda path: listing if "info" in path and "torrents" in path else {}}
             saved = {k: getattr(stats_sync, k) for k in patches}
             try:

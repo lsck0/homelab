@@ -30,11 +30,11 @@ const (
  * -----------------------------------------------------------------------------
  */
 
-// State is /run/mc-gate/state.json, the gate's whole view in the shape a person reads (R-056).
+// State is /run/mc-gate/state.json, the gate's whole view in the shape a person reads.
 type State struct {
 	UpdatedAt string        `json:"updatedAt"`
 	Servers   []StateServer `json:"servers"`
-	// how many switches the last hour holds, the budget of R-051b seen from outside
+	// how many switches the last hour holds, the global budget seen from outside
 	SwitchesLastHour int `json:"switchesLastHour"`
 }
 
@@ -89,7 +89,7 @@ func fileWriteAtomic(path string, data []byte, mode os.FileMode) error {
 	return nil
 }
 
-// stateSave writes the state file where R-074a's RuntimeDirectory puts it.
+// stateSave writes the state file into the unit's RuntimeDirectory.
 func stateSave(runtimeDir string, state State) error {
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
@@ -121,7 +121,7 @@ func startedMarkerTouch(stateDir, name string, now time.Time) error {
 	return os.Chtimes(path, now, now)
 }
 
-// startedMarkerNewer is true when the server has started well since its pack last changed (R-053b). A missing marker
+// startedMarkerNewer is true when the server has started well since its pack last changed. A missing marker
 // or a missing modpack.env is a server that has never started with this pack, which gets the longer timeout.
 func startedMarkerNewer(stateDir, name, modpackEnv string) bool {
 	started, err := os.Stat(filepath.Join(stateDir, name+startedFileSuffix))

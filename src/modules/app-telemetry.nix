@@ -1,30 +1,15 @@
 # a swarm worker's side of the apps' telemetry: container logs bounded on the node and shipped per app, container
 # metrics bounded in cardinality; modules/swarm enables it on every worker
 #
-# Logs. Docker writes each container's output to its own rotated files (the `local` driver), never to the node's
-# journal, and drops lines rather than block a container that writes faster than the disk takes them. A promtail
-# reads them over the docker api, one job per enabled app, and lets each app through at the lab's per-service rate
-# (modules/limits `tenant`); the rest is dropped here, counted per app, before it costs the network, loki or
-# another app anything. In loki each app is its own tenant with the same budget, so no app's lines wait on another's.
-# Labels stay the ones the journal pipeline gave app logs (container_name, swarm_service, swarm_stack, host), so a
-# query or alert over them reads both.
+# logs: docker's `local` driver drops lines rather than block a container; a promtail per node reads them over the
+# docker api, one job per app, and drops past the per-app budget (modules/limits `tenant`) before loki pays for it
+# traces and profiles: a task sends to the relay on its own node, which sets the tenant from the sender's
+# docker_gwbridge address; an address no task container holds is refused, never guessed
+# security: the shipper and the resolver read untrusted names and lines through a read-only proxy of the docker
+# socket, never the docker group
 #
-# Metrics. cadvisor reports docker containers only, with no container label turned into a prometheus label: an app's
-# own labels would otherwise be series names the scrape of every app pays for. vm-103 derives stack and service
-# from the task name (modules/telemetry.nix swarmTaskPatterns).
-#
-# Traces and profiles. A task never reaches vm-103 (modules/swarm DOCKER-USER); it sends to the relay on its own node
-# (telemetry.nix relayEndpoints), which sets the tenant from the sender's address: the resolver maps each task
-# container's docker_gwbridge address to the app swarm named its service after (<app>_<service>, which no compose
-# file chooses), on every container start and stop. A request from any other address is refused, never guessed.
-# vm-103 then admits from this node only the tenants of the apps its cluster runs.
-#
-# The docker api. The shipper and the resolver read untrusted names and lines; they get a proxy of the socket that
-# passes the reads they make (listing, inspecting, logs, events) and nothing else, never the docker group.
-#
-# Rejected: the docker journald driver. Every container logs as docker.service, so journald's per-unit rate limit
-# suppressed every app on the node once one flooded, and the upload filled vm-103's journal-remote directory, which
-# ignores its size cap between vacuums.
+# Rejected: the docker journald driver. Every container logs as docker.service, so one flooding app got every app on
+# the node rate-limited, and the upload filled vm-103's journal-remote directory, which ignores its size cap.
 { config, lib, pkgs, inventory, catalog, ... }:
 let
   cfg = config.homelab.appTelemetry;
@@ -35,10 +20,10 @@ let
   # CONSTANTS
   # -----------------------------------------------------------------------------
 
-  # per container on the node: 3 x 10 MB, what `docker service logs` still shows after the shipper read it
+  # what `docker service logs` still shows after the shipper read it
   logFileBytes = "10m";
   logFiles = "3";
-  # a container writing faster than the driver stores keeps running; above this the newest lines are lost
+  # past this a container writing faster than the driver stores loses its newest lines
   logBufferBytes = "4m";
   dockerSocket = "/run/docker.sock";
   readApi = "docker-read";
@@ -53,14 +38,14 @@ let
   relayTenants = "${relayDir}/tenants.map";
   relayPorts = with telemetry.ports; { inherit otlpHttp otlpGrpc pyroscope; };
   collector = inventory.${telemetry.collectorVmid};
-  # a stream of logs or events stays open as long as the node runs
+  # nginx closes a stream idle this long: the resolver and promtail reconnect
   streamTimeout = "1d";
   # a new task's container is found within this; its lines are read from its start, none are lost
   discoveryInterval = "10s";
   stackLabel = "com.docker.stack.namespace";
   shipperJob = "app-logs";
   positions = "/var/lib/promtail/positions.yaml";
-  # cpu, memory, network, disk io, oom kills, and processes for the pids limit; the per-cpu and tcp families stay off
+  # process: for the pids limit; the per-cpu and tcp families stay off
   cadvisorMetrics = [ "cpu" "memory" "network" "diskIO" "oom_event" "process" ];
   # vm-103 scrapes every 15s; the 1s default spent a third of a core on a worker with a dozen tasks
   cadvisorHousekeeping = "10s";
@@ -154,7 +139,7 @@ let
     }
   '';
 
-  # rewrites the relay's address map from the running task containers, then on every container start and stop
+  # the relay's address map from the running task containers, rewritten on every container start and stop
   relayResolver = pkgs.writeShellApplication {
     name = "${relay}-resolver";
     runtimeInputs = [ config.virtualisation.docker.package pkgs.coreutils ];
@@ -176,10 +161,13 @@ let
         mv "$tmp" ${relayTenants}
         kill -HUP "$(cat ${relayDir}/nginx.pid)"
       }
-      since=$(date +%s)
-      resolve
-      docker events --since "$since" --filter type=container --filter event=start --filter event=die --format '{{.ID}}' |
-        while read -r _; do resolve; done
+      # each pass resolves from scratch, so the events a reconnect missed are covered
+      while true; do
+        since=$(date +%s)
+        resolve
+        docker events --since "$since" --filter type=container --filter event=start --filter event=die --format '{{.ID}}' |
+          while read -r _; do resolve; done || echo "the docker event stream ended, reconnecting" >&2
+      done
     '';
   };
   appJob = app: {

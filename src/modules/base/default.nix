@@ -7,7 +7,6 @@ let
   promtailOn = isCollector || config.homelab.traefik.enable;
   promtailPort = telemetry.ports.promtail;
   textfileDir = config.homelab.textfileDir;
-  # the attic binary cache every host substitutes from, and its signing key
   attic = lab.routes.attic;
   atticCache = "homelab";
   atticAddress = inventory.${toString attic.vmid}.ip;
@@ -52,16 +51,16 @@ in {
     _module.args.catalog = lib.mkDefault lab.catalog;
 
     sops = {
-      # the host's own key, pushed by sync.sh; it opens this host's files and nothing else
+      # the host's own key, pushed by sync.nu; it opens this host's files and nothing else
       age.keyFile = "/var/lib/sops-nix/key.txt";
       # only the pushed key: an ssh host key as a second identity would be one more key that opens the file
       age.sshKeyPaths = [ ];
       gnupg.sshKeyPaths = [ ];
     };
 
-    # eth0 naming so cloud-init config matches
+    # cloud-init's config names eth0
     networking.usePredictableInterfaceNames = false;
-    # deployer, owner, owner's YubiKey, hermes: the same files terraform and sync.sh (proxmox) install
+    # deployer, owner, owner's YubiKey, hermes: the same files terraform and sync.nu (proxmox) install
     users.users.root.openssh.authorizedKeys.keyFiles = lib.filesystem.listFilesRecursive ../../secrets/keys;
 
     services.openssh = {
@@ -74,7 +73,8 @@ in {
 
     security.sudo.wheelNeedsPassword = false;
 
-    environment.systemPackages = with pkgs; [ vim curl htop ];
+    # nushell: the lab's script language, for an operator on the guest as for its units
+    environment.systemPackages = with pkgs; [ vim curl htop nushell ];
     services.prometheus.exporters.node = {
       enable = true;
       openFirewall = lib.mkDefault true;
@@ -88,8 +88,10 @@ in {
       enable = true;
       settings.Upload.URL = telemetry.urls.journalUpload;
     };
+    # every failed upload logs at err: a guest that boots before vm-103, or a burst journal-remote drops, retries every
+    # 3 s at nixpkgs' default; the upload resumes from its cursor, so a slower retry loses nothing
+    systemd.services.systemd-journal-upload.serviceConfig.RestartSec = lib.mkIf (!isCollector) (lib.mkForce "30s");
 
-    # promtail only on the collector and where a file log exists (traefik access)
     systemd.services.promtail = lib.mkIf promtailOn {
       # its namespaced start needs a state dir
       serviceConfig.StateDirectory = "promtail";
@@ -158,7 +160,7 @@ in {
     services.journald.extraConfig = "SystemMaxUse=200M";
     nix.optimise.automatic = true;
 
-    # attic (vm-105) substituter, read-only netrc token
+    # a read-only token
     sops.secrets.attic-pull-token = lib.mkIf (!isInstallImage) {};
     sops.templates."nix-netrc" = lib.mkIf (!isInstallImage) {
       content = ''

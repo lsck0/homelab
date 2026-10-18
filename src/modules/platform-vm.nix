@@ -1,11 +1,14 @@
 # qemu guest: disk, bootloader, agent
-{ config, lib, modulesPath, ... }: {
+{ config, lib, modulesPath, ... }:
+let
+  dropCachesEveryMin = 30;
+in {
   imports = [ (modulesPath + "/profiles/qemu-guest.nix") ];
 
   options.homelab.dropCaches = lib.mkOption {
     type = lib.types.bool;
     default = true;
-    description = "Drop clean page cache every 30 min so free-page reporting hands it back to the host.";
+    description = "Drop clean page cache every ${toString dropCachesEveryMin} min so free-page reporting hands it back to the host.";
   };
 
   config = {
@@ -29,9 +32,15 @@
     boot.kernel.sysctl."vm.vfs_cache_pressure" = 300;
     systemd.services.drop-page-cache = lib.mkIf config.homelab.dropCaches {
       description = "Return clean page cache to the host";
-      startAt = "*:0/30";
+      startAt = "*:0/${toString dropCachesEveryMin}";
       serviceConfig.Type = "oneshot";
       script = "sync; echo 1 > /proc/sys/vm/drop_caches";
+    };
+    # a fixed offset per guest within the period: every guest syncing and refaulting in the same second loads the
+    # host's disks at once
+    systemd.timers.drop-page-cache.timerConfig = lib.mkIf config.homelab.dropCaches {
+      RandomizedDelaySec = "${toString (dropCachesEveryMin - 1)}min";
+      FixedRandomDelay = true;
     };
   };
 }

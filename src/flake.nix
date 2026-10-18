@@ -1,7 +1,7 @@
 # the lab: one nixos configuration per instance folder and swarm node, the collected facts (`lab`), the checks
 #
 # Checks: every src/tests/<name>.nix but the shared stand-ins (the lab-wide tests), every
-# src/{core,instances/preconfigured,instances/custom,modules}/<name>/tests/<test>.nix (a test lives with what it tests)
+# src/{instances/core,instances/preconfigured,instances/custom,modules}/<name>/tests/<test>.nix (a test lives with what it tests)
 # is a check named by its file; adding a test is adding its file. A test is a function of
 # { pkgs, lib, inputs, specialArgs, ... } (specialArgs: the hosts' own, the lab's facts) returning a derivation; a
 # seeded one also takes `seed` with a default and lists past failing seeds in passthru.regressionSeeds, and its check
@@ -85,14 +85,14 @@
         lib.genAttrs (map toString (lib.range 0 seedMax)) (seed: testOf name { seed = lib.toInt seed; }));
 
       # where every secret lives (modules/secrets.nix): `declared` from the folders alone, `plan` (what
-      # scripts/secrets-sync.sh converges to) from every host's sops-nix secrets as well
+      # scripts/secrets-sync.nu converges to) from every host's sops-nix secrets as well
       secrets = let s = import ./modules/secrets.nix { inherit lib lab; }; in {
         inherit (s) declared;
         plan = s.planOf (lib.mapAttrs (_: sys: sys.config) self.nixosConfigurations);
       };
     };
 
-    # every tool the scripts and sync.sh run, pinned by flake.lock: `nix develop ./src`
+    # every tool the scripts and sync.nu run, pinned by flake.lock: `nix develop ./src`
     devShells.${system}.default = let
       # terraform is BSL
       pkgsUnfree = import nixpkgs { inherit system; config.allowUnfreePredicate = p: lib.getName p == "terraform"; };
@@ -101,6 +101,8 @@
         # sops encrypts to the admin YubiKey recipient only through its plugin
         sops age age-plugin-yubikey jq openssl
         openssh sshpass git curl gh python3 wireguard-tools shellcheck iproute2
+        # the scripts' interpreter: the version the guests and the Proxmox host run (scripts/lib/proxmox.nu)
+        nushell
       ]) ++ [ pkgsUnfree.terraform ];
     };
 
@@ -109,7 +111,7 @@
         inherit pkgs lib nixpkgs specialArgs;
         common = { imports = [ common ./modules/platform-vm.nix ]; };
       };
-      # proxmox vztmpl: sync.sh uploads it before terraform creates containers
+      # proxmox vztmpl: sync.nu uploads it before terraform creates containers
       lxc-template = (lib.nixosSystem {
         inherit system specialArgs;
         modules = [ common ./modules/platform-lxc.nix ];
@@ -117,7 +119,7 @@
     };
 
     # the collected facts: terraform reads `lab.terraform` (lib.tf), scripts the inventory (`nix eval .#lab.inventory`),
-    # sync.sh writes `lab.export` to generated/lab.json, the desktop clients' interface (modules/lab-export.nix)
+    # sync.nu writes `lab.export` to generated/lab.json, the desktop clients' interface (modules/lab-export.nix)
     lab = lab // { export = import ./modules/lab-export.nix { inherit lib lab; }; };
 
     # one configuration per instance folder and per generated swarm node

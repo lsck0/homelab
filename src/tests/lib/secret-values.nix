@@ -1,16 +1,10 @@
 # real-format values for the secrets whose services parse them, for testing.secretValues (tests/stubs/sops.nix)
 #
-# Keys a test only needs to be well-formed are derived from their name, so every build agrees on them: a WireGuard
-# key is the base64 of sha256("homelab-test/<name>") (wireguard clamps any 32 bytes into a valid key), a hex or
-# hmac secret that hash's 64 hex chars. Keys that need real structure (RSA, OpenSSH) are generated at build time:
-# private key material never sits in the repo, whose pre-commit hook refuses it. The public halves of the keys are
-# derivations too, under `public`. No oracle depends on a key's value. lib/lab.nix's `guest` gives every secret its
-# node reads the value named here; a node built otherwise (the router) sets them itself:
-#
-#   secretValues = import ./secret-values.nix { inherit pkgs; };
-#   testing.secretValues = { inherit (secretValues) wireguard-private-key protonvpn-private-key; };
-#   # a public half as a string option is read at evaluation, which builds the key first (import from derivation)
-#   homelab.swarm.deployKey = builtins.readFile secretValues.public.app-deploy-key;
+# a key a test only needs well-formed derives from its name, so every build agrees: a WireGuard key is the base64 of
+# sha256("homelab-test/<name>"), a hex secret that hash. A key that needs real structure (RSA, OpenSSH) is generated
+# at build time: private key material never sits in the repo, whose pre-commit hook refuses it. Public halves are
+# under `public`. No oracle depends on a key's value.
+#   testing.secretValues = { inherit (secretValues) wireguard-private-key; };
 { pkgs }:
 let
   seedOf = name: "homelab-test/${name}";
@@ -53,7 +47,7 @@ in {
   lab-gate-key = hexOf "lab-gate-key";
   authelia-oidc-hmac = hexOf "authelia-oidc-hmac";
   inherit authelia-oidc-issuer-key app-deploy-key lldap-server-key;
-  # an onion route's key (<route>-onion-key): any 32 bytes are an ed25519 seed, base64 as scripts/lib/onion.sh reads it
+  # an onion route's key (<route>-onion-key): any 32 bytes are an ed25519 seed, base64 as scripts/lib/onion.nu reads it
   onionSeedOf = wireguardOf;
 
   public = {

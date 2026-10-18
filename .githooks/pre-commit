@@ -1,3 +1,4 @@
-#!/usr/bin/env bash
-# sync.sh points core.hooksPath here; a manual commit gets the same check as an automatic one
-exec "$(git rev-parse --show-toplevel)/src/scripts/secrets-check.sh"
+#!/usr/bin/env -S nu --no-config-file
+# sync.nu and init.nu point core.hooksPath here; a manual commit gets the same check as an automatic one
+const ROOT = path self | path dirname | path dirname
+exec nu --no-config-file ($ROOT | path join src scripts secrets-check.nu)

@@ -11,7 +11,7 @@ import (
  * -----------------------------------------------------------------------------
  */
 
-// one journal line per event (R-057); the message is the event, every fact is a field
+// one journal line per event; the message is the event, every fact is a field
 const (
 	logLogin       = "login"
 	logStart       = "start"

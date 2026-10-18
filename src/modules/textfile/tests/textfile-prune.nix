@@ -1,7 +1,7 @@
-# the textfile prune (lib/prune.sh) across generations: a stale metric of a removed or moved writer goes, a file no
-# generation declared stays (prune_test.sh). No vm.
+# the textfile prune (lib/prune.nu) across generations (prune_test.nu). No vm.
 { pkgs, ... }:
-pkgs.runCommand "textfile-prune" { nativeBuildInputs = [ pkgs.bash pkgs.coreutils ]; } ''
-  bash ${./prune_test.sh} ${../lib/prune.sh}
+pkgs.runCommand "textfile-prune" { nativeBuildInputs = [ pkgs.nushell pkgs.coreutils ]; } ''
+  export HOME=$TMPDIR
+  nu --no-config-file ${./prune_test.nu} ${pkgs.writers.writeNu "textfile-prune" ../lib/prune.nu}
   touch $out
 ''

@@ -16,7 +16,7 @@ import (
  */
 
 const (
-	// the node exporter reads this file through a link in its textfile dir (R-091), so it is world readable
+	// the node exporter reads this file through a link in its textfile dir, so it is world readable
 	metricsFileName = "metrics.prom"
 	metricsFileMode = 0o644
 	// every metric of this gate, in one place: the prefix is the lab's, the subsystem is this guest's
@@ -39,7 +39,7 @@ var metricPhases = []Phase{phaseSleeping, phaseStarting, phaseRunning, phaseStop
  */
 
 // metricsLabel escapes a label value the way the text exposition format wants it. A server name is a dns label and
-// a kick reason is one of R-054's words, so nothing here can really need it; a counter that lies about its own
+// a kick reason is one of texts.go's words, so nothing here can really need it; a counter that lies about its own
 // format when something else does would be worse than the two lines it costs.
 func metricsLabel(value string) string {
 	replacer := strings.NewReplacer(`\`, `\\`, `"`, `\"`, "\n", `\n`)
@@ -64,7 +64,7 @@ func metricsHeader(out *strings.Builder, name, kind, help string) {
  * -----------------------------------------------------------------------------
  */
 
-// metricsRender is the gate's whole view in the prometheus text format (R-090). It takes the records rather than the
+// metricsRender is the gate's whole view in the prometheus text format. It takes the records rather than the
 // decider, so a test renders a view it built itself. It carries no timestamp of its own: the node exporter publishes
 // node_textfile_mtime_seconds for this file, which is the same answer from the side that scrapes it.
 func metricsRender(servers []*Server, kicks map[string]int, switches int) []byte {
@@ -114,7 +114,7 @@ func metricsRender(servers []*Server, kicks map[string]int, switches int) []byte
 	return []byte(out.String())
 }
 
-// metricsSave replaces the file the node exporter reads, atomically, so it never scrapes half a write (R-090). A
+// metricsSave replaces the file the node exporter reads, atomically, so it never scrapes half a write. A
 // render equal to the one on disk writes nothing: every status ping of an unauthenticated internet port passes
 // through here, and the file, unlike the state in /run, lives on the guest's disk.
 func metricsSave(stateDir string, last, data []byte) ([]byte, error) {

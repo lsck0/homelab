@@ -41,6 +41,7 @@ class Door(unittest.TestCase):
             apps[app] = {"tokenFile": os.path.join(root, app), "idle": app == "demo"}
         self.config = {"apps": apps, "wakers": [INGRESS], "redeployIntervalS": INTERVAL_S,
                        "stateDir": os.path.join(root, "state"), "stoppedDir": os.path.join(root, "stopped"),
+                       "wokeSuffix": ".woke",
                        "units": {"redeploy": "app-builder@%s.service", "wake": "swarm-idle-wake@%s.service",
                                  "sleep": "swarm-idle-sleep@%s.service"}}
         self.started = []
@@ -140,6 +141,19 @@ class Door(unittest.TestCase):
         self.assertEqual(respond(), (200, "running\n"))
         open(os.path.join(self.config["stoppedDir"], "demo"), "w").close()
         self.assertEqual(respond(), (200, "stopped\n"))
+        self.assertEqual(self.started, [])
+
+    def test_uptime_counts_from_the_last_wake(self):
+        def respond(remote=INGRESS):
+            return api.respond(self.config, "GET", "/uptime/demo", {}, remote, NOW_S, self.start)
+
+        self.assertEqual(respond(), (200, f"{int(NOW_S)}\n"))
+        woke = os.path.join(self.config["stoppedDir"], "demo.woke")
+        open(woke, "w").close()
+        os.utime(woke, (NOW_S - 30, NOW_S - 30))
+        self.assertEqual(respond(), (200, "30\n"))
+        self.assertEqual(respond(STRANGER)[0], 403)
+        self.assertEqual(self.ask("POST", "/uptime/demo", remote=INGRESS), 405)
         self.assertEqual(self.started, [])
 
 

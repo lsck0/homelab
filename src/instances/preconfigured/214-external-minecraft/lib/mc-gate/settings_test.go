@@ -44,9 +44,9 @@ func settingsTestJSON(t *testing.T, change func(file map[string]any)) []byte {
 	return data
 }
 
-// Test_spec001_r055a_settings covers the settings file of the data model being read whole, and every way a
-// generated file could be wrong being refused rather than guessed at (R-055a).
-func Test_spec001_r055a_settings(t *testing.T) {
+// Test_settings_parse covers the settings file of the data model being read whole, and every way a
+// generated file could be wrong being refused rather than guessed at.
+func Test_settings_parse(t *testing.T) {
 	good := settingsTestJSON(t, func(map[string]any) {})
 	settings, err := settingsParse(good)
 	if err != nil {
@@ -147,9 +147,9 @@ func Test_spec001_r055a_settings(t *testing.T) {
 	})
 }
 
-// Test_spec001_r055b_reload covers a reload adding a server and changing a limit while the records of the others
-// are untouched, which is what keeps a reload from cutting a session (R-055b).
-func Test_spec001_r055b_reload(t *testing.T) {
+// Test_settings_reload covers a reload adding a server and changing a limit while the records of the others
+// are untouched, which is what keeps a reload from cutting a session.
+func Test_settings_reload(t *testing.T) {
 	d, _, clock, settings := deciderTestPair(t)
 	testServerRunning(d, "alpha", clock.Now())
 	decision := testLogin(d, "alpha", testSource)
@@ -183,8 +183,8 @@ func Test_spec001_r055b_reload(t *testing.T) {
 	}
 }
 
-// Test_spec001_r055c_keep covers a server a reload dropped being kept until its last session ends (R-055c).
-func Test_spec001_r055c_keep(t *testing.T) {
+// Test_settings_keep covers a server a reload dropped being kept until its last session ends.
+func Test_settings_keep(t *testing.T) {
 	d, _, clock, settings := deciderTestPair(t)
 	testServerRunning(d, "beta", clock.Now())
 	decision := testLogin(d, "beta", testSource)

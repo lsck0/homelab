@@ -1,24 +1,29 @@
 # the guests against what they declare and what the node holds
 #
-# - a guest's declared needs (instance.nix `vm.needs`) are what its configuration uses, so the kind the rule derives
-#   from them (modules/instance-schema.nix) is the kind it must be: its own container runtime, nfs (client or server)
+# - a guest's declared needs (instance.nix `vm.needs`) are the kind its configuration is: containers, nfs
 # - host memory budget: every powered guest's floor (a vm's balloon floor, its whole memory when unballooned, an
-#   lxc's limit) plus the zfs arc and the node's reserve fit the node's memory (`node` below). Past it the
-#   balloon squeezes guests below their floors and the node swaps; onDemand guests count, since all may wake at once.
-# - a guest mounts exactly the shares its instance.nix declares (lab.shares, its token dirs derived): vm-104 exports
-#   those, so a mount it does not export hangs and an export nothing mounts is open for nothing
+#   lxc's limit), each vm's qemu overhead and the node's reserve fit the node. Past it the balloon squeezes guests
+#   below their floors and the node swaps; onDemand guests count, since all may wake at once
+# - a service's MemoryMax fits its guest's floor less the guest's base: above it the guest's global oom fires before
+#   the cap, and kills the largest process (syncthing, nfsd's clients) instead of the capped unit
+# - a guest mounts exactly the shares its instance.nix declares: vm-104 exports those, so a mount it does not
+#   export hangs and an export nothing mounts is open for nothing
 { lib, configs, lab, ... }:
 let
-  # the proxmox node every guest shares
   node = {
-    # MemTotal of the node (32 GiB less the firmware's share)
+    # MemTotal: 32 GiB less the firmware's share
     memoryMiB = 32022;
     # the zfs arc is capped at 3202 MiB, but the node has no zfs pool (its storage is lvm-thin), so the arc holds nothing
     arcMaxMiB = 0;
-    # the node's own kernel, pve daemons and the page cache of the guest disks
-    reserveMiB = 2048;
+    # what the node itself cannot give back, measured on pve 9.0: 1730 MiB of daemons (pss) and 800 MiB of unreclaimable
+    # kernel memory. page cache is reclaimable, and autoballoon's 80% line squeezes guests to their floors, not below
+    reserveMiB = 2560;
+    # a qemu process beside its guest's memory: 100 to 300 MiB measured per vm
+    qemuOverheadMiB = 150;
   };
-  # the largest floors, named in the violation: where shrinking pays
+  # an idle guest's kernel, sshd, journald and exporters
+  guestBaseMiB = 512;
+  # where shrinking pays
   largestShown = 8;
 
   usesOf = c: lib.optional (c.virtualisation.podman.enable || c.virtualisation.docker.enable
@@ -47,11 +52,26 @@ let
   floors = lib.sort (a: b: a.miB > b.miB) (map (i: { inherit (i) id; kind = i.config.vm.guestKind; miB = floorOf i.config.vm; })
     (lib.filter (i: i.config.vm.power == "on") (lib.attrValues lab.instances)));
   sumOf = kind: lib.foldl' (acc: f: acc + f.miB) 0 (lib.filter (f: f.kind == kind) floors);
-  totalMiB = sumOf "vm" + sumOf "lxc" + node.arcMaxMiB + node.reserveMiB;
+  overheadMiB = node.qemuOverheadMiB * lib.length (lib.filter (f: f.kind == "vm") floors);
+  totalMiB = sumOf "vm" + sumOf "lxc" + overheadMiB + node.arcMaxMiB + node.reserveMiB;
   budgetLaws = lib.optional (totalMiB > node.memoryMiB)
-    ("host memory: vm floors ${toString (sumOf "vm")} + lxc limits ${toString (sumOf "lxc")} + arc ${toString node.arcMaxMiB}"
-      + " + reserve ${toString node.reserveMiB} = ${toString totalMiB} MiB, over the node's ${toString node.memoryMiB} MiB"
-      + " by ${toString (totalMiB - node.memoryMiB)}; largest: "
+    ("host memory: vm floors ${toString (sumOf "vm")} + lxc limits ${toString (sumOf "lxc")} + qemu ${toString overheadMiB}"
+      + " + arc ${toString node.arcMaxMiB} + reserve ${toString node.reserveMiB} = ${toString totalMiB} MiB, over the"
+      + " node's ${toString node.memoryMiB} MiB by ${toString (totalMiB - node.memoryMiB)}; largest: "
       + lib.concatMapStringsSep ", " (f: "${f.id} ${toString f.miB}") (lib.take largestShown floors));
+
+  # systemd's MemoryMax: bytes or a K/M/G/T suffix (base 1024); infinity and a share of the guest are no fixed cap
+  unitBytes = { "" = 1; K = 1024; M = 1024 * 1024; G = 1024 * 1024 * 1024; T = 1024 * 1024 * 1024 * 1024; };
+  miBOf = value: let m = builtins.match "([0-9]+)([KMGT]?)" (toString value); in
+    if m == null then null else lib.toInt (lib.elemAt m 0) * unitBytes.${lib.elemAt m 1} / unitBytes.M;
+  capLaws = lib.concatLists (lib.mapAttrsToList (name: host: let
+      floorMiB = floorOf lab.instances.${host.id}.config.vm;
+      caps = lib.filterAttrs (_: miB: miB != null)
+        (lib.mapAttrs (_: s: miBOf (s.serviceConfig.MemoryMax or "")) configs.${name}.systemd.services);
+    in
+    lib.mapAttrsToList (unit: miB: "${name}: ${unit} MemoryMax ${toString miB} MiB leaves less than ${toString guestBaseMiB}"
+        + " MiB of the guest's ${toString floorMiB} MiB floor")
+      (lib.filterAttrs (_: miB: miB > floorMiB - guestBaseMiB) caps)
+  ) (lib.filterAttrs (_: host: lab.instances ? ${host.id}) lab.hosts));
 in
-needsLaws ++ shareLaws ++ budgetLaws
+needsLaws ++ shareLaws ++ budgetLaws ++ capLaws

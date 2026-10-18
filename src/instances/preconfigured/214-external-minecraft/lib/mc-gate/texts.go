@@ -25,7 +25,7 @@ const (
 	outcomeFailed       = "failed"
 )
 
-// the kick texts of R-054, rendered by kickText; the client shows them on its disconnect screen
+// the kick texts, rendered by kickText; the client shows them on its disconnect screen
 const (
 	textStarting     = "%s is starting, rejoin in about a minute"
 	textStopping     = "%s is stopping, try again in a minute"
@@ -37,7 +37,7 @@ const (
 	textUnknown      = "no server %s here; servers: %s"
 )
 
-// the status descriptions of R-042 and R-053c, rendered by statusDescription; the client shows them in its server list
+// the status descriptions, rendered by statusDescription; the client shows them in its server list
 const (
 	descriptionSleeping = "sleeping, join to start it"
 	descriptionStarting = "starting, rejoin in about a minute"

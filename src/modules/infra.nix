@@ -1,11 +1,6 @@
 # the lab's frame: what holds the lab up but is no route of its own (the house router, proxmox, the lab's router and
 # ingresses, outside dashboards), in display order. The homepage's Infra group (102-internal-homepage) shows it with
 # widgets; lab.export hands it to the desktop clients.
-#
-#   infra = import ../modules/infra.nix { inherit net; };
-#   infra.cards        # [{ name; icon; href; ping; description; }], null where a card has none
-#   infra.fritzbox     # the house router's web ui
-#   infra.proxmoxApi   # <address>:<port> of the proxmox api
 { net }:
 let
   hostUrl = host: "https://${net.fqdn host}";

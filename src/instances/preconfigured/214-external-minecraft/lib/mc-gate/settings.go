@@ -17,7 +17,7 @@ import (
  * -----------------------------------------------------------------------------
  */
 
-// a server's name is one DNS label, because it is one label below the wildcard host *.mc (R-070)
+// a server's name is one DNS label, because it is one label below the wildcard host *.mc
 var settingsNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`)
 
 // a host's network and the bits an address of it carries
@@ -42,7 +42,7 @@ type Settings struct {
 }
 
 // SettingsServer is one declared server. Version and Protocol answer a status ping for a server that has never
-// answered one itself; ModpackEnv is the file whose mtime tells a first start from a later one (R-053b).
+// answered one itself; ModpackEnv is the file whose mtime tells a first start from a later one.
 type SettingsServer struct {
 	Name       string  `json:"name"`
 	Unit       string  `json:"unit"`
@@ -51,7 +51,7 @@ type SettingsServer struct {
 	ModpackEnv string  `json:"modpackEnv"`
 }
 
-// SettingsLimits are every bound of the spec, in seconds or in counts, so a test can shorten them without a rebuild.
+// SettingsLimits are every bound the gate holds, in seconds or in counts, so a test can shorten them without a rebuild.
 type SettingsLimits struct {
 	HandshakeTimeoutS         int `json:"handshakeTimeoutS"`
 	HandshakeBytesMax         int `json:"handshakeBytesMax"`

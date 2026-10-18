@@ -8,7 +8,7 @@
     machine = "q35";
   };
 
-  # filled by lib/hermes-secrets.sh
+  # filled by lib/hermes-secrets.nu
   secrets = {
     hermes-github-app-key = "manual";
     hermes-claude-token = "dotfiles:claude-oauth-token";

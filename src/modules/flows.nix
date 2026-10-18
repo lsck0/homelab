@@ -1,22 +1,12 @@
-# who may open a connection to whom: the lab's network policy as data, read in one place
+# who may open a connection to whom: the lab's network policy as data, each entry with the reason it exists
 #
-# Five lists, each entry with the reason it exists:
-# - networks: the router's interfaces and where each may connect by default. A trusted network reaches
-#   everything, the house lan the lab's zones, an isolated zone (a dmz) the internet only.
-# - guards: grants of one or more guests onto ports of one guest. A grant is the whole path: the guest's guard admits
-#   the sources (modules/network.nix, ports guarded with homelab.ingressOnly; its zone's ingress and loopback are
-#   trusted there already), and every source whose network the router would not let through gets its forward.
-# - forward: the network-wide exceptions across the router: one source, one destination, its ports.
-# - router: the router's own services and who may use them.
-# - portForwards: the house's public address forwarded: https to the edge, every tcp and udp route with a publicPort
-#   to its backend.
+# networks: the router's interfaces and their default reach. guards: grants of guests onto ports of one guest, the whole
+# path (its guard admits the sources, and the router forwards for any source it would not let through). forward: the
+# network-wide exceptions across the router. router: its own services. portForwards: the house's public address.
 #
-# core/300-router/main.nix renders networks, forward, router and portForwards; modules/network.nix renders the
-# grants onto the guest it runs on. A grant onto one instance lives in its instance.nix (`grants`, collected by
-# modules/lab), a route's own path from its ingress is derived from the route; what spans the lab stays here.
-# tests/lib/zones.py states the router's part independently and tests/router-zones.nix holds the running router to it.
-#
-# An endpoint is { network; addresses; }: a network of `networks`, and the addresses in it (null: all of it).
+# the router (instances/core/300-router) renders all but the grants, which modules/network.nix renders on their guest;
+# a grant onto one instance lives in its instance.nix `grants`. tests/lib/zones.py states the router's part
+# independently. An endpoint is { network; addresses; }, addresses null for all of the network.
 { lib, net, inventory, catalog, nasClients, lab }:
 let
   inherit (net) ports zones;
@@ -121,7 +111,7 @@ let
     why = "vm-103 probes the lab-only tcp route ${r.host}";
   }) (lib.filter (r: r.vmid != null && r.protocol == "tcp" && r.publicPort == null && lib.elem "probe" r.on) (lib.attrValues catalog.l4));
 
-  # the router's tor hands an onion route's visitors to the edge (core/300-router/lib/onion-services.nix)
+  # the router's tor hands an onion route's visitors to the edge (instances/core/300-router/lib/onion-services.nix)
   onionGrants = lib.optional (lib.any (r: r.onionAddress != null) (lib.attrValues catalog.external)) {
     from = [ "router" ]; to = edge; tcp = [ torPorts.onionIngress ];
     why = "the router's tor hands the onion routes' visitors to the edge";
@@ -154,7 +144,7 @@ let
 
   networks = {
     internal = { interface = zones.internal.interface; sources = [ zones.internal.subnet ]; reaches = "everything"; };
-    # the owner's devices (core/300-router/main.nix wg0 peers)
+    # the owner's devices (instances/core/300-router/main.nix wg0 peers)
     wireguard = { interface = "wg0"; sources = [ net.wireguard.subnet ]; reaches = "everything"; };
     # the house routes the lab through the router; the apps zone it reaches only through the ingresses
     lan = { interface = net.wan.interface; sources = [ net.wan.subnet ]; reaches = [ "internal" "external" ]; };
@@ -172,7 +162,7 @@ in
   forward = forwardsMerged (lib.concatMap grantForwards guards) ++ [
     {
       from = house [ net.wan.workstation ]; to = all "apps"; tcp = [ ports.ssh ];
-      why = "sync.sh on the workstation deploys the swarm workers over ssh like every guest";
+      why = "sync.nu on the workstation deploys the swarm workers over ssh like every guest";
     }
     {
       from = host edge; to = host internalIngress; tcp = [ ports.https ];

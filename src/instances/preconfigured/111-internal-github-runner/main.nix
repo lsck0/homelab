@@ -138,7 +138,7 @@ in {
 
   systemd.tmpfiles.rules = [
     "d ${regTokenDir} 0700 root root -"
-    # the runners' StateDirectory parent: a dropped uid's 0700 copy kept the runner users out (crash loop)
+    # the runners' StateDirectory parent: a 0700 copy of a dropped uid locks the runner users out
     "d ${stateRoot} 0755 root root -"
   ];
 
