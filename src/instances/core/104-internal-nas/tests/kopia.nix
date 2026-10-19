@@ -1,8 +1,9 @@
 # kopia on the nas: init, snapshot, restore; a restore of a guest's local state copy (paperless, instance.nix
 # `shares`) is marked with a fresh generation for its seed (modules/local-state), any other share is not; the
 # syncthing folders and cold storage snapshot into their own repository, cold storage's upload skips without a
-# session and runs early only until one succeeded, and the repository mirror keeps its remote copy; the disks are
-# trimmed daily; a repository left at its old place stops init
+# session and runs early only until one succeeded, its uploaded gauge read from that marker, without which a success
+# time goes, and the repository mirror keeps its remote copy; the disks are trimmed daily; a repository left at its old
+# place stops init
 { pkgs, lib, ... }:
 pkgs.testers.runNixOSTest {
   name = "kopia";
@@ -180,6 +181,8 @@ pkgs.testers.runNixOSTest {
         machine.succeed("systemctl start proton-cold-storage.service")
         machine.succeed("journalctl -u proton-cold-storage --no-pager | grep -q 'no proton session'")
         machine.fail("ls /var/lib/node-exporter-textfile/proton_cold_storage.prom")
+        uploaded = machine.succeed("cat /var/lib/node-exporter-textfile/proton_cold_storage_uploaded.prom")
+        assert 'homelab_offsite_uploaded{mirror="cold-storage"} 0' in uploaded, uploaded
         weekly = machine.succeed("systemctl show -p TimersMonotonic -p TimersCalendar --value proton-cold-storage.timer")
         assert "OnActiveUSec" not in weekly and "OnCalendar" in weekly, f"every boot starts an upload: {weekly}"
         machine.succeed("systemctl is-active proton-cold-storage-first.timer")
@@ -190,9 +193,14 @@ pkgs.testers.runNixOSTest {
         machine.succeed("touch /var/lib/node-exporter-textfile/proton_cold_storage.prom")
         machine.succeed("systemctl restart proton-cold-storage-first.timer")
         machine.succeed("systemctl is-active proton-cold-storage-first.timer")
+        machine.succeed("systemctl start proton-cold-storage.service")
+        machine.fail("ls /var/lib/node-exporter-textfile/proton_cold_storage.prom")
         machine.succeed("touch /var/lib/proton-drive/cold-storage.uploaded")
         machine.succeed("systemctl restart proton-cold-storage-first.timer")
         machine.fail("systemctl is-active proton-cold-storage-first.timer")
+        machine.succeed("systemctl start proton-cold-storage.service")
+        uploaded = machine.succeed("cat /var/lib/node-exporter-textfile/proton_cold_storage_uploaded.prom")
+        assert 'homelab_offsite_uploaded{mirror="cold-storage"} 1' in uploaded, uploaded
         keep = machine.succeed("systemctl show -p Environment --value proton-sync")
         assert "PROTON_MIRROR_ROOT_KEEP=BACKUPS cold-storage sync" in keep, keep
 

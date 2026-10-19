@@ -2,7 +2,8 @@
 # (tests/alert_rules_test.py holds the cases): every PromQL rule parses, and the policy's cases fire or stay quiet.
 # Every annotation expands with and without a value (tests/annotations_render.go): grafana sends one it cannot raw.
 # What the rules rely on is checked at evaluation: every powered guest is scraped and an idle one labeled so, a
-# powered-off one is not, and no probe reaches a guest that is not always on (it would wake it, or alarm while it sleeps).
+# powered-off one is not, and no probe reaches a guest that is not always on (it would wake it, or alarm while it sleeps)
+# but at its own address, and that probe only an idle guest's.
 {
   pkgs,
   lib,
@@ -45,6 +46,7 @@ let
       "blackbox-tcp"
     ]
   );
+  backendVms = map (c: c.labels.vm) (scrapeOf "blackbox-backend").static_configs;
   guests = lib.filterAttrs (_: v: v.type != "router") inventory;
   problems = lib.concatLists (
     lib.mapAttrsToList (
@@ -59,6 +61,9 @@ let
           labels == null || (labels.idle or null) != (if v.idle == null then null else "true")
         ) "vm-${id} is scraped without its idle label (idle: ${toString v.idle})"
         ++ lib.optional (v.idle != null && lib.elem (telemetry.vmName v) probedVms) "vm-${id} sleeps on purpose but is probed"
+        ++ lib.optional (
+          v.idle == null && lib.elem (telemetry.vmName v) backendVms
+        ) "vm-${id} never sleeps but is probed at its own address"
     ) guests
   );
   rules =

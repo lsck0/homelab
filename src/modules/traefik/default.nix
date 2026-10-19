@@ -511,23 +511,10 @@ let
 
   # a start never fetches or upgrades a rule or its data
   crowdsecHub = import ./lib/crowdsec-hub.nix { inherit pkgs lib; };
-  # hub_branch: without it every start asks version.crowdsec.net, and a start without internet fails.
-  # log_level: podman's journald driver tags container output err, and the lapi's per-request info lines (5000 a day)
-  # buried every real error. use_wal: without it lapi warns that sqlite may leave it unresponsive
-  crowdsecLocalConfig = yamlDocs "config.yaml.local" [
-    {
-      cscli.hub_branch = crowdsecHub.hubBranch;
-      api.server.log_level = "warning";
-      db_config.use_wal = true;
-      # decisions, parser hits, appsec blocks and bucket overflows for vm-103
-      prometheus = {
-        enabled = true;
-        level = "full";
-        listen_addr = "0.0.0.0";
-        listen_port = crowdsecMetricsPort;
-      };
-    }
-  ];
+  crowdsecLocalConfig = import ./lib/crowdsec-local-config.nix {
+    inherit pkgs lib;
+    metricsPort = crowdsecMetricsPort;
+  };
   # the owner's choice: the community api (CAPI) gets each ban's attacker ip, scenario and time, and returns the
   # community blocklist; an outage keeps the last decisions
   crowdsecCommunity = true;

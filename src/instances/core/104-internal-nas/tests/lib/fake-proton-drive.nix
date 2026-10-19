@@ -2,8 +2,9 @@
 # drive is the folder FAKE_DRIVE (/my-files/x is $FAKE_DRIVE/my-files/x), FAKE_LOG gets one line per call. Like the
 # real one, an upload keeps the local mtime as the file's claimed modification time (ms) and skips nothing, a download
 # does not set the local mtime, trash lets same-named items pile up and delete refuses an ambiguous one, and upload
-# expands each local path as a glob: a backslash escapes, braces match nothing (the real one matched no {GUID} folder)
-# and a path matching nothing fails the call. Faults:
+# takes a local path holding none of * ? [ { as it is, backslashes included, and expands any other as a glob: a
+# backslash escapes, braces match nothing (the real one matched no {GUID} folder) and a path matching nothing fails the
+# call. Faults:
 # FAKE_UPLOAD_FAIL set fails every upload; a call naming a path that matches a glob line of the file FAKE_FAIL_FILE
 # fails whole, its cause on stdout under a banner on stderr, as the real one prints some.
 { pkgs }:
@@ -49,6 +50,10 @@ pkgs.writeShellApplication {
       fi
     }
     glob_expand() { # <path>: its matches, NUL-separated
+      if [[ $1 != *['*?[{']* ]]; then
+        if [ -e "$1" ] || [ -L "$1" ]; then printf '%s\0' "$1"; fi
+        return
+      fi
       local bare=''${1//\\?/}
       if [[ $bare != *[][{}*?]* ]]; then
         local literal

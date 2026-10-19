@@ -10,6 +10,8 @@
 const EXIT_GUARD = 3
 # flock's status when an hourly run finds the lock taken; nothing else in a run exits with it
 const EXIT_LOCK_BUSY = 99
+# sd-daemon's priority prefix, which journald reads off the unit's stdout
+const JOURNAL_WARNING = "<4>"
 
 def "main locked" [mode: string]: nothing -> nothing {
     let state = $env.PROTON_BISYNC_STATE
@@ -49,8 +51,9 @@ def main [mode: string]: nothing -> nothing {
     let wait = if $mode == "sync" { [--nonblock --conflict-exit-code $"($EXIT_LOCK_BUSY)"] } else { [] }
     let status = status-of flock ...$wait $env.PROTON_BISYNC_LOCK $nu.current-exe --no-config-file $env.CURRENT_FILE locked $mode
     if $status == $EXIT_LOCK_BUSY {
-        print $"another nas job holds ($env.PROTON_BISYNC_LOCK); skipping this hour"
-        return
+        # a warning and a metric of its own: the unit succeeds, but nothing synced
+        print $"($JOURNAL_WARNING)another nas job holds ($env.PROTON_BISYNC_LOCK); skipping this hour"
+        exit (status-of $env.PROTON_BISYNC_SKIP_METRIC (date now | format date "%s"))
     }
     exit $status
 }

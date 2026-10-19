@@ -113,6 +113,8 @@ class ZoneOracle:
             or (src == ARCHBUILD and dst == MIRROR and tcp and port == SSH)
             # hermes' search skill calls the json api directly, which searxng's pass_ip lets through
             or (src == OPERATOR and dst == SEARXNG and tcp and port == HTTP)
+            # blackbox-backend probes the host port while the guest is awake
+            or (src == COLLECTOR and dst == SEARXNG and tcp and port == HTTP)
             or (src == COLLECTOR and zd in ("dmz", "apps") and tcp and port == NODE_EXPORTER)
             or (
                 src == MANAGER

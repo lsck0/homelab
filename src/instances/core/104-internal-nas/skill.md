@@ -22,7 +22,8 @@ Layout under `/srv/nas`:
 - `bulk/cold-storage` what must be kept but is rarely opened (smb share `cold-storage`): snapshotted nightly into
   `BACKUPS/kopia-syncthing`, uploaded weekly to Proton Drive (`/my-files/homelab-offsite/cold-storage`) one way, so a
   file deleted here stays off-site: `systemctl status proton-cold-storage`. An empty folder is refused; the first
-  upload follows a deploy until one succeeded (`/var/lib/proton-drive/cold-storage.uploaded`)
+  upload follows a deploy until one succeeded (`/var/lib/proton-drive/cold-storage.uploaded`; without it
+  `homelab_offsite_uploaded` reads 0 and pages after two days)
 - `bulk/BACKUPS/kopia` the Kopia repository of the ssd's tree (`kopia-nas`, `nas-restore`); `BACKUPS/kopia-syncthing`
   the one of the hdd's syncthing folders and cold storage (`kopia-syncthing`), so each disk backs up the other (see
   `backups`)

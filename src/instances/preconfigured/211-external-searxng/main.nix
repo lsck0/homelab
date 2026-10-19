@@ -175,6 +175,9 @@ let
     "podman-searxng.service"
     "podman-searxng-valkey.service"
   ];
+  # an unprivileged lxc maps no full uid range, so root's podman takes itself for rootless and keeps its netns under
+  # the runtime dir; /run/user/0 is the ssh session's, whose logout wiped them and failed the next stop (status 125)
+  podmanRuntimeDir = "/run/podman-runtime";
 in
 {
   systemd.services.podman-network-searxng = {
@@ -192,8 +195,21 @@ in
     '';
   };
 
+  systemd.services.podman-searxng.environment.XDG_RUNTIME_DIR = podmanRuntimeDir;
+  systemd.services.podman-searxng-valkey.environment.XDG_RUNTIME_DIR = podmanRuntimeDir;
+  systemd.services.podman-searxng.path = [ pkgs.iptables ];
+
   # rendered every start; only the secret key is state, so no nas share
   systemd.services.podman-searxng.preStart = ''
+    # a container whose teardown failed leaves its port's dnat ahead of the next one's (the network's dn chain): nothing
+    # publishes on this network now, so its jumps and dn chains go
+    jumps=$(iptables-save -t nat | grep -F -- '--comment "dnat name: ${network} id: ' || true)
+    {
+      echo '*nat'
+      sed -n 's/^-A /-D /p' <<< "$jumps"
+      sed -n 's/.* -j \(NETAVARK-DN-[0-9A-F]*\)$/-F \1/p' <<< "$jumps" | sort -u
+      echo COMMIT
+    } | iptables-restore --noflush
     # generated here, a literal would be public in this repo
     [ -s ${secret} ] || (umask 077; head -c 32 /dev/urandom | base64 | tr -d '/+=' > ${secret})
     install -d -m 0700 -o ${searxngUid} -g ${searxngUid} ${configDir}
@@ -259,6 +275,7 @@ in
   };
 
   systemd.tmpfiles.rules = [
+    "d ${podmanRuntimeDir} 0700 root root -"
     "d ${stateDir} 0700 root root -"
     # the old rendered config, secret included; it renders to /run now
     "r ${stateDir}/settings.yml - - - - -"

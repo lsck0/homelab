@@ -73,8 +73,8 @@ def target-ensure [target: string]: nothing -> bool {
 
 # 0 uploaded, 2 only files changed mid-upload (retry once), 1 anything else; unchanged files are skipped by hash
 def upload [source: path, parent: string]: nothing -> int {
-    # the cli expands its local arguments as glob patterns
-    let literal = $source | str replace --all --regex '([\[\]{}()*?!+@\\])' '\$1'
+    # the cli takes an argument holding * ? [ or { as a glob pattern, any other one as it is
+    let literal = if $source =~ '[*?\[{]' { $source | str replace --all --regex '([\[\]{}()*?!+@\\])' '\$1' } else { $source }
     let done = ^proton-drive filesystem upload -j -f create-new-revision -d merge -t $literal $parent | complete
     print --stderr --no-newline $done.stderr
     if $done.exit_code == 0 { return 0 }

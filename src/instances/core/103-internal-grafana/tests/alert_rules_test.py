@@ -12,7 +12,7 @@ cases below in promtool's unit test format. tests/alert-rules.nix runs `promtool
 rules` on them.
 
 The cases are the policy, written out as an oracle: which series make which rule fire with which labels, and which
-must stay quiet (an idle guest asleep, a disk forecast with headroom or from an idle or down guest, a service on a guest that is down, a 5xx share at noise traffic, a dump
+must stay quiet (an idle guest asleep, its host port probe while it sleeps, a disk forecast with headroom or from an idle or down guest, a service on a guest that is down, a 5xx share at noise traffic, a dump
 stale only because its guest just woke up, a stale deploy metric on a guest that is no builder, a manager failure the
 builder already reports).
 """
@@ -79,6 +79,7 @@ SMARTD_NVME1 = ",".join(f'{k}="{v}"' for k, v in SMARTD_NVME1_LABELS.items())
 nas = {"instance": "10.100.0.104:9100", "vm": "nas"}
 # idle: the scrape labels a guest that sleeps on purpose
 archbuild = {"instance": "10.100.0.112:9100", "vm": "archbuild", "idle": "true"}
+searxng = {"instance": "10.200.0.211:9100", "vm": "searxng", "idle": "true"}
 # the app's routes as the edge names its services (catalog.nix): the app itself and a path of it
 app_root = f"{APP}@file"
 app_api = f"{APP}-api@file"
@@ -108,6 +109,23 @@ tests = [
                 "eval_time": "11m",
                 "alertname": "service_down",
                 "exp_alerts": [expect("service_down", job="blackbox-http", service="paperless", vm="paperless")],
+            },
+        ],
+    },
+    {
+        "name": "guests: an idle guest's host port pages while it is awake, not while it sleeps",
+        "interval": "1m",
+        "input_series": [
+            {"series": f'up{{{NODE},instance="{searxng["instance"]}",vm="searxng",idle="true"}}', "values": "1x20"},
+            {"series": f'up{{{NODE},instance="{archbuild["instance"]}",vm="archbuild",idle="true"}}', "values": "0x20"},
+            {"series": 'probe_success{job="blackbox-backend",service="searxng",vm="searxng"}', "values": "0x20"},
+            {"series": 'probe_success{job="blackbox-backend",service="archbuild",vm="archbuild"}', "values": "0x20"},
+        ],
+        "alert_rule_test": [
+            {
+                "eval_time": "11m",
+                "alertname": "service_down",
+                "exp_alerts": [expect("service_down", job="blackbox-backend", service="searxng", vm="searxng")],
             },
         ],
     },

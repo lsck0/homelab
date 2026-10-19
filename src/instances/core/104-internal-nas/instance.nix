@@ -21,7 +21,9 @@
     # nvme root: state, documents and the syncthing repository (lib/kopia.nix), which holds cold storage's snapshots
     # too: cold storage was 241 GB on 2026-10-19 and grows only, so the disk grows with it, on the ssd_root_full
     # warning, before kopia-syncthing stops at 85%. Thin on the host's pve pool: what the guest frees reaches the pool
-    # with the daily trim
+    # with the daily trim. That pool is overcommitted (1716 GiB of volumes on 1.25 TiB, 2026-10-19), so the host's
+    # thinpool_data alerts may fire before this disk fills: move kopia-syncthing to bulk or add a pv to pve, never grow
+    # this disk then
     diskGiB = 750;
     # its root shares the nvme with every guest's: a nightly snapshot or mirror sync never saturates it
     diskLimits.writeMBps = 300;
@@ -76,6 +78,12 @@
       coldStorageOffsiteStaleSeconds = 15 * 24 * 3600;
       # its mirror label, kopia.nix coldStorageLabel
       coldStorageMirror = "\"cold-storage\"";
+      # kopia.nix starts the first upload 15 min past a deploy and stops it after 12h: a day and a half to spare before
+      # a cold storage never uploaded pages
+      coldStorageFirstUploadGraceHours = 48;
+      coldStorageStale = "time() - max(homelab_offsite_last_success_timestamp_seconds{mirror=${coldStorageMirror}}) > bool ${toString coldStorageOffsiteStaleSeconds}";
+      # kopia.nix drops the success time while the upload marker is missing: 0 every hour of the grace
+      coldStorageNeverUploaded = "sum_over_time((max(homelab_offsite_uploaded{mirror=${coldStorageMirror}}) == bool 0)[${toString coldStorageFirstUploadGraceHours}h:1h]) >= bool ${toString coldStorageFirstUploadGraceHours}";
       # kopia.nix rootUsedMaxPercent stops the syncthing repository's snapshots at 85%: this warns with room to act
       ssdRootWarnPercent = 75;
       # this guest's vm label (modules/telemetry.nix vmName)
@@ -117,19 +125,20 @@
         severity = "critical";
         telegram = true;
         summary = "Off-site (Proton Drive): a mirror has not uploaded in over 60h";
-        description = "proton-sync (kopia repository) or proton-bisync (syncthing folder, both ways) on vm-104 has not finished; a share mirror at 0 never synced (FEATURES.md, Storage, backups and off-site). Check `journalctl -u proton-sync -u proton-bisync` and the mirror label of homelab_offsite_last_success_timestamp_seconds.";
+        description = "proton-sync (kopia repository) or proton-bisync (syncthing folder, both ways) on vm-104 has not finished; a share mirror at 0 never synced (FEATURES.md, Storage, backups and off-site). Check `journalctl -u proton-sync -u proton-bisync` and the mirror label of homelab_offsite_last_success_timestamp_seconds; homelab_offsite_last_skip_timestamp_seconds is a bisync run skipped behind another nas job.";
       };
       cold_storage_offsite_stale = {
         title = "Cold storage off-site copy stale";
         category = "backups";
-        expr = whileProtonUp "time() - max(homelab_offsite_last_success_timestamp_seconds{mirror=${coldStorageMirror}})";
-        threshold = coldStorageOffsiteStaleSeconds;
+        # 1 when stale, or when never uploaded past the grace
+        expr = whileProtonUp "${coldStorageStale} or on () ${coldStorageNeverUploaded}";
+        threshold = 0;
         for = "30m";
         noData = "Alerting";
         severity = "critical";
         telegram = true;
-        summary = "Off-site (Proton Drive): cold storage has not uploaded in over 15 days";
-        description = "The weekly proton-cold-storage on vm-104 has not finished an upload of /srv/nas/bulk/cold-storage, or never ran. `journalctl -u proton-cold-storage`; a first upload cut short by its timeout resumes the next week.";
+        summary = "Off-site (Proton Drive): cold storage has not uploaded in over 15 days, or never in 2 days";
+        description = "The weekly proton-cold-storage on vm-104 has not finished an upload of /srv/nas/bulk/cold-storage, or never ran (homelab_offsite_uploaded 0, no .uploaded marker in /var/lib/proton-drive). `journalctl -u proton-cold-storage`; a first upload cut short by its timeout resumes the next week.";
       };
       ssd_root_full = {
         title = "NAS ssd filling up";

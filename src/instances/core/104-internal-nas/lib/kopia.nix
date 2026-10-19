@@ -200,12 +200,38 @@ let
     label = coldStorageLabel;
     textfile = "proton_cold_storage";
   };
+  # homelab_offsite_uploaded{mirror="cold-storage"}: 1 once an upload succeeded (the marker), for the alert on one that
+  # never did; a success time without the marker predates it (an upload of the empty folder) and goes
+  coldStorageUploadedTextfile = "proton_cold_storage_uploaded";
+  coldStorageUploadedMetric = pkgs.writeShellScript "${coldStorageUploadedTextfile}-metric" ''
+    uploaded=1
+    if [ ! -e ${coldStorageUploaded} ]; then
+      uploaded=0
+      rm -f ${config.homelab.textfileDir}/${coldStorageOffsite.textfile}.prom
+    fi
+    exec ${metricWrite} ${
+      lib.escapeShellArgs [
+        coldStorageUploadedTextfile
+        "homelab_offsite_uploaded"
+        "1 once an upload of the Proton Drive mirror succeeded."
+      ]
+    } "$uploaded" ${lib.escapeShellArg "{mirror=\"${coldStorageLabel}\"}"}
+  '';
   # writes the backup's metric at 0 unless it exists: one that never succeeded reads as stale, not as absent
   backupMetricSeed = backup: "[ -e ${config.homelab.textfileDir}/${backup.textfile}.prom ] || ${backupMetric backup} 0";
   shareMetric = {
     label = "share";
     textfile = "proton_bisync";
   };
+  # a run skipped behind the nas job lock: never a success, so the offsite_stale alert still sees the share go stale
+  shareSkipTextfile = "proton_bisync_skip";
+  shareSkipMetric = pkgs.writeShellScript "${shareSkipTextfile}-metric" "exec ${metricWrite} ${
+    lib.escapeShellArgs [
+      shareSkipTextfile
+      "homelab_offsite_last_skip_timestamp_seconds"
+      "Unix time of the last Proton Drive mirror run skipped because another nas job held the lock."
+    ]
+  } \"$1\" ${lib.escapeShellArg "{mirror=\"${shareMetric.label}\"}"}";
   offsiteUnit =
     {
       description,
@@ -260,6 +286,7 @@ let
     PROTON_BISYNC_LOCK = nasJob.lock;
     PROTON_BISYNC_PROBE = probeProton;
     PROTON_BISYNC_METRIC = offsiteMetric shareMetric;
+    PROTON_BISYNC_SKIP_METRIC = shareSkipMetric;
   };
   # the cli holds a downloaded file's ciphertext in memory: a file past the cap kills the cli call, never the engine,
   # so only that file fails and the run goes on
@@ -428,7 +455,9 @@ in
     dailyFilesTextfile
     "proton_sync"
     shareMetric.textfile
+    shareSkipTextfile
     coldStorageOffsite.textfile
+    coldStorageUploadedTextfile
     "backup_verify_repository"
     "backup_verify_offsite"
   ]
@@ -587,25 +616,30 @@ in
   };
 
   systemd.services.proton-cold-storage =
-    offsiteUnit {
-      description = "Upload cold storage to Proton Drive, deleting nothing there";
-      timeout = coldStorageUploadTimeout;
-      exec = "${lib.getExe protonMirror} upload";
-      environment = protonEnv // {
-        PROTON_MIRROR_SOURCE = coldStorage;
-        PROTON_MIRROR_TARGET = offsiteRoot;
-        PROTON_MIRROR_STATE = protonDir;
-        PROTON_MIRROR_LOCK = nasJob.lock;
-        PROTON_MIRROR_PROBE = probeProton;
-        PROTON_MIRROR_METRIC = offsiteMetric coldStorageOffsite;
-        PROTON_MIRROR_UPLOADED = coldStorageUploaded;
+    lib.recursiveUpdate
+      (offsiteUnit {
+        description = "Upload cold storage to Proton Drive, deleting nothing there";
+        timeout = coldStorageUploadTimeout;
+        exec = "${lib.getExe protonMirror} upload";
+        environment = protonEnv // {
+          PROTON_MIRROR_SOURCE = coldStorage;
+          PROTON_MIRROR_TARGET = offsiteRoot;
+          PROTON_MIRROR_STATE = protonDir;
+          PROTON_MIRROR_LOCK = nasJob.lock;
+          PROTON_MIRROR_PROBE = probeProton;
+          PROTON_MIRROR_METRIC = offsiteMetric coldStorageOffsite;
+          PROTON_MIRROR_UPLOADED = coldStorageUploaded;
+        };
+      })
+      {
+        path = [ protonDriveCli ];
+        # without the hdd the folder is an empty one on the root disk, and an upload of it a false success
+        unitConfig.RequiresMountsFor = coldStorage;
+        serviceConfig = {
+          ExecStartPre = coldStorageUploadedMetric;
+          ExecStopPost = coldStorageUploadedMetric;
+        };
       };
-    }
-    // {
-      path = [ protonDriveCli ];
-      # without the hdd the folder is an empty one on the root disk, and an upload of it a false success
-      unitConfig.RequiresMountsFor = coldStorage;
-    };
   systemd.timers.proton-cold-storage = offsiteTimer {
     at = coldStorageUploadAt;
     delay = coldStorageUploadDelay;

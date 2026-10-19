@@ -5,10 +5,11 @@
 # additions, edits and deletions go both ways (a local deletion into the quarantine folder), what lands in the folder
 # owned by the syncthing user with its modes and the remote mtime; a conflict keeps both versions; a mass deletion waits
 # for allow-large, which any sync the limit did not stop spends (a resync leaves it); names the cli would read as globs
-# ({GUID} folders, name[0] files) go up escaped; a missing, unmarked or empty folder is refused; syncthing's internals
-# and symlinks stay local; a failing item fails the run and the next run resumes with it alone; a run lists only what
-# its budget allows; a download past the free-space reserve and a name beside its unicode normalization twin fail alone;
-# a torn events.lock is cleared; an hourly run skips while another heavy nas job holds the job lock, and a proton outage
+# ({GUID} folders, name[0] files) go up escaped, any other (a (1).txt, @scope) as it is; a missing, unmarked or empty
+# folder is refused; syncthing's internals and symlinks stay local; a failing item fails the run and the next run
+# resumes with it alone; a run lists only what its budget allows; a download past the free-space reserve and a name
+# beside its unicode normalization twin fail alone; a torn events.lock is cleared; an hourly run skips while another
+# heavy nas job holds the job lock, logged as a warning and exported as a skip, never as a success, and a proton outage
 # skips it.
 { pkgs, lib, ... }:
 let
@@ -69,6 +70,7 @@ pkgs.testers.runNixOSTest {
     Q = "${quarantine}"
     STATE = "/var/lib/proton-bisync"
     PROM = "/var/lib/node-exporter-textfile/proton_bisync.prom"
+    SKIP_PROM = "/var/lib/node-exporter-textfile/proton_bisync_skip.prom"
     LOG = "/run/fake-proton.log"
     OWNER = "${user}:${group}"
     FILLERS = 20
@@ -115,7 +117,9 @@ pkgs.testers.runNixOSTest {
           f" && echo old > {F}/.stversions/old.txt && echo pull > {F}/docs/.syncthing.b.txt.tmp"
           f" && echo pull > {F}/docs/~syncthing~c.txt.tmp && ln -s docs/a.txt {F}/link"
           f" && mkdir -p {F}/work/.identity/ssh && echo key > {F}/work/.identity/ssh/id"
-          f" && mkdir {F}/'{{guid}}' && echo cache > {F}/'{{guid}}'/state.rsm && echo zero > {F}/docs/'x[0].txt'")
+          f" && mkdir {F}/'{{guid}}' && echo cache > {F}/'{{guid}}'/state.rsm && echo zero > {F}/docs/'x[0].txt'"
+          f" && echo guid-z > {F}/'{{guid}}'/z && echo x0 > {F}/'x[0]' && echo paren > {F}/'a (1).txt'"
+          f" && mkdir {F}/@scope {F}/'Program Files (x86)' && echo at > {F}/@scope/x && echo pf > {F}/'Program Files (x86)'/y")
 
     with subtest("no session: refused before the cli, the share's metric at 0 so the stale alert fires"):
         out = run("proton-bisync", ok=False)
@@ -144,6 +148,8 @@ pkgs.testers.runNixOSTest {
         assert cat(f"{F}/r.txt") == "remote-only" and cat(f"{F}/rdir/sub/deep.txt") == "deep"
         assert cat(f"{R}/docs/a.txt") == "local-a" and cat(f"{R}/docs/fill-7.txt") == "7"
         assert cat(f"{R}/{{guid}}/state.rsm") == "cache" and cat(f"{R}/docs/x[0].txt") == "zero"
+        assert cat(f"{R}/{{guid}}/z") == "guid-z" and cat(f"{R}/x[0]") == "x0" and cat(f"{R}/a (1).txt") == "paren"
+        assert cat(f"{R}/@scope/x") == "at" and cat(f"{R}/Program Files (x86)/y") == "pf"
         for side in [F, R]:
             assert cat(f"{side}/common.txt") == "local", side
             assert cat(f"{side}/common.proton-conflict.txt") == "remote", machine.succeed(f"ls {side}")
@@ -164,11 +170,13 @@ pkgs.testers.runNixOSTest {
         assert here == there, (here, there)
 
     with subtest("additions and edits go both ways; a run with nothing to do moves nothing"):
-        owned(f"echo l2 > {F}/l2.txt && echo local-a2 > {F}/docs/a.txt && echo one > {F}/docs/'x[0].txt'")
+        owned(f"echo l2 > {F}/l2.txt && echo local-a2 > {F}/docs/a.txt && echo one > {F}/docs/'x[0].txt'"
+              f" && echo paren2 > {F}/'a (1).txt' && echo pf2 > {F}/'Program Files (x86)'/y")
         machine.succeed(f"mkdir -p {R}/new/sub && echo r2 > {R}/new/sub/r2.txt"
                         f" && echo remote-edit > {R}/r.txt && touch -d '+1 min' {R}/r.txt")
         run("proton-bisync")
         assert cat(f"{R}/l2.txt") == "l2" and cat(f"{R}/docs/a.txt") == "local-a2" and cat(f"{R}/docs/x[0].txt") == "one"
+        assert cat(f"{R}/a (1).txt") == "paren2" and cat(f"{R}/Program Files (x86)/y") == "pf2"
         assert cat(f"{F}/new/sub/r2.txt") == "r2" and cat(f"{F}/r.txt") == "remote-edit"
         assert modes(f"{F}/new", f"{F}/new/sub/r2.txt") == [OWNER, "755", OWNER, "644"]
         run("proton-bisync")
@@ -281,11 +289,18 @@ pkgs.testers.runNixOSTest {
         assert metric() == before and calls("list") == [], out
         machine.succeed(f"rm /run/proton-down {STATE}/allow-large")
 
-    with subtest("an hourly run skips while another heavy nas job holds the job lock"):
+    with subtest("an hourly run skips while another heavy nas job holds the job lock, a warning that is no success"):
+        before = metric()
         machine.succeed("systemd-run --unit=hold-proton flock /run/nas-job.lock ${pkgs.coreutils}/bin/sleep 600")
         machine.wait_until_fails("flock -n /run/nas-job.lock true")
-        assert "skipping this hour" in run("proton-bisync")
+        run("proton-bisync")
+        warnings = machine.succeed("journalctl -u proton-bisync --invocation=0 -p warning --no-pager -o cat")
+        assert "skipping this hour" in warnings, warnings
         absent(f"{R}/l4.txt")
+        assert metric() == before
+        skip = machine.succeed(f"cat {SKIP_PROM}")
+        assert 'homelab_offsite_last_skip_timestamp_seconds{mirror="share"}' in skip, skip
+        assert float(skip.split()[-1]) > 0, skip
         machine.succeed("systemctl stop hold-proton")
         run("proton-bisync")
         assert cat(f"{R}/l4.txt") == "l4"

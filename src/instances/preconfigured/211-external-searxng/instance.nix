@@ -7,7 +7,7 @@ in
   vm = {
     bootPhase = "public";
     needs = [ "containers" ];
-    kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";
+    kind.lxc = "a vm's kernel would triple the ~165 MiB it holds awake and lengthen every wake";
     # podman needs keyctl; dmz, so never privileged
     features = "nesting=1,keyctl=1";
   };
@@ -25,6 +25,11 @@ in
       from = [ "operator" ];
       tcp = [ port ];
       why = "hermes' search skill calls the json api directly, which the limiter passes for its address (pass_ip)";
+    }
+    {
+      from = [ "collector" ];
+      tcp = [ port ];
+      why = "vm-103 probes the host port while the guest is awake: the edge's probe would wake it";
     }
   ];
 

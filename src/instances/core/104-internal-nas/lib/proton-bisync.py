@@ -166,8 +166,11 @@ def local_path(rel):
     return os.path.join(SOURCE, rel) if rel else SOURCE
 
 
-# the cli expands its local arguments as glob patterns: {GUID} folders and name[1].ext files match nothing raw
+# the cli takes a local argument holding * ? [ or { as a glob pattern ({GUID} folders, name[1].ext files) and any
+# other one as it is
 def glob_literal(path):
+    if not re.search(r"[*?\[{]", path):
+        return path
     return re.sub(r"([][{}()*?!+@\\])", r"\\\1", path)
 
 

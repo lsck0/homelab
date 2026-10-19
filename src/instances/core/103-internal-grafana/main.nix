@@ -350,12 +350,34 @@ let
           _: r: r.protocol == "tcp" && lib.elem "probe" r.on && (r.vmid == null || awake (guest r.vmid))
         ) catalog.l4
       );
+  # an idle guest's host port at its own address, which wakes nothing: down while asleep, so service_down holds it to
+  # the guest being up. Only where the guest grants the collector the port, or the probe is a guard refusal
+  grantsCollector =
+    vmid: port:
+    lib.any (g: g.to == toString vmid && lib.elem telemetry.collectorVmid g.from && lib.elem port g.tcp) lab.grants;
+  backendProbes =
+    lib.mapAttrsToList
+      (name: r: {
+        inherit name;
+        vm = vmName (guest r.vmid);
+        target = "${(guest r.vmid).ip}:${toString r.port}";
+      })
+      (
+        lib.filterAttrs (
+          _: r:
+          r.vmid != null
+          && lib.elem "probe" r.on
+          && (guest r.vmid).powered
+          && (guest r.vmid).idle != null
+          && grantsCollector r.vmid r.port
+        ) (catalog.internal // catalog.external)
+      );
   inherit (telemetry) upstreamJob;
   probesOf = protocol: if protocol == "http" then httpProbes else tcpProbes;
-  probeJob = protocol: {
-    job_name = "blackbox-${protocol}";
+  probeJobOf = job: module: probes: {
+    job_name = job;
     metrics_path = "/probe";
-    params.module = [ "${protocol}_up" ];
+    params.module = [ module ];
     scrape_interval = "60s";
     static_configs = map (p: {
       targets = [ p.target ];
@@ -363,7 +385,7 @@ let
         service = p.name;
         inherit (p) vm;
       };
-    }) (probesOf protocol);
+    }) probes;
     relabel_configs = [
       {
         source_labels = [ "__address__" ];
@@ -379,6 +401,7 @@ let
       }
     ];
   };
+  probeJob = protocol: probeJobOf "blackbox-${protocol}" "${protocol}_up" (probesOf protocol);
 
   labRules = telemetry.alertsOf (
     import ./lib/rules.nix {
@@ -1268,6 +1291,7 @@ in
       }
       (probeJob "http")
       (probeJob "tcp")
+      (probeJobOf "blackbox-backend" "tcp_up" backendProbes)
       (
         probeJob "http"
         // {

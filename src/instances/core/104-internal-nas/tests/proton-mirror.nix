@@ -4,7 +4,8 @@
 # the mass-deletion guard and its override, a missing, unmarked or empty repository, an outage, no session, a failed
 # upload, a torn events.lock. Cold storage's upload: a folder without a file is refused until it is filled, new and
 # changed files go up, a file deleted or a folder emptied here stays remote, a failed upload or an outage reports no
-# success. Paths the cli would read as globs (the fake's too: {GUID} folders, name[0] files) go up escaped.
+# success. Paths the cli would read as globs (the fake's too: {GUID} folders, name[0] files) go up escaped, any other
+# (a (1).txt, @scope) as it is.
 { pkgs, lib, ... }:
 let
   mirror = import ../lib/proton-mirror.nix { inherit pkgs; };
@@ -199,6 +200,18 @@ pkgs.runCommand "proton-mirror"
     run 0 "''${cold[@]}"
     [ -e "$C"/late.txt ] && [ -s metric.out ] || fail "cold storage: the next run did not catch up"
     pass "a failed upload or an outage reports no success; the next run catches up"
+
+    # 8. PATHS: one without * ? [ { goes up as it is, one with them escaped
+    for name in "a (1).txt" "@scope/x" "Program Files (x86)/y" "{guid}/z" "x[0]"; do
+      mkdir -p "$W/paths/$name"
+      echo "$name" > "$W/paths/$name/f"
+      run 0 "''${cold[@]}" PROTON_MIRROR_SOURCE="$W/paths/$name" PROTON_MIRROR_TARGET=$ROOT/paths
+      [ "$(cat "$FAKE_DRIVE$ROOT/paths/$(basename "$name")/f")" = "$name" ] || fail "paths: $name did not go up"
+    done
+    if proton-drive filesystem upload "$W/paths/a \(1\).txt" "$ROOT" 2>/dev/null; then
+      fail "the fake cli unescaped a path without glob characters"
+    fi
+    pass "a path the cli takes literally goes up unescaped, a glob one escaped"
 
     touch $out
   ''
