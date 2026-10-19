@@ -532,8 +532,8 @@ tests += [
         ],
     },
     {
-        "name": "host: a throttling nvme, a warm one over its warning temperature and machine checks page; a cool drive's"
-        " warning minute does not",
+        "name": "host: a throttling nvme, a warm one staying over its warning temperature and machine checks page; a"
+        " cool drive's warning minutes and a warm drive's lone one do not",
         "interval": "5m",
         "input_series": [
             {
@@ -543,15 +543,20 @@ tests += [
             {"series": 'homelab_nvme_thermal_throttle_seconds_total{vm="proxmox",device="nvme0n1"}', "values": "0x20"},
             {
                 "series": 'homelab_nvme_warning_temperature_seconds_total{vm="proxmox",device="nvme1n1"}',
-                "values": "0x6 60x14",
+                "values": "0x6 0+120x13",
             },
-            # nvme0n1 counts a warning minute at a 38 C composite, as the 980 on firmware 1B4QFXO7 did
+            # nvme0n1 counts warning minutes at a 38 C composite, as the 980 on firmware 1B4QFXO7 did
             {
                 "series": 'homelab_nvme_warning_temperature_seconds_total{vm="proxmox",device="nvme0n1"}',
+                "values": "0x6 0+120x13",
+            },
+            {
+                "series": 'homelab_nvme_warning_temperature_seconds_total{vm="proxmox",device="nvme2n1"}',
                 "values": "0x6 60x14",
             },
             {"series": 'nvme_temperature_celsius{vm="proxmox",device="nvme1n1"}', "values": "40x6 65x14"},
             {"series": 'nvme_temperature_celsius{vm="proxmox",device="nvme0n1"}', "values": "38x20"},
+            {"series": 'nvme_temperature_celsius{vm="proxmox",device="nvme2n1"}', "values": "65x20"},
             {"series": 'homelab_mce_events_total{vm="proxmox"}', "values": "0x4 2x16"},
         ],
         "alert_rule_test": [
@@ -561,9 +566,9 @@ tests += [
                 "exp_alerts": [expect("nvme_throttling", vm="proxmox", device="nvme1n1")],
             },
             {"eval_time": "25m", "alertname": "nvme_over_warning_temperature", "exp_alerts": []},
-            {"eval_time": "35m", "alertname": "nvme_over_warning_temperature", "exp_alerts": []},
+            {"eval_time": "45m", "alertname": "nvme_over_warning_temperature", "exp_alerts": []},
             {
-                "eval_time": "45m",
+                "eval_time": "70m",
                 "alertname": "nvme_over_warning_temperature",
                 "exp_alerts": [expect("nvme_over_warning_temperature", vm="proxmox", device="nvme1n1")],
             },

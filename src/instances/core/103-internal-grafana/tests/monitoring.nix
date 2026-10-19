@@ -12,10 +12,13 @@
 }:
 let
   lab = import ../../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
-  telemetry = import ../../../../modules/telemetry.nix {
-    inherit lib;
-    inherit (lab) inventory;
+  # taskchampion's guest is parked in the real lab; here it is the guest to watch
+  inventory = lab.inventory // {
+    "134" = lab.inventory."134" // {
+      powered = true;
+    };
   };
+  telemetry = import ../../../../modules/telemetry.nix { inherit lib inventory; };
   notifications = import ../lib/notifications.nix {
     inherit lib;
     grafanaUrl = "https://grafana.test";
@@ -36,7 +39,9 @@ in
 pkgs.testers.runNixOSTest {
   name = "monitoring";
 
-  node.specialArgs = lab.specialArgs;
+  node.specialArgs = lab.specialArgs // {
+    inherit inventory;
+  };
   nodes.vm-103 = {
     imports = [
       (lab.guest telemetry.collectorVmid {

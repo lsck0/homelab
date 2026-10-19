@@ -48,6 +48,12 @@ let
     inherit (specialArgs) inventory site;
   };
   inherit (lab) vlans;
+  # teamspeak's guest is parked in the real lab, which drops its forwards; here it stands for every forwarded route
+  inventory = lab.inventory // {
+    "215" = lab.inventory."215" // {
+      powered = true;
+    };
+  };
 
   ip = id: lab.inventory.${id}.ip;
   routerWan = net.wan.address;
@@ -123,7 +129,7 @@ let
       map (r: lib.nameValuePair (net.fqdn r.host) (ip (toString r.vmid)))
         # a wildcard host is no name of its own: the names below it are asserted by the wildcard subtests instead
         (
-          lib.filter (r: r.vmid != null && !(lib.hasPrefix "*." r.host) && lab.inventory.${toString r.vmid}.powered) (
+          lib.filter (r: r.vmid != null && !(lib.hasPrefix "*." r.host) && inventory.${toString r.vmid}.powered) (
             lib.attrValues lab.catalog.forwarded
           )
         )
@@ -226,7 +232,9 @@ in
 pkgs.testers.runNixOSTest {
   name = "router-zones";
   passthru.regressionSeeds = [ ];
-  node.specialArgs = lab.specialArgs;
+  node.specialArgs = lab.specialArgs // {
+    inherit inventory;
+  };
 
   nodes.luca-router = {
     imports = [

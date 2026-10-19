@@ -634,10 +634,10 @@ let
     # above real routes, below robots.txt; with the gate, the deception's fakes and labyrinth
     honeypot-tls = {
       rule = botRule honeypotRule;
-      service = if gateOn then "deception-honeypot" else labyrinthService service.protectionFeatures;
+      service = if gateOn then "deception-honeypot" else labyrinthService botOn;
       entryPoints = [ "websecure" ];
       priority = 9500;
-      on = service.protectionFeatures;
+      on = botOn;
     };
   };
 

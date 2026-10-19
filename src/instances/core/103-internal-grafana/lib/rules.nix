@@ -62,6 +62,8 @@ let
   # a warning minute counts only with a warm hour: the 980 on firmware 1B4QFXO7 counted one at a 38 C composite, and
   # heat that reaches its 82 C limit lifts the scraped composite past this between idle (37 C) and the hot rule
   nvmeWarningPeakCelsius = 50;
+  # the drive staying hot, not one counted minute: a lone tick at a normal composite re-fired the alert each time
+  nvmeWarningSecondsPerHour = 300;
   # a host event (a boot, an unsafe shutdown) fires this long, then resolves by itself
   hostEventWindow = "1h";
   hostEventWindowSeconds = 3600;
@@ -463,7 +465,7 @@ let
       category = "storage";
       # the drive counts every minute over its own limit, which a 5 minute scrape of the temperature misses
       expr = "max by (vm, device) (increase(homelab_nvme_warning_temperature_seconds_total[1h])) and on (vm, device) max by (vm, device) (max_over_time(nvme_temperature_celsius[1h])) > ${toString nvmeWarningPeakCelsius}";
-      threshold = 0;
+      threshold = nvmeWarningSecondsPerHour;
       for = "10m";
       telegram = true;
       summary = "{{ $labels.device }} on {{ $labels.vm }}: {{ printf \"%.0f\" $values.A.Value }} s over its warning temperature in the last hour";

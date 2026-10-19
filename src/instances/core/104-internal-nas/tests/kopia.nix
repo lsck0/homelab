@@ -1,9 +1,9 @@
 # kopia on the nas: init, snapshot, restore; a restore of a guest's local state copy (paperless, instance.nix
 # `shares`) is marked with a fresh generation for its seed (modules/local-state), any other share is not; the
 # syncthing folders and cold storage snapshot into their own repository, cold storage's upload skips without a
-# session and runs early only until one succeeded, its uploaded gauge read from that marker, without which a success
-# time goes, and the repository mirror keeps its remote copy; the disks are trimmed daily; a repository left at its old
-# place stops init
+# session and runs early only until one succeeded, its uploaded gauge read from that marker from boot on, without
+# which a success time goes, and the repository mirror keeps its remote copy; the disks are trimmed daily; a
+# repository left at its old place stops init
 { pkgs, lib, ... }:
 pkgs.testers.runNixOSTest {
   name = "kopia";
@@ -46,6 +46,11 @@ pkgs.testers.runNixOSTest {
   testScript = ''
     machine.wait_for_unit("kopia-server.service")
     machine.wait_for_open_port(51515)
+
+    with subtest("the cold storage uploaded gauge exists from boot, at 0 before any upload"):
+        machine.wait_for_file("/var/lib/node-exporter-textfile/proton_cold_storage_uploaded.prom")
+        uploaded = machine.succeed("cat /var/lib/node-exporter-textfile/proton_cold_storage_uploaded.prom")
+        assert 'homelab_offsite_uploaded{mirror="cold-storage"} 0' in uploaded, uploaded
 
     with subtest("repository and policy are set up"):
         policy = machine.succeed("kopia-nas policy show /srv/nas")

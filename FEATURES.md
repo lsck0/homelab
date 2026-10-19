@@ -195,13 +195,14 @@ runbooks.
   probing and crawl scenarios, the labyrinth) starts at a short ban or the captcha, never at a day's ban.
 - The deception (`traefik/lib/gate/deception.go`): a deceived client gets 200s, small plausible fakes for `.env`,
   `.git/config`, wp-login and wp-admin, phpinfo, `/admin`, `*.zip` backups, server-status and `/api/*`, and the
-  labyrinth for any other path, all trickled within the tarpit's slots. Every fake carries canaries (an aws key, a
-  database url, api and git tokens) drawn from the client and the path under a gate-only key (`lab-gate-canary-key`),
-  so nobody else can compute them; each issuance is logged to the journal (`deception canary`, its id, client, path
-  and values), so a later use names who fetched it where. Nothing in a fake comes from the lab. traefik's errors
-  middlewares turn the gate's unassigned 452 and 453 into the fetch, and the deception checks the reason again, so no
-  other visitor ever gets one: a backend answering 452 or 453 itself shows a logged bad gateway and trips no signal,
-  since `forged-crawler` also requires the deception's own `X-Lab-Gate: forged-crawler`.
+  labyrinth for any other path, all trickled within the tarpit's slots. The honeypot's paths deceive a scanner hitting
+  the house address directly too, which every other route refuses past cloudflare. Every fake carries canaries (an aws
+  key, a database url, api and git tokens) drawn from the client and the path under a gate-only key
+  (`lab-gate-canary-key`), so nobody else can compute them; each issuance is logged to the journal (`deception
+  canary`, its id, client, path and values), so a later use names who fetched it where. Nothing in a fake comes from
+  the lab. traefik's errors middlewares turn the gate's unassigned 452 and 453 into the fetch, and the deception
+  checks the reason again, so no other visitor ever gets one: a backend answering 452 or 453 itself shows a logged bad
+  gateway and trips no signal, since `forged-crawler` also requires the deception's own `X-Lab-Gate: forged-crawler`.
 - lab-gate: crowdsec's decisions as readable pages, its own captcha, a token bucket for anonymous clients, the
   tarpit, the deception; onion visitors get an anti-phishing captcha (`traefik/lib/gate`, Go). Counters for grafana:
   `homelab_gate_deceives_total`, `homelab_gate_deceptions_total`, `homelab_gate_canaries_total`; routine scanning

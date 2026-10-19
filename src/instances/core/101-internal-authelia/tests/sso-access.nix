@@ -187,11 +187,12 @@ let
 in
 pkgs.testers.runNixOSTest {
   name = "sso-access";
-  # forgejo's and home assistant's guests are parked in the real lab, where their routes answer 503 at once; here
-  # their stand-ins answer
+  # forgejo's, home assistant's and headscale's guests are parked in the real lab, where their routes answer 503 at
+  # once; here their stand-ins answer
   node.specialArgs = lab.specialArgs // {
     inventory =
-      lab.specialArgs.inventory // lib.genAttrs [ "110" "130" ] (id: lab.specialArgs.inventory.${id} // { powered = true; });
+      lab.specialArgs.inventory
+      // lib.genAttrs [ "110" "130" "140" ] (id: lab.specialArgs.inventory.${id} // { powered = true; });
   };
 
   nodes.vm-100 = guest "100" ../../100-internal-traefik/main.nix {

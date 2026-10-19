@@ -42,6 +42,8 @@ let
   reverseName = address: lib.concatStringsSep "." (lib.reverseList (lib.splitString "." address)) + ".in-addr.arpa";
   forger = "203.0.113.40";
   scanner = "203.0.113.41";
+  # hits the house address itself, past cloudflare
+  directScanner = "198.51.100.41";
   backendClient = "203.0.113.42";
   residentialClient = "203.0.113.9";
   browserUserAgent = "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
@@ -88,6 +90,7 @@ pkgs.testers.runNixOSTest {
           "10.200.0.1/8"
           "10.250.0.1/8"
           "${cloudflare}/13"
+          "${directScanner}/24"
         ];
       })
     ];
@@ -214,6 +217,17 @@ pkgs.testers.runNixOSTest {
           world.wait_until_succeeds(
               f"curl -s --interface {CF} -H 'X-Forwarded-For: ${scanner}' -A '${scannerUserAgent}' --resolve {HOST}:443:{EDGE} "
               f"{MATH}/phpinfo.php | grep -q 'You have been banned for'", timeout=${toString banTimeoutS})
+
+      with subtest("a scanner hitting the house address directly gets the fake, a canary and a decision"):
+          # positive control: the real route refuses a direct caller
+          r = http_request(world, MATH + "/", address=EDGE, src="${directScanner}", headers={"User-Agent": "${scannerUserAgent}"})
+          assert r["status"] == 403, (r["status"], r["body"][:200])
+          r = http_request(world, MATH + "/.env", address=EDGE, src="${directScanner}", headers={"User-Agent": "${scannerUserAgent}"})
+          assert fake(r) and "AWS_ACCESS_KEY_ID=AKIA" in r["body"], (r["status"], r["body"][:300])
+          key = re.search(r"AWS_ACCESS_KEY_ID=(AKIA\w+)", r["body"])
+          assert key, r["body"][:300]
+          vm_200.succeed(f"journalctl -u lab-gate -o cat | grep 'deception canary' | grep '${directScanner}' | grep -q '{key.group(1)}'")
+          wait_for_decision("${directScanner}", "deceive", "homelab/honeypot")
 
       with subtest("the forger keeps its crawler's name past the window and gets the ban page"):
           world.wait_until_succeeds(

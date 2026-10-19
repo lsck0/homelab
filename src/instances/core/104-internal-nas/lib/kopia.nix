@@ -652,6 +652,15 @@ in
       Unit = "proton-cold-storage.service";
     };
   };
+  # the never-uploaded alert needs the series from boot, not from the first weekly run
+  systemd.services.proton-cold-storage-uploaded-metric = {
+    description = "Publish whether cold storage was ever uploaded to Proton Drive";
+    wantedBy = [ "multi-user.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = coldStorageUploadedMetric;
+    };
+  };
 
   systemd.services.proton-bisync = lib.mkIf (shareDir != null) (
     lib.recursiveUpdate
