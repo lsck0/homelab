@@ -4,7 +4,8 @@
 #   guests and the owner's devices only, never the house lan or a dmz or apps address; the owner's devices always,
 #   since lab.json hands the desktop bar both urls
 # - push doors: every request a push door passes carries the tenant the door chose by the sender's address, and an
-#   app node's relay sets it on every request it passes; no client header reaches a store
+#   app node's relay sets it on every request it passes; no client header reaches a store; every tenant a host's
+#   promtail ships as is one the door admits from that host's address, or its logs are refused
 # - access logs: a secret in a url (a feed token, a share link) is cut before the line is shipped to loki
 # - parked guests: no scrape target or probe points at a powered-off guest, and no guest's own alert rule of one is
 #   provisioned: each would stay down, or alarm, for as long as the guest is parked
@@ -96,6 +97,24 @@ let
       })
     );
 
+  pushTenants = collector.services.nginx.appendHttpConfig;
+  shipperLaw = lib.concatLists (
+    lib.mapAttrsToList (
+      name: config:
+      let
+        inherit (inventory.${config.homelab.vmid}) ip;
+        tenants = lib.unique (
+          lib.concatMap (j: map (s: s.tenant.value) (lib.filter (s: s ? tenant) (j.pipeline_stages or [ ]))) (
+            config.services.promtail.configuration.scrape_configs or [ ]
+          )
+        );
+      in
+      map (tenant: "${name}: promtail ships as ${tenant}, which the push door refuses from ${ip}") (
+        lib.filter (tenant: !(lib.hasInfix "\"${ip} ${tenant}\" ${tenant};" pushTenants)) tenants
+      )
+    ) (lib.filterAttrs (_: c: c.services.promtail.enable && c.homelab.vmid != null) configs)
+  );
+
   relayLaw = lib.concatLists (
     lib.mapAttrsToList (
       name: config:
@@ -165,7 +184,7 @@ let
   );
 in
 map (v: "query api: ${v}") queryLaw
-++ map (v: "push door: ${v}") doorLaw
+++ map (v: "push door: ${v}") (doorLaw ++ shipperLaw)
 ++ map (v: "relay: ${v}") relayLaw
 ++ map (v: "access log: ${v}") accessLogLaw
 ++ map (v: "parked guest: ${v}") (scrapeLaw ++ ruleLaw)

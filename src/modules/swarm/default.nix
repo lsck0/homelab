@@ -955,7 +955,10 @@ in
             description = "Keep the apps swarm's nodes in line with the inventory";
             after = [ "swarm-cluster.service" ];
             requires = [ "swarm-cluster.service" ];
-            wantedBy = [ "multi-user.target" ];
+            wantedBy = [
+              "multi-user.target"
+              "swarm-cluster.service"
+            ];
             serviceConfig = {
               ExecStart = lib.getExe reconcileScript;
               Restart = "always";
@@ -967,7 +970,10 @@ in
             description = "Remove the stacks of apps that left the catalog";
             after = [ "swarm-cluster.service" ];
             requires = [ "swarm-cluster.service" ];
-            wantedBy = [ "multi-user.target" ];
+            wantedBy = [
+              "multi-user.target"
+              "swarm-cluster.service"
+            ];
             serviceConfig = {
               Type = "oneshot";
               RemainAfterExit = true;
@@ -1040,7 +1046,10 @@ in
             description = "Apply the catalog to the app ${name}";
             after = [ "swarm-cluster.service" ];
             requires = [ "swarm-cluster.service" ];
-            wantedBy = [ "multi-user.target" ];
+            wantedBy = [
+              "multi-user.target"
+              "swarm-cluster.service"
+            ];
             # sops restarts it when one of the app's secrets changes
             restartTriggers = [ (appCatalogFile name) ];
             serviceConfig = {

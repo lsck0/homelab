@@ -163,12 +163,26 @@ let
     (guest lab.roles.operator).ip
   ]
   ++ map (z: z.routerIp) (lib.attrValues net.zones);
+  # the lab's own forced-command logins, each from the one guest its key allows: the archbuild push to the dmz mirror and
+  # the deploy controller's stacks to the swarm guests
+  serviceLogins = [
+    {
+      user = "archrepo";
+      source =
+        (lib.findFirst (g: lib.hasSuffix "-archbuild" g.name) (throw "no archbuild guest") (lib.attrValues inventory)).ip;
+    }
+    {
+      user = "root";
+      source = (guest lab.roles.app-builder).ip;
+    }
+  ];
   # powered and never asleep: a probe or an alert on anything else would wake it or alarm while it sleeps
   awake = v: v.powered && v.idle == null;
 
   appNodeIds = lib.unique (lib.concatMap (c: c.workerIds) (lib.attrValues catalog.clusters));
   appNodes = map guest (lib.sort (a: b: lib.toInt a < lib.toInt b) appNodeIds);
 
+  # every app ships its containers' logs; only the ones sending traces or profiles pass the other push doors
   appSenders = lib.concatLists (
     lib.mapAttrsToList (
       _: c:
@@ -179,7 +193,13 @@ let
           tenant = telemetry.tenantOf app;
         }) (lib.attrNames c.apps)
       ) c.workerIds
-    ) (lib.filterAttrs (_: c: lib.any telemetry.sendsSignals (lib.attrValues c.apps)) catalog.clusters)
+    ) catalog.clusters
+  );
+  signalTenants = [
+    telemetry.labTenant
+  ]
+  ++ lib.concatMap (c: map telemetry.tenantOf (lib.attrNames (lib.filterAttrs (_: telemetry.sendsSignals) c.apps))) (
+    lib.attrValues catalog.clusters
   );
   labSenders = [
     loopback
@@ -378,7 +398,7 @@ let
         ;
       edgeTraefikTarget = traefikTargetOf "external";
       proxmoxAddress = site.lan.proxmox;
-      inherit proxmoxVm operatorSources;
+      inherit proxmoxVm operatorSources serviceLogins;
     }
   );
   # the rules instances and apps declare over their own metrics, a powered-off guest's none; an app's uid carries the app
@@ -574,16 +594,15 @@ let
   tenantHeader = {
     httpHeaderName1 = telemetry.tenantHeader;
   };
+  # the tenant is public, yet grafana's module warns of a store leak for any secureJsonData not read from a file
+  tenantSecureJsonOf = uid: tenant: {
+    httpHeaderValue1 = "$__file{${pkgs.writeText "grafana-tenant-${uid}" tenant}}";
+  };
   labTempoUid = "tempo";
   lokiTenants = lib.concatStringsSep "|" ([ telemetry.labTenant ] ++ map telemetry.tenantOf (lib.attrNames catalog.apps));
   tenantDatasources = lib.concatLists (
     lib.mapAttrsToList (
       app: a:
-      let
-        tenant = {
-          httpHeaderValue1 = telemetry.tenantOf app;
-        };
-      in
       [
         {
           name = "Loki ${app}";
@@ -591,7 +610,7 @@ let
           access = "proxy";
           url = "http://${loopback}:${toString ports.lokiLocal}";
           uid = "loki-${app}";
-          secureJsonData = tenant;
+          secureJsonData = tenantSecureJsonOf "loki-${app}" (telemetry.tenantOf app);
           jsonData = lokiJsonData // tenantHeader;
         }
       ]
@@ -601,7 +620,7 @@ let
         access = "proxy";
         url = "http://${loopback}:${toString ports.tempo}";
         uid = "tempo-${app}";
-        secureJsonData = tenant;
+        secureJsonData = tenantSecureJsonOf "tempo-${app}" (telemetry.tenantOf app);
         jsonData = tenantHeader // {
           tracesToLogsV2 = {
             datasourceUid = "loki-${app}";
@@ -634,7 +653,7 @@ let
         access = "proxy";
         url = "http://${loopback}:${toString ports.pyroscopeLocal}";
         uid = "pyroscope-${app}";
-        secureJsonData = tenant;
+        secureJsonData = tenantSecureJsonOf "pyroscope-${app}" (telemetry.tenantOf app);
         jsonData = tenantHeader;
       }
     ) catalog.apps
@@ -860,6 +879,9 @@ let
       lib.concatMapStringsSep "|" addressPattern labSenders
     }) " ${telemetry.labTenant};
     }
+    map $push_tenant $signal_tenant {
+      default "";
+    ${lib.concatMapStrings (tenant: "  ${tenant} ${tenant};\n") (lib.unique signalTenants)}}
     map $http_x_scope_orgid $read_tenant { "" ${telemetry.labTenant}; default $http_x_scope_orgid; }
   '';
   pushDoor =
@@ -885,6 +907,9 @@ let
         extraConfig = ''
           limit_except POST { deny all; }
           if ($push_tenant = "") { return 403; }
+        ''
+        + lib.optionalString (door != "lokiPush") ''
+          if ($signal_tenant = "") { return 403; }
         ''
         + (
           if grpc then
@@ -1435,7 +1460,7 @@ in
                   }
                 ];
               };
-            secureJsonData.httpHeaderValue1 = lokiTenants;
+            secureJsonData = tenantSecureJsonOf "loki" lokiTenants;
           }
           # the ingresses' request spans: a lab sender's land in the lab tenant (pushTenantMap)
           {
@@ -1444,7 +1469,7 @@ in
             access = "proxy";
             url = "http://${loopback}:${toString ports.tempo}";
             uid = labTempoUid;
-            secureJsonData.httpHeaderValue1 = telemetry.labTenant;
+            secureJsonData = tenantSecureJsonOf labTempoUid telemetry.labTenant;
             jsonData = tenantHeader // {
               tracesToLogsV2 = {
                 datasourceUid = "loki";

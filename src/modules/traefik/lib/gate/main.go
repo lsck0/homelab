@@ -1,9 +1,11 @@
 // Command lab-gate is the ingress's gate in front of every protected route (modules/traefik/lib/gate.nix): it turns
 // crowdsec's decisions into pages a person can read, asks flagged clients a captcha, limits anonymous clients below
-// the ingress's own limit, and trickles the bot labyrinth.
+// the ingress's own limit, trickles the bot labyrinth, and serves the deception: fakes with canaries and the labyrinth
+// for a scanner crowdsec decided to deceive and a forged search crawler.
 //
 // A request is judged cheapest and most trusted first: an allowed source passes, then a session authelia confirms,
-// then crowdsec's cached decision (ban beats captcha), then an anonymous client's token bucket (429).
+// then crowdsec's cached decision (deceive beats ban beats captcha), where nothing of ban strength holds a forged
+// search crawler on a route with the bot defence, then an anonymous client's token bucket (429).
 //
 // Security: an onion visitor always arrives from the router, so nothing tells two apart. Every browser session there
 // picks its route's own address among lookalikes sharing its ends; a phishing proxy relays the page from the real
@@ -20,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"time"
@@ -30,7 +33,7 @@ const (
 	serverReadHeaderTimeout = 5 * time.Second
 	serverIdleTimeout       = 2 * time.Minute
 	// at least 256 bits, as hmac-sha256 uses them
-	captchaKeyBytesMin = 32
+	hmacKeyBytesMin = 32
 )
 
 func gateCreate(settings Settings) (*Gate, error) {
@@ -39,11 +42,22 @@ func gateCreate(settings Settings) (*Gate, error) {
 		return nil, fmt.Errorf("crowdsec bouncer key: %w", err)
 	}
 	metrics := metricsCreate()
+	crawlers, err := crawlersCreate(settings.Crawlers, net.DefaultResolver)
+	if err != nil {
+		return nil, fmt.Errorf("crawlers: %w", err)
+	}
+	canaryKey, err := keyFileLoad(settings.Deception.CanaryKeyFile, hmacKeyBytesMin)
+	if err != nil {
+		return nil, fmt.Errorf("canary key: %w", err)
+	}
 	g := &Gate{
-		allow:        allowCreate(settings.Allow),
-		decisions:    decisionsCreate(settings.Lapi.URL, string(lapiKey)),
-		limiter:      limiterCreate(settings.Anonymous),
-		tarpit:       tarpitCreate(settings.Tarpit.Upstream, metrics),
+		allow:     allowCreate(settings.Allow),
+		decisions: decisionsCreate(settings.Lapi.URL, string(lapiKey)),
+		limiter:   limiterCreate(settings.Anonymous),
+		tarpit:    tarpitCreate(settings.Tarpit.Upstream, metrics),
+		crawlers:  crawlers,
+		deception: &Deception{statusDeceive: settings.Deception.StatusDeceive, statusForgedCrawler: settings.Deception.StatusForgedCrawler,
+			canaryKey: canaryKey, interval: deceptionChunkInterval},
 		metrics:      metrics,
 		stripCookies: make(map[string]bool, len(settings.StripCookies)),
 	}
@@ -54,7 +68,7 @@ func gateCreate(settings Settings) (*Gate, error) {
 		g.sessions = sessionsCreate(*settings.Session)
 	}
 	if c := settings.Captcha; c != nil {
-		key, err := keyFileLoad(c.KeyFile, captchaKeyBytesMin)
+		key, err := keyFileLoad(c.KeyFile, hmacKeyBytesMin)
 		if err != nil {
 			return nil, fmt.Errorf("captcha key: %w", err)
 		}
@@ -80,6 +94,7 @@ func gateDestroy(g *Gate) {
 		challengesDestroy(g.captcha.challenges)
 	}
 	tarpitDestroy(g.tarpit)
+	crawlersDestroy(g.crawlers)
 	limiterDestroy(g.limiter)
 	decisionsDestroy(g.decisions)
 	sessionsDestroy(g.sessions)
@@ -111,11 +126,15 @@ func main() {
 	tarpitHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { tarpitServe(g.tarpit, w, r) })
 	// no write timeout: a trickle is slow on purpose, tarpitDurationMax ends it
 	tarpitServer := &http.Server{Addr: settings.TarpitListen, Handler: tarpitHandler, ReadHeaderTimeout: serverReadHeaderTimeout, IdleTimeout: serverIdleTimeout}
-	failed := make(chan error, 2)
-	for _, server := range []*http.Server{gateServer, tarpitServer} {
+	// trickles as well
+	deceptionServer := &http.Server{Addr: settings.Deception.Listen, Handler: deceptionMux(g), ReadHeaderTimeout: serverReadHeaderTimeout, IdleTimeout: serverIdleTimeout}
+	servers := []*http.Server{gateServer, tarpitServer, deceptionServer}
+	failed := make(chan error, len(servers))
+	for _, server := range servers {
 		go func() { failed <- server.ListenAndServe() }()
 	}
-	slog.Info("listening", "gate", settings.Listen, "tarpit", settings.TarpitListen, "captcha", g.captcha != nil, "sessions", g.sessions != nil)
+	slog.Info("listening", "gate", settings.Listen, "tarpit", settings.TarpitListen, "deception", settings.Deception.Listen,
+		"captcha", g.captcha != nil, "sessions", g.sessions != nil, "crawlers", len(g.crawlers.list))
 	err = <-failed
 	if !errors.Is(err, http.ErrServerClosed) {
 		slog.Error("listener", "err", err)

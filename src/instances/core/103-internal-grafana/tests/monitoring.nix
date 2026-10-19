@@ -98,6 +98,12 @@ pkgs.testers.runNixOSTest {
             f" --data-urlencode \"query={query}\" | jq -e '[.data.result[].stream.level] == [\"warning\"]'",
             timeout=120)
 
+    with subtest("grafana's loki reads the lab's tenant from its header file: loki refuses a query without one"):
+        vm_103.wait_until_succeeds(
+            "curl -sfG -H 'Remote-User: admin' ${localApi}/datasources/proxy/uid/loki/loki/api/v1/query_range"
+            f" --data-urlencode \"query={query}\" | jq -e '[.data.result[].stream.level] == [\"warning\"]'",
+            timeout=120)
+
     with subtest("there is exactly one alerting path: no Alertmanager, no prometheus rules"):
         vm_103.fail("systemctl list-unit-files | grep -q '^alertmanager.service'")
         vm_103.succeed("curl -sf ${prometheus}/api/v1/rules | jq -e '.data.groups | length == 0'")

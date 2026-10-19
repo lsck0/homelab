@@ -96,27 +96,90 @@ let
 
   # proof-of-work leading zero bits, higher costs every client more cpu
   anubisDifficulty = 4;
-  # the search crawlers anubis' bundled policy admits from their published ranges (data/crawlers/_allow-good.yaml)
-  searchCrawlerUserAgents = [
-    "Googlebot"
-    "bingbot"
-    "DuckDuckBot"
-    "Applebot"
-    "Qwantbot"
-    "Kagibot"
-    "marginalia"
-    "MojeekBot"
-    "YandexBot"
-  ];
+  anubisCrawlers = "${config.services.anubis.package.src}/data/crawlers";
+  # the search crawlers, by the token in their user agents. The gate (lib/gate crawlers.go) sends one naming itself
+  # from elsewhere to the deception on every route with the bot defence, and only a crawler with reverseDomains, its
+  # forward-confirmed reverse dns as the crawler documents it: published ranges go stale (anubis' snapshot lacks
+  # googlebot's, duckduckbot's and applebot's newer ones) and only spare the lookup. ranges: anubis' policy of the
+  # same name has them (data/crawlers/<name>.yaml, which _allow-good.yaml admits). A crawler with a list alone is
+  # left to anubis, which challenges its name from elsewhere. anubis: whether anubis' bundled policy admits it
+  # verified, so the rule below may challenge the rest
+  searchCrawlers =
+    lib.mapAttrs
+      (
+        _: c:
+        {
+          reverseDomains = [ ];
+          ranges = true;
+          anubis = true;
+        }
+        // c
+      )
+      {
+        googlebot = {
+          userAgent = "Googlebot";
+          reverseDomains = [
+            "googlebot.com"
+            "google.com"
+          ];
+        };
+        bingbot = {
+          userAgent = "bingbot";
+          reverseDomains = [ "search.msn.com" ];
+        };
+        applebot = {
+          userAgent = "Applebot";
+          reverseDomains = [ "applebot.apple.com" ];
+        };
+        duckduckbot.userAgent = "DuckDuckBot";
+        qwantbot.userAgent = "Qwantbot";
+        kagibot.userAgent = "Kagibot";
+        marginalia.userAgent = "marginalia";
+        mojeekbot.userAgent = "MojeekBot";
+        yandexbot = {
+          userAgent = "YandexBot";
+          reverseDomains = [
+            "yandex.ru"
+            "yandex.net"
+            "yandex.com"
+          ];
+          ranges = false;
+        };
+        # anubis lets it through as any other non-browser user agent; the gate alone checks it
+        baiduspider = {
+          userAgent = "Baiduspider";
+          reverseDomains = [
+            "crawl.baidu.com"
+            "crawl.baidu.jp"
+          ];
+          ranges = false;
+          anubis = false;
+        };
+      };
+  # a crawler's published ranges as the gate reads them: a json list of cidrs, never empty
+  crawlerRangesFile =
+    name:
+    pkgs.runCommand "crawler-${name}-ranges.json" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
+      yq -o json -I 0 '[.[] | select(.name == "${name}") | .remote_addresses[]]' ${anubisCrawlers}/${name}.yaml > $out
+      yq -e 'length > 0' $out > /dev/null
+    '';
+  gateCrawlers = lib.mapAttrsToList (name: c: {
+    inherit name;
+    inherit (c) userAgent reverseDomains;
+    rangesFile = if c.ranges then "${crawlerRangesFile name}" else null;
+  }) (lib.filterAttrs (_: c: c.reverseDomains != [ ]) searchCrawlers);
   # the bundled policy weighs browser user agents alone and lets every other one through: a crawler's name from outside
-  # its ranges would pass. Appended, this rule sees only what the bundled rules left undecided
+  # its ranges would pass where the gate does not stop it first. Appended, this rule sees only what the bundled rules
+  # left undecided
   anubisPolicy =
     pkgs.runCommand "anubis-policy.yaml"
       {
         nativeBuildInputs = [ pkgs.yq-go ];
         rule = builtins.toJSON {
           name = "unverified-search-crawler";
-          user_agent_regex = "(?i)${lib.concatStringsSep "|" searchCrawlerUserAgents}";
+          user_agent_regex = "(?i)${
+            lib.concatStringsSep "|" (lib.mapAttrsToList (_: c: c.userAgent) (lib.filterAttrs (_: c: c.anubis) searchCrawlers))
+          }";
           action = "CHALLENGE";
         };
       }
@@ -581,10 +644,10 @@ let
       priority = 9000;
       on = botOn;
     };
-    # above real routes, below robots.txt
+    # above real routes, below robots.txt; with the gate, the deception's fakes and labyrinth
     honeypot-tls = {
       rule = botRule honeypotRule;
-      service = labyrinthService service.protectionFeatures;
+      service = if gateOn then "deception-honeypot" else labyrinthService service.protectionFeatures;
       entryPoints = [ "websecure" ];
       priority = 9500;
       on = service.protectionFeatures;
@@ -601,13 +664,18 @@ let
     };
 
   gate = import ./lib/gate.nix { inherit pkgs lib; };
-  ladder = import ./lib/ladder.nix { inherit lib yamlDocs; };
+  ladder = import ./lib/ladder.nix {
+    inherit lib yamlDocs;
+    inherit (cfg.crowdsecBouncer) deceiveWindow;
+    inherit (gate) forgedCrawlerService;
+  };
   # it asks crowdsec, so it runs where the bouncer does
   gateOn = cfg.crowdsecBouncer.enable;
   gateFlagsOf = r: {
     captcha = on r "captcha";
     limit = on r "anonymousLimit";
     tarpit = on r "tarpit";
+    crawlers = on r "botDefense";
     scale = r.limitScale;
   };
   gatedRecords = lib.filter (r: on r "crowdsec") (
@@ -645,9 +713,11 @@ let
       sources = null;
     };
   };
-  gateServices = lib.optionalAttrs captchaOn {
-    gate.loadBalancer.servers = [ { url = "http://${gate.loopback}:${toString gate.port}"; } ];
-  };
+  gateServices =
+    lib.optionalAttrs captchaOn {
+      gate.loadBalancer.servers = [ { url = "http://${gate.loopback}:${toString gate.port}"; } ];
+    }
+    // lib.optionalAttrs gateOn gate.deceptionServices;
   # below robots.txt (10000), above the honeypot (9500): an answer is never mistaken for a probe
   gateAnswerPriority = 9800;
   # one form field of six characters
@@ -697,6 +767,12 @@ let
       burst = rateLimitBurst / anonymousLimitDivisor;
     };
     tarpit.upstream = "http://${loopback}:${toString iocainePort}";
+    deception = {
+      listen = "${gate.loopback}:${toString gate.deceptionPort}";
+      inherit (gate) statusDeceive statusForgedCrawler;
+      canaryKeyFile = "/run/credentials/lab-gate.service/canary";
+    };
+    crawlers = gateCrawlers;
     stripCookies = [ net.autheliaSessionCookie ];
   };
   gateSettingsFile = pkgs.writeText "lab-gate.json" (builtins.toJSON gateSettings);
@@ -1054,7 +1130,10 @@ let
       "client-ip"
       "strip-client-headers"
     ]
-    ++ lib.optional (gateOn && on r "crowdsec") (gate.middlewareName (gateFlagsOf r))
+    # the deception's errors middlewares wrap the gate, whose statuses they turn into the deception
+    ++ lib.optionals (gateOn && on r "crowdsec") (
+      gate.deceptionMiddlewareNames ++ [ (gate.middlewareName (gateFlagsOf r)) ]
+    )
     # scanners must reach the labyrinth, past the waf
     ++ lib.optional (gateOn && on r "crowdsec" && on r "waf" && name != "honeypot-tls") "crowdsec"
     # after the gate, which knows a logged-in user by the session
@@ -1208,7 +1287,7 @@ let
     // limitMiddlewares
     // bouncerMiddleware
     // gateMiddlewares
-    // lib.optionalAttrs gateOn { ${gate.stripMiddlewareName} = gate.stripMiddleware; }
+    // lib.optionalAttrs gateOn ({ ${gate.stripMiddlewareName} = gate.stripMiddleware; } // gate.deceptionMiddlewares)
     // stripClientHeadersMiddleware
     // autheliaMiddleware;
   missingMiddlewares = lib.subtractLists (lib.attrNames allMiddlewares) (
@@ -1246,6 +1325,10 @@ let
     {
       name = "gate tarpit";
       port = gate.tarpitPort;
+    }
+    {
+      name = "gate deception";
+      port = gate.deceptionPort;
     }
   ]
   ++ lib.optionals (anubisRoutes != { }) [
@@ -1330,6 +1413,17 @@ in
           type = lib.types.listOf lib.types.str;
           default = [ ];
           description = "Sources crowdsec never bans and the gate never stops.";
+        };
+        deceiveWindow = lib.mkOption {
+          type = lib.types.strMatching "[0-9]+[smh]";
+          default = "5m";
+          description = "How long the gate deceives a scanner before the ban crowdsec decided with it takes over (lib/ladder.nix); vm tests shorten it.";
+        };
+        profiles = lib.mkOption {
+          type = lib.types.listOf lib.types.anything;
+          readOnly = true;
+          default = ladder.profileList;
+          description = "crowdsec's profiles as rendered (lib/ladder.nix), for tests/policy.";
         };
       };
 
@@ -1863,7 +1957,7 @@ in
             systemd.services.podman-crowdsec.restartTriggers = [ config.systemd.services.crowdsec-prepare-dirs.script ];
 
             systemd.services.lab-gate = {
-              description = "lab-gate: crowdsec's decisions as a captcha or a ban page, the anonymous limit, the tarpit";
+              description = "lab-gate: crowdsec's decisions as a captcha, a ban page or the deception, the anonymous limit, the tarpit";
               wantedBy = [ "multi-user.target" ];
               # traefik's first gated request finds it listening
               before = [ "traefik.service" ];
@@ -1880,6 +1974,7 @@ in
                 DynamicUser = true;
                 LoadCredential = [
                   "bouncer:${bouncers.${gateBouncerName}.keyFile}"
+                  "canary:${config.sops.secrets.lab-gate-canary-key.path}"
                 ]
                 ++ lib.optional captchaOn "captcha:${config.sops.secrets.lab-gate-key.path}";
                 RuntimeDirectory = baseNameOf gateDir;
@@ -1922,7 +2017,10 @@ in
             };
             homelab.textfiles = [ gateMetricsName ];
 
-            sops.secrets = lib.mkIf captchaOn { lab-gate-key.restartUnits = [ "lab-gate.service" ]; };
+            sops.secrets = {
+              lab-gate-canary-key.restartUnits = [ "lab-gate.service" ];
+            }
+            // lib.optionalAttrs captchaOn { lab-gate-key.restartUnits = [ "lab-gate.service" ]; };
           }
         ]
       ))

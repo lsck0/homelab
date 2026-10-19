@@ -250,7 +250,8 @@ in
           -v ${isoWorkDir}:/iso-work \
           -v ${isoOutDir}:/iso \
           ${buildImage} ${entry "iso"} || echo "the iso build failed"
-        podman run --rm --init --replace --pull=missing --name ${containerPublish} \
+        # the host's address: the push to the dmz mirror is admitted from vm-112 alone, never from podman's bridge
+        podman run --rm --init --replace --pull=missing --name ${containerPublish} --network host \
           ${runEnv} -e ARCHBUILD_PUSH_TARGET -e ARCHBUILD_INTERNET_PREFIX \
           -v ${repoDir}:/repo \
           -v ${dotfilesDir}:/dotfiles:ro \

@@ -1,6 +1,7 @@
 #!/usr/bin/env -S nu --no-config-file
-# sync.nu's own decisions, from this machine alone: which guests a run names, the deploy plan it orders them in, and
-# its read-back of the Proxmox anti-spoofing rules against stubbed systemctl and nft. No network.
+# sync.nu's own decisions, from this machine alone: which guests a run names, the deploy plan it orders them in, its
+# read-back of the Proxmox anti-spoofing rules against stubbed systemctl and nft, and how a deploy judges a switch
+# against a stubbed ssh. No network.
 #
 # usage: nu sync_plan_test.nu <repo>, the repo whose top holds sync.nu
 
@@ -23,6 +24,23 @@ table bridge proxmox-firewall-guests {
 		iifname "tap101i0" ip saddr != @v4-guest-101/ipfilter-net0 ip saddr @v4-guest-101/ipfilter-net0-nomatch drop
 	}
 }
+'
+
+# a guest for deploy-nixos: answers by the remote command, a switch with the next of $SWITCH_STATUSES, the failure
+# judge with $JUDGED_FAILED after keeping the output it judges
+const GUEST_SSH = '#!/bin/sh
+for command; do :; done
+case $command in
+*"the following units failed"*) cat > "$STUBS/judged"; printf "%s" "$JUDGED_FAILED" ;;
+*--stdin*) cat > /dev/null ;;
+*switch-to-configuration*)
+  count=$(( $(cat "$STUBS/switches" 2>/dev/null || echo 0) + 1 ))
+  echo $count > "$STUBS/switches"
+  echo "switch run $count"
+  echo "homelab-switch-status=$(echo $SWITCH_STATUSES | cut -d " " -f $count)" ;;
+*readlink*) echo /nix/store/old-system ;;
+*lsblk*) echo "0 0 boot" ;;
+esac
 '
 
 def fail [message: string]: nothing -> nothing {
@@ -86,5 +104,39 @@ def main [repo: path]: nothing -> nothing {
     let stopped = do $check ["100"] "3"
     if $stopped.exit_code == 0 or not ($stopped.stdout | str contains "not running") { fail "a stopped proxmox-firewall passed the check" }
     rm --recursive --force $stubs
+
+    # {exit_code, stdout, switches, judged}: one deploy of a guest whose switches exit with <statuses> in turn
+    let deploy = {|statuses: string, judged_failed: string|
+        let stubs = mktemp --directory --tmpdir
+        $GUEST_SSH | save ($stubs | path join ssh)
+        "#!/bin/sh\n" | save ($stubs | path join ssh-keygen)
+        "#!/bin/sh\n" | save ($stubs | path join nix)
+        ^chmod +x ($stubs | path join ssh) ($stubs | path join ssh-keygen) ($stubs | path join nix)
+        let lab = {src: ($repo | path join src), ssh_config: "/dev/null", known_hosts: "/dev/null"}
+        let code = $"if not \(deploy-nixos ($lab | to nuon) guest 10.0.0.1 ($stubs | to nuon) key\) { exit 3 }"
+        let env_stubbed = {PATH: ($env.PATH | prepend $stubs), STUBS: $stubs, SWITCH_STATUSES: $statuses, JUDGED_FAILED: $judged_failed}
+        let ran = with-env $env_stubbed { sync-run-code $repo $code }
+        let judged = $stubs | path join judged
+        let outcome = {
+            exit_code: $ran.exit_code
+            stdout: $ran.stdout
+            switches: (open --raw ($stubs | path join switches) | str trim | into int)
+            judged: (if ($judged | path exists) { open --raw $judged } else { null })
+        }
+        rm --recursive --force $stubs
+        $outcome
+    }
+    let retried = do $deploy "4 0" ""
+    if $retried.exit_code != 0 { fail $"units failed, then a clean switch: the deploy failed: ($retried.stdout)" }
+    if $retried.switches != 2 { fail $"units failed: ($retried.switches) switches, not one more" }
+    if $retried.judged != null { fail "units failed, then a clean switch: the first switch was judged" }
+    let failed_twice = do $deploy "4 4" "podman-homepage.service"
+    if $failed_twice.exit_code == 0 { fail "units failed in both switches: the deploy passed" }
+    if $failed_twice.switches != 2 { fail $"units failed in both switches: ($failed_twice.switches) switches, not 2" }
+    if ($failed_twice.judged | str contains "switch run 1") or not ($failed_twice.judged | str contains "switch run 2") {
+        fail $"units failed in both switches: not the second switch judged: ($failed_twice.judged)"
+    }
+    if (do $deploy "0" "").switches != 1 { fail "a clean switch: switched again" }
+    if (do $deploy "1 0" "").switches != 1 { fail "a switch failing otherwise than by its units: switched again" }
     print "sync-plan: all cases pass"
 }

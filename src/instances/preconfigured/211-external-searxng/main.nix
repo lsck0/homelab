@@ -112,6 +112,11 @@ let
         name = "brave.news";
         disabled = true;
       }
+      # infobox only and 429'd on this exit every wake; wikidata's infobox stands in, the web engines still rank articles
+      {
+        name = "wikipedia";
+        disabled = true;
+      }
       # the infobox when sparql answers in time; it missed a few queries in ten and held those pages at the timeout
       {
         name = "wikidata";

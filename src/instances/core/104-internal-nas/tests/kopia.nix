@@ -1,7 +1,8 @@
 # kopia on the nas: init, snapshot, restore; a restore of a guest's local state copy (paperless, instance.nix
 # `shares`) is marked with a fresh generation for its seed (modules/local-state), any other share is not; the
 # syncthing folders and cold storage snapshot into their own repository, cold storage's upload skips without a
-# session, and the repository mirror keeps its remote copy; a repository left at its old place stops init
+# session and runs early only until one succeeded, and the repository mirror keeps its remote copy; a repository left
+# at its old place stops init
 { pkgs, lib, ... }:
 pkgs.testers.runNixOSTest {
   name = "kopia";
@@ -13,6 +14,12 @@ pkgs.testers.runNixOSTest {
     ];
     virtualisation.memorySize = 2048;
     environment.systemPackages = [ pkgs.curl ];
+    # as modules/base runs it on every guest
+    services.prometheus.exporters.node = {
+      enable = true;
+      enabledCollectors = [ "textfile" ];
+      extraFlags = [ "--collector.textfile.directory=/var/lib/node-exporter-textfile" ];
+    };
     # main.nix's folder; syncthing itself stays off, and the test starts every run itself
     services.syncthing.settings.folders.sync.path = "/srv/nas/syncthing/sync";
     systemd.timers = lib.genAttrs [ "kopia-syncthing" "proton-bisync" ] (_: {
@@ -110,7 +117,7 @@ pkgs.testers.runNixOSTest {
         machine.succeed("nas-restore now")
         tree = int(machine.succeed("find /srv/nas \\( -path /srv/nas/BACKUPS -o -path /srv/nas/bulk -o -path /srv/nas/syncthing \\) -prune -o -type f -print | wc -l"))
         machine.succeed("systemctl start kopia-metrics.service")
-        prom = machine.succeed("cat /var/lib/node-exporter-textfile/nas_backup.prom")
+        prom = machine.succeed("cat /var/lib/node-exporter-textfile/nas_backup.prom /var/lib/node-exporter-textfile/nas_backup_files.prom")
         print(prom)
         assert 'homelab_backup_last_success_timestamp_seconds{type="daily"}' in prom
         files = int([l for l in prom.splitlines() if l.startswith("homelab_backup_snapshot_files ")][0].split()[1])
@@ -146,7 +153,7 @@ pkgs.testers.runNixOSTest {
         snaps = json.loads(machine.succeed("kopia-syncthing snapshot list /srv/nas/syncthing --json"))
         assert len(snaps) == 1, snaps
         listing = machine.succeed("kopia-syncthing ls -r " + snaps[0]["rootEntry"]["obj"])
-        assert "borg-luca-pc/data" in listing and "sync/notes.txt" in listing, listing
+        assert "sync/notes.txt" in listing and "borg-luca-pc" not in listing, listing
         machine.succeed("test -e /srv/nas/BACKUPS/kopia-syncthing/kopia.repository.f")
         prom = machine.succeed("cat /var/lib/node-exporter-textfile/syncthing_backup.prom")
         assert 'homelab_backup_last_success_timestamp_seconds{type="syncthing"}' in prom, prom
@@ -163,10 +170,26 @@ pkgs.testers.runNixOSTest {
         assert 'homelab_backup_last_success_timestamp_seconds{type="cold-storage"}' in prom, prom
         machine.fail("nas-restore files 0 bulk/cold-storage")
 
+    with subtest("the node exporter serves every backup's freshness: two help texts for one metric drop all but one file"):
+        metrics = machine.succeed("curl -sf http://127.0.0.1:9100/metrics")
+        for backup in ["daily", "syncthing", "cold-storage"]:
+            assert f'homelab_backup_last_success_timestamp_seconds{{type="{backup}"}}' in metrics, backup
+        assert "node_textfile_scrape_error 0" in metrics, [l for l in metrics.splitlines() if "textfile" in l]
+
     with subtest("cold storage's upload skips without a proton session; the repository mirror keeps its remote copy"):
         machine.succeed("systemctl start proton-cold-storage.service")
         machine.succeed("journalctl -u proton-cold-storage --no-pager | grep -q 'no proton session'")
         machine.fail("ls /var/lib/node-exporter-textfile/proton_cold_storage.prom")
+        weekly = machine.succeed("systemctl show -p TimersMonotonic -p TimersCalendar --value proton-cold-storage.timer")
+        assert "OnActiveUSec" not in weekly and "OnCalendar" in weekly, f"every boot starts an upload: {weekly}"
+        machine.succeed("systemctl is-active proton-cold-storage-first.timer")
+        first = machine.succeed("systemctl show -p TimersMonotonic --value proton-cold-storage-first.timer")
+        assert "OnActiveUSec" in first, f"the first upload waits for the weekly run: {first}"
+
+    with subtest("once an upload succeeded, a boot or a switch starts no early one"):
+        machine.succeed("touch /var/lib/node-exporter-textfile/proton_cold_storage.prom")
+        machine.succeed("systemctl restart proton-cold-storage-first.timer")
+        machine.fail("systemctl is-active proton-cold-storage-first.timer")
         keep = machine.succeed("systemctl show -p Environment --value proton-sync")
         assert "PROTON_MIRROR_ROOT_KEEP=BACKUPS cold-storage sync" in keep, keep
 

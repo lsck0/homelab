@@ -1,6 +1,7 @@
 # the edge's anti-bot defence with the real crowdsec (its pinned image, its scenarios and the ladder's profiles): the
 # gate's captcha, one try per puzzle, the cookie, the ban after too many wrong answers with its remaining time, the
-# honeypot's ban, the tarpit, the anonymous limit, and the sources it never stops
+# honeypot's deception and the day's ban after it (the deceive window shortened to a minute), the tarpit, the
+# anonymous limit, and the sources it never stops
 #
 # The fixture is edge-apps' (the real `wat` app on `appnodes`, the internal ingress for the relayed session check,
 # authelia's stand-in answering /api/state), with crowdsec itself in place of its stub on the edge; the internal
@@ -57,6 +58,9 @@ let
   };
   # lib/gate tarpit.go tarpitPerClientMax
   tarpitPerClientMax = 2;
+  deceiveWindow = "1m";
+  # the window, the gate's decision cache and crowdsec's own pace, with room
+  banTimeoutS = 180;
 
   guest = vmid: instance: memory: extra: {
     imports = [
@@ -77,6 +81,7 @@ let
       environment.DISABLE_ONLINE_API = lib.mkOverride 10 "true";
     };
     homelab.traefik.gate.captcha.answerLog = true;
+    homelab.traefik.crowdsecBouncer.deceiveWindow = deceiveWindow;
   };
 in
 pkgs.testers.runNixOSTest {
@@ -226,13 +231,24 @@ pkgs.testers.runNixOSTest {
           assert r["status"] == 403 and 3000 < int(r["headers"]["retry-after"]) <= 3600, r["headers"]
           assert "<script" not in r["body"].lower()
 
-      with subtest("a honeypot hit is banned for minutes (the ladder's strong signal, first rung)"):
-          world.execute(f"curl -s --max-time 3 --interface {CF} -H 'X-Forwarded-For: 203.0.113.24' "
-                        f"--resolve ${net.fqdn "wat"}:443:{EDGE} {WAT}/.env")
+      with subtest("a honeypot hit is deceived for the window, then banned for the day (the ladder's deceive path)"):
+          r = get("/.env", "203.0.113.24")
+          assert r["status"] == 200 and "AWS_ACCESS_KEY_ID=AKIA" in r["body"], (r["status"], r["body"][:300])
+          assert "${net.fqdn "wat"}" not in r["body"] and "${net.domain}" not in r["body"], r["body"][:300]
           vm_200.wait_until_succeeds("podman exec crowdsec cscli decisions list --ip 203.0.113.24 -o json | grep -q homelab/honeypot", timeout=120)
+          made = [d for a in decisions("203.0.113.24") for d in a.get("decisions", [])]
+          assert {(d["type"], d["scenario"]) for d in made} == {("deceive", "homelab/honeypot"), ("ban", "homelab/honeypot")}, made
+          # crowdsec's remaining time: the deceive within the shortened window, the ban the rest of the day
+          deceive = next(d for d in made if d["type"] == "deceive")
+          ban = next(d for d in made if d["type"] == "ban")
+          assert "h" not in deceive["duration"] and ban["duration"].startswith("23h"), made
+          # deceived on the app's own route while the window lasts: an api fake, no app, no ban page
           world.wait_until_succeeds(
               f"curl -s --interface {CF} -H 'X-Forwarded-For: 203.0.113.24' --resolve ${net.fqdn "wat"}:443:{EDGE} {WAT}/api/x "
-              "| grep -q 'You have been banned for 1[0-4] minutes'", timeout=30)
+              "| grep -q access_key_id", timeout=30)
+          world.wait_until_succeeds(
+              f"curl -s --interface {CF} -H 'X-Forwarded-For: 203.0.113.24' --resolve ${net.fqdn "wat"}:443:{EDGE} {WAT}/api/x "
+              "| grep -q 'You have been banned for 23 hours'", timeout=${toString banTimeoutS})
 
       with subtest("the labyrinth trickles, two at a time per client"):
           received = world.execute(f"curl -s --max-time 4 -o /tmp/trickle -w '%{{size_download}}' --interface {CF} -A GPTBot/1.0 "

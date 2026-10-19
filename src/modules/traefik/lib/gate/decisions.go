@@ -23,23 +23,35 @@ const (
 	decisionCountMax = 65536
 )
 
-// DecisionKind is the strongest remediation crowdsec holds for a client.
+// DecisionKind is the strongest remediation crowdsec holds for a client, in order of strength.
 type DecisionKind int
 
 const (
 	DecisionNone DecisionKind = iota
 	DecisionCaptcha
 	DecisionBan
+	// a scanner's: the ladder decides it with the ban that follows it (lib/ladder.nix), so it outranks the ban while
+	// it lasts and the ban takes over when it ends
+	DecisionDeceive
 	// crowdsec did not answer: nobody knows
 	DecisionUnknown
+	DecisionKindCount
+)
+
+var decisionKindNames = [DecisionKindCount]string{"none", "captcha", "ban", "deceive", "unknown"}
+
+// crowdsec's decision types the gate tells apart; any other one is a ban
+const (
+	lapiTypeCaptcha = "captcha"
+	lapiTypeDeceive = "deceive"
 )
 
 // Decision is a client's remediation and when the longest decision of that kind ends.
 type Decision struct {
 	Kind  DecisionKind
 	Until time.Time
-	// the ban's id at crowdsec, so a ban is counted once however often its client returns
-	BanID int64
+	// the earliest id at crowdsec of that kind, so a ban or a deception is counted once however often its client returns
+	ID int64
 }
 
 type decisionEntry struct {
@@ -78,8 +90,8 @@ func decisionsDestroy(d *Decisions) {
 	tableDestroy(d.cache)
 }
 
-// decisionFromLapi folds crowdsec's answer for one client: ban beats captcha, an unknown type counts as a ban (deny
-// by default), the remaining durations are crowdsec's own.
+// decisionFromLapi folds crowdsec's answer for one client: deceive beats ban beats captcha, an unknown type counts as
+// a ban (deny by default), the remaining durations are crowdsec's own.
 func decisionFromLapi(body []byte, now time.Time) (Decision, error) {
 	var decisions []lapiDecision
 	if err := json.Unmarshal(body, &decisions); err != nil {
@@ -92,18 +104,21 @@ func decisionFromLapi(body []byte, now time.Time) (Decision, error) {
 			return Decision{}, fmt.Errorf("lapi: decision %d: %w", d.ID, err)
 		}
 		kind := DecisionBan
-		if d.Type == "captcha" {
+		switch d.Type {
+		case lapiTypeCaptcha:
 			kind = DecisionCaptcha
+		case lapiTypeDeceive:
+			kind = DecisionDeceive
 		}
 		until := now.Add(remaining)
 		switch {
 		case kind > result.Kind:
-			result = Decision{Kind: kind, Until: until}
-		case kind == result.Kind && until.After(result.Until):
-			result.Until = until
-		}
-		if kind == DecisionBan && (result.BanID == 0 || d.ID < result.BanID) {
-			result.BanID = d.ID
+			result = Decision{Kind: kind, Until: until, ID: d.ID}
+		case kind == result.Kind:
+			if until.After(result.Until) {
+				result.Until = until
+			}
+			result.ID = min(result.ID, d.ID)
 		}
 	}
 	return result, nil
@@ -132,8 +147,9 @@ func decisionsFetch(ctx context.Context, d *Decisions, client string, now time.T
 }
 
 // decisionsGet is the client's decision as of at most decisionCacheTTL ago; an unreachable crowdsec is Unknown, cached
-// as briefly, so an outage costs one failed call per client per ttl. newBan is true the first time a ban id is seen.
-func decisionsGet(ctx context.Context, d *Decisions, client string, now time.Time) (decision Decision, newBan bool, err error) {
+// as briefly, so an outage costs one failed call per client per ttl. fresh is true the first time a ban's or a
+// deception's id is seen.
+func decisionsGet(ctx context.Context, d *Decisions, client string, now time.Time) (decision Decision, fresh bool, err error) {
 	d.cache.mu.Lock()
 	entry, found := d.cache.entries[client]
 	d.cache.mu.Unlock()
@@ -148,12 +164,13 @@ func decisionsGet(ctx context.Context, d *Decisions, client string, now time.Tim
 	if ctx.Err() != nil {
 		return decision, false, err
 	}
-	newBan = decision.Kind == DecisionBan && (!found || entry.decision.BanID != decision.BanID)
+	counted := decision.Kind == DecisionBan || decision.Kind == DecisionDeceive
+	fresh = counted && (!found || entry.decision.Kind != decision.Kind || entry.decision.ID != decision.ID)
 	d.cache.mu.Lock()
 	defer d.cache.mu.Unlock()
 	tableRoomMake(d.cache, func(e decisionEntry) bool {
 		return now.Sub(e.checkedAt) >= decisionCacheTTL && !e.decision.Until.After(now)
 	})
 	d.cache.entries[client] = decisionEntry{decision: decision, checkedAt: now}
-	return decision, newBan, err
+	return decision, fresh, err
 }

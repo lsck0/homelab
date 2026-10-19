@@ -107,6 +107,9 @@ let
   # the nightly repository upload, before the sunday verify
   coldStorageUploadAt = "Sat 06:00";
   coldStorageUploadDelay = "30m";
+  # the first upload follows the deploy, not the next saturday: until it runs the stale alert pages; once one
+  # succeeded a boot or a switch starts no early run, which would hold the nas job lock for hours
+  coldStorageFirstUploadAfter = "15min";
   # a first upload cut short resumes next week, skipping what is already there by content
   coldStorageUploadTimeout = "12h";
   syncthingRepo = "${source}/BACKUPS/kopia-syncthing";
@@ -175,6 +178,11 @@ let
         "Unix time of the newest snapshot."
       ]
     } \"$1\" ${lib.escapeShellArg "{type=\"${type}\"}"}";
+  dailyBackup = {
+    type = "daily";
+    textfile = "nas_backup";
+  };
+  dailyFilesTextfile = "nas_backup_files";
   syncthingBackup = {
     type = "syncthing";
     textfile = "syncthing_backup";
@@ -291,7 +299,8 @@ let
     export KOPIA_PASSWORD="$(cat ${config.sops.secrets.kopia-password.path})"
     export KOPIA_CHECK_FOR_UPDATES=false
     export KOPIA_LOG_DIR=${logDir}
-    export KOPIA_CACHE_DIRECTORY=${cacheDir}
+    # one cache per repository: a shared one hands a run the other repository's format blob
+    export KOPIA_CACHE_DIRECTORY=${cacheDir}/${lib.removeSuffix ".config" (baseNameOf kopiaConfig)}
     export PATH="${
       lib.makeBinPath [
         pkgs.kopia
@@ -410,7 +419,8 @@ in
   ];
 
   homelab.textfiles = [
-    "nas_backup"
+    dailyBackup.textfile
+    dailyFilesTextfile
     "proton_sync"
     shareMetric.textfile
     coldStorageOffsite.textfile
@@ -522,16 +532,8 @@ in
       [ -n "$latest" ] || exit 0
       end=$(date -d "$(echo "$latest" | jq -r .endTime)" +%s)
       files=$(echo "$latest" | jq -r '.rootEntry.summ.files // 0')
-      d=${config.homelab.textfileDir}; mkdir -p $d
-      {
-        echo "# HELP homelab_backup_last_success_timestamp_seconds Unix time of the newest NAS snapshot."
-        echo "# TYPE homelab_backup_last_success_timestamp_seconds gauge"
-        echo "homelab_backup_last_success_timestamp_seconds{type=\"daily\"} $end"
-        echo "# HELP homelab_backup_snapshot_files Files in the newest NAS snapshot."
-        echo "# TYPE homelab_backup_snapshot_files gauge"
-        echo "homelab_backup_snapshot_files $files"
-      } > $d/nas_backup.prom.tmp
-      mv $d/nas_backup.prom.tmp $d/nas_backup.prom
+      ${backupMetric dailyBackup} "$end"
+      ${metricWrite} ${dailyFilesTextfile} homelab_backup_snapshot_files "Files in the newest NAS snapshot." "$files"
     '';
   };
   systemd.timers.kopia-metrics = {
@@ -602,6 +604,14 @@ in
     at = coldStorageUploadAt;
     delay = coldStorageUploadDelay;
   };
+  systemd.timers.proton-cold-storage-first = {
+    wantedBy = [ "timers.target" ];
+    unitConfig.ConditionPathExists = "!${config.homelab.textfileDir}/${coldStorageOffsite.textfile}.prom";
+    timerConfig = {
+      OnActiveSec = coldStorageFirstUploadAfter;
+      Unit = "proton-cold-storage.service";
+    };
+  };
 
   systemd.services.proton-bisync = lib.mkIf (shareDir != null) (
     lib.recursiveUpdate
@@ -662,7 +672,7 @@ in
       ${kopiaConnect syncthingRepo}
       kopia policy set ${syncthingRoot} --compression=zstd \
         --keep-latest=3 --keep-hourly=0 --keep-daily=7 --keep-weekly=8 --keep-monthly=6 --keep-annual=0 \
-        --add-ignore=.stversions --add-ignore=proton-bisync-trash --add-ignore='*.tmp'
+        --add-ignore=.stversions --add-ignore=proton-bisync-trash --add-ignore='*.tmp' --add-ignore='/borg-*'
       kopia snapshot create ${syncthingRoot}
       ${backupMetric syncthingBackup} "$(date +%s)"
       # an unchanged tree costs no space, and a deletion in a folder rarely opened is noticed late

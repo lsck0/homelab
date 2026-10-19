@@ -21,7 +21,11 @@ let
     inherit lib;
     inherit (specialArgs) inventory;
   };
-  builder = telemetry.vmName specialArgs.inventory.${toString specialArgs.lab.appsCatalog.builder};
+  builderGuest = specialArgs.inventory.${toString specialArgs.lab.appsCatalog.builder};
+  builder = telemetry.vmName builderGuest;
+  archbuild = lib.findFirst (g: lib.hasSuffix "-archbuild" g.name) (throw "no archbuild guest") (
+    lib.attrValues inventory
+  );
   inherit (specialArgs) inventory;
   inherit (specialArgs.lab) catalog;
   # a route of a nixos guest's alerted service on the internal ingress; a powered-off guest's has no rule to fire
@@ -72,7 +76,7 @@ pkgs.runCommand "alert-rules"
   ''
     mkdir -p $out
     HOME=$TMPDIR GOCACHE=$TMPDIR/go-cache go run ${./annotations_render.go} ${rules}
-    python3 ${./alert_rules_test.py} ${rules} ${fixtureApp} ${builder} ${guestRoute} $out
+    python3 ${./alert_rules_test.py} ${rules} ${fixtureApp} ${builder} ${guestRoute} ${archbuild.ip} ${builderGuest.ip} $out
     cd $out
     promtool check rules rules.json
     promtool test rules tests.json

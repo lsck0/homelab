@@ -70,6 +70,7 @@ in
   protonvpn-private-key = wireguardOf "protonvpn-private-key";
   anubis-ed25519-key = hexOf "anubis-ed25519-key";
   lab-gate-key = hexOf "lab-gate-key";
+  lab-gate-canary-key = hexOf "lab-gate-canary-key";
   authelia-oidc-hmac = hexOf "authelia-oidc-hmac";
   inherit authelia-oidc-issuer-key app-deploy-key lldap-server-key;
   # an onion route's key (<route>-onion-key): any 32 bytes are an ed25519 seed, base64 as scripts/lib/onion.nu reads it

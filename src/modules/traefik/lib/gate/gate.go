@@ -21,6 +21,8 @@ const (
 	headerForwardedURI = "X-Forwarded-Uri"
 	// forwardauth's copy of the request's host, which the router's rule matched (traefik trusts no client's here)
 	headerForwardedHost = "X-Forwarded-Host"
+	// what a search crawler names itself by
+	headerUserAgent = "User-Agent"
 
 	pathAuth    = "/auth"
 	pathStrip   = "/strip"
@@ -50,17 +52,22 @@ const (
 	VerdictBan
 	VerdictLimited
 	VerdictUnavailable
+	// traefik's errors middlewares send these to the deception (deception.go)
+	VerdictDeceive
+	VerdictForgedCrawler
 	VerdictCount
 )
 
-var verdictNames = [VerdictCount]string{"pass", "captcha", "ban", "limited", "unavailable"}
+var verdictNames = [VerdictCount]string{"pass", "captcha", "ban", "limited", "unavailable", "deceive", "forged-crawler"}
 
 // RouteFlags are a route's gate features, from the query of its forwardauth address (modules/traefik/gate.nix).
 type RouteFlags struct {
 	Captcha bool
 	Limit   bool
 	Tarpit  bool
-	Scale   int
+	// the route's bot defence: a forged search crawler gets the deception
+	Crawlers bool
+	Scale    int
 }
 
 // Captcha is the captcha's state when the ingress asks one.
@@ -82,6 +89,8 @@ type Gate struct {
 	limiter   *Limiter
 	captcha   *Captcha
 	tarpit    *Tarpit
+	crawlers  *Crawlers
+	deception *Deception
 	metrics   *Metrics
 	// cookie name -> stripped by /strip
 	stripCookies map[string]bool
@@ -96,7 +105,7 @@ func routeFlagsParse(query url.Values) (RouteFlags, bool) {
 		return RouteFlags{}, false
 	}
 	flag := func(name string) bool { return query.Get(name) == "1" }
-	return RouteFlags{Captcha: flag("captcha"), Limit: flag("limit"), Tarpit: flag("tarpit"), Scale: scale}, true
+	return RouteFlags{Captcha: flag("captcha"), Limit: flag("limit"), Tarpit: flag("tarpit"), Crawlers: flag("crawlers"), Scale: scale}, true
 }
 
 // returnPathParse keeps a return target on this host: a path, never a scheme, a host or a protocol-relative url.
@@ -118,6 +127,8 @@ func verdictDecide(kind DecisionKind, routeCaptcha, captchaEnabled, answering, c
 		return VerdictPass
 	case DecisionBan:
 		return VerdictBan
+	case DecisionDeceive:
+		return VerdictDeceive
 	case DecisionCaptcha:
 		if answering || !routeCaptcha || !captchaEnabled || cookieValid {
 			return VerdictPass
@@ -315,14 +326,26 @@ func gateAuth(g *Gate, w http.ResponseWriter, r *http.Request) {
 	if authenticated {
 		return
 	}
-	decision, newBan, err := decisionsGet(r.Context(), g.decisions, clientText, now)
+	decision, fresh, err := decisionsGet(r.Context(), g.decisions, clientText, now)
 	lapiStateLog(g, err)
 	if err != nil {
 		metricsAdd(g.metrics, metricErrors, "crowdsec", 1)
 	}
-	if newBan {
-		metricsAdd(g.metrics, metricBans, "", 1)
-		slog.Info("ban enforced", "client", clientText, "until", decision.Until.UTC())
+	if fresh {
+		counter := metricBans
+		if decision.Kind == DecisionDeceive {
+			counter = metricDeceives
+		}
+		metricsAdd(g.metrics, counter, "", 1)
+		slog.Info("decision enforced", "kind", decisionKindNames[decision.Kind], "client", clientText, "until", decision.Until.UTC())
+	}
+	// after the decision: a forger's ban ends its deception on time, and a crawler's name never lifts a ban. crowdsec
+	// decides on the access log line this answer leaves (the forged-crawler signal, lib/ladder.nix)
+	banStrength := decision.Kind == DecisionBan || decision.Kind == DecisionDeceive
+	if flags.Crawlers && !banStrength && crawlerJudge(g.crawlers, r.Header.Get(headerUserAgent), client, now) == CrawlerForged {
+		verdict = VerdictForgedCrawler
+		w.WriteHeader(g.deception.statusForgedCrawler)
+		return
 	}
 	needsCookie := decision.Kind == DecisionCaptcha || decision.Kind == DecisionUnknown
 	verdict = verdictDecide(decision.Kind, flags.Captcha, g.captcha != nil, answering, needsCookie && cookieValid(g, r, clientText, now))
@@ -347,7 +370,9 @@ func gateAuth(g *Gate, w http.ResponseWriter, r *http.Request) {
 			Title: "The lab cannot check this address right now",
 			Lead:  "Try again in a few seconds.",
 		})
-	case VerdictCount:
+	case VerdictDeceive:
+		w.WriteHeader(g.deception.statusDeceive)
+	case VerdictForgedCrawler, VerdictCount:
 		panic("gate: no such verdict")
 	}
 }

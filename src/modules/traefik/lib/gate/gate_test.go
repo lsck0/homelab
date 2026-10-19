@@ -94,7 +94,7 @@ func TestPuzzleRenderPng(t *testing.T) {
 }
 
 func TestCookie(t *testing.T) {
-	key := []byte(strings.Repeat("k", captchaKeyBytesMin))
+	key := []byte(strings.Repeat("k", hmacKeyBytesMin))
 	now := time.Unix(1_700_000_000, 0)
 	value := cookieEncode(key, "203.0.113.9", now.Add(cookieLifetime))
 	cases := []struct {
@@ -108,7 +108,7 @@ func TestCookie(t *testing.T) {
 		{"its client, in time", key, "203.0.113.9", value, now, true},
 		{"another client", key, "203.0.113.10", value, now, false},
 		{"expired", key, "203.0.113.9", value, now.Add(cookieLifetime), false},
-		{"another key", []byte(strings.Repeat("x", captchaKeyBytesMin)), "203.0.113.9", value, now, false},
+		{"another key", []byte(strings.Repeat("x", hmacKeyBytesMin)), "203.0.113.9", value, now, false},
 		{"expiry moved", key, "203.0.113.9", "9" + value, now, false},
 		{"mac flipped", key, "203.0.113.9", value[:len(value)-1] + "A", now, false},
 		{"no separator", key, "203.0.113.9", "garbage", now, false},
@@ -134,6 +134,8 @@ func TestVerdictDecide(t *testing.T) {
 				want = VerdictPass
 			case DecisionBan:
 				want = VerdictBan
+			case DecisionDeceive:
+				want = VerdictDeceive
 			case DecisionCaptcha:
 				want = VerdictCaptcha
 				if answering || !routeCaptcha || !captchaEnabled || cookie {
@@ -163,15 +165,18 @@ func TestDecisionFromLapi(t *testing.T) {
 		body  string
 		kind  DecisionKind
 		until time.Duration
-		banID int64
+		id    int64
 		err   bool
 	}{
 		{`null`, DecisionNone, 0, 0, false},
 		{`[]`, DecisionNone, 0, 0, false},
-		{`[{"id":3,"type":"captcha","duration":"3h59m1.5s"}]`, DecisionCaptcha, 3*time.Hour + 59*time.Minute + 1500*time.Millisecond, 0, false},
+		{`[{"id":3,"type":"captcha","duration":"3h59m1.5s"}]`, DecisionCaptcha, 3*time.Hour + 59*time.Minute + 1500*time.Millisecond, 3, false},
 		{`[{"id":3,"type":"captcha","duration":"4h"},{"id":4,"type":"ban","duration":"10m"}]`, DecisionBan, 10 * time.Minute, 4, false},
 		{`[{"id":5,"type":"ban","duration":"10m"},{"id":4,"type":"ban","duration":"1h"}]`, DecisionBan, time.Hour, 4, false},
 		{`[{"id":6,"type":"throttle","duration":"1m"}]`, DecisionBan, time.Minute, 6, false},
+		// the ladder's deception: the deceive outranks the ban decided with it until it ends
+		{`[{"id":8,"type":"ban","duration":"24h"},{"id":7,"type":"deceive","duration":"5m"}]`, DecisionDeceive, 5 * time.Minute, 7, false},
+		{`[{"id":8,"type":"ban","duration":"23h55m"}]`, DecisionBan, 23*time.Hour + 55*time.Minute, 8, false},
 		{`[{"id":7,"type":"ban","duration":"soon"}]`, DecisionNone, 0, 0, true},
 		{`{`, DecisionNone, 0, 0, true},
 	}
@@ -184,7 +189,7 @@ func TestDecisionFromLapi(t *testing.T) {
 		if c.err {
 			continue
 		}
-		if decision.Kind != c.kind || decision.BanID != c.banID || (c.kind != DecisionNone && !decision.Until.Equal(now.Add(c.until))) {
+		if decision.Kind != c.kind || decision.ID != c.id || (c.kind != DecisionNone && !decision.Until.Equal(now.Add(c.until))) {
 			t.Errorf("%s: got %+v", c.body, decision)
 		}
 	}
@@ -420,11 +425,14 @@ func gateFixtureCreate(t *testing.T) *gateFixture {
 		limiter:   limiterCreate(SettingsAnonymous{AveragePerSecond: 1, Burst: 3}),
 		tarpit:    tarpitCreate(labyrinth.URL, metrics),
 		metrics:   metrics,
-		captcha: &Captcha{key: []byte(strings.Repeat("k", captchaKeyBytesMin)), cookieDomain: "lsck0.dev",
+		captcha: &Captcha{key: []byte(strings.Repeat("k", hmacKeyBytesMin)), cookieDomain: "lsck0.dev",
 			answerPath: "/.lab-gate/answer", onions: map[string]string{testOnion: testOnionRoute}, challenges: challenges,
 			renders: make(chan struct{}, renderSlots)},
 	}
 	f.gate.tarpit.interval = time.Millisecond
+	f.gate.crawlers = testCrawlersCreate(t, testResolver{})
+	f.gate.deception = &Deception{statusDeceive: testStatusDeceive, statusForgedCrawler: testStatusForgedCrawler, canaryKey: testCanaryKey,
+		interval: time.Millisecond}
 	f.server = httptest.NewServer(gateMux(f.gate))
 	t.Cleanup(f.server.Close)
 	return f

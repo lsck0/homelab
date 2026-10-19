@@ -15,6 +15,9 @@ const (
 	metricErrors       = "homelab_gate_errors_total"
 	metricTarpitActive = "homelab_gate_tarpit_active"
 	metricOnionDecoys  = "homelab_gate_onion_decoys_total"
+	metricDeceives     = "homelab_gate_deceives_total"
+	metricDeceptions   = "homelab_gate_deceptions_total"
+	metricCanaries     = "homelab_gate_canaries_total"
 )
 
 type metricSpec struct {
@@ -33,6 +36,9 @@ var metricSpecs = []metricSpec{
 	{metricErrors, "Failed calls to crowdsec or authelia, by upstream.", false, "upstream"},
 	{metricTarpitActive, "Labyrinth answers trickling now.", true, ""},
 	{metricOnionDecoys, "Onion captcha answers naming a lookalike address's label: visitors of a phishing copy, by route.", false, "route"},
+	{metricDeceives, "Distinct crowdsec deceive decisions the gate enforced for the first time.", false, ""},
+	{metricDeceptions, "Deception answers, by what they served: a fake target, the labyrinth, busy or refused.", false, "served"},
+	{metricCanaries, "Canary sets issued in fake answers, by target; the journal maps each canary to its client and path.", false, "target"},
 }
 
 // Metrics are the gate's counters, served in prometheus' text format on its loopback listener, where a timer copies

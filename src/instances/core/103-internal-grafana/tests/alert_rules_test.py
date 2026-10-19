@@ -1,9 +1,10 @@
 """The provisioned Grafana alert rules (103-internal-grafana.nix) as Prometheus rules, for promtool.
 
-Usage: alert_rules_test.py <rules.json> <app> <builder> <guest route> <out dir>
+Usage: alert_rules_test.py <rules.json> <app> <builder> <guest route> <archbuild ip> <builder ip> <out dir>
 
 <app>: an app the catalog enables; <builder>: the `vm` label of the app builder's guest; <guest route>: a route of a
-powered nixos guest's alerted service on the internal ingress.
+powered nixos guest's alerted service on the internal ingress; <archbuild ip>, <builder ip>: the guests whose
+forced-command ssh logins are expected.
 
 Writes <out dir>/rules.json, every Prometheus-backed Grafana rule as an alerting rule with the same expression,
 threshold, `for` and labels (Loki rules stay out: promtool evaluates PromQL only), and <out dir>/tests.json, the
@@ -16,11 +17,13 @@ stale only because its guest just woke up, a stale deploy metric on a guest that
 builder already reports).
 """
 
+import ipaddress
 import json
 import os
+import re
 import sys
 
-RULES, APP, BUILDER, GUEST, OUT = sys.argv[1:6]
+RULES, APP, BUILDER, GUEST, ARCHBUILD_IP, BUILDER_IP, OUT = sys.argv[1:8]
 OPERATORS = {"gt": ">", "lt": "<"}
 NODE = 'job="homelab-node-exporter"'
 EDGE = "10.200.0.200:8082"
@@ -52,6 +55,7 @@ with open(RULES) as handle:
 rules = [r for g in groups for r in g["rules"]]
 translated = [p for p in map(prometheus_rule, rules) if p]
 rule_labels = {r["uid"]: r["labels"] for r in rules}
+rule_by_uid = {r["uid"]: r for r in rules}
 with open(os.path.join(OUT, "rules.json"), "w") as handle:
     json.dump({"groups": [{"name": "homelab", "interval": "1m", "rules": translated}]}, handle, indent=2)
 
@@ -510,7 +514,8 @@ tests += [
         ],
     },
     {
-        "name": "host: a throttling nvme, one over its warning temperature and machine checks page; a cool drive does not",
+        "name": "host: a throttling nvme, a warm one over its warning temperature and machine checks page; a cool drive's"
+        " warning minute does not",
         "interval": "5m",
         "input_series": [
             {
@@ -522,10 +527,13 @@ tests += [
                 "series": 'homelab_nvme_warning_temperature_seconds_total{vm="proxmox",device="nvme1n1"}',
                 "values": "0x6 60x14",
             },
+            # nvme0n1 counts a warning minute at a 38 C composite, as the 980 on firmware 1B4QFXO7 did
             {
                 "series": 'homelab_nvme_warning_temperature_seconds_total{vm="proxmox",device="nvme0n1"}',
-                "values": "0x20",
+                "values": "0x6 60x14",
             },
+            {"series": 'nvme_temperature_celsius{vm="proxmox",device="nvme1n1"}', "values": "40x6 65x14"},
+            {"series": 'nvme_temperature_celsius{vm="proxmox",device="nvme0n1"}', "values": "38x20"},
             {"series": 'homelab_mce_events_total{vm="proxmox"}', "values": "0x4 2x16"},
         ],
         "alert_rule_test": [
@@ -535,8 +543,9 @@ tests += [
                 "exp_alerts": [expect("nvme_throttling", vm="proxmox", device="nvme1n1")],
             },
             {"eval_time": "25m", "alertname": "nvme_over_warning_temperature", "exp_alerts": []},
+            {"eval_time": "35m", "alertname": "nvme_over_warning_temperature", "exp_alerts": []},
             {
-                "eval_time": "40m",
+                "eval_time": "45m",
                 "alertname": "nvme_over_warning_temperature",
                 "exp_alerts": [expect("nvme_over_warning_temperature", vm="proxmox", device="nvme1n1")],
             },
@@ -686,6 +695,47 @@ tests += [
         ],
     },
 ]
+
+
+def loki_line_matches(expr, line):
+    """Whether a log line passes every line filter (|= substring, |~ regex) of a LogQL query."""
+    filters = re.findall(r'\|([=~]) "((?:[^"\\]|\\.)*)"', expr)
+    assert filters, f"no line filter in {expr}"
+    return all(text in line if op == "=" else re.search(text, line) for op, text in filters)
+
+
+# the kernel's refusal (modules/network.nix) counts; grafana's own log of the rule's query, which quotes it, does not
+GUARD_EXPR = next(d for d in rule_by_uid["guard_refused"]["data"] if d["refId"] == "A")["model"]["expr"]
+assert loki_line_matches(GUARD_EXPR, "guard-refused: IN=ens18 OUT= SRC=10.100.0.113 DST=10.100.0.103 PROTO=TCP DPT=22")
+assert not loki_line_matches(
+    GUARD_EXPR,
+    f'logger=tsdb.loki endpoint=queryData query="{GUARD_EXPR}" rule_uid=guard_refused',
+), "guard_refused counts grafana's own query log"
+
+
+def ip_in(address, network):
+    return ipaddress.ip_address(address) in ipaddress.ip_network(network, strict=False)
+
+
+def loki_ssh_login_counts(expr, user, source, method="publickey"):
+    """Whether sshd's accept line passes the rule's line filters, regexp stage and label filter."""
+    line = f"Accepted {method} for {user} from {source} port 50022 ssh2"
+    pattern, label_filter = re.search(r'\| regexp "((?:[^"\\]|\\.)*)" \| (.*) \[\w+\]\)\)$', expr).groups()
+    fields = re.search(pattern, line)
+    if not loki_line_matches(expr, line) or not fields:
+        return False
+    python = re.sub(r'(\w+) != ip\("([^"]+)"\)', r'not ip_in(\1, "\2")', label_filter)
+    python = re.sub(r'(\w+) = "', r'\1 == "', python)
+    return eval(python, {"ip_in": ip_in}, fields.groupdict())
+
+
+# the lab's forced-command logins stay quiet only as the pair their key allows: a user from its one guest
+SSH_LOGIN_EXPR = next(d for d in rule_by_uid["ssh_login_unexpected"]["data"] if d["refId"] == "A")["model"]["expr"]
+assert not loki_ssh_login_counts(SSH_LOGIN_EXPR, "archrepo", ARCHBUILD_IP), "the archbuild push alerts"
+assert not loki_ssh_login_counts(SSH_LOGIN_EXPR, "root", BUILDER_IP), "the deploy controller's stacks alert"
+assert loki_ssh_login_counts(SSH_LOGIN_EXPR, "archrepo", BUILDER_IP), "archrepo from another guest is quiet"
+assert loki_ssh_login_counts(SSH_LOGIN_EXPR, "root", ARCHBUILD_IP), "root from the archbuild guest is quiet"
+assert loki_ssh_login_counts(SSH_LOGIN_EXPR, "archrepo", ARCHBUILD_IP, method="password"), "a password login is quiet"
 
 # the oracle's own premises: the rules it tests exist, and their paging is what the policy says
 for uid, page in (

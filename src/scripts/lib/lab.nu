@@ -28,6 +28,8 @@ const HOST_AGE_KEY_PATH = "/var/lib/sops-nix/key.txt"
 const NIX_FEATURES = [--extra-experimental-features "nix-command flakes"]
 # the switch's own status, as the last line of its output: a timeout or a lost connection leaves none
 const SWITCH_STATUS_MARK = "homelab-switch-status="
+# switch-to-configuration's exit status when units failed to start or restart
+const SWITCH_STATUS_UNITS_FAILED = "4"
 # the toplevel sync.nu last deployed, for the guest to tell from the one it runs (drift: a hand switch, a rollback)
 const DEPLOYED_TOPLEVEL_FILE = "/var/lib/homelab/deployed-toplevel"
 const KNOWN_HOSTS_HEADER = [
@@ -225,11 +227,23 @@ export def deploy-nixos [lab: record, name: string, ip: string, toplevel: any, h
 
     # switch in place, no reboot; its lines show live, prefixed with the guest
     let switch = $"nix-env -p /nix/var/nix/profiles/system --set '($toplevel)' && '($toplevel)/bin/switch-to-configuration' switch; echo ($SWITCH_STATUS_MARK)$?"
-    let output = ^timeout $SWITCH_TIMEOUT_S ssh -F $lab.ssh_config $"root@($ip)" $switch o+e>| lines | each {|line|
-        if not ($line | str starts-with $SWITCH_STATUS_MARK) { print $"($name) | ($line)" }
-        $line
+    let switch_run = {||
+        let output = ^timeout $SWITCH_TIMEOUT_S ssh -F $lab.ssh_config $"root@($ip)" $switch o+e>| lines | each {|line|
+            if not ($line | str starts-with $SWITCH_STATUS_MARK) { print $"($name) | ($line)" }
+            $line
+        }
+        let status = $output | where { str starts-with $SWITCH_STATUS_MARK } | get --optional 0 | default "" | str replace $SWITCH_STATUS_MARK ""
+        {output: $output, status: $status}
     }
-    let status = $output | where { str starts-with $SWITCH_STATUS_MARK } | get --optional 0 | default "" | str replace $SWITCH_STATUS_MARK ""
+    mut run = do $switch_run
+    # a unit that fails cancels the start jobs queued behind it, and nothing starts them again; a second switch starts
+    # every active target, so they run, and its own output is the one judged
+    if $run.status == $SWITCH_STATUS_UNITS_FAILED {
+        print $">>> ($name): units failed during the switch, switching once more to start the jobs it cancelled"
+        $run = do $switch_run
+    }
+    let output = $run.output
+    let status = $run.status
     if $status == "" {
         print $"ERROR: ($name): the switch did not finish within ($SWITCH_TIMEOUT_S)s, or the connection dropped."
         return false

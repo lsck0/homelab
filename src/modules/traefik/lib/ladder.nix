@@ -1,40 +1,80 @@
 # the escalation ladder: what crowdsec decides for a client that tripped a signal, as data, rendered into crowdsec's
 # scenarios (the signals, read off traefik's access log) and profiles (the rungs)
 #
-# A signal's alert puts its client on a rung: the signal's entry rung, one higher for every decision the client got
-# in the window, the top rung for every repeat beyond. A suspicious client is first asked the captcha, a misbehaving
-# one banned for minutes, then hours, a repeat offender for a day. The gate (lib/gate) answers each decision: a
-# captcha decision with its captcha, a ban with the ban page and its remaining time.
+# A signal's alert puts its client on a rung of its class's path: the first, one further for every decision the
+# client got in the window, the last for every repeat beyond. A suspicious client is first asked the captcha, a
+# misbehaving one banned for minutes, then hours, a repeat offender for a day. A scanner is deceived for a few minutes
+# and banned in the same alert: crowdsec decides both at once, the gate (lib/gate) serves the deception while the
+# deceive lasts and the ban page after, so the ban comes whether the scanner stops or not; a scanner seen again later
+# is banned for the day. Brute force and the waf keep their bans at once. The gate answers each decision: a captcha
+# decision with its captcha, a ban with the ban page and its remaining time, a deceive with fakes and the labyrinth.
+#
+# A day's ban hits everyone behind the address, so only a signal nothing but a scanner trips (the honeypot's exact
+# paths, path traversal) bans for the day on its first alert. A browser can trip the others: broken links trip
+# http-probing and http-crawl-non_statics, a user-triggered fetcher on a shared egress (an ai assistant's, a cloudflare
+# worker's) the labyrinth, so these start at the captcha or a short ban. A user agent switcher or paywall extension
+# names a search crawler (forged-crawler), and http-sensitive-files matches suffixes (.bak, .exe, .config) an app may
+# serve, in the query too, so these are deceived and then banned for minutes; only a repeat costs the day.
 #
 # credit: decisions the signal itself implies and does not count; a failed captcha always follows the captcha
-# decision that asked it, so its first overflow lands on its entry rung, not one above.
+# decision that asked it, so its first overflow lands on its first rung, not one further.
 #
-# Any scenario no signal names (the hub's probing, cve and waf scenarios) climbs the ladder as a strong signal.
-{ lib, yamlDocs }:
+# Any scenario no class names (the hub's cve, brute force and waf scenarios) climbs the ladder as a strong signal.
+{
+  lib,
+  yamlDocs,
+  # how long a scanner is deceived before its ban
+  deceiveWindow,
+  # the access log's service of the gate's forged-crawler deception (lib/gate.nix)
+  forgedCrawlerService,
+}:
 let
 
-  rungs = [
+  repeatBanDuration = "24h";
+  softBan = [
     {
-      name = "captcha";
-      type = "captcha";
-      duration = "4h";
-    }
-    {
-      name = "softBan";
       type = "ban";
       duration = "15m";
     }
-    {
-      name = "hardBan";
-      type = "ban";
-      duration = "1h";
-    }
-    {
-      name = "repeatBan";
-      type = "ban";
-      duration = "24h";
-    }
   ];
+  rungs = {
+    inherit softBan;
+    captcha = [
+      {
+        type = "captcha";
+        duration = "4h";
+      }
+    ];
+    hardBan = [
+      {
+        type = "ban";
+        duration = "1h";
+      }
+    ];
+    repeatBan = [
+      {
+        type = "ban";
+        duration = repeatBanDuration;
+      }
+    ];
+    deceive = [
+      {
+        type = "deceive";
+        duration = deceiveWindow;
+      }
+      {
+        type = "ban";
+        duration = repeatBanDuration;
+      }
+    ];
+    deceiveSoftBan = [
+      {
+        type = "deceive";
+        duration = deceiveWindow;
+      }
+    ]
+    ++ softBan;
+  };
   # how far back a client's decisions raise its rung
   window = "24h";
 
@@ -47,6 +87,8 @@ let
     "wrong"
     "expired"
   ];
+  # the deception's outcome for a forged crawler (lib/gate deception.go); a backend answering its status itself has none
+  forgedCrawlerOutcome = "forged-crawler";
 
   # anubis' proof-of-work verdict endpoint; it answers 4xx or 5xx to a failed proof
   anubisVerdictPath = "/.within.website/x/cmd/anubis/api/pass-challenge";
@@ -61,9 +103,19 @@ let
   signals = {
     # nothing legitimate requests a honeypot path (modules/traefik honeypotPaths)
     honeypot = {
-      class = "strong";
+      class = "deceive";
       type = "trigger";
       filter = "${httpFilter} && ${routerIs "honeypot-"}";
+    };
+    # a search crawler's name from outside its ranges and names, which the gate answered with the deception
+    forged-crawler = {
+      class = "deceiveBrief";
+      type = "trigger";
+      filter = lib.concatStringsSep " && " [
+        httpFilter
+        "evt.Unmarshaled.traefik.ServiceName == '${forgedCrawlerService}'"
+        "evt.Unmarshaled.traefik['downstream_${outcomeHeader}'] == '${forgedCrawlerOutcome}'"
+      ];
     };
     # a crawler that keeps walking the labyrinth after robots.txt said no
     labyrinth = {
@@ -98,31 +150,62 @@ let
     };
   };
 
-  # where each class enters the ladder, in crowdsec's order; the last takes every alert the others did not
+  # each class's path up the ladder, in crowdsec's order; the last takes every alert the others did not.
+  # hubScenarios: the hub's scenarios (crowdsecurity/base-http-scenarios) the class takes beside its signals
   classes = [
     {
       name = "weak";
-      entry = "captcha";
+      path = [
+        "captcha"
+        "softBan"
+        "hardBan"
+        "repeatBan"
+      ];
       credit = 0;
+      hubScenarios = [ ];
     }
     {
       name = "captchaFailed";
-      entry = "hardBan";
+      path = [
+        "hardBan"
+        "repeatBan"
+      ];
       credit = 1;
+      hubScenarios = [ ];
+    }
+    {
+      name = "deceive";
+      path = [
+        "deceive"
+        "repeatBan"
+      ];
+      credit = 0;
+      hubScenarios = [ "crowdsecurity/http-path-traversal-probing" ];
+    }
+    {
+      name = "deceiveBrief";
+      path = [
+        "deceiveSoftBan"
+        "repeatBan"
+      ];
+      credit = 0;
+      hubScenarios = [ "crowdsecurity/http-sensitive-files" ];
     }
     {
       name = "strong";
-      entry = "softBan";
+      path = [
+        "softBan"
+        "hardBan"
+        "repeatBan"
+      ];
       credit = 0;
+      hubScenarios = [ ];
     }
   ];
 
   scenarioName = name: "homelab/${name}";
   # a client's alerts within one burst raise one decision, not one per event
   blackhole = "1m";
-
-  rungIndex = name: lib.lists.findFirstIndex (r: r.name == name) (throw "ladder: no rung ${name}") rungs;
-  lastRung = lib.length rungs - 1;
 
   scenarioOf =
     name: s:
@@ -140,23 +223,23 @@ let
     }
     // lib.optionalAttrs (s.type == "leaky") { inherit (s) capacity leakspeed; };
 
-  scenariosOf = class: map scenarioName (lib.attrNames (lib.filterAttrs (_: s: s.class == class) signals));
+  scenariosOf =
+    class: map scenarioName (lib.attrNames (lib.filterAttrs (_: s: s.class == class.name) signals)) ++ class.hubScenarios;
 
-  # one profile per rung a class can reach; the client's count of decisions in the window picks it
+  # one profile per rung of a class's path; the client's count of decisions in the window picks it
   profilesOf =
     class:
     let
-      entry = rungIndex class.entry;
       fallback = class.name == (lib.last classes).name;
       count = "GetDecisionsSinceCount(Alert.GetValue(), '${window}')";
+      lastOffset = lib.length class.path - 1;
     in
-    lib.genList (
-      offset:
+    lib.imap0 (
+      offset: rung:
       let
-        rung = lib.elemAt rungs (entry + offset);
         seen = toString (class.credit + offset);
         first = offset == 0;
-        last = entry + offset == lastRung;
+        last = offset == lastOffset;
         countFilter =
           if first && last then
             [ ]
@@ -168,34 +251,30 @@ let
             [ "${count} == ${seen}" ];
       in
       {
-        name = "homelab/${class.name}-${rung.name}";
+        name = "homelab/${class.name}-${rung}";
         filters = [
           (lib.concatStringsSep " && " (
             [
               "Alert.Remediation == true"
               "Alert.GetScope() == 'Ip'"
             ]
-            ++ lib.optional (!fallback) "Alert.GetScenario() in ${builtins.toJSON (scenariosOf class.name)}"
+            ++ lib.optional (!fallback) "Alert.GetScenario() in ${builtins.toJSON (scenariosOf class)}"
             ++ countFilter
           ))
         ];
-        decisions = [ { inherit (rung) type duration; } ];
+        decisions = rungs.${rung};
         on_success = "break";
       }
-    ) (lastRung - entry + 1);
+    ) class.path;
 
   # crowdsec's stock range profile: a range is banned outright
   rangeProfile = {
     name = "default_range_remediation";
     filters = [ "Alert.Remediation == true && Alert.GetScope() == 'Range'" ];
-    decisions = [
-      {
-        type = "ban";
-        inherit ((lib.elemAt rungs lastRung)) duration;
-      }
-    ];
+    decisions = rungs.repeatBan;
     on_success = "break";
   };
+  profiles = lib.concatMap profilesOf classes ++ [ rangeProfile ];
 in
 assert lib.assertMsg (lib.all (s: lib.any (c: c.name == s.class) classes) (
   lib.attrValues signals
@@ -203,16 +282,20 @@ assert lib.assertMsg (lib.all (s: lib.any (c: c.name == s.class) classes) (
 assert lib.assertMsg (lib.all (s: s.type == "trigger" || s.type == "leaky") (
   lib.attrValues signals
 )) "ladder: a signal is neither trigger nor leaky";
+assert lib.assertMsg (lib.all (
+  c: lib.all (rung: rungs ? ${rung}) c.path
+) classes) "ladder: a class's path names no rung";
 {
   inherit
-    rungs
     window
     captchaRegenerationsMax
     outcomeHeader
     ;
+  # the profiles as data, for tests/policy
+  profileList = profiles;
   # file name -> its scenario, for crowdsec's config/scenarios
   scenarios = lib.mapAttrs' (
     name: s: lib.nameValuePair "homelab-${name}.yaml" (yamlDocs "homelab-${name}.yaml" [ (scenarioOf name s) ])
   ) signals;
-  profiles = yamlDocs "profiles.yaml" (lib.concatMap profilesOf classes ++ [ rangeProfile ]);
+  profiles = yamlDocs "profiles.yaml" profiles;
 }

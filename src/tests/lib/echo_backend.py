@@ -5,7 +5,7 @@
 Listens on 0.0.0.0 on every port (one machine stands in for many guests by owning their addresses), answers every
 method with a json body {node, port, method, path, headers, body_len} and logs the same as one json line per
 request. Paths: /big answers 4 KiB of text/html (for compression), /blob BLOB_BYTES of zeros (a download),
-/health and */health answer {"ok": true}.
+/health and */health answer {"ok": true}, /status/CODE answers CODE (a backend's own error status).
 A GET asking to upgrade to a websocket is answered 101 and served as an echo socket: the server sends WEBSOCKET_GREETING
 first, then returns every text or binary message as it came, answers pings and closes on a close (unfragmented
 frames only, which every message of a test is).
@@ -25,6 +25,7 @@ import threading
 BIG_BYTES = 4096
 # eight times traefik's in-memory buffer (modules/traefik memRequestBodyBytes): buffered, it would spill to disk
 BLOB_BYTES = 8 * 1024 * 1024
+STATUS_PREFIX = "/status/"
 
 # rfc 6455 section 1.3: the key's suffix of the handshake's accept hash
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
@@ -70,6 +71,8 @@ def handler_for(log_path, stopped_path):
                 return self.reply(503, "text/plain", b"stopped\n")
             if self.command == "GET" and self.headers.get("Upgrade", "").lower() == "websocket":
                 return self.websocket_serve()
+            if self.path.startswith(STATUS_PREFIX):
+                return self.reply(int(self.path[len(STATUS_PREFIX) :].split("?")[0]), "text/plain", b"backend\n")
             if self.path.split("?")[0].endswith("/big"):
                 return self.reply(200, "text/html", b"x" * BIG_BYTES)
             if self.path.split("?")[0].endswith("/blob"):

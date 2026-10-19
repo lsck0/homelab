@@ -54,6 +54,16 @@ pkgs.testers.runNixOSTest {
         vm_100.succeed("touch /run/flaky-fixed && systemctl start flaky")
         assert "flaky" not in report(), report()
 
+    with subtest("a failed unit whose file is gone leaves no series"):
+        vm_100.succeed(
+            "printf '[Service]\\nType=oneshot\\nExecStart=/run/current-system/sw/bin/false\\n' > /run/systemd/system/gone.service",
+            "systemctl daemon-reload",
+        )
+        vm_100.fail("systemctl start gone")
+        vm_100.succeed("rm /run/systemd/system/gone.service && systemctl daemon-reload")
+        vm_100.succeed("systemctl --failed --plain --no-legend | grep -q '^gone.service not-found failed'")
+        assert "gone" not in report(), report()
+
     with subtest("the timer keeps it fresh"):
         vm_100.succeed("systemctl is-active systemd-failed-units-metric.timer")
 

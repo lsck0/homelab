@@ -156,6 +156,7 @@ def main [script: path]: nothing -> nothing {
         recovery_sysctl_file: ($t | path join 90-homelab-recovery.conf)
         watchdog_defaults: ($t | path join pve-ha-manager)
         watchdog_class_dir: ($t | path join watchdog)
+        watchdog_modprobe_conf: ($t | path join homelab-watchdog.conf)
         sshd_dropin: ($t | path join 10-homelab.conf)
         lab_route_unit: ($t | path join homelab-lab-route.service)
         journal_upload: "http://10.100.0.103:19532", journal_upload_dropin: ($t | path join journal-upload.conf.d homelab.conf)
@@ -332,16 +333,20 @@ def main [script: path]: nothing -> nothing {
     if (open --raw $host.watchdog_defaults) != "OTHER=1\nWATCHDOG_MODULE=sp5100_tco\n" {
         fail $"recovery: watchdog-mux feeds another watchdog: (open --raw $host.watchdog_defaults)"
     }
+    if (open --raw $host.watchdog_modprobe_conf) != "blacklist softdog\ninstall softdog /bin/false\n" {
+        fail $"recovery: softdog still loads at boot: (open --raw $host.watchdog_modprobe_conf)"
+    }
     do $watchdogs_reset [["Software Watchdog" inactive] ["SP5100 TCO timer" active]]
     let ran = do $run "recovery-converge $host" {}
     do $ok $ran "recovery again"
     do $not_called "sysctl" "recovery: unchanged settings applied again"
     if ($ran.stderr | str contains "feeds") { fail $"the hardware watchdog fed: warned anyway: ($ran.stderr)" }
-    "OTHER=1\n" | save --force $host.watchdog_defaults
+    # the chipset's watchdog gone after a converge armed it (a firmware toggle): mux falls back to softdog again
     let ran = do $run "recovery-converge $host" {WATCHDOG: down}
     do $ok $ran "no hardware watchdog: the converge stops"
     if not ($ran.stderr | str contains "power cycle") { fail "no hardware watchdog: no warning" }
-    if (open --raw $host.watchdog_defaults) != "OTHER=1\n" { fail "no hardware watchdog: watchdog-mux was pointed at it anyway" }
+    if (open --raw $host.watchdog_defaults) != "OTHER=1\n" { fail "no hardware watchdog: watchdog-mux still pointed at it" }
+    if ($host.watchdog_modprobe_conf | path exists) { fail "no hardware watchdog: softdog blocked with nothing to replace it" }
 
     let sshd = "sshd-converge $host"
     do $ok (do $run $sshd {}) "keys only"

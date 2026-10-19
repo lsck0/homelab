@@ -33,8 +33,8 @@ Layout under `/srv/nas`:
 - NFS: `exportfs -v`, clients `ss -tn sport = :2049`. A client VM hangs on I/O
   if the NAS is down (hard mounts) and recovers when it is back.
 - SMB shares, all for the one samba user `luca` (no guest), encrypted, SMB 3.1.1 only: `homelab` (the whole of
-  `/srv/nas` as root, `data/` and `BACKUPS/` included), public, media, documents, syncthing, cold-storage, BACKUPS
-  (read-only), the last six acting as nobody. The guests mount `data/` over NFS, each just its own shares. Sessions: `smbstatus --brief`.
+  `/srv/nas` as root, `data/` and `BACKUPS/` included), public, media, documents, syncthing, cold-storage, the last
+  five acting as nobody. The repositories under `BACKUPS/` are reached through `homelab` only. The guests mount `data/` over NFS, each just its own shares. Sessions: `smbstatus --brief`.
 - `data/tokens/vm-<id>` and `data/db-dumps/<vm>` belong to root (0755 and 0700): only the producing guest's root
   writes them. Never loosen their modes; vm-104's tmpfiles rules set them back on every boot.
 - Syncthing GUI https://sync.lsck0.dev; API on the VM: `curl -s localhost:8384/rest/system/status -H "X-API-Key: $(xmllint --xpath 'string(//apikey)' /var/lib/syncthing/config.xml)"`.

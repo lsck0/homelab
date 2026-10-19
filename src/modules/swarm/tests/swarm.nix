@@ -329,6 +329,15 @@ pkgs.testers.runNixOSTest {
         vm_107.wait_for_unit("swarm-converge-demo.service")
         serves(${toString port}, "demo v2")
 
+    with subtest("the cluster unit started again brings back the units a failed switch stopped with it"):
+        dependents = ("swarm-reconcile.service", "swarm-prune.service", "swarm-converge-demo.service")
+        vm_107.succeed("systemctl stop swarm-cluster.service")
+        for unit in dependents:
+            vm_107.fail(f"systemctl is-active {unit}")
+        vm_107.succeed("systemctl start swarm-cluster.service")
+        for unit in dependents:
+            vm_107.wait_for_unit(unit)
+
     with subtest("a task stuck pending is replaced by the next converge, not waited on"):
         def forced():
             return vm_107.succeed("docker service inspect demo_web --format '{{.Spec.TaskTemplate.ForceUpdate}}'").strip()

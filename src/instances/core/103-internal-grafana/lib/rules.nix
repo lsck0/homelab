@@ -15,6 +15,7 @@
   proxmoxVm,
   proxmoxAddress,
   operatorSources,
+  serviceLogins,
   ingressJobs,
 }:
 let
@@ -58,6 +59,9 @@ let
   nvmeTemperatureCelsius = 70;
   # nvme1 averaged 0.6% of its power-on time throttled (43823 s in 2019 h) while it overheated; a cooled drive makes none
   nvmeThrottleSecondsPerHour = 60;
+  # a warning minute counts only with a warm hour: the 980 on firmware 1B4QFXO7 counted one at a 38 C composite, and
+  # heat that reaches its 82 C limit lifts the scraped composite past this between idle (37 C) and the hot rule
+  nvmeWarningPeakCelsius = 50;
   # a host event (a boot, an unsafe shutdown) fires this long, then resolves by itself
   hostEventWindow = "1h";
   hostEventWindowSeconds = 3600;
@@ -110,6 +114,9 @@ let
   busy = "(${requests ""} > ${app5xxMinRequestsPerSecond})";
   sshAcceptedPattern = "^Accepted (?P<method>[^ ]+) for (?P<user>[^ ]+) from (?P<source>[^ ]+) port";
   operatorSourceFilter = lib.concatMapStringsSep " and " (s: "source != ip(\"${s}\")") operatorSources;
+  serviceLoginFilter = lib.concatMapStringsSep " and " (
+    l: "(user != \"${l.user}\" or source != ip(\"${l.source}\"))"
+  ) serviceLogins;
 
   guests = {
     instance_down = {
@@ -205,8 +212,9 @@ let
       category = "attack";
       datasource = "loki";
       rangeSeconds = 3600;
-      # modules/network.nix logs each refusal of a guarded port, ssh and the node exporter among them
-      expr = "sum by (host) (count_over_time({job=\"systemd-journal\"} |= \"guard-refused: \" [1h]))";
+      # modules/network.nix logs each refusal of a guarded port, ssh and the node exporter among them; anchored, since
+      # grafana's own log of this query carries the prefix too
+      expr = "sum by (host) (count_over_time({job=\"systemd-journal\"} |~ \"^guard-refused: \" [1h]))";
       threshold = 0;
       for = "0m";
       summary = "{{ $labels.host }} refused {{ $values.A.Value }} connections to its guarded ports in the last hour";
@@ -454,9 +462,9 @@ let
       title = "NVMe over its warning temperature";
       category = "storage";
       # the drive counts every minute over its own limit, which a 5 minute scrape of the temperature misses
-      expr = "max by (vm, device) (increase(homelab_nvme_warning_temperature_seconds_total[1h]))";
+      expr = "max by (vm, device) (increase(homelab_nvme_warning_temperature_seconds_total[1h])) and on (vm, device) max by (vm, device) (max_over_time(nvme_temperature_celsius[1h])) > ${toString nvmeWarningPeakCelsius}";
       threshold = 0;
-      for = "0m";
+      for = "10m";
       telegram = true;
       summary = "{{ $labels.device }} on {{ $labels.vm }}: {{ printf \"%.0f\" $values.A.Value }} s over its warning temperature in the last hour";
       description = "The drive ran past the temperature its maker rates for sustained use. Check the case airflow and the heatsink now.";
@@ -599,12 +607,12 @@ let
       title = "Unexpected ssh login";
       category = "attack";
       datasource = "loki";
-      expr = "sum by (host, user, source, method) (count_over_time({job=\"systemd-journal\"} |= \"Accepted \" | regexp \"${sshAcceptedPattern}\" | method = \"password\" or (${operatorSourceFilter}) [10m]))";
+      expr = "sum by (host, user, source, method) (count_over_time({job=\"systemd-journal\"} |= \"Accepted \" | regexp \"${sshAcceptedPattern}\" | method = \"password\" or (${operatorSourceFilter} and ${serviceLoginFilter}) [10m]))";
       threshold = 0;
       for = "0m";
       telegram = true;
       summary = "{{ $labels.user }} logged in to {{ $labels.host }} from {{ $labels.source }} by {{ $labels.method }}";
-      description = "An ssh login from outside the operators' addresses (the workstation, the notebook, wireguard, the operator guest, the router) or by password. If nobody here did it, take the guest off the network and rotate the key that let it in.";
+      description = "An ssh login from outside the operators' addresses (the workstation, the notebook, wireguard, the operator guest, the router) and the lab's own forced-command logins, or by password. If nobody here did it, take the guest off the network and rotate the key that let it in.";
     };
     proxmox_login = {
       title = "Proxmox login";

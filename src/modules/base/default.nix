@@ -137,7 +137,9 @@ in
         metric=${textfileDir}/${failedUnitsFile}.prom
         {
           printf '# TYPE homelab_systemd_failed_units gauge\n'
-          systemctl --failed --plain --no-legend --no-pager | awk '{ printf "homelab_systemd_failed_units{unit=\"%s\"} 1\n", $1 }'
+          # a unit whose file a switch removed is not-found: nothing in the config can fix or restart it
+          systemctl --failed --plain --no-legend --no-pager \
+            | awk '$2 != "not-found" { printf "homelab_systemd_failed_units{unit=\"%s\"} 1\n", $1 }'
         } > "$metric.tmp"
         mv "$metric.tmp" "$metric"
       '';

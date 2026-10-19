@@ -1,5 +1,8 @@
 # privacy metasearch
 { lib, profiles, ... }:
+let
+  port = 80;
+in
 {
   vm = {
     bootPhase = "public";
@@ -17,10 +20,18 @@
     stopAfter = "4h";
   };
 
+  grants = [
+    {
+      from = [ "operator" ];
+      tcp = [ port ];
+      why = "hermes' search skill calls the json api directly, which the limiter passes for its address (pass_ip)";
+    }
+  ];
+
   services = {
     searxng = {
       host = "search";
-      port = 80;
+      inherit port;
       # the limiter passes /healthz alone; at / it answered the probers' user agent with 429
       health = "/healthz";
       # search forms only; the cap bounds what one client can make the edge buffer

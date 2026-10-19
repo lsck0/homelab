@@ -39,6 +39,7 @@ OPERATOR = "10.100.0.113"
 EDGE = "10.200.0.200"
 NTFY = "10.200.0.201"
 MIRROR = "10.200.0.210"
+SEARXNG = "10.200.0.211"
 # the forwarded tcp routes the prober checks at their guest: minecraft, teamspeak's file transfer
 PROBED_FORWARDS = {("10.200.0.214", 25565), ("10.200.0.215", 30033)}
 
@@ -110,6 +111,8 @@ class ZoneOracle:
             or (src == COLLECTOR and tcp and (dst, port) in PROBED_FORWARDS)
             or (src == OPERATOR and zd in ("dmz", "apps") and tcp and port == SSH)
             or (src == ARCHBUILD and dst == MIRROR and tcp and port == SSH)
+            # hermes' search skill calls the json api directly, which searxng's pass_ip lets through
+            or (src == OPERATOR and dst == SEARXNG and tcp and port == HTTP)
             or (src == COLLECTOR and zd in ("dmz", "apps") and tcp and port == NODE_EXPORTER)
             or (
                 src == MANAGER

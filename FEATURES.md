@@ -100,8 +100,9 @@ runbooks.
   devices and hermes (vm-113), the api and web ui (8006) from the first three, the ingresses and the dashboard
   (vm-102), node exporter from vm-103, ping from the lan and the dashboard; Proxmox's implicit `management` ipset is
   emptied. In front of every guest Proxmox also holds the recovery path: ssh from the operators and the router's leg
-  in the guest's zone (`sync.nu`'s bastion), node exporter from vm-103, anything else dropped and logged. `sync.nu` refuses to run from any other address and fails
-  while the firewall does not enforce (`proxmox-firewall` active with every guest's spoofed-source drop loaded).
+  in the guest's zone (`sync.nu`'s bastion), node exporter from vm-103, anything else dropped and logged. `sync.nu`
+  refuses to run from any other address and fails while the firewall does not enforce (`proxmox-firewall` active with
+  every guest's spoofed-source drop loaded).
 - Turning the firewall on the first time: check that `lan.workstation` and `lan.notebook` in `site.json` are the
   fritzbox's reserved addresses of the two machines; `./sync.nu` (it creates an ipset `ipfilter-net0` per guest but
   the router, the cluster rules, and last the datacenter options with `input_policy = "DROP"`; no guest is replaced);
@@ -185,11 +186,33 @@ runbooks.
 - Real client address: `traefik-clientip` trusts only the lab's proxies and the pinned cloudflare ranges
   (`src/modules/traefik/lib/traefik-clientip`, `src/modules/net.nix` cloudflareRanges).
 - crowdsec with an escalation ladder: captcha first, then bans of minutes, hours, a day (`traefik/lib/ladder.nix`);
-  the waf through crowdsec's appsec.
+  the waf through crowdsec's appsec. Brute force and the waf are banned at once.
+- Scanners are deceived, then banned: path traversal and the honeypot get a `deceive` decision for five minutes and
+  the day's ban in the same alert, which takes over when the deceive ends, whether the scanner stops or not. A forged
+  search crawler and crowdsec's sensitive-files scenario, which a user agent switcher or an app serving `.bak` or
+  `.exe` files can trip, get the deceive and a 15 minute ban; one seen again is banned for the day
+  (`traefik/lib/ladder.nix`, `crowdsecBouncer.deceiveWindow`). What a browser or a shared address can trip (crowdsec's
+  probing and crawl scenarios, the labyrinth) starts at a short ban or the captcha, never at a day's ban.
+- The deception (`traefik/lib/gate/deception.go`): a deceived client gets 200s, small plausible fakes for `.env`,
+  `.git/config`, wp-login and wp-admin, phpinfo, `/admin`, `*.zip` backups, server-status and `/api/*`, and the
+  labyrinth for any other path, all trickled within the tarpit's slots. Every fake carries canaries (an aws key, a
+  database url, api and git tokens) drawn from the client and the path under a gate-only key (`lab-gate-canary-key`),
+  so nobody else can compute them; each issuance is logged to the journal (`deception canary`, its id, client, path
+  and values), so a later use names who fetched it where. Nothing in a fake comes from the lab. traefik's errors
+  middlewares turn the gate's unassigned 452 and 453 into the fetch, and the deception checks the reason again, so no
+  other visitor ever gets one: a backend answering 452 or 453 itself shows a logged bad gateway and trips no signal,
+  since `forged-crawler` also requires the deception's own `X-Lab-Gate: forged-crawler`.
 - lab-gate: crowdsec's decisions as readable pages, its own captcha, a token bucket for anonymous clients, the
-  tarpit; onion visitors get an anti-phishing captcha (`traefik/lib/gate`, Go).
+  tarpit, the deception; onion visitors get an anti-phishing captcha (`traefik/lib/gate`, Go). Counters for grafana:
+  `homelab_gate_deceives_total`, `homelab_gate_deceptions_total`, `homelab_gate_canaries_total`; routine scanning
+  pages nobody.
 - Bot defence: anubis on public routes, iocaine's labyrinth for crawlers, a disallow-all robots.txt and llms.txt
-  (`src/modules/traefik/default.nix`). An `indexable` route's host serves its backend's robots.txt instead.
+  (`src/modules/traefik/default.nix`). An `indexable` route's host serves its backend's robots.txt instead. On every
+  route with `botDefense`, a request naming a search crawler (Googlebot, bingbot, Applebot, YandexBot, Baiduspider:
+  `searchCrawlers` with `reverseDomains`) from neither its published ranges nor an address with forward-confirmed
+  reverse dns in its domains gets the deception and crowdsec's `forged-crawler` decision; a crawler publishing a list
+  alone (DuckDuckBot, Kagibot and others) is never called forged on a stale list, anubis challenges its name from
+  elsewhere. A forger crowdsec already bans gets the ban page; verified crawlers pass as before.
 - Per route: rate and in-flight limits, body limit, secure headers, access log, `houseUnlimited` for the house, a
   `guard` on the backend port, cloudflare's proxy with the origin refusing anyone else (`src/modules/service.nix`).
 - The sso session reaches authelia and its portal alone: the gate strips `authelia_session` from every other route's

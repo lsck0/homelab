@@ -2,31 +2,54 @@
 # middleware a route's features ask for; modules/traefik wires them into every gated router's chain
 #
 #   gate = import ./lib/gate.nix { inherit pkgs lib; };
-#   gate.middlewareName { captcha = true; limit = true; tarpit = true; scale = 1; }       # "gate"
-#   gate.middlewareName { captcha = false; limit = true; tarpit = true; scale = 20; }     # "gate-nocaptcha-x20"
+#   gate.middlewareName { captcha = true; limit = true; tarpit = true; crawlers = true; scale = 1; }    # "gate"
+#   gate.middlewareName { captcha = false; limit = true; tarpit = true; crawlers = false; scale = 20; } # "gate-nocaptcha-nocrawlers-x20"
+#
+# The deception (lib/gate deception.go): the gate answers forwardauth with an unassigned 4xx status for a client
+# crowdsec deceives or a forged search crawler, which backends do not use; the errors middlewares in front of it turn
+# that into a fetch of the gate's deception listener and a 200. They catch the status from anything behind them, the
+# backend included: the deception checks the reason again and answers a visitor it does not deceive with a logged bad
+# gateway without the forged crawler's outcome header, so a backend answering 452 or 453 itself shows an error page, not
+# its own answer, and trips no signal (lib/ladder.nix).
 { pkgs, lib }:
 let
 
   loopback = "127.0.0.1";
   port = 27100;
   tarpitPort = 27101;
+  deceptionPort = 27102;
+  statusDeceive = 452;
+  statusForgedCrawler = 453;
+  deceptionStatus = 200;
   authPath = "/auth";
   stripPath = "/strip";
   metricsPath = "/metrics";
   # the captcha form's target on every host; dotted, so no app's own path is shadowed
   answerPath = "/.lab-gate/answer";
   binary = "gate";
-  # what forwardauth passes the gate: the client client-ip named and the cookies (its own, authelia's); nothing else
-  # of the request leaves traefik but forwardauth's own X-Forwarded-Host and -Uri (an onion route's address, the path)
+  # what forwardauth passes the gate: the client client-ip named, the cookies (its own, authelia's) and the user agent
+  # a search crawler names itself by; nothing else of the request leaves traefik but forwardauth's own
+  # X-Forwarded-Host and -Uri (an onion route's address, the path)
   authRequestHeaders = [
     "X-Real-Ip"
     "Cookie"
+    "User-Agent"
   ];
   flagNames = [
     "captcha"
     "limit"
     "tarpit"
+    "crawlers"
   ];
+  deceptionUrl = "http://${loopback}:${toString deceptionPort}";
+  # the gate's deception listener's paths (deception.go)
+  honeypotPrefix = "/honeypot";
+  errorsOf = status: service: path: {
+    status = [ (toString status) ];
+    inherit service;
+    query = "${path}?url={url}";
+    statusRewrites.${toString status} = deceptionStatus;
+  };
   # what the strip reads and rewrites of a request
   stripHeaders = [ "Cookie" ];
   # a captcha page is under 32 KiB (a png of flat shapes); traefik reads no gate answer past this
@@ -44,6 +67,10 @@ in
     loopback
     port
     tarpitPort
+    deceptionPort
+    statusDeceive
+    statusForgedCrawler
+    deceptionUrl
     answerPath
     metricsPath
     middlewareName
@@ -70,7 +97,32 @@ in
     authResponseHeaders = stripHeaders;
   };
 
-  # flags: { captcha; limit; tarpit; scale; } -> its traefik middleware
+  # the errors middlewares every gated router's chain names right before its gate, part of it (named gate-*)
+  deceptionMiddlewareNames = [
+    "gate-deception-crawler"
+    "gate-deception"
+  ];
+  deceptionMiddlewares = {
+    gate-deception.errors = errorsOf statusDeceive "deception" "/deceive";
+    gate-deception-crawler.errors = errorsOf statusForgedCrawler "deception-crawler" "/forged-crawler";
+  };
+  # the services of the errors middlewares, and the honeypot router's, which asks with the request's path under its own;
+  # the access log names the service that answered: crowdsec's forged-crawler signal reads it (lib/ladder.nix)
+  deceptionServices =
+    lib.genAttrs [ "deception" "deception-crawler" ] (_: {
+      loadBalancer.servers = [ { url = deceptionUrl; } ];
+    })
+    // {
+      deception-honeypot.loadBalancer.servers = [
+        {
+          url = deceptionUrl + honeypotPrefix;
+          preservePath = true;
+        }
+      ];
+    };
+  forgedCrawlerService = "deception-crawler@file";
+
+  # flags: { captcha; limit; tarpit; crawlers; scale; } -> its traefik middleware
   middleware = flags: {
     forwardAuth = {
       address =

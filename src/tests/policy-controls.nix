@@ -436,6 +436,81 @@ let
         ]
       ) "/run/lab-gate/answers";
     };
+    crawler-list-only = {
+      file = "antibot";
+      marker = "vm-200's gate calls duckduckbot forged on its published list alone";
+      tampered = tamper "200-external-traefik" (gate ++ [ "crawlers" ]) (
+        configs."200-external-traefik".homelab.traefik.gate.settings.crawlers
+        ++ [
+          {
+            name = "duckduckbot";
+            userAgent = "DuckDuckBot";
+            rangesFile = "/nix/store/duckduckbot.json";
+            reverseDomains = [ ];
+          }
+        ]
+      );
+    };
+    browser-day-ban = {
+      file = "antibot";
+      marker = "vm-200's profile homelab/probing-day bans crowdsecurity/http-probing, which a browser trips, for a day";
+      tampered = tamper "200-external-traefik" [ "homelab" "traefik" "crowdsecBouncer" "profiles" ] (
+        [
+          {
+            name = "homelab/probing-day";
+            filters = [
+              "Alert.Remediation == true && Alert.GetScope() == 'Ip' && Alert.GetScenario() in [\"crowdsecurity/http-probing\"]"
+            ];
+            decisions = [
+              {
+                type = "ban";
+                duration = "24h";
+              }
+            ];
+            on_success = "break";
+          }
+        ]
+        ++ configs."200-external-traefik".homelab.traefik.crowdsecBouncer.profiles
+      );
+    };
+    deception-unwrapped = {
+      file = "antibot";
+      marker = "vm-200 router share-tls: its gate is not wrapped by the deception's errors middlewares";
+      tampered = tamper "200-external-traefik" (
+        traefik
+        ++ [
+          "routers"
+          "share-tls"
+          "middlewares"
+        ]
+      ) (lib.remove "gate-deception" edgeRouter.middlewares);
+    };
+    deceive-ban-short = {
+      file = "antibot";
+      marker = "vm-200's profile homelab/deceive-short deceives without a ban outlasting it";
+      tampered = tamper "200-external-traefik" [ "homelab" "traefik" "crowdsecBouncer" "profiles" ] (
+        configs."200-external-traefik".homelab.traefik.crowdsecBouncer.profiles
+        ++ [
+          {
+            name = "homelab/deceive-short";
+            filters = [
+              "Alert.Remediation == true && Alert.GetScope() == 'Ip' && Alert.GetScenario() in [\"homelab/honeypot\"]"
+            ];
+            decisions = [
+              {
+                type = "deceive";
+                duration = "1h";
+              }
+              {
+                type = "ban";
+                duration = "15m";
+              }
+            ];
+            on_success = "break";
+          }
+        ]
+      );
+    };
 
     catalog = {
       file = "apps";

@@ -53,6 +53,7 @@ let
   # at runtime, and sops secrets
   widgets = lib.filter (w: w != null) (map (c: c.widget) lab.homepage) ++ lib.optional (proxmoxCa != null) proxmoxWidget;
   tokens = config.homelab.tokens.reads;
+  tokensDir = config.homelab.tokens.dir;
   secrets = lib.unique (lib.concatMap (w: lib.attrValues w.secrets) widgets);
   varOf = name: "HOMEPAGE_VAR_${lib.toUpper (lib.replaceStrings [ "-" ] [ "_" ] name)}";
   credentialsOf = w: lib.mapAttrs (_: name: "{{${varOf name}}}") ((w.tokens or { }) // w.secrets);
@@ -395,10 +396,13 @@ let
   };
   hostOf = route: net.fqdn routes.${route}.host;
   podmanUnitOf = route: "podman-${route}.service";
+  podmanUnits = map podmanUnitOf (lib.attrNames pages);
 
   envFile = "/run/homepage.env";
   # a token minted after homepage started (first boot, a rotated key) reaches it within this
   envRefreshInterval = "10min";
+  # a hung nfs automount skips the token instead of hanging the unit; the refresh timer picks it up later
+  tokenReadTimeoutS = 10;
 
   # the admins' container env: every exported widget token (token_read refuses one that could inject a line), every
   # secret
@@ -408,7 +412,7 @@ let
       ( umask 077; : > "$1" )
       for entry in ${lib.escapeShellArgs (map (token: "${token}=${varOf token}") tokens)}; do
         token=''${entry%%=*}
-        value=$(token_read "$token") || { echo "widget token $token: not exported yet or no token, skipped"; continue; }
+        value=$(timeout -k 5 ${toString tokenReadTimeoutS} cat ${tokensDir}/"$token".token > /dev/null && token_read "$token") || { echo "widget token $token: not exported yet or no token, skipped"; continue; }
         printf '%s=%s\n' "''${entry#*=}" "$value" >> "$1"
       done
       ${lib.concatMapStrings (secret: ''
@@ -427,8 +431,8 @@ in
   systemd.services = {
     homepage-config = setupUnit {
       description = "Sync Homepage config and collect API tokens";
-      before = map podmanUnitOf (lib.attrNames pages);
-      requiredBy = map podmanUnitOf (lib.attrNames pages);
+      before = podmanUnits;
+      requiredBy = podmanUnits;
       wantedBy = [ ];
       path = [ pkgs.coreutils ];
       script = ''
@@ -467,12 +471,16 @@ in
           install -m 0600 "$RUNTIME_DIRECTORY/env" ${envFile}
           systemctl restart ${podmanUnitOf "homepage"}
         fi
+        # a failed switch cancels the container starts and nothing else queues them again
+        systemctl start ${toString podmanUnits}
       '';
     };
   }
   // lib.mapAttrs' (
     route: page:
     lib.nameValuePair "podman-${route}" {
+      # a restarted homepage-config brings back a container that a failed switch left stopped
+      wantedBy = [ "homepage-config.service" ];
       # a fresh container serves its prebuilt page with empty settings until a revalidate rebuilds it
       postStart = ''
         ${retry} 90 1 ${pkgs.curl}/bin/curl -sf -o /dev/null -H 'Host: ${hostOf route}' http://127.0.0.1:${toString routes.${route}.port}/api/revalidate

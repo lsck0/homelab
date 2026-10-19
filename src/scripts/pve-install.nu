@@ -97,10 +97,13 @@ const RECOVERY_SYSCTL = [
 # (pve-ha-manager) opens /dev/watchdog on every pve host and feeds it, so it is the feeder: systemd's
 # RuntimeWatchdogSec would find the device busy. Mux loads its module at boot, so a change arms at the next one.
 const WATCHDOG_MODULE = "sp5100_tco"
+const WATCHDOG_MODULE_SETTING = $"WATCHDOG_MODULE=($WATCHDOG_MODULE)"
 const WATCHDOG_MODULE_LINE = '^\s*#?\s*WATCHDOG_MODULE='
-# what the kernel names that module's device; mux keeps the first watchdog it found at boot open (softdog, until
-# the module loads before it)
+# what the kernel names that module's device; mux keeps the first watchdog it found at boot open
 const WATCHDOG_IDENTITY = "SP5100 TCO timer"
+# softdog loaded first becomes watchdog0 and mux feeds it; blacklist alone stops only alias loads, install also an
+# explicit modprobe
+const SOFTDOG_BLOCKED = ["blacklist softdog" "install softdog /bin/false"]
 # Debian's own sshd_config includes sshd_config.d first, and sshd keeps the first value it reads
 const SSHD_KEYS_ONLY = ["PermitRootLogin prohibit-password" "PasswordAuthentication no" "KbdInteractiveAuthentication no"]
 # a full-upgrade keeps every config file the host changed, as an interactive one answering "keep" would
@@ -127,6 +130,7 @@ export def pve-host []: nothing -> record {
         recovery_sysctl_file: "/etc/sysctl.d/90-homelab-recovery.conf"
         watchdog_defaults: "/etc/default/pve-ha-manager"
         watchdog_class_dir: "/sys/class/watchdog"
+        watchdog_modprobe_conf: "/etc/modprobe.d/homelab-watchdog.conf"
         sshd_dropin: "/etc/ssh/sshd_config.d/10-homelab.conf"
         lab_route_unit: "/etc/systemd/system/homelab-lab-route.service"
         journal_upload_dropin: "/etc/systemd/journal-upload.conf.d/homelab.conf"
@@ -355,13 +359,26 @@ export def recovery-converge [host: record]: nothing -> nothing {
     }
     if not (succeeds [modprobe $WATCHDOG_MODULE]) {
         warn $"($WATCHDOG_MODULE) does not load \(disabled in the firmware?\): a hung host still waits for a power cycle"
+        # mux loads softdog only when no WATCHDOG_MODULE names another; pointed at the absent module, or with softdog
+        # blocked, it finds no device and the pve-ha units fail
+        if ($host.watchdog_defaults | path exists) {
+            let kept = open --raw $host.watchdog_defaults | lines | where $it != $WATCHDOG_MODULE_SETTING
+            file-converge $host.watchdog_defaults "644" (lines-text $kept) | ignore
+        }
+        if ($host.watchdog_modprobe_conf | path exists) {
+            rm $host.watchdog_modprobe_conf
+            print ">>> Proxmox: softdog loads again, the only watchdog left for watchdog-mux"
+        }
         return
     }
     let kept = if ($host.watchdog_defaults | path exists) {
         open --raw $host.watchdog_defaults | lines | where $it !~ $WATCHDOG_MODULE_LINE
     } else { [] }
-    if (file-converge $host.watchdog_defaults "644" (lines-text ($kept | append $"WATCHDOG_MODULE=($WATCHDOG_MODULE)"))) {
+    if (file-converge $host.watchdog_defaults "644" (lines-text ($kept | append $WATCHDOG_MODULE_SETTING))) {
         print $">>> Proxmox: watchdog-mux arms the ($WATCHDOG_MODULE) hardware watchdog from the next host boot"
+    }
+    if (file-converge $host.watchdog_modprobe_conf "644" (lines-text $SOFTDOG_BLOCKED)) {
+        print $">>> Proxmox: softdog no longer loads, so the ($WATCHDOG_MODULE) watchdog is watchdog0 from the next host boot"
     }
     let active = watchdogs-active $host.watchdog_class_dir
     if $WATCHDOG_IDENTITY not-in $active {

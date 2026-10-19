@@ -12,6 +12,18 @@
 let
   nas = inputs.self.nixosConfigurations."104-internal-nas".config;
   coldStorage = nas.homelab.smb.shares.cold-storage;
+  # a share acting as nobody on a folder closed to nobody lists nothing, as BACKUPS did on its 0700 root folder
+  closedShares = lib.attrNames (
+    lib.filterAttrs (
+      _: share:
+      let
+        rule = lib.findFirst (r: lib.hasPrefix "d ${share.path} " r) null nas.systemd.tmpfiles.rules;
+        fields = lib.splitString " " rule;
+        otherBits = lib.toInt (lib.substring 3 1 (lib.elemAt fields 2));
+      in
+      rule != null && lib.elemAt fields 3 != "nobody" && otherBits < 5
+    ) nas.homelab.smb.shares
+  );
   site = lib.importJSON ../../../../generated/site.json;
   # the nas on the house lan beside the owner's machines; any address hosts allow does not name
   nasAddress = "192.168.178.104";
@@ -48,6 +60,7 @@ let
     };
   };
 in
+assert lib.assertMsg (closedShares == [ ]) "smb shares nobody can list: ${toString closedShares}";
 pkgs.testers.runNixOSTest {
   name = "samba";
 

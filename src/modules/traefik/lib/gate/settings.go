@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/netip"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 )
 
@@ -22,6 +24,8 @@ type Settings struct {
 	Session      *SettingsSession  `json:"session"`
 	Anonymous    SettingsAnonymous `json:"anonymous"`
 	Tarpit       SettingsTarpit    `json:"tarpit"`
+	Deception    SettingsDeception `json:"deception"`
+	Crawlers     []SettingsCrawler `json:"crawlers"`
 	// cookies only the sso portal may read, which /strip removes from a request
 	StripCookies []string `json:"stripCookies"`
 }
@@ -74,6 +78,33 @@ type SettingsTarpit struct {
 	Upstream string `json:"upstream"`
 }
 
+// SettingsDeception is where traefik's errors middlewares fetch the deception, and the statuses the gate answers
+// forwardauth with to send a request there (gate.nix): unassigned ones no backend answers.
+type SettingsDeception struct {
+	Listen              string `json:"listen"`
+	StatusDeceive       int    `json:"statusDeceive"`
+	StatusForgedCrawler int    `json:"statusForgedCrawler"`
+	// the canaries' hmac key, hex (deception.go canarySeed)
+	CanaryKeyFile string `json:"canaryKeyFile"`
+}
+
+// SettingsCrawler is a search crawler the gate verifies by forward-confirmed reverse dns in its domains, and by its
+// published ranges where it has them (crawlers.go says why the ranges alone never do).
+type SettingsCrawler struct {
+	Name      string `json:"name"`
+	UserAgent string `json:"userAgent"`
+	// a json list of cidrs
+	RangesFile     *string  `json:"rangesFile"`
+	ReverseDomains []string `json:"reverseDomains"`
+}
+
+// the statuses the gate answers itself, which a deception status must not be
+var gateOwnStatuses = []int{http.StatusBadRequest, http.StatusForbidden, http.StatusTooManyRequests, http.StatusServiceUnavailable}
+
+func deceptionStatusValid(status int) bool {
+	return status >= http.StatusBadRequest && status < http.StatusInternalServerError && !slices.Contains(gateOwnStatuses, status)
+}
+
 // settingsParse reads the file strictly: every rule a later stage relies on is checked here, once.
 func settingsParse(data []byte) (Settings, error) {
 	var settings Settings
@@ -107,6 +138,25 @@ func settingsParse(data []byte) (Settings, error) {
 			return Settings{}, fmt.Errorf("settings: allow.hosts: %q needs a name, network ip4 or ip6 and bits within it", host.Name)
 		}
 	}
+	if _, err := netip.ParseAddrPort(settings.Deception.Listen); err != nil {
+		return Settings{}, fmt.Errorf("settings: deception.listen: %w", err)
+	}
+	deception := settings.Deception
+	if !deceptionStatusValid(deception.StatusDeceive) || !deceptionStatusValid(deception.StatusForgedCrawler) ||
+		deception.StatusDeceive == deception.StatusForgedCrawler {
+		return Settings{}, errors.New("settings: deception: two distinct 4xx statuses the gate answers nothing else with")
+	}
+	if deception.CanaryKeyFile == "" {
+		return Settings{}, errors.New("settings: deception: canaryKeyFile must be set")
+	}
+	crawlerNames := map[string]bool{}
+	for _, crawler := range settings.Crawlers {
+		if crawler.Name == "" || crawlerNames[crawler.Name] || strings.TrimSpace(crawler.UserAgent) == "" ||
+			len(crawler.ReverseDomains) == 0 || slices.Contains(crawler.ReverseDomains, "") {
+			return Settings{}, fmt.Errorf("settings: crawlers: %q needs a unique name, a user agent and reverse domains", crawler.Name)
+		}
+		crawlerNames[crawler.Name] = true
+	}
 	if settings.Anonymous.AveragePerSecond < 1 || settings.Anonymous.Burst < settings.Anonymous.AveragePerSecond {
 		return Settings{}, errors.New("settings: anonymous: averagePerSecond must be at least 1 and burst at least the average")
 	}
@@ -131,7 +181,7 @@ func settingsParse(data []byte) (Settings, error) {
 	return settings, nil
 }
 
-// keyFileLoad reads a secret file: a hex key (the captcha's hmac key) or a raw token (the bouncer key).
+// keyFileLoad reads a secret file: a hex key (the captcha's and the canaries' hmac keys) or a raw token (the bouncer key).
 func keyFileLoad(path string, hexKeyBytesMin int) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

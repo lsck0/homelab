@@ -200,7 +200,6 @@ in
       path = "/srv/nas/documents";
       writable = true;
     };
-    BACKUPS.path = "/srv/nas/BACKUPS";
     syncthing = {
       path = syncthingDir;
       writable = true;

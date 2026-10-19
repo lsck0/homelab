@@ -35,6 +35,7 @@
   registry-push-password = "hex:24"; # registry user ci: REGISTRY_PASSWORD of the repos that push images
   registry-pull-password = "hex:24"; # registry user puller: read-only pulls
   sccache-redis-pass = "hex:24";
+  lab-gate-canary-key = "hex:32"; # both ingresses' gates: the deception's canary hmac key (modules/traefik lib/gate deception.go)
   telegram-bot-token = "manual"; # hermes-secrets.nu
   telegram-chat-id = "public"; # hermes-secrets.nu: the owner's telegram user id
 
