@@ -36,6 +36,9 @@ let
         version = "1.21.1";
         protocol = 767;
         allowFlight = true;
+        # 375 mods in an 8 GiB guest: a shorter view keeps it out of swap
+        viewDistance = 8;
+        simulationDistance = 6;
         pack = ''
           TYPE=NEOFORGE
           VERSION=1.21.1
@@ -191,8 +194,8 @@ let
         -e OVERRIDE_ICON=TRUE \
         -e "MOTD=[${name}] ${motd}" \
         -e USE_AIKAR_FLAGS=true \
-        -e VIEW_DISTANCE=12 \
-        -e SIMULATION_DISTANCE=8 \
+        -e VIEW_DISTANCE=${toString (servers.${name}.viewDistance or 12)} \
+        -e SIMULATION_DISTANCE=${toString (servers.${name}.simulationDistance or 8)} \
         -e SPAWN_PROTECTION=0 \
         -e MAX_PLAYERS=42069 \
         -e ENABLE_RCON=true \

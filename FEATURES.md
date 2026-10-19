@@ -330,12 +330,19 @@ runbooks.
 - Each disk's kopia repository holds the other disk's data (`lib/kopia.nix`): the nas repository on the hdd
   (`/srv/nas/bulk/BACKUPS/kopia`) snapshots the ssd's `/srv/nas` at 02:00 and verifies on Sundays, including a sample
   downloaded back from proton; the syncthing repository on the ssd (`/srv/nas/BACKUPS/kopia-syncthing`) snapshots the
-  hdd's syncthing folders and the machines' borg repos at 03:00, and refuses to while the ssd's root is over 85% full.
+  hdd's syncthing folders (not the machines' borg repos synced beside them) and cold storage at 03:00, and refuses to
+  while the ssd's root is over 85% full.
   Moving the nas repository from its old place on the ssd, once (`kopia-init` refuses to start a second history
   beside it): `systemctl stop kopia-server`, `mv /srv/nas/BACKUPS/kopia /srv/nas/bulk/BACKUPS/kopia`,
   `systemctl restart kopia-init kopia-server` on vm-104.
 - `proton-sync` mirrors the kopia repository to Proton Drive nightly at 04:00, one way, pruning before it uploads so a
   full drive frees itself (`lib/proton-mirror.nu`).
+- Cold storage, for what must be kept but is rarely opened: `/srv/nas/bulk/cold-storage` on the hdd, smb share
+  `cold-storage`. kopia-syncthing snapshots it nightly (monthly ones kept two years, yearly ones ten);
+  `proton-cold-storage` uploads it to `/my-files/homelab-offsite/cold-storage` on Saturdays at 06:00, the first time
+  15 minutes after the deploy that adds it, one way and deleting nothing there, so a file deleted here stays off-site
+  (`lib/kopia.nix`, `upload` in `lib/proton-mirror.nu`). "Cold storage off-site copy stale" fires after 15 days
+  without an upload, the backup alert on a stale snapshot.
 - `proton-bisync` syncs the syncthing folder (`/srv/nas/syncthing/sync`) with `/my-files/homelab-offsite/sync` both
   ways hourly: what changes on the web or the phone reaches the nas and syncthing takes it to the devices. Its rules
   are in the header of `lib/proton-bisync.py`. Both run on Proton's drive cli and its session from
@@ -433,12 +440,15 @@ runbooks.
 - vm-122 jellyfin with janitorr and ollama on the gpu; vm-123 seerr requests; vm-124 navidrome.
 - vm-130 home assistant; vm-131 paperless-ngx with paperless-ai; vm-132 firefly iii with the fints importer;
   vm-133 huginn; vm-134 taskchampion sync server (ciphertext only).
-- vm-210 public lsck0 pacman mirror at `mirror.lsck0.dev`.
+- vm-210 public lsck0 pacman mirror at `mirror.lsck0.dev`, with the install iso vm-112 builds and signs nightly
+  under `iso/`: each dated `archlinux-lsck0-<date>-x86_64.iso` with its `.sha256` and `.sig`,
+  `archlinux-lsck0-latest-x86_64.iso` linking the newest, and `lsck0-signing.asc`, the key to verify against. It keeps
+  the newest iso, the first of the week and the first of the month (`iso-prune` in `archrepo-build.nu`).
 - vm-211 searxng through the vpn exit, with the limiter and link tokens, an image proxy and json for hermes. Engines:
-  bing, startpage (google's ranking, weighted double), duckduckgo web, wikidata's infobox (1.5 s timeout), nixos wiki,
-  duden and searxng's defaults; brave and the duckduckgo html endpoint are off (captcha and 403 on the exit), the onion
-  engines inactive. Wikipedia, the Arch and NixOS wikis, github and stackoverflow rank first, pinterest is removed. A
-  page waits at most 2 s for an engine.
+  bing, startpage (google's ranking, weighted double), duckduckgo web, wikidata's infobox (1 s timeout, none on a slow
+  query), nixos wiki, duden and searxng's defaults; brave and the duckduckgo html endpoint are off (captcha and 403 on
+  the exit), the onion engines inactive. Wikipedia, the Arch and NixOS wikis, github and stackoverflow rank first,
+  pinterest is removed. A page waits at most 2 s for an engine.
 - vm-212 privatebin; vm-213 file share; vm-215 teamspeak 6.
 - vm-214 minecraft at `<server>.mc.lsck0.dev`, one server awake at a time behind mc-gate: cobblemon (the owner's pack,
   1.21.1), vanilla (the newest release) and atm (All the Mons 1.3.0 on NeoForge, flight allowed). `mc-modpack`

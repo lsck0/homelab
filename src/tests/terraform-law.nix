@@ -17,6 +17,19 @@ let
   apiSources = "\${join(\",\", concat(local.operator_sources, local.host_client_ips.api))}";
   router = "local.site.lan.router";
   firewalled = "\${local.firewalled}";
+  # one entry per cidr in sort order, the guest's own nomatch where it sorts: any other order is a perpetual diff
+  spoofedCidrs = [
+    {
+      for_each = "\${local.spoofed_cidrs[each.key]}";
+      content = [
+        {
+          name = "\${cidr.value}";
+          nomatch = "\${cidr.value == each.value.ip ? true : null}";
+        }
+      ];
+    }
+  ];
+  spoofedOrder = "\${{ for id, v in local.firewalled : id => sort(concat(local.spoofed_halves, [v.ip])) }}";
   spoofedRule = {
     type = "out";
     action = "DROP";
@@ -74,8 +87,10 @@ let
           then "a vm's nic other than the router's bypasses the firewall" else empty end),
         (if [$spoofed.for_each, $guestRules.for_each] != ["${firewalled}", "${firewalled}"]
           then "a firewalled guest has no spoofed set or rule" else empty end),
-        (if [$spoofed.cidr[]? | select(.nomatch == true) | .name] != ["''${each.value.ip}"]
+        (if [$spoofed.cidr, $spoofed.dynamic.cidr] != [null, ${builtins.toJSON spoofedCidrs}]
           then "the spoofed set does not leave out the guest's own address alone" else empty end),
+        (if [.locals[] | select(has("spoofed_cidrs")) | .spoofed_cidrs] != [${builtins.toJSON spoofedOrder}]
+          then "the spoofed set is not declared in the sorted order proxmox reads it back in" else empty end),
         (if ($guestRules.rule // [] | map({type, action, source})) != [${builtins.toJSON spoofedRule}]
           then "a guest's other source addresses are not dropped on the way out" else empty end),
         (if ($guestRules.dynamic.rule // [] | map(select(.for_each == "''${each.value.recovery}") | .content[0] | {action, source, log}))
@@ -106,7 +121,8 @@ let
     "del(.resource.proxmox_virtual_environment_firewall_ipset.management)"
     ".resource.proxmox_virtual_environment_firewall_options.guest[0].ipfilter = false"
     "del(.resource.proxmox_virtual_environment_firewall_rules.guest)"
-    ".resource.proxmox_virtual_environment_firewall_ipset.spoofed[0].cidr[-1].nomatch = false"
+    ".resource.proxmox_virtual_environment_firewall_ipset.spoofed[0].dynamic.cidr[0].content[0].nomatch = true"
+    ''(.locals[] | select(has("spoofed_cidrs")) | .spoofed_cidrs) |= sub("sort\\((?<x>.*)\\) }"; "\(.x) }")''
     ''.resource.proxmox_virtual_environment_firewall_rules.guest[0].rule[0].action = "ACCEPT"''
     ".resource.proxmox_virtual_environment_firewall_rules.guest[0].dynamic.rule |= .[:1]"
     ''.resource.proxmox_virtual_environment_firewall_rules.guest[0].dynamic.rule[0].content[0].source = "${lanSubnet}"''

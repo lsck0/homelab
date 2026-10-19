@@ -324,7 +324,13 @@ resource "proxmox_virtual_environment_firewall_ipset" "ipfilter" {
 
 # ipfilter alone drops no packet from another ipv4 address: proxmox-firewall 1.1.1 ands its drop with the empty
 # nomatch set. Every address but the guest's own, in halves (an ipset of the iptables backend takes no /0); a guest
-# speaks ipv4 alone, so no ipv6 source is its own.
+# speaks ipv4 alone, so no ipv6 source is its own. Proxmox reads a set back sorted by its cidr text: declared in any
+# other order, every apply deletes and recreates the set, and the guest sends unfiltered meanwhile.
+locals {
+  spoofed_halves = ["0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1"]
+  spoofed_cidrs  = { for id, v in local.firewalled : id => sort(concat(local.spoofed_halves, [v.ip])) }
+}
+
 resource "proxmox_virtual_environment_firewall_ipset" "spoofed" {
   for_each   = local.firewalled
   depends_on = [proxmox_virtual_environment_vm.vm, proxmox_virtual_environment_container.ct]
@@ -335,14 +341,11 @@ resource "proxmox_virtual_environment_firewall_ipset" "spoofed" {
   name         = "spoofed"
   comment      = "every source ${each.value.name} may not send from"
   dynamic "cidr" {
-    for_each = ["0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1"]
+    for_each = local.spoofed_cidrs[each.key]
     content {
-      name = cidr.value
+      name    = cidr.value
+      nomatch = cidr.value == each.value.ip ? true : null
     }
-  }
-  cidr {
-    name    = each.value.ip
-    nomatch = true
   }
 }
 

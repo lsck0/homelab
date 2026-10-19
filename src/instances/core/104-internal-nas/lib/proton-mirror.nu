@@ -3,7 +3,8 @@
 # usage: proton-mirror mirror|upload, the environment as kopia.nix's proton-sync and proton-cold-storage units set it
 #   mirror  the kopia repository: upload what is new, prune what vanished
 #   upload  cold storage: upload what is new, a changed file as a new revision; nothing remote is ever trashed, so a
-#           file deleted here stays off-site
+#           file deleted here stays off-site. A source without a file is refused; a success touches
+#           PROTON_MIRROR_UPLOADED
 #
 # The source lands at <target>/<basename of source>. In a mirror its files are content-addressed blobs, uploaded as
 # they are; a vanished one is trashed by path, then deleted from the trash by its name, which no other trashed item
@@ -72,7 +73,9 @@ def target-ensure [target: string]: nothing -> bool {
 
 # 0 uploaded, 2 only files changed mid-upload (retry once), 1 anything else; unchanged files are skipped by hash
 def upload [source: path, parent: string]: nothing -> int {
-    let done = ^proton-drive filesystem upload -j -f create-new-revision -d merge -t $source $parent | complete
+    # the cli expands its local arguments as glob patterns
+    let literal = $source | str replace --all --regex '([\[\]{}()*?!+@\\])' '\$1'
+    let done = ^proton-drive filesystem upload -j -f create-new-revision -d merge -t $literal $parent | complete
     print --stderr --no-newline $done.stderr
     if $done.exit_code == 0 { return 0 }
     # no summary is the call itself failing: session expired, network down
@@ -246,8 +249,12 @@ def "main locked" [mode: string]: nothing -> nothing {
         print "no proton session; run 'proton-drive-login' on this host once (opens a sign-in url)"
         return
     }
-    # an upload trashes nothing, so an empty or wiped folder costs nothing off-site
-    if $mode == "mirror" { source-guard $source $env.PROTON_MIRROR_MARKER }
+    # an upload trashes nothing, but one of an empty folder (the data not moved in yet, the disk gone) reads as a success
+    if $mode == "mirror" {
+        source-guard $source $env.PROTON_MIRROR_MARKER
+    } else if (^find $source -type f -print -quit | complete | get stdout | is-empty) {
+        die $"($source) holds no file: missing, unmounted or not filled yet; refusing to upload"
+    }
     # an outage skips the run: the off-site copy stays as the last run left it
     let probe = status-of $env.PROTON_MIRROR_PROBE
     if $probe != 0 { exit $probe }
@@ -261,6 +268,7 @@ def "main locked" [mode: string]: nothing -> nothing {
         upload-settled $source $target
     }
     if not $ok { failed "one or more uploads or prunes failed" }
+    if $mode == "upload" { touch $env.PROTON_MIRROR_UPLOADED }
     # freshness only on a fully successful run
     exit (status-of $env.PROTON_MIRROR_METRIC (date now | format date "%s"))
 }

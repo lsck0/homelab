@@ -4,7 +4,7 @@
 # usage: proton-bisync sync|resync, the environment as kopia.nix's bisyncEnv sets it
 #   sync    hourly: what changed on either side since the last run reaches the other
 #   resync  the baseline, by hand only: both sides merged, nothing deleted
-# A sync deleting past the engine's limit syncs nothing until STATE/allow-large is touched, for one run.
+# A sync deleting past the engine's limit syncs nothing until STATE/allow-large is touched; the next sync the engine runs spends it.
 
 # the engine's status for a run refused by that limit
 const EXIT_GUARD = 3
@@ -34,8 +34,9 @@ def "main locked" [mode: string]: nothing -> nothing {
     if $status == $EXIT_GUARD {
         die $">>> nothing synced. if the loss is intended: touch ($allow_large); systemctl start proton-bisync"
     }
+    # a failed run spends it too: left armed, it would let every later loss through
+    if $allow { rm $allow_large }
     if $status != 0 { exit $status }
-    rm --force $allow_large
     exit (status-of $env.PROTON_BISYNC_METRIC (date now | format date "%s"))
 }
 

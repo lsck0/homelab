@@ -110,6 +110,8 @@ let
   # the first upload follows the deploy, not the next saturday: until it runs the stale alert pages; once one
   # succeeded a boot or a switch starts no early run, which would hold the nas job lock for hours
   coldStorageFirstUploadAfter = "15min";
+  # touched by an upload that succeeded, which a source without a file never does
+  coldStorageUploaded = "${protonDir}/${coldStorageLabel}.uploaded";
   # a first upload cut short resumes next week, skipping what is already there by content
   coldStorageUploadTimeout = "12h";
   syncthingRepo = "${source}/BACKUPS/kopia-syncthing";
@@ -119,6 +121,9 @@ let
   # the syncthing repository grows on the ssd's root file system, which holds every service's state: past this the
   # snapshot refuses to run
   rootUsedMaxPercent = 85;
+  # the repository's maintenance frees blocks by the gigabyte: the weekly default hands them back to the host's thin
+  # pool days late, which every guest disk shares
+  trimAt = "daily";
   # after the 02:00 snapshot
   repoSyncAt = "04:00";
   repoSyncDelay = "30m";
@@ -593,6 +598,7 @@ in
         PROTON_MIRROR_LOCK = nasJob.lock;
         PROTON_MIRROR_PROBE = probeProton;
         PROTON_MIRROR_METRIC = offsiteMetric coldStorageOffsite;
+        PROTON_MIRROR_UPLOADED = coldStorageUploaded;
       };
     }
     // {
@@ -606,7 +612,7 @@ in
   };
   systemd.timers.proton-cold-storage-first = {
     wantedBy = [ "timers.target" ];
-    unitConfig.ConditionPathExists = "!${config.homelab.textfileDir}/${coldStorageOffsite.textfile}.prom";
+    unitConfig.ConditionPathExists = "!${coldStorageUploaded}";
     timerConfig = {
       OnActiveSec = coldStorageFirstUploadAfter;
       Unit = "proton-cold-storage.service";
@@ -637,6 +643,11 @@ in
     mode = "resync";
     timeout = shareResyncTimeout;
   });
+
+  services.fstrim = {
+    enable = true;
+    interval = trimAt;
+  };
 
   systemd.services.kopia-syncthing = lib.mkIf (shareDir != null) {
     description = "Snapshot the Syncthing folders and cold storage into their repository on the ssd";

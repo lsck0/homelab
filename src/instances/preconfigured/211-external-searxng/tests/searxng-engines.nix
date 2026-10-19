@@ -1,5 +1,5 @@
 # the rendered searxng settings keep wikipedia off and wikidata on: the vpn exit gets wikipedia 429'd, wikidata
-# carries the infobox in its place
+# carries the infobox in its place, on a timeout short enough to keep a page near 1.5 s
 {
   pkgs,
   inputs,
@@ -16,5 +16,7 @@ pkgs.runCommand "searxng-engines" { nativeBuildInputs = [ pkgs.yq-go ]; } ''
   [ "$(disabledOf wikipedia)" = true ] || { echo "wikipedia is not disabled" >&2; exit 1; }
   [ "$(disabledOf wikidata)" != true ] || { echo "wikidata is disabled" >&2; exit 1; }
   [ -n "$(yq '.engines[] | select(.name == "wikidata") | .name' "$settings")" ] || { echo "wikidata is not configured" >&2; exit 1; }
+  [ "$(yq '.engines[] | select(.name == "wikidata") | .timeout <= 1.0' "$settings")" = true ] \
+    || { echo "wikidata's timeout holds a page past 1.5 s" >&2; exit 1; }
   touch $out
 ''

@@ -107,6 +107,8 @@ in
         PasswordAuthentication = false;
       };
     };
+    # socket-activated (an lxc guest): a connection that drops mid-handshake leaves its sshd@ failed until a switch
+    systemd.services."sshd@".unitConfig.CollectMode = lib.mkIf config.services.openssh.startWhenNeeded "inactive-or-failed";
 
     security.sudo.wheelNeedsPassword = false;
 

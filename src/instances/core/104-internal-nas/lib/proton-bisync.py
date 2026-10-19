@@ -43,6 +43,7 @@ import heapq
 import json
 import os
 import pwd
+import re
 import shutil
 import signal
 import stat
@@ -163,6 +164,11 @@ def path_key(rel):
 
 def local_path(rel):
     return os.path.join(SOURCE, rel) if rel else SOURCE
+
+
+# the cli expands its local arguments as glob patterns: {GUID} folders and name[1].ext files match nothing raw
+def glob_literal(path):
+    return re.sub(r"([][{}()*?!+@\\])", r"\\\1", path)
 
 
 def remote_path(rel):
@@ -771,7 +777,7 @@ class Run:
             "-f",
             "create-new-revision",
             "-t",
-            *(local_path(rel) for rel, _ in files),
+            *(glob_literal(local_path(rel)) for rel, _ in files),
             remote_path(folder),
             timeout=transfer_timeout(sum(node.size for _, node in files)),
         )

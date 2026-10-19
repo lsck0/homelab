@@ -1,8 +1,8 @@
 # kopia on the nas: init, snapshot, restore; a restore of a guest's local state copy (paperless, instance.nix
 # `shares`) is marked with a fresh generation for its seed (modules/local-state), any other share is not; the
 # syncthing folders and cold storage snapshot into their own repository, cold storage's upload skips without a
-# session and runs early only until one succeeded, and the repository mirror keeps its remote copy; a repository left
-# at its old place stops init
+# session and runs early only until one succeeded, and the repository mirror keeps its remote copy; the disks are
+# trimmed daily; a repository left at its old place stops init
 { pkgs, lib, ... }:
 pkgs.testers.runNixOSTest {
   name = "kopia";
@@ -186,12 +186,19 @@ pkgs.testers.runNixOSTest {
         first = machine.succeed("systemctl show -p TimersMonotonic --value proton-cold-storage-first.timer")
         assert "OnActiveUSec" in first, f"the first upload waits for the weekly run: {first}"
 
-    with subtest("once an upload succeeded, a boot or a switch starts no early one"):
+    with subtest("once an upload succeeded, a boot or a switch starts no early one; a metric alone is no success"):
         machine.succeed("touch /var/lib/node-exporter-textfile/proton_cold_storage.prom")
+        machine.succeed("systemctl restart proton-cold-storage-first.timer")
+        machine.succeed("systemctl is-active proton-cold-storage-first.timer")
+        machine.succeed("touch /var/lib/proton-drive/cold-storage.uploaded")
         machine.succeed("systemctl restart proton-cold-storage-first.timer")
         machine.fail("systemctl is-active proton-cold-storage-first.timer")
         keep = machine.succeed("systemctl show -p Environment --value proton-sync")
         assert "PROTON_MIRROR_ROOT_KEEP=BACKUPS cold-storage sync" in keep, keep
+
+    with subtest("the ssd's freed blocks go back to the thin pool daily"):
+        trim = machine.succeed("systemctl show -p TimersCalendar --value fstrim.timer")
+        assert "*-*-* 00:00:00" in trim, trim
 
     with subtest("a repository left at its old place on the ssd stops init instead of starting a second one"):
         machine.succeed("mkdir -p /srv/nas/BACKUPS/kopia && touch /srv/nas/BACKUPS/kopia/kopia.repository.f")

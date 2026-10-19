@@ -18,7 +18,10 @@
     # unballooned: at a 1.5 GiB floor the nas oom-killed its own jobs; lib/nas-job.nix caps them from it
     memoryMiB = 3072;
     balloonMiB = 0;
-    # nvme root: state, the kopia repository, documents
+    # nvme root: state, documents and the syncthing repository (lib/kopia.nix), which holds cold storage's snapshots
+    # too: cold storage was 241 GB on 2026-10-19 and grows only, so the disk grows with it, on the ssd_root_full
+    # warning, before kopia-syncthing stops at 85%. Thin on the host's pve pool: what the guest frees reaches the pool
+    # with the daily trim
     diskGiB = 750;
     # its root shares the nvme with every guest's: a nightly snapshot or mirror sync never saturates it
     diskLimits.writeMBps = 300;
@@ -73,6 +76,16 @@
       coldStorageOffsiteStaleSeconds = 15 * 24 * 3600;
       # its mirror label, kopia.nix coldStorageLabel
       coldStorageMirror = "\"cold-storage\"";
+      # kopia.nix rootUsedMaxPercent stops the syncthing repository's snapshots at 85%: this warns with room to act
+      ssdRootWarnPercent = 75;
+      # this guest's vm label (modules/telemetry.nix vmName)
+      ssdRoot = "vm=\"nas\",mountpoint=\"/\"";
+      # df's percentage, which that guard reads: the blocks reserved for root count as neither used nor free
+      ssdRootUsed =
+        let
+          used = "(node_filesystem_size_bytes{${ssdRoot}} - node_filesystem_free_bytes{${ssdRoot}})";
+        in
+        "100 * ${used} / (${used} + node_filesystem_avail_bytes{${ssdRoot}})";
       # lib/kopia.nix verifies weekly (verifyAt): a missed week plus its randomized delay
       verifyStaleSeconds = 8 * 24 * 3600 + 3600;
       # a proton outage is its own "proton unavailable" alert, not a stale off-site copy too
@@ -117,6 +130,16 @@
         telegram = true;
         summary = "Off-site (Proton Drive): cold storage has not uploaded in over 15 days";
         description = "The weekly proton-cold-storage on vm-104 has not finished an upload of /srv/nas/bulk/cold-storage, or never ran. `journalctl -u proton-cold-storage`; a first upload cut short by its timeout resumes the next week.";
+      };
+      ssd_root_full = {
+        title = "NAS ssd filling up";
+        category = "storage";
+        expr = ssdRootUsed;
+        threshold = ssdRootWarnPercent;
+        for = "30m";
+        telegram = true;
+        summary = "vm-104 /: {{ printf \"%.0f\" $values.A.Value }}% used; the syncthing snapshots stop at 85%";
+        description = "The syncthing repository on vm-104's root (/srv/nas/BACKUPS/kopia-syncthing, cold storage's snapshots too) shares it with every service's state; past 85% kopia-syncthing refuses to snapshot. `du -xhd1 /srv/nas/BACKUPS`, then delete snapshots no longer needed (`kopia-syncthing snapshot list`) or grow the disk (instance.nix diskGiB).";
       };
       backup_verify_stale = {
         title = "NAS backup unverified";

@@ -1,13 +1,14 @@
 # vm-104's two-way sync of the syncthing folder with proton drive (lib/proton-bisync.nu and its engine under the real
-# units of lib/kopia.nix) against the fake proton-drive cli (lib/fake-proton-drive.nix), its drive a local folder.
-# No session, no baseline and a missing remote root are refused, the share's metric at 0 for the stale alert; the
-# baseline merges both sides, deletes nothing, keeps both versions of a file that differs and transfers none that
-# agrees; additions, edits and deletions go both ways (a local deletion into the quarantine folder), what lands in the
-# folder owned by the syncthing user with its modes and the remote mtime; a conflict keeps both versions; a mass
-# deletion waits for allow-large; a missing, unmarked or empty folder is refused; syncthing's internals and symlinks
-# stay local; a failing item fails the run and the next run resumes with it alone; a run lists only what its budget
-# allows; a download past the free-space reserve and a name beside its unicode normalization twin fail alone; a torn
-# events.lock is cleared; an hourly run skips while another heavy nas job holds the job lock, and a proton outage
+# units of lib/kopia.nix) against the fake proton-drive cli (lib/fake-proton-drive.nix), its drive a local folder. No
+# session, no baseline and a missing remote root are refused, the share's metric at 0 for the stale alert; the baseline
+# merges both sides, deletes nothing, keeps both versions of a file that differs and transfers none that agrees;
+# additions, edits and deletions go both ways (a local deletion into the quarantine folder), what lands in the folder
+# owned by the syncthing user with its modes and the remote mtime; a conflict keeps both versions; a mass deletion waits
+# for allow-large, which any sync the limit did not stop spends (a resync leaves it); names the cli would read as globs
+# ({GUID} folders, name[0] files) go up escaped; a missing, unmarked or empty folder is refused; syncthing's internals
+# and symlinks stay local; a failing item fails the run and the next run resumes with it alone; a run lists only what
+# its budget allows; a download past the free-space reserve and a name beside its unicode normalization twin fail alone;
+# a torn events.lock is cleared; an hourly run skips while another heavy nas job holds the job lock, and a proton outage
 # skips it.
 { pkgs, lib, ... }:
 let
@@ -113,7 +114,8 @@ pkgs.testers.runNixOSTest {
           f" && echo same > {F}/same.txt && touch -d '2020-01-01 00:00:00.123' {F}/same.txt"
           f" && echo old > {F}/.stversions/old.txt && echo pull > {F}/docs/.syncthing.b.txt.tmp"
           f" && echo pull > {F}/docs/~syncthing~c.txt.tmp && ln -s docs/a.txt {F}/link"
-          f" && mkdir -p {F}/work/.identity/ssh && echo key > {F}/work/.identity/ssh/id")
+          f" && mkdir -p {F}/work/.identity/ssh && echo key > {F}/work/.identity/ssh/id"
+          f" && mkdir {F}/'{{guid}}' && echo cache > {F}/'{{guid}}'/state.rsm && echo zero > {F}/docs/'x[0].txt'")
 
     with subtest("no session: refused before the cli, the share's metric at 0 so the stale alert fires"):
         out = run("proton-bisync", ok=False)
@@ -136,9 +138,12 @@ pkgs.testers.runNixOSTest {
                     f" && echo same > {R}/same.txt && touch -d '2020-01-01 00:00:00.123' {R}/same.txt")
 
     with subtest("the baseline merges both sides, deletes nothing, keeps both versions of what differs"):
+        machine.succeed(f"touch {STATE}/allow-large")
         out = run("proton-bisync-resync")
+        machine.succeed(f"rm {STATE}/allow-large")
         assert cat(f"{F}/r.txt") == "remote-only" and cat(f"{F}/rdir/sub/deep.txt") == "deep"
         assert cat(f"{R}/docs/a.txt") == "local-a" and cat(f"{R}/docs/fill-7.txt") == "7"
+        assert cat(f"{R}/{{guid}}/state.rsm") == "cache" and cat(f"{R}/docs/x[0].txt") == "zero"
         for side in [F, R]:
             assert cat(f"{side}/common.txt") == "local", side
             assert cat(f"{side}/common.proton-conflict.txt") == "remote", machine.succeed(f"ls {side}")
@@ -159,11 +164,11 @@ pkgs.testers.runNixOSTest {
         assert here == there, (here, there)
 
     with subtest("additions and edits go both ways; a run with nothing to do moves nothing"):
-        owned(f"echo l2 > {F}/l2.txt && echo local-a2 > {F}/docs/a.txt")
+        owned(f"echo l2 > {F}/l2.txt && echo local-a2 > {F}/docs/a.txt && echo one > {F}/docs/'x[0].txt'")
         machine.succeed(f"mkdir -p {R}/new/sub && echo r2 > {R}/new/sub/r2.txt"
                         f" && echo remote-edit > {R}/r.txt && touch -d '+1 min' {R}/r.txt")
         run("proton-bisync")
-        assert cat(f"{R}/l2.txt") == "l2" and cat(f"{R}/docs/a.txt") == "local-a2"
+        assert cat(f"{R}/l2.txt") == "l2" and cat(f"{R}/docs/a.txt") == "local-a2" and cat(f"{R}/docs/x[0].txt") == "one"
         assert cat(f"{F}/new/sub/r2.txt") == "r2" and cat(f"{F}/r.txt") == "remote-edit"
         assert modes(f"{F}/new", f"{F}/new/sub/r2.txt") == [OWNER, "755", OWNER, "644"]
         run("proton-bisync")
@@ -197,13 +202,14 @@ pkgs.testers.runNixOSTest {
         absent(f"{R}/docs/fill-12.txt", f"{R}/docs/fill-3.txt", f"{STATE}/allow-large")
         machine.succeed(f"test -e {R}/docs/fill-20.txt && test -e {R}/l3.txt")
 
-    with subtest("a failing item fails the run; the next run resumes with it alone"):
+    with subtest("a failing item fails the run, which spends allow-large; the next run resumes with the item alone"):
         before = metric()
         owned(f"echo up1 > {F}/up1.txt")
         machine.succeed(f"mkdir -p {R}/part && echo p1 > {R}/part/p1.txt && echo p2 > {R}/part/p2.txt"
-                        f" && echo '*/part/p2.txt' > /run/fake-proton-fail")
+                        f" && echo '*/part/p2.txt' > /run/fake-proton-fail && touch {STATE}/allow-large")
         failed = run("proton-bisync", ok=False)
         assert "fake: /my-files/homelab-offsite/sync/part/p2.txt fails" in failed, failed
+        absent(f"{STATE}/allow-large")
         assert cat(f"{F}/part/p1.txt") == "p1" and cat(f"{R}/up1.txt") == "up1"
         absent(f"{F}/part/p2.txt")
         assert metric() == before
@@ -266,14 +272,14 @@ pkgs.testers.runNixOSTest {
         assert listing(R) == before
         machine.succeed(f"rm -r {F} && mv {F}.moved {F}")
 
-    with subtest("a proton outage skips the run: nothing moves, no success"):
+    with subtest("a proton outage skips the run: nothing moves, no success, allow-large stays for the next run"):
         before = metric()
         owned(f"echo l4 > {F}/l4.txt")
-        machine.succeed("touch /run/proton-down")
+        machine.succeed(f"touch /run/proton-down {STATE}/allow-large")
         out = run("proton-bisync")
         absent(f"{R}/l4.txt")
         assert metric() == before and calls("list") == [], out
-        machine.succeed("rm /run/proton-down")
+        machine.succeed(f"rm /run/proton-down {STATE}/allow-large")
 
     with subtest("an hourly run skips while another heavy nas job holds the job lock"):
         machine.succeed("systemd-run --unit=hold-proton flock /run/nas-job.lock ${pkgs.coreutils}/bin/sleep 600")

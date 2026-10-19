@@ -6,12 +6,17 @@ Usage: controller_api_test.py <path to controller-api.py>
 import importlib.util
 import json
 import os
+import socket
+import subprocess
 import sys
 import tempfile
+import threading
+import time
 import unittest
 
 sys.dont_write_bytecode = True
-spec = importlib.util.spec_from_file_location("controller_api", sys.argv.pop(1))
+API_PATH = sys.argv.pop(1)
+spec = importlib.util.spec_from_file_location("controller_api", API_PATH)
 api = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(api)
 
@@ -20,6 +25,11 @@ INGRESS = "10.200.0.200"
 STRANGER = "203.0.113.9"
 INTERVAL_S = 60
 NOW_S = 1_000_000.0
+# far beyond any test's runtime: a read that hits it is a bug, not the clock
+DEADLINE_FAR_S = 60
+# a read budget of this much in the end-to-end request
+READ_BUDGET_S = 0.3
+DRIBBLE_LINES = 6
 
 
 class Door(unittest.TestCase):
@@ -181,13 +191,11 @@ class Door(unittest.TestCase):
 
 class Wire(unittest.TestCase):
     def read(self, data):
-        import socket
-
         a, b = socket.socketpair()
         a.sendall(data)
         a.close()
         try:
-            return api.request_read(b)
+            return api.request_read(b, time.monotonic() + DEADLINE_FAR_S)
         finally:
             b.close()
 
@@ -206,6 +214,38 @@ class Wire(unittest.TestCase):
         ):
             with self.subTest(data=data[:40]):
                 self.assertIsNone(self.read(data))
+
+    def test_a_dribbled_head_times_out_at_its_deadline_not_per_chunk(self):
+        a, b = socket.socketpair()
+
+        # each line arrives well within the deadline, the head never completes
+        def dribble():
+            a.sendall(b"GET /state/demo HTTP/1.1\r\n")
+            for _ in range(DRIBBLE_LINES):
+                time.sleep(READ_BUDGET_S / DRIBBLE_LINES * 2)
+                a.sendall(b"X: y\r\n")
+
+        writer = threading.Thread(target=dribble)
+        with a, b:
+            deadline_s = time.monotonic() + READ_BUDGET_S
+            writer.start()
+            with self.assertRaises(TimeoutError):
+                api.request_read(b, deadline_s)
+            self.assertLess(time.monotonic() - deadline_s, READ_BUDGET_S)
+            writer.join()
+
+    def test_a_slow_client_is_answered_408_before_the_unit_is_killed(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".json") as config:
+            json.dump({"requestMaxS": api.UNIT_START_TIMEOUT_S + api.REPLY_MARGIN_S + READ_BUDGET_S}, config)
+            config.flush()
+            a, b = socket.socketpair()
+            with a, b:
+                a.sendall(b"GET /state/demo HTTP/1.1\r\n")
+                start_s = time.monotonic()
+                done = subprocess.run([sys.executable, API_PATH, config.name], stdin=b, capture_output=True, check=True)
+                self.assertLess(time.monotonic() - start_s, api.UNIT_START_TIMEOUT_S + READ_BUDGET_S)
+                self.assertTrue(a.recv(api.HEAD_BYTES_MAX).startswith(b"HTTP/1.1 408 Request Timeout\r\n"))
+                self.assertIn(b"-> 408", done.stderr)
 
 
 if __name__ == "__main__":

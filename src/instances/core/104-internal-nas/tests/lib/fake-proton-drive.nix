@@ -1,7 +1,9 @@
 # a fake proton-drive cli (0.8.0's `filesystem` verbs and json) for ../proton-mirror.nix and ../proton-bisync.nix: the
 # drive is the folder FAKE_DRIVE (/my-files/x is $FAKE_DRIVE/my-files/x), FAKE_LOG gets one line per call. Like the
 # real one, an upload keeps the local mtime as the file's claimed modification time (ms) and skips nothing, a download
-# does not set the local mtime, trash lets same-named items pile up and delete refuses an ambiguous one. Faults:
+# does not set the local mtime, trash lets same-named items pile up and delete refuses an ambiguous one, and upload
+# expands each local path as a glob: a backslash escapes, braces match nothing (the real one matched no {GUID} folder)
+# and a path matching nothing fails the call. Faults:
 # FAKE_UPLOAD_FAIL set fails every upload; a call naming a path that matches a glob line of the file FAKE_FAIL_FILE
 # fails whole, its cause on stdout under a banner on stderr, as the real one prints some.
 { pkgs }:
@@ -10,6 +12,7 @@ pkgs.writeShellApplication {
   runtimeInputs = with pkgs; [
     coreutils
     findutils
+    gnused
     jq
   ];
   text = ''
@@ -45,6 +48,16 @@ pkgs.writeShellApplication {
              activeRevision: { uid: $rev, claimedSize: $size, claimedModificationTime: $t, claimedDigests: { sha1: $sha } } }'
       fi
     }
+    glob_expand() { # <path>: its matches, NUL-separated
+      local bare=''${1//\\?/}
+      if [[ $bare != *[][{}*?]* ]]; then
+        local literal
+        literal=$(printf '%s' "$1" | sed 's/\\\(.\)/\1/g')
+        if [ -e "$literal" ] || [ -L "$literal" ]; then printf '%s\0' "$literal"; fi
+      elif [[ $bare != *[{}]* ]]; then
+        compgen -G "$1" | tr '\n' '\0'
+      fi
+    }
     strategies_skip() { while [ $# -gt 0 ]; do case $1 in -f|-d) shift 2 ;; -j|-t) shift ;; *) printf '%s\0' "$1"; shift ;; esac; done; }
     case $verb in
       list)
@@ -61,8 +74,14 @@ pkgs.writeShellApplication {
         parent=''${paths[-1]}
         unset 'paths[-1]'
         [ -d "$(local_of "$parent")" ] || missing "$parent"
+        sources=()
+        for pattern in "''${paths[@]}"; do
+          mapfile -d "" -t matches < <(glob_expand "$pattern")
+          [ "''${#matches[@]}" -gt 0 ] || { echo "No paths matched: $pattern" >&2; exit 1; }
+          sources+=("''${matches[@]}")
+        done
         failures='[]'
-        for src in "''${paths[@]}"; do
+        for src in "''${sources[@]}"; do
           dest=$(local_of "$parent")/$(basename "$src")
           if [ -f "$src" ] && [ ! -L "$src" ]; then cp --preserve=timestamps "$src" "$dest"; continue; fi
           mkdir -p "$dest"

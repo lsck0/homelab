@@ -838,6 +838,18 @@ let
         };
     };
 
+    collect-mode = {
+      file = "sockets";
+      marker = "controller-api@.service";
+      tampered = tamper "107-internal-swarm" [
+        "systemd"
+        "services"
+        "controller-api@"
+        "unitConfig"
+        "CollectMode"
+      ] null;
+    };
+
     test-of-another-instance = {
       file = "placement";
       marker = "tests instances/preconfigured/101-internal-b/lib/b.nix";

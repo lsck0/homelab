@@ -113,14 +113,16 @@ let
         disabled = true;
       }
       # infobox only and 429'd on this exit every wake; wikidata's infobox stands in, the web engines still rank articles
+      # (a query wikidata misses shows no infobox)
       {
         name = "wikipedia";
         disabled = true;
       }
-      # the infobox when sparql answers in time; it missed a few queries in ten and held those pages at the timeout
+      # the infobox when sparql answers in time; it misses a few queries in ten, and a page it holds ends about 0.5 s
+      # after its timeout (2.0 s at 1.5), so 1.0 keeps that page near 1.5 s
       {
         name = "wikidata";
-        timeout = 1.5;
+        timeout = 1.0;
       }
       {
         name = "nixos wiki";

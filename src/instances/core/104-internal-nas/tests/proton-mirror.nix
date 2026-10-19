@@ -2,8 +2,9 @@
 # (lib/fake-proton-drive.nix), its drive a folder of the build sandbox. The kopia repository's mirror: upload and prune
 # for good, the stray trees of earlier versions deleted while the syncthing folder's and cold storage's copies stay,
 # the mass-deletion guard and its override, a missing, unmarked or empty repository, an outage, no session, a failed
-# upload, a torn events.lock. Cold storage's upload: new and changed files go up, a file deleted or a folder emptied
-# here stays remote, a failed upload or an outage reports no success.
+# upload, a torn events.lock. Cold storage's upload: a folder without a file is refused until it is filled, new and
+# changed files go up, a file deleted or a folder emptied here stays remote, a failed upload or an outage reports no
+# success. Paths the cli would read as globs (the fake's too: {GUID} folders, name[0] files) go up escaped.
 { pkgs, lib, ... }:
 let
   mirror = import ../lib/proton-mirror.nix { inherit pkgs; };
@@ -141,28 +142,47 @@ pkgs.runCommand "proton-mirror"
 
     # 7. COLD STORAGE: one way, nothing remote ever deleted
     MODE=upload
-    COLD=$W/cold-storage
+    COLD="$W/{vol}[0]/cold-storage"
     C=$FAKE_DRIVE$ROOT/cold-storage
-    cold=(PROTON_MIRROR_SOURCE="$COLD" PROTON_MIRROR_TARGET=$ROOT)
+    UPLOADED=$STATE/cold-storage.uploaded
+    cold=(PROTON_MIRROR_SOURCE="$COLD" PROTON_MIRROR_TARGET=$ROOT PROTON_MIRROR_UPLOADED="$UPLOADED")
     mkdir -p "$COLD"/island_2019
+    rm metric.out
+    run 1 "''${cold[@]}"
+    [ ! -e "$C" ] && [ ! -e metric.out ] && [ ! -e "$UPLOADED" ] || fail "cold storage: an empty folder counted as uploaded"
+    pass "a cold storage without a file is refused, with no success time and no first upload marked"
+
     echo photo > "$COLD"/island_2019/beach.jpg
     echo essay > "$COLD"/schule.txt
-    rm metric.out
+    mkdir "$COLD/{guid}"
+    echo state > "$COLD/{guid}/state.rsm"
+    echo zero > "$COLD/x[0].txt"
+    if unescaped=$(proton-drive filesystem upload "$COLD" "$ROOT" 2>&1) || ! grep -q 'No paths matched' <<<"$unescaped"; then
+      fail "the fake cli took an unescaped pattern literally"
+    fi
     run 0 "''${cold[@]}"
     same "$C" "./island_2019/
     ./island_2019/beach.jpg photo
-    ./schule.txt essay" "cold storage: the first upload is not the folder"
-    [ -s metric.out ] || fail "cold storage: no success time"
+    ./schule.txt essay
+    ./x[0].txt zero
+    ./{guid}/
+    ./{guid}/state.rsm state" "cold storage: the first upload is not the folder"
+    [ -s metric.out ] && [ -e "$UPLOADED" ] || fail "cold storage: no success time or first upload marked"
+    pass "once filled, cold storage goes up, glob characters in its path and names included"
     rm "$COLD"/island_2019/beach.jpg
     echo essay-v2 > "$COLD"/schule.txt
     run 0 "''${cold[@]}"
     same "$C" "./island_2019/
     ./island_2019/beach.jpg photo
-    ./schule.txt essay-v2" "cold storage: a deleted file left the remote, or a changed one did not arrive"
-    rm -r "$COLD"/island_2019 "$COLD"/schule.txt
-    run 0 "''${cold[@]}"
-    [ -e "$C"/island_2019/beach.jpg ] && [ -e "$C"/schule.txt ] && trash_empty \
-      || fail "cold storage: an emptied folder emptied the remote"
+    ./schule.txt essay-v2
+    ./x[0].txt zero
+    ./{guid}/
+    ./{guid}/state.rsm state" "cold storage: a deleted file left the remote, or a changed one did not arrive"
+    rm -r "$COLD"/*
+    rm metric.out
+    run 1 "''${cold[@]}"
+    [ -e "$C"/island_2019/beach.jpg ] && [ -e "$C"/schule.txt ] && trash_empty && [ ! -e metric.out ] \
+      || fail "cold storage: an emptied folder emptied the remote or reported success"
     pass "cold storage takes new and changed files; what is deleted here stays remote, nothing goes to the trash"
 
     MODE=mirror

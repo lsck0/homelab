@@ -25,9 +25,10 @@ import sys
 import time
 
 HEAD_BYTES_MAX = 8192
-READ_TIMEOUT_S = 5
 # --no-block only queues the job
 UNIT_START_TIMEOUT_S = 3
+# the interpreter's start and the answer, within the unit's RuntimeMaxSec (config requestMaxS)
+REPLY_MARGIN_S = 2
 APP_NAME = re.compile(r"[a-z][a-z0-9-]*")
 PATH = re.compile(r"/(redeploy|deploy|wake|sleep|state|uptime)/([^/]+)")
 BEARER = "Bearer "
@@ -39,6 +40,7 @@ REASONS = {
     403: "Forbidden",
     404: "Not Found",
     405: "Method Not Allowed",
+    408: "Request Timeout",
     413: "Payload Too Large",
     429: "Too Many Requests",
     503: "Service Unavailable",
@@ -107,10 +109,17 @@ def deploy_status(config, app):
     return 200, json.dumps({field: record.get(field) for field in DEPLOY_FIELDS}, sort_keys=True) + "\n"
 
 
-def request_read(conn):
-    """Method, path and lowercased headers of one request, or None when it is malformed or too large."""
+def request_read(conn, deadline_s):
+    """Method, path and lowercased headers of one request, or None when it is malformed or too large.
+
+    Raises TimeoutError once the head is still incomplete at deadline_s (time.monotonic), however it dribbles in.
+    """
     data = b""
     while b"\r\n\r\n" not in data:
+        remaining_s = deadline_s - time.monotonic()
+        if remaining_s <= 0:
+            raise TimeoutError
+        conn.settimeout(remaining_s)
         chunk = conn.recv(HEAD_BYTES_MAX)
         if not chunk or len(data) + len(chunk) > HEAD_BYTES_MAX:
             return None
@@ -143,15 +152,17 @@ def unit_start(name):
 def main():
     with open(sys.argv[1], encoding="utf-8") as f:
         config = json.load(f)
+    read_deadline_s = time.monotonic() + config["requestMaxS"] - UNIT_START_TIMEOUT_S - REPLY_MARGIN_S
     conn = socket.socket(fileno=sys.stdin.fileno())
-    conn.settimeout(READ_TIMEOUT_S)
+    request = None
+    status, body = 400, "bad request\n"
     try:
-        request = request_read(conn)
+        request = request_read(conn, read_deadline_s)
+    except TimeoutError:
+        status, body = 408, "request head too slow\n"
     except (OSError, UnicodeDecodeError):
-        request = None
-    if request is None:
-        status, body = 400, "bad request\n"
-    else:
+        pass
+    if request is not None:
         status, body = respond(config, *request, os.environ.get("REMOTE_ADDR", ""), time.time(), unit_start)
     print(f"controller-api: {request[0] + ' ' + request[1] if request else '-'} -> {status}", file=sys.stderr)
     conn.sendall(

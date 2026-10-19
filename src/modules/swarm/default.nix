@@ -529,6 +529,7 @@ let
         wokeSuffix
         deployStatusDir
         ;
+      requestMaxS = controllerRequestMaxS;
       stateDir = controllerState;
     }
   );
@@ -1027,6 +1028,8 @@ in
           # the controller's door: one short unprivileged process per connection, idle costs nothing
           "controller-api@" = {
             description = "Deploy controller request";
+            # a request killed at RuntimeMaxSec would stay failed until the next switch
+            unitConfig.CollectMode = "inactive-or-failed";
             serviceConfig = {
               ExecStart = "${pkgs.python3}/bin/python3 ${./lib/controller-api.py} ${controllerConfig}";
               StandardInput = "socket";
