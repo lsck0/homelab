@@ -485,7 +485,7 @@ pkgs.testers.runNixOSTest {
               options = re.findall(r'-e "?([A-Z_]+)=([^"\n\\]*)', start)
               environment = {key: value.strip() for key, value in options}
               assert environment == {
-                  "EULA": "TRUE", "MEMORY": "6G", "DIFFICULTY": "hard", "ALLOW_FLIGHT": "false",
+                  "EULA": "TRUE", "MEMORY": "5G", "DIFFICULTY": "hard", "ALLOW_FLIGHT": "false",
                   "ICON": "/modpacks/server-icon.png",
                   "OVERRIDE_ICON": "TRUE", "MOTD": f"[{name}] nya~ minecwaft sewvew 🐾✨",
                   "USE_AIKAR_FLAGS": "true", "VIEW_DISTANCE": "12", "SIMULATION_DISTANCE": "8",

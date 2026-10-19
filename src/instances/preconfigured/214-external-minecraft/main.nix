@@ -79,8 +79,8 @@ let
   # a time, so every server reuses them
   serverPort = 25566;
   rconPort = 25575;
-  # live data is ~2.6 GiB with a few players (spark heapsummary); a 5 GiB heap collected nonstop
-  heapSize = "6G";
+  # live data is ~2.6 GiB with a few players (spark heapsummary); 5 GiB plus ~2 GiB off-heap stays under the container
+  heapSize = "5G";
   # the guest's kernel, sshd and the gate (~440 MiB used beside a running pack); the container gets the rest, and
   # past it its coldest pages (atm's ~2 GiB off-heap, 375 mods' classes) go to zram instead of the oom killer
   guestReserveMiB = 768;

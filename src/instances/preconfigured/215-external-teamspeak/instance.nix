@@ -2,6 +2,8 @@
 { config, profiles, ... }:
 {
   vm = {
+    # parked so atm gets its 8 GiB unballooned; "on" brings it back
+    power = "off";
     bootPhase = "public";
     # the official image; its sqlite db and uploads mirrored to the nas (localState)
     needs = [

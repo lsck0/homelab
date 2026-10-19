@@ -7,11 +7,9 @@
       "containers"
       "nfs"
     ];
-    # 8 GiB keeps the host under pve's 80% autoballoon line with the rest running (10 GiB squeezed every other guest
-    # to its floor). The floor is what makes every guest's fit the node (tests/policy/guests.nix): squeezed to it, the
-    # live heap (~2.6 GiB) and the off-heap stay in memory and the cold pages go to zram (main.nix), slow but alive
+    # never ballooned: a squeezed jvm is killed by the kernel and loses the unsaved world (it did at 6.1 GiB)
     memoryMiB = 8192;
-    balloonMiB = 4864;
+    balloonMiB = 0;
     # the tick is one thread, but chunk generation, distant horizons and g1 run beside it: 6 ran at load 6.7 with
     # 20 s stalls exploring; the host has 12 threads, most guests idle, and this one wins when they are not
     cores = 10;

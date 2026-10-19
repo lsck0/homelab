@@ -2,6 +2,8 @@
 { id, ... }:
 {
   vm = {
+    # parked so atm gets its 8 GiB unballooned; "on" brings it back
+    power = "off";
     bootPhase = "dev";
     needs = [ "nfs" ];
     memoryMiB = 1536;

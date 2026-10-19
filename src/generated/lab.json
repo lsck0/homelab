@@ -90,11 +90,11 @@
       "zone": "internal"
     },
     "113": {
-      "enabled": "true",
+      "enabled": "false",
       "idle": null,
       "ip": "10.100.0.113",
       "name": "113-internal-hermes",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "114": {
@@ -178,19 +178,19 @@
       "zone": "internal"
     },
     "134": {
-      "enabled": "true",
+      "enabled": "false",
       "idle": null,
       "ip": "10.100.0.134",
       "name": "134-internal-taskchampion",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "140": {
-      "enabled": "true",
+      "enabled": "false",
       "idle": null,
       "ip": "10.100.0.140",
       "name": "140-internal-headscale",
-      "powered": true,
+      "powered": false,
       "zone": "internal"
     },
     "200": {
@@ -250,11 +250,11 @@
       "zone": "external"
     },
     "215": {
-      "enabled": "true",
+      "enabled": "false",
       "idle": null,
       "ip": "10.200.0.215",
       "name": "215-external-teamspeak",
-      "powered": true,
+      "powered": false,
       "zone": "external"
     },
     "250": {
