@@ -18,6 +18,15 @@ let
   driftFile = "system_drift";
   # sync.nu records each generation it deploys or finds deployed (scripts/lib/lab.nu DEPLOYED_TOPLEVEL_FILE)
   deployedToplevelFile = "/var/lib/homelab/deployed-toplevel";
+  stoppedUnitProperties = [
+    "Id"
+    "Type"
+    "RemainAfterExit"
+    "LoadState"
+    "ActiveState"
+    "ConditionResult"
+    "ConditionTimestampMonotonic"
+  ];
 
   # which file each secret comes from (modules/secrets.nix); null on the install images, which have no key
   secrets = import ../secrets.nix { inherit lib lab; };
@@ -127,9 +136,10 @@ in
     };
     systemd.tmpfiles.rules = [ "d ${textfileDir} 0755 root root -" ];
 
-    # a unit that failed and stays failed raises no other signal: a oneshot's error, a crashed timer's job
+    # a unit that failed and stays failed raises no other signal: a oneshot's error, a crashed timer's job. Nor does
+    # one the boot target pulls in that stopped cleanly and stays stopped: a Requires= on a mount that expired
     systemd.services.systemd-failed-units-metric = {
-      description = "Write the failed systemd units for the node exporter";
+      description = "Write the failed and the stopped systemd units for the node exporter";
       serviceConfig.Type = "oneshot";
       path = [
         config.systemd.package
@@ -142,6 +152,24 @@ in
           # a unit whose file a switch removed is not-found: nothing in the config can fix or restart it
           systemctl --failed --plain --no-legend --no-pager \
             | awk '$2 != "not-found" { printf "homelab_systemd_failed_units{unit=\"%s\"} 1\n", $1 }'
+          printf '# TYPE homelab_systemd_stopped_units gauge\n'
+          # what the boot target pulls in through its own targets (paths.target, timers.target, ...); a oneshot is
+          # done once it exited, a unit whose condition failed was never meant to run, and a parked or sleeping guest
+          # reports nothing: no lab guest needs an exclusion list beyond that
+          wanted=$(systemctl list-dependencies --plain --no-pager multi-user.target "$(systemctl get-default)" \
+            | awk '{ print $NF }' | sort -u)
+          # shellcheck disable=SC2086 # one argument per unit
+          systemctl show --no-pager --property=${lib.concatStringsSep "," stoppedUnitProperties} -- $wanted \
+            | awk '
+                BEGIN { RS = ""; FS = "\n" }
+                {
+                  delete unit
+                  for (i = 1; i <= NF; i++) { cut = index($i, "="); unit[substr($i, 1, cut - 1)] = substr($i, cut + 1) }
+                  if (unit["LoadState"] != "loaded" || unit["ActiveState"] != "inactive") next
+                  if (unit["Type"] == "oneshot" && unit["RemainAfterExit"] == "no") next
+                  if (unit["ConditionResult"] == "no" && unit["ConditionTimestampMonotonic"] != "0") next
+                  printf "homelab_systemd_stopped_units{unit=\"%s\"} 1\n", unit["Id"]
+                }'
         } > "$metric.tmp"
         mv "$metric.tmp" "$metric"
       '';

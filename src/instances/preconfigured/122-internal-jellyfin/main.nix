@@ -295,6 +295,8 @@ in
   };
   # 1.7 GiB peak measured, mostly the mmapped model
   systemd.services.ollama.serviceConfig.MemoryMax = "2560M";
+  # the loader exits once the model is pulled: done, not stopped (base: homelab_systemd_stopped_units)
+  systemd.services.ollama-model-loader.serviceConfig.RemainAfterExit = true;
 
   homelab.nasMounts = nasMount janitorrDir "janitorr" // nasPath "/data" "bulk";
 

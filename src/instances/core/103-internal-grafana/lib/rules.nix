@@ -189,6 +189,16 @@ let
       summary = "{{ $labels.unit }} on {{ $labels.vm }} failed";
       description = "The unit failed and stayed failed: a oneshot's error or a crashed service systemd gave up on. `systemctl status {{ $labels.unit }}` and `journalctl -u {{ $labels.unit }}` on that guest.";
     };
+    unit_stopped = {
+      title = "Unit stopped";
+      category = "service";
+      # modules/base: a series per unit the boot target pulls in while it is inactive
+      expr = "max by (vm, unit) (homelab_systemd_stopped_units)";
+      threshold = 0;
+      for = "10m";
+      summary = "{{ $labels.unit }} on {{ $labels.vm }} stopped";
+      description = "The unit stopped cleanly and nothing starts it again: a dependency it requires went away (a mount that expired or dropped), or a hand stop. `systemctl status {{ $labels.unit }}` on that guest, then `systemctl start {{ $labels.unit }}`.";
+    };
     oom_kill = {
       title = "Out of memory kill";
       category = "offline";

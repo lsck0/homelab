@@ -12,6 +12,7 @@
   config,
   lib,
   pkgs,
+  nasRequires,
   ...
 }:
 let
@@ -66,27 +67,30 @@ let
 
   setupUnit =
     unit:
-    lib.recursiveUpdate
-      {
-        wantedBy = [ "multi-user.target" ];
-        # retry forever: what the unit waits for comes up in no fixed order
-        startLimitIntervalSec = 0;
-        # an lxc mounts nfs at boot, not on access: never write under an empty mountpoint
-        unitConfig.RequiresMountsFor = tokens.mountPoints;
-        serviceConfig = {
-          Type = "oneshot";
-          RemainAfterExit = true;
-          Restart = "on-failure";
-          RestartSec = setupRetryIntervalS;
-        };
-      }
-      (
-        unit
-        // {
-          # strict for every setup: an unset name, a failed command or a failed stage of a pipe stops it
-          script = "set -euo pipefail\n" + tokenHelpers + unit.script;
+    lib.mkMerge [
+      # an lxc mounts nfs at boot, not on access: never write under an empty mountpoint
+      (nasRequires tokens.mountPoints)
+      (lib.recursiveUpdate
+        {
+          wantedBy = [ "multi-user.target" ];
+          # retry forever: what the unit waits for comes up in no fixed order
+          startLimitIntervalSec = 0;
+          serviceConfig = {
+            Type = "oneshot";
+            RemainAfterExit = true;
+            Restart = "on-failure";
+            RestartSec = setupRetryIntervalS;
+          };
         }
-      );
+        (
+          unit
+          // {
+            # strict for every setup: an unset name, a failed command or a failed stage of a pipe stops it
+            script = "set -euo pipefail\n" + tokenHelpers + unit.script;
+          }
+        )
+      )
+    ];
 in
 {
   _module.args = { inherit retry setupUnit; };

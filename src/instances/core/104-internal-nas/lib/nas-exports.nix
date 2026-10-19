@@ -110,8 +110,9 @@ in
       "${pkgs.bash}/bin/sh -c 'echo ${toString nfsdMaxBlockBytes} > /proc/fs/nfsd/max_block_size'"
     ];
 
-    # nixpkgs' nfsd module restarts only mountd when /etc/exports changes, and only nfs-server's start runs exportfs:
-    # a share added by a deploy stays unexported, and its clients get "No such file or directory", until a reboot
+    # a switch never restarts nfs-mountd: nfs-server requires it and would restart with it, dropping every guest's mount.
+    # exportfs -ra applies an exports change in place, mountd reads the kernel's export table
+    systemd.services.nfs-mountd.restartIfChanged = false;
     systemd.services.nfs-exports-reload = {
       description = "Re-export the NAS shares after /etc/exports changes";
       # a new share's directory comes from tmpfiles, which a switch reruns in the same transaction; the hdd is nofail,

@@ -8,6 +8,7 @@
   lib,
   pkgs,
   retry,
+  nasRequires,
   inventory,
   site,
   catalog,
@@ -66,6 +67,7 @@ let
     intervalS = 5;
   };
   restartDelayS = 10;
+  tokenMounts = nasRequires config.homelab.tokens.mountPoints;
 
   configFile = (pkgs.formats.yaml { }).generate "forgejo-runner.yaml" {
     log.level = "info";
@@ -141,8 +143,9 @@ in
     after = [
       "network-online.target"
       ci.userUnit
-    ];
-    unitConfig.RequiresMountsFor = config.homelab.tokens.mountPoints;
+    ]
+    ++ tokenMounts.after;
+    inherit (tokenMounts) requires;
     environment.DOCKER_HOST = ci.dockerHost;
     serviceConfig = {
       User = user;

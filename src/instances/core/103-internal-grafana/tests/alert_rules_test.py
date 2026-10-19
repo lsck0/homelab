@@ -577,10 +577,13 @@ tests += [
         ],
     },
     {
-        "name": "guests: a unit failed for a quarter hour, an oom kill and a drifted host alert; healthy guests do not",
+        "name": "guests: a unit failed for a quarter hour or stopped for ten minutes, an oom kill and a drifted host alert;"
+        " healthy guests and a unit stopped for a switch do not",
         "interval": "1m",
         "input_series": [
             {"series": 'homelab_systemd_failed_units{vm="nas",unit="kopia.service"}', "values": "1x90"},
+            {"series": 'homelab_systemd_stopped_units{vm="terminal",unit="nginx.service"}', "values": "1x90"},
+            {"series": 'homelab_systemd_stopped_units{vm="swarm",unit="swarm-cluster.service"}', "values": "1 1 _x88"},
             {"series": 'node_vmstat_oom_kill{instance="10.100.0.104:9100",vm="nas"}', "values": "0 0 0 1x87"},
             {"series": f'node_vmstat_oom_kill{{instance="{paperless["instance"]}",vm="paperless"}}', "values": "5x90"},
             {"series": 'homelab_system_drift{vm="nas"}', "values": "1x90"},
@@ -592,6 +595,12 @@ tests += [
                 "eval_time": "16m",
                 "alertname": "unit_failed",
                 "exp_alerts": [expect("unit_failed", vm="nas", unit="kopia.service")],
+            },
+            {"eval_time": "9m", "alertname": "unit_stopped", "exp_alerts": []},
+            {
+                "eval_time": "11m",
+                "alertname": "unit_stopped",
+                "exp_alerts": [expect("unit_stopped", vm="terminal", unit="nginx.service")],
             },
             {"eval_time": "2m", "alertname": "oom_kill", "exp_alerts": []},
             {"eval_time": "10m", "alertname": "oom_kill", "exp_alerts": [expect("oom_kill", vm="nas")]},

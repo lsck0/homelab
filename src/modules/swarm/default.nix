@@ -22,6 +22,7 @@
   inventory,
   site,
   nasMount,
+  nasRequires,
   retry,
   catalog,
   lab,
@@ -151,6 +152,8 @@ let
   self = inventory.${ownId};
   isManager = own != null && ownId == managerId;
   isWorker = own != null && lib.elem ownId workerIds;
+  # the automounts, not RequiresMountsFor: a mount's idle expiry would stop the cluster and everything after it
+  clusterMounts = nasRequires (config.homelab.tokens.mountPoints ++ lib.optional isManager managerShare);
   # a swarm of one: its manager runs the app, there is no worker to join, no node to reconcile
   single = workerIds == [ managerId ];
   # the deploy controller builds every app and takes their redeploys; its own swarm gets stacks from its inbox
@@ -918,11 +921,11 @@ in
           after = [
             "docker.service"
             "network-online.target"
-          ];
-          requires = [ "docker.service" ];
+          ]
+          ++ clusterMounts.after;
+          requires = [ "docker.service" ] ++ clusterMounts.requires;
           wants = [ "network-online.target" ];
           wantedBy = [ "multi-user.target" ];
-          unitConfig.RequiresMountsFor = config.homelab.tokens.mountPoints ++ lib.optional isManager managerShare;
           startLimitIntervalSec = 0;
           serviceConfig = {
             Type = "oneshot";
@@ -955,7 +958,7 @@ in
           swarm-reconcile = lib.mkIf (!single) {
             description = "Keep the apps swarm's nodes in line with the inventory";
             after = [ "swarm-cluster.service" ];
-            requires = [ "swarm-cluster.service" ];
+            wants = [ "swarm-cluster.service" ];
             wantedBy = [
               "multi-user.target"
               "swarm-cluster.service"
@@ -970,7 +973,7 @@ in
           swarm-prune = {
             description = "Remove the stacks of apps that left the catalog";
             after = [ "swarm-cluster.service" ];
-            requires = [ "swarm-cluster.service" ];
+            wants = [ "swarm-cluster.service" ];
             wantedBy = [
               "multi-user.target"
               "swarm-cluster.service"
@@ -1048,7 +1051,7 @@ in
           lib.nameValuePair (convergeUnitOf name) {
             description = "Apply the catalog to the app ${name}";
             after = [ "swarm-cluster.service" ];
-            requires = [ "swarm-cluster.service" ];
+            wants = [ "swarm-cluster.service" ];
             wantedBy = [
               "multi-user.target"
               "swarm-cluster.service"

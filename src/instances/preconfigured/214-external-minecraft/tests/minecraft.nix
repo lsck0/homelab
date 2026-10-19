@@ -210,6 +210,8 @@ pkgs.testers.runNixOSTest {
       METRICS = "${metricsFile}"
       TEXTFILE = "${nodes.vm-214.homelab.textfileDir}/mc-gate.prom"
       SETTINGS = "${settingsPath}"
+      DEPLOY_PENDING_DIR = "/var/lib/homelab"
+      DEPLOY_PENDING = f"{DEPLOY_PENDING_DIR}/deploy-pending"
       MINIMUM_ONLINE_S = ${toString testLimits.minimumOnlineS}
       # the unit files of the guest with nothing forced: what the lab would really run
       PLAIN_UNITS = ${
@@ -513,6 +515,28 @@ pkgs.testers.runNixOSTest {
               assert DATA_AUTOMOUNT in unit["Requires"] and DATA_AUTOMOUNT in unit["After"], unit
               assert "mc-layout.service" in unit["Requires"], unit
               assert "mc-layout.service" in unit["After"], unit
+
+      with subtest("deploy pending"):
+          # marked before this boot, as a sync marks the guest terraform then reboots: nothing starts, nothing fails
+          vm_214.succeed(
+              f"mkdir -p {DEPLOY_PENDING_DIR} && "
+              f"touch -d @$(( $(date +%s) - $(cut -d. -f1 /proc/uptime) - 60 )) {DEPLOY_PENDING}"
+          )
+          vm_214.succeed("systemctl start minecraft-vanilla.service")
+          unit = show("minecraft-vanilla.service", "ActiveState", "Result")
+          assert unit == {"ActiveState": "inactive", "Result": "success"}, unit
+          vm_214.succeed("journalctl -u minecraft-vanilla.service --grep 'rebooted under a sync' --no-pager")
+          # marked since this boot: no reboot put it on the old generation
+          vm_214.succeed(f"touch {DEPLOY_PENDING}")
+          vm_214.succeed("systemctl start minecraft-vanilla.service")
+          vm_214.succeed("systemctl is-active --quiet minecraft-vanilla.service")
+          servers_sleep()
+          # a run that died before the deploy: its mark expires
+          vm_214.succeed(f"touch -d '1 day ago' {DEPLOY_PENDING}")
+          vm_214.succeed("systemctl start minecraft-vanilla.service")
+          vm_214.succeed("systemctl is-active --quiet minecraft-vanilla.service")
+          vm_214.succeed(f"rm {DEPLOY_PENDING}")
+          servers_sleep()
 
       with subtest("no wantedby"):
           # only the gate starts a server, so nothing pulls one in at boot

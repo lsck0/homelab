@@ -65,6 +65,10 @@ let
   gateSettingsPath = "/etc/mc-gate/settings.json";
   gateMetricsName = "mc-gate";
   gateMetricsFile = "${gateStateDir}/metrics.prom";
+  # sync.nu marks the guest before terraform may reboot it and removes the mark with its deploy or its failure
+  # (scripts/lib/lab.nu DEPLOY_PENDING_FILE); sync.nu's REAPER_PAUSE_S bounds a run, so a mark a dead run left expires
+  deployPendingFile = "/var/lib/homelab/deploy-pending";
+  deployPendingMaxS = 14400;
   # the server's secrets, rendered by sops under /run: never on the nas, never in a snapshot
   serverEnv = config.sops.templates."minecraft-server.env".path;
   imageJava21 = "itzg/minecraft-server:2026.9.1-java21";
@@ -172,6 +176,20 @@ let
       ${podman} rm --force --ignore ${containerOf name}
     '';
 
+  # a boot after the mark runs the generation the sync is about to replace, and a server keeps the unit it started
+  # with until it sleeps (restartIfChanged): it waits for the deploy instead
+  deployGuard = pkgs.writeShellScript "minecraft-deploy-guard" ''
+    [ -e ${deployPendingFile} ] || exit 0
+    max_s=${toString deployPendingMaxS}
+    now=$(date +%s)
+    marked=$(stat -c %Y ${deployPendingFile})
+    booted=$((now - $(cut -d. -f1 /proc/uptime)))
+    if [ "$marked" -lt "$booted" ] && [ $((now - marked)) -lt "$max_s" ]; then
+      echo "rebooted under a sync that has not deployed this guest yet: no server starts on the old generation"
+      exit 1
+    fi
+  '';
+
   # distant horizons draws the far terrain, so the server sends and ticks less of it (view and simulation distance)
   serverStart =
     name:
@@ -227,6 +245,8 @@ let
     conflicts = othersThan name;
     path = [ pkgs.podman ];
     serviceConfig = {
+      # a condition, not a failure: the start is skipped, the unit stays inactive and the gate puts it back to sleep
+      ExecCondition = deployGuard;
       ExecStartPre = serverPreStart name;
       ExecStart = serverStart name;
       # podman stops the container, not its client: a stopped client would leave conmon and the jvm holding the ports

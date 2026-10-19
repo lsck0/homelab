@@ -32,7 +32,8 @@ use src/scripts/lib/proxmox.nu [
     PROXMOX_IMAGE PROXMOX_LXC_TEMPLATE PROXMOX_SSH_ALIVE_INTERVAL_S PROXMOX_SSH_ALIVE_COUNT
 ]
 use src/scripts/lib/lab.nu [
-    lab-ssh-try proxmox-ssh wait-for-ssh guest-status guest-wake guest-sleep host-keys-learn deploy-nixos SSH_CONNECT_TIMEOUT_S
+    lab-ssh-try proxmox-ssh wait-for-ssh guest-status guest-wake guest-sleep host-keys-learn deploy-pending-add
+    deploy-pending-remove deploy-nixos SSH_CONNECT_TIMEOUT_S
 ]
 
 const LOG_KEEP = 30
@@ -506,6 +507,7 @@ def sync-run [run: path, names: list<string>, skip_host: bool]: nothing -> int {
     if not $skip_host {
         phase-print $started "TERRAFORM"
         if not (law-check $TERRAFORM_LAW) { die $"terraform breaks its law \(($TERRAFORM_LAW), above\): nothing applied." }
+        deploy-pending-add $lab ($inventory | items {|id, guest| if $id in $selected and $guest.powered { $guest.ip? } } | compact)
         if not (terraform-sync $lab $nas_id $tfvars_file $ca $nix_trust) { $failure = true }
         let lxc_settings = $inventory | items {|id, guest|
             if $guest.kind == "lxc" { $"($id) ($guest.features) (if $guest.powered and $guest.idle == null { 1 } else { 0 })" }
@@ -569,6 +571,7 @@ def sync-run [run: path, names: list<string>, skip_host: bool]: nothing -> int {
         } else {
             deploy-nixos $lab $name $ip $toplevel $key
         }
+        if not $ok { deploy-pending-remove $lab [$ip] }
         {guest: $name, ok: $ok, seconds: (((date now) - $began) / 1sec | math floor)}
     }
 

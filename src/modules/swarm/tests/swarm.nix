@@ -329,11 +329,11 @@ pkgs.testers.runNixOSTest {
         vm_107.wait_for_unit("swarm-converge-demo.service")
         serves(${toString port}, "demo v2")
 
-    with subtest("the cluster unit started again brings back the units a failed switch stopped with it"):
+    with subtest("a stop of the cluster unit leaves the units after it running"):
         dependents = ("swarm-reconcile.service", "swarm-prune.service", "swarm-converge-demo.service")
         vm_107.succeed("systemctl stop swarm-cluster.service")
         for unit in dependents:
-            vm_107.fail(f"systemctl is-active {unit}")
+            vm_107.succeed(f"systemctl is-active {unit}")
         vm_107.succeed("systemctl start swarm-cluster.service")
         for unit in dependents:
             vm_107.wait_for_unit(unit)

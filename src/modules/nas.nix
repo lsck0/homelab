@@ -52,7 +52,31 @@ let
   declaredMountpoints = pkgs.writeText "nas-mountpoints" (lib.concatLines nasMountpoints);
   # podman-<name> or docker-<name>, whichever backend the host runs
   containerUnits = map (c: c.serviceName) (lib.attrValues config.virtualisation.oci-containers.containers);
-  nasAutomounts = map (m: "${utils.escapeSystemdPath m}.${if container then "mount" else "automount"}") nasMountpoints;
+  automountOf = m: "${utils.escapeSystemdPath m}.${if container then "mount" else "automount"}";
+  nasAutomounts = map automountOf nasMountpoints;
+  holdersOf = path: lib.filter (m: path == m || lib.hasPrefix "${m}/" path) nasMountpoints;
+  # the nas mountpoint a path lies on, the innermost when they nest
+  mountpointOf =
+    path:
+    let
+      holders = holdersOf path;
+    in
+    if holders == [ ] then
+      throw "nasRequires: ${path} lies on no nas mount of ${config.networking.hostName}"
+    else
+      lib.last (lib.sort (a: b: lib.stringLength a < lib.stringLength b) holders);
+  # a long-lived unit's dependency on the nas paths it uses: their automounts, which the mount's idle expiry and a
+  # restart of the nas never stop. RequiresMountsFor requires the mount and stops the unit with it, for good
+  nasRequires =
+    paths:
+    let
+      units = lib.unique (map (p: automountOf (mountpointOf p)) paths);
+    in
+    {
+      requires = units;
+      after = units;
+    };
+  postgresDir = config.services.postgresql.dataDir;
 
   mount = options: mountpoint: path: {
     "${mountpoint}" = {
@@ -126,6 +150,7 @@ in
       nasMountRo = mountpoint: name: mount nfsOptsRo mountpoint "data/${name}";
       nasMedia = mountpoint: subpath: mount nfsOptsRo mountpoint "bulk/media/${subpath}";
       nasPath = mount nfsOpts;
+      inherit nasRequires;
     };
 
     homelab.nasFileSystems = lib.mapAttrs (_: m: { inherit (m) device fsType options; }) config.homelab.nasMounts;
@@ -165,11 +190,21 @@ in
 
     systemd.services = {
       # nfs postgres outlives the 45s stop default
-      postgresql.serviceConfig = lib.mkIf config.services.postgresql.enable {
-        TimeoutStopSec = "3min";
-        Restart = lib.mkForce "on-failure";
-        RestartSec = 10;
-      };
+      postgresql = lib.mkIf config.services.postgresql.enable (
+        lib.mkMerge [
+          {
+            serviceConfig = {
+              TimeoutStopSec = "3min";
+              Restart = lib.mkForce "on-failure";
+              RestartSec = 10;
+            };
+          }
+          # nixpkgs' RequiresMountsFor on the data dir
+          (lib.mkIf (holdersOf postgresDir != [ ]) (
+            nasRequires [ postgresDir ] // { unitConfig.RequiresMountsFor = lib.mkForce [ ]; }
+          ))
+        ]
+      );
 
       # tmpfiles skips unmounted automounts
       nas-tmpfiles = lib.mkIf (nasMountpoints != [ ]) {

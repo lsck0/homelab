@@ -39,6 +39,7 @@ case $command in
   echo "switch run $count"
   echo "homelab-switch-status=$(echo $SWITCH_STATUSES | cut -d " " -f $count)" ;;
 *readlink*) echo /nix/store/old-system ;;
+*deploy-pending*) echo "$command" >> "$STUBS/pending" ;;
 *lsblk*) echo "0 0 boot" ;;
 esac
 '
@@ -138,5 +139,17 @@ def main [repo: path]: nothing -> nothing {
     }
     if (do $deploy "0" "").switches != 1 { fail "a clean switch: switched again" }
     if (do $deploy "1 0" "").switches != 1 { fail "a switch failing otherwise than by its units: switched again" }
+
+    let stubs = mktemp --directory --tmpdir
+    $GUEST_SSH | save ($stubs | path join ssh)
+    ^chmod +x ($stubs | path join ssh)
+    let lab = {ssh_config: "/dev/null"} | to nuon
+    let code = $"deploy-pending-add ($lab) [10.0.0.1 10.0.0.2]; deploy-pending-remove ($lab) [10.0.0.1]"
+    let ran = with-env {PATH: ($env.PATH | prepend $stubs), STUBS: $stubs} { sync-run-code $repo $code }
+    if $ran.exit_code != 0 { fail $"the deploy-pending mark failed: ($ran.stderr)" }
+    let pending = open --raw ($stubs | path join pending) | lines
+    if ($pending | where { str contains "touch" } | length) != 2 { fail $"not both guests marked: ($pending)" }
+    if not ($pending | last | str contains "rm -f") { fail $"the mark is not removed after its guests are marked: ($pending)" }
+    rm --recursive --force $stubs
     print "sync-plan: all cases pass"
 }

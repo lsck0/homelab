@@ -32,6 +32,9 @@ const SWITCH_STATUS_MARK = "homelab-switch-status="
 const SWITCH_STATUS_UNITS_FAILED = "4"
 # the toplevel sync.nu last deployed, for the guest to tell from the one it runs (drift: a hand switch, a rollback)
 const DEPLOYED_TOPLEVEL_FILE = "/var/lib/homelab/deployed-toplevel"
+# a guest terraform reboots runs its old generation until its deploy: marked before terraform, removed by the deploy
+# or its failure (instances/preconfigured/214-external-minecraft starts no server under it)
+const DEPLOY_PENDING_FILE = "/var/lib/homelab/deploy-pending"
 const KNOWN_HOSTS_HEADER = [
     "# every ssh host key of the lab, checked strictly by sync.nu, hermes and the owner's ssh config"
     "# Proxmox: pinned by src/scripts/init.nu --pin after a console check. Guests: written by sync.nu from each"
@@ -181,9 +184,20 @@ def wait-for-reboot [lab: record, ip: string, boot_id: string]: nothing -> bool 
     false
 }
 
+# a guest that does not answer is rebooted into nothing either
+export def deploy-pending-add [lab: record, ips: list<string>]: nothing -> nothing {
+    let dir = $DEPLOY_PENDING_FILE | path dirname
+    $ips | par-each {|ip| lab-ssh-try $lab $ip $"mkdir -p ($dir) && touch ($DEPLOY_PENDING_FILE)" } | ignore
+}
+
+# a failed deploy leaves the guest on its old generation for good: nothing is left to wait for
+export def deploy-pending-remove [lab: record, ips: list<string>]: nothing -> nothing {
+    $ips | par-each {|ip| lab-ssh-try $lab $ip $"rm -f ($DEPLOY_PENDING_FILE)" } | ignore
+}
+
 def deployed-toplevel-record [lab: record, name: string, ip: string, toplevel: string]: nothing -> bool {
     let dir = $DEPLOYED_TOPLEVEL_FILE | path dirname
-    let recorded = lab-ssh-try $lab $ip $"mkdir -p ($dir) && echo ($toplevel) > ($DEPLOYED_TOPLEVEL_FILE)"
+    let recorded = lab-ssh-try $lab $ip $"mkdir -p ($dir) && echo ($toplevel) > ($DEPLOYED_TOPLEVEL_FILE) && rm -f ($DEPLOY_PENDING_FILE)"
     if $recorded.exit_code != 0 { print $"ERROR: ($name): the deployed toplevel is not recorded: ($recorded.stderr | str trim)" }
     $recorded.exit_code == 0
 }

@@ -15,6 +15,7 @@
   lib,
   pkgs,
   nasMount,
+  nasRequires,
   ...
 }:
 let
@@ -151,10 +152,10 @@ in
     systemd.services = lib.mkMerge (
       lib.mapAttrsToList (name: s: {
         # no RemainAfterExit: every start of the app runs it again
-        "${name}-seed" = {
+        # the automount: the app requires its seed, and RequiresMountsFor would stop both with the mount
+        "${name}-seed" = nasRequires [ (nasDir name) ] // {
           before = [ "${s.unit}.service" ];
           requiredBy = [ "${s.unit}.service" ];
-          unitConfig.RequiresMountsFor = [ (nasDir name) ];
           serviceConfig = {
             Type = "oneshot";
             ExecStart = reconcile name s;

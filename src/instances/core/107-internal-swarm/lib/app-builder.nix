@@ -17,6 +17,7 @@
   inventory,
   lab,
   upstream,
+  nasRequires,
   ...
 }:
 let
@@ -215,8 +216,9 @@ let
     # the rootless socket lives under /run/user
     ProtectHome = "read-only";
   };
+  dashboardsMount = nasRequires [ config.homelab.swarm.appDashboardsDir ];
   unit = {
-    unitConfig.RequiresMountsFor = [ config.homelab.swarm.appDashboardsDir ];
+    inherit (dashboardsMount) requires;
     wants = [
       "network-online.target"
       docker.userUnit
@@ -224,7 +226,8 @@ let
     after = [
       "network-online.target"
       docker.userUnit
-    ];
+    ]
+    ++ dashboardsMount.after;
     path = [
       pkgs.git
       pkgs.git-lfs

@@ -6,6 +6,7 @@
   inventory,
   site,
   nasMount,
+  nasRequires,
   catalog,
   upstream,
   ...
@@ -256,7 +257,8 @@ let
   );
 
   calendarState = "/var/lib/calendar";
-  incomingDir = "${calendarState}/incoming";
+  # local: a path unit requires the mount of what it watches, and inotify sees no write over nfs anyway
+  incomingDir = "/var/lib/calendar-incoming";
   uploadDir = "${calendarState}/uploads";
 
   # calendars only exported by hand
@@ -305,15 +307,16 @@ in
   homelab.textfiles = map (lib.removeSuffix ".prom") (lib.concatMap (f: f.exports or [ ]) (lib.attrValues collectors));
 
   imports = [
-    # nothing may run before the shares are up
+    # nothing may run before the shares are up; a unit that stays up requires the automount, not the mount
+    {
+      systemd.services.calendar-upload-dir = nasRequires [ calendarState ];
+    }
     {
       systemd.services =
         lib.genAttrs
           (
             [
-              "nginx"
               "trmnl-sync"
-              "calendar-upload-dir"
               "calendar-upload"
             ]
             ++ map (f: f.script) (lib.attrValues collectors)
@@ -473,7 +476,10 @@ in
     wantedBy = [ "multi-user.target" ];
     before = [ "nginx.service" ];
     after = [ "remote-fs.target" ];
-    path = [ pkgs.coreutils ];
+    path = [
+      pkgs.coreutils
+      pkgs.findutils
+    ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -485,6 +491,11 @@ in
       [ -n "$TOKEN" ] || { echo "calendar-upload-token is empty"; exit 1; }
       DIR="${incomingDir}/$TOKEN"
       mkdir -p "$DIR" "${incomingDir}/.tmp" ${uploadDir}
+      # pushes left in the nas incoming dir it replaced; delete once that dir is gone on vm-114
+      if [ -d ${calendarState}/incoming ]; then
+        find ${calendarState}/incoming -mindepth 1 -maxdepth 2 -name '*.ics' -exec mv -t "$DIR" {} +
+        rm -rf ${calendarState}/incoming
+      fi
       # drop stale token dirs after rotation
       for dir in ${incomingDir}/*; do
         [ -d "$dir" ] || continue
@@ -501,6 +512,8 @@ in
 
   # nginx unit has ProtectSystem=strict
   systemd.services.nginx.serviceConfig.ReadWritePaths = [ incomingDir ];
+  # nginx refuses to start on a missing ReadWritePaths, and calendar-upload-dir waits for the nas
+  systemd.tmpfiles.rules = [ "d ${incomingDir} 0700 nginx nginx -" ];
 
   # promote a pushed file once it parses: the push itself starts it, nothing polls
   systemd.paths.calendar-upload = {

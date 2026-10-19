@@ -689,11 +689,22 @@ let
     };
     long-run-mount = {
       file = "mounts";
-      marker = "outlives deploys yet RequiresMountsFor";
+      marker = "service archbuild stays up yet RequiresMountsFor";
       tampered =
         tamper "112-internal-archbuild"
           [ "systemd" "services" "archbuild" "unitConfig" "RequiresMountsFor" ]
           [ "/var/lib/archrepo" ];
+    };
+    path-unit-mount = {
+      file = "mounts";
+      marker = "path unit calendar-upload stays up yet RequiresMountsFor";
+      tampered = tamper "114-internal-terminal" [
+        "systemd"
+        "paths"
+        "calendar-upload"
+        "pathConfig"
+        "PathExistsGlob"
+      ] "/var/lib/calendar/incoming/*/*.ics";
     };
     image-pulled-at-start = {
       file = "images";

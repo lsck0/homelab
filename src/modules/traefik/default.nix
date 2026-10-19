@@ -224,7 +224,8 @@ let
     stsIncludeSubdomains = true;
     stsPreload = true;
     contentTypeNosniff = true;
-    browserXssFilter = true;
+    # the auditor "1; mode=block" asked for is gone from browsers and leaked cross-origin state where it ran
+    customResponseHeaders.X-XSS-Protection = "0";
     referrerPolicy = "strict-origin-when-cross-origin";
   };
 
@@ -1744,6 +1745,11 @@ in
             };
           };
           dynamicConfigOptions = {
+            # a client naming no router's host (an ech outer name, a scanner) gets the wildcard, never a self-signed cert
+            tls.stores.default.defaultGeneratedCert = {
+              resolver = wildcardTls.certResolver;
+              domain = lib.head wildcardTls.domains;
+            };
             http = {
               routers = routersWithTls;
               services = cfg.services // routeServices // frontendServices // relayServices // botDefenseServices // gateServices;
