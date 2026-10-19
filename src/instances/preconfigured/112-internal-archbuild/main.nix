@@ -111,7 +111,7 @@ let
   '';
 in {
   homelab.textfiles = [ metricsName ];
-  homelab.nasMounts = nasPath repoDir "bulk/archrepo";
+  homelab.nasMounts = nasPath repoDir "archrepo";
 
   sops.secrets.archrepo-signing-key = {};
   # rsync push to the always-on dmz mirror (vm-210)

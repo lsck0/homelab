@@ -54,6 +54,6 @@
   };
 
   shares = {
-    "bulk/archrepo" = { };
+    "archrepo" = { };
   };
 }

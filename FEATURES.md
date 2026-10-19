@@ -273,7 +273,7 @@ runbooks.
   Symlinks stay local.
 - Databases dumped before the snapshot (`src/modules/db-backup`); sqlite apps run on local disk with a nas copy
   (`src/modules/local-state`); `nas-restore` puts a snapshot back in place.
-- A full official Arch mirror on the hdd, synced hourly (`lib/archmirror-sync.nu`), beside the lsck0 repo.
+- A full official Arch mirror on the nas's ssd root (`/srv/nas/archmirror`), synced hourly (`lib/archmirror-sync.nu`), beside the lsck0 repo (`/srv/nas/archrepo`); the hdd keeps only syncthing, media and torrents.
 
 ## Secrets
 

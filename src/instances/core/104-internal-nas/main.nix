@@ -1,7 +1,7 @@
 # the nas: nfs exports (lib/nas-exports.nix), the owner's smb shares (lib/samba.nix), syncthing, filebrowser, kopia
 # (lib/kopia.nix), the lsck0 pacman repo vm-112 builds, and a full official arch mirror beside it
 #
-# The mirror lives on the bulk hdd next to the lsck0 repo, so a -Syu or a pacstrap whose exact version is not in last
+# The mirror lives on the ssd root next to the lsck0 repo (the hdd keeps syncthing and media alone), so a -Syu or a pacstrap whose exact version is not in last
 # night's lsck0 snapshot pulls from the lan. nginx serves it at /archlinux of the repo's vhost, so lsck0 keeps /x86_64
 # and its authority over overridden and aur packages. Symlinks stay enabled: the package files are relative links into
 # the shared pool/ and rsync's --safe-links already bars any escape, so disable_symlinks would 404 every package.
@@ -26,7 +26,7 @@ let
   syncthingSyncPort = 22000;
   syncthingDiscoveryPort = 21027;
 
-  mirrorDir = "${bulk}/archmirror";
+  mirrorDir = "/srv/nas/archmirror";
   syncthingDir = "/srv/nas/syncthing";
   # tier 1, german, rsync-enabled; the trailing slash is the module root; its https side is the upstream probe
   mirrorUpstream = "rsync://ftp.halifax.rwth-aachen.de/archlinux/";
@@ -162,7 +162,7 @@ in {
     "d /srv/nas/documents/inbox 0777 nobody nogroup -"
     "d ${bulk}/torrents 0775 1000 1000 -"
     # vm-112 writes as root over nfs
-    "d ${bulk}/archrepo 0755 root root -"
+    "d /srv/nas/archrepo 0755 root root -"
     "d ${mirrorDir} 0755 root root -"
     "d /srv/nas/data/firefly/db 0750 70 70 -"
     "d /srv/nas/data/firefly/upload 0750 1000 1000 -"
@@ -244,7 +244,7 @@ in {
     enable = true;
     virtualHosts.archrepo = {
       listen = [{ addr = "0.0.0.0"; port = archrepoPort; }];
-      root = "${bulk}/archrepo";
+      root = "/srv/nas/archrepo";
       extraConfig = ''
         autoindex on;
         # internal, lan, wireguard, tailnet
@@ -274,9 +274,8 @@ in {
   # official repos update a few times a day, so hourly caps the lag
   systemd.services.archmirror-sync = {
     description = "Sync the full official Arch mirror (core/extra/multilib, x86_64) from a tier-1 upstream";
-    after = [ "network-online.target" bulkMount ];
+    after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
-    requires = [ bulkMount ];
     startAt = "hourly";
     environment = {
       ARCHMIRROR_UPSTREAM = mirrorUpstream;

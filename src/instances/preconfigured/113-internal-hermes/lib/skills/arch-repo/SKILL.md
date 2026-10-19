@@ -49,10 +49,10 @@ Two separate things:
 - A recipe starts only while its whole bound (3h build, kill grace, fetch) still fits the night's budget (the
   unit's 20h less 3h for the snapshot and publish); a later one shows as failed "deferred to the next night" and
   keeps its last build.
-- Output lands on the NAS at `/srv/nas/bulk/archrepo` (vm-104 serves it on :8090 for the LAN), and is
+- Output lands on the NAS at `/srv/nas/archrepo` (vm-104 serves it on :8090 for the LAN), and is
   pushed with rsync to vm-210 (`mirror.lsck0.dev`, public, plain http, signed packages).
 
-## Official mirror (vm-104, /srv/nas/bulk/archmirror)
+## Official mirror (vm-104, /srv/nas/archmirror)
 
 - `archmirror-sync.service`, hourly timer, from `rsync://ftp.halifax.rwth-aachen.de/archlinux/`,
   capped at 60 MiB/s, idle I/O priority (script `src/instances/core/104-internal-nas/lib/archmirror-sync.nu`). It checks upstream
@@ -62,6 +62,6 @@ Two separate things:
 - Served at `http://10.100.0.104:8090/archlinux/$repo/os/$arch` to internal, LAN, WireGuard and tailnet only.
 - Start a sync now: `ssh 10.100.0.104 systemctl start --no-block archmirror-sync.service`. A second
   start while one runs is a no-op (flock on `/run/archmirror-sync.lock`).
-- Status: `ssh 10.100.0.104 'systemctl status archmirror-sync; cat /srv/nas/bulk/archmirror/lastupdate'`.
+- Status: `ssh 10.100.0.104 'systemctl status archmirror-sync; cat /srv/nas/archmirror/lastupdate'`.
   `lastupdate` is a unix timestamp; compare it with `date +%s`.
 - Disk: `ssh 10.100.0.104 df -h /srv/nas/bulk`. The media quota does not cover the mirror.

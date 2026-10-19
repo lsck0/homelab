@@ -19,6 +19,8 @@
       pkgs.graphviz
       pkgs.poppler-utils
       pkgs.ghostscript
+      # build.nu waits on the image tools with pgrep
+      pkgs.procps
     ];
   };
   schedule = "*-*-* 00:00:00 Europe/Berlin";
