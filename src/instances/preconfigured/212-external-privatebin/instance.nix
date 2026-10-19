@@ -1,19 +1,29 @@
 # encrypted pastebin
-{ lib, profiles, ... }: {
+{ lib, profiles, ... }:
+{
   vm = {
     # parked while unused; "on" brings it back
     power = "off";
     bootPhase = "public";
-    needs = [ "containers" "nfs" ];
+    needs = [
+      "containers"
+      "nfs"
+    ];
   };
 
-  idle = { stopAfter = "30m"; };
+  idle = {
+    stopAfter = "30m";
+  };
 
   services = {
     privatebin = {
       host = "paste";
       port = 80;
-      homepage = { group = "Public"; icon = "privatebin"; name = "PrivateBin"; };
+      homepage = {
+        group = "Public";
+        icon = "privatebin";
+        name = "PrivateBin";
+      };
       # anubis fronts it at the edge; privatebin caps pastes itself
       on = lib.subtractLists [ "cloudflare" "bodyLimit" ] profiles.hardenedExternal ++ profiles.listed ++ profiles.observed;
     };

@@ -2,6 +2,7 @@
 
 Usage: dashboards_import_test.py <path to dashboards-import.py>
 """
+
 import importlib.util
 import json
 import os
@@ -18,8 +19,13 @@ APP = "demo"
 
 
 def board(datasource, **extra):
-    out = {"uid": "main", "title": "Main", "panels": [{"type": "timeseries", "datasource": datasource,
-                                                      "targets": [{"datasource": datasource, "expr": "up"}]}]}
+    out = {
+        "uid": "main",
+        "title": "Main",
+        "panels": [
+            {"type": "timeseries", "datasource": datasource, "targets": [{"datasource": datasource, "expr": "up"}]}
+        ],
+    }
     out.update(extra)
     return json.dumps(out)
 
@@ -46,8 +52,12 @@ class Normalise(unittest.TestCase):
                 self.assertEqual(out["panels"][0]["targets"][0]["datasource"], want)
 
     def test_export_inputs_resolve_to_the_apps_own(self):
-        text = board("${DS_LOKI}", __inputs=[{"name": "DS_LOKI", "pluginId": "loki", "type": "datasource"}],
-                     __requires=[{"id": "loki"}], id=7)
+        text = board(
+            "${DS_LOKI}",
+            __inputs=[{"name": "DS_LOKI", "pluginId": "loki", "type": "datasource"}],
+            __requires=[{"id": "loki"}],
+            id=7,
+        )
         out = normalise(text)
         self.assertEqual(out["panels"][0]["datasource"], {"type": "loki", "uid": "loki-demo"})
         self.assertNotIn("__inputs", out)

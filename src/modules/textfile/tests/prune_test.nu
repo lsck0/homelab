@@ -2,9 +2,6 @@
 #
 # usage: prune_test.nu <textfile-prune executable>
 
-# the names hosts wrote before they kept a record
-const LEGACY = "app_builder legacy_*"
-
 def fail [message: string]: nothing -> nothing {
     print -e $"FAIL: ($message)"
     exit 1
@@ -23,7 +20,7 @@ def gone [dir: path, name: string, why: string]: nothing -> nothing {
 }
 
 def activate [prune: path, dir: path, ...patterns: string]: nothing -> nothing {
-    let run = do { ^$prune $dir $LEGACY ...$patterns } | complete
+    let run = do { ^$prune $dir ...$patterns } | complete
     if $run.exit_code != 0 { fail $"activate ($patterns): exit ($run.exit_code): ($run.stderr)" }
 }
 
@@ -31,19 +28,12 @@ def main [prune: path]: nothing -> nothing {
     let d = mktemp --directory | path join textfile
     mkdir $d
 
-    # a host's first generation: a legacy file no unit writes now goes, a declared one stays, what nobody ever declared
-    # survives (a forgotten writer loses nothing)
-    put $d app_builder legacy_x ondemand forgotten
+    # a host's first generation removes nothing: what nobody ever declared survives (a forgotten writer loses nothing)
+    put $d app_builder ondemand forgotten
     activate $prune $d ondemand
-    gone $d app_builder "legacy, not declared here"
-    gone $d legacy_x "legacy pattern, not declared here"
+    has $d app_builder "never recorded"
     has $d ondemand "declared"
     has $d forgotten "never declared"
-
-    # the legacy names count for the first record only: from then on a host's own record decides
-    put $d app_builder
-    activate $prune $d ondemand
-    has $d app_builder "written after the first activation"
 
     # the builder moved away: the name its old generation recorded goes, the others stay
     activate $prune $d app_builder ondemand
@@ -80,7 +70,7 @@ def main [prune: path]: nothing -> nothing {
     if not ($d | path join .declared | path exists) { fail "no record" }
 
     # a pattern outside the option's shape is refused, not taken as a regex
-    let bad = do { ^$prune $d $LEGACY 'a.b' } | complete
+    let bad = do { ^$prune $d 'a.b' } | complete
     if $bad.exit_code == 0 { fail "a pattern with a regex character was taken" }
 
     print "prune: ok"

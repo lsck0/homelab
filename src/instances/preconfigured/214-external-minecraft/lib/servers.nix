@@ -4,20 +4,28 @@
 let
   # one dns label: lowercase letters and digits, hyphens inside (rfc 1123)
   labelPattern = "[a-z0-9]([a-z0-9-]*[a-z0-9])?";
-  reserved = [ "layout" "gate" "state" ];
+  reserved = [
+    "layout"
+    "gate"
+    "state"
+  ];
 
   # a name -> what is wrong with it, or null
-  problem = name:
+  problem =
+    name:
     if builtins.match labelPattern name == null then
       "server ${builtins.toJSON name}: a server name is one dns label, the label below *.mc a player dials"
     else if lib.elem name reserved then
       "server ${name}: the name is taken by the guest's own mc-${name}"
-    else null;
-in {
+    else
+      null;
+in
+{
   inherit problem;
 
   # the declared servers -> their names, or a throw listing every name that breaks the rule
-  check = servers:
+  check =
+    servers:
     let
       names = lib.attrNames servers;
       problems = lib.filter (p: p != null) (map problem names);

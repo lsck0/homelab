@@ -7,13 +7,19 @@
 #   systemctl start app-builder              look at every app now
 #   systemctl start app-builder@<app>        look at one app now, what its ci's /redeploy does
 #   app-builder-redeploy <app>               forget the app's state, then deploy it again whatever it was
+#   app-builder-rollback <app>               deploy the commit before the current one, held until a new commit
 #   journalctl -u app-builder -u 'app-builder@*'
-{ config, lib, pkgs, catalog, inventory, lab, upstream, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  catalog,
+  inventory,
+  lab,
+  upstream,
+  ...
+}:
 let
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
-
   user = "appbuild";
   uid = 2001;
   builderId = lab.roles.app-builder;
@@ -25,9 +31,11 @@ let
   baseRefreshS = 24 * 60 * 60;
   textfileName = "app_builder";
   textfile = "${config.homelab.textfileDir}/${textfileName}.prom";
-  vm = lab.instances.${builderId}.config.vm;
-  # the balloon floor holds the manager (instance.nix); builds get the rest when the host has it free
-  memoryMaxMiB = vm.memoryMiB - vm.balloonMiB;
+  inherit (lab.instances.${builderId}.config) vm;
+  floorMiB = if vm.balloonMiB == 0 then vm.memoryMiB else vm.balloonMiB;
+  # the swarm manager, its controller and the guest's base beside the builds
+  managerReserveMiB = 1024;
+  memoryMaxMiB = floorMiB - managerReserveMiB;
   # the peak of one cold rust or node build: builds run side by side only as far as both cores and memory hold
   buildMemoryMiB = 1024;
   github = "https://github.com";
@@ -55,66 +63,128 @@ let
   gitCallsPerApp = 8;
   runOverheadS = 60;
 
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
-
   cfg = config.homelab.appBuilder;
-  guestManagers = lib.unique (lib.concatMap (a: lib.optional (managerOf a != null) (managerOf a).address) (lib.attrValues catalog.apps));
+  guestManagers = lib.unique (
+    lib.concatMap (a: lib.optional (managerOf a != null) (managerOf a).address) (lib.attrValues catalog.apps)
+  );
   inbox = "${stateDir}/inbox";
-  dashboardsImport = pkgs.writers.writePython3 "dashboards-import" { flakeIgnore = [ "E501" ]; } (builtins.readFile ./dashboards-import.py);
+  dashboardsImport = pkgs.writers.writePython3 "dashboards-import" {
+    flakeIgnore = [
+      "E501"
+      "E203"
+      "W503"
+    ];
+  } (builtins.readFile ./dashboards-import.py);
   # the cluster this host manages takes its stacks here; any other's (a guest's own swarm) over its forced command
-  managerOf = a: if a.cluster.manager == builderId then null
-    else { address = inventory.${a.cluster.manager}.ip; knownHosts = "${cfg.knownHosts}"; };
+  managerOf =
+    a:
+    if a.cluster.manager == builderId then
+      null
+    else
+      {
+        address = inventory.${a.cluster.manager}.ip;
+        knownHosts = "${cfg.knownHosts}";
+      };
 
   staticSite = import ./static-site.nix { inherit pkgs lib; };
-  indexableOrigins = a: map (r: "https://${r.host}.${catalog.domain}") (lib.filter (r: r.indexable) (lib.attrValues a.routes));
+  indexableOrigins =
+    a: map (r: "https://${r.host}.${catalog.domain}") (lib.filter (r: r.indexable) (lib.attrValues a.routes));
   # a static app's build as lib/app-builder.py runs it; its store paths decide a deploy, so a new toolchain or server
   # rebuilds. An indexable route's origin gets a robots.txt and a sitemap.xml in the site
-  staticOf = name: a: if a.static == null then null else {
-    inherit (a.static) command output;
-    inherit (staticSite) server build root;
-    toolchain = "${staticSite.toolchainOf name a.static.packages}";
-    indexable = lib.findFirst (_: true) null (indexableOrigins a);
-  };
+  staticOf =
+    name: a:
+    if a.static == null then
+      null
+    else
+      {
+        inherit (a.static) command output;
+        inherit (staticSite) server build root;
+        toolchain = "${staticSite.toolchainOf name a.static.packages}";
+        indexable = lib.findFirst (_: true) null (indexableOrigins a);
+      };
   staticApps = lib.filterAttrs (_: a: a.static != null) catalog.apps;
 
   # what decides a deploy: a change here deploys the newest commit again even when the branch stood still
-  buildInputsOf = name: a: { inherit (a) repo branch stack build exclude watch dashboards; static = staticOf name a; };
-  catalogJson = pkgs.writeText "app-builder.json" (builtins.toJSON {
-    inherit (catalog) registry;
-    inherit registryUser github githubApi timeouts;
-    inherit (cfg) backoff;
-    inherit baseRefreshS;
-    upstreams = {
-      urls = lib.mapAttrs (_: u: u.url) lab.upstreams;
-      inherit (upstream) registries retry unavailable;
-    };
-    registryPasswordFile = config.sops.secrets.registry-builder-password.path;
-    deployKeyFile = config.sops.secrets.app-deploy-key.path;
-    # read access to the private repos of the catalog; empty: public repos only
-    githubTokenFile = config.sops.secrets.github-mirror-token.path;
-    workDir = "${stateDir}/work";
-    inherit inbox;
-    deployUnit = config.homelab.swarm.deployUnit;
-    buildParallelism = lib.min vm.cores (memoryMaxMiB / buildMemoryMiB);
-    dashboardsImport = "${dashboardsImport}";
-    dashboardsDir = config.homelab.swarm.appDashboardsDir;
-    apps = lib.mapAttrs (name: a: buildInputsOf name a // {
-      build = lib.mapAttrs (_: b: { inherit (b) context dockerfile target args; }) a.build;
-      hash = builtins.hashString "sha256" (builtins.toJSON (buildInputsOf name a));
-      manager = managerOf a;
-      inherit (a) dashboards schedule;
-    }) catalog.apps;
-  });
+  buildInputsOf = name: a: {
+    inherit (a)
+      repo
+      branch
+      stack
+      build
+      exclude
+      watch
+      dashboards
+      ;
+    static = staticOf name a;
+  };
+  catalogJson = pkgs.writeText "app-builder.json" (
+    builtins.toJSON {
+      inherit (catalog) registry;
+      inherit
+        registryUser
+        github
+        githubApi
+        timeouts
+        ;
+      inherit (cfg) backoff;
+      inherit baseRefreshS;
+      upstreams = {
+        urls = lib.mapAttrs (_: u: u.url) lab.upstreams;
+        inherit (upstream) registries retry unavailable;
+      };
+      registryPasswordFile = config.sops.secrets.registry-builder-password.path;
+      deployKeyFile = config.sops.secrets.app-deploy-key.path;
+      # read access to the catalog's private app repos; empty: public repos only
+      githubTokenFile = config.sops.secrets.github-mirror-token.path;
+      workDir = "${stateDir}/work";
+      inherit inbox;
+      inherit (config.homelab.swarm) deployUnit deployStatusDir;
+      buildParallelism = lib.min vm.cores (memoryMaxMiB / buildMemoryMiB);
+      dashboardsImport = "${dashboardsImport}";
+      dashboardsDir = config.homelab.swarm.appDashboardsDir;
+      apps = lib.mapAttrs (
+        name: a:
+        buildInputsOf name a
+        // {
+          build = lib.mapAttrs (_: b: {
+            inherit (b)
+              context
+              dockerfile
+              target
+              args
+              ;
+          }) a.build;
+          hash = builtins.hashString "sha256" (builtins.toJSON (buildInputsOf name a));
+          manager = managerOf a;
+          inherit (a) dashboards schedule requireChecks;
+        }
+      ) catalog.apps;
+    }
+  );
 
   # an upstream call at its worst: every attempt at its bound, the doubling backoffs between them, the probe
-  backoffsS = (lib.foldl' (acc: _: { sumS = acc.sumS + acc.delayS; delayS = acc.delayS * 2; })
-    { sumS = 0; delayS = upstream.retry.backoffS; } (lib.range 2 upstream.retry.attempts)).sumS;
+  backoffsS =
+    (lib.foldl'
+      (acc: _: {
+        sumS = acc.sumS + acc.delayS;
+        delayS = acc.delayS * 2;
+      })
+      {
+        sumS = 0;
+        delayS = upstream.retry.backoffS;
+      }
+      (lib.range 2 upstream.retry.attempts)
+    ).sumS;
   retriedS = boundS: upstream.retry.attempts * boundS + backoffsS + upstream.retry.probeTimeoutS;
   # the longest one app may take: every git call, every watched path, every image (its base's pull retried), the deploy
-  appTimeoutS = a: retriedS (gitCallsPerApp * timeouts.gitS + lib.length a.watch * timeouts.apiS) + timeouts.loginS
-    + lib.length (lib.attrNames a.build ++ lib.optional (a.static != null) "web") * (retriedS timeouts.pushS + timeouts.buildS + 2 * timeouts.pushS) + timeouts.deployS;
+  appTimeoutS =
+    a:
+    retriedS (gitCallsPerApp * timeouts.gitS + lib.length a.watch * timeouts.apiS)
+    + timeouts.loginS
+    +
+      lib.length (lib.attrNames a.build ++ lib.optional (a.static != null) "web")
+      * (retriedS timeouts.pushS + timeouts.buildS + 2 * timeouts.pushS)
+    + timeouts.deployS;
   appTimeouts = map appTimeoutS (lib.attrValues catalog.apps);
   runTimeoutS = lib.foldl' (sum: t: sum + t) runOverheadS appTimeouts;
 
@@ -135,7 +205,10 @@ let
     # the boards apps ship go to the nas share vm-103 provisions; "+": made as root, then this user's
     ExecStartPre = "+${pkgs.coreutils}/bin/install -d -m 0755 -o ${user} -g ${user} ${config.homelab.swarm.appDashboardsDir}";
     # the share's mount, which exists before the folder: systemd refuses to start a unit naming a missing path
-    ReadWritePaths = [ (dirOf config.homelab.swarm.appDashboardsDir) ];
+    ReadWritePaths = [
+      (dirOf config.homelab.swarm.appDashboardsDir)
+      config.homelab.swarm.deployStatusDir
+    ];
     NoNewPrivileges = true;
     ProtectSystem = "strict";
     PrivateTmp = true;
@@ -144,16 +217,28 @@ let
   };
   unit = {
     unitConfig.RequiresMountsFor = [ config.homelab.swarm.appDashboardsDir ];
-    wants = [ "network-online.target" docker.userUnit ];
-    after = [ "network-online.target" docker.userUnit ];
-    path = [ pkgs.git pkgs.git-lfs pkgs.openssh config.virtualisation.docker.package ];
+    wants = [
+      "network-online.target"
+      docker.userUnit
+    ];
+    after = [
+      "network-online.target"
+      docker.userUnit
+    ];
+    path = [
+      pkgs.git
+      pkgs.git-lfs
+      pkgs.openssh
+      config.virtualisation.docker.package
+    ];
     environment = {
       DOCKER_HOST = docker.dockerHost;
       # the home is read-only under ProtectSystem=strict; docker login writes here
       DOCKER_CONFIG = "${stateDir}/docker";
     };
   };
-in {
+in
+{
   options.homelab.appBuilder.knownHosts = lib.mkOption {
     type = lib.types.path;
     default = ../../../../generated/known_hosts;
@@ -181,32 +266,47 @@ in {
   config = {
     homelab.textfiles = [ textfileName ];
 
-    assertions = lib.mapAttrsToList (name: a: {
-      assertion = a.stack == null && a.build == { } && a.stateful == [ ] && lib.length (indexableOrigins a) <= 1;
-      message = "app ${name} is static: it names no stack, build or stateful service, and one indexable origin at most";
-    }) staticApps ++ [
-      {
-        assertion = config.homelab.vmid == builderId;
-        message = "the app builder runs on vm-${builderId} (the role app-builder), the address the managers' forced command accepts";
-      }
-      {
-        assertion = vm.balloonMiB > 0 && memoryMaxMiB >= buildMemoryMiB;
-        message = "vm-${builderId}: memoryMiB ${toString vm.memoryMiB} above its balloon floor ${toString vm.balloonMiB} must hold one build (${toString buildMemoryMiB} MiB)";
-      }
-    ];
+    assertions =
+      lib.mapAttrsToList (name: a: {
+        assertion = a.stack == null && a.build == { } && a.stateful == [ ] && lib.length (indexableOrigins a) <= 1;
+        message = "app ${name} is static: it names no stack, build or stateful service, and one indexable origin at most";
+      }) staticApps
+      ++ [
+        {
+          assertion = config.homelab.vmid == builderId;
+          message = "the app builder runs on vm-${builderId} (the role app-builder), the address the managers' forced command accepts";
+        }
+        {
+          assertion = memoryMaxMiB >= buildMemoryMiB;
+          message = "vm-${builderId}: its floor ${toString floorMiB} MiB less ${toString managerReserveMiB} for the manager must hold one build (${toString buildMemoryMiB} MiB)";
+        }
+      ];
 
     homelab.rootlessDocker.${user} = {
       inherit uid;
       memoryMax = "${toString memoryMaxMiB}M";
       buildCacheKeep = "20GB";
       # the registry through the internal ingress, and the guest swarms' forced command; nothing else inside
-      labAccess = [ { ip = catalog.ingress.internal.ip; port = 443; } ] ++ map (ip: { inherit ip; port = 22; }) guestManagers;
+      labAccess = [
+        {
+          inherit (catalog.ingress.internal) ip;
+          port = 443;
+        }
+      ]
+      ++ map (ip: {
+        inherit ip;
+        port = 22;
+      }) guestManagers;
     };
     # lab names without cloudflare: the ingress terminates https and gates pushes
     networking.hosts.${catalog.ingress.internal.ip} = [ catalog.registry ];
 
     # its stacks for this host's swarm, which swarm-deploy@<app> reads as root
-    systemd.tmpfiles.rules = [ "d ${inbox} 0750 ${user} ${user} -" ];
+    systemd.tmpfiles.rules = [
+      "d ${inbox} 0750 ${user} ${user} -"
+      # the controller reads it as its own user
+      "d ${config.homelab.swarm.deployStatusDir} 0755 ${user} ${user} -"
+    ];
     homelab.swarm.deployInbox = inbox;
     security.polkit.enable = true;
     security.polkit.extraConfig = ''
@@ -248,27 +348,52 @@ in {
         ExecStart = "${config.systemd.package}/bin/systemctl start --no-block app-builder.service";
       };
     };
-    environment.systemPackages = [ (pkgs.writeShellApplication {
-      name = "app-builder-redeploy";
-      runtimeInputs = [ pkgs.util-linux config.systemd.package ];
-      text = ''
-        app=''${1:?usage: app-builder-redeploy <app>}
-        [[ "$app" =~ ^[a-z][a-z0-9-]*$ ]] || { echo "app-builder-redeploy: '$app' is no app name" >&2; exit 2; }
-        # under the app's lock (lib/app-builder.py app_lock), as its owner: a run at it finishes first
-        runuser -u ${user} -- flock ${stateDir}/"$app".lock rm -f ${stateDir}/"$app".json
-        systemctl start "app-builder@$app.service"
-      '';
-    }) ];
+    environment.systemPackages = [
+      (pkgs.writeShellApplication {
+        name = "app-builder-redeploy";
+        runtimeInputs = [
+          pkgs.util-linux
+          config.systemd.package
+        ];
+        text = ''
+          app=''${1:?usage: app-builder-redeploy <app>}
+          [[ "$app" =~ ^[a-z][a-z0-9-]*$ ]] || { echo "app-builder-redeploy: '$app' is no app name" >&2; exit 2; }
+          # under the app's lock (lib/app-builder.py app_lock), as its owner: a run at it finishes first
+          runuser -u ${user} -- flock ${stateDir}/"$app".lock rm -f ${stateDir}/"$app".json
+          systemctl start "app-builder@$app.service"
+        '';
+      })
+      (pkgs.writeShellApplication {
+        name = "app-builder-rollback";
+        runtimeInputs = [
+          pkgs.util-linux
+          config.systemd.package
+        ];
+        text = ''
+          app=''${1:?usage: app-builder-rollback <app>}
+          runuser -u ${user} -- ${builder} --rollback "$app"
+          systemctl start "app-builder@$app.service"
+        '';
+      })
+    ];
 
     systemd.timers = {
       app-builder = {
         wantedBy = [ "timers.target" ];
         timerConfig.OnUnitInactiveSec = pollInterval;
       };
-    } // lib.mapAttrs' (name: a: lib.nameValuePair "app-builder-${name}" {
-      wantedBy = [ "timers.target" ];
-      # a schedule missed while the vm was down runs at its boot
-      timerConfig = { OnCalendar = a.schedule; Persistent = true; Unit = "app-builder@${name}.service"; };
-    }) (lib.filterAttrs (_: a: a.schedule != null) catalog.apps);
+    }
+    // lib.mapAttrs' (
+      name: a:
+      lib.nameValuePair "app-builder-${name}" {
+        wantedBy = [ "timers.target" ];
+        # a schedule missed while the vm was down runs at its boot
+        timerConfig = {
+          OnCalendar = a.schedule;
+          Persistent = true;
+          Unit = "app-builder@${name}.service";
+        };
+      }
+    ) (lib.filterAttrs (_: a: a.schedule != null) catalog.apps);
   };
 }

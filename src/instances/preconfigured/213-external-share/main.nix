@@ -1,4 +1,10 @@
-{ catalog, nasMount, pkgs, site, ... }:
+{
+  catalog,
+  nasMount,
+  pkgs,
+  site,
+  ...
+}:
 let
   route = catalog.external.share;
   data = "/var/lib/pingvin-share";
@@ -9,17 +15,25 @@ let
   # declared settings win over the database at every start and lock the admin ui (backend/src/config/config.service.ts)
   config = (pkgs.formats.yaml { }).generate "pingvin-share.yaml" {
     general.appUrl = "https://${route.host}.${site.domain}";
-    security = { allowRegistration = false; allowUnauthenticatedShares = false; secureCookies = true; };
+    security = {
+      allowRegistration = false;
+      allowUnauthenticatedShares = false;
+      secureCookies = true;
+    };
     share.maxExpiration = expirationMax;
   };
-in {
+in
+{
   homelab.nasMounts = nasMount data "share";
 
   # the maintained fork of the archived Pingvin Share; it migrates the db forward at start, the nas copy is the rollback
   virtualisation.oci-containers.containers.share = {
-    image = "ghcr.io/smp46/pingvin-share-x:v2.0.0";
+    image = "ghcr.io/smp46/pingvin-share-x:v2.0.0@sha256:d509135afd1d2cefcdeae64a455d52ad5635f7bb37701c6f858f179023ba2910";
     ports = [ "${toString route.port}:3000" ];
-    volumes = [ "${data}:/opt/app/backend/data" "${config}:/opt/app/config.yaml:ro" ];
+    volumes = [
+      "${data}:/opt/app/backend/data"
+      "${config}:/opt/app/config.yaml:ro"
+    ];
     # ~220 MiB: vm 30d peak 469 minus the idle base
     extraOptions = [ "--memory=384m" ];
     # only the zone's ingress reaches the port (the guard, modules/network.nix), its x-forwarded-for is the visitor's

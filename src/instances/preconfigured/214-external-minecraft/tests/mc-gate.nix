@@ -15,6 +15,12 @@ let
   '';
 in
 pkgs.linkFarm "mc-gate" [
-  { name = "package"; path = mcGate.package; }
-  { name = "fuzz"; path = fuzz; }
+  {
+    name = "package";
+    path = mcGate.package;
+  }
+  {
+    name = "fuzz";
+    path = fuzz;
+  }
 ]

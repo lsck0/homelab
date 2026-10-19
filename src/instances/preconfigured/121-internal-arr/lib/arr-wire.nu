@@ -48,10 +48,6 @@ def config-load []: nothing -> record {
     } | merge $hosts
 }
 
-# -----------------------------------------------------------------------------
-# INTERNAL
-# -----------------------------------------------------------------------------
-
 def file-read [file: path]: nothing -> any {
     try { open --raw $file | str trim } catch { null } | if $in == "" { null } else { $in }
 }
@@ -112,10 +108,6 @@ def prowlarr-indexers-correct [config: record, name: string, base: string, key: 
         row-correct $"($name)/indexer ($row.name)" $"($base)/indexer" $key $row $want
     } | flatten
 }
-
-# -----------------------------------------------------------------------------
-# SERVARR APPS
-# -----------------------------------------------------------------------------
 
 def servarr-wire [config: record, name: string, version: string, category_field: string, category: string, ...roots: string]: nothing -> list<record> {
     let key = secret-read $config $"($name)-key"
@@ -191,10 +183,6 @@ def jellyfin-notify-wire [config: record, name: string]: nothing -> list<record>
         [(later $"($name): adding the Jellyfin notification failed")]
     }
 }
-
-# -----------------------------------------------------------------------------
-# PROWLARR
-# -----------------------------------------------------------------------------
 
 def prowlarr-apps-wire [config: record, base: string, key: string, apps: list]: nothing -> list<record> {
     let wired = [[implementation name]; [Radarr radarr] [Sonarr sonarr] [Lidarr lidarr]] | each {|app|
@@ -278,10 +266,6 @@ def prowlarr-wire [config: record]: nothing -> list<record> {
     }
     $wired ++ $tor ++ $added ++ $tagged
 }
-
-# -----------------------------------------------------------------------------
-# JELLYSEERR
-# -----------------------------------------------------------------------------
 
 def seerr [session: string, method: string, url: string, body?: record]: nothing -> any {
     let headers = {Cookie: $session}
@@ -390,10 +374,6 @@ def jellyseerr-wire [config: record]: nothing -> list<record> {
     if $session == null { return [(later "jellyseerr: Jellyfin login failed")] }
     if $initialised { seerr-correct $config $session $base $keys } else { seerr-initialise $config $session $base $keys }
 }
-
-# -----------------------------------------------------------------------------
-# BAZARR
-# -----------------------------------------------------------------------------
 
 def bazarr-wire [config: record]: nothing -> list<record> {
     let base = $"($config.bazarr_url)/api"

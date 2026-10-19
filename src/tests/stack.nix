@@ -16,9 +16,17 @@ let
       -E "(''${6}) (import ''${flake%#*}/modules/lab { lib = import ${pkgs.path}/lib; }).instances"
   '';
 in
-pkgs.runCommand "stack" { nativeBuildInputs = [ pkgs.nushell pkgs.python3 nixEval ]; } ''
-  export HOME=$TMPDIR NIX_STATE_DIR=$TMPDIR/nix
-  mkdir fixture && cp -r ${src} fixture/src && chmod -R u+w fixture
-  python3 ${./stack_test.py} fixture
-  touch $out
-''
+pkgs.runCommand "stack"
+  {
+    nativeBuildInputs = [
+      pkgs.nushell
+      pkgs.python3
+      nixEval
+    ];
+  }
+  ''
+    export HOME=$TMPDIR NIX_STATE_DIR=$TMPDIR/nix
+    mkdir fixture && cp -r ${src} fixture/src && chmod -R u+w fixture
+    python3 ${./stack_test.py} fixture
+    touch $out
+  ''

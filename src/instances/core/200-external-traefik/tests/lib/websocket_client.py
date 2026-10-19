@@ -44,11 +44,23 @@ async def socket_open(args, context, headers, index):
     """One socket whose greeting and echo arrived, or the refusal of its upgrade."""
     hostname = args.url.split("/")[2]
     try:
-        socket = await connect(args.url, additional_headers=headers, ssl=context, server_hostname=hostname,
-                               host=args.address, port=HTTPS_PORT, local_addr=(args.source, 0), proxy=None,
-                               ping_interval=None, open_timeout=OPEN_TIMEOUT_S)
+        socket = await connect(
+            args.url,
+            additional_headers=headers,
+            ssl=context,
+            server_hostname=hostname,
+            host=args.address,
+            port=HTTPS_PORT,
+            local_addr=(args.source, 0),
+            proxy=None,
+            ping_interval=None,
+            open_timeout=OPEN_TIMEOUT_S,
+        )
     except InvalidStatus as refusal:
-        return None, {"status": refusal.response.status_code, "retry_after": refusal.response.headers.get("Retry-After")}
+        return None, {
+            "status": refusal.response.status_code,
+            "retry_after": refusal.response.headers.get("Retry-After"),
+        }
     greeting = await asyncio.wait_for(socket.recv(), REPLY_TIMEOUT_S)
     assert greeting == GREETING, greeting
     assert await socket_echo(socket, f"open {index}"), f"socket {index} echoed nothing"
@@ -64,7 +76,9 @@ def report_write(path, report):
 async def main():
     parser = argparse.ArgumentParser(description="hold websockets open through an ingress")
     parser.add_argument("--url", required=True)
-    parser.add_argument("--address", required=True, help="the ingress to connect to, whatever the url's host resolves to")
+    parser.add_argument(
+        "--address", required=True, help="the ingress to connect to, whatever the url's host resolves to"
+    )
     parser.add_argument("--source", required=True)
     parser.add_argument("--ca", required=True)
     parser.add_argument("--header", action="append", default=[], help="'Name: value', repeatable")

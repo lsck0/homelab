@@ -7,9 +7,6 @@
 # A new dashboard icon needs its hash below: add `<name> = "";`, build vm-102, paste the hash nix reports.
 { lib, pkgs }:
 let
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
 
   publicPath = "/icons";
   dashboardIconsRev = "104a791794ef68b31bfecac676ddace8c223fd27";
@@ -57,34 +54,37 @@ let
     traefik = "sha256-z/eLNq/Za+pYksebj0gMn7JSSsNDAHoLzz9WHogUa1s=";
   };
 
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
-
   isMdi = lib.hasPrefix mdiPrefix;
   fileOf = icon: if isMdi icon then "${icon}.svg" else "${icon}.png";
-  dashboardIcon = icon: pkgs.fetchurl {
-    name = fileOf icon;
-    url = "https://raw.githubusercontent.com/homarr-labs/dashboard-icons/${dashboardIconsRev}/png/${icon}.png";
-    hash = hashes.${icon};
-  };
-in {
+  dashboardIcon =
+    icon:
+    pkgs.fetchurl {
+      name = fileOf icon;
+      url = "https://raw.githubusercontent.com/homarr-labs/dashboard-icons/${dashboardIconsRev}/png/${icon}.png";
+      hash = hashes.${icon};
+    };
+in
+{
   src = icon: "${publicPath}/${fileOf icon}";
 
-  dir = icons: let
-    mdiIcons = lib.filter isMdi icons;
-    dashboardIcons = lib.subtractLists mdiIcons icons;
-    unpinned = lib.filter (icon: !(hashes ? ${icon})) dashboardIcons;
-  in assert lib.assertMsg (unpinned == [ ])
-    "102-internal-homepage: no pinned hash for the icons ${toString unpinned} (lib/icons.nix)";
-  pkgs.runCommand "homepage-icons" { } ''
-    mkdir -p $out
-    tar -xzf ${mdi} --strip-components=2 -C $TMPDIR package/svg
-    for icon in ${lib.escapeShellArgs (map (lib.removePrefix mdiPrefix) mdiIcons)}; do
-      sed 's|<svg |<svg fill="${mdiColor}" |' "$TMPDIR/$icon.svg" > "$out/${mdiPrefix}$icon.svg"
-    done
-    ${lib.concatMapStrings (icon: "cp ${dashboardIcon icon} $out/${fileOf icon}\n") dashboardIcons}
-  '';
+  dir =
+    icons:
+    let
+      mdiIcons = lib.filter isMdi icons;
+      dashboardIcons = lib.subtractLists mdiIcons icons;
+      unpinned = lib.filter (icon: !(hashes ? ${icon})) dashboardIcons;
+    in
+    assert lib.assertMsg (
+      unpinned == [ ]
+    ) "102-internal-homepage: no pinned hash for the icons ${toString unpinned} (lib/icons.nix)";
+    pkgs.runCommand "homepage-icons" { } ''
+      mkdir -p $out
+      tar -xzf ${mdi} --strip-components=2 -C $TMPDIR package/svg
+      for icon in ${lib.escapeShellArgs (map (lib.removePrefix mdiPrefix) mdiIcons)}; do
+        sed 's|<svg |<svg fill="${mdiColor}" |' "$TMPDIR/$icon.svg" > "$out/${mdiPrefix}$icon.svg"
+      done
+      ${lib.concatMapStrings (icon: "cp ${dashboardIcon icon} $out/${fileOf icon}\n") dashboardIcons}
+    '';
 
   inherit publicPath;
 }

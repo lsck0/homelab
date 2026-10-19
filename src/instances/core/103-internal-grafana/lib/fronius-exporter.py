@@ -16,6 +16,7 @@ AC-coupled pv) makes the house a net source and P_Load positive. Then the real l
 the surplus is exported as fronius_unaccounted_watts. fronius_site_info{meter_location} says where the smart
 meter sits, which decides whether Fronius measures the grid or computes it.
 """
+
 import concurrent.futures
 import json
 import os
@@ -25,9 +26,6 @@ import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
 
 HOST = os.environ.get("FRONIUS_HOST", "")
 LISTEN = os.environ.get("FRONIUS_LISTEN", "127.0.0.1:9118")
@@ -63,10 +61,6 @@ METER_TOTAL = {
     "EnergyReal_WAC_Minus_Absolute": ("fronius_meter_export_wh", "Energy fed into the grid, lifetime."),
 }
 
-
-# -----------------------------------------------------------------------------
-# SOLAR API
-# -----------------------------------------------------------------------------
 
 def fetch(host, path, timeout_s):
     """Body.Data of one Solar API call, or None."""
@@ -107,10 +101,6 @@ def number(value):
         return None
 
 
-# -----------------------------------------------------------------------------
-# EXPOSITION
-# -----------------------------------------------------------------------------
-
 def label_escape(value):
     return str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
 
@@ -146,10 +136,6 @@ def ratio(value):
     return v / PERCENT if v is not None else None
 
 
-# -----------------------------------------------------------------------------
-# COLLECTORS
-# -----------------------------------------------------------------------------
-
 def collect_powerflow(m, data):
     site = data.get("Site") or {}
     pv = number(site.get("P_PV"))
@@ -163,11 +149,14 @@ def collect_powerflow(m, data):
         m.add("fronius_load_watts", "House consumption.", -load)
     m.add("fronius_battery_watts", "Battery power, discharge positive.", site.get("P_Akku"))
     m.add("fronius_autonomy_ratio", "Share of consumption not drawn from the grid.", ratio(site.get("rel_Autonomy")))
-    m.add("fronius_self_consumption_ratio", "Share of production used on site.",
-          ratio(site.get("rel_SelfConsumption")))
+    m.add("fronius_self_consumption_ratio", "Share of production used on site.", ratio(site.get("rel_SelfConsumption")))
     if site.get("Meter_Location") is not None:
-        m.add("fronius_site_info", "Where the smart meter sits: grid (measured) or load (grid computed).", 1.0,
-              {"meter_location": site.get("Meter_Location")})
+        m.add(
+            "fronius_site_info",
+            "Where the smart meter sits: grid (measured) or load (grid computed).",
+            1.0,
+            {"meter_location": site.get("Meter_Location")},
+        )
     for key, name in (("E_Day", "day"), ("E_Year", "year"), ("E_Total", "total")):
         m.add(f"fronius_inverter_energy_{name}_wh", f"Inverter AC output, current {name}.", site.get(key))
     for inverter in (data.get("Inverters") or {}).values():
@@ -182,8 +171,12 @@ def collect_meter(m, data):
             for phase in PHASES:
                 m.add(name, help_text, meter.get(field.format(phase)), {"phase": phase})
         for pair in PHASE_PAIRS:
-            m.add("fronius_meter_voltage_phase_to_phase_volts", "Phase to phase voltage.",
-                  meter.get(f"Voltage_AC_PhaseToPhase_{pair}"), {"phases": pair})
+            m.add(
+                "fronius_meter_voltage_phase_to_phase_volts",
+                "Phase to phase voltage.",
+                meter.get(f"Voltage_AC_PhaseToPhase_{pair}"),
+                {"phases": pair},
+            )
         m.add("fronius_meter_frequency_hertz", "Grid frequency.", meter.get("Frequency_Phase_Average"))
         for field, (name, help_text) in METER_TOTAL.items():
             m.add(name, help_text, meter.get(field))
@@ -238,10 +231,6 @@ def scrape_deadline_s(header_value):
         timeout_s = SCRAPE_TIMEOUT_DEFAULT_S
     return max(SCRAPE_MARGIN_S, timeout_s - SCRAPE_MARGIN_S)
 
-
-# -----------------------------------------------------------------------------
-# SERVER
-# -----------------------------------------------------------------------------
 
 class Handler(BaseHTTPRequestHandler):
     def do_GET(self):  # noqa: N802

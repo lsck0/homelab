@@ -9,12 +9,9 @@
 let
   inherit (lib) mkOption types;
 
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
-
-  collectorVmid = lib.findFirst (id: lib.elem "collector" inventory.${id}.roles)
-    (throw "modules/telemetry.nix: no guest holds the role collector") (lib.attrNames inventory);
+  collectorVmid = lib.findFirst (
+    id: lib.elem "collector" inventory.${id}.roles
+  ) (throw "modules/telemetry.nix: no guest holds the role collector") (lib.attrNames inventory);
 
   ports = {
     grafana = 80;
@@ -39,6 +36,9 @@ let
     journalRemote = 19532;
     # every promtail's own http server: its metrics, scraped for dropped entries
     promtail = 9080;
+    # each ingress's crowdsec and anubis exporters
+    crowdsecMetrics = 6060;
+    anubisMetrics = 28000;
   };
 
   # docker's default bridge address, the same on every node (modules/app-telemetry.nix pins it): a task reaches its
@@ -52,21 +52,54 @@ let
     otlpHttp = [ "/v1/traces" ];
     otlpGrpc = [ "/opentelemetry.proto.collector.trace.v1.TraceService/Export" ];
     # the legacy ingest api (pyroscope-rs, the template's agent) and the connect push api (alloy)
-    pyroscope = [ "/ingest" "/push.v1.PusherService/Push" ];
+    pyroscope = [
+      "/ingest"
+      "/push.v1.PusherService/Push"
+    ];
   };
 
   # a notification groups the alerts of one category: one header, one line per alert
   categories = {
-    offline = { firing = "Offline"; resolved = "Back online"; };
-    service = { firing = "Service down"; resolved = "Service back"; };
-    backups = { firing = "Backups missing"; resolved = "Backups running again"; };
-    attack = { firing = "Attack detected"; resolved = "Attack over"; };
-    storage = { firing = "Storage needs attention"; resolved = "Storage ok"; };
-    apps = { firing = "Apps failing"; resolved = "Apps ok"; };
-    builds = { firing = "Builds failing"; resolved = "Builds ok"; };
-    monitoring = { firing = "Monitoring degraded"; resolved = "Monitoring ok"; };
-    upstream = { firing = "Upstream unavailable"; resolved = "Upstream back"; };
-    heartbeat = { firing = "Alerting alive"; resolved = "Alerting stopped"; };
+    offline = {
+      firing = "Offline";
+      resolved = "Back online";
+    };
+    service = {
+      firing = "Service down";
+      resolved = "Service back";
+    };
+    backups = {
+      firing = "Backups missing";
+      resolved = "Backups running again";
+    };
+    attack = {
+      firing = "Attack detected";
+      resolved = "Attack over";
+    };
+    storage = {
+      firing = "Storage needs attention";
+      resolved = "Storage ok";
+    };
+    apps = {
+      firing = "Apps failing";
+      resolved = "Apps ok";
+    };
+    builds = {
+      firing = "Builds failing";
+      resolved = "Builds ok";
+    };
+    monitoring = {
+      firing = "Monitoring degraded";
+      resolved = "Monitoring ok";
+    };
+    upstream = {
+      firing = "Upstream unavailable";
+      resolved = "Upstream back";
+    };
+    heartbeat = {
+      firing = "Alerting alive";
+      resolved = "Alerting stopped";
+    };
   };
 
   # vm-103's probe of every third-party service (modules/upstream); upstreamUp <name> is 1 while it answers, so an
@@ -74,54 +107,118 @@ let
   upstreamJob = "upstream";
   upstreamUp = name: "max(probe_success{job=\"${upstreamJob}\",upstream=\"${name}\"})";
 
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
-
-  collector = inventory.${collectorVmid} or (throw "modules/telemetry.nix: the inventory has no collector ${collectorVmid}");
+  collector =
+    inventory.${collectorVmid} or (throw "modules/telemetry.nix: the inventory has no collector ${collectorVmid}");
   urlOf = port: "http://${collector.ip}:${toString port}";
 
-  shortName = v:
-    let m = builtins.match "[0-9]+-(internal|external|apps)-(.*)" v.name;
-    in if m == null then v.name else builtins.elemAt m 1;
+  shortName =
+    v:
+    let
+      m = builtins.match "[0-9]+-(internal|external|apps)-(.*)" v.name;
+    in
+    if m == null then v.name else builtins.elemAt m 1;
   countBy = key: lib.foldl' (acc: v: acc // { ${key v} = (acc.${key v} or 0) + 1; }) { } (lib.attrValues inventory);
   nameCounts = countBy shortName;
   zonedName = v: "${shortName v}-${v.type}";
   zonedCounts = countBy zonedName;
   vmId = v: lib.head (lib.splitString "-" v.name);
 
-  # -----------------------------------------------------------------------------
-  # TYPES
-  # -----------------------------------------------------------------------------
-
   alertType = types.submodule {
     options = {
-      title = mkOption { type = types.str; description = "The rule's name in Grafana."; };
-      category = mkOption { type = types.enum (lib.attrNames categories); description = "Groups notifications and names their header."; };
-      expr = mkOption { type = types.str; description = "PromQL, or LogQL with datasource loki: query A."; };
-      op = mkOption { type = types.enum [ "gt" "lt" ]; default = "gt"; description = "How A meets the threshold."; };
-      threshold = mkOption { type = types.number; description = "Condition C: A op threshold fires."; };
-      for = mkOption { type = types.str; default = "5m"; description = "How long the condition holds before it fires."; };
+      title = mkOption {
+        type = types.str;
+        description = "The rule's name in Grafana.";
+      };
+      category = mkOption {
+        type = types.enum (lib.attrNames categories);
+        description = "Groups notifications and names their header.";
+      };
+      expr = mkOption {
+        type = types.str;
+        description = "PromQL, or LogQL with datasource loki: query A.";
+      };
+      op = mkOption {
+        type = types.enum [
+          "gt"
+          "lt"
+        ];
+        default = "gt";
+        description = "How A meets the threshold.";
+      };
+      threshold = mkOption {
+        type = types.number;
+        description = "Condition C: A op threshold fires.";
+      };
+      for = mkOption {
+        type = types.str;
+        default = "5m";
+        description = "How long the condition holds before it fires.";
+      };
       noData = mkOption {
-        type = types.enum [ "OK" "Alerting" ];
+        type = types.enum [
+          "OK"
+          "Alerting"
+        ];
         default = "OK";
         description = "Alerting where silence itself is the failure (a backup timestamp, a log line).";
       };
       execErr = mkOption {
-        type = types.enum [ "KeepLast" "OK" ];
+        type = types.enum [
+          "KeepLast"
+          "OK"
+        ];
         default = "KeepLast";
         description = "A store restarting is not every rule firing at once; OK where an error means silence is wanted.";
       };
-      severity = mkOption { type = types.enum [ "warning" "critical" ]; default = "warning"; description = "critical: needs action today."; };
-      telegram = mkOption { type = types.bool; default = false; description = "Pages over telegram besides ntfy."; };
-      datasource = mkOption { type = types.enum [ "prometheus" "loki" ]; default = "prometheus"; description = "What A queries."; };
-      rangeSeconds = mkOption { type = types.ints.positive; default = 600; description = "How far A looks back (loki rules)."; };
-      summary = mkOption { type = types.str; description = "One line per alert; a go template over $labels and $values."; };
-      description = mkOption { type = types.str; description = "What it means and the first command to run."; };
+      severity = mkOption {
+        type = types.enum [
+          "warning"
+          "critical"
+        ];
+        default = "warning";
+        description = "critical: needs action today.";
+      };
+      telegram = mkOption {
+        type = types.bool;
+        default = false;
+        description = "Pages over telegram besides ntfy.";
+      };
+      datasource = mkOption {
+        type = types.enum [
+          "prometheus"
+          "loki"
+        ];
+        default = "prometheus";
+        description = "What A queries.";
+      };
+      rangeSeconds = mkOption {
+        type = types.ints.positive;
+        default = 600;
+        description = "How far A looks back (loki rules).";
+      };
+      summary = mkOption {
+        type = types.str;
+        description = "One line per alert; a go template over $labels and $values.";
+      };
+      description = mkOption {
+        type = types.str;
+        description = "What it means and the first command to run.";
+      };
     };
   };
-in {
-  inherit collectorVmid ports categories alertType relayAddress relayBridge pushPaths upstreamJob upstreamUp;
+in
+{
+  inherit
+    collectorVmid
+    ports
+    categories
+    alertType
+    relayAddress
+    relayBridge
+    pushPaths
+    upstreamJob
+    upstreamUp
+    ;
 
   urls = {
     prometheus = urlOf ports.prometheus;
@@ -143,17 +240,29 @@ in {
   };
 
   # alerts keyed by uid, typed and defaulted like an instance's (rules vm-103 writes itself)
-  alertsOf = alerts: (lib.evalModules {
-    modules = [{ options.alerts = mkOption { type = types.attrsOf alertType; }; config = { inherit alerts; }; }];
-  }).config.alerts;
+  alertsOf =
+    alerts:
+    (lib.evalModules {
+      modules = [
+        {
+          options.alerts = mkOption { type = types.attrsOf alertType; };
+          config = { inherit alerts; };
+        }
+      ];
+    }).config.alerts;
 
   # the readable `vm` label: the short name ("jellyfin"), the zone added where two guests share it, the id where they
   # share the zone too (swarm-250); vm-103's targets and vm-114's stats-sync both name guests by it
-  vmName = v:
-    if v.type == "router" then "router"
-    else if nameCounts.${shortName v} == 1 then shortName v
-    else if zonedCounts.${zonedName v} == 1 then zonedName v
-    else "${shortName v}-${vmId v}";
+  vmName =
+    v:
+    if v.type == "router" then
+      "router"
+    else if nameCounts.${shortName v} == 1 then
+      shortName v
+    else if zonedCounts.${zonedName v} == 1 then
+      zonedName v
+    else
+      "${shortName v}-${vmId v}";
 
   # swarm names a task's container <stack>_<service>.<slot>.<task id>, a new task id per deploy and restart
   swarmTaskPatterns = {

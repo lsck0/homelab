@@ -1,5 +1,16 @@
 # forgejo: the git forge, logins through authelia oidc, github mirrors, api tokens for the lab
-{ config, pkgs, lib, inventory, catalog, retry, setupUnit, site, upstream, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  inventory,
+  catalog,
+  retry,
+  setupUnit,
+  site,
+  upstream,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   route = catalog.internal.forgejo;
@@ -9,7 +20,7 @@ let
   containerHttpPort = 3000;
   # the container's git user, which owns the data dir
   containerUid = 1000;
-  sshPort = 2222;
+  sshPort = (import ./lib/git-ssh.nix).port;
   data = "/var/lib/forgejo";
   db = "${data}/gitea/gitea.db";
   owner = "luca";
@@ -18,7 +29,7 @@ let
   # an older version afterwards, so forgejo-upgrade-backup keeps the db before every new image. Before a major bump:
   # `forgejo manager flush-queues` on the running version, read the release notes' "When upgrading from" list,
   # deploy, then `forgejo doctor check --all`.
-  image = "codeberg.org/forgejo/forgejo:15.0.9";
+  image = "codeberg.org/forgejo/forgejo:15.0.9@sha256:91a5310c86934339e16bd06b6078aada836e3d8935b2d70f6598108cbfaed5d1";
 
   # the forgejo cli inside the container, after the web side answers
   forgejoPrelude = ''
@@ -32,43 +43,67 @@ let
 
   # a bot user and its api token, exported as a lab token. The stored token stays while forgejo accepts it; only
   # a 401 (revoked, or the db restored to a time before it) mints a new one, so tokens do not pile up
-  botToken = { name, token, scopes, admin ? false }: setupUnit {
-    description = "Export a Forgejo API token for ${name}";
-    after = [ "podman-forgejo.service" "forgejo-init.service" ];
-    path = [ pkgs.curl pkgs.podman pkgs.coreutils pkgs.gawk pkgs.gnugrep ];
-    script = ''
-      ${forgejoPrelude}
-      if current=$(token_read ${token}); then
-        case "$(forgejo_token_status "$current")" in
-          200) echo "${name} token valid"; exit 0 ;;
-          401) echo "${name} token rejected, minting a new one" ;;
-          *) echo "${name} token check inconclusive, retrying" >&2; exit 1 ;;
-        esac
-      fi
-      if ! forgejo_cli admin user list | awk 'NR > 1 { print $2 }' | grep -qx ${name}-bot; then
-        # its password is never used: the bot works through tokens
-        forgejo_cli admin user create --username ${name}-bot --email ${name}@${site.domain} \
-          --random-password ${lib.optionalString admin "--admin "}--must-change-password=false
-      fi
-      # timestamped: a token name is unique per user
-      forgejo_cli admin user generate-access-token --raw --username ${name}-bot --token-name "${name}-$(date +%s)" \
-        --scopes ${scopes} | tr -d '\r\n' | token_write ${token}
-    '';
-  };
-in {
+  botToken =
+    {
+      name,
+      token,
+      scopes,
+      admin ? false,
+    }:
+    setupUnit {
+      description = "Export a Forgejo API token for ${name}";
+      after = [
+        "podman-forgejo.service"
+        "forgejo-init.service"
+      ];
+      path = [
+        pkgs.curl
+        pkgs.podman
+        pkgs.coreutils
+        pkgs.gawk
+        pkgs.gnugrep
+      ];
+      script = ''
+        ${forgejoPrelude}
+        if current=$(token_read ${token}); then
+          case "$(forgejo_token_status "$current")" in
+            200) echo "${name} token valid"; exit 0 ;;
+            401) echo "${name} token rejected, minting a new one" ;;
+            *) echo "${name} token check inconclusive, retrying" >&2; exit 1 ;;
+          esac
+        fi
+        if ! forgejo_cli admin user list | awk 'NR > 1 { print $2 }' | grep -qx ${name}-bot; then
+          # its password is never used: the bot works through tokens
+          forgejo_cli admin user create --username ${name}-bot --email ${name}@${site.domain} \
+            --random-password ${lib.optionalString admin "--admin "}--must-change-password=false
+        fi
+        # timestamped: a token name is unique per user
+        forgejo_cli admin user generate-access-token --raw --username ${name}-bot --token-name "${name}-$(date +%s)" \
+          --scopes ${scopes} | tr -d '\r\n' | token_write ${token}
+      '';
+    };
+in
+{
   homelab.localState.forgejo = {
     path = data;
     unit = "podman-forgejo";
     sqlite = [ "gitea/gitea.db" ];
     # live leveldb queues, rebuilt indexes and logs
-    exclude = [ "gitea/queues" "gitea/indexers" "gitea/log" ];
+    exclude = [
+      "gitea/queues"
+      "gitea/indexers"
+      "gitea/log"
+    ];
   };
 
-  sops.secrets.forgejo-oidc-secret = {};
+  sops.secrets.forgejo-oidc-secret = { };
 
   virtualisation.oci-containers.containers.forgejo = {
     inherit image;
-    ports = [ "${toString route.port}:${toString containerHttpPort}" "${toString sshPort}:${toString net.ports.ssh}" ];
+    ports = [
+      "${toString route.port}:${toString containerHttpPort}"
+      "${toString sshPort}:${toString net.ports.ssh}"
+    ];
     volumes = [ "${data}:/data" ];
     # authelia's discovery document through the internal ingress
     extraOptions = [ "--add-host=${autheliaHost}:${net.ipOf net.zones.internal.ingress}" ];
@@ -96,24 +131,35 @@ in {
     before = [ "podman-forgejo.service" ];
     after = [ "forgejo-seed.service" ];
     requiredBy = [ "podman-forgejo.service" ];
-    path = [ pkgs.sqlite pkgs.coreutils pkgs.findutils ];
-    serviceConfig = { Type = "oneshot"; UMask = "0077"; };
-    script = let running = config.virtualisation.oci-containers.containers.forgejo.image; in ''
-      stamp=${data}/.image
-      if [ -f "$stamp" ] && [ "$(cat "$stamp")" = ${lib.escapeShellArg running} ]; then exit 0; fi
-      if [ -f ${db} ]; then
-        keep=${db}.before-${lib.last (lib.splitString ":" running)}
-        if [ ! -e "$keep" ]; then
-          sqlite3 ${db} ".backup '$keep.tmp'"
-          mv "$keep.tmp" "$keep"
-          echo "kept the database as $keep before upgrading to ${running}"
+    path = [
+      pkgs.sqlite
+      pkgs.coreutils
+      pkgs.findutils
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      UMask = "0077";
+    };
+    script =
+      let
+        running = config.virtualisation.oci-containers.containers.forgejo.image;
+      in
+      ''
+        stamp=${data}/.image
+        if [ -f "$stamp" ] && [ "$(cat "$stamp")" = ${lib.escapeShellArg running} ]; then exit 0; fi
+        if [ -f ${db} ]; then
+          keep=${db}.before-${lib.last (lib.splitString ":" running)}
+          if [ ! -e "$keep" ]; then
+            sqlite3 ${db} ".backup '$keep.tmp'"
+            mv "$keep.tmp" "$keep"
+            echo "kept the database as $keep before upgrading to ${running}"
+          fi
+          chmod 0600 "$keep"
+          find ${dirOf db} -maxdepth 1 -name '${baseNameOf db}.before-*' ! -path "$keep" -print -delete
         fi
-        chmod 0600 "$keep"
-        find ${dirOf db} -maxdepth 1 -name '${baseNameOf db}.before-*' ! -path "$keep" -print -delete
-      fi
-      printf '%s' ${lib.escapeShellArg running} > "$stamp.tmp"
-      mv "$stamp.tmp" "$stamp"
-    '';
+        printf '%s' ${lib.escapeShellArg running} > "$stamp.tmp"
+        mv "$stamp.tmp" "$stamp"
+      '';
   };
 
   # the owner's account on a fresh forge with a random password: logins go through authelia (ACCOUNT_LINKING auto),
@@ -121,7 +167,12 @@ in {
   systemd.services.forgejo-init = setupUnit {
     description = "Create the Forgejo owner account on a fresh forge";
     after = [ "podman-forgejo.service" ];
-    path = [ pkgs.curl pkgs.podman pkgs.gawk pkgs.coreutils ];
+    path = [
+      pkgs.curl
+      pkgs.podman
+      pkgs.gawk
+      pkgs.coreutils
+    ];
     script = ''
       ${forgejoPrelude}
       # the header line, then one line per user
@@ -136,8 +187,15 @@ in {
   # the authelia login source, created once and corrected every run
   systemd.services.forgejo-oauth2-setup = setupUnit {
     description = "Configure Forgejo OAuth2 with Authelia";
-    after = [ "podman-forgejo.service" "forgejo-init.service" ];
-    path = [ pkgs.curl pkgs.podman pkgs.gawk ];
+    after = [
+      "podman-forgejo.service"
+      "forgejo-init.service"
+    ];
+    path = [
+      pkgs.curl
+      pkgs.podman
+      pkgs.gawk
+    ];
     script = ''
       ${forgejoPrelude}
       # the cli takes the client secret only as a flag; it stays inside this vm
@@ -174,8 +232,15 @@ in {
   # the runner registration token, read by the runner on vm-111; regenerated each run, a used one is spent
   systemd.services.forgejo-runner-token = setupUnit {
     description = "Export a Forgejo runner registration token";
-    after = [ "podman-forgejo.service" "forgejo-oauth2-setup.service" ];
-    path = [ pkgs.curl pkgs.podman pkgs.coreutils ];
+    after = [
+      "podman-forgejo.service"
+      "forgejo-oauth2-setup.service"
+    ];
+    path = [
+      pkgs.curl
+      pkgs.podman
+      pkgs.coreutils
+    ];
     script = ''
       ${forgejoPrelude}
       forgejo_cli actions generate-runner-token | tr -d '\r\n' | token_write forgejo-runner
@@ -183,13 +248,20 @@ in {
   };
 
   # GitHub mirrors: github is the source, forgejo pull-mirrors each repo
-  sops.secrets.github-mirror-token = {};
+  sops.secrets.github-mirror-token = { };
 
   systemd.services.forgejo-mirror = {
     description = "Mirror every GitHub repository into Forgejo";
     requires = [ "podman-forgejo.service" ];
-    after = [ "podman-forgejo.service" "forgejo-init.service" ];
-    path = [ pkgs.curl pkgs.podman pkgs.coreutils ];
+    after = [
+      "podman-forgejo.service"
+      "forgejo-init.service"
+    ];
+    path = [
+      pkgs.curl
+      pkgs.podman
+      pkgs.coreutils
+    ];
     serviceConfig = {
       Type = "oneshot";
       StateDirectory = "forgejo-mirror";
@@ -235,8 +307,9 @@ in {
     "d ${data} 0750 ${toString containerUid} ${toString containerUid} -"
   ];
 
-  # git ssh, unguarded; the web port is its route's
+  # git over ssh is no route: its port and guard are here, its clients a grant in instance.nix
   networking.firewall.allowedTCPPorts = [ sshPort ];
+  homelab.ingressOnly.ports = [ sshPort ];
 
   # consistent copy for the snapshot, the live file may be mid-write
   homelab.dbBackup.databases.forgejo.sqlite = db;

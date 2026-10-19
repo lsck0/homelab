@@ -8,7 +8,8 @@
 #   script = "${sqliteBackup.command "/var/lib/app/db.sqlite" "$tmp"}";   # shell: both arguments are expanded there
 let
   busyTimeoutMs = 60000;
-in {
+in
+{
   # command <source> <target>: shell words; the target is single-quoted inside sqlite's dot-command
   command = source: target: ''sqlite3 ${source} ".timeout ${toString busyTimeoutMs}" ".backup '${target}'"'';
 }

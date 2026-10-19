@@ -45,10 +45,6 @@ export def tfstate-synced-set [local: path, agreed: path]: nothing -> nothing {
 
 export def tfstate-hash [file: path]: nothing -> string { hash-of $file }
 
-# -----------------------------------------------------------------------------
-# LOCK
-# -----------------------------------------------------------------------------
-
 # {ok, message, job, tag}: the job holds the lock until tfstate-lock-release ends its stdin
 export def tfstate-lock-acquire [transport: record]: nothing -> record {
     let tag = random int 1..$TAG_MAX
@@ -88,10 +84,6 @@ export def tfstate-lock-release [lock: record]: nothing -> nothing {
         try { job kill $lock.job }
     }
 }
-
-# -----------------------------------------------------------------------------
-# PULL AND PUSH
-# -----------------------------------------------------------------------------
 
 # kept beside it under the time it moved, with the agreement it held; nothing is deleted
 export def tfstate-set-aside [local: path]: nothing -> string {

@@ -15,8 +15,14 @@ let
   # far beyond any test run; a test vm's clock starts at the build host's
   validDays = 3650;
   leaves = {
-    lsck0 = [ "lsck0.dev" "*.lsck0.dev" ];
-    github = [ "github.com" "api.github.com" ];
+    lsck0 = [
+      "lsck0.dev"
+      "*.lsck0.dev"
+    ];
+    github = [
+      "github.com"
+      "api.github.com"
+    ];
   };
   # quoted: stdenv's nullglob would drop an unmatched *.lsck0.dev
   quote = word: "'${word}'";
@@ -40,6 +46,11 @@ let
     }
     ${leafCalls}
   '';
-in {
+in
+{
   ca = "${tree}/ca.crt";
-} // builtins.mapAttrs (name: _: { cert = "${tree}/${name}.crt"; key = "${tree}/${name}.key"; }) leaves
+}
+// builtins.mapAttrs (name: _: {
+  cert = "${tree}/${name}.crt";
+  key = "${tree}/${name}.key";
+}) leaves

@@ -1,4 +1,14 @@
-{ config, lib, pkgs, retry, inventory, site, catalog, lab, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  retry,
+  inventory,
+  site,
+  catalog,
+  lab,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   headscaleRoute = catalog.internal.headscale;
@@ -16,27 +26,41 @@ let
   apiKeyRenewWithinSeconds = 7 * 86400;
 
   # everything but the two secrets, which headplane 0.6 reads only inline; headplane-secret adds them with jq
-  headplaneConfig = pkgs.writeText "headplane-config.json" (builtins.toJSON {
-    server = { host = "0.0.0.0"; port = headplaneRoute.port; cookie_secure = true; };
-    headscale = { url = headscaleLocal; public_url = headscaleUrl; config_strict = false; };
-    integration.agent.enabled = false;
-    oidc = {
-      issuer = autheliaIssuer;
-      client_id = oidc.headplane.id;
-      client_secret_path = "${headplaneDir}/oidc-secret";
-      token_endpoint_auth_method = oidc.headplane.tokenAuthMethod;
-      redirect_uri = "https://${net.fqdn headplaneRoute.host}${oidc.headplane.callback}";
-      disable_api_key_login = true;
-    };
-  });
+  headplaneConfig = pkgs.writeText "headplane-config.json" (
+    builtins.toJSON {
+      server = {
+        host = "0.0.0.0";
+        inherit (headplaneRoute) port;
+        cookie_secure = true;
+      };
+      headscale = {
+        url = headscaleLocal;
+        public_url = headscaleUrl;
+        config_strict = false;
+      };
+      integration.agent.enabled = false;
+      oidc = {
+        issuer = autheliaIssuer;
+        client_id = oidc.headplane.id;
+        client_secret_path = "${headplaneDir}/oidc-secret";
+        token_endpoint_auth_method = oidc.headplane.tokenAuthMethod;
+        redirect_uri = "https://${net.fqdn headplaneRoute.host}${oidc.headplane.callback}";
+        disable_api_key_login = true;
+      };
+    }
+  );
 in
 {
-  homelab.localState.headscale = { path = headscaleDir; unit = "headscale"; sqlite = [ "db.sqlite" ]; };
+  homelab.localState.headscale = {
+    path = headscaleDir;
+    unit = "headscale";
+    sqlite = [ "db.sqlite" ];
+  };
 
   services.headscale = {
     enable = true;
     address = "0.0.0.0";
-    port = headscaleRoute.port;
+    inherit (headscaleRoute) port;
     settings = {
       server_url = headscaleUrl;
       dns = {
@@ -52,15 +76,25 @@ in
         issuer = autheliaIssuer;
         client_id = oidc.headscale.id;
         client_secret_path = config.sops.secrets.headscale-oidc-secret.path;
-        scope = [ "openid" "profile" "email" "groups" ];
-        allowed_groups = [ "admins" "app-${oidc.headscale.id}" ];
+        scope = [
+          "openid"
+          "profile"
+          "email"
+          "groups"
+        ];
+        allowed_groups = [
+          "admins"
+          "app-${oidc.headscale.id}"
+        ];
         pkce.enabled = oidc.headscale.pkce;
         # vpn keeps running when authelia is down
         only_start_if_oidc_is_available = false;
       };
     };
   };
-  sops.secrets.headscale-oidc-secret = { owner = "headscale"; };
+  sops.secrets.headscale-oidc-secret = {
+    owner = "headscale";
+  };
 
   # Headplane, the web ui headscale does not ship; the tag for reading, the digest for what runs
   virtualisation.oci-containers.containers.headplane = {
@@ -74,7 +108,7 @@ in
     ];
   };
 
-  sops.secrets.headplane-oidc-secret = {};
+  sops.secrets.headplane-oidc-secret = { };
   systemd.services.headplane-secret = {
     description = "Generate the Headplane cookie secret and config";
     before = [ "podman-headplane.service" ];
@@ -82,9 +116,18 @@ in
     # oidc sessions act through this key
     after = [ "headplane-apikey.service" ];
     wants = [ "headplane-apikey.service" ];
-    path = [ pkgs.openssl pkgs.coreutils pkgs.jq ];
+    path = [
+      pkgs.openssl
+      pkgs.coreutils
+      pkgs.jq
+    ];
     startLimitIntervalSec = 0;
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 30; };
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      Restart = "on-failure";
+      RestartSec = 30;
+    };
     # json is yaml; every file is private from its first byte and replaced whole
     script = ''
       set -euo pipefail
@@ -107,9 +150,19 @@ in
     wants = [ "headscale.service" ];
     wantedBy = [ "multi-user.target" ];
     startAt = "daily";
-    path = [ pkgs.headscale pkgs.curl pkgs.coreutils pkgs.jq pkgs.systemd ];
+    path = [
+      pkgs.headscale
+      pkgs.curl
+      pkgs.coreutils
+      pkgs.jq
+      pkgs.systemd
+    ];
     startLimitIntervalSec = 0;
-    serviceConfig = { Type = "oneshot"; Restart = "on-failure"; RestartSec = 60; };
+    serviceConfig = {
+      Type = "oneshot";
+      Restart = "on-failure";
+      RestartSec = 60;
+    };
     script = ''
       set -euo pipefail
       umask 077

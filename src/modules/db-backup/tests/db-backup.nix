@@ -5,7 +5,13 @@
 # Claims: a dump is restorable (integrity_check, rows) even under a concurrent writer and through a nas outage; a
 # failed or empty dump leaves nothing behind and no fresh metric; retention keeps the newest DUMPS_KEPT; each host
 # reaches only its own dump dir, which only root may enter on the nas. Every refusal has its positive control.
-{ pkgs, lib, specialArgs, inputs, ... }:
+{
+  pkgs,
+  lib,
+  specialArgs,
+  inputs,
+  ...
+}:
 let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
   ip = id: lab.inventory.${id}.ip;
@@ -17,7 +23,12 @@ let
   outageS = 20;
 
   guest = id: databases: {
-    imports = [ (lab.guest id { flat = true; nas = true; }) ];
+    imports = [
+      (lab.guest id {
+        flat = true;
+        nas = true;
+      })
+    ];
     environment.systemPackages = [ pkgs.sqlite ];
     homelab.dbBackup.databases = databases;
   };
@@ -25,20 +36,33 @@ let
   # the dmz assertion of modules/nas.nix, as evaluated for the real vm-212: a media mount is refused there
   privatebin = inputs.self.nixosConfigurations."212-external-privatebin";
   failedAssertions = config: map (a: a.message) (lib.filter (a: !a.assertion) config.assertions);
-  withMedia = (privatebin.extendModules {
-    modules = [ ({ nasMedia, ... }: { homelab.nasMounts = nasMedia "/srv/media" "movies"; }) ];
-  }).config;
+  withMedia =
+    (privatebin.extendModules {
+      modules = [
+        (
+          { nasMedia, ... }:
+          {
+            homelab.nasMounts = nasMedia "/srv/media" "movies";
+          }
+        )
+      ];
+    }).config;
   dmzRule = "dmz hosts may only mount /srv/nas/data/<share>";
 in
-assert lib.assertMsg (!(lib.any (lib.hasInfix dmzRule) (failedAssertions privatebin.config)))
-  "db-backup: the real vm-212 already fails the dmz mount assertion";
-assert lib.assertMsg (lib.any (lib.hasInfix dmzRule) (failedAssertions withMedia))
-  "db-backup: vm-212 with a media mount passes nas.nix's dmz assertion";
+assert lib.assertMsg (
+  !(lib.any (lib.hasInfix dmzRule) (failedAssertions privatebin.config))
+) "db-backup: the real vm-212 already fails the dmz mount assertion";
+assert lib.assertMsg (lib.any (lib.hasInfix dmzRule) (
+  failedAssertions withMedia
+)) "db-backup: vm-212 with a media mount passes nas.nix's dmz assertion";
 pkgs.testers.runNixOSTest {
   name = "db-backup";
 
   node.specialArgs = lab.specialArgs;
-  nodes.vm-104 = { imports = [ (lab.nas { flat = true; }) ]; environment.systemPackages = [ pkgs.sqlite ]; };
+  nodes.vm-104 = {
+    imports = [ (lab.nas { flat = true; }) ];
+    environment.systemPackages = [ pkgs.sqlite ];
+  };
   nodes.vm-101 = guest "101" {
     app.sqlite = "/var/lib/app/db.sqlite";
     pg.command = "cat /var/lib/app/dump.sql";

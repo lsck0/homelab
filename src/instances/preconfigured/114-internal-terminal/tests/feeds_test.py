@@ -9,6 +9,7 @@ prometheus errors, partial answers. Every clock is a parameter, every random dra
 Writes <out dir>/payloads/<name>.json, what the scripts publish for each TRMNL template (tests/trmnl-templates.nix
 renders them).
 """
+
 import contextlib
 import datetime
 import importlib.util
@@ -67,8 +68,6 @@ def payload_write(name, payload):
         json.dump(payload, handle, indent=2, ensure_ascii=False)
 
 
-# ---- fakes at the urlopen boundary --------------------------------------------------------------
-
 class FakePrometheus:
     """Answers batched queries (energy_model.query_batch) term by term from `values`; `fail` injects a fault.
 
@@ -97,9 +96,13 @@ class FakePrometheus:
         terms = [t for t in self.TERM.findall(query) if t not in missing]
         if url.endswith("/api/v1/query_range"):
             start, end, step = (float(form[k][0]) for k in ("start", "end", "step"))
-            result = [{"metric": {"term": t}, "values": [[start + i * step, str(self.value(t))]
-                                                         for i in range(int((end - start) // step) + 1)]}
-                      for t in terms]
+            result = [
+                {
+                    "metric": {"term": t},
+                    "values": [[start + i * step, str(self.value(t))] for i in range(int((end - start) // step) + 1)],
+                }
+                for t in terms
+            ]
             return json_response({"status": "success", "data": {"resultType": "matrix", "result": result}})
         result = [{"metric": {"term": t}, "value": [0, str(self.value(t))]} for t in terms]
         return json_response({"status": "success", "data": {"resultType": "vector", "result": result}})
@@ -107,8 +110,6 @@ class FakePrometheus:
     def value(self, term):
         return self.values.get(term, self.default)
 
-
-# ---- energy model -------------------------------------------------------------------------------
 
 class LocalDays(unittest.TestCase):
     def test_dst_days_are_23_and_25_hours(self):
@@ -125,16 +126,22 @@ class LocalDays(unittest.TestCase):
         self.assertEqual(end, start_next)
 
     def test_a_year_of_days_and_of_months_is_a_year(self):
-        days = sum(e - s for s, e in (em.local_day_bounds(datetime.date(2026, 1, 1) + datetime.timedelta(days=i))
-                                      for i in range(365)))
+        days = sum(
+            e - s
+            for s, e in (
+                em.local_day_bounds(datetime.date(2026, 1, 1) + datetime.timedelta(days=i)) for i in range(365)
+            )
+        )
         months = sum(e - s for s, e in (em.local_month_bounds(2026, m) for m in range(1, 13)))
         self.assertEqual(days, 365 * DAY)
         self.assertEqual(months, 365 * DAY)
 
     def test_today_follows_the_house_clock(self):
         # 23:30 utc on 2026-06-01 is already the 2nd in Berlin
-        self.assertEqual(em.local_today(int(datetime.datetime(2026, 6, 1, 23, 30, tzinfo=datetime.timezone.utc)
-                                            .timestamp())), datetime.date(2026, 6, 2))
+        self.assertEqual(
+            em.local_today(int(datetime.datetime(2026, 6, 1, 23, 30, tzinfo=datetime.timezone.utc).timestamp())),
+            datetime.date(2026, 6, 2),
+        )
 
 
 class Queries(unittest.TestCase):
@@ -146,8 +153,12 @@ class Queries(unittest.TestCase):
         self.assertEqual(em.query_batch_parse(rows), {t: 2.5 for t in terms})
 
     def test_batch_parse_drops_malformed_rows(self):
-        rows = [{"metric": {"term": "a"}, "value": [0, "NaN?"]}, {"metric": {}}, {"value": [0, "1"]},
-                {"metric": {"term": "b"}, "value": [0, "4"]}]
+        rows = [
+            {"metric": {"term": "a"}, "value": [0, "NaN?"]},
+            {"metric": {}},
+            {"value": [0, "1"]},
+            {"metric": {"term": "b"}, "value": [0, "4"]},
+        ]
         self.assertEqual(em.query_batch_parse(rows), {"b": 4.0, None: 1.0})
 
     def test_window_pins_every_selector_to_its_end(self):
@@ -182,18 +193,38 @@ class Spot(unittest.TestCase):
         both = self.slots(today) + self.slots(today + datetime.timedelta(days=1))
         cases = [
             ("no cache", None, local_s(2026, 6, 10, 9), True),
-            ("today complete before publication", {"attempted_at_s": 0, "slots": self.slots(today)},
-             local_s(2026, 6, 10, 9), False),
+            (
+                "today complete before publication",
+                {"attempted_at_s": 0, "slots": self.slots(today)},
+                local_s(2026, 6, 10, 9),
+                False,
+            ),
             ("tomorrow published", {"attempted_at_s": 0, "slots": self.slots(today)}, local_s(2026, 6, 10, 14), True),
-            ("tomorrow tried within the hour", {"attempted_at_s": local_s(2026, 6, 10, 13, 30),
-                                                "slots": self.slots(today)}, local_s(2026, 6, 10, 14), False),
+            (
+                "tomorrow tried within the hour",
+                {"attempted_at_s": local_s(2026, 6, 10, 13, 30), "slots": self.slots(today)},
+                local_s(2026, 6, 10, 14),
+                False,
+            ),
             ("both days held", {"attempted_at_s": 0, "slots": both}, local_s(2026, 6, 10, 20), False),
-            ("today missing after midnight", {"attempted_at_s": 0, "slots": self.slots(today)},
-             local_s(2026, 6, 11, 0, 5), True),
-            ("failed fetch retried after an hour", {"attempted_at_s": local_s(2026, 6, 10, 8), "slots": []},
-             local_s(2026, 6, 10, 9), True),
-            ("failed fetch not retried within the hour", {"attempted_at_s": local_s(2026, 6, 10, 8, 30), "slots": []},
-             local_s(2026, 6, 10, 9), False),
+            (
+                "today missing after midnight",
+                {"attempted_at_s": 0, "slots": self.slots(today)},
+                local_s(2026, 6, 11, 0, 5),
+                True,
+            ),
+            (
+                "failed fetch retried after an hour",
+                {"attempted_at_s": local_s(2026, 6, 10, 8), "slots": []},
+                local_s(2026, 6, 10, 9),
+                True,
+            ),
+            (
+                "failed fetch not retried within the hour",
+                {"attempted_at_s": local_s(2026, 6, 10, 8, 30), "slots": []},
+                local_s(2026, 6, 10, 9),
+                False,
+            ),
         ]
         for name, cache, now_s, due in cases:
             with self.subTest(name):
@@ -223,12 +254,16 @@ class Spot(unittest.TestCase):
         self.assertEqual(em.spot_parse({"unix_seconds": [2, 1], "price": [2000.0, None]}), [(2, 2.0)])
 
     @PROPERTY
-    @given(st.lists(st.floats(min_value=-0.5, max_value=2.0, allow_nan=False), min_size=1, max_size=30),
-           st.integers(min_value=1, max_value=6))
+    @given(
+        st.lists(st.floats(min_value=-0.5, max_value=2.0, allow_nan=False), min_size=1, max_size=30),
+        st.integers(min_value=1, max_value=6),
+    )
     def test_cheapest_window_is_the_brute_force_one(self, prices, hours):
         hourly = [(i * HOUR, p) for i, p in enumerate(prices)]
         best = em.spot_cheapest_window(hourly, hours)
-        runs = [(hourly[i][0], sum(p for _, p in hourly[i:i + hours]) / hours) for i in range(len(prices) - hours + 1)]
+        runs = [
+            (hourly[i][0], sum(p for _, p in hourly[i : i + hours]) / hours) for i in range(len(prices) - hours + 1)
+        ]
         if not runs:
             self.assertIsNone(best)
             return
@@ -240,8 +275,6 @@ class Spot(unittest.TestCase):
         self.assertIsNone(em.spot_cheapest_window([(0, 0.0), (2 * HOUR, 0.0)], 2))
 
 
-# ---- energy-sync --------------------------------------------------------------------------------
-
 energy_sync = script_load("energy-sync")
 
 
@@ -251,17 +284,31 @@ class EnergySync(unittest.TestCase):
         feed, state_dir = os.path.join(tmp, "feed"), os.path.join(tmp, "state")
         os.makedirs(state_dir, exist_ok=True)
         with contextlib.redirect_stderr(io.StringIO()):
-            rc = energy_sync.run(feed, state_dir, now_s, lambda request, timeout: (
-                FakeSpot()(request, timeout) if isinstance(request, str) else prometheus(request, timeout)))
+            rc = energy_sync.run(
+                feed,
+                state_dir,
+                now_s,
+                lambda request, timeout: (
+                    FakeSpot()(request, timeout) if isinstance(request, str) else prometheus(request, timeout)
+                ),
+            )
         with open(os.path.join(feed, "energy.json")) as handle:
             payload = json.load(handle)
         return rc, payload, tmp
 
     def test_payload_and_exports(self):
         now_s = local_s(2026, 10, 25, 18, 30)
-        values = {"net_eur": 4.257, "savings_eur": 1.5, "pv_kwh": 12.34, "load_kwh": 8.0,
-                  "import_known_load_kwh": 2.0, "export_known_pv_kwh": 6.0, "gas_reading": 3278.0,
-                  "gas_read_at": now_s - 40 * HOUR, "water_read_at": now_s - HOUR}
+        values = {
+            "net_eur": 4.257,
+            "savings_eur": 1.5,
+            "pv_kwh": 12.34,
+            "load_kwh": 8.0,
+            "import_known_load_kwh": 2.0,
+            "export_known_pv_kwh": 6.0,
+            "gas_reading": 3278.0,
+            "gas_read_at": now_s - 40 * HOUR,
+            "water_read_at": now_s - HOUR,
+        }
         rc, payload, tmp = self.run_sync(now_s, FakePrometheus(values))
         self.assertEqual(rc, 0)
         self.assertTrue(payload["source_ok"])
@@ -322,14 +369,17 @@ class EnergySync(unittest.TestCase):
         self.assertEqual(due[0], datetime.date(2026, 10, 23))
 
     def test_months_sum_their_days(self):
-        days = {"2026-09-30": {"pv_kwh": 1.0}, "2026-10-01": {"pv_kwh": 2.0, "gas_m3": 1.5},
-                "2026-10-02": {"pv_kwh": 3.0}}
-        self.assertEqual(energy_sync.months_from_days(days),
-                         {"2026-09": {"pv_kwh": 1.0}, "2026-10": {"pv_kwh": 5.0, "gas_m3": 1.5}})
+        days = {
+            "2026-09-30": {"pv_kwh": 1.0},
+            "2026-10-01": {"pv_kwh": 2.0, "gas_m3": 1.5},
+            "2026-10-02": {"pv_kwh": 3.0},
+        }
+        self.assertEqual(
+            energy_sync.months_from_days(days), {"2026-09": {"pv_kwh": 1.0}, "2026-10": {"pv_kwh": 5.0, "gas_m3": 1.5}}
+        )
 
     def test_german_numbers_round_trip(self):
-        for value, digits, text in ((1234.5, 1, "1.234,5"), (-0.04, 2, "-0,04"), (1e6, 0, "1.000.000"),
-                                    (None, 2, "-")):
+        for value, digits, text in ((1234.5, 1, "1.234,5"), (-0.04, 2, "-0,04"), (1e6, 0, "1.000.000"), (None, 2, "-")):
             self.assertEqual(energy_sync.format_decimal(value, digits), text)
 
     @PROPERTY
@@ -339,12 +389,19 @@ class EnergySync(unittest.TestCase):
         self.assertAlmostEqual(float(text.replace(".", "").replace(",", ".")), round(value, digits), places=digits)
 
     @PROPERTY
-    @given(st.lists(st.tuples(st.floats(min_value=0, max_value=DAY), st.floats(min_value=-500, max_value=20000)),
-                    max_size=50), st.floats(min_value=1, max_value=20000), st.booleans())
+    @given(
+        st.lists(
+            st.tuples(st.floats(min_value=0, max_value=DAY), st.floats(min_value=-500, max_value=20000)), max_size=50
+        ),
+        st.floats(min_value=1, max_value=20000),
+        st.booleans(),
+    )
     def test_chart_path_stays_in_the_viewbox(self, points, top, close):
         d = energy_sync.chart_path(sorted(points), 0, DAY, top, close)
         for x, y in re.findall(r"(-?[0-9.]+),(-?[0-9.]+)", d):
-            self.assertTrue(0 <= float(x) <= energy_sync.CHART_WIDTH_PX and 0 <= float(y) <= energy_sync.CHART_HEIGHT_PX)
+            self.assertTrue(
+                0 <= float(x) <= energy_sync.CHART_WIDTH_PX and 0 <= float(y) <= energy_sync.CHART_HEIGHT_PX
+            )
 
     def test_formats(self):
         for watts, text in ((None, "-"), (0, "0 W"), (999.4, "999 W"), (1000, "1,00 kW"), (-2500, "-2,50 kW")):
@@ -353,21 +410,25 @@ class EnergySync(unittest.TestCase):
             self.assertEqual(energy_sync.format_age(seconds), text)
 
 
-# ---- stats-sync ---------------------------------------------------------------------------------
-
 stats_sync = script_load("stats-sync")
 
 
 class StatsSync(unittest.TestCase):
     def test_human_units(self):
-        for value, text in ((0, "0B/s"), (9.4, "9B/s"), (2048, "2.0K/s"), (50 * 1024 ** 2, "50M/s")):
+        for value, text in ((0, "0B/s"), (9.4, "9B/s"), (2048, "2.0K/s"), (50 * 1024**2, "50M/s")):
             self.assertEqual(stats_sync.human_rate(value), text)
-        for value, text in ((5, "5B"), (1536, "1.5KB"), (3 * 1024 ** 4, "3.0TB")):
+        for value, text in ((5, "5B"), (1536, "1.5KB"), (3 * 1024**4, "3.0TB")):
             self.assertEqual(stats_sync.human_size(value), text)
         for value, text in ((999, "999"), (1500, "1.5k"), (25000, "25k"), (2.5e6, "2.5M")):
             self.assertEqual(stats_sync.human_count(value), text)
-        for seconds, pct, text in ((0, 50, ""), (stats_sync.ETA_UNKNOWN_S, 10, ""), (120, 10, "2m"), (7200, 10, "2h"),
-                                   (172800, 10, "2d"), (5, 100, "done")):
+        for seconds, pct, text in (
+            (0, 50, ""),
+            (stats_sync.ETA_UNKNOWN_S, 10, ""),
+            (120, 10, "2m"),
+            (7200, 10, "2h"),
+            (172800, 10, "2d"),
+            (5, 100, "done"),
+        ):
             self.assertEqual(stats_sync.eta(seconds, pct), text)
 
     def test_bars_scale_to_the_largest(self):
@@ -386,9 +447,11 @@ class StatsSync(unittest.TestCase):
         self.assertEqual(calls, [])
 
     def test_payload_names_guests_like_grafana_and_hides_torrent_names(self):
-        inventory = {"131": {"name": "131-internal-paperless", "vm": "paperless", "powered": True, "idle": None},
-                     "150": {"name": "150-apps-swarm", "vm": "swarm-150", "powered": True, "idle": None},
-                     "133": {"name": "133-internal-huginn", "vm": "huginn", "powered": False, "idle": None}}
+        inventory = {
+            "131": {"name": "131-internal-paperless", "vm": "paperless", "powered": True, "idle": None},
+            "150": {"name": "150-apps-swarm", "vm": "swarm-150", "powered": True, "idle": None},
+            "133": {"name": "133-internal-huginn", "vm": "huginn", "powered": False, "idle": None},
+        }
         with tempfile.TemporaryDirectory() as tmp:
             inv = os.path.join(tmp, "inventory.json")
             with open(inv, "w") as handle:
@@ -396,26 +459,51 @@ class StatsSync(unittest.TestCase):
 
             def promql(query):
                 if query.startswith("up{"):
-                    return [{"metric": {"vm": "paperless"}, "value": [0, "1"]},
-                            {"metric": {"vm": "swarm-150"}, "value": [0, "0"]}]
+                    return [
+                        {"metric": {"vm": "paperless"}, "value": [0, "1"]},
+                        {"metric": {"vm": "swarm-150"}, "value": [0, "0"]},
+                    ]
                 return []
 
-            listing = [{"name": "Secret.Movie.2026.2160p", "category": "radarr", "state": "downloading",
-                        "progress": 0.5, "dlspeed": 1000, "size": 10 ** 9, "eta": 600}]
-            patches = {"INVENTORY": inv, "QBITTORRENT": "http://qbittorrent", "promql": promql, "logql": lambda query: [],
-                       "qb_get": lambda path: listing if "info" in path and "torrents" in path else {}}
+            listing = [
+                {
+                    "name": "Secret.Movie.2026.2160p",
+                    "category": "radarr",
+                    "state": "downloading",
+                    "progress": 0.5,
+                    "dlspeed": 1000,
+                    "size": 10**9,
+                    "eta": 600,
+                }
+            ]
+            patches = {
+                "INVENTORY": inv,
+                "QBITTORRENT": "http://qbittorrent",
+                "promql": promql,
+                "logql": lambda query: [],
+                "qb_get": lambda path: listing if "info" in path and "torrents" in path else {},
+            }
             saved = {k: getattr(stats_sync, k) for k in patches}
             try:
                 for k, v in patches.items():
                     setattr(stats_sync, k, v)
                 rows, summary = stats_sync.services()
                 torrents = stats_sync.torrents()
-                payload = {"view": "stats", "generated_at": "2026-10-06T12:00:00+02:00", "label": "Tue 06 Oct 12:00",
-                           "summary": summary, "services": rows, "services_more": 0,
-                           "services_off": [r["name"] for r in rows if r["disabled"]],
-                           "network": stats_sync.network(), "totals": stats_sync.totals(),
-                           "requests": stats_sync.requests(), "clients": stats_sync.clients(),
-                           "storage": stats_sync.storage(), "torrents": torrents}
+                payload = {
+                    "view": "stats",
+                    "generated_at": "2026-10-06T12:00:00+02:00",
+                    "label": "Tue 06 Oct 12:00",
+                    "summary": summary,
+                    "services": rows,
+                    "services_more": 0,
+                    "services_off": [r["name"] for r in rows if r["disabled"]],
+                    "network": stats_sync.network(),
+                    "totals": stats_sync.totals(),
+                    "requests": stats_sync.requests(),
+                    "clients": stats_sync.clients(),
+                    "storage": stats_sync.storage(),
+                    "torrents": torrents,
+                }
             finally:
                 for k, v in saved.items():
                     setattr(stats_sync, k, v)
@@ -424,8 +512,6 @@ class StatsSync(unittest.TestCase):
         self.assertEqual(torrents["items"][0]["name"], "radarr")
         payload_write("stats", payload)
 
-
-# ---- calendar-sync ------------------------------------------------------------------------------
 
 calendar_sync = script_load("calendar-sync")
 
@@ -485,9 +571,17 @@ class CalendarSync(unittest.TestCase):
             self.assertGreaterEqual(e["lanes"], concurrent)
 
     @PROPERTY
-    @given(st.lists(st.tuples(st.floats(min_value=0, max_value=100), st.floats(min_value=0, max_value=100),
-                              st.integers(min_value=0, max_value=3)), max_size=20),
-           st.floats(min_value=0.5, max_value=30))
+    @given(
+        st.lists(
+            st.tuples(
+                st.floats(min_value=0, max_value=100),
+                st.floats(min_value=0, max_value=100),
+                st.integers(min_value=0, max_value=3),
+            ),
+            max_size=20,
+        ),
+        st.floats(min_value=0.5, max_value=30),
+    )
     def test_min_height_keeps_every_block_inside(self, blocks, min_pct):
         events = [{"top_pct": t, "height_pct": h, "lane": lane} for t, h, lane in blocks]
         calendar_sync.enforce_min_height(events, min_pct)
@@ -558,32 +652,59 @@ class CalendarSync(unittest.TestCase):
         payload_write("calendar-month", calendar_sync.month_view(calendars, 0, FALL_BACK))
 
 
-# ---- github-sync --------------------------------------------------------------------------------
-
 github_sync = script_load("github-sync")
 
 GITHUB_NOW = datetime.datetime(2026, 10, 6, 12, 0, tzinfo=datetime.timezone.utc)
 GITHUB_REPOS = [
-    {"name": "homelab", "private": False, "language": "Nix", "stargazers_count": 2, "pushed_at": "2026-10-06T09:00:00Z"},
-    {"name": "diary", "private": True, "language": "Markdown", "stargazers_count": 0, "pushed_at": "2026-10-05T12:00:00Z"},
+    {
+        "name": "homelab",
+        "private": False,
+        "language": "Nix",
+        "stargazers_count": 2,
+        "pushed_at": "2026-10-06T09:00:00Z",
+    },
+    {
+        "name": "diary",
+        "private": True,
+        "language": "Markdown",
+        "stargazers_count": 0,
+        "pushed_at": "2026-10-05T12:00:00Z",
+    },
     {"name": "repo<a>", "private": False, "language": None, "stargazers_count": 0, "pushed_at": "bogus"},
 ]
 GITHUB_NOTES = [
-    {"reason": "ci_activity", "repository": {"name": "homelab", "private": False}, "updated_at": "2026-10-06T10:00:00Z",
-     "subject": {"title": "<script>x</script> workflow run failed"}},
-    {"reason": "ci_activity", "repository": {"name": "diary", "private": True}, "updated_at": "2026-10-06T11:00:00Z",
-     "subject": {"title": "secret workflow run failed"}},
+    {
+        "reason": "ci_activity",
+        "repository": {"name": "homelab", "private": False},
+        "updated_at": "2026-10-06T10:00:00Z",
+        "subject": {"title": "<script>x</script> workflow run failed"},
+    },
+    {
+        "reason": "ci_activity",
+        "repository": {"name": "diary", "private": True},
+        "updated_at": "2026-10-06T11:00:00Z",
+        "subject": {"title": "secret workflow run failed"},
+    },
     {"reason": "mention", "repository": {"name": "diary", "private": True}},
     {"reason": "mention", "repository": {"name": "homelab", "private": False}},
 ]
-GITHUB_ISSUES = {"total_count": 1, "items": [{"repository_url": "https://api.github.com/repos/lsck0/homelab",
-                                              "title": "Title from a stranger <img src=x>", "created_at": "2026-10-04T12:00:00Z"}]}
+GITHUB_ISSUES = {
+    "total_count": 1,
+    "items": [
+        {
+            "repository_url": "https://api.github.com/repos/lsck0/homelab",
+            "title": "Title from a stranger <img src=x>",
+            "created_at": "2026-10-04T12:00:00Z",
+        }
+    ],
+}
 
 
 class GithubSync(unittest.TestCase):
     def test_private_repos_stay_off_the_panel(self):
-        payload = github_sync.payload_build(GITHUB_REPOS, GITHUB_NOTES, GITHUB_ISSUES, {"total_count": 0}, 3, 20,
-                                            GITHUB_NOW, include_private=False)
+        payload = github_sync.payload_build(
+            GITHUB_REPOS, GITHUB_NOTES, GITHUB_ISSUES, {"total_count": 0}, 3, 20, GITHUB_NOW, include_private=False
+        )
         text = json.dumps(payload)
         self.assertNotIn("diary", text)
         self.assertNotIn("secret", text)
@@ -592,8 +713,9 @@ class GithubSync(unittest.TestCase):
         payload_write("github", payload)
 
     def test_private_repos_when_opted_in(self):
-        payload = github_sync.payload_build(GITHUB_REPOS, GITHUB_NOTES, GITHUB_ISSUES, {"total_count": 0}, 3, 20,
-                                            GITHUB_NOW, include_private=True)
+        payload = github_sync.payload_build(
+            GITHUB_REPOS, GITHUB_NOTES, GITHUB_ISSUES, {"total_count": 0}, 3, 20, GITHUB_NOW, include_private=True
+        )
         self.assertEqual((payload["repos"], payload["ci_failing"], payload["alerts"]), (3, 2, 2))
 
     def test_a_failed_call_keeps_the_last_payload(self):
@@ -624,8 +746,6 @@ class GithubSync(unittest.TestCase):
         self.assertFalse(github_sync.public({"name": "x"}, False))
         self.assertFalse(github_sync.public(None, False))
 
-
-# ---- arxiv-sync ---------------------------------------------------------------------------------
 
 arxiv_sync = script_load("arxiv-sync")
 
@@ -659,8 +779,6 @@ class ArxivSync(unittest.TestCase):
         self.assertIsNotNone(arxiv_sync.parse_date("Tue, 06 Oct 2026 00:00:00 GMT").utcoffset())
 
 
-# ---- trmnl-sync ---------------------------------------------------------------------------------
-
 trmnl_sync = script_load("trmnl-sync")
 
 
@@ -675,8 +793,11 @@ class TrmnlSync(unittest.TestCase):
                 templates[name] = os.path.join(tmp, f"{name}.liquid")
                 with open(templates[name], "w") as handle:
                     handle.write(f"<p>{name}</p>")
-            have = {"/1/markup/markup_full": "<p>same</p>", "/2/markup/markup_full": "<p>old</p>",
-                    "/3/markup/markup_full": "<p>old</p>"}
+            have = {
+                "/1/markup/markup_full": "<p>same</p>",
+                "/2/markup/markup_full": "<p>old</p>",
+                "/3/markup/markup_full": "<p>old</p>",
+            }
             pushed, slept = [], []
 
             def call(path, token, body=None, method=None):
@@ -692,8 +813,13 @@ class TrmnlSync(unittest.TestCase):
             os.environ["TRMNL_API_KEY_FILE"] = key
             try:
                 trmnl_sync.call, trmnl_sync.time.sleep = call, slept.append
-                sys.argv = ["trmnl-sync", f"1={templates['same']}", f"2={templates['new']}", f"3={templates['other']}",
-                            f"4={templates['other']}"]
+                sys.argv = [
+                    "trmnl-sync",
+                    f"1={templates['same']}",
+                    f"2={templates['new']}",
+                    f"3={templates['other']}",
+                    f"4={templates['other']}",
+                ]
                 with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                     rc = trmnl_sync.main()
             finally:

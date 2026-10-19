@@ -1,5 +1,12 @@
 # huginn: automation agents, logins through authelia's Remote-User header, postgres on the host
-{ config, pkgs, catalog, nasMount, site, ... }:
+{
+  config,
+  pkgs,
+  catalog,
+  nasMount,
+  site,
+  ...
+}:
 let
   route = catalog.internal.huginn;
   stateDir = "/var/lib/huginn";
@@ -12,7 +19,10 @@ let
   # the admin huginn seeds on a fresh database
   seedUser = "akadmin";
   # podman's default bridge: the container reaches the host's postgres at its gateway
-  podmanBridge = { subnet = "10.88.0.0/16"; gateway = "10.88.0.1"; };
+  podmanBridge = {
+    subnet = "10.88.0.0/16";
+    gateway = "10.88.0.1";
+  };
   # authelia Remote-User login; the first admin to log in takes over the seeded one
   remoteUser = pkgs.writeText "zz_remote_user.rb" ''
     Rails.application.config.to_prepare do
@@ -32,19 +42,21 @@ let
       end
     end
   '';
-in {
-  homelab.nasMounts = nasMount stateDir "huginn"
-    // nasMount "/var/lib/postgresql" "huginn-db";
+in
+{
+  homelab.nasMounts = nasMount stateDir "huginn" // nasMount "/var/lib/postgresql" "huginn-db";
 
   services.postgresql = {
     enable = true;
     enableTCPIP = true;
     ensureDatabases = [ database ];
-    ensureUsers = [{
-      name = database;
-      ensureDBOwnership = true;
-      ensureClauses.createdb = true;
-    }];
+    ensureUsers = [
+      {
+        name = database;
+        ensureDBOwnership = true;
+        ensureClauses.createdb = true;
+      }
+    ];
     authentication = ''
       local all all trust
       host all all 127.0.0.1/32 trust
@@ -55,7 +67,7 @@ in {
   };
 
   virtualisation.oci-containers.containers.huginn = {
-    image = "ghcr.io/huginn/huginn:f2cc19148df9a4785d789d30f0b10d1d9c2dae10";
+    image = "ghcr.io/huginn/huginn:f2cc19148df9a4785d789d30f0b10d1d9c2dae10@sha256:66098272d06892bd074b0192ccfb5121bccdb33a7f605d9b390b850abb2bb112";
     ports = [ "${toString route.port}:${toString containerPort}" ];
     volumes = [
       "${stateDir}:${stateDir}"
@@ -78,7 +90,10 @@ in {
   systemd.services.huginn-seed = {
     before = [ "podman-huginn.service" ];
     requiredBy = [ "podman-huginn.service" ];
-    path = [ pkgs.openssl pkgs.coreutils ];
+    path = [
+      pkgs.openssl
+      pkgs.coreutils
+    ];
     serviceConfig.Type = "oneshot";
     script = ''
       [ -s ${seedEnv} ] || echo "SEED_PASSWORD=$(openssl rand -hex 16)" > ${seedEnv}
@@ -96,7 +111,10 @@ in {
   # a dump: a live data dir on nfs copies inconsistently
   homelab.dbBackup.databases.huginn = {
     command = "runuser -u postgres -- pg_dumpall --clean --if-exists";
-    path = [ config.services.postgresql.package pkgs.util-linux ];
+    path = [
+      config.services.postgresql.package
+      pkgs.util-linux
+    ];
   };
   systemd.services.db-backup-huginn = {
     after = [ "postgresql.service" ];

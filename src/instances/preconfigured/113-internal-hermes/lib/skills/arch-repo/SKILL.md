@@ -24,7 +24,7 @@ Two separate things:
 - `archbuild.service` (oneshot, up to 20h) builds in two podman containers: `archbuild-build` runs the
   recipes and holds no secret, `archbuild-publish` signs and pushes. Only commits signed by the owner's
   key on arch-dotfiles `master` are built.
-- The VM is woken at 03:00 by the internal traefik. `archbuild-if-stale.timer` starts a build when
+- The VM is woken at 05:30 by the internal traefik. `archbuild-if-stale.timer` starts a build when
   the last finished one is older than 20h. While a build runs, `/busy` answers 200 and the
   on-demand reaper leaves the VM up.
 - Start a build now: `vm start 112`, then `ssh 10.100.0.112 systemctl start --no-block archbuild.service`.

@@ -7,6 +7,7 @@ Fault injection at each one's boundary: a hung inverter endpoint, an energy-char
 <out dir>/fronius-<case>.prom, which tests/exporters.nix checks with promtool and tests/dashboards.nix reads as the
 inverter's metric names.
 """
+
 import contextlib
 import importlib.util
 import io
@@ -43,39 +44,71 @@ def exposition(text):
     return samples
 
 
-# -----------------------------------------------------------------------------
-# FRONIUS EXPORTER
-# -----------------------------------------------------------------------------
-
 fronius = module_load(FRONIUS)
 
 FRONIUS_DAY = {
-    "powerflow": {"Site": {"P_PV": 3500.5, "P_Grid": -1200.0, "P_Load": -2300.5, "P_Akku": -100.0,
-                           "rel_Autonomy": 100.0, "rel_SelfConsumption": 65.7, "Meter_Location": "grid",
-                           "E_Day": None, "E_Year": None, "E_Total": 12345678.0},
-                  "Inverters": {"1": {"SOC": 55.0}}},
+    "powerflow": {
+        "Site": {
+            "P_PV": 3500.5,
+            "P_Grid": -1200.0,
+            "P_Load": -2300.5,
+            "P_Akku": -100.0,
+            "rel_Autonomy": 100.0,
+            "rel_SelfConsumption": 65.7,
+            "Meter_Location": "grid",
+            "E_Day": None,
+            "E_Year": None,
+            "E_Total": 12345678.0,
+        },
+        "Inverters": {"1": {"SOC": 55.0}},
+    },
     # a full smart meter: every field the exporter reads, so the exposition names every meter metric
-    "meter": {"0": {**{field.format(phase): 100.0 + i for i, field in enumerate(fronius.METER_PHASE)
-                       for phase in fronius.PHASES},
-                    **{f"Voltage_AC_PhaseToPhase_{pair}": 400.5 for pair in fronius.PHASE_PAIRS},
-                    "Frequency_Phase_Average": 50.01,
-                    "EnergyReal_WAC_Plus_Absolute": 4567890.0, "EnergyReal_WAC_Minus_Absolute": 1234567.0}},
+    "meter": {
+        "0": {
+            **{
+                field.format(phase): 100.0 + i
+                for i, field in enumerate(fronius.METER_PHASE)
+                for phase in fronius.PHASES
+            },
+            **{f"Voltage_AC_PhaseToPhase_{pair}": 400.5 for pair in fronius.PHASE_PAIRS},
+            "Frequency_Phase_Average": 50.01,
+            "EnergyReal_WAC_Plus_Absolute": 4567890.0,
+            "EnergyReal_WAC_Minus_Absolute": 1234567.0,
+        }
+    },
     "storage": {"0": {"Controller": {"Temperature_Cell": 21.5, "Current_DC": -0.3, "Capacity_Maximum": 10240.0}}},
-    "inverter": {"DeviceStatus": {"StatusCode": 7, "ErrorCode": 0}, "PAC": {"Value": 3400.0},
-                 "UDC": {"Value": 610.0}, "IDC": {"Value": 5.8}},
+    "inverter": {
+        "DeviceStatus": {"StatusCode": 7, "ErrorCode": 0},
+        "PAC": {"Value": 3400.0},
+        "UDC": {"Value": 610.0},
+        "IDC": {"Value": 5.8},
+    },
 }
 FRONIUS_NIGHT_BATTERY_OFFLINE = {
-    "powerflow": {"Site": {"P_PV": None, "P_Grid": 350.0, "P_Load": -350.0, "P_Akku": None,
-                           "rel_Autonomy": None, "rel_SelfConsumption": None, "Meter_Location": "grid"},
-                  "Inverters": {"1": {"SOC": None}}},
+    "powerflow": {
+        "Site": {
+            "P_PV": None,
+            "P_Grid": 350.0,
+            "P_Load": -350.0,
+            "P_Akku": None,
+            "rel_Autonomy": None,
+            "rel_SelfConsumption": None,
+            "Meter_Location": "grid",
+        },
+        "Inverters": {"1": {"SOC": None}},
+    },
     "meter": FRONIUS_DAY["meter"],
     "storage": {},
     "inverter": {"DeviceStatus": {"StatusCode": 3, "ErrorCode": 0}, "PAC": {"Value": None}},
 }
 FRONIUS_HIDDEN_GENERATOR = {
-    "powerflow": {"Site": {"P_PV": 1000.0, "P_Grid": -4500.0, "P_Load": 2000.0, "P_Akku": 0.0,
-                           "Meter_Location": "grid"}, "Inverters": {}},
-    "meter": FRONIUS_DAY["meter"], "storage": FRONIUS_DAY["storage"], "inverter": FRONIUS_DAY["inverter"],
+    "powerflow": {
+        "Site": {"P_PV": 1000.0, "P_Grid": -4500.0, "P_Load": 2000.0, "P_Akku": 0.0, "Meter_Location": "grid"},
+        "Inverters": {},
+    },
+    "meter": FRONIUS_DAY["meter"],
+    "storage": FRONIUS_DAY["storage"],
+    "inverter": FRONIUS_DAY["inverter"],
 }
 
 
@@ -88,6 +121,7 @@ def fronius_fake(case, hung=()):
             release.wait(timeout_s + 5)
             return None
         return case.get(key)
+
     return fetch, release
 
 
@@ -115,8 +149,13 @@ class Fronius(unittest.TestCase):
         m = self.scrape("night", FRONIUS_NIGHT_BATTERY_OFFLINE)
         # pv at night is the one legitimate zero
         self.assertEqual(m["fronius_pv_watts"], 0.0)
-        for absent in ("fronius_battery_watts", "fronius_battery_soc_ratio", "fronius_autonomy_ratio",
-                       "fronius_inverter_ac_watts", "fronius_battery_temperature_celsius"):
+        for absent in (
+            "fronius_battery_watts",
+            "fronius_battery_soc_ratio",
+            "fronius_autonomy_ratio",
+            "fronius_inverter_ac_watts",
+            "fronius_battery_temperature_celsius",
+        ):
             self.assertNotIn(absent, m)
 
     def test_a_hidden_generator_leaves_the_load_unknown(self):
@@ -143,10 +182,6 @@ class Fronius(unittest.TestCase):
         m.add("x", "help", 1, {"meter_location": 'a"b\\c\nd'})
         self.assertIn('x{meter_location="a\\"b\\\\c\\nd"} 1.0', m.render())
 
-
-# -----------------------------------------------------------------------------
-# SPOT-PRICE
-# -----------------------------------------------------------------------------
 
 spot_price = module_load(SPOT_PRICE)
 

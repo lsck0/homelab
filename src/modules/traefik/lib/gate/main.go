@@ -25,12 +25,6 @@ import (
 	"time"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 const (
 	// traefik is the only caller, on loopback: these bound a stuck connection, never a slow client
 	serverReadHeaderTimeout = 5 * time.Second
@@ -39,12 +33,6 @@ const (
 	captchaKeyBytesMin = 32
 )
 
-/*
- * -----------------------------------------------------------------------------
- * LIFETIME
- * -----------------------------------------------------------------------------
- */
-
 func gateCreate(settings Settings) (*Gate, error) {
 	lapiKey, err := keyFileLoad(settings.Lapi.KeyFile, 0)
 	if err != nil {
@@ -52,11 +40,15 @@ func gateCreate(settings Settings) (*Gate, error) {
 	}
 	metrics := metricsCreate()
 	g := &Gate{
-		allow:     allowCreate(settings.Allow),
-		decisions: decisionsCreate(settings.Lapi.URL, string(lapiKey)),
-		limiter:   limiterCreate(settings.Anonymous),
-		tarpit:    tarpitCreate(settings.Tarpit.Upstream, metrics),
-		metrics:   metrics,
+		allow:        allowCreate(settings.Allow),
+		decisions:    decisionsCreate(settings.Lapi.URL, string(lapiKey)),
+		limiter:      limiterCreate(settings.Anonymous),
+		tarpit:       tarpitCreate(settings.Tarpit.Upstream, metrics),
+		metrics:      metrics,
+		stripCookies: make(map[string]bool, len(settings.StripCookies)),
+	}
+	for _, name := range settings.StripCookies {
+		g.stripCookies[name] = true
 	}
 	if settings.Session != nil {
 		g.sessions = sessionsCreate(*settings.Session)
@@ -94,12 +86,6 @@ func gateDestroy(g *Gate) {
 	allowDestroy(g.allow)
 	metricsDestroy(g.metrics)
 }
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 func main() {
 	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stderr, nil)))

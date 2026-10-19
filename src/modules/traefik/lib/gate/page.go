@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 // The lab's look: the homepage's slate theme, light or dark as the system asks, system fonts only, no script at all.
 const pageStyle = `
 :root{color-scheme:light dark;--bg:#f8fafc;--card:#fff;--ink:#0f172a;--muted:#475569;--line:#e2e8f0;--accent:#0369a1;
@@ -87,12 +81,6 @@ No script, no tracking, nothing from anyone else. {{.Aside}}</p>
 </html>
 `))
 
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
-
 type pageData struct {
 	Title     string
 	Style     template.CSS
@@ -154,12 +142,6 @@ var onionWording = captchaWording{
 	},
 }
 
-/*
- * -----------------------------------------------------------------------------
- * INTERNAL
- * -----------------------------------------------------------------------------
- */
-
 func cssDigest() string {
 	digest := sha256.Sum256([]byte(pageStyle))
 	return base64.StdEncoding.EncodeToString(digest[:])
@@ -171,12 +153,6 @@ func plural(count int64, unit string) string {
 	}
 	return strconv.FormatInt(count, 10) + " " + unit + "s"
 }
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 // durationHuman is a remaining time in its two largest units, rounded down: what a person reads at a glance.
 func durationHuman(d time.Duration) string {

@@ -1,4 +1,11 @@
-{ config, pkgs, lib, catalog, site, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  catalog,
+  site,
+  ...
+}:
 let
   ntfy = import ../../../modules/ntfy.nix;
   inherit (ntfy) topics;
@@ -6,14 +13,40 @@ let
 
   # every account ntfy has (ntfy-users-prune removes the rest); password: its sops secret, null for token-only
   users = {
-    luca = { password = "ntfy-admin-password"; role = "admin"; access = { }; };
-    grafana = { password = "ntfy-grafana-password"; role = "user";
-                access = { ${topics.alerts} = "write-only"; ${topics.heartbeat} = "write-only"; }; };
-    hermes = { password = "ntfy-hermes-password"; role = "user"; access = { ${topics.hermes} = "read-write"; }; };
-    desktop = { password = null; role = "user"; access = lib.genAttrs ntfy.desktopTopics (_: "read-only"); };
+    luca = {
+      password = "ntfy-admin-password";
+      role = "admin";
+      access = { };
+    };
+    grafana = {
+      password = "ntfy-grafana-password";
+      role = "user";
+      access = {
+        ${topics.alerts} = "write-only";
+        ${topics.heartbeat} = "write-only";
+      };
+    };
+    hermes = {
+      password = "ntfy-hermes-password";
+      role = "user";
+      access = {
+        ${topics.hermes} = "read-write";
+      };
+    };
+    desktop = {
+      password = null;
+      role = "user";
+      access = lib.genAttrs ntfy.desktopTopics (_: "read-only");
+    };
     # the heartbeat check below; its token is made here and never leaves the host
-    heartbeat = { password = null; role = "user";
-                  access = { ${topics.heartbeat} = "read-only"; ${topics.alerts} = "write-only"; }; };
+    heartbeat = {
+      password = null;
+      role = "user";
+      access = {
+        ${topics.heartbeat} = "read-only";
+        ${topics.alerts} = "write-only";
+      };
+    };
   };
   secretUsers = lib.filterAttrs (_: u: u.password != null) users;
 
@@ -36,9 +69,14 @@ let
   deadmanTextfile = "deadman";
   deadmanTimeoutS = 10;
   deadmanRetries = 2;
-in {
-  sops.secrets = lib.mapAttrs' (_: u: lib.nameValuePair u.password { restartUnits = [ "ntfy-sh.service" ]; }) secretUsers
-    // { ntfy-desktop-token.restartUnits = [ "ntfy-sh.service" ]; deadman-ping-url = { }; };
+in
+{
+  sops.secrets =
+    lib.mapAttrs' (_: u: lib.nameValuePair u.password { restartUnits = [ "ntfy-sh.service" ]; }) secretUsers
+    // {
+      ntfy-desktop-token.restartUnits = [ "ntfy-sh.service" ];
+      deadman-ping-url = { };
+    };
   # a curl config: the url carries the switch's key and stays off the command line
   sops.templates.${deadmanCurl}.content = ''url = "${config.sops.placeholder.deadman-ping-url}"'';
   homelab.textfiles = [ deadmanTextfile ];
@@ -49,7 +87,12 @@ in {
     before = [ "ntfy-sh.service" ];
     requiredBy = [ "ntfy-sh.service" ];
     partOf = [ "ntfy-sh.service" ];
-    path = [ pkgs.ntfy-sh pkgs.coreutils pkgs.gnugrep pkgs.openssl ];
+    path = [
+      pkgs.ntfy-sh
+      pkgs.coreutils
+      pkgs.gnugrep
+      pkgs.openssl
+    ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -70,12 +113,21 @@ in {
         printf 'tk_%s' "''${random:0:29}" > ${heartbeatToken}
       fi
       entries=()
-      ${lib.concatStrings (lib.mapAttrsToList (name: u: ''
-        hash=$(hash_of "${if u.password == null then "$(openssl rand -hex 32)" else "$(cat ${config.sops.secrets.${u.password}.path})"}")
-        entries+=("${name}:$hash:${u.role}")
-      '') users)}
-      access=(${lib.concatStringsSep " " (lib.concatLists (lib.mapAttrsToList (name: u:
-        lib.mapAttrsToList (topic: perm: "${name}:${topic}:${perm}") u.access) users))})
+      ${lib.concatStrings (
+        lib.mapAttrsToList (name: u: ''
+          hash=$(hash_of "${
+            if u.password == null then "$(openssl rand -hex 32)" else "$(cat ${config.sops.secrets.${u.password}.path})"
+          }")
+          entries+=("${name}:$hash:${u.role}")
+        '') users
+      )}
+      access=(${
+        lib.concatStringsSep " " (
+          lib.concatLists (
+            lib.mapAttrsToList (name: u: lib.mapAttrsToList (topic: perm: "${name}:${topic}:${perm}") u.access) users
+          )
+        )
+      })
       tokens=("desktop:$(cat ${config.sops.secrets.ntfy-desktop-token.path}):desktop" "heartbeat:$(cat ${heartbeatToken}):heartbeat")
       join() { local IFS=,; echo "$*"; }
       umask 077
@@ -118,7 +170,10 @@ in {
     before = [ "ntfy-sh.service" ];
     partOf = [ "ntfy-sh.service" ];
     wantedBy = [ "ntfy-sh.service" ];
-    path = [ pkgs.ntfy-sh pkgs.gawk ];
+    path = [
+      pkgs.ntfy-sh
+      pkgs.gawk
+    ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
@@ -141,8 +196,15 @@ in {
   systemd.services.heartbeat-check = {
     description = "Alert when vm-103's alerting heartbeat stops";
     after = [ "ntfy-sh.service" ];
-    path = [ pkgs.curl pkgs.gnugrep pkgs.coreutils ];
-    serviceConfig = { Type = "oneshot"; StateDirectory = "heartbeat-check"; };
+    path = [
+      pkgs.curl
+      pkgs.gnugrep
+      pkgs.coreutils
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      StateDirectory = "heartbeat-check";
+    };
     script = ''
       set -euo pipefail
       auth() { printf 'Authorization: Bearer %s\n' "$(cat ${heartbeatToken})"; }
@@ -151,15 +213,14 @@ in {
         | grep -q '"event":"message"'; then
         rm -f "$alerted"
         metrics=${config.homelab.textfileDir}/${deadmanTextfile}.prom
-        # no switch set up yet (an empty manual secret): no gauge, so no deadman_unavailable for a url never given
-        if [ -z "$(cat ${config.sops.secrets.deadman-ping-url.path})" ]; then
-          rm -f "$metrics"
-          exit 0
+        # the switch being down or never set up (an empty manual secret) costs its gauge, vm-103's
+        # deadman_unavailable, never this check
+        ok=0
+        if [ -s ${config.sops.secrets.deadman-ping-url.path} ]; then
+          ok=1
+          curl -fsS -m ${toString deadmanTimeoutS} --retry ${toString deadmanRetries} --retry-all-errors -o /dev/null \
+            -K ${config.sops.templates.${deadmanCurl}.path} || ok=0
         fi
-        # the switch being down costs its gauge (vm-103's deadman_unavailable), never this check
-        ok=1
-        curl -fsS -m ${toString deadmanTimeoutS} --retry ${toString deadmanRetries} --retry-all-errors -o /dev/null \
-          -K ${config.sops.templates.${deadmanCurl}.path} || ok=0
         printf '# TYPE homelab_deadman_ping_ok gauge\nhomelab_deadman_ping_ok %s\n' "$ok" > "$metrics.tmp"
         mv "$metrics.tmp" "$metrics"
         exit 0
@@ -173,6 +234,9 @@ in {
   };
   systemd.timers.heartbeat-check = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnBootSec = "${toString heartbeatWindowMin}m"; OnUnitActiveSec = "${toString heartbeatIntervalMin}m"; };
+    timerConfig = {
+      OnBootSec = "${toString heartbeatWindowMin}m";
+      OnUnitActiveSec = "${toString heartbeatIntervalMin}m";
+    };
   };
 }

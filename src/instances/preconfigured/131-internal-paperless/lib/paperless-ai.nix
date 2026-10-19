@@ -1,7 +1,16 @@
 # paperless-ai: llm tagging for paperless
-{ config, lib, pkgs, inventory, hostIp, catalog, lab, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inventory,
+  hostIp,
+  catalog,
+  lab,
+  ...
+}:
 let
-  port = catalog.internal.paperless-ai.port;
+  inherit (catalog.internal.paperless-ai) port;
   containerPort = 3000;
   stateDir = "/var/lib/paperless-ai";
   # the local ollama on the llm role's gpu; documents stay in the lab
@@ -16,7 +25,8 @@ let
     "Tags nur aus der vorgegebenen Liste, höchstens drei."
     "Datum: das Ausstellungsdatum des Dokuments."
   ];
-in {
+in
+{
   # its sqlite runs in wal mode, which nfs breaks; local, the nas keeps a nightly copy
   homelab.localState.paperless-ai = {
     path = stateDir;
@@ -85,7 +95,7 @@ in {
   };
 
   virtualisation.oci-containers.containers.paperless-ai = {
-    image = "docker.io/clusterzx/paperless-ai:3.0.9";
+    image = "docker.io/clusterzx/paperless-ai:3.0.9@sha256:2b65888163fd59716f1c8285b31c5bd0b30c9c3c192c42b516688e3887d4ba60";
     ports = [ "${toString port}:${toString containerPort}" ];
     volumes = [ "${stateDir}:/app/data" ];
     environment = {
@@ -96,7 +106,11 @@ in {
       RAG_SERVICE_ENABLED = "false";
     };
     # measured 1.3g resident, half again as headroom
-    extraOptions = [ "--cap-drop=ALL" "--security-opt=no-new-privileges" "--memory=2g" ];
+    extraOptions = [
+      "--cap-drop=ALL"
+      "--security-opt=no-new-privileges"
+      "--memory=2g"
+    ];
   };
 
   # the app runs as the container's root without capabilities (no DAC override), so its state must be root's own

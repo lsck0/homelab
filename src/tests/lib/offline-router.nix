@@ -5,7 +5,12 @@
 # tight loop on them, tor never started), the jobs that talk to cloudflare, proton and tor's control port stay off,
 # and blocky blocks from a local list instead of downloading one. tor, blocky, coredns, kea, nftables, both tunnels
 # and the egress policy run as in production.
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   secretValues = import ./secret-values.nix { inherit pkgs; };
   service = import ../../modules/service.nix { inherit lib; };
@@ -13,16 +18,26 @@ let
   denylist = pkgs.writeText "blocky-test-denylist" ''
     0.0.0.0 blocked.lab.test
   '';
-in {
+in
+{
   # an onion route's key is a seed of its own (lib/onion-services.nix), which a test may replace by one it knows
-  testing.secretValues = { inherit (secretValues) wireguard-private-key protonvpn-private-key; }
-    // lib.mapAttrs' (name: _: lib.nameValuePair (service.onionKeyOf name) (lib.mkDefault (secretValues.onionSeedOf name)))
-      config.services.tor.relay.onionServices;
+  testing.secretValues = {
+    inherit (secretValues) wireguard-private-key protonvpn-private-key;
+  }
+  // lib.mapAttrs' (
+    name: _: lib.nameValuePair (service.onionKeyOf name) (lib.mkDefault (secretValues.onionSeedOf name))
+  ) config.services.tor.relay.onionServices;
 
   # internet-only work; a test starts a unit itself when it is about it. Only a job the router runs: protonvpn-port
   # exists while a powered guest takes inbound vpn traffic, and a timer here without it would start no service
-  systemd.timers = lib.genAttrs [ "public-address" "public-prefix" "blocklists-fetch" "protonvpn-port" "tor-new-circuits" ]
-    (name: lib.mkIf (config.systemd.services ? ${name}) { wantedBy = lib.mkForce [ ]; });
+  systemd.timers = lib.genAttrs [
+    "public-address"
+    "public-prefix"
+    "blocklists-fetch"
+    "protonvpn-port"
+    "tor-new-circuits"
+    "wg-egress-failover"
+  ] (name: lib.mkIf (config.systemd.services ? ${name}) { wantedBy = lib.mkForce [ ]; });
 
   services.blocky.settings.blocking.denylists.ads = lib.mkForce [ "${denylist}" ];
 }

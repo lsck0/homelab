@@ -6,18 +6,58 @@ let
   hostUrl = host: "https://${net.fqdn host}";
   fritzbox = "http://${net.wan.gateway}";
   proxmoxApi = "${net.wan.proxmox}:${toString net.ports.proxmoxApi}";
-  cardOf = card: { href = null; ping = null; description = null; } // card;
-in {
+  cardOf =
+    card:
+    {
+      href = null;
+      ping = null;
+      description = null;
+    }
+    // card;
+in
+{
   inherit fritzbox proxmoxApi;
 
   cards = map cardOf [
-    { name = "Cloudflare"; icon = "cloudflare"; href = "https://dash.cloudflare.com"; }
-    { name = "FritzBox"; icon = "mdi-router-wireless"; href = fritzbox; ping = fritzbox; }
-    { name = "Proxmox"; icon = "proxmox"; href = hostUrl net.ingressPages.proxmox; ping = "http://${proxmoxApi}"; }
-    { name = "Router"; icon = "nixos"; ping = "http://${net.zones.internal.routerIp}"; }
-    { name = "Traefik"; icon = "traefik"; href = hostUrl net.ingressPages.dashboard; ping = "http://${net.ipOf net.zones.internal.ingress}";
-      description = "Internal ingress"; }
-    { name = "Traefik DMZ"; icon = "traefik"; ping = "http://${net.ipOf net.zones.external.ingress}"; description = "Public ingress"; }
-    { name = "Terminal"; icon = "mdi-tablet-dashboard"; href = "https://trmnl.com/dashboard"; }
+    {
+      name = "Cloudflare";
+      icon = "cloudflare";
+      href = "https://dash.cloudflare.com";
+    }
+    {
+      name = "FritzBox";
+      icon = "mdi-router-wireless";
+      href = fritzbox;
+      ping = fritzbox;
+    }
+    {
+      name = "Proxmox";
+      icon = "proxmox";
+      href = hostUrl net.ingressPages.proxmox;
+      ping = "http://${proxmoxApi}";
+    }
+    {
+      name = "Router";
+      icon = "nixos";
+      ping = "http://${net.zones.internal.routerIp}";
+    }
+    {
+      name = "Traefik";
+      icon = "traefik";
+      href = hostUrl net.ingressPages.dashboard;
+      ping = "http://${net.ipOf net.zones.internal.ingress}";
+      description = "Internal ingress";
+    }
+    {
+      name = "Traefik DMZ";
+      icon = "traefik";
+      ping = "http://${net.ipOf net.zones.external.ingress}";
+      description = "Public ingress";
+    }
+    {
+      name = "Terminal";
+      icon = "mdi-tablet-dashboard";
+      href = "https://trmnl.com/dashboard";
+    }
   ];
 }

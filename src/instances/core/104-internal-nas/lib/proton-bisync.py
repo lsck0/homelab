@@ -35,6 +35,7 @@ FREE_RESERVE_PERCENT of the folder's file system free fails that file, not the d
 local (proton stores none), logged. A failed cli call while PROBE says proton is down ends the run with the probe's
 status, the state saved.
 """
+
 import calendar
 import grp
 import hashlib
@@ -54,8 +55,6 @@ from fnmatch import fnmatchcase
 from itertools import groupby
 from typing import NamedTuple
 
-# -----------------------------------------------------------------------------
-# CONSTANTS
 ENV = os.environ
 SOURCE = ENV["PROTON_BISYNC_SOURCE"]
 # the remote folder SOURCE is synced with, a posix path below /my-files
@@ -102,6 +101,7 @@ KIND_NAMES = {"f": "file", "d": "folder", "x": "special file"}
 
 class Node(NamedTuple):
     """one side's item: kind f(ile), d(irectory) or x (neither); size -1 when the remote does not claim one"""
+
     kind: str
     size: int = 0
     mtime: int = 0
@@ -129,8 +129,6 @@ class Stop(Exception):
     """systemd stops the run (timeout or by hand)"""
 
 
-# -----------------------------------------------------------------------------
-# FUNCTIONS
 def log(message):
     print(message, flush=True)
 
@@ -245,13 +243,17 @@ def sha1_of(path):
 
 
 def cli(*args, timeout=CALL_TIMEOUT):
-    """runs `proton-drive filesystem <args>`: (succeeded, stdout, stderr)"""
+    """runs `proton-drive filesystem <args>`: (succeeded, stdout, its error text)
+
+    The cli prints some failures on stdout under a banner on stderr: the error text holds both, stderr last."""
     try:
-        done = subprocess.run([CLI, "filesystem", *args], stdin=subprocess.DEVNULL, capture_output=True, text=True,
-                              timeout=timeout)
+        done = subprocess.run(
+            [CLI, "filesystem", *args], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=timeout
+        )
     except subprocess.TimeoutExpired:
         return False, "", f"timed out after {timeout} s"
-    return done.returncode == 0, done.stdout, done.stderr
+    succeeded = done.returncode == 0
+    return succeeded, done.stdout, done.stderr if succeeded else f"{done.stdout}\n{done.stderr}"
 
 
 def outage_check():
@@ -363,8 +365,6 @@ def trash_prune(now):
             shutil.rmtree(entry.path)
 
 
-# -----------------------------------------------------------------------------
-# THE RUN
 class Run:
     def __init__(self, resync, entries):
         self.resync = resync
@@ -380,19 +380,22 @@ class Run:
         self.remote_changed_dirs = set()
         self.forgotten = set()
         self.failures = 0
-        self.counts = dict.fromkeys(["listed", "agreed", "uploaded", "downloaded", "conflicts", "folders",
-                                     "trashed", "quarantined"], 0)
+        self.counts = dict.fromkeys(
+            ["listed", "agreed", "uploaded", "downloaded", "conflicts", "folders", "trashed", "quarantined"], 0
+        )
         self.mkdirs_local, self.downloads, self.mkdirs_remote, self.uploads = [], [], [], []
         self.trashes, self.quarantines = [], []
         # NFC form -> the paths on either side holding it
         self.forms = {}
         self.saved_at = time.monotonic()
 
-    # --- state -----------------------------------------------------------------
     def save(self):
         if self.forgotten:
-            self.entries = {rel: e for rel, e in self.entries.items()
-                            if rel not in self.forgotten and not any(a in self.forgotten for a in ancestors(rel))}
+            self.entries = {
+                rel: e
+                for rel, e in self.entries.items()
+                if rel not in self.forgotten and not any(a in self.forgotten for a in ancestors(rel))
+            }
             self.forgotten.clear()
         tmp = STATE_FILE + ".tmp"
         with open(os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
@@ -420,7 +423,6 @@ class Run:
         if not self.resync and folder and folder["t"] == "d":
             folder["hot"] = self.now
 
-    # --- listing -----------------------------------------------------------------
     def root_check(self):
         above, name = REMOTE.rsplit("/", 1)
         ok, out, err = cli("list", "-j", above)
@@ -429,7 +431,9 @@ class Run:
             raise Refused(f"cannot list {above}, which holds the remote root: {short(err)}")
         nodes, _ = children_parse(out)
         if nodes.get(name, Node("?")).kind != "d":
-            raise Refused(f"the remote root {REMOTE} is missing: refusing to sync (FEATURES.md, Storage, backups and off-site)")
+            raise Refused(
+                f"the remote root {REMOTE} is missing: refusing to sync (FEATURES.md, Storage, backups and off-site)"
+            )
 
     def list_folder(self, folder, quiet=False):
         ok, out, err = cli("list", "-j", remote_path(folder))
@@ -491,8 +495,12 @@ class Run:
         """lists folders, the longest unread first, until SWEEP_SECONDS are spent (resync: all of them)"""
         deadline = float("inf") if self.resync else time.monotonic() + SWEEP_SECONDS
         queue = [(self.priority(rel), rel) for rel, e in self.entries.items() if e["t"] == "d"]
-        queue += [(-1, join(folder, name)) for folder, kids in self.listed.items()
-                  for name, node in kids.items() if node.kind == "d" and join(folder, name) not in self.entries]
+        queue += [
+            (-1, join(folder, name))
+            for folder, kids in self.listed.items()
+            for name, node in kids.items()
+            if node.kind == "d" and join(folder, name) not in self.entries
+        ]
         heapq.heapify(queue)
         while queue and time.monotonic() < deadline:
             _, folder = heapq.heappop(queue)
@@ -518,7 +526,6 @@ class Run:
             return None
         return UNKNOWN
 
-    # --- planning ----------------------------------------------------------------
     def changes_mark(self):
         """the folders holding a local change, and every folder whose remote side must be read for it"""
         for rel in set(self.local) | set(self.entries):
@@ -585,8 +592,11 @@ class Run:
             elif local.kind == "f":
                 self.uploads.append(rel)
         elif local.kind != remote.kind:
-            self.fail(f"{rel} is a {KIND_NAMES[local.kind]} here and a {KIND_NAMES[remote.kind]} on proton: "
-                      "rename one of them", parent(rel))
+            self.fail(
+                f"{rel} is a {KIND_NAMES[local.kind]} here and a {KIND_NAMES[remote.kind]} on proton: "
+                "rename one of them",
+                parent(rel),
+            )
             return True
         elif local.kind == "d":
             self.entries[rel] = dir_entry(self.now if rel in self.listed else 0)
@@ -636,17 +646,18 @@ class Run:
         for side, rels in (("on proton", self.trashes), ("here", self.quarantines)):
             count = sum(1 + subtree.get(rel, 0) for rel in rels)
             if count and count * 100 > len(self.entries) * MAX_DELETE_PERCENT:
-                log(f">>> this run would delete {count} of {len(self.entries)} entries {side}, over "
-                    f"{MAX_DELETE_PERCENT}%: {', '.join(rels[:10])}")
+                log(
+                    f">>> this run would delete {count} of {len(self.entries)} entries {side}, over "
+                    f"{MAX_DELETE_PERCENT}%: {', '.join(rels[:10])}"
+                )
                 tripped = True
         if tripped and not ALLOW_LARGE:
             raise Guard()
 
-    # --- applying ----------------------------------------------------------------
     def each_batch(self, items, run):
         """run(batch) per BATCH_COUNT items; a failed batch is retried item by item"""
         for i in range(0, len(items), BATCH_COUNT):
-            batch = items[i:i + BATCH_COUNT]
+            batch = items[i : i + BATCH_COUNT]
             if not run(batch) and len(batch) > 1:
                 for item in batch:
                     run([item])
@@ -700,13 +711,22 @@ class Run:
         os.makedirs(STAGING, exist_ok=True)
         if free_bytes(STAGING) - size < reserve_bytes(STAGING):
             if len(batch) == 1:
-                self.fail(f"download of {batch[0][0]} ({size} bytes) would leave less than {FREE_RESERVE_PERCENT}% of "
-                          f"{STAGING}'s file system free: next run", parent(batch[0][0]))
+                self.fail(
+                    f"download of {batch[0][0]} ({size} bytes) would leave less than {FREE_RESERVE_PERCENT}% of "
+                    f"{STAGING}'s file system free: next run",
+                    parent(batch[0][0]),
+                )
             return False
         staging = os.path.join(STAGING, str(time.time_ns()))
         os.makedirs(staging)
-        ok, _, err = cli("download", "-f", "remove", *(remote_path(rel) for rel, _, _ in batch), staging,
-                         timeout=transfer_timeout(size))
+        ok, _, err = cli(
+            "download",
+            "-f",
+            "remove",
+            *(remote_path(rel) for rel, _, _ in batch),
+            staging,
+            timeout=transfer_timeout(size),
+        )
         if ok:
             for rel, remote, target in batch:
                 self.place(rel, remote, target, os.path.join(staging, basename(rel)))
@@ -745,8 +765,16 @@ class Run:
         if not files:
             return True
         folder = parent(batch[0])
-        ok, _, err = cli("upload", "-j", "-f", "create-new-revision", "-t", *(local_path(rel) for rel, _ in files),
-                         remote_path(folder), timeout=transfer_timeout(sum(node.size for _, node in files)))
+        ok, _, err = cli(
+            "upload",
+            "-j",
+            "-f",
+            "create-new-revision",
+            "-t",
+            *(local_path(rel) for rel, _ in files),
+            remote_path(folder),
+            timeout=transfer_timeout(sum(node.size for _, node in files)),
+        )
         if not ok:
             outage_check()
             if len(batch) == 1:
@@ -761,17 +789,19 @@ class Run:
         return True
 
     def trash(self, batch):
-        ok, out, err = cli("trash", "-j", *(remote_path(rel) for rel in batch))
+        cli_ok, out, err = cli("trash", "-j", *(remote_path(rel) for rel in batch))
         try:
-            ok = ok and all(item.get("ok") for item in json.loads(out))
+            ok = cli_ok and all(item.get("ok") for item in json.loads(out))
         except (ValueError, AttributeError):
             ok = False
         if not ok:
             outage_check()
             if len(batch) > 1:
                 return False
-            if GONE not in err:
-                self.fail(f"cannot trash {remote_path(batch[0])}: {short(err)} {short(out)}", parent(batch[0]))
+            # a refused item is told in the listing on stdout, a failed call in the error text
+            detail = out if cli_ok else err
+            if GONE not in detail:
+                self.fail(f"cannot trash {remote_path(batch[0])}: {short(detail)}", parent(batch[0]))
                 return False
         for rel in batch:
             log(f"trashed on proton: {rel}")
@@ -834,8 +864,6 @@ class Run:
         self.apply()
 
 
-# -----------------------------------------------------------------------------
-# MAIN
 def stop(signum, _frame):
     raise Stop(signal.Signals(signum).name)
 

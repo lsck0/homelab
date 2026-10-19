@@ -43,6 +43,7 @@ Local days: a window is built from local midnights with zoneinfo, never by addin
 A fixed-offset datetime plus timedelta(days=1) is exactly 86400 s, so on 2026-03-29 (23 h) and 2026-10-25 (25 h)
 the old windows were an hour off.
 """
+
 import dataclasses
 import datetime
 import json
@@ -50,10 +51,6 @@ import pathlib
 import urllib.error
 import urllib.parse
 from zoneinfo import ZoneInfo
-
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
 
 INPUTS = json.loads((pathlib.Path(__file__).parent / "energy_inputs.json").read_text())
 # local days, the spot price's "today" and the reading clock all follow the house's zone
@@ -135,10 +132,6 @@ SPOT_SLOT_MAX_S = SECONDS_PER_HOUR
 SPOT_TIMEOUT_S = 20
 
 
-# -----------------------------------------------------------------------------
-# WINDOWS
-# -----------------------------------------------------------------------------
-
 @dataclasses.dataclass(frozen=True)
 class Window:
     """A query window: `duration` for range selectors, `seconds` as a number literal, ending at `at_s` or now."""
@@ -160,17 +153,15 @@ def window_from_seconds(seconds, at_s=None):
 WINDOW_RANGE = Window("$__range", "$__range_s")
 
 
-# -----------------------------------------------------------------------------
-# QUERIES
-# -----------------------------------------------------------------------------
-
 def energy_kwh(power_w, window):
     """One-minute samples summed: a scrape gap counts as nothing, the same as on the meter.
 
     Averaging times the window would fill gaps with the mean and disagree with the meter after every outage.
     """
-    return (f"sum(sum_over_time(({power_w})[{window.duration}:1m]{window.modifier()}))"
-            f" / {MINUTES_PER_HOUR} / {WATTS_PER_KILOWATT}")
+    return (
+        f"sum(sum_over_time(({power_w})[{window.duration}:1m]{window.modifier()}))"
+        f" / {MINUTES_PER_HOUR} / {WATTS_PER_KILOWATT}"
+    )
 
 
 def meter_rise(metric, window):
@@ -210,7 +201,7 @@ def cost_terms(window, fee_seconds=None):
     return {
         "electricity_eur": f"({meter_kwh(IMPORT_WH, window)}) * {tariff('price_electricity', window)}",
         "gas_eur": f"({meter_rise(GAS_M3, window)}) * {tariff('gas_kwh_per_m3', window)}"
-                   f" * {tariff('price_gas', window)}",
+        f" * {tariff('price_gas', window)}",
         "water_eur": f"({meter_rise(WATER_M3, window)}) * {tariff('price_water', window)}",
         "base_fees_eur": f"({fees}) * {fee_seconds or window.seconds} / {SECONDS_PER_MONTH}",
         "feed_in_eur": f"({meter_kwh(EXPORT_WH, window)}) * {tariff('price_feed_in', window)}",
@@ -228,8 +219,10 @@ def import_at_spot_eur(window):
 
 def cost_net(terms):
     """Paid over the window: import, gas, water and base fees, less the feed-in tariff."""
-    return (f"({terms['electricity_eur']}) + ({terms['gas_eur']}) + ({terms['water_eur']})"
-            f" + ({terms['base_fees_eur']}) - ({terms['feed_in_eur']})")
+    return (
+        f"({terms['electricity_eur']}) + ({terms['gas_eur']}) + ({terms['water_eur']})"
+        f" + ({terms['base_fees_eur']}) - ({terms['feed_in_eur']})"
+    )
 
 
 def cost_savings(terms):
@@ -289,10 +282,6 @@ def query_batch_parse(result):
     return out
 
 
-# -----------------------------------------------------------------------------
-# LOCAL TIME
-# -----------------------------------------------------------------------------
-
 def local_midnight(day, zone=HOUSE_ZONE):
     """00:00 of a local calendar day as an aware datetime with that day's own offset."""
     return datetime.datetime.combine(day, datetime.time(0), zone)
@@ -316,10 +305,6 @@ def local_month_bounds(year, month, zone=HOUSE_ZONE):
 def local_today(now_s, zone=HOUSE_ZONE):
     return datetime.datetime.fromtimestamp(now_s, zone).date()
 
-
-# -----------------------------------------------------------------------------
-# DAY-AHEAD PRICES
-# -----------------------------------------------------------------------------
 
 def spot_parse(body):
     """An energy-charts answer as sorted (unix_seconds, eur_per_kwh) pairs, or None if malformed."""
@@ -425,7 +410,7 @@ def spot_cheapest_window(hourly, hours):
     assert hours >= 1, hours
     best = None
     for i in range(len(hourly) - hours + 1):
-        run = hourly[i:i + hours]
+        run = hourly[i : i + hours]
         # a gap (a missing hour) is not a consecutive run
         if run[-1][0] - run[0][0] != (hours - 1) * SECONDS_PER_HOUR:
             continue

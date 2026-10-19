@@ -7,12 +7,6 @@ import (
 	"strings"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 // An onion route's captcha shows its own address among lookalikes: a phishing proxy relays this page from the real
 // address, so its visitor finds no row matching the address bar, while the lab's own visitor finds exactly one.
 const (
@@ -26,12 +20,6 @@ const (
 	onionRows       = 4
 	onionQuestion   = "Which label stands beside the address that is exactly the one in your browser's address bar?"
 )
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 // onionAddressValid is true for a v3 onion address as tor names it: 56 lowercase base32 characters and the suffix.
 func onionAddressValid(address string) bool {

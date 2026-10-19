@@ -1,16 +1,23 @@
-{ lib, pkgs, lab, ... }:
+{
+  lib,
+  pkgs,
+  lab,
+  ...
+}:
 let
   repoDir = "/var/lib/archrepo";
   # the builder rsyncs the built repo here over ssh; the public half lives beside the private one, its secret
   pushSecret = "archrepo-push-key";
-  pusher = lib.findSingle (i: i.config.secrets ? ${pushSecret}) (throw "no instance holds ${pushSecret}")
-    (throw "two instances hold ${pushSecret}") (lib.attrValues lab.instances);
+  pusher = lib.findSingle (
+    i: i.config.secrets ? ${pushSecret}
+  ) (throw "no instance holds ${pushSecret}") (throw "two instances hold ${pushSecret}") (lib.attrValues lab.instances);
   pushKey = lib.fileContents (pusher.dir + "/${pushSecret}.pub");
   # the internet's tree, which the edge puts before the internet's every path (instance.nix publicPrefix)
   internetPrefix = lab.routes.mirror.publicPrefix;
-  # the status and the logs it names live in the full tree alone, the internet reads them there too
-  sharedPaths = "status\\.(json|txt)|build\\.log|logs/.*";
-in {
+  # the status, the logs it names and the install iso live in the full tree alone, the internet reads them there too
+  sharedPaths = "status\\.(json|txt)|build\\.log|logs/.*|iso(/.*)?";
+in
+{
   # push target for the builder; owns the served tree, the key only runs a write-only rsync into it
   users.users.archrepo = {
     isSystemUser = true;

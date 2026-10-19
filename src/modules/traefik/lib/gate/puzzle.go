@@ -9,12 +9,6 @@ import (
 	"strings"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 // The scene: objects in distinct cells of a grid, each a shape with a label plate below it. The cells keep a shape and
 // its plate apart from every other; the jitter keeps the scene from being a readable table.
 const (
@@ -50,12 +44,6 @@ const (
 	backwardsSentence = " Type that label backwards, last character first."
 	hexDigits         = "0123456789abcdef"
 )
-
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
 
 // Shape is what an object looks like; the question names it, never its color.
 type Shape int
@@ -95,12 +83,6 @@ type Puzzle struct {
 	// what the other rows' codes answer: only a person shown a lookalike address has a reason to type one
 	Decoys []string
 }
-
-/*
- * -----------------------------------------------------------------------------
- * INTERNAL
- * -----------------------------------------------------------------------------
- */
 
 var ordinalNames = []string{"first", "second", "third", "fourth", "fifth", "sixth", "seventh"}
 
@@ -276,12 +258,6 @@ func candidatesAll(objects []Object) []candidate {
 	}
 	return out
 }
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 // puzzleRandom is a seed's one stream: every choice of a puzzle comes from it, so the seed alone recreates the puzzle.
 func puzzleRandom(seed uint64) *rand.Rand {

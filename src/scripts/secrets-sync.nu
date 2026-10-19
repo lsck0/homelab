@@ -27,8 +27,8 @@ const SRC = $ROOT | path join src
 use lib/tools.nu [die run-text tools-require]
 use lib/onion.nu [onion-seed-generate onion-address]
 use lib/secrets.nu [
-    secrets-admins-load secrets-plan-load secrets-encrypt secrets-age-key-lines secrets-age-key-ready secrets-dotfiles-dir
-    SECRETS_HOME_DIRS SECRETS_CATALOG_FILE SECRETS_VALUES_NAME SECRETS_SHARED_NAME SECRETS_KEY_NAME SECRETS_PUB_NAME
+    secrets-admins-load secrets-plan-load secrets-encrypt secrets-age-key-lines secrets-age-recipient secrets-age-key-ready
+    secrets-dotfiles-dir    SECRETS_HOME_DIRS SECRETS_CATALOG_FILE SECRETS_VALUES_NAME SECRETS_SHARED_NAME SECRETS_KEY_NAME SECRETS_PUB_NAME
 ]
 
 # garage access key ids are GK plus 12 random bytes in hex
@@ -58,8 +58,6 @@ def decrypt [file: path]: nothing -> any {
     let plain = do { ^sops --decrypt $file } | complete
     if $plain.exit_code != 0 { null } else { $plain.stdout }
 }
-
-def recipient-of [key: string]: nothing -> string { $key | run-text age-keygen -y }
 
 def key-generate []: nothing -> string {
     let generated = ^age-keygen e> /dev/null
@@ -110,9 +108,7 @@ def main [
     # the dotfiles key by default, linked and unlocked like sync.nu does; a key passed in is used as it is
     if ($env.SOPS_AGE_KEY_FILE? | is-empty) { secrets-age-key-ready ($ROOT | path join secrets age.txt) }
 
-    # -------------------------------------------------------------------------
-    # CHECKS: nothing is written before all of them pass
-    # -------------------------------------------------------------------------
+    # nothing is written before every check passes
     let admins = secrets-admins-load $SRC
     let admins_sorted = $admins | sort
     let layout = secrets-plan-load $SRC $plan
@@ -136,7 +132,7 @@ def main [
             if $plain == null { die $"src/($home)/($SECRETS_KEY_NAME) does not decrypt with ($env.SOPS_AGE_KEY_FILE)" }
             let key = $plain | str trim
             let pub = if ($pub_file | path exists) { open --raw $pub_file | str trim } else { "" }
-            if $pub != (recipient-of $key) { die $"src/($home)/($SECRETS_PUB_NAME) is not the public half of its ($SECRETS_KEY_NAME)" }
+            if $pub != (secrets-age-recipient $key) { die $"src/($home)/($SECRETS_PUB_NAME) is not the public half of its ($SECRETS_KEY_NAME)" }
             let gone = recipients-of $key_file | where $it not-in $admins_sorted
             {key: $key, state: (if ($gone | is-empty) { "kept" } else { "renewed" })}
         } else if ($pub_file | path exists) {
@@ -148,11 +144,8 @@ def main [
         print $"key     ($c): ($stored.state)"
         $acc | insert $c (key-generate)
     }
-    let host_recipient = $keys | items {|c, key| {c: $c, r: (recipient-of $key)} } | reduce --fold {} {|e, acc| $acc | insert $e.c $e.r }
+    let host_recipient = $keys | items {|c, key| {c: $c, r: (secrets-age-recipient $key)} } | reduce --fold {} {|e, acc| $acc | insert $e.c $e.r }
 
-    # -------------------------------------------------------------------------
-    # PLAN: every value where it is declared, every file's plaintext and rule
-    # -------------------------------------------------------------------------
     let declared = $layout.secrets
     let kind_of = {|k: string| $declared | get $k | get kind }
     let file_of = {|k: string| $declared | get $k | get file }
@@ -248,9 +241,6 @@ def main [
     } | flatten
     let sops_config = ($SOPS_CONFIG_HEADER ++ $rules | str join "\n") + "\n"
 
-    # -------------------------------------------------------------------------
-    # WRITE: rules, keys, values with additions, shared copies, removals (a dry run only reports)
-    # -------------------------------------------------------------------------
     # encrypted to the admins and the file's readers, when its content or recipients differ; true when it (would) write
     let write_file = {|file: string, plain: any|
         let path = src-path $file
@@ -314,7 +304,7 @@ def main [
 
     # first every value in its new place beside its old copies, then the copies go: no failure point loses one
     if $apply {
-        for file in ($new | columns | sort) {
+        for file in ($new | columns | sort | where {|file| do $in_plan $file }) {
             let union = $old | get --optional $file | default {} | merge ($new | get $file)
             if (do $write_file $file $union) { $changed += 1 }
         }

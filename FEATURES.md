@@ -27,11 +27,15 @@ runbooks.
 - `./sync.nu`: the one command; checks the staged tree for secrets, converges secrets and the Proxmox host, applies
   terraform, builds every guest, deploys them in parallel (`HOMELAB_PARALLEL`), pins each guest's ssh host key through
   Proxmox, writes `src/generated/lab.json` and commits `Generation: <n>`. `--dry-run` evaluates, builds and prints the
-  plan, touching nothing. Logs in `~/.local/state/homelab/logs/`, the last 30 runs.
+  plan, touching nothing. `./sync.nu <guest>...` deploys the named guests alone (vmid or name), `--skip-host` leaves
+  the Proxmox host and terraform out; a partial run commits nothing. `terraform-law` and `policy-eval` gate every
+  run: a broken law stops it before anything is applied. Logs in `~/.local/state/homelab/logs/`, the last 30 runs.
 - A deploy copies the guest's closure first, then pushes the guest's own age key and switches in place; the payloads it
   runs on a guest (`src/scripts/lib/host-age-key.nu`, `src/scripts/lib/switch-failures.nu`) run under the nu of that
   closure, so a guest still on a generation without nu deploys too. A declared unit that failed in the switch fails
   that guest's deploy, a transient one does not. A disk terraform grew reboots the guest to expand its partition.
+  Each deployed guest records its generation (`/var/lib/homelab/deployed-toplevel`); one running another
+  (a hand-run switch, a rollback) raises "Host off its deployed generation".
 - Deploys pause the on-demand reaper (`/run/ondemand-reaper-pause-until`), so no guest stops mid-deploy.
 - Terraform state lives on the nas (`/srv/nas/terraform`) with a lock; sync.nu works on a copy in
   `~/.local/state/homelab/terraform/` (`$XDG_STATE_HOME`), where terraform's providers live too, since a `path:`
@@ -40,7 +44,8 @@ runbooks.
   `deinit.nu` does, and never pulls from or locks a nas. `TF_STATE_OFFLINE=1` applies from the copy while the nas is
   down.
 - `src/scripts/init.nu <ip>` pins Proxmox's host key after a console check, asks the site, makes secrets and the
-  golden image, converges the host; `--pin <ip>` re-pins alone. `src/scripts/deinit.nu [--yes] [proxmox-ip]` tears
+  golden image, converges the host; `--pin <ip>` re-pins alone, `--upgrade <ip>` runs apt's full-upgrade on the host
+  and names the kernel a reboot starts. `src/scripts/deinit.nu [--yes] [proxmox-ip]` tears
   the lab down. `src/instances/preconfigured/113-internal-hermes/lib/hermes-secrets.nu` once sets hermes' ssh key,
   github app, api key and telegram bot.
 - `src/scripts/stack.nu status | {apps|media|public} {on|off} [--apply]`: swaps a boot phase's guests in or out (the
@@ -67,13 +72,17 @@ runbooks.
 
 - `src/scripts/pve-install.nu` converges the host on every `init.nu` and `sync.nu` run: apt sources, the zone bridges,
   gpu passthrough, power settings, openipmi off without a bmc, root's password (`proxmox-root-pass`) and ssh keys
-  (`src/secrets/keys/`), the lab's api users and tokens (created once, never rotated; undeclared `@pve` users and every
-  empty pool are removed), the lldap realm, the node's address and the api certificate naming it, the bulk storage and
-  its hookscript, textfile collectors, the host exporter, smartd and OSSEC. While the package mirrors or github are
-  down, what needs them waits for the next run; the rest still converges. `deinit.nu` runs its teardown.
-- Autorecovery: a panic, an oops, a hung task or a soft lockup reboots the host; watchdog-mux arms the chipset's
-  `sp5100_tco` watchdog, which resets a hang that never panics. Guests come back in their boot order; idling guests
-  stay off until woken.
+  (`src/secrets/keys/`, keys only: sshd takes no password), the route to the lab's subnets through the router, the
+  lab's api users and tokens (created once, never rotated; undeclared `@pve` users and every empty pool are removed),
+  the lldap realm, the node's address and the api certificate naming it, the bulk storage and its hookscript, the
+  host exporter with its textfile collectors (thin pools, the drives' thermal time, machine checks, pending apt
+  upgrades, which watchdog is armed), smartd, OSSEC, and the journal upload to vm-103. While the package mirrors or
+  github are down, what needs them waits for the next run; the rest still converges. `deinit.nu` runs its teardown.
+- Autorecovery: a panic, an oops, a hung task or a soft or hard lockup reboots the host. watchdog-mux arms the
+  chipset's `sp5100_tco` watchdog, which resets a hang that never panics, from the next host boot on; until then
+  "Host watchdog not armed" fires, and `systemctl stop watchdog-mux && rmmod softdog && systemctl start watchdog-mux`
+  on the host arms it now. Guests come back in their boot order, the router right after the nas; idling guests stay
+  off until woken.
 - The bulk storage (the hdd's lvm-thin pool, vm-104's media disk) stays disabled except while vm-104 starts or stops
   (its hookscript), and pvestatd runs with its own lvm config (`/etc/lvm-pvestatd`) that rejects the hdd, so nothing
   but the nas wakes the disk. A resize (a terraform `diskGiB` change of vm-104's bulk disk too), a snapshot or a backup
@@ -86,11 +95,13 @@ runbooks.
 
 - Firewall (`src/terraform/lib.tf`, held by `src/tests/terraform-law.nix`): the datacenter firewall is on; every
   guest's nic may send only from its own address and mac (the router's are exempt), and the host drops input its rules
-  do not name. It admits ssh from the house lan, the api and web ui (8006) from `lan.workstation`, `lan.notebook` and
-  the router (the ingresses, the homepage, hermes and grafana reach it masqueraded as the router), node exporter from
-  the router and ping from the lan; Proxmox's implicit `management` ipset is emptied. `sync.nu` refuses to run from any
-  other address and fails while the firewall does not enforce (`pve-firewall status` `enabled/running`, or with the
-  nftables backend `proxmox-firewall` active with its table loaded).
+  do not name. The router leaves lab traffic to the host unmasqueraded and the host routes the lab back through it,
+  so each guest is admitted by its own address: ssh from `lan.workstation`, `lan.notebook`, the owner's wireguard
+  devices and hermes (vm-113), the api and web ui (8006) from the first three, the ingresses and the dashboard
+  (vm-102), node exporter from vm-103, ping from the lan and the dashboard; Proxmox's implicit `management` ipset is
+  emptied. In front of every guest Proxmox also holds the recovery path: ssh from the operators and the router's leg
+  in the guest's zone (`sync.nu`'s bastion), node exporter from vm-103, anything else dropped and logged. `sync.nu` refuses to run from any other address and fails
+  while the firewall does not enforce (`proxmox-firewall` active with every guest's spoofed-source drop loaded).
 - Turning the firewall on the first time: check that `lan.workstation` and `lan.notebook` in `site.json` are the
   fritzbox's reserved addresses of the two machines; `./sync.nu` (it creates an ipset `ipfilter-net0` per guest but
   the router, the cluster rules, and last the datacenter options with `input_policy = "DROP"`; no guest is replaced);
@@ -110,7 +121,8 @@ runbooks.
   ```
 
 - root@pam is outside the realm and keeps its own password (`proxmox-root-pass` in `src/secrets/shared.sops.json`),
-  the way back in.
+  the way back in at the console and the web ui, where it asks for TOTP or WebAuthn too (Datacenter, Two Factor;
+  its recovery keys printed and kept offline). Over ssh root takes keys alone.
 
 ## Layout and adding things
 
@@ -121,7 +133,7 @@ runbooks.
   `skill.md` (hermes' skill about it), `secrets.sops.json`, its key (`age.pub`, `age.sops`) and a generated
   `secrets.shared.sops.json`; an app folder holds `app.nix` and its secrets.
 - A guest is a vm, or an unprivileged lxc where nothing it `needs` asks for a vm (`src/modules/instance-schema.nix`);
-  `vm.kind.<kind> = "<why>"` overrides that, `vm.privileged` (internal zone only) makes an lxc privileged for nfs.
+  `vm.kind.<kind> = "<why>"` overrides that. No container is privileged (`src/tests/policy/guests.nix`).
 - A guest: copy `preconfigured/_template`, a vmid in the zone's range, `git add`, sync. An app: copy `custom/_template`
   with a repo and a branch (`src/modules/apps-catalog`).
 - Every file has one owner: what one instance uses lives in its folder, what two or more use is a module
@@ -146,13 +158,20 @@ runbooks.
   lan with a leg in each (`src/modules/net.nix`, `src/generated/zones.json`).
 - vm-300 router: nat, the zone firewall rendered from `src/modules/flows.nix` (every flow carries its reason), dhcp,
   split-horizon dns, wireguard for the owner's devices (`src/instances/core/300-router/main.nix`).
+- No zone reaches the house or another zone, the internal one included: each exception is a forward naming its guests
+  and ports (hermes to Proxmox, the dashboard's frame cards, vm-103's scrapes). The house reaches the internal zone and
+  the dmz. A guest's ssh answers the operators (the workstation, the notebook, wireguard, hermes) and its node
+  exporter vm-103 alone (`recovery` in `src/modules/flows.nix`). The router counts every refusal between the networks
+  by its source network (`homelab_forward_denied_packets_total`) and logs it as `fwd-deny <network>:`; one from the
+  dmz or the apps zone raises "Zone crossing refused".
 - Wildcard routes: `*.mc` answers every name one label below it, forwarded by port and resolved by the router's
   template (`src/modules/catalog.nix`).
 - Egress classes: a guest's internet traffic through the vpn exit (`src/modules/egress-vpn.nix`) or tor, with a
-  killswitch, transparent to the program; qbittorrent and searxng use the vpn.
+  killswitch, transparent to the program; qbittorrent and searxng use the vpn. The exit moves to the next of its
+  `servers` when its handshake is three minutes old; none answering raises "VPN exit unavailable".
 - Proton's forwarded port renewed and handed to qbittorrent (`300-router/lib/protonvpn-port.nu`).
-- Cloudflare ddns for the public names (`300-router/lib/ddns-cloudflare.nu`); the house's ipv6 prefix learned from the
-  fritzbox and served by dns (`300-router/lib/public-prefix.nu`).
+- Cloudflare ddns for the public names (`300-router/lib/ddns-cloudflare.nu`); the house's public address and ipv6
+  prefix asked of the fritzbox over upnp, no third party, and served by dns (`300-router/lib/public-address.nu`).
 - Onion services for routes with `onion = true`, served by the router's tor and the edge
   (`300-router/lib/onion-services.nix`, `src/scripts/lib/onion.nu`, addresses in `src/generated/onions.json`).
 - `wol-pc` on the router wakes the owner's pc from the vpn.
@@ -173,14 +192,23 @@ runbooks.
   (`src/modules/traefik/default.nix`). An `indexable` route's host serves its backend's robots.txt instead.
 - Per route: rate and in-flight limits, body limit, secure headers, access log, `houseUnlimited` for the house, a
   `guard` on the backend port, cloudflare's proxy with the origin refusing anyone else (`src/modules/service.nix`).
+- The sso session reaches authelia and its portal alone: the gate strips `authelia_session` from every other route's
+  cookies (`strip-session-cookie`), so no app or third-party backend sees it.
+- A route whose guest is powered off answers 503 at once; no ingress dials it.
 - Request budgets per app at the edge (`src/modules/limits`).
 
 ## Identity
 
 - vm-101 authelia: forwardauth and the lab's oidc provider over lldap; `ssoPaths` put prefixes of a public route
-  behind it (`101-internal-authelia`).
+  behind it (`101-internal-authelia`). A remembered login lasts a week.
+- With a mail relay in `site.json` (`smtp = { host; port; username; sender; }`, its password the manual secret
+  `smtp-password`) authelia mails enrolment codes and password resets; without one reset is off and codes land in
+  `/var/lib/authelia-main/notification.txt` on vm-101.
 - An app gets the lldap group `app-<route>`; forgejo, jellyfin and headscale log in through oidc (`oidc` in their
-  instance.nix).
+  instance.nix). `lab-user` on vm-101 manages people: `add`, `passwd`, `groups`, `ungroup`, `list`, and `offboard`,
+  which deletes the user and its second factors and names the apps that keep an account of their own.
+- Two dashboards: `homelab.lsck0.dev` for the admins, with the widgets and their tokens, and `start.lsck0.dev` for
+  everyone else, links only.
 - lldap's `admin` takes its password from `lldap-admin-password` at every start: rotate it with
   `sops unset src/instances/core/101-internal-authelia/secrets.sops.json '["lldap-admin-password"]'`, then `./sync.nu`.
 - Proxmox logins through the lldap realm with TOTP (Proxmox host above).
@@ -190,7 +218,8 @@ runbooks.
 - `idle = { stopAfter; wakeAt; }` in instance.nix: the ingress's local proxy wakes a stopped guest through the Proxmox
   api on its first connection, holds it until the backend answers, and stops it after the idle time
   (`src/modules/on-demand`). Idle guests: archbuild, jellyseerr, navidrome, firefly, searxng (4h), privatebin, share.
-- `wakeAt` wakes on a schedule: archbuild at 03:00 for the nightly build, firefly at 05:00 for the bank import.
+- `wakeAt` wakes on a schedule: archbuild at 05:30 for the nightly build, after the nas' snapshot and off-site upload,
+  firefly at 05:00 for the bank import.
 - `power = "off"` keeps a guest stopped; `stack.nu` flips whole boot phases.
 - Apps with `scaleToZero` run no task after `idle.stopAfter` (15 minutes unless set) and wake on the next request,
   held at the ingress until the health path answers (a few seconds). An app stays up without it when it has a job of
@@ -207,10 +236,19 @@ runbooks.
   disabling it removes its stack, its volumes stay on the state worker. A deploy of a sleeping app runs the new
   version until it is up, then puts it back to sleep.
 - `app-builder-redeploy <app>` on vm-107, or from ci:
-  `curl -fsS -X POST -H "Authorization: Bearer $DEPLOY_TOKEN" https://deploy.lsck0.dev/redeploy/<app>`.
+  `curl -fsS -X POST -H "Authorization: Bearer $DEPLOY_TOKEN" https://deploy.lsck0.dev/redeploy/<app>`, past any
+  backoff; `GET /deploy/<app>` with the same token answers the live and previous commit, a hold and the last failure.
+  `app-builder-rollback <app>` deploys the commit before the live one and holds it until a new commit lands.
+- A deploy is undone when a new task fails its healthcheck or dies as it starts (`src/modules/swarm` swarm-deploy);
+  one that converged but answers no `health` is the edge's "App has no healthy backend".
+  `requireChecks = true` deploys a commit only once its GitHub check runs passed. Each app builds on empty BuildKit
+  cache mounts, never on what another app's build left there.
 - An app declares what only it knows: routes (host, path, service, port, `health`, a path answering below 500 when
-  up), `metrics` endpoints, `stateful` services and `volumes`, its features. It owns its own authentication; the
-  platform offers tls, bot defence, rate limits, telemetry, backups and scale to zero, each opted into.
+  up), `metrics` endpoints, `stateful` services and `volumes`, `dumps` (a command and its `restore`, which
+  `swarm-dump-restore <app> <dump> [<file>]` on the state worker runs), its features. Secrets reach a service as env
+  (`env`) or as a file (`secretFiles`, for images reading `<KEY>_FILE`); a `manual` one is the owner's to set with
+  sops, and the app does not deploy while it is empty. It owns its own authentication; the platform offers tls, bot
+  defence, rate limits, telemetry, backups and scale to zero, each opted into.
 - `watch = [ "<path>" ]` deploys only commits touching those paths; `schedule = "<systemd calendar>"` looks at the
   app on a timer instead of every poll, for a build too heavy for every push (a missed run runs at boot).
 - Static sites (`static` in app.nix: a command, its output and its packages): built without network, served by one
@@ -239,22 +277,40 @@ runbooks.
 ## Telemetry and alerts
 
 - vm-103: prometheus, loki, tempo, pyroscope behind push doors that set the tenant by sender, grafana with the lab's
-  boards and alerts (`103-internal-grafana`).
-- Journals ship to vm-103's journal-remote; node exporter and textfile collectors on every guest and the Proxmox host
-  (`src/modules/base`, `src/modules/textfile`).
+  boards and alerts (`103-internal-grafana`). Grafana opens on the homelab board; every user views, the `admins` group
+  administers. The ingresses' request spans are in the Tempo source, each linked to its access log line and back.
+- Journals ship to vm-103's journal-remote, the Proxmox host's too; node exporter and textfile collectors on every
+  guest and the host (`src/modules/base`, `src/modules/textfile`). vm-103 scrapes each ingress's access log
+  shipper, crowdsec and anubis, and authelia.
 - The prober (blackbox) checks every `probe` route; the homepage shows its status.
-- Alerts go to ntfy on vm-201; an off-site dead man's switch takes a ping on every heartbeat.
+- Alerts go to ntfy on vm-201, the critical ones to telegram too, each with its runbook and a link to the rule. Rules
+  beyond the services' own: a unit failed for 15 minutes, an oom kill, a host off its deployed generation, a guard or
+  the router refusing a connection, an ingress companion unreachable, the app builder stalled for two hours, and on
+  the Proxmox host a reboot, an unclean end, machine checks, nvme heat, the watchdog unarmed and security upgrades
+  pending for a week (`103-internal-grafana/lib/rules.nix`).
+- Dead man's switch: vm-201 pings an off-site check (`deadman-ping-url`, e.g. healthchecks.io with a 5 minute period
+  and 15 minutes grace, alerting by mail) on every heartbeat from vm-103. Until that url is set, or while the ping
+  fails, "Dead man's switch unavailable" fires.
 - Third-party outages are classified, not failures: `upstream.run` retries, then probes (`src/modules/upstream`).
 - Energy: fronius exporter, spot prices and cost boards (`103-internal-grafana/lib`, `src/modules/energy`).
 
 ## Storage, backups and off-site
 
-- vm-104 nas: nfs exports for the guests, syncthing, filebrowser (`104-internal-nas`).
+- vm-104 nas: nfs exports for the guests, syncthing, filebrowser (`104-internal-nas`). Every export checks subtrees,
+  so a forged file handle cannot leave its share, and root is squashed where a share takes no root writes. smb and
+  syncthing answer the owner's machines alone.
 - The owner's machines mount the whole tree over smb, sealed: `//10.100.0.104/homelab` with
   `credentials=/etc/samba/homelab.cred,seal,vers=3.1.1`. That file is the dotfiles' secret `samba-homelab`
-  (a `username=` line with the owner's login and a `password=` line, `openssl rand -hex 32`); secrets-sync.nu copies it to the nas, whose samba-user sets the
-  password from it (`104-internal-nas/lib/samba.nix`). Changing the password is changing that file, then `./sync.nu`.
-- kopia snapshots the nas at 02:00 and verifies on Sundays, including a sample downloaded back from proton.
+  (a `username=` line with the owner's login and a `password=` line, `openssl rand -hex 32`); secrets-sync.nu copies
+  it to the nas, whose samba-user sets the password from it (`104-internal-nas/lib/samba.nix`). Changing the password
+  is changing that file, then `./sync.nu`.
+- Each disk's kopia repository holds the other disk's data (`lib/kopia.nix`): the nas repository on the hdd
+  (`/srv/nas/bulk/BACKUPS/kopia`) snapshots the ssd's `/srv/nas` at 02:00 and verifies on Sundays, including a sample
+  downloaded back from proton; the syncthing repository on the ssd (`/srv/nas/BACKUPS/kopia-syncthing`) snapshots the
+  hdd's syncthing folders and the machines' borg repos at 03:00, and refuses to while the ssd's root is over 85% full.
+  Moving the nas repository from its old place on the ssd, once (`kopia-init` refuses to start a second history
+  beside it): `systemctl stop kopia-server`, `mv /srv/nas/BACKUPS/kopia /srv/nas/bulk/BACKUPS/kopia`,
+  `systemctl restart kopia-init kopia-server` on vm-104.
 - `proton-sync` mirrors the kopia repository to Proton Drive nightly at 04:00, one way, pruning before it uploads so a
   full drive frees itself (`lib/proton-mirror.nu`).
 - `proton-bisync` syncs the syncthing folder (`/srv/nas/syncthing/sync`) with `/my-files/homelab-offsite/sync` both
@@ -273,7 +329,8 @@ runbooks.
   Symlinks stay local.
 - Databases dumped before the snapshot (`src/modules/db-backup`); sqlite apps run on local disk with a nas copy
   (`src/modules/local-state`); `nas-restore` puts a snapshot back in place.
-- A full official Arch mirror on the nas's ssd root (`/srv/nas/archmirror`), synced hourly (`lib/archmirror-sync.nu`), beside the lsck0 repo (`/srv/nas/archrepo`); the hdd keeps only syncthing, media and torrents.
+- A full official Arch mirror on the nas's ssd root (`/srv/nas/archmirror`), synced hourly (`lib/archmirror-sync.nu`),
+  beside the lsck0 repo (`/srv/nas/archrepo`).
 
 ## Secrets
 
@@ -285,6 +342,8 @@ runbooks.
   dotfiles secrets, writes `.sops.yaml` and hands each guest only its own key. Adding one: read it in a config
   (`sops.secrets.<name>`), declare it with its kind (`src/secrets/shared.nix` lists the kinds), `./sync.nu`; a
   `manual` one is added empty, fill it with `sops <its file>`. Moving a declaration moves the value.
+- A declared secret missing from its file stops its guest's build, so a new `manual` one is filled before its guest
+  deploys: `secrets-sync.nu --apply`, then `sops <its file>`.
 - A `guardsData:` secret (a key stored data or logins depend on) is never generated once the lab is deployed: a
   missing one stops the run until restored, or `--generate-guarded` for one that guards nothing yet.
 - Plaintext never touches the repo: `src/scripts/sops-encrypt.nu` writes sops files; the pre-commit hook (`.githooks`,
@@ -307,7 +366,7 @@ runbooks.
      `kopia-password` with `kopia-nas repository change-password` on vm-104, `authelia-storage-key` with
      `authelia storage encryption change-key` on vm-101. Generated ones: delete the line with `sops <its file>`, then
      `secrets-sync.nu --apply` (a `guardsData:` one with `--generate-guarded`). `dotfiles:` ones in the dotfiles'
-     secrets. External ones (cloudflare, github, telegram, attic, proton, trmnl): issue new, revoke old,
+     secrets. External ones (cloudflare, github, telegram, proton, trmnl): issue new, revoke old,
      `sops <its file>`.
   7. `./sync.nu`: it pushes the new host keys, re-activates each guest and commits.
 
@@ -328,14 +387,15 @@ runbooks.
   `kopia snapshot list` / `kopia restore <snapshot> <target>`. The syncthing folder is not in kopia: its copy is
   `/my-files/homelab-offsite/sync`, with proton's file revisions and trash as its history.
 - The nas is down: `TF_STATE_OFFLINE=1 ./sync.nu` applies from the local state copy.
-- The Proxmox firewall locks out a machine: ssh stays open to the house lan, so `ssh root@<proxmox> pve-firewall stop`
-  from any machine with a key of `src/secrets/keys/`; fix `lan.workstation`/`lan.notebook` in `site.json`, then
-  `./sync.nu` turns it on again.
+- The Proxmox firewall locks out a machine: ssh stays open to `lan.workstation` and `lan.notebook`, so
+  `ssh root@<proxmox> pve-firewall stop` from either (or the host's console); fix `lan.workstation`/`lan.notebook` in
+  `site.json`, then `./sync.nu` turns it on again.
 
 ## Services
 
-- vm-105 cache: attic nix binary cache and redis for sccache.
-- vm-102 homepage: cards for every service and app, generated from their `homepage` data.
+- vm-105 cache: redis for the ci's sccache.
+- vm-102 homepage: cards for every service and app, generated from their `homepage` data; a powered-off guest's card
+  links nowhere.
 - vm-110 forgejo: oidc logins, pull mirrors of every owned github repo (`lib/forgejo-mirror.nu`).
 - vm-111 ci: github actions and forgejo runners, one rootless docker per trust level, never root.
 - vm-112 archbuild: nightly signed builds of the lsck0 pacman repo in an Arch container, published to the nas and
@@ -358,8 +418,11 @@ runbooks.
   page waits at most 2 s for an engine.
 - vm-212 privatebin; vm-213 file share; vm-215 teamspeak 6.
 - vm-214 minecraft at `<server>.mc.lsck0.dev`, one server awake at a time behind mc-gate: cobblemon (the owner's pack,
-  1.21.1), vanilla (the newest release) and atm (All the Mons 1.3.0 on NeoForge, flight allowed, extra mods from
-  `atm-extra`). `mc-modpack` switches a server's pack, each pack keeping its own world (`214-external-minecraft`).
+  1.21.1), vanilla (the newest release) and atm (All the Mons 1.3.0 on NeoForge, flight allowed). `mc-modpack`
+  switches a server's pack, each pack keeping its own world. Every server takes extra mods beside its pack from
+  `minecraft-modpacks/extra/<server>`, owned by the container's user at every start; `mc-mod add` reads a jar's
+  metadata and refuses one whose loader or minecraft or neoforge range the server's version falls outside of
+  (`214-external-minecraft`).
 - Apps: hello (the ci demo, a static c server, also an onion route), math (above), nyangine (its web example), wat.
 
 ## Tests and laws

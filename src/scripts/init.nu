@@ -8,13 +8,18 @@
 const ROOT = path self | path dirname | path dirname | path dirname
 const SRC = $ROOT | path join src
 use lib/tools.nu [die run-text tools-require]
-use lib/proxmox.nu [lab-files proxmox-pinned-host proxmox-ssh-init proxmox-converge PROXMOX_SSH_PORT_DEFAULT PROXMOX_SSH_USER_DEFAULT]
+use lib/proxmox.nu [
+    lab-files proxmox-pinned-host proxmox-ssh-init proxmox-converge proxmox-upgrade PROXMOX_SSH_PORT_DEFAULT
+    PROXMOX_SSH_USER_DEFAULT
+]
 use lib/secrets.nu [secrets-age-key-ready secrets-set SECRETS_CATALOG_FILE]
 
 const KEYSCAN_TIMEOUT_S = 5
 # of the bulk disk's bytes, the thin pool and its metadata fit in this share
 const BULK_POOL_SHARE = 0.96
 const BYTES_PER_GIB = 1073741824
+# the repo is public: a tenth of a degree (about 10 km) places the weather and the sun, not the house
+const LOCATION_DECIMALS = 1
 const NIX_FEATURES = [--extra-experimental-features "nix-command flakes"]
 
 # Proxmox's ed25519 host key, confirmed against the console; every other line (the guests' keys) stays
@@ -35,15 +40,20 @@ def pin [ip: string, port: int]: nothing -> nothing {
     print ">>> Pinned in src/generated/known_hosts; commit it (sync.nu does)."
 }
 
-# Pin Proxmox's host key, ask the site, make the secrets and converge the host; --pin (re)pins the key only
-def main [proxmox_ip: string, --pin]: nothing -> nothing {
+# Pin Proxmox's host key, ask the site, make the secrets and converge the host; --pin (re)pins the key only,
+# --upgrade upgrades the host's packages only (a maintenance window: the host may need a reboot after it)
+def main [proxmox_ip: string, --pin, --upgrade]: nothing -> nothing {
     tools-require ssh ssh-keyscan ssh-keygen
-    if not $pin { tools-require sops git nix age-keygen }
+    if not ($pin or $upgrade) { tools-require sops git nix age-keygen }
     let port = $PROXMOX_SSH_PORT_DEFAULT
     let files = lab-files $SRC
     let pinned = (do { ^ssh-keygen -F (proxmox-pinned-host $proxmox_ip $port) -f $files.known_hosts } | complete).exit_code == 0
     if $pin or not $pinned { pin $proxmox_ip $port }
     if $pin { return }
+    if $upgrade {
+        proxmox-upgrade $SRC (proxmox-ssh-init $SRC $proxmox_ip $port) $"($PROXMOX_SSH_USER_DEFAULT)@($proxmox_ip)"
+        return
+    }
 
     print $">>> Initializing Lab on Proxmox at ($proxmox_ip)..."
     # a commit before the first sync gets the plaintext guard too
@@ -69,9 +79,7 @@ def main [proxmox_ip: string, --pin]: nothing -> nothing {
     }
     print $">>> Connected to ($version)"
 
-    # -------------------------------------------------------------------------
-    # SITE: the machine and the house network, asked once and kept in src/generated/site.json for terraform, nix and sync.nu
-    # -------------------------------------------------------------------------
+    # the machine and the house network, asked once and kept in src/generated/site.json for terraform, nix and sync.nu
     let site = if ($files.site | path exists) { open $files.site } else { {} }
     # enter keeps the default, "-" clears it
     let ask = {|question: string, current: any|
@@ -130,7 +138,10 @@ def main [proxmox_ip: string, --pin]: nothing -> nothing {
         domain: $domain
         timeZone: $time_zone
         repo: $repo
-        location: ($site.location? | default {} | merge {latitude: ($latitude | into float), longitude: ($longitude | into float)})
+        location: ($site.location? | default {} | merge {
+            latitude: ($latitude | into float | math round --precision $LOCATION_DECIMALS)
+            longitude: ($longitude | into float | math round --precision $LOCATION_DECIMALS)
+        })
         lan: $lan
         gpu: $gpu
         bulk: $bulk

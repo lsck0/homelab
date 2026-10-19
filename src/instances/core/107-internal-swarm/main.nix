@@ -1,6 +1,7 @@
 # the deploy controller: the apps swarm's manager (raft, scheduling, deploys, modules/swarm) and the app builder
 # (lib/app-builder.nix, rootless as appbuild, never against the swarm's root docker socket)
-{ ... }: {
+{ ... }:
+{
   imports = [
     ../../../modules/rootless-docker.nix
     ./lib/app-builder.nix

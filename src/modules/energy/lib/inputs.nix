@@ -13,21 +13,25 @@ let
   # every metric of home assistant's prometheus integration is <namespace>_<name>
   namespace = "hass";
 
-  meter = key: m: m // rec {
-    input = "input_number.${key}_meter";
-    replacedButton = "input_button.${key}_meter_replaced";
-    # home assistant derives a yaml entity's id from its name, never from unique_id: the name is the id's slug
-    readingName = "${key} meter reading";
-    reading = "sensor.${key}_meter_reading";
-    readAtName = "${key} meter read at";
-    readAt = "sensor.${key}_meter_read_at";
-    # override_metric names; the default would mangle the unit into the name (m³ -> mu0xb3)
-    readingMetricName = "${key}_meter_cubic_meters";
-    readingMetric = "${namespace}_${readingMetricName}";
-    readAtMetricName = "${key}_meter_read_timestamp_seconds";
-    readAtMetric = "${namespace}_${readAtMetricName}";
-  };
-in {
+  meter =
+    key: m:
+    m
+    // rec {
+      input = "input_number.${key}_meter";
+      replacedButton = "input_button.${key}_meter_replaced";
+      # home assistant derives a yaml entity's id from its name, never from unique_id: the name is the id's slug
+      readingName = "${key} meter reading";
+      reading = "sensor.${key}_meter_reading";
+      readAtName = "${key} meter read at";
+      readAt = "sensor.${key}_meter_read_at";
+      # override_metric names; the default would mangle the unit into the name (m³ -> mu0xb3)
+      readingMetricName = "${key}_meter_cubic_meters";
+      readingMetric = "${namespace}_${readingMetricName}";
+      readAtMetricName = "${key}_meter_read_timestamp_seconds";
+      readAtMetric = "${namespace}_${readAtMetricName}";
+    };
+in
+{
   inherit namespace;
 
   # the house's zone: local days, the spot price's "today" and the reading clock follow it
@@ -58,14 +62,62 @@ in {
 
   # contract prices, kept in home assistant so a tariff change is one edit in the app; max bounds a typo
   tariffs = {
-    price_electricity = { label = "Strompreis";          unit = "EUR/kWh";   icon = "mdi:cash";            max = 10;   step = 0.0001; };
-    price_feed_in     = { label = "Einspeisevergütung";  unit = "EUR/kWh";   icon = "mdi:cash-plus";       max = 10;   step = 0.0001; };
-    price_gas         = { label = "Gaspreis";            unit = "EUR/kWh";   icon = "mdi:cash";            max = 10;   step = 0.0001; };
+    price_electricity = {
+      label = "Strompreis";
+      unit = "EUR/kWh";
+      icon = "mdi:cash";
+      max = 10;
+      step = 0.0001;
+    };
+    price_feed_in = {
+      label = "Einspeisevergütung";
+      unit = "EUR/kWh";
+      icon = "mdi:cash-plus";
+      max = 10;
+      step = 0.0001;
+    };
+    price_gas = {
+      label = "Gaspreis";
+      unit = "EUR/kWh";
+      icon = "mdi:cash";
+      max = 10;
+      step = 0.0001;
+    };
     # brennwert times zustandszahl, from the gas bill
-    gas_kwh_per_m3    = { label = "Gas Umrechnung";      unit = "kWh/m³";    icon = "mdi:swap-horizontal"; max = 20;   step = 0.0001; };
-    price_water       = { label = "Wasserpreis";         unit = "EUR/m³";    icon = "mdi:cash";            max = 100;  step = 0.01; };
-    fee_electricity   = { label = "Grundpreis Strom";    unit = "EUR/Monat"; icon = "mdi:calendar-month";  max = 1000; step = 0.01; };
-    fee_gas           = { label = "Grundpreis Gas";      unit = "EUR/Monat"; icon = "mdi:calendar-month";  max = 1000; step = 0.01; };
-    fee_water         = { label = "Grundpreis Wasser";   unit = "EUR/Monat"; icon = "mdi:calendar-month";  max = 1000; step = 0.01; };
+    gas_kwh_per_m3 = {
+      label = "Gas Umrechnung";
+      unit = "kWh/m³";
+      icon = "mdi:swap-horizontal";
+      max = 20;
+      step = 0.0001;
+    };
+    price_water = {
+      label = "Wasserpreis";
+      unit = "EUR/m³";
+      icon = "mdi:cash";
+      max = 100;
+      step = 0.01;
+    };
+    fee_electricity = {
+      label = "Grundpreis Strom";
+      unit = "EUR/Monat";
+      icon = "mdi:calendar-month";
+      max = 1000;
+      step = 0.01;
+    };
+    fee_gas = {
+      label = "Grundpreis Gas";
+      unit = "EUR/Monat";
+      icon = "mdi:calendar-month";
+      max = 1000;
+      step = 0.01;
+    };
+    fee_water = {
+      label = "Grundpreis Wasser";
+      unit = "EUR/Monat";
+      icon = "mdi:calendar-month";
+      max = 1000;
+      step = 0.01;
+    };
   };
 }

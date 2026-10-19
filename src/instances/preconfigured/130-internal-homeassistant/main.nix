@@ -1,4 +1,14 @@
-{ config, pkgs, lib, inventory, site, catalog, retry, setupUnit, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  inventory,
+  site,
+  catalog,
+  retry,
+  setupUnit,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   route = catalog.internal.homeassistant;
@@ -102,17 +112,21 @@ let
 
     asyncio.run(main())
   '';
-in {
+in
+{
   # the recorder's sqlite wal dies of SIGBUS on nfs; local, the nas keeps a nightly copy
   homelab.localState.homeassistant = {
     path = stateDir;
     unit = "podman-homeassistant";
     sqlite = [ "home-assistant_v2.db" ];
-    exclude = [ ".cache" "home-assistant.log*" ];
+    exclude = [
+      ".cache"
+      "home-assistant.log*"
+    ];
   };
 
   virtualisation.oci-containers.containers.homeassistant = {
-    image = "ghcr.io/home-assistant/home-assistant:2026.9.2";
+    image = "ghcr.io/home-assistant/home-assistant:2026.9.2@sha256:a1bc133af84ee6505fe2c266d9805b7c75b780dfdc188edfee3b11e8f3cd8efe";
     ports = [ "${toString route.port}:${toString containerPort}" ];
     volumes = [
       "${stateDir}:/config"
@@ -123,13 +137,16 @@ in {
     ];
   };
 
-  sops.secrets.homeassistant-oidc-secret = {};
+  sops.secrets.homeassistant-oidc-secret = { };
 
   systemd.services.hass-http = {
     before = [ "podman-homeassistant.service" ];
     requiredBy = [ "podman-homeassistant.service" ];
     after = [ "homeassistant-seed.service" ];
-    path = [ pkgs.jq pkgs.coreutils ];
+    path = [
+      pkgs.jq
+      pkgs.coreutils
+    ];
     serviceConfig.Type = "oneshot";
     script = ''
       f=${stateDir}/.storage/http
@@ -157,7 +174,13 @@ in {
   systemd.services.hass-homepage-token = setupUnit {
     description = "Generate Home Assistant token for Homepage";
     after = [ "podman-homeassistant.service" ];
-    path = [ pkgs.curl pkgs.coreutils pkgs.jq pkgs.openssl (pkgs.python3.withPackages (ps: [ ps.websockets ])) ];
+    path = [
+      pkgs.curl
+      pkgs.coreutils
+      pkgs.jq
+      pkgs.openssl
+      (pkgs.python3.withPackages (ps: [ ps.websockets ]))
+    ];
     script = ''
       [ -s ${tokensDir}/hass-key.token ] && exit 0
       # any http answer means it is up, a 401 included

@@ -2,7 +2,9 @@
 #
 # Build dependencies as a table: a split base's packages depending on their siblings (apparmor.d,
 # opentelemetry-python-contrib) must not ask the repos for them, by name or by provides, versioned or not; every other
-# depends and makedepends stays, a name that only shares a prefix with a sibling included.
+# depends and makedepends stays, a name that only shares a prefix with a sibling included; a split package's empty
+# `depends = ` (libsoup-docs) names nothing. An override of two packages reaches makepkg as two, and makepkg runs with
+# the perl tools on its PATH.
 #
 # The push to the mirror into a local directory: the served tree (the internet's as hardlinks of the pool), the status
 # and the logs status.txt names arrive, the final --delete keeps the logs and drops stale repo files. What the build
@@ -17,6 +19,11 @@
 # A local recipe over an official package of its name (quickshell): the staged and the final db serve the local build
 # whether its version is newer or older than the official one, against real pacman dbs.
 #
+# The install iso: the iso container runs dot's iso build with the mirror and keeps every iso it makes, marks its run
+# only when the build passed and leaves its work dir empty either way. Publish signs the night's iso into iso/ beside a
+# copy of the repo key, moves the latest links to it and prunes the dated isos by the snapshots' rule; an unfinished
+# build, a key file that is not the signing key, or an iso off its .sha256 publishes nothing and keeps the served isos.
+#
 # The internet's tree beside the full one, published with a real repo key: its db and files db name the own builds
 # alone (a local recipe's over an official name included), signed, its files hardlinks of the pool's; it switches and
 # prunes like the full one. A prefix that is none, or that would make it the full tree, stops the publish.
@@ -27,7 +34,7 @@
 # The parts the port from bash could bend, against what the bash build did: the recipe key hashes byte for byte as
 # before (a changed key would rebuild every base the first night); repack's pkgrel 1.<n>, its sibling pins and the
 # replaces line; the skip decision (is-current) as a table; publish's acceptance of a rebuilt base as a table; the
-# dated snapshots the prune keeps; the db index against a db with a malformed desc.
+# dated snapshots and isos the prune keeps, one table for both; the db index against a db with a malformed desc.
 #
 # usage: nu archrepo_build_test.nu <upstream run> <unavailable> <stand-in url> <state dir> <stand-in pacman upstream>,
 # beside ../lib; GPG_STAND_IN names a dir with a gpg that always fails
@@ -73,6 +80,14 @@ def package-make [dir: path, name: string, version: string, extra: list<string> 
     $file
 }
 
+# a fresh signing key in $env.GNUPGHOME, its fingerprint
+def key-create [uid: string]: nothing -> string {
+    mkdir $env.GNUPGHOME
+    ^chmod 700 $env.GNUPGHOME
+    do { ^gpg --batch --pinentry-mode loopback --passphrase "" --quick-gen-key $uid ed25519 sign never } | complete | ignore
+    ^gpg --with-colons --list-keys $uid | lines | each { split row ":" } | where { $in.0 == fpr } | get 0.9
+}
+
 def inode [file: path]: nothing -> string {
     ^stat -c %i $file | str trim
 }
@@ -93,6 +108,9 @@ def deps-check []: nothing -> nothing {
         ["a name that only shares a prefix with a sibling is installed"
             "pkgbase = apparmor.d|pkgname = apparmor.d|  depends = apparmor.d-base-extra|pkgname = apparmor.d-base" [apparmor.d-base-extra]]
         ["a recipe without depends installs nothing" "pkgbase = data|pkgname = data" []]
+        ["a split package's empty depends names nothing (libsoup-docs)"
+            "pkgbase = libsoup|  makedepends = meson|  depends = glib-networking|pkgname = libsoup|  depends = glib-networking|  depends = libpsl.so|pkgname = libsoup-docs|  depends = "
+            [glib-networking libpsl.so meson]]
     ]
     let dir = $env.PWD | path join recipe
     for case in $cases {
@@ -103,6 +121,36 @@ def deps-check []: nothing -> nothing {
         if $got != $case.want { fail $"($case.name): wanted ($got), want ($case.want)" }
         pass $case.name
     }
+}
+
+# the overrides of a base appended to its aur PKGBUILD, read back by makepkg
+def override-check []: nothing -> nothing {
+    let fixture = $env.PWD | path join override
+    rm --recursive --force $fixture
+    let c = context-default | merge {dotfiles: ($fixture | path join dotfiles)}
+    let dir = $fixture | path join recipe
+    write-lines ($c.dotfiles | path join mirror overrides.conf) [
+        "# <pkgbase> <depends|makedepends> <package>..." "tool depends dep-a dep-b  # forgotten" "tool makedepends make-a make-b" "other depends dep-c"
+    ]
+    write-lines ($dir | path join PKGBUILD) ["pkgname=tool" "pkgver=1" "pkgrel=1" "arch=(any)" "depends=(dep-base)"]
+    let override = recipe-override $c (night-empty) tool $dir
+    if not $override.changed or ($override.n.failed | is-not-empty) { fail $"the override did not apply: ($override | to nuon)" }
+    let srcinfo = do { cd $dir; ^makepkg --printsrcinfo } | complete
+    if $srcinfo.exit_code != 0 { fail $"makepkg reads no overridden PKGBUILD: ($srcinfo.stderr)" }
+    $srcinfo.stdout | save --force ($dir | path join .SRCINFO)
+    let got = {depends: (srcinfo-get ($dir | path join .SRCINFO) depends), makedepends: (srcinfo-get ($dir | path join .SRCINFO) makedepends)}
+    let want = {depends: [dep-base dep-a dep-b], makedepends: [make-a make-b]}
+    if $got != $want { fail $"the overridden .SRCINFO lists ($got | to nuon), want ($want | to nuon)" }
+    pass "an override of two packages reaches makepkg as two"
+}
+
+def build-path-check []: nothing -> nothing {
+    let path = context-default | get as_builder | where { str starts-with "PATH=" } | get 0 | str substring 5.. | split row ":"
+    if "/usr/bin/core_perl" not-in $path { fail $"the build's PATH lacks the perl tools: ($path)" }
+    if ($path | enumerate | where item == "/usr/local/bin" | get 0.index) > ($path | enumerate | where item == "/usr/bin" | get 0.index) {
+        fail $"the ninja wrapper comes after /usr/bin: ($path)"
+    }
+    pass "makepkg runs with the perl tools (pod2man) on its PATH, the ninja wrapper first"
 }
 
 def gate-check []: nothing -> nothing {
@@ -144,6 +192,10 @@ def push-fixture [c: record, secret_file: path]: nothing -> nothing {
     ^ln ($c.repo_dir | path join a-1-1.1-x86_64.pkg.tar.zst) ($internet | path join $ARCH)
     ^ln -s $snapshot ($internet | path join $CURRENT_NAME)
     "state\n" | save ($c.served | path join .state a)
+    let iso = "archlinux-lsck0-2026.10.18-x86_64.iso"
+    mkdir ($c.served | path join $ISO_DIR)
+    for file in [$iso $"($iso).sig" $ISO_KEY_NAME] { "iso\n" | save ($c.served | path join $ISO_DIR $file) }
+    ^ln -s $iso ($c.served | path join $ISO_DIR $ISO_LATEST)
     $"failed: a: build failed, ($LOGS_NAME)/a.log\n" | save ($c.served | path join status.txt)
     "{}\n" | save ($c.served | path join status.json)
     "run\n" | save $c.build_log
@@ -178,7 +230,9 @@ def push-cases []: nothing -> nothing {
     }
     let at = {|public| $base | merge {public: $public, public_logs: ($public | path join $LOGS_NAME), build_log: ($public | path join $BUILD_LOG_NAME)} }
     let served = [status.txt status.json $"($ARCH)/($REPO).db" $"($ARCH)/($REPO).db.tar.gz" $"($ARCH)/a-1-1.1-x86_64.pkg.tar.zst"
-        $"public/($CURRENT_NAME)" $"public/($ARCH)/($REPO).db.tar.gz" $"public/($ARCH)/a-1-1.1-x86_64.pkg.tar.zst"]
+        $"public/($CURRENT_NAME)" $"public/($ARCH)/($REPO).db.tar.gz" $"public/($ARCH)/a-1-1.1-x86_64.pkg.tar.zst"
+        $"($ISO_DIR)/archlinux-lsck0-2026.10.18-x86_64.iso" $"($ISO_DIR)/archlinux-lsck0-2026.10.18-x86_64.iso.sig"
+        $"($ISO_DIR)/($ISO_LATEST)" $"($ISO_DIR)/($ISO_KEY_NAME)"]
     let planted = [notes.txt sub key.log fifo.log huge.log] | each { $"($LOGS_NAME)/($in)" }
     let stale = [$"($LOGS_NAME)/gone.log" $"($ARCH)/gone-1-1.1-x86_64.pkg.tar.zst" .state]
 
@@ -190,6 +244,8 @@ def push-cases []: nothing -> nothing {
         fail "the internet's tree arrived as copies, not hardlinks of the pool"
     }
     pass "the internet's tree arrives as hardlinks of the pool"
+    if ($c.push_target | path join $ISO_DIR $ISO_LATEST | path type) != symlink { fail "the latest iso arrived as no link" }
+    pass "the isos arrive, latest as a link"
 
     let c = do $at ($env.PWD | path join public-link)
     push-fixture $c $secret_file
@@ -364,10 +420,7 @@ def local-over-official [pacman_upstream: path, name: string, official: string, 
 
 def internet-cases [lib: path]: nothing -> nothing {
     $env.GNUPGHOME = $env.PWD | path join gnupg
-    mkdir $env.GNUPGHOME
-    ^chmod 700 $env.GNUPGHOME
-    do { ^gpg --batch --pinentry-mode loopback --passphrase "" --quick-gen-key "archbuild test <test@invalid>" ed25519 sign never } | complete | ignore
-    let key = ^gpg --with-colons --list-secret-keys | lines | each { split row ":" } | where { $in.0 == fpr } | get 0.9
+    let key = key-create "archbuild test <test@invalid>"
     let served = $env.PWD | path join trees
     let c = context-default | merge {
         served: $served, repo_dir: ($served | path join $ARCH), work: ($env.PWD | path join trees-work), internet_prefix: /public
@@ -447,6 +500,117 @@ def internet-cases [lib: path]: nothing -> nothing {
         if not ($got.stdout | str contains "is no path prefix") { fail $"($case.name): ($got.stdout)($got.stderr)" }
         pass $case.name
     }
+}
+
+# a dated iso and its .sha256 as dot writes them, its path
+def iso-make [dir: path, date: string, contents: string = "iso"]: nothing -> path {
+    let name = $"archlinux-lsck0-($date)-x86_64.iso"
+    let file = $dir | path join $name
+    $"($contents) ($date)\n" | save --force $file
+    $"(open --raw $file | hash sha256)  ($name)\n" | save --force $"($file).sha256"
+    $file
+}
+
+# the iso container with a stand-in dot.nu, which records its arguments and makes an iso or fails
+def iso-build-cases [lib: path]: nothing -> nothing {
+    let fixture = $env.PWD | path join iso-build
+    rm --recursive --force $fixture
+    let c = context-default | merge {
+        dotfiles: ($fixture | path join dotfiles), iso_out: ($fixture | path join out), iso_run: ($fixture | path join out run)
+        iso_work: ($fixture | path join work), iso_mirror: 'http://mirror.invalid/archlinux/$repo/os/$arch'
+        upstream: ($fixture | path join upstream), run_started: (now-s)
+    }
+    let args_file = $fixture | path join args.nuon
+    mkdir $c.iso_out $c.iso_work ($c.dotfiles | path join scripts)
+    write-lines $c.upstream ["exit 0"]
+    write-lines ($c.dotfiles | path join scripts dot.nu) [
+        "def --wrapped main [...args: string] {"
+        $"    $args | to nuon | save --force ($args_file | to nuon)"
+        "    let at = {|flag| $args | get (($args | enumerate | where item == $flag | get 0.index) + 1) }"
+        "    touch ((do $at '--work') | path join airootfs)"
+        "    if ($env.ISO_STAND_IN_FAILS? | is-not-empty) { exit 3 }"
+        "    touch ((do $at '--out') | path join archlinux-lsck0-2026.10.18-x86_64.iso)"
+        "}"
+    ]
+    touch ($c.iso_out | path join archlinux-lsck0-2026.10.17-x86_64.iso)
+    let got = isolated $lib $c null "iso-main $c"
+    if $got.exit_code != 0 { fail $"the iso build failed: ($got.output)" }
+    let want = [internal iso --work $c.iso_work --out $c.iso_out --mirror $c.iso_mirror --keep "1000"]
+    if (open $args_file) != $want { fail $"dot ran with ((open $args_file) | to nuon), want ($want | to nuon)" }
+    if (open --raw $c.iso_run | str trim) != ($c.run_started | into string) { fail "a passed iso build left no run id" }
+    if (ls $c.iso_out | get name | each { path basename } | sort) != [archlinux-lsck0-2026.10.18-x86_64.iso run] {
+        fail $"the out dir holds ((ls $c.iso_out | get name) | to nuon) after a passed build"
+    }
+    if (ls $c.iso_work | is-not-empty) { fail "a passed iso build left its work dir" }
+    pass "the iso container runs dot's iso build with the mirror, keeps its isos to publish and marks its run"
+
+    let got = with-env {ISO_STAND_IN_FAILS: "1"} { isolated $lib $c null "iso-main $c" }
+    if $got.exit_code == 0 { fail "a failed iso build passed" }
+    if ($c.iso_run | path exists) or (ls $c.iso_out | is-not-empty) { fail "a failed iso build left a run id or an iso" }
+    if (ls $c.iso_work | is-not-empty) { fail "a failed iso build left its work dir" }
+    pass "a failed iso build marks no run and leaves its work dir empty"
+}
+
+# publish's iso step against a real repo key: what it serves, links, signs and prunes
+def iso-publish-cases []: nothing -> nothing {
+    $env.GNUPGHOME = $env.PWD | path join iso-gnupg
+    let key = key-create "archbuild iso <iso@invalid>"
+    let other = key-create "someone else <other@invalid>"
+    let fixture = $env.PWD | path join iso-publish
+    rm --recursive --force $fixture
+    # a Sunday: the week started 2026-10-12, the month 2026-10-01
+    let c = context-default | merge {
+        dotfiles: ($fixture | path join dotfiles), iso_out: ($fixture | path join out), iso_run: ($fixture | path join out run)
+        iso_served: ($fixture | path join served $ISO_DIR), work: ($fixture | path join work), key: $key
+        run_started: (("2026-10-18T03:00:00Z" | into datetime | into int) // 1_000_000_000)
+    }
+    let anchor = $c.dotfiles | path join configs base pacman archrepo.asc
+    mkdir ($anchor | path dirname) $c.iso_out $c.iso_served $c.work
+    for date in [2026.10.01 2026.10.05 2026.10.12 2026.10.17] {
+        let file = iso-make $c.iso_served $date
+        "sig\n" | save --force $"($file).sig"
+    }
+    ^ln -s archlinux-lsck0-2026.10.17-x86_64.iso ($c.iso_served | path join $ISO_LATEST)
+    let served = {|| ls -a $c.iso_served | get name | each { path basename } | sort }
+    let before = do $served
+    iso-make $c.iso_out 2026.10.18 | ignore
+
+    let cases = [
+        [name anchor_key run tamper want];
+        ["an unfinished build publishes nothing" $key "0" false "the iso build did not finish"]
+        ["a key file that is not the signing key publishes nothing" $other run false "not the signing key"]
+        ["an iso off its .sha256 publishes nothing" $key run true "does not match its .sha256"]
+    ]
+    for case in $cases {
+        ^gpg --armor --export $case.anchor_key | save --force $anchor
+        let run = if $case.run == run { $c.run_started | into string } else { $case.run }
+        $run | save --force $c.iso_run
+        let iso = $c.iso_out | path join archlinux-lsck0-2026.10.18-x86_64.iso
+        if $case.tamper { "tampered\n" | save --force $iso } else { iso-make $c.iso_out 2026.10.18 | ignore }
+        let p = iso-publish $c (publish-empty)
+        if not ($p.iso_failure | str contains $case.want) { fail $"($case.name): '($p.iso_failure)'" }
+        if (do $served) != $before { fail $"($case.name): the served isos changed to ((do $served) | to nuon)" }
+        pass $case.name
+    }
+
+    ^gpg --armor --export $key | save --force $anchor
+    iso-make $c.iso_out 2026.10.18 | ignore
+    $c.run_started | into string | save --force $c.iso_run
+    let p = iso-publish $c (publish-empty)
+    if $p.iso_failure != "" { fail $"the night's iso was not published: ($p.iso_failure)" }
+    let latest = $c.iso_served | path join $ISO_LATEST
+    if (^readlink $latest | str trim) != archlinux-lsck0-2026.10.18-x86_64.iso { fail "latest does not name the night's iso" }
+    if (^readlink $"($latest).sig" | str trim) != archlinux-lsck0-2026.10.18-x86_64.iso.sig { fail "the latest .sig does not name the night's" }
+    if (do { ^gpg --batch --verify $"($latest).sig" $latest } | complete).exit_code != 0 { fail "the latest iso carries no valid signature" }
+    if (do { cd $c.iso_served; ^sha256sum --check --status $"($ISO_LATEST).sha256" } | complete).exit_code != 0 {
+        fail "the latest .sha256 does not check the latest iso"
+    }
+    if (open --raw ($c.iso_served | path join $ISO_KEY_NAME)) != (open --raw $anchor) { fail $"($ISO_KEY_NAME) is no copy of the repo key" }
+    pass "the night's iso is signed by the repo key, latest, its .sig and .sha256 follow it, the key lies beside"
+    let want = [2026.10.01 2026.10.12 2026.10.18] | each {|date| ["" .sha256 .sig] | each { $"archlinux-lsck0-($date)-x86_64.iso($in)" } }
+    | flatten | append [$ISO_LATEST $"($ISO_LATEST).sha256" $"($ISO_LATEST).sig" $ISO_KEY_NAME] | sort
+    if (do $served) != $want { fail $"the served isos are ((do $served) | to nuon), want ($want | to nuon)" }
+    pass "the isos are pruned like the snapshots: newest, first of the month, first of the week"
 }
 
 def skip-cases [lib: path]: nothing -> nothing {
@@ -661,28 +825,41 @@ def base-check-cases []: nothing -> nothing {
     }
 }
 
-# the newest, the first of the month, the first of the week (Monday) and the one current names stay; the pool always
-def snapshot-prune-cases []: nothing -> nothing {
+# the newest, the first of the month, the first of the week (Monday) and the one current or latest names stay: the
+# dated snapshots beside the pool and the internet's tree, and the dated isos with their .sha256 and .sig beside the key
+def dated-prune-cases []: nothing -> nothing {
     let root = $env.PWD | path join prune-tree
+    let isos = $env.PWD | path join prune-isos
     # a Sunday: the week started 2026-10-12, the month 2026-10-01
-    let run = ("2026-10-18T03:00:00Z" | into datetime | into int) // 1_000_000_000
+    let c = context-default | merge {run_started: (("2026-10-18T03:00:00Z" | into datetime | into int) // 1_000_000_000)}
+    let iso_name = {|day| $"archlinux-lsck0-2026.($day | str replace '-' '.')-x86_64.iso" }
     let cases = [
         [name days current want];
         ["month, week and newest" [09-28 10-02 10-05 10-12 10-13 10-17 10-18] 10-18 [10-02 10-12 10-18]]
         ["current held back stays" [09-28 10-02 10-12 10-13 10-17] 09-28 [09-28 10-02 10-12 10-17]]
-        ["one snapshot this month is all three" [09-20 09-30 10-18] 10-18 [10-18]]
+        ["one this month is all three" [09-20 09-30 10-18] 10-18 [10-18]]
         ["nothing this month keeps the newest" [09-20 09-30] 09-30 [09-30]]
     ]
     for case in $cases {
-        rm --recursive --force $root
-        for d in $case.days { mkdir ($root | path join $"2026-($d)" x86_64) }
-        mkdir ($root | path join x86_64) ($root | path join public)
+        rm --recursive --force $root $isos
+        mkdir ($root | path join $ARCH) ($root | path join public) $isos
+        for day in $case.days {
+            mkdir ($root | path join $"2026-($day)" $ARCH)
+            for suffix in ["" .sha256 .sig] { touch ($isos | path join $"(do $iso_name $day)($suffix)") }
+        }
         ^ln -s $"2026-($case.current)" ($root | path join $CURRENT_NAME)
-        snapshot-prune (context-default | merge {run_started: $run}) $root | ignore
+        ^ln -s (do $iso_name $case.current) ($isos | path join $ISO_LATEST)
+        touch ($isos | path join $ISO_KEY_NAME)
+        snapshot-prune $c $root
+        iso-prune $c $isos
         let kept = ls $root | where type == dir | get name | each { path basename } | sort
-        let want = $case.want | each { $"2026-($in)" } | append [public x86_64] | sort
-        if $kept != $want { fail $"($case.name): kept ($kept | to nuon), want ($want | to nuon)" }
-        pass $"snapshot prune: ($case.name)"
+        let want = $case.want | each { $"2026-($in)" } | append [public $ARCH] | sort
+        if $kept != $want { fail $"snapshots, ($case.name): kept ($kept | to nuon), want ($want | to nuon)" }
+        let kept = ls -a $isos | get name | each { path basename } | sort
+        let want = $case.want | each {|day| ["" .sha256 .sig] | each { $"(do $iso_name $day)($in)" } } | flatten
+        | append [$ISO_LATEST $ISO_KEY_NAME] | sort
+        if $kept != $want { fail $"isos, ($case.name): kept ($kept | to nuon), want ($want | to nuon)" }
+        pass $"snapshot and iso prune: ($case.name)"
     }
 }
 
@@ -710,12 +887,14 @@ def db-index-cases []: nothing -> nothing {
 def main [upstream: path, unavailable: int, aur_url: string, aur_state: path, pacman_upstream: path]: nothing -> nothing {
     let lib = $env.FILE_PWD | path join .. lib | path expand
     deps-check
+    override-check
+    build-path-check
     recipe-key-cases
     repack-cases
     is-current-cases
     restage-cases
     base-check-cases
-    snapshot-prune-cases
+    dated-prune-cases
     db-index-cases
     gate-check
     push-cases
@@ -725,5 +904,7 @@ def main [upstream: path, unavailable: int, aur_url: string, aur_state: path, pa
     local-over-official $pacman_upstream "a local recipe newer than the official package serves its build (quickshell)" 0.3.2-1 0.3.2-2.9
     local-over-official $pacman_upstream "a local recipe older than the official package still serves its build" 0.3.2-5 0.3.2-2.9
     internet-cases $lib
+    iso-build-cases $lib
+    iso-publish-cases
     skip-cases $lib
 }

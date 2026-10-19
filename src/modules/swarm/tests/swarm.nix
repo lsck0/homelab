@@ -7,27 +7,56 @@
 # Lab guests at their real addresses on one flat network (tests/lib/lab.nix): the real modules mount the real
 # shares (homelab.nasMounts) from a test nas that exports them by the real rules (104-internal-nas's lib/nas-exports.nix). The
 # apps are the test's own, one app, so the production catalog can change without touching this test.
-{ pkgs, lib, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  specialArgs,
+  ...
+}:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: { inherit demo; }; };
-  net = import ../../net.nix { inherit lib; inherit (lab) inventory site; };
+  lab = import ../../../tests/lib/lab.nix {
+    inherit pkgs lib specialArgs;
+    apps = _: { inherit demo; };
+  };
+  net = import ../../net.nix {
+    inherit lib;
+    inherit (lab) inventory site;
+  };
   flows = import ../../flows.nix {
     inherit lib net;
     inherit (lab) inventory catalog;
-    lab = lab.specialArgs.lab;
+    inherit (lab.specialArgs) lab;
     nasClients = throw "the test reads the port forwards only";
   };
 
-  app = version: pkgs.dockerTools.buildLayeredImage {
-    name = "registry.lsck0.dev/demo/web";
-    tag = version;
-    contents = [ pkgs.busybox pkgs.curl pkgs.socat (pkgs.writeTextDir "www/index.html" "demo ${version}\n") ];
-    config.Cmd = [ "httpd" "-f" "-p" "8000" "-h" "/www" ];
-  };
+  app =
+    version:
+    pkgs.dockerTools.buildLayeredImage {
+      name = "registry.lsck0.dev/demo/web";
+      tag = version;
+      contents = [
+        pkgs.busybox
+        pkgs.curl
+        pkgs.socat
+        (pkgs.writeTextDir "www/index.html" "demo ${version}\n")
+      ];
+      config.Cmd = [
+        "httpd"
+        "-f"
+        "-p"
+        "8000"
+        "-h"
+        "/www"
+      ];
+    };
 
   inherit (lab) profiles;
   # the router caps and logs a forward's clients
-  forwarded = [ "inflightLimit" "accessLog" "probe" ];
+  forwarded = [
+    "inflightLimit"
+    "accessLog"
+    "probe"
+  ];
   port = 20130;
   portChanged = 20131;
   tcpPort = 20132;
@@ -41,46 +70,103 @@ let
     repo = "lsck0/demo";
     branch = "master";
     routes = {
-      demo = { service = "web"; targetPort = 8000; inherit port; on = profiles.hardenedExternal ++ [ "probe" ]; };
-      demo-tcp = { protocol = "tcp"; service = "web"; targetPort = 8000; port = tcpPort; publicPort = tcpPort; on = forwarded; };
-      demo-udp = { protocol = "udp"; service = "echo"; targetPort = echoPort; port = udpPort; publicPort = udpPort; on = forwarded; };
+      demo = {
+        service = "web";
+        targetPort = 8000;
+        inherit port;
+        on = profiles.hardenedExternal ++ [ "probe" ];
+      };
+      demo-tcp = {
+        protocol = "tcp";
+        service = "web";
+        targetPort = 8000;
+        port = tcpPort;
+        publicPort = tcpPort;
+        on = forwarded;
+      };
+      demo-udp = {
+        protocol = "udp";
+        service = "echo";
+        targetPort = echoPort;
+        port = udpPort;
+        publicPort = udpPort;
+        on = forwarded;
+      };
     };
-    resources = { web.memoryMiB = 256; echo.memoryMiB = 128; };
+    resources = {
+      web.memoryMiB = 256;
+      echo.memoryMiB = 128;
+    };
     # stays up: its tcp and udp routes go from the router straight to the workers, past every wake proxy
-    on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
+    on =
+      profiles.observed
+      ++ profiles.traced
+      ++ [
+        "frontend"
+        "homepage"
+      ];
     # more than one worker holds beside a deploy's surge: the swarm gets two (modules/limits workerCountOf)
     reservation.memoryMiB = 768;
   };
   # a catalog edit as sync.nu deploys it: the lab collected again with the demo changed
   catalogWith = change: lib.mkForce (lab.withApps (apps: lib.recursiveUpdate apps { demo = change; })).catalog;
 
-  w1 = assert lib.assertMsg (lab.appsCatalog.swarm.workers == [ 250 251 ]) "swarm: the fixture needs two workers";
+  w1 =
+    assert lib.assertMsg (
+      lab.appsCatalog.swarm.workers == [
+        250
+        251
+      ]
+    ) "swarm: the fixture needs two workers";
     lab.inventory."250".ip;
   w2 = lab.inventory."251".ip;
 
   # the router forwards each l4 route to every worker, by its own protocol
-  forwards = lib.filter (f: lib.elem f.port [ tcpPort udpPort ]) flows.portForwards;
-  forwardsWrong = lib.filter (f: f.addresses != [ w1 w2 ] || f.proto != (if f.port == tcpPort then "tcp" else "udp")) forwards;
+  forwards = lib.filter (
+    f:
+    lib.elem f.port [
+      tcpPort
+      udpPort
+    ]
+  ) flows.portForwards;
+  forwardsWrong = lib.filter (
+    f:
+    f.addresses != [
+      w1
+      w2
+    ]
+    || f.proto != (if f.port == tcpPort then "tcp" else "udp")
+  ) forwards;
   # registry.lsck0.dev resolves to the internal ingress; here the registry itself answers there
   registryAddress = lab.inventory."100".ip;
 
-  swarmNode = vmid: { lib, ... }: {
-    imports = [ (lab.guest vmid { flat = true; nas = true; }) ];
-    virtualisation.memorySize = 1536;
-    virtualisation.diskSize = 4096;
-    environment.systemPackages = [ pkgs.curl ];
-    networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
-    # no collector (vm-103) here: a failing upload would fail every switch below
-    services.journald.upload.enable = lib.mkForce false;
-    # what sync.nu does after an edit of an app, on every node at once
-    specialisation.edited.configuration._module.args.catalog = catalogWith {
-      routes.demo.port = portChanged;
-      env.web.GREETING = "edited";
+  swarmNode =
+    vmid:
+    { lib, ... }:
+    {
+      imports = [
+        (lab.guest vmid {
+          flat = true;
+          nas = true;
+        })
+      ];
+      virtualisation.memorySize = 1536;
+      virtualisation.diskSize = 4096;
+      environment.systemPackages = [ pkgs.curl ];
+      networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
+      # no collector (vm-103) here: a failing upload would fail every switch below
+      services.journald.upload.enable = lib.mkForce false;
+      # what sync.nu does after an edit of an app, on every node at once
+      specialisation.edited.configuration._module.args.catalog = catalogWith {
+        routes.demo.port = portChanged;
+        env.web.GREETING = "edited";
+      };
+      specialisation.disabled.configuration._module.args.catalog = catalogWith { enable = false; };
     };
-    specialisation.disabled.configuration._module.args.catalog = catalogWith { enable = false; };
-  };
 in
-assert lib.assertMsg (lib.length forwards == 2 && forwardsWrong == [ ]) "the router's l4 forwards: ${builtins.toJSON forwards}";
+assert lib.assertMsg (
+  lib.length forwards == 2 && forwardsWrong == [ ]
+) "the router's l4 forwards: ${builtins.toJSON forwards}";
 pkgs.testers.runNixOSTest {
   name = "swarm";
 
@@ -94,15 +180,28 @@ pkgs.testers.runNixOSTest {
       enable = true;
       listenAddress = "0.0.0.0";
       port = 443;
-      extraConfig.http.tls = { certificate = lab.pki.lsck0.cert; key = lab.pki.lsck0.key; };
+      extraConfig.http.tls = {
+        certificate = lab.pki.lsck0.cert;
+        inherit (lab.pki.lsck0) key;
+      };
     };
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
   };
 
   # the internet behind the router: the workers' gateway, so their answers to the client come back here
   nodes.world = {
-    imports = [ (lab.multi { addresses = [ "${client}/24" "${lab.inventory."250".gateway}/8" ]; }) ];
-    environment.systemPackages = [ pkgs.curl pkgs.socat ];
+    imports = [
+      (lab.multi {
+        addresses = [
+          "${client}/24"
+          "${lab.inventory."250".gateway}/8"
+        ];
+      })
+    ];
+    environment.systemPackages = [
+      pkgs.curl
+      pkgs.socat
+    ];
   };
 
   nodes.vm-107 = swarmNode "107";
@@ -206,7 +305,8 @@ pkgs.testers.runNixOSTest {
         assert 'homelab_swarm_deploy_ok{app="demo"} 0' in deploy_ok(), deploy_ok()
 
     with subtest("a new commit rolls out"):
-        stack(push("${app "v2"}", "v2"))
+        v2 = push("${app "v2"}", "v2")
+        stack(v2)
         vm_107.succeed("swarm-apply demo < /tmp/stack.json")
         serves(${toString port}, "demo v2")
         assert 'homelab_swarm_deploy_ok{app="demo"} 1' in deploy_ok(), deploy_ok()

@@ -13,7 +13,20 @@ let
   # images keep their bytes under one name (lwarp names its images by content hash)
   cacheRevalidate = "no-cache";
   cacheLong = "public, max-age=31536000";
-  longExtensions = [ "woff" "woff2" "otf" "ttf" "svg" "png" "jpg" "jpeg" "gif" "webp" "avif" "ico" ];
+  longExtensions = [
+    "woff"
+    "woff2"
+    "otf"
+    "ttf"
+    "svg"
+    "png"
+    "jpg"
+    "jpeg"
+    "gif"
+    "webp"
+    "avif"
+    "ico"
+  ];
 
   serverConfig = (pkgs.formats.toml { }).generate "static-web-server.toml" {
     general = {
@@ -30,8 +43,14 @@ let
       health = true;
     };
     advanced.headers = [
-      { source = "**/*"; headers.Cache-Control = cacheRevalidate; }
-      { source = "**/*.{${lib.concatStringsSep "," longExtensions}}"; headers.Cache-Control = cacheLong; }
+      {
+        source = "**/*";
+        headers.Cache-Control = cacheRevalidate;
+      }
+      {
+        source = "**/*.{${lib.concatStringsSep "," longExtensions}}";
+        headers.Cache-Control = cacheLong;
+      }
     ];
   };
 
@@ -40,7 +59,11 @@ let
     contents = [ pkgs.dockerTools.fakeNss ];
     extraCommands = "mkdir -p .${root}";
     config = {
-      Entrypoint = [ (lib.getExe pkgs.static-web-server) "--config-file" "${serverConfig}" ];
+      Entrypoint = [
+        (lib.getExe pkgs.static-web-server)
+        "--config-file"
+        "${serverConfig}"
+      ];
       User = user;
       ExposedPorts."${toString port}/tcp" = { };
     };
@@ -52,15 +75,28 @@ let
     copyToRoot = [ pkgs.dockerTools.fakeNss ];
   };
 
-  toolchainOf = name: packages: pkgs.buildEnv {
-    name = "static-site-toolchain-${name}";
-    paths = [ pkgs.bash pkgs.coreutils ] ++ packages pkgs;
-    pathsToLink = [ "/bin" ];
-  };
+  toolchainOf =
+    name: packages:
+    pkgs.buildEnv {
+      name = "static-site-toolchain-${name}";
+      paths = [
+        pkgs.bash
+        pkgs.coreutils
+      ]
+      ++ packages pkgs;
+      pathsToLink = [ "/bin" ];
+    };
 
   imageRef = image: "${image.imageName}:${image.imageTag}";
-in {
+in
+{
   inherit root toolchainOf;
-  server = { archive = "${serverImage}"; ref = imageRef serverImage; };
-  build = { archive = "${buildImage}"; ref = imageRef buildImage; };
+  server = {
+    archive = "${serverImage}";
+    ref = imageRef serverImage;
+  };
+  build = {
+    archive = "${buildImage}";
+    ref = imageRef buildImage;
+  };
 }

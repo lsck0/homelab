@@ -3,7 +3,17 @@
 # Every api user is a superuser on purpose: paperless hides a document its owner did not share from everyone else, so a
 # scoped user would miss what the owner uploads in the ui. That is why no dashboard gets a paperless token (the
 # homepage card has no widget): a token lives only where it changes documents, hermes (vm-113) and paperless-ai.
-{ config, lib, pkgs, catalog, nasMount, nasPath, setupUnit, site, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  catalog,
+  nasMount,
+  nasPath,
+  setupUnit,
+  site,
+  ...
+}:
 let
   route = catalog.internal.paperless;
   publicUrl = "https://${route.host}.${site.domain}";
@@ -29,8 +39,22 @@ let
   '';
   # fixed vocabulary; paperless-ai may only pick from these
   tags = [
-    "Steuern" "Versicherung" "Bank" "Wohnen" "Nebenkosten" "Energie" "Wasser" "Auto"
-    "Gesundheit" "Arbeit" "Behörde" "Einkauf" "Telefon & Internet" "Bildung" "Familie" "Reise"
+    "Steuern"
+    "Versicherung"
+    "Bank"
+    "Wohnen"
+    "Nebenkosten"
+    "Energie"
+    "Wasser"
+    "Auto"
+    "Gesundheit"
+    "Arbeit"
+    "Behörde"
+    "Einkauf"
+    "Telefon & Internet"
+    "Bildung"
+    "Familie"
+    "Reise"
   ];
   # document types match by keyword here: paperless-ai 3.0.9 only restricts tags and correspondents in code
   documentTypes = {
@@ -48,7 +72,8 @@ let
   };
   pyList = xs: "[" + lib.concatMapStringsSep ", " (x: "'${x}'") xs + "]";
   pyDict = d: "{" + lib.concatStringsSep ", " (lib.mapAttrsToList (k: v: "'${k}': '${v}'") d) + "}";
-in {
+in
+{
   imports = [ ./lib/paperless-ai.nix ];
 
   # documents stay plain files on the nas, the inbox is the smb documents share
@@ -60,7 +85,12 @@ in {
     unit = "paperless-scheduler";
     sqlite = [ "db.sqlite3" ];
     # the beat schedule and logs regenerate
-    exclude = [ "media" "consume" "log" "celerybeat-schedule.db*" ];
+    exclude = [
+      "media"
+      "consume"
+      "log"
+      "celerybeat-schedule.db*"
+    ];
   };
 
   services.paperless = {

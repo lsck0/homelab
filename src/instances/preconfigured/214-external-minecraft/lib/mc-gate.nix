@@ -3,14 +3,18 @@
 let
   binary = "mc-gate";
   fakeServer = "fake-server";
-in {
+in
+{
   inherit binary fakeServer;
 
   # buildGoModule runs the go tests before anything ships
   package = pkgs.buildGoModule {
     pname = "mc-gate";
     version = "1.0.0";
-    src = lib.fileset.toSource { root = ./mc-gate; fileset = ./mc-gate; };
+    src = lib.fileset.toSource {
+      root = ./mc-gate;
+      fileset = ./mc-gate;
+    };
     vendorHash = null;
     env.CGO_ENABLED = "0";
     meta.mainProgram = binary;

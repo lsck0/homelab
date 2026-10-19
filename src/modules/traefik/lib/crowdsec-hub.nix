@@ -30,11 +30,18 @@ let
 
   # a release names its own hub branch; cscli asks version.crowdsec.net for it unless told, at every install
   hubBranch = "master";
-  cscliConfig = pkgs.writeText "config.yaml" (builtins.toJSON {
-    common.log_media = "stdout";
-    cscli.hub_branch = hubBranch;
-    config_paths = { config_dir = "@etc@"; data_dir = "@data@"; hub_dir = "@etc@/hub"; index_path = "@etc@/hub/.index.json"; };
-  });
+  cscliConfig = pkgs.writeText "config.yaml" (
+    builtins.toJSON {
+      common.log_media = "stdout";
+      cscli.hub_branch = hubBranch;
+      config_paths = {
+        config_dir = "@etc@";
+        data_dir = "@data@";
+        hub_dir = "@etc@/hub";
+        index_path = "@etc@/hub/.index.json";
+      };
+    }
+  );
 
   # installs the collections into ./etc as the container's entrypoint does, without a network
   install = ''
@@ -45,15 +52,33 @@ let
   '';
 
   # every data file an installed item names, at its dest_file; a url outside the lists repository fails the build
-  data = pkgs.runCommand "crowdsec-data" { nativeBuildInputs = [ pkgs.crowdsec pkgs.yq-go ]; } (install + ''
-    mkdir $out
-    find -L etc -path etc/hub -prune -o -name '*.yaml' -type f -print0 \
-      | xargs -0 yq ea -N '.data[]? | [.source_url, .dest_file] | @tsv' \
-      | sort -u | while IFS=$'\t' read -r url dest; do
-        [[ $url == ${dataUrlPrefix}* ]] || { echo "data file outside ${dataUrlPrefix}: $url" >&2; exit 1; }
-        install -m 0644 ${secLists}/''${url#${dataUrlPrefix}} "$out/$dest"
-      done
-  '');
-in {
-  inherit hub hubBranch collections install data;
+  data =
+    pkgs.runCommand "crowdsec-data"
+      {
+        nativeBuildInputs = [
+          pkgs.crowdsec
+          pkgs.yq-go
+        ];
+      }
+      (
+        install
+        + ''
+          mkdir $out
+          find -L etc -path etc/hub -prune -o -name '*.yaml' -type f -print0 \
+            | xargs -0 yq ea -N '.data[]? | [.source_url, .dest_file] | @tsv' \
+            | sort -u | while IFS=$'\t' read -r url dest; do
+              [[ $url == ${dataUrlPrefix}* ]] || { echo "data file outside ${dataUrlPrefix}: $url" >&2; exit 1; }
+              install -m 0644 ${secLists}/''${url#${dataUrlPrefix}} "$out/$dest"
+            done
+        ''
+      );
+in
+{
+  inherit
+    hub
+    hubBranch
+    collections
+    install
+    data
+    ;
 }

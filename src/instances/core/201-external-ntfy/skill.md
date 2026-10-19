@@ -18,7 +18,9 @@ metadata:
 - ntfy requires a login (`auth-default-access` is `deny-all`). Every account and every topic grant is declared
   in `src/instances/core/201-external-ntfy/main.nix` (`users`): ntfy provisions exactly those at start, and an account made
   by hand is deleted on the next start. A new topic or account is an edit there plus a deploy by the owner.
-- `homelab-alerts` is Grafana's topic and the owner's alert channel; `homelab-heartbeat` is Grafana's watchdog.
+- `homelab-alerts` is Grafana's topic and the owner's alert channel; `homelab-heartbeat` is Grafana's watchdog. On
+  every beat vm-201 pings the off-site dead man's switch (secret `deadman-ping-url`); `cat
+  /var/lib/node-exporter-textfile/deadman.prom` says whether the last ping went through (0 too while the url is unset).
   Never publish to either: `hermes` may not, and a message there would read as an alert.
 - Prefer replying on Telegram. Use `lab-notify` for long-running jobs that finish later (a restore or a download
   finished) or when Telegram is unavailable.

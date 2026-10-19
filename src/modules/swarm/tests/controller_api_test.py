@@ -2,7 +2,9 @@
 
 Usage: controller_api_test.py <path to controller-api.py>
 """
+
 import importlib.util
+import json
 import os
 import sys
 import tempfile
@@ -13,10 +15,6 @@ spec = importlib.util.spec_from_file_location("controller_api", sys.argv.pop(1))
 api = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(api)
 
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
-
 TOKENS = {"demo": "a" * 64, "other": "b" * 64}
 INGRESS = "10.200.0.200"
 STRANGER = "203.0.113.9"
@@ -24,26 +22,31 @@ INTERVAL_S = 60
 NOW_S = 1_000_000.0
 
 
-# -----------------------------------------------------------------------------
-# TESTS
-# -----------------------------------------------------------------------------
-
 class Door(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         root = self.dir.name
-        for name in ("state", "stopped"):
+        for name in ("state", "stopped", "deploys"):
             os.mkdir(os.path.join(root, name))
         apps = {}
         for app, token in TOKENS.items():
             with open(os.path.join(root, app), "w", encoding="utf-8") as f:
                 f.write(token + "\n")
             apps[app] = {"tokenFile": os.path.join(root, app), "idle": app == "demo"}
-        self.config = {"apps": apps, "wakers": [INGRESS], "redeployIntervalS": INTERVAL_S,
-                       "stateDir": os.path.join(root, "state"), "stoppedDir": os.path.join(root, "stopped"),
-                       "wokeSuffix": ".woke",
-                       "units": {"redeploy": "app-builder@%s.service", "wake": "swarm-idle-wake@%s.service",
-                                 "sleep": "swarm-idle-sleep@%s.service"}}
+        self.config = {
+            "apps": apps,
+            "wakers": [INGRESS],
+            "redeployIntervalS": INTERVAL_S,
+            "stateDir": os.path.join(root, "state"),
+            "stoppedDir": os.path.join(root, "stopped"),
+            "deployStatusDir": os.path.join(root, "deploys"),
+            "wokeSuffix": ".woke",
+            "units": {
+                "redeploy": "app-builder@%s.service",
+                "wake": "swarm-idle-wake@%s.service",
+                "sleep": "swarm-idle-sleep@%s.service",
+            },
+        }
         self.started = []
         self.startable = True
 
@@ -61,6 +64,23 @@ class Door(unittest.TestCase):
             h["authorization"] = f"Bearer {token}"
         return api.respond(self.config, method, path, h, remote, now_s, self.start)[0]
 
+    def test_deploy_status(self):
+        def deploy(token):
+            return api.respond(
+                self.config, "GET", "/deploy/demo", {"authorization": f"Bearer {token}"}, STRANGER, NOW_S, self.start
+            )
+
+        self.assertEqual(deploy(TOKENS["demo"])[0], 404)
+        record = {"sha": "c0ffee", "deployed_at": 1, "failure": None, "build_hash": "secret-ish", "head": "c0ffee"}
+        with open(os.path.join(self.config["deployStatusDir"], "demo.json"), "w", encoding="utf-8") as f:
+            json.dump(record, f)
+        status, body = deploy(TOKENS["demo"])
+        expected = {"sha": "c0ffee", "previous_sha": None, "deployed_at": 1, "failure": None, "hold": None}
+        self.assertEqual((status, json.loads(body)), (200, expected))
+        self.assertEqual(deploy(TOKENS["other"])[0], 401)
+        self.assertEqual(self.ask("POST", "/deploy/demo", TOKENS["demo"]), 405)
+        self.assertEqual(self.started, [])
+
     def test_redeploy_table(self):
         # (method, path, token) -> status; nothing but the valid case starts a unit
         for method, path, token, status in [
@@ -71,7 +91,7 @@ class Door(unittest.TestCase):
             ("POST", "/redeploy/nope", TOKENS["demo"], 404),
             ("POST", "/redeploy/../demo", TOKENS["demo"], 404),
             ("GET", "/redeploy/demo", TOKENS["demo"], 405),
-            ("POST", "/deploy/demo", TOKENS["demo"], 404),
+            ("POST", "/build/demo", TOKENS["demo"], 404),
         ]:
             with self.subTest(method=method, path=path, token=token):
                 self.assertEqual(self.ask(method, path, token), status)
@@ -109,8 +129,10 @@ class Door(unittest.TestCase):
     def test_a_start_that_cannot_run_or_hangs_is_no_start(self):
         saved = api.subprocess.run
         for error in (OSError("no systemctl"), api.subprocess.TimeoutExpired("systemctl", api.UNIT_START_TIMEOUT_S)):
+
             def run(*args, error=error, **kwargs):
                 raise error
+
             api.subprocess.run = run
             try:
                 self.assertFalse(api.unit_start("app-builder@demo.service"))
@@ -160,6 +182,7 @@ class Door(unittest.TestCase):
 class Wire(unittest.TestCase):
     def read(self, data):
         import socket
+
         a, b = socket.socketpair()
         a.sendall(data)
         a.close()
@@ -169,12 +192,18 @@ class Wire(unittest.TestCase):
             b.close()
 
     def test_a_request_parses(self):
-        self.assertEqual(self.read(b"POST /redeploy/demo HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer t\r\n\r\n"),
-                         ("POST", "/redeploy/demo", {"host": "x", "authorization": "Bearer t"}))
+        self.assertEqual(
+            self.read(b"POST /redeploy/demo HTTP/1.1\r\nHost: x\r\nAuthorization: Bearer t\r\n\r\n"),
+            ("POST", "/redeploy/demo", {"host": "x", "authorization": "Bearer t"}),
+        )
 
     def test_malformed_and_oversized_are_refused(self):
-        for data in (b"GET /\r\n\r\n", b"GET / HTTP/1.1\r\nnocolon\r\n\r\n", b"GET / HTTP/1.1\r\n",
-                     b"GET / HTTP/1.1\r\nX: " + b"a" * api.HEAD_BYTES_MAX + b"\r\n\r\n"):
+        for data in (
+            b"GET /\r\n\r\n",
+            b"GET / HTTP/1.1\r\nnocolon\r\n\r\n",
+            b"GET / HTTP/1.1\r\n",
+            b"GET / HTTP/1.1\r\nX: " + b"a" * api.HEAD_BYTES_MAX + b"\r\n\r\n",
+        ):
             with self.subTest(data=data[:40]):
                 self.assertIsNone(self.read(data))
 

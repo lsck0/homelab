@@ -12,15 +12,28 @@
 # Any scenario no signal names (the hub's probing, cve and waf scenarios) climbs the ladder as a strong signal.
 { lib, yamlDocs }:
 let
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
 
   rungs = [
-    { name = "captcha"; type = "captcha"; duration = "4h"; }
-    { name = "softBan"; type = "ban"; duration = "15m"; }
-    { name = "hardBan"; type = "ban"; duration = "1h"; }
-    { name = "repeatBan"; type = "ban"; duration = "24h"; }
+    {
+      name = "captcha";
+      type = "captcha";
+      duration = "4h";
+    }
+    {
+      name = "softBan";
+      type = "ban";
+      duration = "15m";
+    }
+    {
+      name = "hardBan";
+      type = "ban";
+      duration = "1h";
+    }
+    {
+      name = "repeatBan";
+      type = "ban";
+      duration = "24h";
+    }
   ];
   # how far back a client's decisions raise its rung
   window = "24h";
@@ -30,7 +43,10 @@ let
   minutesPerHour = 60;
   # what the gate's answers say in the access log (lib/gate page.go headerOutcome, challenge.go outcomeNames)
   outcomeHeader = "X-Lab-Gate";
-  captchaFailures = [ "wrong" "expired" ];
+  captchaFailures = [
+    "wrong"
+    "expired"
+  ];
 
   # anubis' proof-of-work verdict endpoint; it answers 4xx or 5xx to a failed proof
   anubisVerdictPath = "/.within.website/x/cmd/anubis/api/pass-challenge";
@@ -84,70 +100,119 @@ let
 
   # where each class enters the ladder, in crowdsec's order; the last takes every alert the others did not
   classes = [
-    { name = "weak"; entry = "captcha"; credit = 0; }
-    { name = "captchaFailed"; entry = "hardBan"; credit = 1; }
-    { name = "strong"; entry = "softBan"; credit = 0; }
+    {
+      name = "weak";
+      entry = "captcha";
+      credit = 0;
+    }
+    {
+      name = "captchaFailed";
+      entry = "hardBan";
+      credit = 1;
+    }
+    {
+      name = "strong";
+      entry = "softBan";
+      credit = 0;
+    }
   ];
 
   scenarioName = name: "homelab/${name}";
   # a client's alerts within one burst raise one decision, not one per event
   blackhole = "1m";
 
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
-
   rungIndex = name: lib.lists.findFirstIndex (r: r.name == name) (throw "ladder: no rung ${name}") rungs;
   lastRung = lib.length rungs - 1;
 
-  scenarioOf = name: s: {
-    inherit (s) type filter;
-    name = scenarioName name;
-    description = "homelab ladder signal ${name} (modules/traefik/lib/ladder.nix)";
-    groupby = "evt.Meta.source_ip";
-    inherit blackhole;
-    labels = { remediation = true; service = "http"; label = "homelab ${name}"; };
-  } // lib.optionalAttrs (s.type == "leaky") { inherit (s) capacity leakspeed; };
+  scenarioOf =
+    name: s:
+    {
+      inherit (s) type filter;
+      name = scenarioName name;
+      description = "homelab ladder signal ${name} (modules/traefik/lib/ladder.nix)";
+      groupby = "evt.Meta.source_ip";
+      inherit blackhole;
+      labels = {
+        remediation = true;
+        service = "http";
+        label = "homelab ${name}";
+      };
+    }
+    // lib.optionalAttrs (s.type == "leaky") { inherit (s) capacity leakspeed; };
 
   scenariosOf = class: map scenarioName (lib.attrNames (lib.filterAttrs (_: s: s.class == class) signals));
 
   # one profile per rung a class can reach; the client's count of decisions in the window picks it
-  profilesOf = class: let
-    entry = rungIndex class.entry;
-    fallback = class.name == (lib.last classes).name;
-    count = "GetDecisionsSinceCount(Alert.GetValue(), '${window}')";
-  in lib.genList (offset: let
-    rung = lib.elemAt rungs (entry + offset);
-    seen = toString (class.credit + offset);
-    first = offset == 0;
-    last = entry + offset == lastRung;
-    countFilter =
-      if first && last then [ ]
-      else if first then [ "${count} <= ${seen}" ]
-      else if last then [ "${count} >= ${seen}" ]
-      else [ "${count} == ${seen}" ];
-  in {
-    name = "homelab/${class.name}-${rung.name}";
-    filters = [ (lib.concatStringsSep " && " ([ "Alert.Remediation == true" "Alert.GetScope() == 'Ip'" ]
-      ++ lib.optional (!fallback) "Alert.GetScenario() in ${builtins.toJSON (scenariosOf class.name)}"
-      ++ countFilter)) ];
-    decisions = [ { inherit (rung) type duration; } ];
-    on_success = "break";
-  }) (lastRung - entry + 1);
+  profilesOf =
+    class:
+    let
+      entry = rungIndex class.entry;
+      fallback = class.name == (lib.last classes).name;
+      count = "GetDecisionsSinceCount(Alert.GetValue(), '${window}')";
+    in
+    lib.genList (
+      offset:
+      let
+        rung = lib.elemAt rungs (entry + offset);
+        seen = toString (class.credit + offset);
+        first = offset == 0;
+        last = entry + offset == lastRung;
+        countFilter =
+          if first && last then
+            [ ]
+          else if first then
+            [ "${count} <= ${seen}" ]
+          else if last then
+            [ "${count} >= ${seen}" ]
+          else
+            [ "${count} == ${seen}" ];
+      in
+      {
+        name = "homelab/${class.name}-${rung.name}";
+        filters = [
+          (lib.concatStringsSep " && " (
+            [
+              "Alert.Remediation == true"
+              "Alert.GetScope() == 'Ip'"
+            ]
+            ++ lib.optional (!fallback) "Alert.GetScenario() in ${builtins.toJSON (scenariosOf class.name)}"
+            ++ countFilter
+          ))
+        ];
+        decisions = [ { inherit (rung) type duration; } ];
+        on_success = "break";
+      }
+    ) (lastRung - entry + 1);
 
   # crowdsec's stock range profile: a range is banned outright
   rangeProfile = {
     name = "default_range_remediation";
     filters = [ "Alert.Remediation == true && Alert.GetScope() == 'Range'" ];
-    decisions = [ { type = "ban"; duration = (lib.elemAt rungs lastRung).duration; } ];
+    decisions = [
+      {
+        type = "ban";
+        inherit ((lib.elemAt rungs lastRung)) duration;
+      }
+    ];
     on_success = "break";
   };
 in
-assert lib.assertMsg (lib.all (s: lib.any (c: c.name == s.class) classes) (lib.attrValues signals)) "ladder: a signal names no class";
-assert lib.assertMsg (lib.all (s: s.type == "trigger" || s.type == "leaky") (lib.attrValues signals)) "ladder: a signal is neither trigger nor leaky";
+assert lib.assertMsg (lib.all (s: lib.any (c: c.name == s.class) classes) (
+  lib.attrValues signals
+)) "ladder: a signal names no class";
+assert lib.assertMsg (lib.all (s: s.type == "trigger" || s.type == "leaky") (
+  lib.attrValues signals
+)) "ladder: a signal is neither trigger nor leaky";
 {
-  inherit rungs window captchaRegenerationsMax outcomeHeader;
+  inherit
+    rungs
+    window
+    captchaRegenerationsMax
+    outcomeHeader
+    ;
   # file name -> its scenario, for crowdsec's config/scenarios
-  scenarios = lib.mapAttrs' (name: s: lib.nameValuePair "homelab-${name}.yaml" (yamlDocs "homelab-${name}.yaml" [ (scenarioOf name s) ])) signals;
+  scenarios = lib.mapAttrs' (
+    name: s: lib.nameValuePair "homelab-${name}.yaml" (yamlDocs "homelab-${name}.yaml" [ (scenarioOf name s) ])
+  ) signals;
   profiles = yamlDocs "profiles.yaml" (lib.concatMap profilesOf classes ++ [ rangeProfile ]);
 }

@@ -8,28 +8,35 @@
 #   nobody deletes through the ingress (the ui's cleanup on vm-106 does)
 # - the swarms (workers, managers) pull with `puller` and write nothing; the apps zone reaches no other internal route
 # - every other source gets nothing, the edge relaying a forged X-Forwarded-For included
-# - the backend answers the ingress only, the prober goes through it; ssh and node-exporter stay reachable (the
-#   recovery path)
+# - the backend answers the ingress only, the prober goes through it; ssh stays open to the operators and the
+#   router's leg (sync.nu's bastion), node-exporter to the collector (the recovery path), neither to anyone else
 # - a rotated password takes effect on restart, the old one stops working
 # - a firewall restart on vm-106 opens no window to the backend
 # Flat: vm-100, vm-106 and `world`, which owns the gateways and every source address.
-{ pkgs, lib, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  specialArgs,
+  ...
+}:
 let
   lab = import ../../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
-  net = import ../../../../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
+  net = import ../../../../modules/net.nix {
+    inherit lib;
+    inherit (specialArgs) inventory site;
+  };
   inherit (lab) routes;
-
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
 
   registry = net.fqdn routes.internal.registry-api.host;
   ingress = lab.inventory."100".ip;
   backend = lab.inventory."106".ip;
-  backendPorts = { api = 5000; ui = 80; };
+  backendPorts = {
+    api = 5000;
+    ui = 80;
+  };
   sources = {
     ciVm = lab.inventory."111".ip;
-    workstation = lab.site.lan.workstation;
+    inherit (lab.site.lan) workstation;
     worker = lab.inventory."250".ip;
     # the shared swarm's manager and the builder
     controller = lab.inventory."107".ip;
@@ -47,7 +54,11 @@ let
   rotated = "rotated-builder-password";
   # modules/traefik renders each route's users here, one file per route
   authDir = "/run/traefik-auth";
-  image = pkgs.dockerTools.buildImage { name = "probe"; tag = "v1"; config.Cmd = [ "/probe" ]; };
+  image = pkgs.dockerTools.buildImage {
+    name = "probe";
+    tag = "v1";
+    config.Cmd = [ "/probe" ];
+  };
   repository = "t4/probe";
   # firewall restarts and connection attempts in the window test
   restarts = 10;
@@ -59,26 +70,57 @@ pkgs.testers.runNixOSTest {
   node.specialArgs = lab.specialArgs;
 
   nodes.vm-100 = {
-    imports = [ (lab.guest "100" { flat = true; instance = ../../100-internal-traefik/main.nix; }) ../../../../tests/lib/offline-traefik.nix ];
+    imports = [
+      (lab.guest "100" {
+        flat = true;
+        instance = ../../100-internal-traefik/main.nix;
+      })
+      ../../../../tests/lib/offline-traefik.nix
+    ];
     virtualisation.memorySize = 1536;
     testing.honorSecretPermissions = true;
   };
 
   nodes.vm-106 = {
-    imports = [ (lab.guest "106" { flat = true; instance = ../main.nix; }) ];
+    imports = [
+      (lab.guest "106" {
+        flat = true;
+        instance = ../main.nix;
+      })
+    ];
     virtualisation.memorySize = 1536;
     virtualisation.diskSize = 4096;
     testing.honorSecretPermissions = true;
-    virtualisation.oci-containers.containers.registry.imageFile = lab.images.registry;
-    virtualisation.oci-containers.containers.registry-ui.imageFile = lab.images.registry-ui;
+    # a loaded archive answers to its tag, never to the registry's digest the real guest pins
+    virtualisation.oci-containers.containers = lib.genAttrs [ "registry" "registry-ui" ] (name: {
+      image = lib.mkForce "${lab.images.${name}.imageName}:${lab.images.${name}.imageTag}";
+      imageFile = lab.images.${name};
+    });
   };
 
   nodes.world = {
-    imports = [ (lab.multi { addresses = [ "10.100.0.1/8" "192.168.178.1/24" ] ++ map (ip: "${ip}/32") (lib.attrValues sources); }) ];
-    environment.systemPackages = [ pkgs.skopeo pkgs.netcat pkgs.jq ];
+    imports = [
+      (lab.multi {
+        addresses = [
+          "10.100.0.1/8"
+          "192.168.178.1/24"
+        ]
+        ++ map (ip: "${ip}/32") (lib.attrValues sources);
+      })
+    ];
+    environment.systemPackages = [
+      pkgs.skopeo
+      pkgs.netcat
+      pkgs.jq
+    ];
     # skopeo refuses every copy without /etc/containers/policy.json; this writes nixpkgs' default (accept anything)
     virtualisation.containers.enable = true;
-    networking.hosts.${ingress} = [ registry (net.fqdn "grafana") (net.fqdn "git") (net.fqdn "auth") ];
+    networking.hosts.${ingress} = [
+      registry
+      (net.fqdn "grafana")
+      (net.fqdn "git")
+      (net.fqdn "auth")
+    ];
   };
 
   testScript = lab.driverPython + ''
@@ -117,6 +159,8 @@ pkgs.testers.runNixOSTest {
     # the bouncer refuses every request until the crowdsec stub listens (lib/offline-traefik.nix)
     vm_100.wait_for_file("/var/lib/crowdsec/data/stub-ready")
     world.wait_for_unit("multi-user.target")
+    # traefik answers with its own certificate until its file provider has loaded the lab's
+    world.wait_until_succeeds(f"curl -sS -o /dev/null --resolve {REGISTRY}:443:${ingress} https://{REGISTRY}/v2/", timeout=60)
 
     manifest = "/v2/${repository}/manifests/v1"
     uploads = "/v2/${repository}/blobs/uploads/"
@@ -180,13 +224,16 @@ pkgs.testers.runNixOSTest {
             ("edge", "GET", "/v2/", "puller", 404, {"X-Forwarded-For": SOURCES["worker"]}),
         ])
 
-    with subtest("the backend answers the ingress only; ssh and node-exporter stay open"):
+    with subtest("the backend answers the ingress only; ssh stays open to the operators, node-exporter to the collector"):
         for port in (${toString backendPorts.api}, ${toString backendPorts.ui}):
             for src in ("ciVm", "worker", "workstation", "prober"):
                 world.fail(f"curl -sS -m 5 --interface {SOURCES[src]} http://${backend}:{port}/")
             vm_100.succeed(f"curl -sS -m 5 -o /dev/null http://${backend}:{port}/")
         world.succeed(f"nc -z -w 5 -s {SOURCES['workstation']} ${backend} 22")
-        world.succeed(f"curl -sf -m 5 --interface {SOURCES['workstation']} -o /dev/null http://${backend}:9100/metrics")
+        world.succeed("nc -z -w 5 -s ${net.zones.internal.routerIp} ${backend} 22")
+        world.fail(f"nc -z -w 5 -s {SOURCES['ciVm']} ${backend} 22")
+        world.succeed(f"curl -sf -m 5 --interface {SOURCES['prober']} -o /dev/null http://${backend}:9100/metrics")
+        world.fail(f"curl -sS -m 5 --interface {SOURCES['workstation']} -o /dev/null http://${backend}:9100/metrics")
 
     with subtest("the credentials files: traefik's alone, bcrypt, exactly the users"):
         vm_100.succeed("[ \"$(stat -c '%a %U %G' ${authDir})\" = '750 root traefik' ]")

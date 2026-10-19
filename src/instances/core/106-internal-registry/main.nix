@@ -7,7 +7,15 @@
 # workaround: the gc runs registry 3.0, not the serving 2.8.3, whose --delete-untagged also deletes the per-platform
 # manifests an oci index points to (buildkit attestations, containerd store), leaving those images unpullable. Delete
 # once the serving registry is 3.x.
-{ config, lib, pkgs, catalog, hostIp, nasMount, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  catalog,
+  hostIp,
+  nasMount,
+  ...
+}:
 let
   apiPort = catalog.internal.registry-api.port;
   uiPort = catalog.internal.registry-ui.port;
@@ -38,7 +46,11 @@ let
 
   registryPrune = pkgs.writeShellApplication {
     name = "registry-prune";
-    runtimeInputs = [ pkgs.coreutils pkgs.findutils pkgs.gawk ];
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.gawk
+    ];
     text = ''
       # besides latest: the last ten builds to roll back to
       KEEP_COUNT=10
@@ -57,13 +69,17 @@ let
       done
     '';
   };
-in {
+in
+{
   homelab.nasMounts = nasMount stateDir "registry";
 
   virtualisation.oci-containers.containers.registry = {
-    image = "registry:2.8.3";
+    image = "registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373";
     ports = [ "${toString apiPort}:5000" ];
-    volumes = [ "${stateDir}:/var/lib/registry" "${authDir}:${authMount}:ro" ];
+    volumes = [
+      "${stateDir}:/var/lib/registry"
+      "${authDir}:${authMount}:ro"
+    ];
     environment = {
       REGISTRY_AUTH = "htpasswd";
       REGISTRY_AUTH_HTPASSWD_REALM = "registry";
@@ -76,7 +92,7 @@ in {
   };
 
   virtualisation.oci-containers.containers.registry-ui = {
-    image = "joxit/docker-registry-ui:2.6.0";
+    image = "joxit/docker-registry-ui:2.6.0@sha256:bb5956a6b378706f1c3a92c947d0a0c606e280460cd9e37c0198caf46399c839";
     ports = [ "${toString uiPort}:80" ];
     environment = {
       REGISTRY_TITLE = "Homelab Registry";
@@ -88,20 +104,36 @@ in {
     environmentFiles = [ "${authDir}/ui.env" ];
   };
 
-  sops.secrets = lib.genAttrs (lib.unique (lib.attrValues users)) (_: { restartUnits = [ "registry-auth.service" ]; });
+  sops.secrets = lib.genAttrs (lib.unique (lib.attrValues users)) (_: {
+    restartUnits = [ "registry-auth.service" ];
+  });
   systemd.services.registry-auth = {
     description = "Render the registry's users and the ui's credential";
-    before = [ "podman-registry.service" "podman-registry-ui.service" ];
-    requiredBy = [ "podman-registry.service" "podman-registry-ui.service" ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; RuntimeDirectory = baseNameOf authDir; RuntimeDirectoryMode = "0700"; };
+    before = [
+      "podman-registry.service"
+      "podman-registry-ui.service"
+    ];
+    requiredBy = [
+      "podman-registry.service"
+      "podman-registry-ui.service"
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      RuntimeDirectory = baseNameOf authDir;
+      RuntimeDirectoryMode = "0700";
+    };
     path = [ pkgs.coreutils ];
     # printf is a builtin: a password reaches htpasswd and base64 on their stdin, never an argv
     script = ''
       set -euo pipefail
       umask 077
       head -c ${toString uiPasswordBytes} /dev/urandom | base64 -w0 > ${authDir}/ui.password
-    '' + htpasswd.render "${authDir}/htpasswd" (lib.mapAttrs (_: secret: config.sops.secrets.${secret}.path) users
-      // { ${uiUser} = "${authDir}/ui.password"; }) + ''
+    ''
+    + htpasswd.render "${authDir}/htpasswd" (
+      lib.mapAttrs (_: secret: config.sops.secrets.${secret}.path) users // { ${uiUser} = "${authDir}/ui.password"; }
+    )
+    + ''
       printf 'NGINX_PROXY_HEADER_Authorization=Basic %s\n' \
         "$(printf '%s:%s' ${uiUser} "$(cat ${authDir}/ui.password)" | base64 -w0)" > ${authDir}/ui.env.tmp
       mv ${authDir}/ui.env.tmp ${authDir}/ui.env
@@ -114,7 +146,11 @@ in {
 
   systemd.services.registry-gc = {
     description = "Prune old registry tags and reclaim their blobs";
-    path = [ pkgs.podman pkgs.systemd registryPrune ];
+    path = [
+      pkgs.podman
+      pkgs.systemd
+      registryPrune
+    ];
     serviceConfig = {
       Type = "oneshot";
       # a hung prune or gc must not leave the registry down: systemd stops the run, ExecStopPost restarts it
@@ -131,7 +167,10 @@ in {
   };
   systemd.timers.registry-gc = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnCalendar = "03:30"; Persistent = true; };
+    timerConfig = {
+      OnCalendar = "03:30";
+      Persistent = true;
+    };
   };
 
   systemd.tmpfiles.rules = [

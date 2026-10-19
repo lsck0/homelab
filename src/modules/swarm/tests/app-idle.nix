@@ -5,10 +5,21 @@
 # idle window, `steady` stays up without scaleToZero. A request to a sleeping app is held until the app answers,
 # within coldStartMaxS and without an image pull; a deploy of a sleeping app runs its new version once and puts it
 # back to sleep.
-{ pkgs, lib, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  specialArgs,
+  ...
+}:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: apps; };
-  net = import ../../net.nix { inherit lib; inherit (specialArgs) inventory site; };
+  lab = import ../../../tests/lib/lab.nix {
+    inherit pkgs lib specialArgs;
+    apps = _: apps;
+  };
+  net = import ../../net.nix {
+    inherit lib;
+    inherit (specialArgs) inventory site;
+  };
   ip = id: lab.inventory.${id}.ip;
   registryAddress = ip "100";
   edge = ip "200";
@@ -21,27 +32,55 @@ let
   # a pull or a fixed wait would show as more
   coldStartMaxS = 20;
 
-  imageOf = version: pkgs.dockerTools.buildLayeredImage {
-    name = "fixture";
-    tag = version;
-    contents = [ pkgs.busybox pkgs.curl (pkgs.writeTextDir "www/index.html" "${version}\n") ];
-    config.Cmd = [ "httpd" "-f" "-p" "8000" "-h" "/www" ];
+  imageOf =
+    version:
+    pkgs.dockerTools.buildLayeredImage {
+      name = "fixture";
+      tag = version;
+      contents = [
+        pkgs.busybox
+        pkgs.curl
+        (pkgs.writeTextDir "www/index.html" "${version}\n")
+      ];
+      config.Cmd = [
+        "httpd"
+        "-f"
+        "-p"
+        "8000"
+        "-h"
+        "/www"
+      ];
+    };
+  images = {
+    v1 = imageOf "v1";
+    v2 = imageOf "v2";
   };
-  images = { v1 = imageOf "v1"; v2 = imageOf "v2"; };
   inherit (lab) profiles;
   # every telemetry and the card, as an app the owner deploys
-  appOn = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
-  appOf = name: port: extra: lib.recursiveUpdate {
-    enable = true;
-    repo = "lsck0/${name}";
-    branch = "master";
-    # no browser here
-    routes.${name} = { inherit port; health = "/"; on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ]; };
-    # both apps and a deploy's surge on the one worker (modules/limits workerCountOf)
-    resources.web.memoryMiB = 128;
-    reservation.memoryMiB = 256;
-    on = appOn ++ [ "scaleToZero" ];
-  } extra;
+  appOn =
+    profiles.observed
+    ++ profiles.traced
+    ++ [
+      "frontend"
+      "homepage"
+    ];
+  appOf =
+    name: port: extra:
+    lib.recursiveUpdate {
+      enable = true;
+      repo = "lsck0/${name}";
+      branch = "master";
+      # no browser here
+      routes.${name} = {
+        inherit port;
+        health = "/";
+        on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ];
+      };
+      # both apps and a deploy's surge on the one worker (modules/limits workerCountOf)
+      resources.web.memoryMiB = 128;
+      reservation.memoryMiB = 256;
+      on = appOn ++ [ "scaleToZero" ];
+    } extra;
   apps = {
     lazy = appOf "lazy" 20180 { idle.stopAfter = idleWindow; };
     steady = appOf "steady" 20190 { on = appOn; };
@@ -51,7 +90,13 @@ let
     environment.systemPackages = [ pkgs.curl ];
   };
   swarmNode = vmid: {
-    imports = [ (lab.guest vmid { flat = true; nas = true; }) common ];
+    imports = [
+      (lab.guest vmid {
+        flat = true;
+        nas = true;
+      })
+      common
+    ];
     virtualisation.memorySize = 2048;
     virtualisation.diskSize = 4096;
     services.journald.upload.enable = lib.mkForce false;
@@ -68,21 +113,40 @@ pkgs.testers.runNixOSTest {
       enable = true;
       listenAddress = "0.0.0.0";
       port = 443;
-      extraConfig.http.tls = { certificate = lab.pki.lsck0.cert; key = lab.pki.lsck0.key; };
+      extraConfig.http.tls = {
+        certificate = lab.pki.lsck0.cert;
+        inherit (lab.pki.lsck0) key;
+      };
     };
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
   };
   nodes.vm-107 = swarmNode "107";
   nodes.vm-250 = swarmNode "250";
   nodes.vm-200 = {
-    imports = [ (lab.guest "200" { flat = true; instance = ../../../instances/core/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
+    imports = [
+      (lab.guest "200" {
+        flat = true;
+        instance = ../../../instances/core/200-external-traefik/main.nix;
+      })
+      ../../../tests/lib/offline-traefik.nix
+      common
+    ];
     virtualisation.memorySize = 1536;
     services.journald.upload.enable = lib.mkForce false;
     # the test runs the reaper itself: its own timer would put lazy to sleep before the test looks
     systemd.timers.ondemand-reaper.wantedBy = lib.mkForce [ ];
   };
   nodes.world = {
-    imports = [ (lab.multi { addresses = [ "10.100.0.1/8" "10.200.0.1/8" "10.250.0.1/8" "${cloudflare}/13" ]; }) ];
+    imports = [
+      (lab.multi {
+        addresses = [
+          "10.100.0.1/8"
+          "10.200.0.1/8"
+          "10.250.0.1/8"
+          "${cloudflare}/13"
+        ];
+      })
+    ];
     environment.systemPackages = [ pkgs.curl ];
   };
 

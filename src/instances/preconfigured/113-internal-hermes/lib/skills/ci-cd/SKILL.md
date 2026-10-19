@@ -68,7 +68,8 @@ Flow on every push to that branch:
 ## Look
 
 - Builder: `ssh 10.100.0.107 'systemctl status app-builder; journalctl -u app-builder -u "app-builder@*" -n 100'`.
-  State per app: `/var/lib/app-builder/<app>.json` (`sha` live, `failure` with its retry time).
+  State per app: `/var/lib/app-builder/<app>.json` (`sha` live, `previous_sha`, `hold`, `failure` with its retry
+  time); the same from CI: `curl -fsS -H "Authorization: Bearer $DEPLOY_TOKEN" https://deploy.lsck0.dev/deploy/<app>`.
   Metrics: `homelab_app_deploy_ok{app}`, `homelab_app_deploy_failures{app}`,
   `homelab_app_builder_last_run_timestamp_seconds`.
 - Manager: `ssh 10.100.0.107 'journalctl -t swarm-deploy -u swarm-converge-<app> -n 50'`; metric
@@ -88,8 +89,9 @@ Flow on every push to that branch:
   `swarm-volume-restore <app> <volume> [<archive>]` (newest of `/var/backup/db/<app>-volume-<volume>/` by
   default), then scale back.
 - **Apply the catalog again:** on vm-107, `systemctl restart swarm-converge-<app>`.
-- **Roll back to an older build:** `ssh 10.100.0.107 docker service update --image registry.lsck0.dev/<app>/<service>@<digest> <app>_<service>`.
-  The next push or converge replaces it; for a lasting rollback, revert the commit on the branch.
+- **Roll back:** on vm-107, `app-builder-rollback <app>` deploys the commit before the live one and holds it until a
+  new commit lands on the branch.
+- **Restore a dump:** on the state worker, `swarm-dump-restore <app> <dump> [<file>]` (newest dump by default).
 - **Scale a stateless service:** `docker service scale <app>_<service>=<n>` on vm-107. Stateful ones stay at 1.
 - **Never** run `docker stack rm` or `docker volume rm` without the owner: volumes hold app data, and a disabled
   app's volumes stay on vm-250 until the owner removes them.
@@ -102,8 +104,10 @@ Copy `src/instances/custom/_template/` to `src/instances/custom/<name>/` and set
 `on`; more routes, `idle`, `resources` and `placement` are optional. Repos without a
 compose file need a root `Dockerfile` (service `web`, port 8000 unless the route says otherwise); a stack whose
 services only name images needs `build` hints. Every named volume needs `volumes.<name>.backup`, its service in `stateful`.
-Secrets go in `env.<service>` as `{{name}}` with a `secrets` generator; the owner then runs
-`src/scripts/secrets-sync.nu --apply` and `./sync.nu`. A broken entry fails every host's build with a message
+Secrets go in `env.<service>` as `{{name}}`, or as a file through `secretFiles.<service>.<KEY>`, each with a
+`secrets` generator; a `manual` one (a third party's key) the owner sets with sops, and the app does not deploy
+while it is empty. The owner then runs `src/scripts/secrets-sync.nu --apply` and `./sync.nu`.
+`requireChecks = true` deploys a commit only once its GitHub check runs passed. A broken entry fails every host's build with a message
 naming the field. Draft the entry; do not deploy it yourself.
 
 ## CI runners (vm-111)

@@ -32,8 +32,10 @@ and api_key). The key is yours alone: every consumer has its own (`homelab-<cons
 
 ## Janitorr (automatic cleanup)
 
+- Dry run by default: it only logs what it would delete. Deleting takes
+  `homelab.janitorr.deleteMedia = true` in main.nix, the owner's decision; never set it yourself.
 - Rules: movies/seasons not watched (or, never watched, not grabbed) for 120
-  days are deleted; sooner when free space < 25 %. "Leaving Soon" collections
+  days are candidates; sooner when free space < 25 %. "Leaving Soon" collections
   show them 14 days before.
 - Keep something forever: add tag `janitorr_keep` in Radarr/Sonarr
   (`POST /api/v3/tag {"label":"janitorr_keep"}`, then add the tag id to the movie/series and `PUT` it).

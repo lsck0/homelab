@@ -1,9 +1,5 @@
 # vm plumbing: the lab's guests (nix, modules/lab) -> proxmox vms and containers
 
-# -----------------------------------------------------------------------------
-# GUESTS
-# -----------------------------------------------------------------------------
-
 # nix computes every guest (modules/lab) and fails on a broken invariant, so a plan never starts past one; the external
 # program's protocol allows string values only, hence the one json string
 data "external" "lab" {
@@ -12,7 +8,8 @@ data "external" "lab" {
 }
 
 locals {
-  instances = jsondecode(data.external.lab.result.json)
+  lab       = jsondecode(data.external.lab.result.json)
+  instances = local.lab.guests
 
   # scripts/pve-install.nu names the lvm-thin storage on the bulk disk
   bulk_datastore = "bulk"
@@ -32,7 +29,6 @@ locals {
       powered     = i.powered
       idle        = i.idle
       kind        = i.kind
-      privileged  = i.privileged
       memory      = i.memory
       balloon     = i.balloon
       cores       = i.cores
@@ -46,6 +42,7 @@ locals {
       extra_disks = [for d in i.extra_disks : { size = d.size, datastore = local.datastores[d.store] }]
       boot_order  = i.boot_order
       boot_wait   = i.boot_wait
+      recovery    = i.recovery
 
       bridge        = i.type == "router" ? var.wan_bridge : local.zones[i.type].bridge
       extra_bridges = i.type == "router" ? [for z in local.router_zones : local.zones[z].bridge] : []
@@ -95,8 +92,9 @@ resource "proxmox_virtual_environment_hardware_mapping_pci" "gpu" {
 resource "proxmox_virtual_environment_vm" "vm" {
   for_each = { for id, v in local.vms : id => v if v.kind == "vm" }
 
-  # the gpu mapping must exist before a vm references it
-  depends_on = [proxmox_virtual_environment_hardware_mapping_pci.gpu]
+  # the gpu mapping must exist before a vm references it; a guest turned from lxc into a vm keeps its vmid, so its
+  # container must be destroyed before the vm is created ("VM <id> already exists" otherwise)
+  depends_on = [proxmox_virtual_environment_hardware_mapping_pci.gpu, proxmox_virtual_environment_container.ct]
 
   name      = each.value.name
   node_name = local.site.node
@@ -181,7 +179,7 @@ resource "proxmox_virtual_environment_vm" "vm" {
     }
   }
 
-  # a guest's nic carries the proxmox firewall's ip and mac filter (FIREWALL below); the router forwards every
+  # a guest's nic carries the proxmox firewall's ip and mac filter (`ipfilter` below); the router forwards every
   # source it routes, so no address filter can describe its nics
   network_device {
     bridge     = each.value.bridge
@@ -213,9 +211,10 @@ resource "proxmox_virtual_environment_vm" "vm" {
 resource "proxmox_virtual_environment_container" "ct" {
   for_each = { for id, v in local.vms : id => v if v.kind == "lxc" }
 
-  node_name     = local.site.node
-  vm_id         = tonumber(each.key)
-  unprivileged  = !each.value.privileged
+  node_name = local.site.node
+  vm_id     = tonumber(each.key)
+  # root in a container is root on the host otherwise (tests/policy/guests.nix)
+  unprivileged  = true
   started       = each.value.powered
   start_on_boot = each.value.powered && each.value.idle == null
 
@@ -270,25 +269,42 @@ resource "proxmox_virtual_environment_container" "ct" {
   }
 }
 
-# -----------------------------------------------------------------------------
-# FIREWALL
-# -----------------------------------------------------------------------------
-
-# proxmox binds every guest to its own address and mac, and the host takes only its own traffic. Zones are shared bridges, and the router, the nas exports and every ingress guard authorize by source address. A
-# root guest could take any address of its subnet (a static change, a gratuitous arp) and inherit that host's
-# rights: the edge's api access, a nas client's export. ipfilter drops every packet and arp reply a guest's nic sends
-# from another address, macfilter every frame from another mac. Filtering itself stays with the router and the guests:
-# both guest policies are ACCEPT, proxmox only checks who is speaking.
+# proxmox binds every guest to its own address and mac, and the host takes only its own traffic. Zones are shared
+# bridges, and the router, the nas exports and every ingress guard authorize by source address. A root guest could
+# take any address of its subnet (a static change, a gratuitous arp) and inherit that host's rights: the edge's api
+# access, a nas client's export. ipfilter drops every arp reply a guest's nic sends for another address, the spoofed
+# rule every packet from one, macfilter every frame from another mac. Filtering itself stays with the router and the
+# guests: both guest policies are ACCEPT, so a service a guest opens needs no rule here. Its recovery path (ssh, the
+# node exporter) proxmox holds to the guest's own sources (modules/flows.nix `recovery`) too, so a guest that drops
+# its own firewall still opens it to no neighbour; a refusal logs to the host's firewall log.
 #
-# The host drops what its rules do not name. Lab traffic reaches it masqueraded as the router's lan address
-# (instances/core/300-router), so the router stands for the ingresses' wake and proxmox route, the homepage and grafana.
-# The datacenter switch comes last: no guest is filtered before its ipset exists, and the host rules exist before
-# the DROP policy does. sync.nu fails while the firewall is not running.
+# The host drops what its rules do not name. The router leaves lab traffic to the host unmasqueraded
+# (instances/core/300-router) and the host routes the lab's subnets back through it (scripts/pve-install.nu), so the
+# rules name each guest that talks to the host by its own address, never the router's, which would stand for every
+# guest. The datacenter switch comes last: no guest is filtered before its ipsets and rules exist, and the host rules
+# exist before the DROP policy does. sync.nu fails while the firewall is not running or a guest's spoofed rule is
+# not loaded.
 locals {
   # the router forwards every source it routes, no address filter fits it (its nics carry firewall = false)
   firewalled = { for id, v in local.vms : id => v if v.type != "router" }
   # the owner's machines, dhcp-reserved in the fritzbox; sync.nu refuses to run from any other address
   operators = [local.site.lan.workstation, local.site.lan.notebook]
+  # and the owner's devices over wireguard, which the host routes back through the router too
+  operator_sources = concat(local.operators, [local.lab.wireguard])
+
+  dashboard_id = "102"
+  collector_id = "103"
+  hermes_id    = "113"
+  # the guests that talk to the host, by what they reach on it
+  host_clients = {
+    # the ingresses wake their zones' onDemand guests and serve the web ui, the dashboard reads its widget
+    api = concat([for z in local.zones : tostring(z.ingress) if z.ingress != null], [local.dashboard_id])
+    # hermes administers the host over ssh (instances/preconfigured/113-internal-hermes)
+    ssh     = [local.hermes_id]
+    metrics = [local.collector_id]
+    ping    = [local.dashboard_id]
+  }
+  host_client_ips = { for reach, ids in local.host_clients : reach => [for id in ids : local.instances[id].ip] }
 }
 
 resource "proxmox_virtual_environment_firewall_ipset" "ipfilter" {
@@ -303,6 +319,72 @@ resource "proxmox_virtual_environment_firewall_ipset" "ipfilter" {
   comment = "the only source address ${each.value.name} may send from"
   cidr {
     name = each.value.ip
+  }
+}
+
+# ipfilter alone drops no packet from another ipv4 address: proxmox-firewall 1.1.1 ands its drop with the empty
+# nomatch set. Every address but the guest's own, in halves (an ipset of the iptables backend takes no /0); a guest
+# speaks ipv4 alone, so no ipv6 source is its own.
+resource "proxmox_virtual_environment_firewall_ipset" "spoofed" {
+  for_each   = local.firewalled
+  depends_on = [proxmox_virtual_environment_vm.vm, proxmox_virtual_environment_container.ct]
+
+  node_name    = local.site.node
+  vm_id        = each.value.kind == "vm" ? tonumber(each.key) : null
+  container_id = each.value.kind == "lxc" ? tonumber(each.key) : null
+  name         = "spoofed"
+  comment      = "every source ${each.value.name} may not send from"
+  dynamic "cidr" {
+    for_each = ["0.0.0.0/1", "128.0.0.0/1", "::/1", "8000::/1"]
+    content {
+      name = cidr.value
+    }
+  }
+  cidr {
+    name    = each.value.ip
+    nomatch = true
+  }
+}
+
+moved {
+  from = proxmox_virtual_environment_firewall_rules.spoofed
+  to   = proxmox_virtual_environment_firewall_rules.guest
+}
+
+resource "proxmox_virtual_environment_firewall_rules" "guest" {
+  for_each   = local.firewalled
+  depends_on = [proxmox_virtual_environment_firewall_ipset.spoofed]
+
+  node_name    = local.site.node
+  vm_id        = each.value.kind == "vm" ? tonumber(each.key) : null
+  container_id = each.value.kind == "lxc" ? tonumber(each.key) : null
+  rule {
+    type    = "out"
+    action  = "DROP"
+    source  = "+guest/spoofed"
+    comment = "what ${each.value.name} sends from another address"
+  }
+  dynamic "rule" {
+    for_each = each.value.recovery
+    content {
+      type    = "in"
+      action  = "ACCEPT"
+      proto   = "tcp"
+      dport   = tostring(rule.value.port)
+      source  = join(",", rule.value.sources)
+      comment = "the recovery path's sources"
+    }
+  }
+  dynamic "rule" {
+    for_each = each.value.recovery
+    content {
+      type    = "in"
+      action  = "DROP"
+      proto   = "tcp"
+      dport   = tostring(rule.value.port)
+      log     = "info"
+      comment = "the recovery path from anyone else"
+    }
   }
 }
 
@@ -338,6 +420,7 @@ resource "proxmox_virtual_environment_firewall_ipset" "management" {
 resource "proxmox_virtual_environment_cluster_firewall" "datacenter" {
   depends_on = [
     proxmox_virtual_environment_firewall_options.guest,
+    proxmox_virtual_environment_firewall_rules.guest,
     proxmox_virtual_environment_firewall_rules.host,
     proxmox_virtual_environment_firewall_ipset.management,
   ]
@@ -356,16 +439,16 @@ resource "proxmox_virtual_environment_firewall_rules" "host" {
     action  = "ACCEPT"
     proto   = "tcp"
     dport   = "22"
-    source  = local.site.lan.subnet
-    comment = "ssh from the house lan: sync.nu, init.nu, hermes through the router; keys only"
+    source  = join(",", concat(local.operator_sources, local.host_client_ips.ssh))
+    comment = "ssh from the owner's machines (sync.nu, init.nu), their wireguard and hermes; keys only"
   }
   rule {
     type    = "in"
     action  = "ACCEPT"
     proto   = "tcp"
     dport   = tostring(local.proxmox_api_port)
-    source  = join(",", concat(local.operators, [local.site.lan.router]))
-    comment = "api and web ui: the owner's machines (terraform, sync.nu) and the router (the ingresses, homepage)"
+    source  = join(",", concat(local.operator_sources, local.host_client_ips.api))
+    comment = "api and web ui: the owner's machines and their wireguard, the ingresses and the dashboard"
   }
   rule {
     type    = "in"
@@ -379,14 +462,14 @@ resource "proxmox_virtual_environment_firewall_rules" "host" {
     action  = "ACCEPT"
     proto   = "tcp"
     dport   = "9100"
-    source  = local.site.lan.router
-    comment = "node exporter, scraped by vm-103 through the router"
+    source  = join(",", local.host_client_ips.metrics)
+    comment = "node exporter, scraped by vm-103"
   }
   rule {
     type    = "in"
     action  = "ACCEPT"
     proto   = "icmp"
-    source  = local.site.lan.subnet
-    comment = "ping: the homepage's and the prober's reachability checks"
+    source  = join(",", concat([local.site.lan.subnet], local.host_client_ips.ping))
+    comment = "ping: the house, and the dashboard's reachability check"
   }
 }

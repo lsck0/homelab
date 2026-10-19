@@ -32,7 +32,8 @@ export def secrets-age-key-lines [file: path]: nothing -> list<string> {
     try { open --raw $file | lines | where $it =~ $AGE_KEY_LINE } catch { [] }
 }
 
-def recipient-of [key: string]: nothing -> string {
+# an age key's public half
+export def secrets-age-recipient [key: string]: nothing -> string {
     $key | run-text age-keygen -y
 }
 
@@ -58,7 +59,7 @@ export def secrets-admins-load [src: path]: nothing -> list<string> {
     let key_file = $env.SOPS_AGE_KEY_FILE
     let keys = secrets-age-key-lines $key_file
     if ($keys | is-empty) { die $"admin age key not readable at ($key_file)" }
-    let unlocking = $keys | each { recipient-of $in }
+    let unlocking = $keys | each { secrets-age-recipient $in }
     if ($unlocking | all { $in not-in $recipients }) {
         die ([
             $"the key unlocking this run \(($key_file): ($unlocking | str join ' ')\) is not an admin recipient."

@@ -8,9 +8,14 @@
 # token_write <name> (stdin) and token_read <name> refuse a value that is no token. Writes go to the real file in
 # tokens.ownDir, never through the links in tokens.dir: a rename through a link replaces the link with a local file,
 # and the nas copy, which every consumer reads, goes stale.
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
-  tokens = config.homelab.tokens;
+  inherit (config.homelab) tokens;
 
   # a setup that fails waits this long before the next try: long enough not to hammer an app that is still
   # starting, short enough that a guest converges within a minute of what it waits for
@@ -43,7 +48,8 @@ let
       [[ $value =~ $re ]] || { echo "token_read: $1 holds no token, refusing it" >&2; return 1; }
       printf '%s' "$value"
     }
-  '' + lib.optionalString (tokens.ownDir != null) ''
+  ''
+  + lib.optionalString (tokens.ownDir != null) ''
     token_write() { # <name>, the value on stdin
       local own="${tokens.ownDir}" value tmp re='${tokenPattern}'
       value=$(${pkgs.coreutils}/bin/cat)
@@ -58,22 +64,30 @@ let
     }
   '';
 
-  setupUnit = unit: lib.recursiveUpdate {
-    wantedBy = [ "multi-user.target" ];
-    # retry forever: what the unit waits for comes up in no fixed order
-    startLimitIntervalSec = 0;
-    # an lxc mounts nfs at boot, not on access: never write under an empty mountpoint
-    unitConfig.RequiresMountsFor = tokens.mountPoints;
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-      Restart = "on-failure";
-      RestartSec = setupRetryIntervalS;
-    };
-  } (unit // {
-    # strict for every setup: an unset name, a failed command or a failed stage of a pipe stops it
-    script = "set -euo pipefail\n" + tokenHelpers + unit.script;
-  });
-in {
+  setupUnit =
+    unit:
+    lib.recursiveUpdate
+      {
+        wantedBy = [ "multi-user.target" ];
+        # retry forever: what the unit waits for comes up in no fixed order
+        startLimitIntervalSec = 0;
+        # an lxc mounts nfs at boot, not on access: never write under an empty mountpoint
+        unitConfig.RequiresMountsFor = tokens.mountPoints;
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          Restart = "on-failure";
+          RestartSec = setupRetryIntervalS;
+        };
+      }
+      (
+        unit
+        // {
+          # strict for every setup: an unset name, a failed command or a failed stage of a pipe stops it
+          script = "set -euo pipefail\n" + tokenHelpers + unit.script;
+        }
+      );
+in
+{
   _module.args = { inherit retry setupUnit; };
 }

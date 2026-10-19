@@ -1,12 +1,14 @@
 #!/usr/bin/env -S nu --no-config-file
 # snapshot every package arch-dotfiles lists into the signed lsck0 pacman repo
 #
-# usage: archrepo-build.nu build|publish, each in a fresh archlinux container after archrepo-fetch.nu checked out a
+# usage: archrepo-build.nu build|iso|publish, each in a fresh archlinux container after archrepo-fetch.nu checked out a
 # dotfiles commit signed by the pinned key (main.nix):
 #   build    untrusted: runs aur and local recipes, holds no secret, cannot write the served tree. Its result is a
 #            proposal in /outbox: unsigned packages, the staged db, the official dbs it ran against, state and a report.
+#   iso      privileged, holds no secret: builds arch-dotfiles' install iso (mirror/iso) from the same checkout.
 #   publish  trusted: holds the repo and push keys and never runs or installs what a recipe produced. It signs only
-#            proposed packages it can vouch for, builds the served db itself and publishes it as a dated snapshot.
+#            proposed packages it can vouch for, builds the served db itself and publishes it as a dated snapshot,
+#            and signs the night's iso into iso/.
 #
 # Security: a malicious recipe can ship bad contents under its own names, which installing it grants anyway, but
 # cannot take the key, sign another base's name, take or replace an official package, or write the served tree:
@@ -29,6 +31,7 @@
 #   /public      the builder's status page (logs/<base>.log, status.json, the host's build.log); publish pushes logs
 #   /run/signing.asc, /run/push-key   publish only
 #   /upstream, /run/archbuild.unavailable   modules/upstream's run, and where a skipped night names the upstream
+#   /iso         iso writes the night's install iso there, publish reads it read-only; /iso-work is iso's alone
 #
 # Packages keep their names; built ones are repacked to pkgrel 1.<n>, n counting the builds of that base, so a rebuild
 # never reuses a file name a client may have cached. A base rebuilds when its recipe hash changes (aur commit, local
@@ -53,6 +56,14 @@ export const DB_FILES = ["lsck0.db.tar.gz" "lsck0.files.tar.gz"]
 export const CURRENT_NAME = "current"
 export const SNAPSHOT_MANIFEST = "manifest.json"
 const SNAPSHOT_PATTERN = '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+# arch-dotfiles scripts/lib/iso.nu's names: the dated iso with its .sha256, the latest links
+const ISO_PATTERN = '^archlinux-lsck0-(?P<year>[0-9]{4})\.(?P<month>[0-9]{2})\.(?P<day>[0-9]{2})-x86_64\.iso$'
+export const ISO_LATEST = "archlinux-lsck0-latest-x86_64.iso"
+export const ISO_DIR = "iso"
+# the repo key beside the isos, which a download verifies against
+export const ISO_KEY_NAME = "lsck0-signing.asc"
+# dot's own retention off: its out dir holds this run's iso alone, publish keeps the dated ones (iso-prune)
+const ISO_KEEP_ALL = 1000
 # one or more path segments, never one that climbs or hides
 const INTERNET_PREFIX_PATTERN = '^(/[A-Za-z0-9_~-][A-Za-z0-9._~-]*)+$'
 # a snapshot hardlinks the pool, so a kept one costs only the files new since the one before it
@@ -84,6 +95,9 @@ export const UNAVAILABLE = 75
 const KEYSERVER = "hkps://keyserver.ubuntu.com"
 const KEY_FETCH_TIMEOUT_S = 120
 const NINJA_WRAPPER = "/usr/local/bin/ninja"
+# makepkg runs without /etc/profile, whose perlbin.sh adds the perl dirs (pod2man is core_perl's); /usr/local/bin
+# first, for the ninja wrapper
+export const BUILD_PATH = "/usr/local/sbin:/usr/local/bin:/usr/bin:/usr/bin/site_perl:/usr/bin/vendor_perl:/usr/bin/core_perl"
 const RESOLVE_ROUNDS_MAX = 16
 # names per aur rpc request
 const RPC_BATCH = 100
@@ -122,6 +136,7 @@ export def context-default []: nothing -> record {
     let cache = "/cache"
     let outbox = "/outbox"
     let public = "/public"
+    let iso_out = "/iso"
     let prefix = $env.ARCHBUILD_INTERNET_PREFIX? | default ""
     let started = $env.ARCHBUILD_RUN_STARTED? | default "0" | into int
     {
@@ -174,9 +189,16 @@ export def context-default []: nothing -> record {
         unavailable_file: "/run/archbuild.unavailable"
         # prints the package list of a dotfiles checkout, mounted next to this script
         list_script: "/list.nu"
+        iso_served: ($served | path join $ISO_DIR)
+        iso_out: $iso_out
+        # written last by iso: publish takes only an iso of its own run
+        iso_run: ($iso_out | path join run)
+        iso_work: "/iso-work"
+        # a pacman Server line for mkarchiso's packages, $repo and $arch included
+        iso_mirror: ($env.ARCHBUILD_ISO_MIRROR? | default "")
         aur_url: $AUR_URL
         # a command prefix: timeout runs it
-        as_builder: [sudo -u $BUILDER -H env $"CARGO_HOME=($cache)/cargo" $"GOPATH=($cache)/go"
+        as_builder: [sudo -u $BUILDER -H env $"PATH=($BUILD_PATH)" $"CARGO_HOME=($cache)/cargo" $"GOPATH=($cache)/go"
             $"GOMODCACHE=($cache)/go/mod" $"GOCACHE=($cache)/go/build"]
         key: ""
     }
@@ -199,13 +221,11 @@ export def night-empty []: nothing -> record {
 export def publish-empty []: nothing -> record {
     {
         served: {}, state_file: {}, owner_of: {}, official_name: {}, final: {}, internet_files: [], built: [], failed: {}
-        held_back: "", snapshot_missing: [], proposed_missing: [], push_failed: false
+        held_back: "", snapshot_missing: [], proposed_missing: []
+        # empty while the night's iso is published, else why it is not
+        iso_failure: ""
     }
 }
-
-# -----------------------------------------------------------------------------
-# INTERNAL
-# -----------------------------------------------------------------------------
 
 export def log [message: string]: nothing -> nothing {
     print $"(date now | date to-timezone UTC | format date '%H:%M:%S') ($message)"
@@ -298,9 +318,10 @@ def aur-get [c: record, url: string, ...args: string]: nothing -> any {
     $parsed
 }
 
-# .SRCINFO values of one key, arch-specific ones included
+# .SRCINFO values of one key, arch-specific ones included; a split package's `depends = ` (libsoup-docs) clears the
+# list for that package and names nothing
 export def srcinfo-get [file: path, key: string]: nothing -> list<string> {
-    open --raw $file | lines | each { str trim --left | split row --regex '\s+' } | where {|words|
+    open --raw $file | lines | each { str trim | split row --regex '\s+' } | where {|words|
         ($words | length) >= 3 and ($words.0 == $key or $words.0 == $"($key)_x86_64") and $words.1 == "="
     } | each { get 2 }
 }
@@ -388,15 +409,6 @@ export def listed-missing [c: record, db?: path]: nothing -> list<string> {
     $got.stdout | lines | where $it != ""
 }
 
-def json-replace [file: path, value: any]: nothing -> nothing {
-    $value | to json --indent 2 | save --force $"($file).new"
-    mv --force $"($file).new" $file
-}
-
-# -----------------------------------------------------------------------------
-# REPO
-# -----------------------------------------------------------------------------
-
 # name -> file of a db; a db that cannot be read stops the caller, an empty index would look like an empty repo.
 # repo-add starts every desc with %FILENAME% and %NAME%; a desc that does not is no db this pipeline wrote
 export def db-index [db: path]: nothing -> record {
@@ -424,10 +436,6 @@ def dbpath-create [dir: path]: nothing -> nothing {
     rm --recursive --force $dir
     mkdir ($dir | path join sync)
 }
-
-# -----------------------------------------------------------------------------
-# BUILD: SETUP
-# -----------------------------------------------------------------------------
 
 # one link per staged file into the pool that holds it, the outbox's own build before the served copy: the builder's
 # pacman reads one server, which holds every file the staged db names; a name without a file stops the run
@@ -504,10 +512,6 @@ def repo-has-load [n: record]: nothing -> record {
     $n | upsert repo_has ($has | to-set)
 }
 
-# -----------------------------------------------------------------------------
-# BUILD: RECIPES
-# -----------------------------------------------------------------------------
-
 # a fetch into a kept repo, so a retried attempt starts over cleanly
 export def recipe-aur [c: record, base: string, dir: path]: nothing -> bool {
     let clone = $c.cache | path join aur $base
@@ -528,7 +532,7 @@ def recipe-local [c: record, base: string, dir: path]: nothing -> bool {
 }
 
 # appends the overrides of one base to its PKGBUILD; changed tells whether it touched it
-def recipe-override [c: record, n: record, base: string, dir: path]: nothing -> record {
+export def recipe-override [c: record, n: record, base: string, dir: path]: nothing -> record {
     let file = $c.dotfiles | path join $OVERRIDES
     if not ($file | path exists) { return {n: $n, changed: false} }
     let rows = open --raw $file | lines | each { str replace --regex '#.*' '' | str trim | split row --regex '\s+' }
@@ -539,7 +543,7 @@ def recipe-override [c: record, n: record, base: string, dir: path]: nothing -> 
         if $field not-in [depends makedepends] {
             return {n: (fail $n $base $"unknown override field '($field)'"), changed: false}
         }
-        $"\n($field)+=(($row | skip 2 | str join ' '))\n" | save --append ($dir | path join PKGBUILD)
+        $"\n($field)+=\(($row | skip 2 | str join ' ')\)\n" | save --append ($dir | path join PKGBUILD)
         $changed = true
     }
     {n: $n, changed: $changed}
@@ -582,10 +586,6 @@ export def base-add [c: record, n: record, base: string, kind: string]: nothing 
     if (has $n.kind $base) { return $n }
     materialize $c ($n | merge {kind: ($n.kind | upsert $base $kind), bases: ($n.bases | append $base)}) $base
 }
-
-# -----------------------------------------------------------------------------
-# BUILD: RESOLVE
-# -----------------------------------------------------------------------------
 
 def local-recipe-exists [c: record, name: string]: nothing -> bool {
     $c.dotfiles | path join $PKGBUILDS $name PKGBUILD | path exists
@@ -728,10 +728,6 @@ def plan [n: record]: nothing -> record {
     let order = $edges | str join "\n" | do { ^tsort } | complete | get stdout | lines | where $it != ""
     $n | upsert order $order
 }
-
-# -----------------------------------------------------------------------------
-# BUILD: BUILD
-# -----------------------------------------------------------------------------
 
 def is-vcs [dir: path]: nothing -> bool {
     open --raw ($dir | path join .SRCINFO) | lines | any { $in =~ $VCS_SOURCE_PATTERN }
@@ -936,10 +932,6 @@ def build-base [c: record, n: record, base: string]: nothing -> record {
     $staged | upsert built ($staged.built | append $base)
 }
 
-# -----------------------------------------------------------------------------
-# BUILD: SNAPSHOT
-# -----------------------------------------------------------------------------
-
 # names the staged set is checked and installed by: listed official ones plus everything built. A local recipe's names
 # come as lsck0/<name>: it may replace an official package, which pacman's repo order would otherwise resolve them to
 export def snapshot-targets [c: record, n: record]: nothing -> list<string> {
@@ -1052,10 +1044,6 @@ def db-prune [c: record, n: record]: nothing -> record {
     $n
 }
 
-# -----------------------------------------------------------------------------
-# BUILD: OUTBOX
-# -----------------------------------------------------------------------------
-
 # the running build on the builder's status page; the served status.json is publish's
 def progress-write [c: record, n: record, phase: string, current: string = "", done: int = 0]: nothing -> nothing {
     let served = $c.served | path join status.json
@@ -1093,10 +1081,6 @@ def caches-clean [c: record]: nothing -> nothing {
     let go_build = $cache | path join go build
     if ($go_build | path exists) { ^find $go_build -type f -mtime $"+($BUILD_CACHE_KEEP_DAYS)" -delete }
 }
-
-# -----------------------------------------------------------------------------
-# PUBLISH: SETUP
-# -----------------------------------------------------------------------------
 
 def key-setup [c: record]: nothing -> record {
     do { ^gpg --batch --import $c.signing_key_file } | complete | ignore
@@ -1136,10 +1120,6 @@ def served-load [c: record, p: record]: nothing -> record {
     | each {|file| {key: $file, value: (file-package-name $file)} } | to-map
     $p | merge {served: $served, owner_of: $owner_of, state_file: $state_file}
 }
-
-# -----------------------------------------------------------------------------
-# PUBLISH: ACCEPT
-# -----------------------------------------------------------------------------
 
 def base-reject [p: record, base: string, reason: string]: nothing -> record {
     fail $p $base $"rejected: ($reason)"
@@ -1233,10 +1213,6 @@ def state-prune [c: record, p: record]: nothing -> nothing {
         if not $served { rm --force $path }
     }
 }
-
-# -----------------------------------------------------------------------------
-# PUBLISH: ASSEMBLE
-# -----------------------------------------------------------------------------
 
 # final from the proposed names. Each one's file must be a signed build of it or the file served for it already; a
 # base's name that is neither keeps its served file; any other name is official and maps to the file arch's dbs name
@@ -1365,10 +1341,6 @@ export def completeness-check [c: record, p: record, proposed_missing: list<stri
     $p | upsert held_back $"listed names the served snapshot has and this one lacks: ($list)"
 }
 
-# -----------------------------------------------------------------------------
-# PUBLISH: PUBLISH
-# -----------------------------------------------------------------------------
-
 # db, signature and pacman's names for both into a directory, copied or hardlinked
 def db-put [from: path, dir: path, --link]: nothing -> nothing {
     for f in $DB_FILES {
@@ -1449,18 +1421,22 @@ export def files-prune [dir: path, files: list<string>]: nothing -> nothing {
     }
 }
 
-# <root> keeps three dated snapshots: the newest, the first of this month and the first of this week (from Monday),
-# plus whichever one current names
-export def snapshot-prune [c: record, root: path]: nothing -> nothing {
-    let today = time-format $c.run_started $DATE_FORMAT
-    let weekday = time-format $c.run_started "%u" | into int
-    let week_start = time-format ($c.run_started - ($weekday - 1) * $SECONDS_PER_DAY) $DATE_FORMAT
+# the YYYY-MM-DD dates a tree keeps of its dated snapshots or isos: the newest, the first of this month and the first
+# of this week (from Monday), plus the one its link (current, latest) names
+export def dated-keep [run_started: int, dates: list<string>, linked: string]: nothing -> list<string> {
+    let today = time-format $run_started $DATE_FORMAT
+    let weekday = time-format $run_started "%u" | into int
+    let week_start = time-format ($run_started - ($weekday - 1) * $SECONDS_PER_DAY) $DATE_FORMAT
     let month_start = ($today | str substring 0..6) + "-01"
+    let sorted = $dates | sort
+    let first_since = {|start| $sorted | where $it >= $start | get -o 0 }
+    [($sorted | reverse | get -o 0) (do $first_since $month_start) (do $first_since $week_start) $linked] | compact | where $it != "" | uniq
+}
+
+export def snapshot-prune [c: record, root: path]: nothing -> nothing {
     let current = ^readlink ($root | path join $CURRENT_NAME) | str trim
-    let dated = ls $root | where type == dir | get name | where { ($in | path basename) =~ $SNAPSHOT_PATTERN } | sort
-    let names = $dated | each { path basename }
-    let first_since = {|start| $names | where $it >= $start | get 0? }
-    let keep = [($names | reverse | get 0?) (do $first_since $month_start) (do $first_since $week_start) $current] | compact
+    let dated = ls $root | where type == dir | get name | where { ($in | path basename) =~ $SNAPSHOT_PATTERN }
+    let keep = dated-keep $c.run_started ($dated | each { path basename }) $current
     for dir in $dated {
         let name = $dir | path basename
         if $name in $keep { continue }
@@ -1469,9 +1445,79 @@ export def snapshot-prune [c: record, root: path]: nothing -> nothing {
     }
 }
 
-# -----------------------------------------------------------------------------
-# PUBLISH: STATUS
-# -----------------------------------------------------------------------------
+# the YYYY-MM-DD of a dated iso's name, null for any other name
+def iso-date [name: string]: nothing -> any {
+    $name | parse --regex $ISO_PATTERN | get -o 0 | if $in == null { null } else { $"($in.year)-($in.month)-($in.day)" }
+}
+
+# the dated isos of dir as {name, date}, oldest first
+def iso-dated [dir: path]: nothing -> table {
+    ls $dir | where type == file | get name | each {|file| {name: ($file | path basename), date: (iso-date ($file | path basename))} }
+    | where date != null | sort-by date
+}
+
+# the dated isos <dir> keeps follow the snapshots' rule, latest's among them; each leaves with its .sha256 and .sig
+export def iso-prune [c: record, dir: path]: nothing -> nothing {
+    let latest = $dir | path join $ISO_LATEST
+    let linked = if ($latest | path type) == symlink { iso-date (^readlink $latest | str trim) } else { null }
+    let dated = iso-dated $dir
+    let keep = dated-keep $c.run_started $dated.date ($linked | default "")
+    for iso in ($dated | where date not-in $keep) {
+        log $"removing iso ($iso.name)"
+        rm --force ...([$iso.name $"($iso.name).sha256" $"($iso.name).sig"] | each {|name| $dir | path join $name })
+    }
+}
+
+# the reason this run's iso cannot be published, "" when it can
+def iso-check [c: record]: nothing -> string {
+    if not (outbox-file-check $c.iso_run) or (open --raw $c.iso_run | str trim) != ($c.run_started | into string) {
+        return $"the iso build did not finish, ($BUILD_LOG_NAME)"
+    }
+    let anchor = $c.dotfiles | path join $REPO_PUBLIC_KEY
+    let fingerprint = ^gpg --show-keys --with-colons $anchor | lines | each { split row ":" } | where { $in.0 == fpr }
+    | get -o 0.9
+    if $fingerprint != $c.key { return $"($REPO_PUBLIC_KEY) is ($fingerprint | default 'no key'), not the signing key ($c.key)" }
+    let built = iso-dated $c.iso_out
+    if ($built | is-empty) { return "the iso build left no iso" }
+    for iso in $built {
+        let file = $c.iso_out | path join $iso.name
+        let sum = $"($file).sha256"
+        if not (outbox-file-check $file) or not (outbox-file-check $sum) { return $"($iso.name) or its .sha256 is no file" }
+        if (do { cd $c.iso_out; ^sha256sum --check --status ($sum | path basename) } | complete).exit_code != 0 {
+            return $"($iso.name) does not match its .sha256"
+        }
+    }
+    ""
+}
+
+# the night's iso signed into iso/ beside the repo key, latest moved to the newest and the dated ones pruned; a failed
+# build leaves the served isos as they are
+export def iso-publish [c: record, p: record]: nothing -> record {
+    let reason = iso-check $c
+    if $reason != "" {
+        log $"iso not published: ($reason)"
+        return ($p | upsert iso_failure $reason)
+    }
+    let dir = $c.iso_served
+    mkdir $dir
+    put ($c.dotfiles | path join $REPO_PUBLIC_KEY) $dir $ISO_KEY_NAME
+    for iso in (iso-dated $c.iso_out) {
+        let file = $dir | path join $iso.name
+        put ($c.iso_out | path join $"($iso.name).sha256") $dir
+        put ($c.iso_out | path join $iso.name) $dir
+        sign $c $file
+        log $"iso: signed ($iso.name)"
+    }
+    let newest = iso-dated $dir | last | get name
+    let sum = open --raw ($dir | path join $"($newest).sha256") | split row " " | first
+    let latest_sum = $c.work | path join $"($ISO_LATEST).sha256"
+    $"($sum)  ($ISO_LATEST)\n" | save --force $latest_sum
+    put $latest_sum $dir
+    symlink-set $"($newest).sig" ($dir | path join $"($ISO_LATEST).sig")
+    symlink-set $newest ($dir | path join $ISO_LATEST)
+    iso-prune $c $dir
+    $p
+}
 
 def status-write [c: record, p: record]: nothing -> nothing {
     let now = date now | date to-timezone UTC | format date $TIME_FORMAT
@@ -1479,7 +1525,10 @@ def status-write [c: record, p: record]: nothing -> nothing {
     let packages = if $held { $p.served | columns | length } else { $p.final | columns | length }
     let snapshot = if $held { null } else { time-format $c.run_started $DATE_FORMAT }
     let report = open --raw $c.outbox_report | from json
-    let failures = $report.failed | append (failures-list $p.failed) | where $it != "" | sort | uniq
+    let iso_failure = if $p.iso_failure == "" { [] } else { [$"($ISO_DIR): ($p.iso_failure)"] }
+    let failures = $report.failed | append (failures-list $p.failed) | append $iso_failure | where $it != "" | sort | uniq
+    let latest = $c.iso_served | path join $ISO_LATEST
+    let iso = if ($latest | path type) == symlink { ^readlink $latest | str trim } else { null }
     let missing = $p.snapshot_missing
     let indented = {|items| $items | each { $"  ($in)" } }
     let text = [
@@ -1491,6 +1540,7 @@ def status-write [c: record, p: record]: nothing -> nothing {
         $"published:  (if $held { $'no, held back: ($p.held_back)' } else { 'yes' })"
         $"built:      (if ($p.built | is-empty) { 'none' } else { $p.built | str join ' ' })"
         $"dropped:    (if ($report.dropped | is-empty) { 'none' } else { $report.dropped | str join ' ' })"
+        $"iso:        ($iso | default 'none')"
         $"failed:     ($failures | length)"
     ] | append (do $indented $failures) | append $"missing:    ($missing | length) listed, not in the served snapshot"
     | append (do $indented $missing)
@@ -1500,7 +1550,7 @@ def status-write [c: record, p: record]: nothing -> nothing {
     {
         packages: $packages, failing: ($failures | length), last_build: $now, commit: $c.commit, snapshot: $snapshot
         held_back: (if $held { $p.held_back } else { null }), failed: $failures, dropped: $report.dropped
-        missing: $missing, running: null
+        missing: $missing, iso: $iso, running: null
     } | to json --indent 2 | save --force $status_json
     put $status_json $c.served
     put $status_txt $c.served
@@ -1527,8 +1577,9 @@ export def logs-push [c: record]: nothing -> bool {
     push-rsync $c ...$only_logs $c.build_log $"($c.push_target)/"
 }
 
-# mirror to the always-on dmz host: packages and snapshot dirs, then the dbs and current, then the logs the status
-# names, then the status, then deletions; a failure fails the unit, the mirror keeps its last whole copy
+# mirror to the always-on dmz host: packages, snapshot dirs and isos, then the dbs, current and the latest iso links,
+# then the logs the status names, then the status, then deletions; a failure fails the unit, the mirror keeps its last
+# whole copy
 export def push [c: record]: nothing -> bool {
     if $c.push_target == "" or not ($c.push_key_file | path exists) { return true }
     if not ($c.repo_dir | path join $"($REPO).db" | path exists) { return true }
@@ -1537,7 +1588,8 @@ export def push [c: record]: nothing -> bool {
     let target = $"($c.push_target)/"
     let pushed = (
         (push-rsync $c --exclude $"($REPO).db*" --exclude $"($REPO).files*" --exclude $"/($CURRENT_NAME)"
-            --exclude $"($c.internet_prefix)/($CURRENT_NAME)" --exclude "/status.*" $served $target)
+            --exclude $"($c.internet_prefix)/($CURRENT_NAME)" --exclude $"/($ISO_DIR)/($ISO_LATEST)*" --exclude "/status.*"
+            $served $target)
         and (push-rsync $c --delay-updates --exclude "/status.*" $served $target)
         and (logs-push $c)
         and (push-rsync $c ($c.served | path join status.txt) ($c.served | path join status.json) $target)
@@ -1546,10 +1598,6 @@ export def push [c: record]: nothing -> bool {
     if not $pushed { log $"push to ($c.push_target) failed, the dmz mirror keeps its last copy" }
     $pushed
 }
-
-# -----------------------------------------------------------------------------
-# MAIN
-# -----------------------------------------------------------------------------
 
 def build-main [c: record]: nothing -> nothing {
     log "setting up the build"
@@ -1616,8 +1664,32 @@ def publish-main [c: record]: nothing -> nothing {
     } else {
         log $"held back: ($p.held_back)"
     }
+    $p = iso-publish $c $p
     status-write $c $p
-    if not (push $c) { exit 1 }
+    let pushed = push $c
+    # a failed iso fails the unit too, after the packages and the status went out
+    if not $pushed or $p.iso_failure != "" { exit 1 }
+}
+
+# the install iso from the verified checkout into /iso, the run id last; its work dir emptied for the next night's
+# package builds
+export def iso-main [c: record]: nothing -> nothing {
+    log "setting up the iso build"
+    if $c.iso_mirror == "" { die "ARCHBUILD_ISO_MIRROR is unset: the pacman Server mkarchiso fetches from" }
+    ^find $c.iso_out $c.iso_work -mindepth 1 -delete
+    if (upstream-quiet $c $PACMAN_TRANSFER_TIMEOUT_S archlinux pacman -S --noconfirm --needed archiso git gnupg) != 0 {
+        die "installing archiso failed"
+    }
+    ^git config --global --add safe.directory "*"
+    let built = do {
+        cd $c.dotfiles
+        (command-status $nu.current-exe --no-config-file scripts/dot.nu internal iso --work $c.iso_work --out $c.iso_out
+            --mirror $c.iso_mirror --keep ($ISO_KEEP_ALL | into string))
+    }
+    ^find $c.iso_work -mindepth 1 -delete
+    if $built != 0 { die $"the iso build failed \(exit ($built)\)" }
+    $c.run_started | into string | save --force $c.iso_run
+    log "iso built"
 }
 
 def main [mode: string]: nothing -> nothing {
@@ -1627,7 +1699,8 @@ def main [mode: string]: nothing -> nothing {
     if $c.build_budget_s == "" { die "ARCHBUILD_BUILD_BUDGET_S is unset: seconds the recipes of a night may take" }
     match $mode {
         "build" => { build-main $c }
+        "iso" => { iso-main $c }
         "publish" => { publish-main $c }
-        _ => { die "usage: archrepo-build.nu build|publish" }
+        _ => { die "usage: archrepo-build.nu build|iso|publish" }
     }
 }

@@ -15,11 +15,16 @@ metadata:
 
 Layout under `/srv/nas`:
 - `data/<service>` persistent data of every service (NFS-mounted by the VMs)
-- `bulk/` the 2 TB hdd, not backed up: `bulk/media/{movies,tv,anime,music,leaving-soon}`, `bulk/torrents` finished downloads;
+- `bulk/` the 2 TB hdd, its media and torrents not backed up: `bulk/media/{movies,tv,anime,music,leaving-soon}`, `bulk/torrents` finished downloads;
   media and torrents share a 750 GiB ext4 project quota (`mediaQuotaGiB` in `src/instances/core/104-internal-nas/main.nix`).
   Incomplete torrents live on vm-120's own 150 GiB disk, not on the NAS.
 - `documents` (`inbox/` is the Paperless consume dir, `archive/` a read-only view of all Paperless documents), `public`, `syncthing`
-- `BACKUPS/kopia` Kopia repository (see `backups`)
+- `bulk/cold-storage` what must be kept but is rarely opened (smb share `cold-storage`): snapshotted nightly into
+  `BACKUPS/kopia-syncthing`, uploaded weekly to Proton Drive (`/my-files/homelab-offsite/cold-storage`) one way, so a
+  file deleted here stays off-site: `systemctl status proton-cold-storage`
+- `bulk/BACKUPS/kopia` the Kopia repository of the ssd's tree (`kopia-nas`, `nas-restore`); `BACKUPS/kopia-syncthing`
+  the one of the hdd's syncthing folders and cold storage (`kopia-syncthing`), so each disk backs up the other (see
+  `backups`)
 
 ## Tasks
 
@@ -28,8 +33,8 @@ Layout under `/srv/nas`:
 - NFS: `exportfs -v`, clients `ss -tn sport = :2049`. A client VM hangs on I/O
   if the NAS is down (hard mounts) and recovers when it is back.
 - SMB shares, all for the one samba user `luca` (no guest), encrypted, SMB 3.1.1 only: `homelab` (the whole of
-  `/srv/nas` as root, `data/` and `BACKUPS/` included), public, media, documents, syncthing, BACKUPS (read-only), the
-  last five acting as nobody. The guests mount `data/` over NFS, each just its own shares. Sessions: `smbstatus --brief`.
+  `/srv/nas` as root, `data/` and `BACKUPS/` included), public, media, documents, syncthing, cold-storage, BACKUPS
+  (read-only), the last six acting as nobody. The guests mount `data/` over NFS, each just its own shares. Sessions: `smbstatus --brief`.
 - `data/tokens/vm-<id>` and `data/db-dumps/<vm>` belong to root (0755 and 0700): only the producing guest's root
   writes them. Never loosen their modes; vm-104's tmpfiles rules set them back on every boot.
 - Syncthing GUI https://sync.lsck0.dev; API on the VM: `curl -s localhost:8384/rest/system/status -H "X-API-Key: $(xmllint --xpath 'string(//apikey)' /var/lib/syncthing/config.xml)"`.

@@ -1,5 +1,16 @@
 # prowlarr: indexer manager, indexer traffic through tor, flaresolverr beside it
-{ config, pkgs, inventory, catalog, hostIp, retry, setupUnit, site, instance, ... }:
+{
+  config,
+  pkgs,
+  inventory,
+  catalog,
+  hostIp,
+  retry,
+  setupUnit,
+  site,
+  instance,
+  ...
+}:
 let
   route = catalog.internal.prowlarr;
   # the router's tor socks port isolated per destination, at the router's address in this guest's zone
@@ -10,15 +21,24 @@ let
   flaresolverrPort = 8191;
   # flaresolverr renders hostile tracker pages in chromium: its own network, outside the default bridge the guard
   # trusts (modules/network.nix), so a compromised chromium cannot call the arrs' login-free ports
-  flaresolverrNetwork = { name = "flaresolverr"; subnet = "10.89.130.0/24"; };
-in {
-  homelab.servarr.prowlarr.image = "lscr.io/linuxserver/prowlarr:2.6.5.5623-ls161";
+  flaresolverrNetwork = {
+    name = "flaresolverr";
+    subnet = "10.89.130.0/24";
+  };
+in
+{
+  homelab.servarr.prowlarr.image = "lscr.io/linuxserver/prowlarr:2.6.5.5623-ls161@sha256:c96b56d94d116a9f4de94bc23d3381689492e6c3cfb7435320e8d982e406f99a";
 
   # indexer traffic leaves through tor
   systemd.services.prowlarr-tor-proxy = setupUnit {
     description = "Send Prowlarr's indexer traffic through Tor";
     after = [ "podman-prowlarr.service" ];
-    path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.systemd ];
+    path = [
+      pkgs.curl
+      pkgs.jq
+      pkgs.coreutils
+      pkgs.systemd
+    ];
     serviceConfig.PrivateTmp = true;
     script = ''
       API=http://127.0.0.1:${toString route.port}/api/v1
@@ -56,7 +76,10 @@ in {
     requiredBy = [ "podman-flaresolverr.service" ];
     before = [ "podman-flaresolverr.service" ];
     path = [ config.virtualisation.podman.package ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
     script = ''
       podman network exists ${flaresolverrNetwork.name} \
         || podman network create --subnet=${flaresolverrNetwork.subnet} ${flaresolverrNetwork.name}
@@ -65,7 +88,7 @@ in {
 
   # flaresolverr for cloudflare-guarded trackers
   virtualisation.oci-containers.containers.flaresolverr = {
-    image = "ghcr.io/flaresolverr/flaresolverr:v3.4.2";
+    image = "ghcr.io/flaresolverr/flaresolverr:v3.4.2@sha256:42ffb1cc56088899e91a7382bc611b00fa7cbd016accfed12c0695275ca18451";
     networks = [ flaresolverrNetwork.name ];
     ports = [ "${podmanBridgeGateway}:${toString flaresolverrPort}:${toString flaresolverrPort}" ];
     environment = {

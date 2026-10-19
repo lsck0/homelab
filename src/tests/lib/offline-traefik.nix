@@ -11,17 +11,25 @@
 #   request, or use a fresh one. AppSec answers 403 to a request carrying X-Test-Attack: 1. The bouncer refuses
 #   everything until the stub listens: wait for /var/lib/crowdsec/data/stub-ready before the first request.
 # - the house whitelist job, which needs the router's published address and a real cscli: off.
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   pki = import ./pki.nix { inherit pkgs; };
   images = import ./images.nix { inherit pkgs; };
-in {
+in
+{
   config = lib.mkMerge [
     {
-      assertions = [{
-        assertion = config.homelab.traefik.enable;
-        message = "lib/offline-traefik.nix belongs on an ingress: import it with 100- or 200-*-traefik.nix";
-      }];
+      assertions = [
+        {
+          assertion = config.homelab.traefik.enable;
+          message = "lib/offline-traefik.nix belongs on an ingress: import it with 100- or 200-*-traefik.nix";
+        }
+      ];
 
       # traefik waits for the nas-held acme store otherwise
       systemd.tmpfiles.rules = [ "f /var/lib/traefik/acme/acme.json 0600 traefik traefik -" ];

@@ -16,7 +16,7 @@ I1 an app's recorded sha is a commit whose stack, with exactly that commit's ima
 I2 a run that finds the newest watched commit deployed, with the same catalog entry, builds and deploys nothing
 I3 once faults stop, a run after the backoff cap brings every app to its newest commit (liveness)
 I4 metrics.prom is a complete file that agrees with the states after every finished run
-I5 a run for one named app (its ci's /redeploy) looks at that app as the timer would and leaves the others alone;
+I5 a run for one named app (its ci's /redeploy) looks at that app past its backoff and leaves the others alone;
    an unknown name exits 2 and touches nothing
 I6 an app none of whose calls failed in a run is deployed by it, whatever the others did
 I7 a forgotten app (app-builder-redeploy) is deployed again, and its deployed commit builds nothing: the registry
@@ -25,7 +25,11 @@ I8 after baseRefreshS a changed base image rebuilds and deploys the app though i
    base deploys the same images and builds nothing
 I9 an upstream down for a whole run fails no app on its account: the forge down changes no state at all, a registry
    down deploys nothing
+I10 a rollback deploys the commit before the live one and holds it while the branch stands still; a new commit
+   releases it
+I11 after every finished run each app's published status (GET /deploy/<app>) is its state
 """
+
 import contextlib
 import io
 import json
@@ -43,9 +47,6 @@ spec = importlib.util.spec_from_file_location("app_builder", sys.argv[1])
 builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)
 
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
 
 SEEDS_PER_RUN = 1000
 # seeds that once failed; each stays here for good
@@ -60,7 +61,7 @@ BACKOFF = {"baseS": 300, "maxS": 3600}
 # simulated seconds between two timer runs
 RUN_INTERVAL_S = 60
 # longer than a seed's whole run, so only I8 sees a refresh
-BASE_REFRESH_S = 10 ** 6
+BASE_REFRESH_S = 10**6
 BASE_IMAGE = "base:1"
 FAULTS = ("forge", "api", "checkout", "login", "registry", "ssh-timeout", "refused", "answer-lost", "outage")
 # chance per run that one upstream is down for all of it, while the seed's faulty phase lasts
@@ -75,10 +76,6 @@ ORIGINAL = {name: getattr(builder, name) for name in ("app_build_deploy", "file_
 class SimCrash(Exception):
     """The builder process died between two writes."""
 
-
-# -----------------------------------------------------------------------------
-# TYPES
-# -----------------------------------------------------------------------------
 
 # every fault kind and crash fired over the whole run: a run where none fire proves nothing
 FIRED = {kind: 0 for kind in FAULTS + ("crash",)}
@@ -138,27 +135,57 @@ class World:
 
 def catalog_of(world):
     apps = {
-        "hello": {"repo": "lsck0/hello", "branch": "master", "stack": None, "build": {}, "exclude": [],
-                  "watch": ["web"], "hash": world.hashes["hello"], "dashboards": [], "manager": None},
-        "plain": {"repo": "lsck0/plain", "branch": "master", "stack": None, "build": {}, "exclude": [],
-                  "watch": [], "hash": world.hashes["plain"], "dashboards": [], "manager": None},
+        "hello": {
+            "repo": "lsck0/hello",
+            "branch": "master",
+            "stack": None,
+            "build": {},
+            "exclude": [],
+            "watch": ["web"],
+            "hash": world.hashes["hello"],
+            "dashboards": [],
+            "manager": None,
+        },
+        "plain": {
+            "repo": "lsck0/plain",
+            "branch": "master",
+            "stack": None,
+            "build": {},
+            "exclude": [],
+            "watch": [],
+            "hash": world.hashes["plain"],
+            "dashboards": [],
+            "manager": None,
+        },
     }
-    return {"registry": REGISTRY, "registryUser": "builder", "registryPasswordFile": "/dev/null",
-            "deployKeyFile": "/dev/null", "github": "https://forge.test", "githubApi": "https://api.forge.test",
-            "manager": {"address": "10.0.0.1", "knownHosts": "/dev/null"}, "timeouts": {}, "backoff": BACKOFF,
-            "buildParallelism": 2, "baseRefreshS": BASE_REFRESH_S,
-            "upstreams": {"retry": {"attempts": 2, "backoffS": 1, "probeTimeoutS": 1}, "unavailable": 75,
-                          "registries": {"docker.io": "dockerhub"}},
-            "apps": apps, "loggedIn": False}
+    return {
+        "registry": REGISTRY,
+        "registryUser": "builder",
+        "registryPasswordFile": "/dev/null",
+        "deployKeyFile": "/dev/null",
+        "github": "https://forge.test",
+        "githubApi": "https://api.forge.test",
+        "manager": {"address": "10.0.0.1", "knownHosts": "/dev/null"},
+        "timeouts": {},
+        "backoff": BACKOFF,
+        "buildParallelism": 2,
+        "baseRefreshS": BASE_REFRESH_S,
+        "upstreams": {
+            "retry": {"attempts": 2, "backoffS": 1, "probeTimeoutS": 1},
+            "unavailable": 75,
+            "registries": {"docker.io": "dockerhub"},
+        },
+        "apps": apps,
+        "loggedIn": False,
+    }
 
 
 def app_of_repo(repo):
     return repo.split("/")[1]
 
 
-# -----------------------------------------------------------------------------
-# BOUNDARY: the simulated forge, registry and manager
-# -----------------------------------------------------------------------------
+# boundary: the simulated forge, registry and manager
+
 
 def world_install(world):
     def branch_head(ctx, repo, branch):
@@ -259,6 +286,7 @@ def world_install(world):
     builder.registry_digest = registry_digest
     builder.image_base_digest = image_base_digest
     builder.image_build_push = image_build_push
+    builder.cache_mounts_prune = lambda ctx: None
     builder.stack_deploy = stack_deploy
     builder.image_mark_live = image_mark_live
     builder.app_build_deploy = app_build_deploy
@@ -269,12 +297,14 @@ def world_install(world):
     builder.log = lambda app, message: None
 
 
-# -----------------------------------------------------------------------------
-# INVARIANTS
-# -----------------------------------------------------------------------------
-
 def states_of(state_dir, apps):
     return {app: builder.state_load(state_dir, app) for app in apps}
+
+
+def status_dir_of(state_dir):
+    path = os.path.join(state_dir, "status")
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def target_of(world, app, spec_):
@@ -307,7 +337,7 @@ def run_once(world, state_dir, only=None):
         world.down = {world.rng.choice(UPSTREAMS)}
     if world.faulty and world.rng.random() < CRASH_PROBABILITY:
         world.writes_until_crash = world.rng.randint(0, 3)
-    catalog = catalog_of(world)
+    catalog = dict(catalog_of(world), deployStatusDir=status_dir_of(state_dir))
     before = states_of(state_dir, catalog["apps"])
     deploys_before = len(world.accepted)
     try:
@@ -324,6 +354,8 @@ def check_run(world, state_dir, catalog, before, deploys_before, finished, only,
     if not finished:
         return
     check_metrics(state_dir, states, world, where)
+    published = states_of(catalog["deployStatusDir"], catalog["apps"])
+    assert published == states, f"{where}: I11 published {published}, the states are {states}"
     for app, spec_ in catalog["apps"].items():
         new = [a for a in world.accepted[deploys_before:] if a[0] == app]
         prior = before[app]
@@ -341,16 +373,17 @@ def check_run(world, state_dir, catalog, before, deploys_before, finished, only,
         if prior["sha"] == target and prior["build_hash"] == spec_["hash"]:
             assert not new, f"{where}: I2 {app} redeployed {target}, already live"
         failure = prior["failure"]
-        backing_off = (failure is not None and failure["head"] == world.head(app)
-                       and failure["build_hash"] == spec_["hash"] and world.clock < failure["retry_at"])
-        if app not in world.calls and not backing_off and world.head(app) is not None:
-            assert states[app]["failure"] is None and states[app]["sha"] == target, \
+        backing_off = (
+            failure is not None
+            and failure["head"] == world.head(app)
+            and failure["build_hash"] == spec_["hash"]
+            and world.clock < failure["retry_at"]
+        )
+        if app not in world.calls and not (backing_off and only != app) and world.head(app) is not None:
+            assert states[app]["failure"] is None and states[app]["sha"] == target, (
                 f"{where}: I6 {app} met no fault but is {states[app]}, target {target}"
+            )
 
-
-# -----------------------------------------------------------------------------
-# FUNCTIONS
-# -----------------------------------------------------------------------------
 
 def unknown_app_untouched(world, state_dir):
     """I5: main refuses an unknown app before it takes the lock or writes anything."""
@@ -366,6 +399,26 @@ def unknown_app_untouched(world, state_dir):
         sys.argv = argv
         os.unlink(f.name)
     assert code == 2 and sorted(os.listdir(state_dir)) == before, "I5: an unknown app changed the state dir"
+
+
+def rollback_check(world, state_dir, seed):
+    """I10 on plain, whose every commit is a target: two deploys give it a previous commit to go back to."""
+    for _ in range(2):
+        world.commit("plain")
+        run_once(world, state_dir, "plain")
+    state = builder.state_load(state_dir, "plain")
+    previous, live = state["previous_sha"], state["sha"]
+    assert previous is not None and live == world.head("plain"), f"seed {seed}: I10 plain is at {state}"
+    assert builder.app_rollback(state_dir, "plain") == 0, f"seed {seed}: I10 the rollback was refused"
+    for attempt in range(2):
+        run_once(world, state_dir)
+        state = builder.state_load(state_dir, "plain")
+        assert state["sha"] == previous and state["hold"] is not None, f"seed {seed}: I10 run {attempt}: {state}"
+        world.clock += RUN_INTERVAL_S
+    world.commit("plain")
+    run_once(world, state_dir)
+    state = builder.state_load(state_dir, "plain")
+    assert state["sha"] == world.head("plain") and state["hold"] is None, f"seed {seed}: I10 not released: {state}"
 
 
 def seed_run(seed):
@@ -403,18 +456,22 @@ def seed_run(seed):
         builds = world.builds
         os.remove(os.path.join(state_dir, "hello" + builder.STATE_SUFFIX))
         catalog, before, deploys_before, finished = run_once(world, state_dir, "hello")
-        assert finished and world.builds == builds and len(world.accepted) == deploys_before + 1, \
+        assert finished and world.builds == builds and len(world.accepted) == deploys_before + 1, (
             f"seed {seed}: I7 a redeploy of hello's live commit built {world.builds - builds} images"
+        )
+        rollback_check(world, state_dir, seed)
         for changed in (False, True):
             world.clock += BASE_REFRESH_S
             if changed:
                 world.base_digest = "sha256:" + "2" * 64
             builds = world.builds
             catalog, before, deploys_before, finished = run_once(world, state_dir)
-            assert finished and world.builds == builds + (len(catalog["apps"]) if changed else 0), \
+            assert finished and world.builds == builds + (len(catalog["apps"]) if changed else 0), (
                 f"seed {seed}: I8 base changed {changed}: {world.builds - builds} builds"
-            assert len(world.accepted) == deploys_before + len(catalog["apps"]), \
+            )
+            assert len(world.accepted) == deploys_before + len(catalog["apps"]), (
                 f"seed {seed}: I8 base changed {changed}: not every app was looked at again"
+            )
 
 
 def main():

@@ -7,7 +7,7 @@
 # deletion waits for allow-large; a missing, unmarked or empty folder is refused; syncthing's internals and symlinks
 # stay local; a failing item fails the run and the next run resumes with it alone; a run lists only what its budget
 # allows; a download past the free-space reserve and a name beside its unicode normalization twin fail alone; a torn
-# events.lock is cleared; an hourly run skips while another off-site run holds the proton lock, and a proton outage
+# events.lock is cleared; an hourly run skips while another heavy nas job holds the job lock, and a proton outage
 # skips it.
 { pkgs, lib, ... }:
 let
@@ -19,7 +19,14 @@ let
   user = "nobody";
   group = "nogroup";
   fakeCli = import ./lib/fake-proton-drive.nix { inherit pkgs; };
-  inherit ((import ../../../../modules/upstream { inherit lib pkgs; lab.upstreams = { }; })._module.args.upstream) unavailable;
+  inherit
+    ((import ../../../../modules/upstream {
+      inherit lib pkgs;
+      lab.upstreams = { };
+    })._module.args.upstream
+    )
+    unavailable
+    ;
   # proton is down while /run/proton-down exists
   probe = pkgs.writeShellScript "proton-probe-fake" ''
     down=${toString unavailable}
@@ -30,10 +37,16 @@ pkgs.testers.runNixOSTest {
   name = "proton-bisync";
 
   nodes.machine = {
-    imports = [ ../../../../tests/stubs.nix ../lib/kopia.nix ];
+    imports = [
+      ../../../../tests/stubs.nix
+      ../lib/kopia.nix
+    ];
     virtualisation.memorySize = 2048;
     # main.nix's folder and owner; syncthing itself stays off
-    services.syncthing = { inherit user group; settings.folders.sync.path = folder; };
+    services.syncthing = {
+      inherit user group;
+      settings.folders.sync.path = folder;
+    };
     systemd.services = lib.genAttrs [ "proton-bisync" "proton-bisync-resync" ] (_: {
       environment = {
         PROTON_BISYNC_CLI = lib.mkForce (lib.getExe fakeCli);
@@ -189,7 +202,8 @@ pkgs.testers.runNixOSTest {
         owned(f"echo up1 > {F}/up1.txt")
         machine.succeed(f"mkdir -p {R}/part && echo p1 > {R}/part/p1.txt && echo p2 > {R}/part/p2.txt"
                         f" && echo '*/part/p2.txt' > /run/fake-proton-fail")
-        run("proton-bisync", ok=False)
+        failed = run("proton-bisync", ok=False)
+        assert "fake: /my-files/homelab-offsite/sync/part/p2.txt fails" in failed, failed
         assert cat(f"{F}/part/p1.txt") == "p1" and cat(f"{R}/up1.txt") == "up1"
         absent(f"{F}/part/p2.txt")
         assert metric() == before
@@ -261,9 +275,9 @@ pkgs.testers.runNixOSTest {
         assert metric() == before and calls("list") == [], out
         machine.succeed("rm /run/proton-down")
 
-    with subtest("an hourly run skips while another off-site run holds the proton lock"):
-        machine.succeed("systemd-run --unit=hold-proton flock /run/proton-drive.lock ${pkgs.coreutils}/bin/sleep 600")
-        machine.wait_until_fails("flock -n /run/proton-drive.lock true")
+    with subtest("an hourly run skips while another heavy nas job holds the job lock"):
+        machine.succeed("systemd-run --unit=hold-proton flock /run/nas-job.lock ${pkgs.coreutils}/bin/sleep 600")
+        machine.wait_until_fails("flock -n /run/nas-job.lock true")
         assert "skipping this hour" in run("proton-bisync")
         absent(f"{R}/l4.txt")
         machine.succeed("systemctl stop hold-proton")

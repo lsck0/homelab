@@ -18,6 +18,7 @@ Example:
     if rows is None:
         ...  # prometheus unreachable
 """
+
 import json
 import os
 import socket

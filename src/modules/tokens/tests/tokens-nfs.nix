@@ -5,31 +5,52 @@
 #   vm-121  producer of bazarr-key                    rw tokens/vm-121
 #   vm-122  producer of the jellyfin keys, reads bazarr-key  ro tokens/vm-121
 #   vm-131  producer of paperless-key, reads nothing of vm-121
-#   vm-250  apps zone, reads swarm-worker-token                    ro tokens/vm-107 (subtree checked)
+#   vm-250  apps zone, reads swarm-worker-token                    ro tokens/vm-107
+#
+# Every export checks subtrees: a forged file handle never leaves its share.
 #
 # Every refusal has its positive control in the same run: the same mount from the entitled guest works. Faults: the
 # nas unreachable mid-write and restarted under a reader; a token rewritten 300 times under a concurrent reader.
-{ pkgs, lib, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  specialArgs,
+  ...
+}:
 let
   lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
   ip = id: lab.inventory.${id}.ip;
   nasIp = ip "104";
 
   guest = id: reads: {
-    imports = [ (lab.guest id { flat = true; nas = true; }) ];
+    imports = [
+      (lab.guest id {
+        flat = true;
+        nas = true;
+      })
+    ];
     homelab.tokens.reads = reads;
   };
 
   # the oracle: token share -> { client vmid: "rw" | "ro" }, and which clients sit outside the internal zone
   exportsWanted = {
-    "/srv/nas/data/tokens/vm-121" = { "121" = "rw"; "122" = "ro"; };
-    "/srv/nas/data/tokens/vm-122" = { "122" = "rw"; };
-    "/srv/nas/data/tokens/vm-131" = { "131" = "rw"; };
-    "/srv/nas/data/tokens/vm-107" = { "250" = "ro"; };
+    "/srv/nas/data/tokens/vm-121" = {
+      "121" = "rw";
+      "122" = "ro";
+    };
+    "/srv/nas/data/tokens/vm-122" = {
+      "122" = "rw";
+    };
+    "/srv/nas/data/tokens/vm-131" = {
+      "131" = "rw";
+    };
+    "/srv/nas/data/tokens/vm-107" = {
+      "250" = "ro";
+    };
   };
-  subtreeChecked = [ (ip "250") ];
-  exportsJson = builtins.toJSON (lib.mapAttrs (_: clients: lib.mapAttrs' (id: mode: lib.nameValuePair (ip id) mode) clients)
-    exportsWanted);
+  exportsJson = builtins.toJSON (
+    lib.mapAttrs (_: clients: lib.mapAttrs' (id: mode: lib.nameValuePair (ip id) mode) clients) exportsWanted
+  );
 
   # a 4 KiB token version: its number, padded, so every version is distinct and a torn read is visible
   rotations = 300;
@@ -51,7 +72,6 @@ pkgs.testers.runNixOSTest {
     import json, re
 
     WANTED = json.loads('${exportsJson}')
-    SUBTREE_CHECKED = ${builtins.toJSON subtreeChecked}
     NAS = "${nasIp}"
     OWN_130 = "/var/lib/lab-tokens.d/vm-121"
 
@@ -92,8 +112,7 @@ pkgs.testers.runNixOSTest {
                 opts = tokens[path][client]
                 assert mode in opts, f"{path} {client}: {opts} lacks {mode}"
                 # exportfs -v names only no_subtree_check; checking subtrees is its default
-                checked = "no_subtree_check" not in opts
-                assert checked == (client in SUBTREE_CHECKED), f"{path} {client}: subtree check {checked} in {opts}"
+                assert "no_subtree_check" not in opts, f"{path} {client}: no subtree check in {opts}"
         for vmid in ("121", "122", "131"):
             mode = vm_104.succeed(f"stat -c '%a %U' /srv/nas/data/tokens/vm-{vmid}").strip()
             assert mode == "755 root", f"tokens/vm-{vmid} is {mode}, not root's 0755"

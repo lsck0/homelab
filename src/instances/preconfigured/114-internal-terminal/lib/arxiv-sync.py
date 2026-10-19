@@ -3,6 +3,7 @@
 Usage: arxiv-sync.py <out-dir>
 Env:   ARXIV_FEED, ARXIV_ROWS, ARXIV_AUTHORS, ARXIV_TYPES
 """
+
 import json
 import os
 import re
@@ -34,33 +35,59 @@ ARXIV = "{http://arxiv.org/schemas/atom}"
 
 # names for common primary categories
 SUBJECTS = {
-    "math.AC": "Commutative Algebra", "math.AG": "Algebraic Geometry",
-    "math.AP": "Analysis of PDEs", "math.AT": "Algebraic Topology",
-    "math.CA": "Classical Analysis", "math.CO": "Combinatorics",
-    "math.CT": "Category Theory", "math.CV": "Complex Variables",
-    "math.DG": "Differential Geometry", "math.DS": "Dynamical Systems",
-    "math.FA": "Functional Analysis", "math.GM": "General Mathematics",
-    "math.GN": "General Topology", "math.GR": "Group Theory",
-    "math.GT": "Geometric Topology", "math.HO": "History and Overview",
-    "math.IT": "Information Theory", "math.KT": "K-Theory",
-    "math.LO": "Logic", "math.MG": "Metric Geometry",
-    "math.MP": "Mathematical Physics", "math.NA": "Numerical Analysis",
-    "math.NT": "Number Theory", "math.OA": "Operator Algebras",
-    "math.OC": "Optimization and Control", "math.PR": "Probability",
-    "math.QA": "Quantum Algebra", "math.RA": "Rings and Algebras",
-    "math.RT": "Representation Theory", "math.SG": "Symplectic Geometry",
-    "math.SP": "Spectral Theory", "math.ST": "Statistics Theory",
+    "math.AC": "Commutative Algebra",
+    "math.AG": "Algebraic Geometry",
+    "math.AP": "Analysis of PDEs",
+    "math.AT": "Algebraic Topology",
+    "math.CA": "Classical Analysis",
+    "math.CO": "Combinatorics",
+    "math.CT": "Category Theory",
+    "math.CV": "Complex Variables",
+    "math.DG": "Differential Geometry",
+    "math.DS": "Dynamical Systems",
+    "math.FA": "Functional Analysis",
+    "math.GM": "General Mathematics",
+    "math.GN": "General Topology",
+    "math.GR": "Group Theory",
+    "math.GT": "Geometric Topology",
+    "math.HO": "History and Overview",
+    "math.IT": "Information Theory",
+    "math.KT": "K-Theory",
+    "math.LO": "Logic",
+    "math.MG": "Metric Geometry",
+    "math.MP": "Mathematical Physics",
+    "math.NA": "Numerical Analysis",
+    "math.NT": "Number Theory",
+    "math.OA": "Operator Algebras",
+    "math.OC": "Optimization and Control",
+    "math.PR": "Probability",
+    "math.QA": "Quantum Algebra",
+    "math.RA": "Rings and Algebras",
+    "math.RT": "Representation Theory",
+    "math.SG": "Symplectic Geometry",
+    "math.SP": "Spectral Theory",
+    "math.ST": "Statistics Theory",
     # cross-lists in the math feed use non-math codes
-    "math-ph": "Mathematical Physics", "cs.IT": "Information Theory",
-    "cs.LG": "Machine Learning", "cs.DM": "Discrete Mathematics",
-    "cs.NA": "Numerical Analysis", "cs.DS": "Data Structures",
-    "cs.CC": "Computational Complexity", "cs.LO": "Logic in CS",
-    "stat.ML": "Machine Learning", "stat.TH": "Statistics Theory",
-    "stat.ME": "Statistics Methodology", "stat.AP": "Applied Statistics",
-    "q-fin.MF": "Mathematical Finance", "nlin.SI": "Integrable Systems",
-    "nlin.CD": "Chaotic Dynamics", "cond-mat.stat-mech": "Statistical Mechanics",
-    "quant-ph": "Quantum Physics", "gr-qc": "General Relativity",
-    "hep-th": "High Energy Theory", "eess.SP": "Signal Processing",
+    "math-ph": "Mathematical Physics",
+    "cs.IT": "Information Theory",
+    "cs.LG": "Machine Learning",
+    "cs.DM": "Discrete Mathematics",
+    "cs.NA": "Numerical Analysis",
+    "cs.DS": "Data Structures",
+    "cs.CC": "Computational Complexity",
+    "cs.LO": "Logic in CS",
+    "stat.ML": "Machine Learning",
+    "stat.TH": "Statistics Theory",
+    "stat.ME": "Statistics Methodology",
+    "stat.AP": "Applied Statistics",
+    "q-fin.MF": "Mathematical Finance",
+    "nlin.SI": "Integrable Systems",
+    "nlin.CD": "Chaotic Dynamics",
+    "cond-mat.stat-mech": "Statistical Mechanics",
+    "quant-ph": "Quantum Physics",
+    "gr-qc": "General Relativity",
+    "hep-th": "High Energy Theory",
+    "eess.SP": "Signal Processing",
     "eess.SY": "Systems and Control",
 }
 
@@ -126,15 +153,17 @@ def payload_build(channel, now):
             continue
         link = item.findtext("link") or ""
         code = item.findtext("category") or ""
-        entries.append({
-            "id": link.rsplit("/", 1)[-1],
-            "title": detex(item.findtext("title") or ""),
-            "authors": authors(item),
-            "subject": SUBJECTS.get(code, code),
-            "code": code,
-            "published": when.isoformat(),
-            "day": when.date(),
-        })
+        entries.append(
+            {
+                "id": link.rsplit("/", 1)[-1],
+                "title": detex(item.findtext("title") or ""),
+                "authors": authors(item),
+                "subject": SUBJECTS.get(code, code),
+                "code": code,
+                "published": when.isoformat(),
+                "day": when.date(),
+            }
+        )
 
     # one batch per feed; newest date labels it
     label_day = max((e["day"] for e in entries), default=now.date())
@@ -149,8 +178,7 @@ def payload_build(channel, now):
         del e["day"]
 
     # group by subject; submission order interleaved them
-    groups = [sorted((e for e in todays if e["subject"] == s), key=lambda e: e["id"])
-              for s, _ in ranked]
+    groups = [sorted((e for e in todays if e["subject"] == s), key=lambda e: e["id"]) for s, _ in ranked]
     shown = [e for tier in zip_longest(*groups) for e in tier if e is not None]
 
     return {

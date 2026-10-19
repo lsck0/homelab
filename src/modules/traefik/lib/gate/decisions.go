@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 const (
 	// how stale a client's verdict may be: a new ban or captcha reaches its client this much later at most, and a
 	// page load of tens of requests asks crowdsec once
@@ -28,12 +22,6 @@ const (
 	// clients remembered at once: far above a flood's distinct addresses per ttl, a few MiB at most
 	decisionCountMax = 65536
 )
-
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
 
 // DecisionKind is the strongest remediation crowdsec holds for a client.
 type DecisionKind int
@@ -73,12 +61,6 @@ type lapiDecision struct {
 	Duration string `json:"duration"`
 }
 
-/*
- * -----------------------------------------------------------------------------
- * LIFETIME
- * -----------------------------------------------------------------------------
- */
-
 func decisionsCreate(baseURL, key string) *Decisions {
 	return &Decisions{
 		http:    &http.Client{Timeout: lapiTimeout},
@@ -95,12 +77,6 @@ func decisionsDestroy(d *Decisions) {
 	d.http.CloseIdleConnections()
 	tableDestroy(d.cache)
 }
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 // decisionFromLapi folds crowdsec's answer for one client: ban beats captcha, an unknown type counts as a ban (deny
 // by default), the remaining durations are crowdsec's own.

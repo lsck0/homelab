@@ -1,27 +1,67 @@
 # lab-wide: placement and exposure compose in modules/flows.nix
 # an app on its own internal-zone guest serving an external route: the edge reaches the guest's published port and its
 # controller (guard and router), as for the shared swarm
-{ pkgs, lib, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  specialArgs,
+  ...
+}:
 let
   # a free vmid of the internal zone
   placedId = "199";
   port = 20180;
   profiles = import ../modules/profiles.nix;
-  apps = folders: folders // {
-    inward = {
-      enable = true;
-      repo = "lsck0/inward";
-      branch = "master";
-      # no browser here
-      routes.inward = { inherit port; zone = "external"; on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ]; };
-      on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" "scaleToZero" ];
-      reservation = { memoryMiB = 512; cpus = 0.5; };
-      placement = { zone = "internal"; vmid = lib.toInt placedId; vm.memoryMiB = 1536; };
+  apps =
+    folders:
+    folders
+    // {
+      inward = {
+        enable = true;
+        repo = "lsck0/inward";
+        branch = "master";
+        # no browser here
+        routes.inward = {
+          inherit port;
+          zone = "external";
+          on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ];
+        };
+        on =
+          profiles.observed
+          ++ profiles.traced
+          ++ [
+            "frontend"
+            "homepage"
+            "scaleToZero"
+          ];
+        reservation = {
+          memoryMiB = 512;
+          cpus = 0.5;
+        };
+        placement = {
+          zone = "internal";
+          vmid = lib.toInt placedId;
+          vm.memoryMiB = 1536;
+        };
+      };
     };
+  grown = import ./lib/lab.nix {
+    inherit
+      pkgs
+      lib
+      specialArgs
+      apps
+      ;
   };
-  lab = (import ./lib/lab.nix { inherit pkgs lib specialArgs apps; }).specialArgs.lab;
-  net = import ../modules/net.nix { inherit lib; inherit (lab) inventory site; };
-  flows = import ../modules/flows.nix { inherit lib net lab; inherit (lab) inventory catalog nasClients; };
+  inherit (grown.specialArgs) lab;
+  net = import ../modules/net.nix {
+    inherit lib;
+    inherit (lab) inventory site;
+  };
+  flows = import ../modules/flows.nix {
+    inherit lib net lab;
+    inherit (lab) inventory catalog nasClients;
+  };
   edge = net.zones.external.ingress;
 
   # the edge's grant onto the guest's port, and its forward across the router

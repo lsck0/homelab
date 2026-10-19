@@ -1,12 +1,22 @@
 # e-ink terminal: calendar, lab stats, arxiv, energy and github feeds for the TRMNL cloud
-{ config, pkgs, lib, inventory, site, nasMount, catalog, upstream, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  inventory,
+  site,
+  nasMount,
+  catalog,
+  upstream,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   telemetry = import ../../../modules/telemetry.nix { inherit lib inventory; };
   energyModel = import ../../../modules/energy { inherit pkgs; };
   feedIo = import ../../../modules/feeds { inherit pkgs; };
   edge = net.zones.external.ingress;
-  qbittorrent = catalog.internal.qbittorrent;
+  inherit (catalog.internal) qbittorrent;
 
   terminalDir = "/var/lib/terminal";
   # nginx's root: one directory per feed, named by the feed's token
@@ -20,10 +30,20 @@ let
   feedDir = name: "${feedLinks}/${name}";
 
   # stats-sync names guests as grafana does (modules/telemetry.nix) and needs to know which should exist
-  terminalInventory = pkgs.writeText "inventory.json"
-    (builtins.toJSON (lib.mapAttrs (_: v: v // { vm = telemetry.vmName v; }) inventory));
+  terminalInventory = pkgs.writeText "inventory.json" (
+    builtins.toJSON (lib.mapAttrs (_: v: v // { vm = telemetry.vmName v; }) inventory)
+  );
 
-  python = name: libraries: pkgs.writers.writePython3Bin name { inherit libraries; flakeIgnore = [ "E501" ]; };
+  python =
+    name: libraries:
+    pkgs.writers.writePython3Bin name {
+      inherit libraries;
+      flakeIgnore = [
+        "E501"
+        "E203"
+        "W503"
+      ];
+    };
   pythonScript = name: libraries: python name libraries (builtins.readFile ./lib/${name}.py);
 
   energyState = "/var/lib/energy-sync";
@@ -54,7 +74,8 @@ let
   feeds = {
     stats = {
       files = [ "stats.json" ];
-      cloud = "guest names, load and state; request counts per route; visitor countries, agents and host names "
+      cloud =
+        "guest names, load and state; request counts per route; visitor countries, agents and host names "
         + "of the public ingress; disk use; torrent counts and progress, without names";
       plugins."484687" = ./lib/trmnl/terminal.liquid;
       script = "stats-sync";
@@ -64,14 +85,19 @@ let
         STATS_PROMETHEUS = telemetry.urls.prometheus;
         STATS_LOKI = telemetry.urls.loki;
         # a parked vm-120 is not polled: every run would wait out the timeout and log the failure
-        STATS_QBITTORRENT = lib.optionalString inventory.${toString qbittorrent.vmid}.powered
-          "http://${net.ipOf (toString qbittorrent.vmid)}:${toString qbittorrent.port}";
+        STATS_QBITTORRENT =
+          lib.optionalString inventory.${toString qbittorrent.vmid}.powered
+            "http://${net.ipOf (toString qbittorrent.vmid)}:${toString qbittorrent.port}";
         STATS_INVENTORY = "${terminalInventory}";
         STATS_CLIENT_INGRESS = "vm-${edge}";
         STATS_EDGE_ADDRESS = net.ipOf edge;
         STATS_CLIENT_DOMAIN = ".${net.domain}";
       };
-      timer = { OnBootSec = "2m"; OnUnitActiveSec = "2m"; };
+      # each run scans the edge's access log six times (lib/stats-sync.py); the panel needs no fresher numbers
+      timer = {
+        OnBootSec = "2m";
+        OnUnitActiveSec = "10m";
+      };
     };
     # house power, gas, water, prices; the panel refreshes every few minutes, power is a snapshot anyway
     energy = {
@@ -79,14 +105,23 @@ let
       cloud = "house power, energy and cost, meter readings and when they were read: whether someone is home";
       plugins."2f3cbe6f-8b44-46fe-90a2-86d4d2543280" = ./lib/trmnl/energy.liquid;
       script = "energy-sync";
-      libraries = [ energyModel feedIo ];
-      arguments = [ (feedDir "energy") energyState ];
+      libraries = [
+        energyModel
+        feedIo
+      ];
+      arguments = [
+        (feedDir "energy")
+        energyState
+      ];
       stateDirectory = baseNameOf energyState;
       # the board's per-day and per-month bars (instances/core/103-internal-grafana/lib/dashboards/energy.py)
       exports = [ "energy.prom" ];
       description = "Collect house energy for the TRMNL terminal";
       environment.ENERGY_PROMETHEUS = telemetry.urls.prometheus;
-      timer = { OnBootSec = "3m"; OnUnitActiveSec = "5m"; };
+      timer = {
+        OnBootSec = "3m";
+        OnUnitActiveSec = "5m";
+      };
     };
     # arxiv announces daily, hourly catches the batch
     arxiv = {
@@ -97,7 +132,11 @@ let
       upstream = "arxiv";
       libraries = [ feedIo ];
       description = "Fetch today's arXiv mathematics announcements";
-      timer = { OnBootSec = "5m"; OnUnitActiveSec = "1h"; Persistent = true; };
+      timer = {
+        OnBootSec = "5m";
+        OnUnitActiveSec = "1h";
+        Persistent = true;
+      };
     };
     github = {
       files = [ "github.json" ];
@@ -108,16 +147,36 @@ let
       libraries = [ feedIo ];
       description = "Collect GitHub activity for the TRMNL terminal";
       environment.GITHUB_TOKEN_FILE = config.sops.secrets.github-mirror-token.path;
-      timer = { OnBootSec = "7m"; OnUnitActiveSec = "1h"; Persistent = true; };
+      timer = {
+        OnBootSec = "7m";
+        OnUnitActiveSec = "1h";
+        Persistent = true;
+      };
     };
     calendar = {
-      files = [ "week.json" "week-prev.json" "week-next.json" "day.json" "day-next.json" "month.json" "month-next.json" ];
+      files = [
+        "week.json"
+        "week-prev.json"
+        "week-next.json"
+        "day.json"
+        "day-next.json"
+        "month.json"
+        "month-next.json"
+      ];
       cloud = "event titles, times and locations of every calendar source; no descriptions, attendees or links";
       # one template for the week, day and month plugins; each polls the view its TRMNL settings name
       plugins = lib.genAttrs [ "484254" "484274" "484257" "484255" ] (_: ./lib/trmnl/calendar.liquid);
       script = "calendar-sync";
-      libraries = with pkgs.python3Packages; [ icalendar recurring-ical-events tzdata feedIo ];
-      arguments = [ (feedDir "calendar") (feedDir "ics") ];
+      libraries = with pkgs.python3Packages; [
+        icalendar
+        recurring-ical-events
+        tzdata
+        feedIo
+      ];
+      arguments = [
+        (feedDir "calendar")
+        (feedDir "ics")
+      ];
       stateDirectory = baseNameOf calendarCopies;
       description = "Merge remote calendars and render the TRMNL payload";
       environment = {
@@ -126,7 +185,11 @@ let
         CALENDAR_UPLOAD_DIR = uploadDir;
         CALENDAR_TZ = site.timeZone;
       };
-      timer = { OnBootSec = "2min"; OnUnitActiveSec = "15min"; Persistent = true; };
+      timer = {
+        OnBootSec = "2min";
+        OnUnitActiveSec = "15min";
+        Persistent = true;
+      };
     };
     # every source merged in full for the owner's own calendar apps; calendar-sync writes it, no plugin holds its token
     ics = {
@@ -180,13 +243,17 @@ let
     os.replace(urls_path + ".tmp", urls_path)
     print(f"{len(tokens)} feeds published, urls in {urls_path}")
   '';
-  feedSpec = builtins.toJSON (lib.mapAttrs (_: f: {
-    inherit (f) files;
-    base = "https://${net.fqdn (f.route or terminalRoute).host}";
-  }) feeds);
+  feedSpec = builtins.toJSON (
+    lib.mapAttrs (_: f: {
+      inherit (f) files;
+      base = "https://${net.fqdn (f.route or terminalRoute).host}";
+    }) feeds
+  );
 
   # trmnl-sync's arguments: <plugin id>=<template> for every plugin of every feed
-  pluginTemplates = lib.concatLists (lib.mapAttrsToList (_: f: lib.mapAttrsToList (id: template: "${id}=${template}") f.plugins) feeds);
+  pluginTemplates = lib.concatLists (
+    lib.mapAttrsToList (_: f: lib.mapAttrsToList (id: template: "${id}=${template}") f.plugins) feeds
+  );
 
   calendarState = "/var/lib/calendar";
   incomingDir = "${calendarState}/incoming";
@@ -227,7 +294,8 @@ let
 
     sys.exit(rc)
   '';
-in {
+in
+{
   # footers and "today" in the payloads are the house's local time
   time.timeZone = site.timeZone;
 
@@ -237,62 +305,98 @@ in {
   homelab.textfiles = map (lib.removeSuffix ".prom") (lib.concatMap (f: f.exports or [ ]) (lib.attrValues collectors));
 
   imports = [
-    # an lxc mounts nfs at boot, not on access: nothing may run before the shares are up
+    # nothing may run before the shares are up
     {
-      systemd.services = lib.genAttrs ([
-        "nginx" "trmnl-sync" "calendar-upload-dir" "calendar-upload"
-      ] ++ map (f: f.script) (lib.attrValues collectors)) (_: {
-        unitConfig.RequiresMountsFor = [ calendarState ] ++ config.homelab.tokens.mountPoints;
-      });
+      systemd.services =
+        lib.genAttrs
+          (
+            [
+              "nginx"
+              "trmnl-sync"
+              "calendar-upload-dir"
+              "calendar-upload"
+            ]
+            ++ map (f: f.script) (lib.attrValues collectors)
+          )
+          (_: {
+            unitConfig.RequiresMountsFor = [ calendarState ] ++ config.homelab.tokens.mountPoints;
+          });
     }
     {
-      systemd.services = lib.mapAttrs' (name: f: lib.nameValuePair f.script {
-        inherit (f) description;
-        environment = f.environment or { };
-        after = [ "terminal-token.service" "network-online.target" ];
-        requires = [ "terminal-token.service" ];
-        wants = [ "network-online.target" ];
-        serviceConfig = {
-          Type = "oneshot";
-          User = "nginx";
-          Group = "nginx";
-          ExecStart = lib.escapeShellArgs (lib.optionals (f ? upstream) [ upstream.run f.upstream ]
-            ++ [ "${pythonScript f.script (f.libraries or [ ])}/bin/${f.script}" ]
-            ++ f.arguments or [ (feedDir name) ]);
-        } // lib.optionalAttrs (f ? upstream) {
-          SuccessExitStatus = [ upstream.unavailable ];
-        } // lib.optionalAttrs (f ? stateDirectory) {
-          StateDirectory = f.stateDirectory;
-        } // lib.optionalAttrs (f ? exports) {
-          # node-exporter's textfile dir belongs to root
-          ExecStartPost = map (file:
-            "+${pkgs.coreutils}/bin/install -m 0644 /var/lib/${f.stateDirectory}/${file} ${textfileDir}/${file}") f.exports;
-        };
-      }) collectors;
-      systemd.timers = lib.mapAttrs' (_: f: lib.nameValuePair f.script {
-        wantedBy = [ "timers.target" ];
-        timerConfig = f.timer;
-      }) collectors;
+      systemd.services = lib.mapAttrs' (
+        name: f:
+        lib.nameValuePair f.script {
+          inherit (f) description;
+          environment = f.environment or { };
+          after = [
+            "terminal-token.service"
+            "network-online.target"
+          ];
+          requires = [ "terminal-token.service" ];
+          wants = [ "network-online.target" ];
+          serviceConfig = {
+            Type = "oneshot";
+            User = "nginx";
+            Group = "nginx";
+            ExecStart = lib.escapeShellArgs (
+              lib.optionals (f ? upstream) [
+                upstream.run
+                f.upstream
+              ]
+              ++ [ "${pythonScript f.script (f.libraries or [ ])}/bin/${f.script}" ]
+              ++ f.arguments or [ (feedDir name) ]
+            );
+          }
+          // lib.optionalAttrs (f ? upstream) {
+            SuccessExitStatus = [ upstream.unavailable ];
+          }
+          // lib.optionalAttrs (f ? stateDirectory) {
+            StateDirectory = f.stateDirectory;
+          }
+          // lib.optionalAttrs (f ? exports) {
+            # node-exporter's textfile dir belongs to root
+            ExecStartPost = map (
+              file: "+${pkgs.coreutils}/bin/install -m 0644 /var/lib/${f.stateDirectory}/${file} ${textfileDir}/${file}"
+            ) f.exports;
+          };
+        }
+      ) collectors;
+      systemd.timers = lib.mapAttrs' (
+        _: f:
+        lib.nameValuePair f.script {
+          wantedBy = [ "timers.target" ];
+          timerConfig = f.timer;
+        }
+      ) collectors;
     }
   ];
 
   sops.secrets = {
     # "NAME|URL" per line
-    calendar-sources = { owner = "nginx"; };
+    calendar-sources = {
+      owner = "nginx";
+    };
     # leaked feed url must not grant uploads
-    calendar-upload-token = {};
+    calendar-upload-token = { };
     # trmnl write token, can replace panels
-    trmnl-api-key = {};
+    trmnl-api-key = { };
     # read-only: github panel
-    github-mirror-token = { owner = "nginx"; };
+    github-mirror-token = {
+      owner = "nginx";
+    };
     # every feed's token derives from it; from sops so a rebuilt guest keeps the plugin urls
-    terminal-token = {};
+    terminal-token = { };
   };
 
   services.nginx = {
     enable = true;
     virtualHosts.terminal = {
-      listen = [{ addr = "0.0.0.0"; port = terminalRoute.port; }];
+      listen = [
+        {
+          addr = "0.0.0.0";
+          inherit (terminalRoute) port;
+        }
+      ];
       root = terminalPublic;
       # every path holds a token (instance.nix leaves out accessLog); a miss would log it as an error
       extraConfig = ''
@@ -329,7 +433,10 @@ in {
     description = "Publish the terminal feeds under their tokens";
     wantedBy = [ "multi-user.target" ];
     before = [ "nginx.service" ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
     script = ''
       install -d -m 0755 ${terminalDir}
       ${terminalFeeds}/bin/terminal-feeds ${config.sops.secrets.terminal-token.path} ${terminalPublic} ${feedLinks} \
@@ -367,7 +474,12 @@ in {
     before = [ "nginx.service" ];
     after = [ "remote-fs.target" ];
     path = [ pkgs.coreutils ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 15; };
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      Restart = "on-failure";
+      RestartSec = 15;
+    };
     script = ''
       TOKEN=$(cat ${config.sops.secrets.calendar-upload-token.path})
       [ -n "$TOKEN" ] || { echo "calendar-upload-token is empty"; exit 1; }
@@ -397,7 +509,12 @@ in {
   };
   systemd.services.calendar-upload = {
     description = "Validate a pushed .ics and re-render the calendar";
-    path = [ promote pkgs.coreutils pkgs.findutils pkgs.systemd ];
+    path = [
+      promote
+      pkgs.coreutils
+      pkgs.findutils
+      pkgs.systemd
+    ];
     serviceConfig.Type = "oneshot";
     script = ''
       # collect from any token dir

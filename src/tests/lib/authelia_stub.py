@@ -26,7 +26,9 @@ def handler_for(portal, session, log_dir):
 
         def state(self):
             level = 1 if session in self.headers.get("Cookie", "") else 0
-            body = json.dumps({"status": "OK", "data": {"username": "alice" if level else "", "authentication_level": level}}).encode()
+            body = json.dumps(
+                {"status": "OK", "data": {"username": "alice" if level else "", "authentication_level": level}}
+            ).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))

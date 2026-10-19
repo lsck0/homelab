@@ -14,12 +14,16 @@ src/scripts/init.nu <proxmox-ip>      # once: pin the host key, site, secrets, g
 TF_STATE_FRESH=1 ./sync.nu            # the first deploy: no terraform state on the nas yet
 ./sync.nu --dry-run                   # evaluate, build and print the plan, touching nothing
 ./sync.nu                             # every deploy after; ends in a `Generation: <n>` commit
+./sync.nu <guest>... --skip-host      # the named guests (vmid or name) alone, or no host and terraform; no commit
+src/scripts/init.nu <proxmox-ip> --upgrade   # apt full-upgrade of the host; it names the kernel a reboot starts
 ```
 
-The sops age key is the dotfiles' `~/projects/arch-dotfiles/secrets/age.txt`; `init.nu` and `sync.nu` keep
-`secrets/age.txt` linked to it, and `sync.nu` unlocks it with the YubiKey (`dot secrets unlock`). The deploying
-machine's `~/.ssh/id_ed25519.pub` must be one of `src/secrets/keys/`, which every guest, the router and Proxmox root
-authorize.
+`terraform-law` and `policy-eval` gate every run: a broken law stops it before anything is applied. The sops age key
+is the dotfiles' `~/projects/arch-dotfiles/secrets/age.txt`; `init.nu` and `sync.nu` keep `secrets/age.txt` linked to
+it, and `sync.nu` unlocks it with the YubiKey (`dot secrets unlock`). The deploying machine's `~/.ssh/id_ed25519.pub`
+must be one of `src/secrets/keys/`, which every guest, the router and Proxmox root authorize. Proxmox root takes keys
+alone over ssh: leave `init.nu`'s password prompt blank on a converged host. root@pam logs in to the web ui with TOTP
+or WebAuthn, its recovery keys kept offline.
 
 | variable | effect |
 |---|---|
@@ -50,7 +54,9 @@ src/
 ```
 
 Zones by vmid: internal 1xx (staff only, behind authelia), external 200-249 (public, behind the edge), apps swarm
-workers 250 and up, the router 300. Every file has one owner folder; what two or more instances use is a module.
+workers 250 and up, the router 300. No zone reaches the house or another zone but through a named flow
+(`src/modules/flows.nix`); a guest's ssh answers the operators alone, its node exporter vm-103. Every file has one owner
+folder; what two or more instances use is a module.
 
 ## Adding an instance
 
@@ -78,8 +84,8 @@ key: FEATURES.md, Secrets.
 - A guest recreated or its age key lost: `./sync.nu` re-pins and rewrites it. Proxmox reinstalled:
   `src/scripts/init.nu --pin <proxmox-ip>` after comparing the fingerprint on its console.
 - A service's data broken: `ssh root@10.100.0.104 nas-restore service <share> <snapshot id or date> --yes`.
-- Locked out by the Proxmox firewall: `ssh root@<proxmox> pve-firewall stop` from the house lan, fix `site.json`,
-  `./sync.nu`.
+- Locked out by the Proxmox firewall: `ssh root@<proxmox> pve-firewall stop` from the workstation or the notebook
+  (or the host's console), fix `site.json`, `./sync.nu`.
 - The lab and the nas gone: restore the kopia repository from Proton Drive (FEATURES.md, Recovery).
 
 ## Tests

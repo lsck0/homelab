@@ -11,6 +11,7 @@ gate reads the server's name out of, so the test always dials <server>.mc.lsck0.
 A held login is one player sitting on a server: the gate counts it as a live session, so the test can ask for
 another server and be refused. The test ends it by killing the process.
 """
+
 import argparse
 import json
 import socket
@@ -65,7 +66,7 @@ def varint_unpack(data, pos):
 
 def string_unpack(data, pos):
     length, pos = varint_unpack(data, pos)
-    return data[pos:pos + length].decode(errors="replace"), pos + length
+    return data[pos : pos + length].decode(errors="replace"), pos + length
 
 
 def read_exact(sock, count):

@@ -19,10 +19,6 @@ let
   mcGate = import ./lib/mc-gate.nix { inherit pkgs lib; };
   serverNames = import ./lib/servers.nix { inherit lib; };
 
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
-
   # the key is the dns label below *.mc; version and protocol answer a ping before the server ever answered one; image
   # is the java its minecraft release names (the version manifest's javaVersion); pack seeds modpack.env.
   # The vm test passes its own set as `mcServers`. A formal with a default would still be looked up in `_module.args`
@@ -45,7 +41,6 @@ let
           VERSION=1.21.1
           NEOFORGE_VERSION=21.1.249
           GENERIC_PACK=/modpacks/allthemons-serverfiles-1.3.0.zip
-          MODS=/modpacks/atm-extra
           COPY_CONFIG_SRC=/modpacks/atm-config
           SYNC_SKIP_NEWER_IN_DESTINATION=false
           LEVEL=allthemons
@@ -56,6 +51,11 @@ let
   data = "/var/lib/minecraft";
   dataAutomount = "${utils.escapeSystemdPath data}.automount";
   modpacksDir = "/var/lib/minecraft-modpacks";
+  # where the container sees modpacksDir, read-only
+  containerModpacksDir = "/modpacks";
+  # each server's own jars beside its pack (mc-mod), copied into its mods at every start
+  extraModsName = "extra";
+  extraModsDir = "${modpacksDir}/${extraModsName}";
   gateStateDir = "/var/lib/mc-gate";
   gateRuntimeDir = "/run/mc-gate";
   gateUser = "mc-gate";
@@ -88,7 +88,7 @@ let
   ];
   # a copy in the share: its origin answers 403, which fails the image's fetch (d.furaffinity.net/art/skullfugg/
   # 1697237475/1697237475.skullfugg_boykisser_ych_mdp_alt_for_frostywuff__1.png, scaled to 64x64)
-  icon = "/modpacks/server-icon.png";
+  icon = "${containerModpacksDir}/server-icon.png";
   motd = "nya~ minecwaft sewvew 🐾✨";
 
   # the world the guest ran before it had several: mc-layout moves it into its own dir once
@@ -133,14 +133,11 @@ let
     LEVEL=vanilla
   '';
 
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
-
   names = serverNames.check servers;
   unitOf = name: "minecraft-${name}.service";
   dirOf = name: "${data}/${name}";
   modpackEnvOf = name: "${dirOf name}/modpack.env";
+  extraModsOf = name: "${extraModsDir}/${name}";
   containerOf = name: "minecraft-${name}";
   # ordering one way only: a cycle in `Conflicts=` peers makes systemd solve it by deleting a job
   earlierThan = name: map unitOf (lib.filter (other: other < name) names);
@@ -163,9 +160,11 @@ let
         [ -s ${data}/${file} ] || install -m 0640 -o ${serverUid} -g ${serverUid} \
           ${pkgs.writeText "minecraft-${file}" sharedEmpty} ${data}/${file}
       '') sharedFiles}
-      [ -s ${modpackEnvOf name} ] || printf '%s' ${
-        lib.escapeShellArg (servers.${name}.pack or defaultModpack)
-      } \
+      # the image copies the jars as its own uid: one copied in by root at 0600 ended the start after 5 s
+      install -d -m 0750 -o ${serverUid} -g ${serverGroup} ${extraModsDir} ${extraModsOf name}
+      chown -R ${serverUid}:${serverGroup} ${extraModsOf name}
+      chmod -R u=rwX,g=rX,o= ${extraModsOf name}
+      [ -s ${modpackEnvOf name} ] || printf '%s' ${lib.escapeShellArg (servers.${name}.pack or defaultModpack)} \
         > ${modpackEnvOf name}
       ${podman} rm --force --ignore ${containerOf name}
     '';
@@ -181,7 +180,7 @@ let
         ${lib.concatMapStringsSep " " (ip: "--dns=${ip}") containerDns} \
         -p 127.0.0.1:${toString serverPort}:${toString publicPort} \
         -p 127.0.0.1:${toString rconPort}:${toString rconPort} \
-        -v ${dirOf name}:/data -v ${modpacksDir}:/modpacks:ro \
+        -v ${dirOf name}:/data -v ${modpacksDir}:${containerModpacksDir}:ro \
         ${sharedMounts} \
         --env-file ${serverEnv} --env-file ${modpackEnvOf name} \
         -e EULA=TRUE \
@@ -200,6 +199,7 @@ let
         -e ENABLE_WHITELIST=true \
         -e ENFORCE_WHITELIST=true \
         -e REMOVE_OLD_MODS=TRUE \
+        -e MODS=${containerModpacksDir}/${extraModsName}/${name} \
         -e MAX_TICK_TIME=-1 \
         -e STOP_DURATION=90 \
         ${servers.${name}.image or imageJava21}
@@ -212,8 +212,15 @@ let
     # sleepAfterS with nobody on, or at `systemctl restart`
     restartIfChanged = false;
     # the automount, not the mount (RequiresMountsFor): an idle expiry or a restart of the mount would stop the server
-    requires = [ layoutUnit dataAutomount ];
-    after = [ layoutUnit dataAutomount ] ++ earlierThan name;
+    requires = [
+      layoutUnit
+      dataAutomount
+    ];
+    after = [
+      layoutUnit
+      dataAutomount
+    ]
+    ++ earlierThan name;
     conflicts = othersThan name;
     path = [ pkgs.podman ];
     serviceConfig = {
@@ -337,6 +344,33 @@ let
     fi
   '';
 
+  mcMod = pkgs.writers.writeNuBin "mc-mod" {
+    makeWrapperArgs = [
+      "--set"
+      "MC_MOD_SETTINGS"
+      (pkgs.writeText "mc-mod-settings.json" (
+        builtins.toJSON {
+          inherit data;
+          extraMods = extraModsDir;
+          owner = serverUid;
+          group = serverGroup;
+          servers = map (name: {
+            inherit name;
+            unit = unitOf name;
+            version = servers.${name}.version or null;
+          }) names;
+        }
+      ))
+      "--prefix"
+      "PATH"
+      ":"
+      (lib.makeBinPath [
+        pkgs.coreutils
+        pkgs.unzip
+      ])
+    ];
+  } ./lib/mc-mod.nu;
+
   # only works while the server runs: rcon lives in its container
   mcRcon = pkgs.writeShellScriptBin "mc-rcon" ''
     set -euo pipefail
@@ -384,6 +418,7 @@ in
   homelab.textfiles = [ gateMetricsName ];
 
   environment.systemPackages = [
+    mcMod
     mcModpack
     mcRcon
     mcState

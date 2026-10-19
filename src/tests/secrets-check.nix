@@ -16,14 +16,22 @@ let
 in
 assert lib.assertMsg (builtins.pathExists ../../.githooks)
   "secrets-check needs the whole repo (.githooks): build it from git, `nix build ./src#checks.x86_64-linux.secrets-check`, not from a path: flake";
-pkgs.runCommand "secrets-check" {
-  nativeBuildInputs = with pkgs; [ nushell sops age git coreutils ];
-} ''
-  export HOME=$TMPDIR
-  # the hook's `/usr/bin/env nu` is the workstation's; the sandbox has neither
-  cp -r ${fixture} fixture
-  chmod -R u+w fixture
-  patchShebangs fixture/.githooks
-  nu --no-config-file ${./secrets_check_test.nu} "$PWD/fixture"
-  touch $out
-''
+pkgs.runCommand "secrets-check"
+  {
+    nativeBuildInputs = with pkgs; [
+      nushell
+      sops
+      age
+      git
+      coreutils
+    ];
+  }
+  ''
+    export HOME=$TMPDIR
+    # the hook's `/usr/bin/env nu` is the workstation's; the sandbox has neither
+    cp -r ${fixture} fixture
+    chmod -R u+w fixture
+    patchShebangs fixture/.githooks
+    nu --no-config-file ${./secrets_check_test.nu} "$PWD/fixture"
+    touch $out
+  ''

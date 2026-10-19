@@ -1,12 +1,20 @@
 # the internal ingress: every internal route (modules/catalog.nix) with its protection (modules/traefik), the
 # on-demand wake of the internal zone's sleeping guests, and the relay target of the edge
-{ config, lib, inventory, site, catalog, ... }:
+{
+  config,
+  lib,
+  inventory,
+  site,
+  catalog,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   service = import ../../../modules/service.nix { inherit lib; };
-  authelia = catalog.internal.authelia;
+  inherit (catalog.internal) authelia;
   loopback = "127.0.0.1";
-in {
+in
+{
   # backends wake via homelab.onDemand, with the internal zone's token (granted on that zone's sleepers only)
   homelab.onDemand = {
     enable = true;
@@ -24,17 +32,25 @@ in {
     authelia.address = "http://${net.ipOf (toString authelia.vmid)}:${toString authelia.port}/api/authz/forward-auth";
 
     # the edge's defence here too, for lan clients and relayed ones alike; never ban the house or the lab
-    crowdsecBouncer = { enable = true; whitelistCidrs = net.privateRanges; };
+    crowdsecBouncer = {
+      enable = true;
+      whitelistCidrs = net.privateRanges;
+    };
     # captcha-less: the internet reaches this ingress through the edge, whose gate asks it; users are asked about
     # through this ingress itself, as the portal's name
-    gate.session = { url = "https://${loopback}:${toString net.ports.https}/api/state"; host = net.fqdn authelia.host; };
+    gate.session = {
+      url = "https://${loopback}:${toString net.ports.https}/api/state";
+      host = net.fqdn authelia.host;
+    };
     # robots.txt, llms.txt and the labyrinth, as on the edge
     botDefense.enable = true;
 
     # the apps zone is a dmz: only a route admitting it by its sources (the registry's pulls) answers it
     refusedClients = [ net.zones.apps.subnet ];
 
-    loopbackPorts = lib.mapAttrs' (name: svc: lib.nameValuePair "ondemand-${name}" svc.listenPort) config.homelab.onDemand.services;
+    loopbackPorts = lib.mapAttrs' (
+      name: svc: lib.nameValuePair "ondemand-${name}" svc.listenPort
+    ) config.homelab.onDemand.services;
 
     # this ingress's own pages, behind authelia
     routers = {
@@ -57,7 +73,7 @@ in {
       };
     };
     services.proxmox.loadBalancer = {
-      servers = [{ url = "https://${net.wan.proxmox}:${toString net.ports.proxmoxApi}"; }];
+      servers = [ { url = "https://${net.wan.proxmox}:${toString net.ports.proxmoxApi}"; } ];
       serversTransport = "proxmox";
     };
     # proxmox's own certificate, issued by its root ca (site.json) for the host's address

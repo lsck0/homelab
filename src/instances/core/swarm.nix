@@ -12,18 +12,32 @@
   nodes = {
     first = 250;
     # the join token the manager mints, and the images its services name, which a worker's prune keeps (modules/swarm)
-    tokenReads = [ "swarm-worker-token" "swarm-images" ];
-    on = [ "swarmWorker" "appTelemetry" ];
+    tokenReads = [
+      "swarm-worker-token"
+      "swarm-images"
+    ];
+    on = [
+      "swarmWorker"
+      "appTelemetry"
+    ];
     vm = {
       bootPhase = "public";
-      needs = [ "containers" "nfs" ];
+      needs = [
+        "containers"
+        "nfs"
+      ];
       memoryMiB = 1280;
       # memory is the swarm's admission capacity (modules/limits): never reclaimed, never overcommitted
       balloonMiB = 0;
       cores = 2;
       # the swarm must never starve the lab: under host contention every lab guest outweighs a worker
       cpuUnits = 50;
-      diskLimits = { readMBps = 100; writeMBps = 60; readIops = 2000; writeIops = 1000; };
+      diskLimits = {
+        readMBps = 100;
+        writeMBps = 60;
+        readIops = 2000;
+        writeIops = 1000;
+      };
       # ~320 Mbit/s: an app flood cannot fill the bridge the lab shares
       nicRateMBps = 40;
       diskGiB = 64;

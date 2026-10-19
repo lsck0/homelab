@@ -1,6 +1,5 @@
-# textfile-prune <dir> <first record> <pattern>...: removes the .prom files of names the previous run recorded in
-# <dir>/.declared and none of the patterns covers any more, then records the patterns; a file never recorded is left
-# alone. <first record> (space-separated names) stands for the record of a dir that has none yet.
+# textfile-prune <dir> <pattern>...: removes the .prom files of names the previous run recorded in <dir>/.declared and
+# none of the patterns covers any more, then records the patterns; a file never recorded is left alone.
 
 const RECORD = ".declared"
 const PROM_SUFFIX = '\.prom(\.tmp)?$'
@@ -21,12 +20,13 @@ def record-save [record: path, names: list<string>]: nothing -> nothing {
     mv --force $"($record).tmp" $record
 }
 
-def main [dir: path, first: string, ...patterns: string]: nothing -> nothing {
+def main [dir: path, ...patterns: string]: nothing -> nothing {
     let record = $dir | path join $RECORD
     let declared = $patterns | each {|p| pattern-to-regex $p }
     mkdir $dir
-    if not ($record | path exists) { record-save $record ($first | split row " " | where $it != "") }
-    let previous = open --raw $record | lines | where $it != "" | each {|p| pattern-to-regex $p }
+    let previous = if ($record | path exists) {
+        open --raw $record | lines | where $it != "" | each {|p| pattern-to-regex $p }
+    } else { [] }
 
     ls --all $dir | where type != dir | get name | each {|file|
         let name = $file | path basename

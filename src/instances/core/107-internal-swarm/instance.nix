@@ -1,20 +1,31 @@
 # the deploy controller: the apps swarm's manager (drained of tasks) and the app builder
-{ lib, profiles, ... }: {
-  roles = [ "swarm-manager" "app-builder" ];
+{ lib, profiles, ... }:
+{
+  roles = [
+    "swarm-manager"
+    "app-builder"
+  ];
   on = [ "swarmManager" ];
 
   vm = {
     bootPhase = "dev";
-    needs = [ "containers" "nfs" ];
-    # the floor holds the manager; a build takes what the host has free
+    needs = [
+      "containers"
+      "nfs"
+    ];
+    # at a 1 GiB floor the host never grew it and builds swapped: the floor holds the manager and one build
+    # (lib/app-builder.nix), the rest is the host's to give
     memoryMiB = 3072;
-    balloonMiB = 1024;
+    balloonMiB = 2560;
     cores = 4;
     # images, the buildkit cache and the raft
     diskGiB = 40;
   };
 
-  tokens = [ "swarm-worker-token" "swarm-images" ];
+  tokens = [
+    "swarm-worker-token"
+    "swarm-images"
+  ];
 
   services.deploy = {
     path = "/redeploy";

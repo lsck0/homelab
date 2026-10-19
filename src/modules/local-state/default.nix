@@ -10,7 +10,13 @@
 # but trusts a cached "no such file" for its attribute timeout. The mirror runs only while the ids match, so it never overwrites a restore; it
 # starts `<name>-reseed` (a restart of the app, so the seed runs) when it finds one. Its share is marked localState
 # (instance.nix `shares`), which tells nas-restore to write the ids and name the guest.
-{ config, lib, pkgs, nasMount, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  nasMount,
+  ...
+}:
 let
   cfg = config.homelab.localState;
 
@@ -51,7 +57,14 @@ let
   # mtimes to the nanosecond: whole seconds would skip a file rewritten at its size within the second of a copy, for good
   rsyncCopy = "rsync -a --delete --modify-window=-1";
   # a database and its journals, copied by the backup api instead; a sibling like gitea.db.before-<tag> is plain data
-  sqliteFilesOf = glob: map (suffix: "${glob}${suffix}") [ "" "-wal" "-shm" "-journal" ];
+  sqliteFilesOf =
+    glob:
+    map (suffix: "${glob}${suffix}") [
+      ""
+      "-wal"
+      "-shm"
+      "-journal"
+    ];
 
   # the ids of both copies, empty where none is written
   generationsRead = local: nas: ''
@@ -61,49 +74,68 @@ let
   '';
 
   # a state directory the seed creates belongs to the app's unit user; a container's is declared by tmpfiles
-  ownerOf = s: let sc = config.systemd.services.${s.unit}.serviceConfig; user = sc.User or "root"; in
+  ownerOf =
+    s:
+    let
+      sc = config.systemd.services.${s.unit}.serviceConfig;
+      user = sc.User or "root";
+    in
     "${user}:${sc.Group or user}";
 
-  reconcile = name: s: let local = s.path; nas = nasDir name; in pkgs.writeShellScript "${name}-reconcile" ''
-    set -euo pipefail
-    export PATH=${lib.makeBinPath [ pkgs.rsync pkgs.findutils pkgs.coreutils pkgs.util-linux ]}
-    if [ ! -d ${local} ]; then mkdir -p ${local}; chown ${ownerOf s} ${local}; fi
-    # the nas share itself, still mounted from before localState: copying it onto itself would destroy it
-    if mountpoint -q ${local}; then echo "${name}: ${local} is a mount, not the guest's disk; unmount it" >&2; exit 1; fi
-    ${generationsRead local nas}
-    # the local id first: a crash between the writes leaves the mark, and the next seed copies again
-    from_nas() {
-      owner=$(stat -c %u:%g ${local})
-      mode=$(stat -c %a ${local})
-      ${rsyncCopy} ${excludes s} ${nas}/ ${local}/
-      # rsync gave the directory itself the share's owner and mode (root squashed to nobody): it keeps its own, the
-      # container's uid of a tmpfiles rule included, which no unit's User names
-      chown "$owner" ${local}
-      chmod "$mode" ${local}
-      printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${local}/${generationFile}
-      printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${nas}/${generationFile}
-    }
-    if [ -n "$local_gen" ] && [ "$local_gen" = "$nas_gen" ]; then
-      exit 0
-    elif [ -z "$(find ${local} -type f ! -name ${generationFile} -print -quit)" ]; then
-      if [ -z "$nas_gen" ]; then nas_gen=$(cat /proc/sys/kernel/random/uuid); printf '%s\n' "$nas_gen" > ${nas}/${generationFile}; fi
-      from_nas
-      echo "${name}: seeded ${local} from the nas copy"
-    elif [ -z "$nas_gen" ]; then
-      if [ -z "$local_gen" ]; then local_gen=$(cat /proc/sys/kernel/random/uuid); printf '%s\n' "$local_gen" > ${local}/${generationFile}; fi
-      printf '%s\n' "$local_gen" > ${nas}/${generationFile}
-      echo "${name}: the nas copy has no generation: keeping the local data, the next mirror replaces the nas copy"
-    elif [ "$nas_gen" != "''${nas_gen#${restoredPrefix}}" ]; then
-      from_nas
-      echo "${name}: replaced ${local} with the restored nas copy"
-    else
-      echo "${name}: ${local} (generation ''${local_gen:-none}) and the nas copy (generation $nas_gen) diverged."
-      echo "  Keep the nas copy: empty ${local}, then systemctl start ${name}-reseed."
-      echo "  Keep the local data: cp ${nas}/${generationFile} ${local}/; the next mirror replaces the nas copy."
-      exit 1
-    fi
-  '';
-in {
+  reconcile =
+    name: s:
+    let
+      local = s.path;
+      nas = nasDir name;
+    in
+    pkgs.writeShellScript "${name}-reconcile" ''
+      set -euo pipefail
+      export PATH=${
+        lib.makeBinPath [
+          pkgs.rsync
+          pkgs.findutils
+          pkgs.coreutils
+          pkgs.util-linux
+        ]
+      }
+      if [ ! -d ${local} ]; then mkdir -p ${local}; chown ${ownerOf s} ${local}; fi
+      # the nas share itself, still mounted from before localState: copying it onto itself would destroy it
+      if mountpoint -q ${local}; then echo "${name}: ${local} is a mount, not the guest's disk; unmount it" >&2; exit 1; fi
+      ${generationsRead local nas}
+      # the local id first: a crash between the writes leaves the mark, and the next seed copies again
+      from_nas() {
+        owner=$(stat -c %u:%g ${local})
+        mode=$(stat -c %a ${local})
+        ${rsyncCopy} ${excludes s} ${nas}/ ${local}/
+        # rsync gave the directory itself the share's owner and mode (root squashed to nobody): it keeps its own, the
+        # container's uid of a tmpfiles rule included, which no unit's User names
+        chown "$owner" ${local}
+        chmod "$mode" ${local}
+        printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${local}/${generationFile}
+        printf '%s\n' "''${nas_gen#${restoredPrefix}}" > ${nas}/${generationFile}
+      }
+      if [ -n "$local_gen" ] && [ "$local_gen" = "$nas_gen" ]; then
+        exit 0
+      elif [ -z "$(find ${local} -type f ! -name ${generationFile} -print -quit)" ]; then
+        if [ -z "$nas_gen" ]; then nas_gen=$(cat /proc/sys/kernel/random/uuid); printf '%s\n' "$nas_gen" > ${nas}/${generationFile}; fi
+        from_nas
+        echo "${name}: seeded ${local} from the nas copy"
+      elif [ -z "$nas_gen" ]; then
+        if [ -z "$local_gen" ]; then local_gen=$(cat /proc/sys/kernel/random/uuid); printf '%s\n' "$local_gen" > ${local}/${generationFile}; fi
+        printf '%s\n' "$local_gen" > ${nas}/${generationFile}
+        echo "${name}: the nas copy has no generation: keeping the local data, the next mirror replaces the nas copy"
+      elif [ "$nas_gen" != "''${nas_gen#${restoredPrefix}}" ]; then
+        from_nas
+        echo "${name}: replaced ${local} with the restored nas copy"
+      else
+        echo "${name}: ${local} (generation ''${local_gen:-none}) and the nas copy (generation $nas_gen) diverged."
+        echo "  Keep the nas copy: empty ${local}, then systemctl start ${name}-reseed."
+        echo "  Keep the local data: cp ${nas}/${generationFile} ${local}/; the next mirror replaces the nas copy."
+        exit 1
+      fi
+    '';
+in
+{
   options.homelab.localState = lib.mkOption {
     type = lib.types.attrsOf stateType;
     default = { };
@@ -112,66 +144,84 @@ in {
 
   config = lib.mkIf (cfg != { }) {
     homelab.textfiles = map (name: "local_state_${name}") (lib.attrNames cfg);
-    homelab.nasMounts = lib.mkMerge (lib.mapAttrsToList (name: _:
-      lib.mapAttrs (_: m: m // { localState = true; }) (nasMount (nasDir name) name)) cfg);
+    homelab.nasMounts = lib.mkMerge (
+      lib.mapAttrsToList (name: _: lib.mapAttrs (_: m: m // { localState = true; }) (nasMount (nasDir name) name)) cfg
+    );
 
-    systemd.services = lib.mkMerge (lib.mapAttrsToList (name: s: {
-      # no RemainAfterExit: every start of the app runs it again
-      "${name}-seed" = {
-        before = [ "${s.unit}.service" ];
-        requiredBy = [ "${s.unit}.service" ];
-        unitConfig.RequiresMountsFor = [ (nasDir name) ];
-        serviceConfig = { Type = "oneshot"; ExecStart = reconcile name s; };
-      };
-      # restart so the seed runs before the app on the deploy that changes it
-      "${s.unit}".restartTriggers = [ (reconcile name s) ];
+    systemd.services = lib.mkMerge (
+      lib.mapAttrsToList (name: s: {
+        # no RemainAfterExit: every start of the app runs it again
+        "${name}-seed" = {
+          before = [ "${s.unit}.service" ];
+          requiredBy = [ "${s.unit}.service" ];
+          unitConfig.RequiresMountsFor = [ (nasDir name) ];
+          serviceConfig = {
+            Type = "oneshot";
+            ExecStart = reconcile name s;
+          };
+        };
+        # restart so the seed runs before the app on the deploy that changes it
+        "${s.unit}".restartTriggers = [ (reconcile name s) ];
 
-      "${name}-reseed" = {
-        description = "Restart ${s.unit} so ${name}-seed takes a restored nas copy";
-        serviceConfig = { Type = "oneshot"; ExecStart = "${config.systemd.package}/bin/systemctl restart ${s.unit}.service"; };
-      };
+        "${name}-reseed" = {
+          description = "Restart ${s.unit} so ${name}-seed takes a restored nas copy";
+          serviceConfig = {
+            Type = "oneshot";
+            ExecStart = "${config.systemd.package}/bin/systemctl restart ${s.unit}.service";
+          };
+        };
 
-      "${name}-mirror" = {
-        startAt = mirrorAt;
-        unitConfig.RequiresMountsFor = [ (nasDir name) ];
-        path = [ pkgs.rsync pkgs.sqlite config.systemd.package ];
-        serviceConfig.Type = "oneshot";
-        script = ''
-          ${generationsRead s.path (nasDir name)}
-          if [ -z "$local_gen" ] || [ "$local_gen" != "$nas_gen" ]; then
-            if [ "$nas_gen" != "''${nas_gen#${restoredPrefix}}" ]; then
-              echo "${name}: the nas copy was restored, reseeding"
-              exec systemctl start --no-block ${name}-reseed.service
+        "${name}-mirror" = {
+          startAt = mirrorAt;
+          unitConfig.RequiresMountsFor = [ (nasDir name) ];
+          path = [
+            pkgs.rsync
+            pkgs.sqlite
+            config.systemd.package
+          ];
+          serviceConfig.Type = "oneshot";
+          script = ''
+            ${generationsRead s.path (nasDir name)}
+            if [ -z "$local_gen" ] || [ "$local_gen" != "$nas_gen" ]; then
+              if [ "$nas_gen" != "''${nas_gen#${restoredPrefix}}" ]; then
+                echo "${name}: the nas copy was restored, reseeding"
+                exec systemctl start --no-block ${name}-reseed.service
+              fi
+              echo "${name}: generation ''${local_gen:-none} here, ''${nas_gen:-none} on the nas: not mirroring (${name}-seed says why)"
+              exit 1
             fi
-            echo "${name}: generation ''${local_gen:-none} here, ''${nas_gen:-none} on the nas: not mirroring (${name}-seed says why)"
-            exit 1
-          fi
-          status=0
-          # the share's directory keeps its own mode: rsync would give it the local one
-          share_mode=$(stat -c %a ${nasDir name})
-          ${rsyncCopy} ${excludes s} ${lib.concatMapStringsSep " " (f: "--exclude ${lib.escapeShellArg f}") (lib.concatMap sqliteFilesOf s.sqlite)} ${s.path}/ ${nasDir name}/ \
-            || status=$?
-          chmod "$share_mode" ${nasDir name}
-          if [ "$status" != 0 ] && [ "$status" != ${toString rsyncVanishedStatus} ]; then exit "$status"; fi
-          for db in ${lib.concatMapStringsSep " " (g: "${s.path}/${g}") s.sqlite}; do
-            [ -f "$db" ] || continue
-            copy=${nasDir name}/''${db#${s.path}/}
-            mkdir -p "$(dirname "$copy")"
-            # a journal left from when the app ran on the share would be replayed into the fresh copy
-            rm -f "$copy-wal" "$copy-shm" "$copy-journal"
-            ${sqliteBackup.command "\"$db\"" "$copy"}
-          done
-          # grafana's state_mirror_stale alert watches this
-          d=${config.homelab.textfileDir}
-          printf '# TYPE homelab_local_state_mirror_last_success_timestamp_seconds gauge\nhomelab_local_state_mirror_last_success_timestamp_seconds{state="%s"} %s\n' ${name} "$(date +%s)" > $d/local_state_${name}.prom.tmp
-          mv $d/local_state_${name}.prom.tmp $d/local_state_${name}.prom
-        '';
-      };
-    }) cfg);
+            status=0
+            # the share's directory keeps its own mode: rsync would give it the local one
+            share_mode=$(stat -c %a ${nasDir name})
+            ${rsyncCopy} ${excludes s} ${
+              lib.concatMapStringsSep " " (f: "--exclude ${lib.escapeShellArg f}") (lib.concatMap sqliteFilesOf s.sqlite)
+            } ${s.path}/ ${nasDir name}/ \
+              || status=$?
+            chmod "$share_mode" ${nasDir name}
+            if [ "$status" != 0 ] && [ "$status" != ${toString rsyncVanishedStatus} ]; then exit "$status"; fi
+            for db in ${lib.concatMapStringsSep " " (g: "${s.path}/${g}") s.sqlite}; do
+              [ -f "$db" ] || continue
+              copy=${nasDir name}/''${db#${s.path}/}
+              mkdir -p "$(dirname "$copy")"
+              # a journal left from when the app ran on the share would be replayed into the fresh copy
+              rm -f "$copy-wal" "$copy-shm" "$copy-journal"
+              ${sqliteBackup.command "\"$db\"" "$copy"}
+            done
+            # grafana's state_mirror_stale alert watches this
+            d=${config.homelab.textfileDir}
+            printf '# TYPE homelab_local_state_mirror_last_success_timestamp_seconds gauge\nhomelab_local_state_mirror_last_success_timestamp_seconds{state="%s"} %s\n' ${name} "$(date +%s)" > $d/local_state_${name}.prom.tmp
+            mv $d/local_state_${name}.prom.tmp $d/local_state_${name}.prom
+          '';
+        };
+      }) cfg
+    );
 
     # an on-demand guest is rarely up at mirrorAt; catch up on the next boot
-    systemd.timers = lib.mapAttrs' (name: _: lib.nameValuePair "${name}-mirror" {
-      timerConfig.Persistent = true;
-    }) cfg;
+    systemd.timers = lib.mapAttrs' (
+      name: _:
+      lib.nameValuePair "${name}-mirror" {
+        timerConfig.Persistent = true;
+      }
+    ) cfg;
   };
 }

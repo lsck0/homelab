@@ -324,6 +324,7 @@
     "accessLog": "vm-200",
     "dashboard": "/d/homelab",
     "grafana": "https://grafana.lsck0.dev",
+    "journalUpload": "http://10.100.0.103:19532",
     "loki": "http://10.100.0.103:3100",
     "prometheus": "http://10.100.0.103:9090"
   },
@@ -353,17 +354,6 @@
       "port": 80,
       "protocol": "http",
       "vmid": 112,
-      "zone": "internal"
-    },
-    "attic": {
-      "app": null,
-      "health": "/",
-      "host": "attic.lsck0.dev",
-      "onion": null,
-      "path": "/",
-      "port": 8080,
-      "protocol": "http",
-      "vmid": 105,
       "zone": "internal"
     },
     "authelia": {
@@ -784,6 +774,17 @@
       "vmid": 121,
       "zone": "internal"
     },
+    "start": {
+      "app": null,
+      "health": "/",
+      "host": "start.lsck0.dev",
+      "onion": null,
+      "path": "/",
+      "port": 81,
+      "protocol": "http",
+      "vmid": 102,
+      "zone": "internal"
+    },
     "syncthing": {
       "app": null,
       "health": "/",
@@ -841,6 +842,9 @@
     }
   },
   "schema": 1,
+  "wireguard": {
+    "subnet": "10.0.0.0/24"
+  },
   "zones": {
     "apps": {
       "ingress": null,

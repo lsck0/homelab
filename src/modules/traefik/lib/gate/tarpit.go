@@ -9,12 +9,6 @@ import (
 	"time"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 // A labyrinth answer leaves at 32 bytes a second for two minutes at most: a crawler waits minutes per page for a few
 // kilobytes of nonsense, the edge holds one idle connection and goroutine per trickle. The bounds keep that cheap
 // whatever arrives: two trickles per client, 128 in all; past them the request is refused at once, which costs less
@@ -35,12 +29,6 @@ const (
 // the upstream's own headers that describe the body as it was, not as it trickles
 var tarpitDroppedHeaders = []string{"Content-Length", "Content-Encoding", "Transfer-Encoding", "Connection"}
 
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
-
 // Tarpit proxies the labyrinth and trickles its answers, bounded per client and in total.
 type Tarpit struct {
 	http     *http.Client
@@ -53,12 +41,6 @@ type Tarpit struct {
 	total    int
 	totalMax int
 }
-
-/*
- * -----------------------------------------------------------------------------
- * LIFETIME
- * -----------------------------------------------------------------------------
- */
 
 func tarpitCreate(upstream string, metrics *Metrics) *Tarpit {
 	return &Tarpit{
@@ -77,12 +59,6 @@ func tarpitDestroy(t *Tarpit) {
 	}
 	t.http.CloseIdleConnections()
 }
-
-/*
- * -----------------------------------------------------------------------------
- * INTERNAL
- * -----------------------------------------------------------------------------
- */
 
 func tarpitAcquire(t *Tarpit, client string) bool {
 	t.mu.Lock()
@@ -123,12 +99,6 @@ func tarpitFetch(ctx context.Context, t *Tarpit, r *http.Request) (*http.Respons
 	body, err := io.ReadAll(io.LimitReader(response.Body, tarpitBodyBytesMax))
 	return response, body, err
 }
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 // tarpitServe is the labyrinth's service: the upstream's page, a few bytes at a time, until it ends, the client goes
 // or the time is up.

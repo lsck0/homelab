@@ -4,12 +4,23 @@
 let
   tree = lib.fileset.toSource {
     root = ../.;
-    fileset = lib.fileset.unions [ ./archrepo_list_test.nu ../lib/archrepo-list.nu ../lib/archrepo-build.nu ];
+    fileset = lib.fileset.unions [
+      ./archrepo_list_test.nu
+      ../lib/archrepo-list.nu
+      ../lib/archrepo-build.nu
+    ];
   };
 in
-pkgs.runCommand "archrepo-list" {
-  nativeBuildInputs = [ pkgs.nushell pkgs.bash pkgs.coreutils pkgs.libarchive ];
-} ''
-  nu --no-config-file ${tree}/tests/archrepo_list_test.nu
-  touch $out
-''
+pkgs.runCommand "archrepo-list"
+  {
+    nativeBuildInputs = [
+      pkgs.nushell
+      pkgs.bash
+      pkgs.coreutils
+      pkgs.libarchive
+    ];
+  }
+  ''
+    nu --no-config-file ${tree}/tests/archrepo_list_test.nu
+    touch $out
+  ''

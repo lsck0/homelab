@@ -1,15 +1,30 @@
 # Tailscale control server (VPN mesh) + Headplane UI; internal, not dmz: it controls mesh membership
-{ lib, id, config, profiles, ... }: {
+{
+  lib,
+  id,
+  config,
+  profiles,
+  ...
+}:
+{
   vm = {
     bootPhase = "network";
-    needs = [ "containers" "nfs" ];
+    needs = [
+      "containers"
+      "nfs"
+    ];
   };
 
-  grants = [ {
-    from = [ "internal" "lan" "wireguard" ];
-    tcp = [ config.services.headscale.port ];
-    why = "its direct tailscale clients, not yet named: the lab, the house and the owner's devices";
-  } ];
+  grants = [
+    {
+      from = [
+        "lan"
+        "wireguard"
+      ];
+      tcp = [ config.services.headscale.port ];
+      why = "its direct tailscale clients: the house and the owner's devices; no lab guest runs tailscale";
+    }
+  ];
 
   tokens = [ "headplane-key" ];
 
@@ -18,8 +33,14 @@
       host = "hs-ui";
       port = 3000;
       health = "/admin/healthz";
-      loginRedirect = { path = "/"; to = "/admin/"; };
-      homepage = { group = "Core"; icon = "headscale"; };
+      loginRedirect = {
+        path = "/";
+        to = "/admin/";
+      };
+      homepage = {
+        group = "Core";
+        icon = "headscale";
+      };
       oidc = {
         callback = "/admin/oidc/callback";
         name = "Headplane";
@@ -32,7 +53,10 @@
       host = "hs";
       port = 80;
       health = "/health";
-      homepage = { group = "Public"; icon = "headscale"; };
+      homepage = {
+        group = "Public";
+        icon = "headscale";
+      };
       oidc = {
         callback = "/oidc/callback";
         name = "Headscale";
@@ -45,7 +69,9 @@
   };
 
   shares = {
-    "data/db-dumps/vm-${id}" = { mode = "0700"; };
+    "data/db-dumps/vm-${id}" = {
+      mode = "0700";
+    };
     "data/headscale".localState = true;
   };
 }

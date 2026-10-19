@@ -1,5 +1,11 @@
 # dumps of live databases to the nas before kopia's snapshot, each consistent by its own engine's mechanism
-{ config, lib, pkgs, nasPath, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  nasPath,
+  ...
+}:
 let
   cfg = config.homelab.dbBackup;
   dir = "/var/backup/db";
@@ -55,19 +61,24 @@ let
     # a temp file until complete: a failed or interrupted run leaves no partial dump
     tmp=$(mktemp -p "$out" .${name}.XXXXXX)
     trap 'rm -f "$tmp"' EXIT
-    ${if db.sqlite != null then ''
-      if [ ! -s ${lib.escapeShellArg db.sqlite} ]; then
-        echo "${name}: ${db.sqlite} does not exist yet, nothing to dump"
-        exit 0
-      fi
-      # online backup api, safe under a writer (sqlite-backup.nix)
-      ${sqliteBackup.command (lib.escapeShellArg db.sqlite) "$tmp"}
-      ext=sqlite
-    '' else ''
-      ${db.command} > "$tmp"
-      [ -s "$tmp" ] || { echo "${name}: dump was empty"; exit 1; }
-      ext=${db.suffix}
-    ''}
+    ${
+      if db.sqlite != null then
+        ''
+          if [ ! -s ${lib.escapeShellArg db.sqlite} ]; then
+            echo "${name}: ${db.sqlite} does not exist yet, nothing to dump"
+            exit 0
+          fi
+          # online backup api, safe under a writer (sqlite-backup.nix)
+          ${sqliteBackup.command (lib.escapeShellArg db.sqlite) "$tmp"}
+          ext=sqlite
+        ''
+      else
+        ''
+          ${db.command} > "$tmp"
+          [ -s "$tmp" ] || { echo "${name}: dump was empty"; exit 1; }
+          ext=${db.suffix}
+        ''
+    }
     # plain: kopia compresses and deduplicates, a compressed dump would defeat both
     mv "$tmp" "$out/${name}-$stamp.$ext"
     # the .zst dumps of earlier versions age out with the plain ones
@@ -79,7 +90,8 @@ let
     printf '# TYPE homelab_db_dump_last_success_timestamp_seconds gauge\nhomelab_db_dump_last_success_timestamp_seconds{db="%s"} %s\n' ${name} "$(date +%s)" > $d/db_dump_${name}.prom.tmp
     mv $d/db_dump_${name}.prom.tmp $d/db_dump_${name}.prom
   '';
-in {
+in
+{
   options.homelab.dbBackup = {
     databases = lib.mkOption {
       type = lib.types.attrsOf dbType;
@@ -101,28 +113,42 @@ in {
     homelab.textfiles = map (name: "db_dump_${name}") (lib.attrNames cfg.databases);
 
     # each host mounts only its own dump dir, root-only (the units run as root): no guest sees another's dumps
-    homelab.nasMounts = lib.mapAttrs (_: m: m // { shareMode = "0700"; })
-      (nasPath dir "data/db-dumps/${config.networking.hostName}");
+    homelab.nasMounts = lib.mapAttrs (_: m: m // { shareMode = "0700"; }) (
+      nasPath dir "data/db-dumps/${config.networking.hostName}"
+    );
 
-    systemd.services = lib.mapAttrs' (name: db: lib.nameValuePair "db-backup-${name}" {
-      description = "Dump ${name} to the NAS";
-      after = [ "network-online.target" ];
-      wants = [ "network-online.target" ];
-      # lxc guests mount the nas at boot, not on access
-      unitConfig.RequiresMountsFor = [ dir ];
-      path = [ pkgs.sqlite pkgs.coreutils pkgs.findutils ] ++ db.path;
-      serviceConfig = { Type = "oneshot"; };
-      script = script name db;
-    }) cfg.databases;
+    systemd.services = lib.mapAttrs' (
+      name: db:
+      lib.nameValuePair "db-backup-${name}" {
+        description = "Dump ${name} to the NAS";
+        after = [ "network-online.target" ];
+        wants = [ "network-online.target" ];
+        # lxc guests mount the nas at boot, not on access
+        unitConfig.RequiresMountsFor = [ dir ];
+        path = [
+          pkgs.sqlite
+          pkgs.coreutils
+          pkgs.findutils
+        ]
+        ++ db.path;
+        serviceConfig = {
+          Type = "oneshot";
+        };
+        script = script name db;
+      }
+    ) cfg.databases;
 
-    systemd.timers = lib.mapAttrs' (name: _: lib.nameValuePair "db-backup-${name}" {
-      wantedBy = [ "timers.target" ];
-      timerConfig = {
-        OnCalendar = onCalendar;
-        Persistent = true;
-        RandomizedDelaySec = "5m";
-      };
-    }) cfg.databases;
+    systemd.timers = lib.mapAttrs' (
+      name: _:
+      lib.nameValuePair "db-backup-${name}" {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnCalendar = onCalendar;
+          Persistent = true;
+          RandomizedDelaySec = "5m";
+        };
+      }
+    ) cfg.databases;
 
     assertions = lib.mapAttrsToList (name: db: {
       assertion = (db.sqlite == null) != (db.command == null);

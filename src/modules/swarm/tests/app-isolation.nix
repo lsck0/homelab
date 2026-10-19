@@ -7,21 +7,30 @@
 # memory, processes, requests, log lines, metric series, spans, profiles, browser beacons. Then the platform's own
 # guarantees: admission against the app's reservation, capabilities, the workers' advertised capacity, and the
 # boards and datasources each app gets. The seed picks the flood order and the flooding clients' addresses.
-{ pkgs, lib, specialArgs, seed ? 7, ... }:
+{
+  pkgs,
+  lib,
+  specialArgs,
+  seed ? 7,
+  ...
+}:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: apps; };
-  net = import ../../net.nix { inherit lib; inherit (specialArgs) inventory site; };
-  telemetry = import ../../telemetry.nix { inherit lib; inherit (lab) inventory; };
+  lab = import ../../../tests/lib/lab.nix {
+    inherit pkgs lib specialArgs;
+    apps = _: apps;
+  };
+  net = import ../../net.nix {
+    inherit lib;
+    inherit (specialArgs) inventory site;
+  };
+  telemetry = import ../../telemetry.nix {
+    inherit lib;
+    inherit (lab) inventory;
+  };
   limits = import ../../limits { inherit lib; };
   # the builder's import of an app's own boards (107-internal-swarm)
   dashboardsImport = ../../../instances/core/107-internal-swarm/lib/dashboards-import.py;
   ip = id: lab.inventory.${id}.ip;
-
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
-
-  workers = [ "250" "251" ];
   # what each worker advertises and caps its apps to, from the worker shape (modules/limits)
   workerShape = lab.specialArgs.lab.instances."250".config.vm;
   allocatableMiB = (limits.allocatableOf workerShape).memoryMiB;
@@ -29,19 +38,35 @@ let
   collector = ip telemetry.collectorVmid;
   edge = ip "200";
   cloudflare = "104.16.0.10";
-  ports = { quiet = 20140; noisy = 20150; };
+  ports = {
+    quiet = 20140;
+    noisy = 20150;
+  };
   # each task: small enough that both apps and a rolling deploy fit two workers
-  task = { memoryMiB = 256; cpus = 0.5; pids = 128; };
+  task = {
+    memoryMiB = 256;
+    cpus = 0.5;
+    pids = 128;
+  };
   # the quiet app's answers through the edge while the noisy one floods: every request, within this
   quietLatencyS = 2;
   floodS = 20;
   # no request of the test waits longer; one that would is an answer of its own (curl's 000)
   requestTimeoutS = 10;
-  requestFlood = { count = 2000; concurrency = 64; };
+  requestFlood = {
+    count = 2000;
+    concurrency = 64;
+  };
   # the noisy app's spans: three times its burst, back to back, which no refill keeps up with
-  spanFlood = rec { bytes = 600000; count = 3 * limits.tenant.traceBurstBytes / bytes; };
+  spanFlood = rec {
+    bytes = 600000;
+    count = 3 * limits.tenant.traceBurstBytes / bytes;
+  };
   # the noisy app's browser beacons: each well within the intake's body cap, three times its burst in all
-  beaconFlood = rec { bytes = limits.frontend.bodyBytes / 2; count = 3 * limits.tenant.traceBurstBytes / bytes; };
+  beaconFlood = rec {
+    bytes = limits.frontend.bodyBytes / 2;
+    count = 3 * limits.tenant.traceBurstBytes / bytes;
+  };
   # the noisy app's exporter: more series than one scrape may hold
   bigSeries = limits.tenant.scrapeSamples + 1000;
 
@@ -54,8 +79,19 @@ let
   image = pkgs.dockerTools.buildLayeredImage {
     name = "fixture";
     tag = "v1";
-    contents = [ pkgs.busybox pkgs.curl www ];
-    config.Cmd = [ "httpd" "-f" "-p" "8000" "-h" "/www" ];
+    contents = [
+      pkgs.busybox
+      pkgs.curl
+      www
+    ];
+    config.Cmd = [
+      "httpd"
+      "-f"
+      "-p"
+      "8000"
+      "-h"
+      "/www"
+    ];
   };
 
   inherit (lab) profiles;
@@ -64,20 +100,47 @@ let
     repo = "lsck0/${name}";
     branch = "master";
     # anubis is instances/core/200-external-traefik/tests/edge-apps.nix's subject; a flood here must reach the app's own limits, not a challenge
-    routes.${name} = { port = ports.${name}; health = "/"; on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ]; };
-    metrics.web = { service = "web"; targetPort = 8000; port = ports.${name} + 1; path = metricsPath; };
+    routes.${name} = {
+      port = ports.${name};
+      health = "/";
+      on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ];
+    };
+    metrics.web = {
+      service = "web";
+      targetPort = 8000;
+      port = ports.${name} + 1;
+      path = metricsPath;
+    };
     resources.web = task;
     # stays up: a flood here meets the app's own limits, not its wake proxy (app-idle wakes apps)
-    on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
+    on =
+      profiles.observed
+      ++ profiles.traced
+      ++ [
+        "frontend"
+        "homepage"
+      ];
   };
-  apps = { quiet = appOf "quiet" "/metrics.txt"; noisy = appOf "noisy" "/big.txt"; };
+  apps = {
+    quiet = appOf "quiet" "/metrics.txt";
+    noisy = appOf "noisy" "/big.txt";
+  };
 
-  common = { lib, ... }: {
+  common = _: {
     networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
-    environment.systemPackages = [ pkgs.curl pkgs.jq ];
+    environment.systemPackages = [
+      pkgs.curl
+      pkgs.jq
+    ];
   };
   swarmNode = vmid: memory: {
-    imports = [ (lab.guest vmid { flat = true; nas = true; }) common ];
+    imports = [
+      (lab.guest vmid {
+        flat = true;
+        nas = true;
+      })
+      common
+    ];
     virtualisation.memorySize = memory;
     virtualisation.diskSize = 6144;
   };
@@ -93,24 +156,56 @@ pkgs.testers.runNixOSTest {
       enable = true;
       listenAddress = "0.0.0.0";
       port = 443;
-      extraConfig.http.tls = { certificate = lab.pki.lsck0.cert; key = lab.pki.lsck0.key; };
+      extraConfig.http.tls = {
+        certificate = lab.pki.lsck0.cert;
+        inherit (lab.pki.lsck0) key;
+      };
     };
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
   };
   nodes.vm-107 = swarmNode "107" 1536;
   # the production worker's cores: a task's cpu flood meets its own limit, never the apps slice's share of one core
-  nodes.vm-250 = { imports = [ (swarmNode "250" 2560) ]; virtualisation.cores = workerShape.cores; };
-  nodes.vm-251 = { imports = [ (swarmNode "251" 2560) ]; virtualisation.cores = workerShape.cores; };
+  nodes.vm-250 = {
+    imports = [ (swarmNode "250" 2560) ];
+    virtualisation.cores = workerShape.cores;
+  };
+  nodes.vm-251 = {
+    imports = [ (swarmNode "251" 2560) ];
+    virtualisation.cores = workerShape.cores;
+  };
   nodes.vm-103 = {
-    imports = [ (lab.guest telemetry.collectorVmid { flat = true; nas = true; instance = ../../../instances/core/103-internal-grafana/main.nix; }) common ];
+    imports = [
+      (lab.guest telemetry.collectorVmid {
+        flat = true;
+        nas = true;
+        instance = ../../../instances/core/103-internal-grafana/main.nix;
+      })
+      common
+    ];
     virtualisation.memorySize = 3072;
   };
   nodes.vm-200 = {
-    imports = [ (lab.guest "200" { flat = true; instance = ../../../instances/core/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
+    imports = [
+      (lab.guest "200" {
+        flat = true;
+        instance = ../../../instances/core/200-external-traefik/main.nix;
+      })
+      ../../../tests/lib/offline-traefik.nix
+      common
+    ];
     virtualisation.memorySize = 1536;
   };
   nodes.world = {
-    imports = [ (lab.multi { addresses = [ "10.100.0.1/8" "10.200.0.1/8" "10.250.0.1/8" "${cloudflare}/13" ]; }) ];
+    imports = [
+      (lab.multi {
+        addresses = [
+          "10.100.0.1/8"
+          "10.200.0.1/8"
+          "10.250.0.1/8"
+          "${cloudflare}/13"
+        ];
+      })
+    ];
     environment.systemPackages = [ pkgs.curl ];
   };
 
@@ -458,7 +553,17 @@ pkgs.testers.runNixOSTest {
         sources = json.loads(vm_103.succeed(f"{GRAFANA}/api/datasources"))
         uids = {s["uid"] for s in sources}
         assert {"loki-quiet", "tempo-quiet", "pyroscope-quiet", "loki-noisy"} <= uids, uids
-        assert not {"tempo", "pyroscope"} & uids, uids
+        assert "pyroscope" not in uids, uids
+        # the lab's own tempo (the ingresses' spans) reads the lab tenant alone, never an app's
+        trace_id = rng.randbytes(16).hex()
+        assert push_span("quiet", span(trace_id, "quiet-tenant-probe")) == 200
+        vm_103.wait_until_succeeds(tempo_has(TENANT["quiet"], trace_id), timeout=120)
+        def trace_through(uid):
+            body = json.dumps({"queries": [{"refId": "A", "datasource": {"uid": uid}, "queryType": "traceId", "query": trace_id}],
+                               "from": "now-1h", "to": "now"})
+            return vm_103.execute(f"{GRAFANA}/api/ds/query -H 'Content-Type: application/json' -d {shlex.quote(body)}")[1]
+        assert "quiet-tenant-probe" in trace_through("tempo-quiet")
+        assert "quiet-tenant-probe" not in trace_through("tempo")
 
     with subtest("an app's own dashboard lands in its folder, rewritten to its own datasources"):
         repo = "/tmp/quiet-repo"

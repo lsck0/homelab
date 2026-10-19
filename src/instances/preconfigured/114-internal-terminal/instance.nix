@@ -4,20 +4,27 @@ let
   # one nginx serves both hosts, polled by the trmnl cloud
   feedPort = 8081;
   # the trmnl cloud fetches it directly with a token in the path, which the access log would keep, and solves no captcha
-  feedOn = lib.subtractLists [ "sso" "captcha" "cloudflare" "accessLog" ] profiles.hardenedInternal
-    ++ [ "probe" ] ++ profiles.observed;
-in {
+  feedOn =
+    lib.subtractLists [ "sso" "captcha" "cloudflare" "accessLog" ] profiles.hardenedInternal
+    ++ [ "probe" ]
+    ++ profiles.observed;
+in
+{
   vm = {
     bootPhase = "apps";
     needs = [ "nfs" ];
-    kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";
-    privileged = true;
-    features = "nesting=1,mount=nfs";
   };
 
   services = {
-    calendar = { host = "cal"; port = feedPort; on = feedOn; };
-    terminal = { port = feedPort; on = feedOn; };
+    calendar = {
+      host = "cal";
+      port = feedPort;
+      on = feedOn;
+    };
+    terminal = {
+      port = feedPort;
+      on = feedOn;
+    };
   };
 
   secrets = {

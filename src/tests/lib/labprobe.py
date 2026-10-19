@@ -36,10 +36,6 @@ import struct
 import sys
 import time
 
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
-
 PROTOS = ("tcp", "udp", "esp")
 STATES = ("open", "foreign", "refused", "unreachable", "filtered", "sent")
 EXPECTS = ("open", "closed", "refused", "filtered", "unreachable")
@@ -57,11 +53,6 @@ UDP_DATAGRAM_BYTES_MAX = 2048
 IN_PKTINFO = struct.Struct("I4s4s")
 IP_PACKET_BYTES_MAX = 65535
 UNREACHABLE_ERRNOS = (errno.EHOSTUNREACH, errno.ENETUNREACH, errno.EACCES, errno.EPERM)
-
-
-# -----------------------------------------------------------------------------
-# INTERNAL
-# -----------------------------------------------------------------------------
 
 
 def json_load(path):
@@ -116,19 +107,21 @@ def probe_render(probe):
     return f"{probe['id']} {probe['src']} -> {probe['dst']}{port}/{probe['proto']}"
 
 
-# -----------------------------------------------------------------------------
-# SINK
-# -----------------------------------------------------------------------------
-
-
 class SinkLog:
     def __init__(self, path):
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         self.file = open(path, "a", encoding="utf-8")
 
     def write(self, probe_id, proto, src, sport, dst, dport):
-        entry = {"id": probe_id, "proto": proto, "src": src, "sport": sport, "dst": dst, "dport": dport,
-                 "t": time.time()}
+        entry = {
+            "id": probe_id,
+            "proto": proto,
+            "src": src,
+            "sport": sport,
+            "dst": dst,
+            "dport": dport,
+            "t": time.time(),
+        }
         self.file.write(json.dumps(entry) + "\n")
         self.file.flush()
 
@@ -158,6 +151,7 @@ def sink_tcp_handler(log):
 def sink_udp_reader(log, sock, port):
     """Echo every datagram from the address it was sent to: a node owning many addresses must answer a probe of
     each from that one, or the prober's connected socket drops the reply. IP_PKTINFO names it both ways."""
+
     def read():
         data, ancillary, _, addr = sock.recvmsg(UDP_DATAGRAM_BYTES_MAX, socket.CMSG_SPACE(IN_PKTINFO.size))
         dst = None
@@ -165,8 +159,11 @@ def sink_udp_reader(log, sock, port):
             if level == socket.IPPROTO_IP and kind == socket.IP_PKTINFO:
                 dst = socket.inet_ntoa(IN_PKTINFO.unpack(value)[2])
         log.write(probe_id_parse(data), "udp", addr[0], addr[1], dst, port)
-        source = [] if dst is None else [(socket.IPPROTO_IP, socket.IP_PKTINFO,
-                                         IN_PKTINFO.pack(0, socket.inet_aton(dst), bytes(4)))]
+        source = (
+            []
+            if dst is None
+            else [(socket.IPPROTO_IP, socket.IP_PKTINFO, IN_PKTINFO.pack(0, socket.inet_aton(dst), bytes(4)))]
+        )
         sock.sendmsg([data], source, 0, addr)
 
     return read
@@ -178,7 +175,7 @@ def sink_esp_reader(log, sock):
         header_bytes = (packet[0] & 0x0F) * 4
         src = socket.inet_ntoa(packet[12:16])
         dst = socket.inet_ntoa(packet[16:20])
-        log.write(probe_id_parse(packet[header_bytes + ESP_HEADER.size:]), "esp", src, None, dst, None)
+        log.write(probe_id_parse(packet[header_bytes + ESP_HEADER.size :]), "esp", src, None, dst, None)
 
     return read
 
@@ -203,15 +200,11 @@ async def sink_main(args):
     await asyncio.Event().wait()
 
 
-# -----------------------------------------------------------------------------
-# RUN
-# -----------------------------------------------------------------------------
-
-
 async def run_tcp(probe, timeout_s):
     try:
         reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(probe["dst"], probe["port"], local_addr=(probe["src"], 0)), timeout_s)
+            asyncio.open_connection(probe["dst"], probe["port"], local_addr=(probe["src"], 0)), timeout_s
+        )
     except asyncio.TimeoutError:
         return "filtered"
     except ConnectionRefusedError:
@@ -290,11 +283,6 @@ async def run_main(args):
     json_save(args.out, {probe["id"]: results[probe["id"]] for probe in plan})
 
 
-# -----------------------------------------------------------------------------
-# EXPECT
-# -----------------------------------------------------------------------------
-
-
 def expect_mismatch(probe, state, sightings):
     """None when the probe went as expected, else what happened instead."""
     expect = probe.get("expect", "open")
@@ -337,11 +325,6 @@ def expect_main(args):
             print(f"MISMATCH {probe_render(probe)}: {mismatch}")
     print(f"labprobe: {len(plan)} probes, {mismatches} mismatches")
     return 1 if mismatches else 0
-
-
-# -----------------------------------------------------------------------------
-# MAIN
-# -----------------------------------------------------------------------------
 
 
 def main():

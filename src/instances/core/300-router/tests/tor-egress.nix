@@ -1,51 +1,104 @@
 # the tor egress class (`profiles.torEgress`) on the real router: a member's internet tcp ends at tor's
 # TransPort, is refused while tor is down and dropped once the redirect is gone, its udp has no way out and nothing
-# of it reaches the house; its names go to tor's DNSPort, its lab traffic stays direct. A vpn member and a plain
-# guest beside it keep their own paths: the tunnel, and the house masqueraded.
+# of it reaches the house; its names go to tor's DNSPort, and what it sends to private addresses is the forward
+# policy's, never tor's. A vpn member and a plain guest beside it keep their own paths: the tunnel, and the internet
+# masqueraded; proxmox sees the plain guest by its own address.
 #
 # No instance routes through tor, so the test makes one: the router reads the class from lab.egress alone (flows.nix,
 # main.nix), which the test's facts extend by a guest of the internal zone. Nodes: the router, `house` (the fritzbox,
 # a house device and the internet stand-in), `internal` (the member, the vpn member, a plain guest).
-{ pkgs, lib, specialArgs, seed ? 1, ... }:
+{
+  pkgs,
+  lib,
+  specialArgs,
+  seed ? 1,
+  ...
+}:
 let
   lab = import ../../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
-  net = import ../../../../modules/net.nix { inherit lib; inherit (specialArgs) inventory site; };
+  net = import ../../../../modules/net.nix {
+    inherit lib;
+    inherit (specialArgs) inventory site;
+  };
   torPorts = import ../../../../modules/tor-ports.nix;
   ip = id: lab.inventory.${id}.ip;
 
   memberId = "131";
-  vpnMemberId = lib.head (lib.attrNames (lib.filterAttrs (id: e: e.via == "vpn" && (net.zoneOf id).name == "internal") lab.egress));
+  vpnMemberId = lib.head (
+    lib.attrNames (lib.filterAttrs (id: e: e.via == "vpn" && (net.zoneOf id).name == "internal") lab.egress)
+  );
   plainId = "103";
   facts = lab.specialArgs // {
-    lab = lab.specialArgs.lab // { egress = lab.egress // { ${memberId} = { via = "tor"; inbound = false; vmid = lib.toInt memberId; }; }; };
+    lab = lab.specialArgs.lab // {
+      egress = lab.egress // {
+        ${memberId} = {
+          via = "tor";
+          inbound = false;
+          vmid = lib.toInt memberId;
+        };
+      };
+    };
   };
 
-  house = { fritzbox = net.wan.gateway; device = "192.168.178.50"; internet = "198.51.100.7"; };
-  guests = { member = ip memberId; vpnMember = ip vpnMemberId; plain = ip plainId; };
+  house = {
+    fritzbox = net.wan.gateway;
+    inherit (net.wan) proxmox;
+    device = "192.168.178.50";
+    internet = "198.51.100.7";
+  };
+  guests = {
+    member = ip memberId;
+    vpnMember = ip vpnMemberId;
+    plain = ip plainId;
+  };
   routerInternal = net.zones.internal.routerIp;
   # no port the policy names: only this test's probes use it
   probePort = 4444;
 
-  tools = { environment.systemPackages = [ pkgs.dig pkgs.netcat pkgs.tcpdump ]; };
+  tools = {
+    environment.systemPackages = [
+      pkgs.dig
+      pkgs.netcat
+      pkgs.tcpdump
+    ];
+  };
 in
 pkgs.testers.runNixOSTest {
   name = "tor-egress";
   passthru.regressionSeeds = [ ];
   node.specialArgs = facts;
 
-  nodes.luca-router = { imports = [ lab.router tools ]; virtualisation.memorySize = 1024; };
+  nodes.luca-router = {
+    imports = [
+      lab.router
+      tools
+    ];
+    virtualisation.memorySize = 1024;
+  };
   nodes.house = {
-    imports = [ (lab.multi {
-      addresses = map (a: "${a}/24") (lib.attrValues house);
-      routes = [ { address = "10.0.0.0"; prefixLength = 8; via = net.wan.address; } ];
-    }) tools ];
+    imports = [
+      (lab.multi {
+        addresses = map (a: "${a}/24") (lib.attrValues house);
+        routes = [
+          {
+            address = "10.0.0.0";
+            prefixLength = 8;
+            via = net.wan.address;
+          }
+        ];
+      })
+      tools
+    ];
   };
   nodes.internal = {
-    imports = [ (lab.multi {
-      vlan = lab.vlans.internal;
-      addresses = map (a: "${a}/24") (lib.attrValues guests);
-      gateway = routerInternal;
-    }) tools ];
+    imports = [
+      (lab.multi {
+        vlan = lab.vlans.internal;
+        addresses = map (a: "${a}/24") (lib.attrValues guests);
+        gateway = routerInternal;
+      })
+      tools
+    ];
   };
 
   testScript = lab.driverPython + ''
@@ -57,6 +110,8 @@ pkgs.testers.runNixOSTest {
     ROUTER_WAN = "${net.wan.address}"
     ROUTER = "${routerInternal}"
     PORT = ${toString probePort}
+    # the collector (the plain guest) scrapes proxmox's node exporter: a flow the policy opens to the house
+    NODE_EXPORTER = ${toString net.ports.nodeExporter}
     MEMBER, VPN_MEMBER, PLAIN = GUESTS["member"], GUESTS["vpnMember"], GUESTS["plain"]
     sources = {a: internal for a in GUESTS.values()}
 
@@ -86,10 +141,10 @@ pkgs.testers.runNixOSTest {
     house.wait_for_unit("network.target")
     internal.wait_for_unit("network.target")
     luca_router.wait_until_succeeds("ss -ltnH 'sport = :${toString torPorts.trans}' | grep -q '${routerInternal}:'", timeout=60)
-    probe_sinks_start([house], tcp=(PORT,), udp=(PORT,))
+    probe_sinks_start([house], tcp=(PORT, NODE_EXPORTER), udp=(PORT,))
 
     with subtest("a tor member's internet traffic goes into tor or nowhere, never through the house"):
-        capture_start(house, "eth1", "/tmp/leak.pcap", f"host {HOUSE['internet']} or host {HOUSE['device']}")
+        capture_start(house, "eth1", "/tmp/leak.pcap", f"host {HOUSE['internet']} or host {HOUSE['device']} or host {HOUSE['proxmox']}")
         before = counter("torredirect", MEMBER)
         # tor's transparent port accepts it: the only listener the redirect leads to
         assert connects(MEMBER, HOUSE["internet"]), "the member's tcp did not reach tor's TransPort"
@@ -103,15 +158,17 @@ pkgs.testers.runNixOSTest {
         internal.fail(f"ping -c 1 -W 2 -I {MEMBER} {HOUSE['internet']}")
         assert counter("killswitch", MEMBER) > before, "the killswitch saw nothing once the redirect was gone"
         luca_router.succeed("systemctl restart nftables")
+        before = counter("torredirect", MEMBER)
         probe_check([
             {"src": MEMBER, "dst": HOUSE["internet"], "proto": "udp", "port": PORT, "expect": "closed"},
-            # lab and house traffic stays direct
-            {"src": MEMBER, "dst": HOUSE["device"], "proto": "tcp", "port": PORT, "expect": "open", "seen_src": ROUTER_WAN},
-            # positive control inside the capture: a plain guest to the house, which the capture must see
-            {"src": PLAIN, "dst": HOUSE["device"], "proto": "udp", "port": PORT, "expect": "open", "seen_src": ROUTER_WAN},
+            # the house is the forward policy's to close, never tor's to carry
+            {"src": MEMBER, "dst": HOUSE["device"], "proto": "tcp", "port": PORT, "expect": "closed"},
+            # positive control inside the capture: the plain guest's scrape of proxmox, unmasqueraded
+            {"src": PLAIN, "dst": HOUSE["proxmox"], "proto": "tcp", "port": NODE_EXPORTER, "expect": "open", "seen_src": PLAIN},
         ], sources=sources, sinks=[house], seed=SEED)
-        house.wait_until_succeeds(f"tcpdump -n -r /tmp/leak.pcap 2>/dev/null | grep -q '> {HOUSE['device']}.{PORT}:'", timeout=10)
-        leak = [l for l in capture_stop(house, "/tmp/leak.pcap").splitlines() if HOUSE["internet"] in l]
+        assert counter("torredirect", MEMBER) == before, "tor took the member's traffic to a private address"
+        house.wait_until_succeeds(f"tcpdump -n -r /tmp/leak.pcap 2>/dev/null | grep -q '> {HOUSE['proxmox']}.{NODE_EXPORTER}:'", timeout=10)
+        leak = [l for l in capture_stop(house, "/tmp/leak.pcap").splitlines() if HOUSE["internet"] in l or HOUSE["device"] in l]
         assert not leak, "a tor member's traffic left through the house:\n" + "\n".join(leak)
 
     with subtest("a vpn member still leaves through the tunnel, a plain guest through the house"):

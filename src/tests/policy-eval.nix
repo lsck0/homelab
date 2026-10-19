@@ -10,21 +10,33 @@
 #     lib.optional (<broken> config) "${name}: <what is wrong and where>") configs)
 #
 # A law states the policy itself, not a copy of the module that implements it.
-{ pkgs, lib, inputs, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  inputs,
+  specialArgs,
+  ...
+}:
 let
   facts = import ./policy/lib/facts.nix { inherit lib inputs specialArgs; };
 
   lawFiles = lib.filterAttrs (file: kind: kind == "regular" && lib.hasSuffix ".nix" file) (builtins.readDir ./policy);
-  violations = lib.concatLists (lib.mapAttrsToList (file: _:
-    map (violation: "policy/${file}: ${violation}") (import ./policy/${file} facts)) lawFiles);
+  violations = lib.concatLists (
+    lib.mapAttrsToList (file: _: map (violation: "policy/${file}: ${violation}") (import ./policy/${file} facts)) lawFiles
+  );
   report = pkgs.writeText "policy-violations" (lib.concatLines violations);
   count = attrs: toString (lib.length (lib.attrNames attrs));
 in
-pkgs.runCommand "policy-eval" { } (if violations == [ ] then ''
-  echo "policy-eval: ${count lawFiles} law files hold over ${count facts.configs} configurations"
-  touch $out
-'' else ''
-  echo "policy-eval: ${toString (lib.length violations)} violation(s):" >&2
-  cat ${report} >&2
-  exit 1
-'')
+pkgs.runCommand "policy-eval" { } (
+  if violations == [ ] then
+    ''
+      echo "policy-eval: ${count lawFiles} law files hold over ${count facts.configs} configurations"
+      touch $out
+    ''
+  else
+    ''
+      echo "policy-eval: ${toString (lib.length violations)} violation(s):" >&2
+      cat ${report} >&2
+      exit 1
+    ''
+)

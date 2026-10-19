@@ -1,4 +1,4 @@
-# jellyfin, janitorr (deletes media nobody watches) and ollama (the lab's local llm), on the site's gpu if it has one
+# jellyfin, janitorr (finds media nobody watches, a dry run unless deleteMedia) and ollama (the lab's local llm), on the site's gpu if it has one
 #
 # Security: browsers log in only through authelia (jellyfin-plugin-sso), apps and jellyseerr by quick connect from a
 # logged-in browser; password logins remain for the generated admin and janitorr. No lldap plugin: it binds as lldap's
@@ -6,18 +6,35 @@
 #
 # jellyfin-setup runs on every start, PartOf the container (a restart may bring a db a localState restore swapped); it
 # restarts the server inside the container, never its own unit, so it cannot stop halfway.
-{ config, lib, pkgs, inventory, catalog, nasMount, nasPath, setupUnit, site, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inventory,
+  catalog,
+  nasMount,
+  nasPath,
+  setupUnit,
+  site,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   # the site's passthrough gpu (instance.nix vm.pci maps it here); without one jellyfin and ollama use the cpu
   gpu = site.gpu != null;
-  T = config.homelab.tokens.dir;
   ollama = import ../../../modules/ollama.nix;
 
   route = catalog.internal.jellyfin;
   # janitorr's start fails on a client it cannot reach: none of them may sleep (idle), or it crash-loops meanwhile
-  urlOf = name: let r = catalog.internal.${name}; vmid = toString r.vmid; in
-    assert lib.assertMsg (inventory.${vmid}.idle == null) "janitorr calls ${name} directly, but vm-${vmid} sleeps when idle";
+  urlOf =
+    name:
+    let
+      r = catalog.internal.${name};
+      vmid = toString r.vmid;
+    in
+    assert lib.assertMsg (
+      inventory.${vmid}.idle == null
+    ) "janitorr calls ${name} directly, but vm-${vmid} sleeps when idle";
     "http://${net.ipOf vmid}:${toString r.port}";
   publicUrl = "https://${net.fqdn route.host}";
   autheliaUrl = "https://${net.fqdn catalog.internal.authelia.host}";
@@ -34,9 +51,12 @@ let
 
   # one api key per consumer, so a leaked one is revoked alone: token jellyfin-key-<consumer>, jellyfin app
   # homelab-<consumer>. homepage (vm-102), hermes (vm-113), the *arr notifications (vm-121), janitorr (here)
-  apiKeyConsumers = [ "homepage" "hermes" "arr" "janitorr" ];
-  # the key every consumer shared before; revoked once the per-consumer keys exist
-  apiKeyLegacyApp = "homelab";
+  apiKeyConsumers = [
+    "homepage"
+    "hermes"
+    "arr"
+    "janitorr"
+  ];
 
   # a start runs the db migrations of a new version before the api answers; ten minutes bounds that, it is no wait
   readyTimeoutS = 600;
@@ -82,7 +102,8 @@ let
   janitorrPort = 8082;
   janitorrStatsPort = 8081;
 
-  janitorrConfig = pkgs.writeText "janitorr.yml.tmpl" ''
+  janitorrTemplate = "janitorr/application.yml.tmpl";
+  janitorrConfig = ''
     logging:
       level:
         com.github.schaka: INFO
@@ -94,7 +115,7 @@ let
       from-scratch: true
       free-space-check-dir: "${mediaDir}"
     application:
-      dry-run: false
+      dry-run: ${lib.boolToString (!config.homelab.janitorr.deleteMedia)}
       run-once: false
       whole-tv-show: false
       whole-show-seeding-check: false
@@ -238,7 +259,14 @@ let
       jq -r --arg n "$2" 'first(.[] | select(.Name | test($n; "i"))) | "\(.Id) \(.Version)"' <<<"$1"
     }
   '';
-in {
+in
+{
+  imports = [
+    {
+      options.homelab.janitorr.deleteMedia = lib.mkEnableOption "janitorr deleting media; off, it only logs what it would delete";
+    }
+  ];
+
   # nvidia driver and cuda are unfree
   nixpkgs.config.allowUnfree = gpu;
   services.xserver.videoDrivers = lib.optional gpu "nvidia";
@@ -279,7 +307,7 @@ in {
 
   virtualisation.oci-containers.containers = {
     jellyfin = {
-      image = "jellyfin/jellyfin:12.1";
+      image = "jellyfin/jellyfin:12.1@sha256:78d3ea1207d1322471fcac39a614f004f2ccf7e878f95ab2977d752f07e4dd7e";
       ports = [ "${toString route.port}:${toString containerPort}" ];
       volumes = [
         "${stateDir}/config:/config"
@@ -292,17 +320,20 @@ in {
     };
 
     janitorr-stats = {
-      image = "ghcr.io/schaka/janitorr-stats:v0.2.6-sqlite";
+      image = "ghcr.io/schaka/janitorr-stats:v0.2.6-sqlite@sha256:ef85aed0ce2d3e3955d48360572daa412f92b3b0ffcaac0c3ea449d35dde451b";
       volumes = [
         "${janitorrDir}/stats.yml:/work/config/application.yml:ro"
         "${janitorrDir}/stats:/data"
       ];
       # 131 MiB measured
-      extraOptions = [ "--network=host" "--memory=256m" ];
+      extraOptions = [
+        "--network=host"
+        "--memory=256m"
+      ];
     };
 
     janitorr = {
-      image = "ghcr.io/schaka/janitorr:jvm-v2.2.1";
+      image = "ghcr.io/schaka/janitorr:jvm-v2.2.1@sha256:0f5d7099ee1cb013765919c5e701d44405c345a151d2e81ebed61d0f8439e286";
       user = "${uid}:${uid}";
       dependsOn = [ "janitorr-stats" ];
       volumes = [
@@ -313,7 +344,10 @@ in {
       ];
       # host network, beside jellyfin's port and janitorr-stats'
       environment.SERVER_PORT = toString janitorrPort;
-      extraOptions = [ "--network=host" "--memory=512m" ];
+      extraOptions = [
+        "--network=host"
+        "--memory=512m"
+      ];
     };
   };
 
@@ -328,7 +362,13 @@ in {
     description = "Set up Jellyfin (admin, API keys, libraries, janitorr, network, Authelia SSO)";
     partOf = [ "podman-jellyfin.service" ];
     after = [ "podman-jellyfin.service" ];
-    path = [ pkgs.curl pkgs.jq pkgs.coreutils pkgs.diffutils pkgs.findutils ];
+    path = [
+      pkgs.curl
+      pkgs.jq
+      pkgs.coreutils
+      pkgs.diffutils
+      pkgs.findutils
+    ];
     serviceConfig = {
       RuntimeDirectory = "jellyfin-setup";
       RuntimeDirectoryMode = "0700";
@@ -338,7 +378,7 @@ in {
       ${jellyfinApi}
       jellyfin_wait_ready
 
-      # -- admin: the first start runs the wizard with the generated password
+      # the first start runs the wizard with the generated password
       if curl -sSf "$J/System/Info/Public" | jq -e '.StartupWizardCompleted == false' >/dev/null; then
         curl -sSf -X POST "$J/Startup/Configuration" -H "Content-Type: application/json" \
           -d '{"UICulture":"en-US","MetadataCountryCode":"DE","PreferredMetadataLanguage":"en"}'
@@ -351,7 +391,6 @@ in {
       fi
       jellyfin_login
 
-      # -- api keys, one per consumer; then the shared one goes
       keys_of() { # <app name> -> its keys, one per line
         jq -r --arg a "$1" '.Items[] | select(.AppName == $a) | .AccessToken' <<<"$keys"
       }
@@ -366,13 +405,8 @@ in {
         # a second key of the same app would be a hand-made one; the first stays the consumer's
         printf '%s' "''${key%%$'\n'*}" | token_write "jellyfin-key-$consumer"
       done
-      for legacy in $(keys_of ${apiKeyLegacyApp}); do
-        api -X DELETE "$J/Auth/Keys/$legacy"
-        echo "revoked the shared api key ${apiKeyLegacyApp}"
-      done
-      rm -f ${config.homelab.tokens.ownDir}/jellyfin-key.token
 
-      # -- libraries; nfs has no inotify, arr imports trigger scans
+      # nfs has no inotify, arr imports trigger scans
       have=$(api "$J/Library/VirtualFolders" | jq -r '.[].Name')
       library_ensure() { # <name> <collection type> <path>
         grep -qx "$1" <<<"$have" && return 0
@@ -406,7 +440,7 @@ in {
         echo "library $(jq -r .Name <<<"$folder"): metadata fetching enabled"
       done
 
-      # -- janitorr deletes through a user of its own: content deletion, no admin
+      # janitorr deletes through a user of its own: content deletion, no admin
       janitorr_id=$(api "$J/Users" | jq -r 'first(.[] | select(.Name == "janitorr")) | .Id')
       if [ -z "$janitorr_id" ]; then
         janitorr_id=$(jq -cn --rawfile p ${config.sops.secrets.janitorr-pass.path} '{Name: "janitorr", Password: $p}' \
@@ -417,7 +451,7 @@ in {
       want=$(jq -c '.IsAdministrator = false | .EnableContentDeletion = true | .IsHidden = true' <<<"$policy")
       [ "$policy" = "$want" ] || { api -X POST "$J/Users/$janitorr_id/Policy" -d "$want"; echo "janitorr policy set"; }
 
-      # -- encoding; turing: no av1 decode
+      # turing: no av1 decode
       enc=$(api "$J/System/Configuration/encoding" | jq -c .)
       want=$(jq -c '
         .HardwareAccelerationType = "${if gpu then "nvenc" else "none"}"
@@ -429,12 +463,12 @@ in {
         | .AllowHevcEncoding = true' <<<"$enc")
       [ "$enc" = "$want" ] || { api -X POST "$J/System/Configuration/encoding" -d "$want"; echo "encoding set"; }
 
-      # -- quick connect: apps and jellyseerr log in by pairing with a browser session, the way in besides authelia
+      # apps and jellyseerr log in by pairing with a browser session, the way in besides authelia
       sys=$(api "$J/System/Configuration" | jq -c .)
       want=$(jq -c '.QuickConnectAvailable = true' <<<"$sys")
       [ "$sys" = "$want" ] || { api -X POST "$J/System/Configuration" -d "$want"; echo "quick connect enabled"; }
 
-      # -- network: the ingress is the trusted proxy, links point at the public name
+      # the ingress is the trusted proxy, links point at the public name
       net=$(api "$J/System/Configuration/network" | jq -c .)
       want=$(jq -c --arg proxy ${ingressIp} --arg url ${publicUrl} \
         '.KnownProxies = [$proxy] | .PublishedServerUriBySubnet = ["all=" + $url]' <<<"$net")
@@ -443,17 +477,7 @@ in {
         restart_needed "network settings"
       fi
 
-      # -- the lldap plugin is retired: its stored bind password is blanked first, an uninstall may leave the file
-      plugins=$(api "$J/Plugins")
-      read -r ldap_id ldap_version <<<"$(plugin_find "$plugins" '^LDAP')"
-      if [ -n "$ldap_id" ]; then
-        api "$J/Plugins/$ldap_id/Configuration" | jq -c '.LdapBindUser = "" | .LdapBindPassword = ""' \
-          | api -X POST "$J/Plugins/$ldap_id/Configuration" -d @-
-        api -X DELETE "$J/Plugins/$ldap_id/$ldap_version"
-        restart_needed "ldap plugin removed"
-      fi
-
-      # -- plugins come from the store alone: no repository, so nothing installs or updates behind this unit
+      # plugins come from the store alone: no repository, so nothing installs or updates behind this unit
       if ! api "$J/Repositories" | jq -e 'length == 0' >/dev/null; then
         api -X POST "$J/Repositories" -d '[]'
         echo "plugin repositories removed"
@@ -467,7 +491,6 @@ in {
         break
       done
 
-      # -- the one restart
       if [ -n "$RESTART_REASONS" ]; then
         echo "restarting jellyfin once: $RESTART_REASONS"
         jellyfin_restart
@@ -484,14 +507,24 @@ in {
     '';
   };
 
-  sops.secrets = lib.genAttrs [ "jellyfin-oidc-secret" "jellyfin-admin-pass" "janitorr-pass" "radarr-key" "sonarr-key" ] (_: { });
+  sops.secrets = lib.genAttrs [ "jellyfin-oidc-secret" "jellyfin-admin-pass" "janitorr-pass" "radarr-key" "sonarr-key" ] (
+    _: { }
+  );
+
+  environment.etc.${janitorrTemplate}.text = janitorrConfig;
 
   systemd.services.janitorr-config = setupUnit {
     description = "Render Janitorr configuration from the API keys";
     after = [ "jellyfin-setup.service" ];
     wants = [ "jellyfin-setup.service" ];
-    before = [ "podman-janitorr.service" "podman-janitorr-stats.service" ];
-    wantedBy = [ "podman-janitorr.service" "podman-janitorr-stats.service" ];
+    before = [
+      "podman-janitorr.service"
+      "podman-janitorr-stats.service"
+    ];
+    wantedBy = [
+      "podman-janitorr.service"
+      "podman-janitorr-stats.service"
+    ];
     path = [ pkgs.coreutils ];
     script = ''
       # token_read checks each value is a token, so none carries a yaml quote or a second line; the secrets are hex
@@ -507,7 +540,7 @@ in {
         (umask 077; printf '%s\n' "$text" > "$2.tmp")
         chown ${uid}:${uid} "$2.tmp"; mv "$2.tmp" "$2"
       }
-      render ${janitorrConfig} ${janitorrDir}/application.yml
+      render ${config.environment.etc.${janitorrTemplate}.source} ${janitorrDir}/application.yml
       render ${statsConfig} ${janitorrDir}/stats.yml
     '';
   };

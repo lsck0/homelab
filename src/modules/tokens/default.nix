@@ -9,7 +9,15 @@
 #
 # Limit: the nas tells clients apart by source address alone. The guarantee holds only while a guest cannot take
 # another's address on the bridge, which Proxmox's per-NIC ip filter (terraform, lib.tf) has to enforce.
-{ config, lib, nasMount, nasMountRo, lab, instance, ... }:
+{
+  config,
+  lib,
+  nasMount,
+  nasMountRo,
+  lab,
+  instance,
+  ...
+}:
 let
   cfg = config.homelab.tokens;
 
@@ -25,7 +33,8 @@ let
   readIds = lib.unique (map (name: producers.${name}) cfg.reads);
   shareOf = id: lib.removePrefix "data/" (lab.tokenShare.pathOf id);
   tokenName = lib.types.enum (lib.attrNames producers);
-in {
+in
+{
   options.homelab.tokens = {
     reads = lib.mkOption {
       type = lib.types.listOf tokenName;
@@ -75,12 +84,15 @@ in {
 
   config = lib.mkIf (touched != [ ]) {
     homelab.nasMounts = lib.mkMerge (
-      lib.optional (mints != [ ])
-        (lib.mapAttrs (_: m: m // { shareMode = lab.tokenShare.mode; }) (nasMount (hostDir ownId) (shareOf ownId)))
+      lib.optional (mints != [ ]) (
+        lib.mapAttrs (_: m: m // { shareMode = lab.tokenShare.mode; }) (nasMount (hostDir ownId) (shareOf ownId))
+      )
       ++ map (id: nasMountRo (hostDir id) (shareOf id)) (lib.remove ownId readIds)
     );
 
-    systemd.tmpfiles.rules = [ "d ${cfg.dir} 0755 root root -" ]
-      ++ map (name: "L+ ${cfg.dir}/${name}.token - - - - ${hostDir producers.${name}}/${name}.token") touched;
+    systemd.tmpfiles.rules = [
+      "d ${cfg.dir} 0755 root root -"
+    ]
+    ++ map (name: "L+ ${cfg.dir}/${name}.token - - - - ${hostDir producers.${name}}/${name}.token") touched;
   };
 }

@@ -7,7 +7,12 @@
 #
 # After the last attempt the probe url decides: down -> "<name> unavailable", exit `unavailable`, the caller keeps its
 # last state; up -> the command's own status. UPSTREAM_{ATTEMPTS,BACKOFF_S,TIMEOUT_S} override the defaults.
-{ lib, pkgs, lab, ... }:
+{
+  lib,
+  pkgs,
+  lab,
+  ...
+}:
 let
   # three retries over about two minutes ride out a blip; a real outage is the next run's
   attempts = 4;
@@ -20,7 +25,10 @@ let
 
   run = pkgs.writeShellApplication {
     name = "upstream";
-    runtimeInputs = [ pkgs.coreutils pkgs.curl ];
+    runtimeInputs = [
+      pkgs.coreutils
+      pkgs.curl
+    ];
     text = ''
       if [ "$#" -lt 1 ]; then
         echo "usage: upstream <name> [command...]" >&2
@@ -67,14 +75,23 @@ let
     '';
   };
   # an image registry's host -> its upstream name
-  registries = lib.mapAttrs' (name: u: lib.nameValuePair u.registry name) (lib.filterAttrs (_: u: u ? registry) lab.upstreams);
+  registries = lib.mapAttrs' (name: u: lib.nameValuePair u.registry name) (
+    lib.filterAttrs (_: u: u ? registry) lab.upstreams
+  );
   dockerHub = "docker.io";
   # docker's reference rule: a first component with a dot or a colon, or localhost, is a registry, else docker hub
-  registryOf = image: let
-    parts = lib.splitString "/" image;
-    first = lib.head parts;
-  in if lib.length parts > 1 && (lib.hasInfix "." first || lib.hasInfix ":" first || first == "localhost") then first else dockerHub;
-in {
+  registryOf =
+    image:
+    let
+      parts = lib.splitString "/" image;
+      first = lib.head parts;
+    in
+    if lib.length parts > 1 && (lib.hasInfix "." first || lib.hasInfix ":" first || first == "localhost") then
+      first
+    else
+      dockerHub;
+in
+{
   # retry and probeTimeoutS: for callers implementing the same contract (instances/core/107-internal-swarm/lib/app-builder.py)
   _module.args.upstream = {
     run = lib.getExe run;

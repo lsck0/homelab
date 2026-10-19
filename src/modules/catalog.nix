@@ -6,11 +6,14 @@
 #
 # Rejected: merging the route sets with `//`. A later app silently replaced an earlier route of the same name, so
 # `wat.internal.grafana` took grafana's authelia route; every collision is a problem instead.
-{ inventory, lib, site, appsCatalog, lab }:
+{
+  inventory,
+  lib,
+  site,
+  appsCatalog,
+  lab,
+}:
 let
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
 
   telemetry = import ./telemetry.nix { inherit lib inventory; };
   service = import ./service.nix { inherit lib; };
@@ -18,11 +21,24 @@ let
   net = import ./net.nix { inherit lib inventory site; };
   inherit (net) domain;
   # internal routes are served by the internal zone's ingress, external ones by the edge
-  ingressIds = { internal = net.zones.internal.ingress; external = net.zones.external.ingress; };
+  ingressIds = {
+    internal = net.zones.internal.ingress;
+    external = net.zones.external.ingress;
+  };
   # swarm's control plane, its gossip, and the vxlan data path of the overlays
-  swarmPorts = { manager = net.ports.swarmManager; gossip = net.ports.swarmGossip; vxlan = net.ports.vxlan; };
+  swarmPorts = {
+    manager = net.ports.swarmManager;
+    gossip = net.ports.swarmGossip;
+    inherit (net.ports) vxlan;
+  };
   # an app publishes a port for each http route by its zone, each l4 route by its protocol, and each exporter
-  groups = [ "external" "internal" "metrics" "tcp" "udp" ];
+  groups = [
+    "external"
+    "internal"
+    "metrics"
+    "tcp"
+    "udp"
+  ];
   # the switches of a service record (`services`): an instance service's own, an app's beside its routes'
   instanceFeatures = service.protectionFeatures ++ service.exemptionFeatures ++ service.telemetryFeatures;
   appFeatures = service.telemetryFeatures ++ service.platformFeatures;
@@ -30,13 +46,10 @@ let
   # `{{homelab.<name>}}` in an app's env or override: lab endpoints an app may not hard-code. Telemetry at the relay
   # on the task's own node; origin-<route> where an app's route lives for its users
   telemetryEndpoints = telemetry.relayEndpoints;
-  originEndpoints = lib.concatMapAttrs (_: a: lib.mapAttrs' (name: r: lib.nameValuePair "origin-${name}" "https://${net.fqdn r.host}") a.routes)
-    appsCatalog.apps;
+  originEndpoints = lib.concatMapAttrs (
+    _: a: lib.mapAttrs' (name: r: lib.nameValuePair "origin-${name}" "https://${net.fqdn r.host}") a.routes
+  ) appsCatalog.apps;
   labEndpoints = telemetryEndpoints // originEndpoints;
-
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
 
   allApps = appsCatalog.apps;
   enabledRaw = lib.filterAttrs (_: a: a.enable) allApps;
@@ -45,41 +58,79 @@ let
   workerIds = lib.filter (id: inventory.${id}.powered) (map toString appsCatalog.swarm.workers);
   nodes = map (id: inventory.${id}.ip) workerIds;
   # a guest's shape as admission reads it (modules/limits allocatableOf)
-  shapeOf = id: { inherit id; inherit (inventory.${id}) ip; inherit (lab.instances.${id}.config.vm) memoryMiB cores cpuLimitCores; };
+  shapeOf = id: {
+    inherit id;
+    inherit (inventory.${id}) ip;
+    inherit (lab.instances.${id}.config.vm) memoryMiB cores cpuLimitCores;
+  };
 
   # every {{...}} of a string: secret refs, swarm templates ({{.Task.Slot}}), lab endpoints ({{homelab.x}})
   placeholdersOf = value: map lib.head (builtins.filter builtins.isList (builtins.split "\\{\\{([^}]*)}}" value));
   isSecretRef = inner: builtins.match "[a-z0-9][a-z0-9-]*" inner != null;
   isSwarmTemplate = inner: lib.hasPrefix "." inner;
-  labRefOf = inner: let m = builtins.match "homelab\\.([a-z0-9-]+)" inner; in if m == null then null else lib.head m;
+  labRefOf =
+    inner:
+    let
+      m = builtins.match "homelab\\.([a-z0-9-]+)" inner;
+    in
+    if m == null then null else lib.head m;
   secretRefs = value: builtins.filter isSecretRef (placeholdersOf value);
   labRefs = value: lib.filter (r: r != null) (map labRefOf (placeholdersOf value));
 
-  resolveLab = value: builtins.replaceStrings
-    (map (n: "{{homelab.${n}}}") (lib.attrNames labEndpoints)) (lib.attrValues labEndpoints) value;
+  resolveLab =
+    value:
+    builtins.replaceStrings (map (n: "{{homelab.${n}}}") (lib.attrNames labEndpoints)) (lib.attrValues labEndpoints) value;
   # every string of a nested value (an override is a compose overlay)
-  strings = value:
-    if builtins.isString value then [ value ]
-    else if builtins.isList value then lib.concatMap strings value
-    else if builtins.isAttrs value then lib.concatMap strings (lib.attrValues value)
-    else [ ];
-  resolveDeep = value:
-    if builtins.isString value then resolveLab value
-    else if builtins.isList value then map resolveDeep value
-    else if builtins.isAttrs value then lib.mapAttrs (_: resolveDeep) value
-    else value;
+  strings =
+    value:
+    if builtins.isString value then
+      [ value ]
+    else if builtins.isList value then
+      lib.concatMap strings value
+    else if builtins.isAttrs value then
+      lib.concatMap strings (lib.attrValues value)
+    else
+      [ ];
+  resolveDeep =
+    value:
+    if builtins.isString value then
+      resolveLab value
+    else if builtins.isList value then
+      map resolveDeep value
+    else if builtins.isAttrs value then
+      lib.mapAttrs (_: resolveDeep) value
+    else
+      value;
   envStrings = a: lib.concatMap lib.attrValues (lib.attrValues a.env);
+  secretFileRefs = a: lib.concatMap lib.attrValues (lib.attrValues a.secretFiles);
 
   # where an app runs: the shared apps swarm, or its own guest, a swarm of one (its placement)
-  clusterOf = a:
-    if a.placement == null then { manager = toString appsCatalog.swarm.manager; inherit nodes; zone = "apps"; }
-    else let id = toString a.placement.vmid; in { manager = id; nodes = [ inventory.${id}.ip ]; inherit (a.placement) zone; };
+  clusterOf =
+    a:
+    if a.placement == null then
+      {
+        manager = toString appsCatalog.swarm.manager;
+        inherit nodes;
+        zone = "apps";
+      }
+    else
+      let
+        id = toString a.placement.vmid;
+      in
+      {
+        manager = id;
+        nodes = [ inventory.${id}.ip ];
+        inherit (a.placement) zone;
+      };
 
-  normalize = a: a // {
-    env = lib.mapAttrs (_: lib.mapAttrs (_: resolveLab)) a.env;
-    override = resolveDeep a.override;
-    cluster = clusterOf a;
-  };
+  normalize =
+    a:
+    a
+    // {
+      env = lib.mapAttrs (_: lib.mapAttrs (_: resolveLab)) a.env;
+      override = resolveDeep a.override;
+      cluster = clusterOf a;
+    };
   apps = lib.mapAttrs (_: normalize) enabledRaw;
 
   # every swarm by name: `shared` (the workers of instances/core/swarm.nix, the apps without placement) and `app-<name>` per
@@ -95,171 +146,287 @@ let
       zone = "apps";
       apps = lib.filterAttrs (_: a: a.placement == null) apps;
     };
-  } // lib.mapAttrs' (app: a: let id = toString a.placement.vmid; in lib.nameValuePair "app-${app}" {
-    managerId = id;
-    stateId = id;
-    wakers = wakersOf id;
-    workerIds = [ id ];
-    inherit (a.cluster) nodes zone;
-    apps.${app} = a;
-  }) (lib.filterAttrs (_: a: a.placement != null) apps);
-  admissionOf = c: limits.clusterOf {
-    inherit (c) apps;
-    workers = lib.genAttrs c.workerIds shapeOf;
-    inherit (appsCatalog.swarm) taskDefaults;
-  };
+  }
+  // lib.mapAttrs' (
+    app: a:
+    let
+      id = toString a.placement.vmid;
+    in
+    lib.nameValuePair "app-${app}" {
+      managerId = id;
+      stateId = id;
+      wakers = wakersOf id;
+      workerIds = [ id ];
+      inherit (a.cluster) nodes zone;
+      apps.${app} = a;
+    }
+  ) (lib.filterAttrs (_: a: a.placement != null) apps);
+  admissionOf =
+    c:
+    limits.clusterOf {
+      inherit (c) apps;
+      workers = lib.genAttrs c.workerIds shapeOf;
+      inherit (appsCatalog.swarm) taskDefaults;
+    };
 
   # an onion route's address, null until secrets-sync.nu generated its key
   onionAddressOf = name: r: if r.onion then lab.onions.${service.onionKeyOf name} or null else null;
   # route name -> { name; owner; route; } for every route of the lab, so a collision can name both owners; an
   # instance service's route is its own exposure, an app's route runs on the app's cluster
-  routeEntries = lib.mapAttrsToList (name: r: {
-    inherit name;
-    owner = "vm-${toString r.vmid}";
-    route = r // { app = null; nodes = [ ]; onionAddress = onionAddressOf name r; };
-  }) lab.routes
-  ++ lib.concatLists (lib.mapAttrsToList (app: a: lib.mapAttrsToList (name: r: {
-    inherit name;
-    owner = "apps.${app}";
-    route = r // { vmid = null; inherit app; inherit (a.cluster) nodes; onionAddress = onionAddressOf name r; };
-  }) a.routes) apps);
-  routesOf = zone: lib.listToAttrs (map (e: lib.nameValuePair e.name e.route)
-    (lib.filter (e: e.route.protocol == "http" && e.route.zone == zone) routeEntries));
+  routeEntries =
+    lib.mapAttrsToList (name: r: {
+      inherit name;
+      owner = "vm-${toString r.vmid}";
+      route = r // {
+        app = null;
+        nodes = [ ];
+        onionAddress = onionAddressOf name r;
+      };
+    }) lab.routes
+    ++ lib.concatLists (
+      lib.mapAttrsToList (
+        app: a:
+        lib.mapAttrsToList (name: r: {
+          inherit name;
+          owner = "apps.${app}";
+          route = r // {
+            vmid = null;
+            inherit app;
+            inherit (a.cluster) nodes;
+            onionAddress = onionAddressOf name r;
+          };
+        }) a.routes
+      ) apps
+    );
+  routesOf =
+    zone:
+    lib.listToAttrs (
+      map (e: lib.nameValuePair e.name e.route) (
+        lib.filter (e: e.route.protocol == "http" && e.route.zone == zone) routeEntries
+      )
+    );
   l4Entries = lib.filter (e: e.route.protocol != "http") routeEntries;
   # what authelia guards: every http route with sso on or ssoPaths, either ingress, and every oidc client
-  ssoNames = map (e: e.name) (lib.filter (e: e.route.protocol == "http" && (lib.elem "sso" e.route.on || e.route.ssoPaths != [ ])) routeEntries)
+  ssoNames =
+    map (e: e.name) (
+      lib.filter (e: e.route.protocol == "http" && (lib.elem "sso" e.route.on || e.route.ssoPaths != [ ])) routeEntries
+    )
     ++ map (c: c.id) lab.oidc;
 
   # every published port of every enabled app as { port; owner; where; group; guarded; }: an http route's guarded where
   # it takes the guard, an exporter's always (vm-103 alone scrapes it)
-  uses = lib.concatLists (lib.mapAttrsToList (app: a:
-    lib.mapAttrsToList (key: p: {
-      inherit (p) port;
-      group = if p.protocol == "http" then p.zone else p.protocol;
-      owner = "${app}/${p.service}:${toString p.targetPort}";
-      where = "apps.${app}.routes.${key}";
-      guarded = p.protocol == "http" && lib.elem "guard" p.on;
-    }) a.routes
-    ++ lib.mapAttrsToList (key: p: {
-      inherit (p) port;
-      group = "metrics";
-      owner = "${app}/${p.service}:${toString p.targetPort}";
-      where = "apps.${app}.metrics.${key}";
-      guarded = true;
-    }) a.metrics
-  ) apps);
+  uses = lib.concatLists (
+    lib.mapAttrsToList (
+      app: a:
+      lib.mapAttrsToList (key: p: {
+        inherit (p) port;
+        group = if p.protocol == "http" then p.zone else p.protocol;
+        owner = "${app}/${p.service}:${toString p.targetPort}";
+        where = "apps.${app}.routes.${key}";
+        guarded = p.protocol == "http" && lib.elem "guard" p.on;
+      }) a.routes
+      ++ lib.mapAttrsToList (key: p: {
+        inherit (p) port;
+        group = "metrics";
+        owner = "${app}/${p.service}:${toString p.targetPort}";
+        where = "apps.${app}.metrics.${key}";
+        guarded = true;
+      }) a.metrics
+    ) apps
+  );
   portsOf = group: uses: lib.unique (map (u: u.port) (lib.filter (u: u.group == group) uses));
 
   # a metrics endpoint served by a container port that a public path also routes to is public unless denied
-  metricsBlocks = lib.concatLists (lib.mapAttrsToList (app: a: lib.concatMap (m:
-    map (r: { inherit app; inherit (r) host; inherit (m) path; })
-      (lib.filter (r: r.protocol == "http" && r.zone == "external" && r.service == m.service && r.targetPort == m.targetPort) (lib.attrValues a.routes))
-  ) (lib.attrValues a.metrics)) apps);
-
-  # -----------------------------------------------------------------------------
-  # PROBLEMS
-  # -----------------------------------------------------------------------------
+  metricsBlocks = lib.concatLists (
+    lib.mapAttrsToList (
+      app: a:
+      lib.concatMap (
+        m:
+        map
+          (r: {
+            inherit app;
+            inherit (r) host;
+            inherit (m) path;
+          })
+          (
+            lib.filter (r: r.protocol == "http" && r.zone == "external" && r.service == m.service && r.targetPort == m.targetPort) (
+              lib.attrValues a.routes
+            )
+          )
+      ) (lib.attrValues a.metrics)
+    ) apps
+  );
 
   inherit (appsCatalog.swarm) portRange taskMax;
   inRange = port: port >= portRange.first && port <= portRange.last;
 
-  duplicatesBy = key: what: entries: lib.concatLists (lib.mapAttrsToList (k: es:
-    lib.optional (lib.length (lib.unique (map (e: e.owner) es)) > 1)
-      "${what} ${k} is claimed by ${lib.concatMapStringsSep " and " (e: e.owner) es}"
-  ) (lib.groupBy key entries));
+  duplicatesBy =
+    key: what: entries:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        k: es:
+        lib.optional (lib.length (lib.unique (map (e: e.owner) es)) > 1)
+          "${what} ${k} is claimed by ${lib.concatMapStringsSep " and " (e: e.owner) es}"
+      ) (lib.groupBy key entries)
+    );
 
   # an ssoPath needs the internal ingress, which has authelia, a route that is public otherwise, and a prefix of its own
   under = path: prefix: path == "/" || prefix == path || lib.hasPrefix "${path}/" prefix;
-  ssoPathProblems = lib.concatMap (e: let r = e.route; where = "${e.owner} route ${e.name}"; in
-    lib.optional (r.protocol != "http" || r.zone != "internal")
-      "${where}: ssoPaths need the internal ingress, the dmz reaches no authelia"
+  ssoPathProblems = lib.concatMap (
+    e:
+    let
+      r = e.route;
+      where = "${e.owner} route ${e.name}";
+    in
+    lib.optional (
+      r.protocol != "http" || r.zone != "internal"
+    ) "${where}: ssoPaths need the internal ingress, the dmz reaches no authelia"
     ++ lib.optional (lib.elem "sso" r.on) "${where}: ssoPaths on a route behind sso already: remove them"
-    ++ map (p: "${where}: ssoPaths ${p} lies outside the route's path ${r.path}, which never serves it") (lib.filter (p: !(under r.path p)) r.ssoPaths)
+    ++ map (p: "${where}: ssoPaths ${p} lies outside the route's path ${r.path}, which never serves it") (
+      lib.filter (p: !(under r.path p)) r.ssoPaths
+    )
   ) (lib.filter (e: e.route.ssoPaths != [ ]) routeEntries);
 
   # a host belongs to one owner, an instance or an app, whose routes split it by path
-  hostOwners = map (e: { inherit (e) name owner; inherit (e.route) host; }) routeEntries;
+  hostOwners = map (e: {
+    inherit (e) name owner;
+    inherit (e.route) host;
+  }) routeEntries;
   # the split horizon names a host at one ingress
-  zoneProblems = lib.concatLists (lib.mapAttrsToList (host: es:
-    lib.optional (lib.length (lib.unique (map (e: e.route.zone) es)) > 1) "host ${host}.${domain} is routed by both ingresses"
-  ) (lib.groupBy (e: e.route.host) (lib.filter (e: e.route.protocol == "http") routeEntries)));
-  hostProblems = lib.concatLists (lib.mapAttrsToList (host: es: let owners = lib.unique (map (e: e.owner) es); in
-    lib.optional (lib.length owners > 1) "host ${host}.${domain} is claimed by ${lib.concatStringsSep " and " owners}"
-  ) (lib.groupBy (e: e.host) hostOwners));
+  zoneProblems = lib.concatLists (
+    lib.mapAttrsToList (
+      host: es:
+      lib.optional (
+        lib.length (lib.unique (map (e: e.route.zone) es)) > 1
+      ) "host ${host}.${domain} is routed by both ingresses"
+    ) (lib.groupBy (e: e.route.host) (lib.filter (e: e.route.protocol == "http") routeEntries))
+  );
+  hostProblems = lib.concatLists (
+    lib.mapAttrsToList (
+      host: es:
+      let
+        owners = lib.unique (map (e: e.owner) es);
+      in
+      lib.optional (lib.length owners > 1) "host ${host}.${domain} is claimed by ${lib.concatStringsSep " and " owners}"
+    ) (lib.groupBy (e: e.host) hostOwners)
+  );
 
   # a wildcard host, `*.mc`, answers every name one label below it. The ingress certificate covers one level and the
   # ingress routes by exact host, so such a host is reached by a forwarded port alone, and the names below it are its
   # own: no other route may take one, and no srv may point a client somewhere else.
   parentOf = host: lib.concatStringsSep "." (lib.tail (lib.splitString "." host));
   wildcardEntries = lib.filter (e: service.wildcardHost e.route.host) routeEntries;
-  coveredProblems = lib.concatMap (w: map (e:
-    "${e.owner} route ${e.name}: host ${e.route.host}.${domain} lies under ${w.owner} route ${w.name}'s ${w.route.host}.${domain}, which answers it; rename one"
-  ) (lib.filter (e: !(service.wildcardHost e.route.host) && "*.${parentOf e.route.host}" == w.route.host) routeEntries)) wildcardEntries;
+  coveredProblems = lib.concatMap (
+    w:
+    map (
+      e:
+      "${e.owner} route ${e.name}: host ${e.route.host}.${domain} lies under ${w.owner} route ${w.name}'s ${w.route.host}.${domain}, which answers it; rename one"
+    ) (lib.filter (e: !(service.wildcardHost e.route.host) && "*.${parentOf e.route.host}" == w.route.host) routeEntries)
+  ) wildcardEntries;
 
-  portProblems = lib.concatLists (lib.mapAttrsToList (port: claims:
-    lib.optional (lib.length (lib.unique (map (c: c.owner) claims)) > 1)
-      "port ${port} is published for ${lib.concatMapStringsSep " and " (c: "${c.owner} (${c.where})") claims}"
-  ) (lib.groupBy (u: toString u.port) uses))
-  ++ map (u: "${u.where}.port ${toString u.port} is outside swarm.portRange ${toString portRange.first}-${toString portRange.last}")
-    (lib.filter (u: !inRange u.port) uses)
-  ++ lib.optional (inRange appsCatalog.cadvisorPort)
-    "cadvisorPort ${toString appsCatalog.cadvisorPort} lies inside swarm.portRange, where an app may publish it"
-  ++ lib.optional (lib.any (p: inRange p) (lib.attrValues swarmPorts))
-    "swarm.portRange ${toString portRange.first}-${toString portRange.last} holds a port of swarm itself (${toString (lib.attrValues swarmPorts)})";
+  portProblems =
+    lib.concatLists (
+      lib.mapAttrsToList (
+        port: claims:
+        lib.optional (lib.length (lib.unique (map (c: c.owner) claims)) > 1)
+          "port ${port} is published for ${lib.concatMapStringsSep " and " (c: "${c.owner} (${c.where})") claims}"
+      ) (lib.groupBy (u: toString u.port) uses)
+    )
+    ++ map (
+      u:
+      "${u.where}.port ${toString u.port} is outside swarm.portRange ${toString portRange.first}-${toString portRange.last}"
+    ) (lib.filter (u: !inRange u.port) uses)
+    ++ lib.optional (inRange appsCatalog.cadvisorPort) "cadvisorPort ${toString appsCatalog.cadvisorPort} lies inside swarm.portRange, where an app may publish it"
+    ++ lib.optional (lib.any inRange (lib.attrValues swarmPorts)) "swarm.portRange ${toString portRange.first}-${toString portRange.last} holds a port of swarm itself (${toString (lib.attrValues swarmPorts)})";
 
-  appProblems = app: a: let
-    where = "apps.${app}";
-    envServices = lib.attrNames a.env;
-    refs = lib.unique (lib.concatMap secretRefs (envStrings a));
-    unknownPlaceholders = lib.unique (lib.filter (inner: !(isSecretRef inner || isSwarmTemplate inner || labRefOf inner != null))
-      (lib.concatMap placeholdersOf (envStrings a ++ strings a.override)));
-    lab = lib.unique (lib.concatMap labRefs (envStrings a ++ strings a.override));
-    published = lib.unique (map (p: p.service) (lib.attrValues a.routes ++ lib.attrValues a.metrics));
-  in
-    lib.optional (builtins.match "[a-z][a-z0-9-]*" app == null) "${where}: an app name is [a-z][a-z0-9-]*, it names a stack and its routes"
-    ++ map (s: "${where}.env names the secret {{${s}}}, which `secrets` does not generate: add `secrets.${s}`")
-      (lib.subtractLists (lib.attrNames a.secrets) refs)
-    ++ map (s: "${where}.secrets.${s} is named by no env value: remove it, or reference it as {{${s}}}")
-      (lib.subtractLists refs (lib.attrNames a.secrets))
-    ++ map (p: "${where}: {{${p}}} is neither a secret ({{name}}), a swarm template ({{.Task.Slot}}) nor a lab endpoint ({{homelab.${lib.concatStringsSep "|" (lib.attrNames labEndpoints)}}})")
-      unknownPlaceholders
-    ++ map (n: "${where}: {{homelab.${n}}} is no lab endpoint; known: ${lib.concatStringsSep ", " (lib.attrNames labEndpoints)}")
-      (lib.subtractLists (lib.attrNames labEndpoints) lab)
-    ++ lib.optional (lib.intersectLists (lib.attrNames telemetryEndpoints) lab != [ ] && !(telemetry.sendsSignals a))
-      "${where} names {{homelab.*}} telemetry endpoints without traces or profiles in `on`: the workers would drop its traffic"
+  appProblems =
+    app: a:
+    let
+      where = "apps.${app}";
+      envServices = lib.attrNames a.env;
+      refs = lib.unique (lib.concatMap secretRefs (envStrings a) ++ secretFileRefs a);
+      unknownPlaceholders = lib.unique (
+        lib.filter (inner: !(isSecretRef inner || isSwarmTemplate inner || labRefOf inner != null)) (
+          lib.concatMap placeholdersOf (envStrings a ++ strings a.override)
+        )
+      );
+      lab = lib.unique (lib.concatMap labRefs (envStrings a ++ strings a.override));
+      published = lib.unique (map (p: p.service) (lib.attrValues a.routes ++ lib.attrValues a.metrics));
+    in
+    lib.optional (
+      builtins.match "[a-z][a-z0-9-]*" app == null
+    ) "${where}: an app name is [a-z][a-z0-9-]*, it names a stack and its routes"
+    ++ map (s: "${where} names the secret ${s}, which `secrets` does not generate: add `secrets.${s}`") (
+      lib.subtractLists (lib.attrNames a.secrets) refs
+    )
+    ++ map (s: "${where}.secrets.${s} is named by no env value or secret file: remove it, or reference it as {{${s}}}") (
+      lib.subtractLists refs (lib.attrNames a.secrets)
+    )
+    ++ map (
+      p:
+      "${where}: {{${p}}} is neither a secret ({{name}}), a swarm template ({{.Task.Slot}}) nor a lab endpoint ({{homelab.${lib.concatStringsSep "|" (lib.attrNames labEndpoints)}}})"
+    ) unknownPlaceholders
+    ++ map (
+      n: "${where}: {{homelab.${n}}} is no lab endpoint; known: ${lib.concatStringsSep ", " (lib.attrNames labEndpoints)}"
+    ) (lib.subtractLists (lib.attrNames labEndpoints) lab)
+    ++
+      lib.optional (lib.intersectLists (lib.attrNames telemetryEndpoints) lab != [ ] && !(telemetry.sendsSignals a))
+        "${where} names {{homelab.*}} telemetry endpoints without traces or profiles in `on`: the workers would drop its traffic"
     ++ lib.concatLists (lib.mapAttrsToList (name: service.featureProblemsOf "${where}.routes.${name}") a.routes)
-    ++ map (d: "${where}.dumps.${d}.service ${a.dumps.${d}.service} is not stateful: a dump runs on the state worker only")
-      (lib.filter (d: !(lib.elem a.dumps.${d}.service a.stateful)) (lib.attrNames a.dumps))
-    ++ map (s: "${where}.exclude drops ${s}, which the catalog still uses (stateful, published, env or resources)")
-      (lib.intersectLists a.exclude (a.stateful ++ published ++ envServices ++ lib.attrNames a.resources))
-    ++ lib.optional (a.idle.stopAfter == null && lib.elem "scaleToZero" a.on)
-      "${where}: scaleToZero with idle.stopAfter null never sleeps: drop one"
-    ++ lib.optional (a.idle.stopAfter != null && !(lib.elem "scaleToZero" a.on))
-      "${where}.idle.stopAfter ${a.idle.stopAfter} stops it without scaleToZero in `on`: add it"
-    ++ lib.optional (a.enable && a.routes == { } && a.metrics == { })
-      "${where} publishes nothing: give it `routes` or `metrics`, or disable it"
-    ++ lib.concatLists (lib.mapAttrsToList (service: r: map (limit:
-      "${where}.resources.${service}.${limit} ${toString r.${limit}} is above swarm.taskMax.${limit} ${toString taskMax.${limit}}: a worker cannot hold it"
-    ) (lib.filter (limit: r.${limit} > taskMax.${limit}) (lib.attrNames taskMax))) a.resources);
+    ++ map (
+      d: "${where}.dumps.${d}.service ${a.dumps.${d}.service} is not stateful: a dump runs on the state worker only"
+    ) (lib.filter (d: !(lib.elem a.dumps.${d}.service a.stateful)) (lib.attrNames a.dumps))
+    ++ map (s: "${where}.exclude drops ${s}, which the catalog still uses (stateful, published, env or resources)") (
+      lib.intersectLists a.exclude (a.stateful ++ published ++ envServices ++ lib.attrNames a.resources)
+    )
+    ++ lib.optional (
+      a.idle.stopAfter == null && lib.elem "scaleToZero" a.on
+    ) "${where}: scaleToZero with idle.stopAfter null never sleeps: drop one"
+    ++ lib.optional (
+      a.idle.stopAfter != null && !(lib.elem "scaleToZero" a.on)
+    ) "${where}.idle.stopAfter ${a.idle.stopAfter} stops it without scaleToZero in `on`: add it"
+    ++ lib.optional (
+      a.enable && a.routes == { } && a.metrics == { }
+    ) "${where} publishes nothing: give it `routes` or `metrics`, or disable it"
+    ++ lib.concatLists (
+      lib.mapAttrsToList (
+        service: r:
+        map (
+          limit:
+          "${where}.resources.${service}.${limit} ${toString r.${limit}} is above swarm.taskMax.${limit} ${toString taskMax.${limit}}: a worker cannot hold it"
+        ) (lib.filter (limit: r.${limit} > taskMax.${limit}) (lib.attrNames taskMax))
+      ) a.resources
+    );
   # every deployment's telemetry and protection switches, by service key: an instance service (vmid) or an app
-  services = lib.mapAttrs (name: r: {
-    key = name;
-    inherit (r) vmid zone;
-    app = null;
-    routes = [ name ];
-    on = service.enabledOf instanceFeatures r.on;
-    inherit (lab.instances.${toString r.vmid}.config) idle;
-    inherit (lab.instances.${toString r.vmid}.config.services.${name}) metrics;
-  }) lab.routes // lib.mapAttrs (app: a: {
-    key = app;
-    vmid = null;
-    inherit app;
-    inherit (a) metrics idle cluster;
-    routes = lib.attrNames a.routes;
-    on = service.enabledOf appFeatures a.on;
-  }) apps;
-in {
-  inherit apps nodes domain metricsBlocks services secretRefs;
+  services =
+    lib.mapAttrs (name: r: {
+      key = name;
+      inherit (r) vmid zone;
+      app = null;
+      routes = [ name ];
+      on = service.enabledOf instanceFeatures r.on;
+      inherit (lab.instances.${toString r.vmid}.config) idle;
+      inherit (lab.instances.${toString r.vmid}.config.services.${name}) metrics;
+    }) lab.routes
+    // lib.mapAttrs (app: a: {
+      key = app;
+      vmid = null;
+      inherit app;
+      inherit (a) metrics idle cluster;
+      routes = lib.attrNames a.routes;
+      on = service.enabledOf appFeatures a.on;
+    }) apps;
+in
+{
+  inherit
+    apps
+    nodes
+    domain
+    metricsBlocks
+    services
+    secretRefs
+    secretFileRefs
+    ;
   # admission: limits.clusterOf over the cluster's workers
   clusters = lib.mapAttrs (_: c: c // { admission = admissionOf c; }) clusters;
   manager = inventory.${toString appsCatalog.swarm.manager};
@@ -294,41 +461,87 @@ in {
     groups = lib.genAttrs ssoNames (name: "app-${name}");
   };
   l4 = lib.listToAttrs (map (e: lib.nameValuePair e.name e.route) l4Entries);
-  forwarded = lib.listToAttrs (map (e: lib.nameValuePair e.name e.route) (lib.filter (e: e.route.publicPort != null) l4Entries));
+  forwarded = lib.listToAttrs (
+    map (e: lib.nameValuePair e.name e.route) (lib.filter (e: e.route.publicPort != null) l4Entries)
+  );
 
-  problems = duplicatesBy (e: e.name) "route name" routeEntries
-    ++ map (e: "${e.owner} route ${e.name}: an srv record points at the house's publicPort, which the route lacks")
-      (lib.filter (e: e.route.srv != null && e.route.publicPort == null) l4Entries)
-    ++ map (e: "${e.owner} route ${e.name}: an http route goes through its zone's ingress, publicPort is for tcp and udp")
-      (lib.filter (e: e.route.protocol == "http" && e.route.publicPort != null) routeEntries)
+  problems =
+    duplicatesBy (e: e.name) "route name" routeEntries
+    ++ map (e: "${e.owner} route ${e.name}: an srv record points at the house's publicPort, which the route lacks") (
+      lib.filter (e: e.route.srv != null && e.route.publicPort == null) l4Entries
+    )
+    ++ map (e: "${e.owner} route ${e.name}: an http route goes through its zone's ingress, publicPort is for tcp and udp") (
+      lib.filter (e: e.route.protocol == "http" && e.route.publicPort != null) routeEntries
+    )
     # authelia's session is bound to the lab's domain, which an onion origin never carries
-    ++ map (e: "${e.owner} route ${e.name}: onion serves a public http route of the edge only")
-      (lib.filter (e: e.route.onion && (e.route.protocol != "http" || e.route.zone != "external")) routeEntries)
+    ++ map (e: "${e.owner} route ${e.name}: onion serves a public http route of the edge only") (
+      lib.filter (e: e.route.onion && (e.route.protocol != "http" || e.route.zone != "external")) routeEntries
+    )
     # an idle deployment sleeps until an ingress's wake proxy sees a connection; the router forwards past it
-    ++ map (e: "${e.owner} route ${e.name}: a ${e.route.protocol} route goes from the router straight to its backend, which no wake proxy sees; its deployment cannot idle${lib.optionalString (e.route.app != null) ": keep it up without scaleToZero"}")
-      (lib.filter (e: if e.route.app != null then apps.${e.route.app}.idle.stopAfter != null
-        else inventory.${toString e.route.vmid}.idle != null) l4Entries)
+    ++
+      map
+        (
+          e:
+          "${e.owner} route ${e.name}: a ${e.route.protocol} route goes from the router straight to its backend, which no wake proxy sees; its deployment cannot idle${
+            lib.optionalString (e.route.app != null) ": keep it up without scaleToZero"
+          }"
+        )
+        (
+          lib.filter (
+            e:
+            if e.route.app != null then
+              apps.${e.route.app}.idle.stopAfter != null
+            else
+              inventory.${toString e.route.vmid}.idle != null
+          ) l4Entries
+        )
     # the house's public address: https for the ingresses, wireguard for the owner's devices, every l4 route once
-    ++ duplicatesBy (e: "${e.route.protocol}/${toString e.route.publicPort}") "public port"
-      (lib.filter (e: e.route.publicPort != null) l4Entries ++ [
-        { name = "https"; owner = "the edge"; route = { protocol = "tcp"; publicPort = net.ports.https; }; }
-        { name = "wireguard"; owner = "the router"; route = { protocol = "udp"; publicPort = net.ports.wireguard; }; }
-      ])
-    ++ map (app: "apps.${app}: the name is an instance service's too; a service key names one deployment")
-      (lib.intersectLists (lib.attrNames appsCatalog.apps) (lib.attrNames lab.routes))
+    ++ duplicatesBy (e: "${e.route.protocol}/${toString e.route.publicPort}") "public port" (
+      lib.filter (e: e.route.publicPort != null) l4Entries
+      ++ [
+        {
+          name = "https";
+          owner = "the edge";
+          route = {
+            protocol = "tcp";
+            publicPort = net.ports.https;
+          };
+        }
+        {
+          name = "wireguard";
+          owner = "the router";
+          route = {
+            protocol = "udp";
+            publicPort = net.ports.wireguard;
+          };
+        }
+      ]
+    )
+    ++ map (app: "apps.${app}: the name is an instance service's too; a service key names one deployment") (
+      lib.intersectLists (lib.attrNames appsCatalog.apps) (lib.attrNames lab.routes)
+    )
     ++ hostProblems
     ++ zoneProblems
-    ++ map (e: "${e.owner} route ${e.name}: host ${e.route.host} goes through its zone's ingress, which holds a certificate for one level and routes by exact host; a dotted or wildcard host serves tcp or udp")
-      (lib.filter (e: e.route.protocol == "http" && lib.hasInfix "." e.route.host) routeEntries)
-    ++ map (e: "${e.owner} route ${e.name}: host ${e.route.host} is reached by the house's forwarded port alone, which the route lacks: set publicPort")
-      (lib.filter (e: service.wildcardHost e.route.host && e.route.publicPort == null) routeEntries)
-    ++ map (e: "${e.owner} route ${e.name}: an srv record names one host, which ${e.route.host} is not; drop srv")
-      (lib.filter (e: service.wildcardHost e.route.host && e.route.srv != null) routeEntries)
+    ++ map (
+      e:
+      "${e.owner} route ${e.name}: host ${e.route.host} goes through its zone's ingress, which holds a certificate for one level and routes by exact host; a dotted or wildcard host serves tcp or udp"
+    ) (lib.filter (e: e.route.protocol == "http" && lib.hasInfix "." e.route.host) routeEntries)
+    ++ map (
+      e:
+      "${e.owner} route ${e.name}: host ${e.route.host} is reached by the house's forwarded port alone, which the route lacks: set publicPort"
+    ) (lib.filter (e: service.wildcardHost e.route.host && e.route.publicPort == null) routeEntries)
+    ++ map (e: "${e.owner} route ${e.name}: an srv record names one host, which ${e.route.host} is not; drop srv") (
+      lib.filter (e: service.wildcardHost e.route.host && e.route.srv != null) routeEntries
+    )
     ++ coveredProblems
     ++ ssoPathProblems
-    ++ lib.concatLists (lib.mapAttrsToList (name: r: service.featureProblemsOf "vm-${toString r.vmid} route ${name}" r) lab.routes)
+    ++ lib.concatLists (
+      lib.mapAttrsToList (name: r: service.featureProblemsOf "vm-${toString r.vmid} route ${name}" r) lab.routes
+    )
     ++ portProblems
     ++ lib.concatLists (lib.mapAttrsToList appProblems allApps)
     ++ lib.concatLists (lib.mapAttrsToList (name: c: map (p: "swarm ${name}: ${p}") (admissionOf c).problems) clusters)
-    ++ lib.optional (appsCatalog.swarm.portRange.first > appsCatalog.swarm.portRange.last) "swarm.portRange: first is above last";
+    ++ lib.optional (
+      appsCatalog.swarm.portRange.first > appsCatalog.swarm.portRange.last
+    ) "swarm.portRange: first is above last";
 }

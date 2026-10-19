@@ -1,15 +1,22 @@
 # Minecraft servers; mc-gate sleeps and wakes one of them per real player login
-{ config, profiles, ... }: {
+{ config, profiles, ... }:
+{
   vm = {
     bootPhase = "public";
-    needs = [ "containers" "nfs" ];
-    # no ballooning: the jvm's growing heap (main.nix heapSize) in a ballooned-down guest gets oom-killed. 8 GiB keeps
-    # the host under pve's 80% autoballoon line with the rest running (10 GiB squeezed every other guest to its floor)
+    needs = [
+      "containers"
+      "nfs"
+    ];
+    # 8 GiB keeps the host under pve's 80% autoballoon line with the rest running (10 GiB squeezed every other guest
+    # to its floor). The floor is what makes every guest's fit the node (tests/policy/guests.nix): squeezed to it, the
+    # live heap (~2.6 GiB) and the off-heap stay in memory and the cold pages go to zram (main.nix), slow but alive
     memoryMiB = 8192;
-    balloonMiB = 8192;
+    balloonMiB = 4864;
     # the tick is one thread, but chunk generation, distant horizons and g1 run beside it: 6 ran at load 6.7 with
     # 20 s stalls exploring; the host has 12 threads, most guests idle, and this one wins when they are not
     cores = 10;
+    # a world generating flat out still leaves the host 4 of its 12 threads
+    cpuLimitCores = 8;
     cpuUnits = 200;
     diskGiB = 16;
   };
@@ -23,25 +30,32 @@
     port = 25565;
     publicPort = config.services.minecraft.port;
     # the router caps and logs its forward; a game server, no page
-    on = [ "inflightLimit" "accessLog" "probe" ] ++ profiles.observed;
+    on = [
+      "inflightLimit"
+      "accessLog"
+      "probe"
+    ]
+    ++ profiles.observed;
   };
 
-  alerts = let
-    # one failed start is a slow first download or a pack being swapped; the comparison is strict, so the second
-    # failure within an hour crosses this and is the pack, the world or the disk
-    startFailuresHourly = 1;
-  in {
-    minecraft_start_failed = {
-      title = "Minecraft server did not start";
-      category = "service";
-      # mc-gate counts a start it issued that never came up: systemd refused it, the unit failed, or it timed out
-      expr = "max by (server) (increase(homelab_mc_start_failures_total[1h]))";
-      threshold = startFailuresHourly;
-      for = "0m";
-      summary = "{{ $labels.server }} did not start: {{ $values.A.Value | printf \"%.0f\" }} failures in the last hour";
-      description = "Players wake the server by joining and it never comes up. `mc-state` and `journalctl -u minecraft-{{ $labels.server }} -u mc-gate` on vm-214; a pack that was just changed downloads on its first start and may simply be slow.";
+  alerts =
+    let
+      # one failed start is a slow first download or a pack being swapped; the comparison is strict, so the second
+      # failure within an hour crosses this and is the pack, the world or the disk
+      startFailuresHourly = 1;
+    in
+    {
+      minecraft_start_failed = {
+        title = "Minecraft server did not start";
+        category = "service";
+        # mc-gate counts a start it issued that never came up: systemd refused it, the unit failed, or it timed out
+        expr = "max by (server) (increase(homelab_mc_start_failures_total[1h]))";
+        threshold = startFailuresHourly;
+        for = "0m";
+        summary = "{{ $labels.server }} did not start: {{ $values.A.Value | printf \"%.0f\" }} failures in the last hour";
+        description = "Players wake the server by joining and it never comes up. `mc-state` and `journalctl -u minecraft-{{ $labels.server }} -u mc-gate` on vm-214; a pack that was just changed downloads on its first start and may simply be slow.";
+      };
     };
-  };
 
   shares = {
     "data/minecraft" = { };

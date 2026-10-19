@@ -3,6 +3,7 @@ workers' generic resources, the app's reservation, placement over the workers, c
 
 Usage: render_limits_test.py <path to swarm-render.py>
 """
+
 import importlib.util
 import sys
 import unittest
@@ -16,10 +17,6 @@ spec = importlib.util.spec_from_file_location("swarm_render", sys.argv.pop(1))
 render_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(render_module)
 
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
-
 APP = "demo"
 REGISTRY = "registry.lsck0.dev"
 OWN = f"{REGISTRY}/{APP}/web@sha256:" + "a" * 64
@@ -29,18 +26,30 @@ PER_NODE = 2
 SERVICES_MAX = 4
 
 
-# -----------------------------------------------------------------------------
-# INTERNAL
-# -----------------------------------------------------------------------------
-
 def catalog_of(memory=1024, cpu=500, resources=None, stateful=(), exclude=(), override=None):
-    app = {"exclude": list(exclude), "stateful": list(stateful), "volumes": {"data": {"backup": False}},
-           "override": override or {}, "images": [],
-           "published": [{"service": "web", "targetPort": 8000, "port": 20100, "protocol": "tcp"}],
-           "resources": resources or {}, "reservation": {"memoryMiB": memory, "cpuMillis": cpu}}
-    return {"registry": REGISTRY, "replicasMax": 5, "replicasPerNodeMax": PER_NODE, "servicesMax": SERVICES_MAX,
-            "taskDefaults": TASK_DEFAULTS, "genericResources": GENERIC, "replicasLabel": "homelab.replicas",
-            "stackBytesMax": 1024 * 1024, "apps": {APP: app}}
+    app = {
+        "exclude": list(exclude),
+        "stateful": list(stateful),
+        "volumes": {"data": {"backup": False}},
+        "override": override or {},
+        "images": [],
+        "published": [{"service": "web", "targetPort": 8000, "port": 20100, "protocol": "tcp"}],
+        "resources": resources or {},
+        "reservation": {"memoryMiB": memory, "cpuMillis": cpu},
+        "envRequired": [],
+        "secretFiles": {},
+    }
+    return {
+        "registry": REGISTRY,
+        "replicasMax": 5,
+        "replicasPerNodeMax": PER_NODE,
+        "servicesMax": SERVICES_MAX,
+        "taskDefaults": TASK_DEFAULTS,
+        "genericResources": GENERIC,
+        "replicasLabel": "homelab.replicas",
+        "stackBytesMax": 1024 * 1024,
+        "apps": {APP: app},
+    }
 
 
 def stack_of(**services):
@@ -64,18 +73,25 @@ def refusal(case, stack, catalog, env=None):
     return err.getvalue()
 
 
-# -----------------------------------------------------------------------------
-# TESTS
-# -----------------------------------------------------------------------------
-
 class Reservations(unittest.TestCase):
     def test_memory_is_reserved_at_its_limit_and_cpu_at_its_reservation(self):
-        out = render(stack_of(), catalog_of(resources={"web": {"memoryMiB": 768, "cpus": 2.0, "pids": 64, "cpuMillis": 250}}))
-        self.assertEqual(out["services"]["web"]["deploy"]["resources"], {
-            "limits": {"memory": "768M", "cpus": "2.0", "pids": 64},
-            "reservations": {"memory": "768M", "cpus": "0.25", "generic_resources": [
-                {"discrete_resource_spec": {"kind": "HOMELAB_MEMORY_MIB", "value": 768}},
-                {"discrete_resource_spec": {"kind": "HOMELAB_CPU_MILLIS", "value": 250}}]}})
+        out = render(
+            stack_of(), catalog_of(resources={"web": {"memoryMiB": 768, "cpus": 2.0, "pids": 64, "cpuMillis": 250}})
+        )
+        self.assertEqual(
+            out["services"]["web"]["deploy"]["resources"],
+            {
+                "limits": {"memory": "768M", "cpus": "2.0", "pids": 64},
+                "reservations": {
+                    "memory": "768M",
+                    "cpus": "0.25",
+                    "generic_resources": [
+                        {"discrete_resource_spec": {"kind": "HOMELAB_MEMORY_MIB", "value": 768}},
+                        {"discrete_resource_spec": {"kind": "HOMELAB_CPU_MILLIS", "value": 250}},
+                    ],
+                },
+            },
+        )
 
     def test_unlisted_services_get_the_defaults(self):
         out = render(stack_of(worker={}), catalog_of())
@@ -97,15 +113,21 @@ class Admission(unittest.TestCase):
         self.refuses(stack_of(worker={}), catalog_of(memory=1023, cpu=1000), "need 1024 MiB")
 
     def test_cpu_above_the_reservation(self):
-        self.refuses(stack_of(worker={}), catalog_of(memory=4096, cpu=199),
-                     "need 200 millicores (web 100, worker 100), apps.demo.reservation.cpus holds 199 millicores")
+        self.refuses(
+            stack_of(worker={}),
+            catalog_of(memory=4096, cpu=199),
+            "need 200 millicores (web 100, worker 100), apps.demo.reservation.cpus holds 199 millicores",
+        )
 
     def test_excluded_services_hold_nothing(self):
         render(stack_of(grafana={}), catalog_of(memory=512, cpu=100, exclude=["grafana"]))
 
     def test_override_services_count(self):
-        self.refuses(stack_of(), catalog_of(memory=512, cpu=1000, override={"services": {"relay": {"image": OWN}}}),
-                     "need 1024 MiB (relay 512, web 512)")
+        self.refuses(
+            stack_of(),
+            catalog_of(memory=512, cpu=1000, override={"services": {"relay": {"image": OWN}}}),
+            "need 1024 MiB (relay 512, web 512)",
+        )
 
     def test_stateful_services_count_once(self):
         stack = stack_of(db={"deploy": {"replicas": 3}, "volumes": ["data:/data"]})
@@ -113,9 +135,12 @@ class Admission(unittest.TestCase):
         render(stack, catalog_of(memory=1024, cpu=200, stateful=["db"]))
 
     def test_the_refusal_names_the_numbers_and_the_knob(self):
-        self.refuses(stack_of(worker={"deploy": {"replicas": 2}}), catalog_of(memory=1024, cpu=1000),
-                     "the stack's tasks need 1536 MiB (web 512, worker 1024), apps.demo.reservation.memoryMiB holds "
-                     "1024 MiB: raise it or lower apps.demo.resources")
+        self.refuses(
+            stack_of(worker={"deploy": {"replicas": 2}}),
+            catalog_of(memory=1024, cpu=1000),
+            "the stack's tasks need 1536 MiB (web 512, worker 1024), apps.demo.reservation.memoryMiB holds "
+            "1024 MiB: raise it or lower apps.demo.resources",
+        )
 
     def test_services_are_bounded(self):
         many = {f"s{i}": {} for i in range(SERVICES_MAX)}
@@ -125,21 +150,32 @@ class Admission(unittest.TestCase):
 
 class Placement(unittest.TestCase):
     def per_node(self, deploy):
-        return render(stack_of(worker={"deploy": deploy}), catalog_of(memory=8192, cpu=4000))["services"]["worker"]["deploy"]
+        return render(stack_of(worker={"deploy": deploy}), catalog_of(memory=8192, cpu=4000))["services"]["worker"][
+            "deploy"
+        ]
 
     def test_stateless_replicas_spread(self):
         self.assertEqual(self.per_node({"replicas": 3})["placement"]["max_replicas_per_node"], PER_NODE)
 
     def test_an_apps_lower_bound_stands_a_higher_one_is_capped(self):
-        self.assertEqual(self.per_node({"placement": {"max_replicas_per_node": 1}})["placement"]["max_replicas_per_node"], 1)
-        self.assertEqual(self.per_node({"placement": {"max_replicas_per_node": 9}})["placement"]["max_replicas_per_node"],
-                         PER_NODE)
+        self.assertEqual(
+            self.per_node({"placement": {"max_replicas_per_node": 1}})["placement"]["max_replicas_per_node"], 1
+        )
+        self.assertEqual(
+            self.per_node({"placement": {"max_replicas_per_node": 9}})["placement"]["max_replicas_per_node"], PER_NODE
+        )
 
     def test_no_count_is_refused(self):
         for bad in (0, -1, "2", True):
             with self.subTest(bad=bad):
-                self.assertIn("is no count", refusal(self, stack_of(worker={"deploy": {"placement": {"max_replicas_per_node": bad}}}),
-                                                     catalog_of(memory=8192, cpu=4000)))
+                self.assertIn(
+                    "is no count",
+                    refusal(
+                        self,
+                        stack_of(worker={"deploy": {"placement": {"max_replicas_per_node": bad}}}),
+                        catalog_of(memory=8192, cpu=4000),
+                    ),
+                )
 
     def test_stateful_services_stay_on_the_state_worker(self):
         stack = stack_of(db={"volumes": ["data:/data"]})

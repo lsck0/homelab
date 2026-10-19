@@ -4,10 +4,30 @@
 # nixos nat's own accepts, which the drops must precede (lib.mkBefore; tests/policy/network.nix holds it).
 # egress classes: a member's internet traffic leaves through its exit or not at all, transparently, so a program that
 # ignores proxy settings leaks nothing; the killswitch drops what tor cannot carry (udp, icmp).
-{ config, pkgs, lib, inventory, nasClients, site, catalog, lab, upstream, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  inventory,
+  nasClients,
+  site,
+  catalog,
+  lab,
+  upstream,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
-  flows = import ../../../modules/flows.nix { inherit lib net inventory catalog nasClients lab; };
+  flows = import ../../../modules/flows.nix {
+    inherit
+      lib
+      net
+      inventory
+      catalog
+      nasClients
+      lab
+      ;
+  };
   service = import ../../../modules/service.nix { inherit lib; };
   inherit (net) zones ports;
   wan = net.wan.interface;
@@ -18,51 +38,69 @@ let
   # the house lan shares the wan
   labNetworks = lib.attrValues (removeAttrs flows.networks [ "lan" ]);
 
-  # -------------------------------------------------------------------------------------------------------------
-  # FIREWALL RENDERING
-  # -------------------------------------------------------------------------------------------------------------
-
   addressesOf = e: if e.addresses == null then flows.networks.${e.network}.sources else e.addresses;
   # a flow with nobody on one side (no nas client in a zone, no enabled app) renders nothing, never `{ }`
   flowLive = f: addressesOf f.from != [ ] && (f ? to -> addressesOf f.to != [ ]);
-  flowRules = f:
+  flowRules =
+    f:
     let
       # a router service answers on the interface the flow comes in by: the dmz's dns is 10.200.0.1, never 10.100.0.1
       # (local delivery would accept any of the router's addresses); dhcp and mdns arrive as broadcast and multicast
-      match = "iifname \"${ifOf f.from.network}\" ip saddr ${set (addressesOf f.from)}"
+      match =
+        "iifname \"${ifOf f.from.network}\" ip saddr ${set (addressesOf f.from)}"
         + (if f ? to then " ip daddr ${set (addressesOf f.to)}" else " fib daddr . iif type { local, broadcast, multicast }");
     in
-    lib.optionals (flowLive f) ([ "# ${f.why}" ]
+    lib.optionals (flowLive f) (
+      [ "# ${f.why}" ]
       ++ lib.optional ((f.tcp or [ ]) != [ ]) "${match} tcp dport ${set f.tcp} accept"
       ++ lib.optional ((f.udp or [ ]) != [ ]) "${match} udp dport ${set f.udp} accept"
-      ++ lib.optional (f.esp or false) "${match} meta l4proto esp accept");
+      ++ lib.optional (f.esp or false) "${match} meta l4proto esp accept"
+      ++ lib.optional (f.icmp or false) "${match} icmp type echo-request accept"
+    );
 
-  networkDefaults = name: n: [ "# ${name}" ] ++ (
-    if n.reaches == "everything" then [ "iifname \"${n.interface}\" accept" ]
-    else if n.reaches == "internet" then [
-      "iifname \"${n.interface}\" ip daddr ${privateRanges} counter drop"
-          "iifname \"${n.interface}\" accept"
-    ]
-    else [
-      "iifname \"${n.interface}\" ip saddr ${set n.sources} oifname ${set (map (r: "\"${ifOf r}\"") n.reaches)} accept"
-      "iifname \"${n.interface}\" counter drop"
-    ]);
+  # a refusal between the networks counts by its source network (forward-deny-textfile) and logs, rate limited; the
+  # limit lives on a rule of its own, so a flood past it is still dropped
+  denyCounterOf = network: "fwd-deny-${network}";
+  denyingNetworks = lib.attrNames (lib.filterAttrs (_: n: n.reaches != "everything") flows.networks);
+  denyRules = network: match: [
+    "${match} limit rate ${toString forwardLogPerMinute}/minute log prefix \"fwd-deny ${network}: \" level info"
+    "${match} counter name \"${denyCounterOf network}\" drop"
+  ];
+  networkDefaults =
+    name: n:
+    let
+      from = "iifname \"${n.interface}\"";
+    in
+    [ "# ${name}" ]
+    ++ (
+      if n.reaches == "everything" then
+        [ "${from} accept" ]
+      else if n.reaches == "internet" then
+        denyRules name "${from} ip daddr ${privateRanges}" ++ [ "${from} accept" ]
+      else
+        [ "${from} ip saddr ${set n.sources} oifname ${set (map (r: "\"${ifOf r}\"") n.reaches)} accept" ]
+        ++ denyRules name from
+    );
+  forwardDenyTextfile = "forward-deny";
 
-  forwardRules = lib.concatStringsSep "\n" (lib.concatMap flowRules flows.forward
-    ++ lib.concatLists (lib.mapAttrsToList networkDefaults flows.networks));
+  forwardRules = lib.concatStringsSep "\n" (
+    lib.concatMap flowRules flows.forward ++ lib.concatLists (lib.mapAttrsToList networkDefaults flows.networks)
+  );
   inputRules = lib.concatStringsSep "\n" (lib.concatMap flowRules flows.router);
 
-  # -------------------------------------------------------------------------------------------------------------
-  # EGRESS CLASSES (an instance's `on`, collected by modules/lab `egress`)
-  # -------------------------------------------------------------------------------------------------------------
-
-  egressMarks = { vpn = { mark = 1; table = 100; }; };
+  egressMarks = {
+    vpn = {
+      mark = 1;
+      table = 100;
+    };
+  };
   # ahead of the main table's rule (32766), after local (0)
   egressRulePriority = 101;
   # the blackhole only answers while the tunnel's own default (metric 1, egress-vpn.nix) is missing
   egressBlackholeMetric = 1000;
   vpnEntries = lib.filterAttrs (_: e: e.via == "vpn") lab.egress;
-  membersOf = via: lib.sort (a: b: a < b) (map net.ipOf (lib.attrNames (lib.filterAttrs (_: e: e.via == via) lab.egress)));
+  membersOf =
+    via: lib.sort (a: b: a < b) (map net.ipOf (lib.attrNames (lib.filterAttrs (_: e: e.via == via) lab.egress)));
   vpnMembers = membersOf "vpn";
   torMembers = membersOf "tor";
   # a parked guest takes no forwarded port: renewing one for it only fails
@@ -73,16 +111,29 @@ let
   # the provider's nat-pmp lease; the timer renews well inside it
   protonLeaseS = 60;
 
-  nuScript = name: deps: pkgs.writers.writeNu name {
-    makeWrapperArgs = [ "--prefix" "PATH" ":" (lib.makeBinPath deps) ];
-  } ./lib/${name}.nu;
-  protonvpnPort = nuScript "protonvpn-port" [ pkgs.libnatpmp pkgs.nftables pkgs.curl ];
-  publicPrefix = nuScript "public-prefix" [ pkgs.curl pkgs.coreutils ];
-  ddnsCloudflare = nuScript "ddns-cloudflare" [ pkgs.curl pkgs.coreutils ];
-
-  # -------------------------------------------------------------------------------------------------------------
-  # TOR
-  # -------------------------------------------------------------------------------------------------------------
+  nuScript =
+    name: deps:
+    pkgs.writers.writeNu name {
+      makeWrapperArgs = [
+        "--prefix"
+        "PATH"
+        ":"
+        (lib.makeBinPath deps)
+      ];
+    } ./lib/${name}.nu;
+  protonvpnPort = nuScript "protonvpn-port" [
+    pkgs.libnatpmp
+    pkgs.nftables
+    pkgs.curl
+  ];
+  publicAddress = nuScript "public-address" [
+    pkgs.curl
+    pkgs.coreutils
+  ];
+  ddnsCloudflare = nuScript "ddns-cloudflare" [
+    pkgs.curl
+    pkgs.coreutils
+  ];
 
   torPorts = import ../../../modules/tor-ports.nix;
   torFlowsOn = port: lib.filter (f: lib.elem port (f.tcp or [ ])) flows.router;
@@ -100,10 +151,6 @@ let
   '';
   torTextfile = "tor";
 
-  # -------------------------------------------------------------------------------------------------------------
-  # DNS AND DDNS NAMES
-  # -------------------------------------------------------------------------------------------------------------
-
   ingressIp = zone: net.ipOf zones.${zone}.ingress;
   hostsOf = side: lib.unique (map (r: r.host) (lib.attrValues catalog.${side}));
   internalExtraHosts = lib.attrValues net.ingressPages;
@@ -111,28 +158,56 @@ let
   installHosts = lib.attrNames (import ../../../modules/install-hosts.nix);
   forwardHosts = lib.filter (h: h != null) (map (f: f.host) flows.portForwards);
   # names that skip the ingresses; a wildcard host has no single address for a hosts line, the templates answer it
-  directHosts = { smb = net.ipOf lab.roles.nas; } // lib.mapAttrs' (_: r: lib.nameValuePair r.host (net.ipOf (toString r.vmid)))
-    (lib.filterAttrs (_: r: r.vmid != null && r.publicPort == null && !(service.wildcardHost r.host)) catalog.l4);
+  directHosts = {
+    smb = net.ipOf lab.roles.nas;
+  }
+  // lib.mapAttrs' (_: r: lib.nameValuePair r.host (net.ipOf (toString r.vmid))) (
+    lib.filterAttrs (_: r: r.vmid != null && r.publicPort == null && !(service.wildcardHost r.host)) catalog.l4
+  );
 
   # install lines, the wireguard endpoint and port forwards cannot pass cloudflare's proxy; a wildcard forward is the
   # record `*.<rest>.<domain>`, which cloudflare accepts below the apex
-  routeHosts = side: map (r: { inherit (r) host; proxied = lib.elem "cloudflare" r.on; })
-    (lib.filter service.publicOf (lib.attrValues catalog.${side}));
-  allRouteHosts = routeHosts "internal" ++ routeHosts "external"
-    ++ map (host: { inherit host; proxied = true; }) internalExtraHosts;
+  routeHosts =
+    side:
+    map (r: {
+      inherit (r) host;
+      proxied = lib.elem "cloudflare" r.on;
+    }) (lib.filter service.publicOf (lib.attrValues catalog.${side}));
+  allRouteHosts =
+    routeHosts "internal"
+    ++ routeHosts "external"
+    ++ map (host: {
+      inherit host;
+      proxied = true;
+    }) internalExtraHosts;
   proxiedHosts = lib.unique (map (r: r.host) (lib.filter (r: r.proxied) allRouteHosts));
-  rawHosts = lib.subtractLists proxiedHosts (lib.unique (map (r: r.host) (lib.filter (r: !r.proxied) allRouteHosts)
-    ++ installHosts ++ forwardHosts ++ [ net.wan.publicHost ]));
-  ddnsRecords = pkgs.writeText "ddns-records.json" (builtins.toJSON (
-    map (h: { name = net.fqdn h; proxied = true; }) proxiedHosts
-    ++ map (h: { name = net.fqdn h; proxied = false; }) rawHosts));
+  rawHosts = lib.subtractLists proxiedHosts (
+    lib.unique (
+      map (r: r.host) (lib.filter (r: !r.proxied) allRouteHosts) ++ installHosts ++ forwardHosts ++ [ net.wan.publicHost ]
+    )
+  );
+  ddnsRecords = pkgs.writeText "ddns-records.json" (
+    builtins.toJSON (
+      map (h: {
+        name = net.fqdn h;
+        proxied = true;
+      }) proxiedHosts
+      ++ map (h: {
+        name = net.fqdn h;
+        proxied = false;
+      }) rawHosts
+    )
+  );
 
   hostLines = ip: names: lib.concatMapStrings (h: "      ${ip} ${net.fqdn h}\n") names;
   # the forwards a name leads to: inside the lab it resolves straight to the backend
   hostForwards = lib.filter (f: f.host != null) flows.portForwards;
   # a name's tcp and udp forwards (teamspeak's voice and files) share its guest: one line per name and backend
-  forwardHostLines = lib.unique (lib.concatMap (f: map (ip: hostLines ip [ f.host ]) f.addresses)
-    (lib.filter (f: !(service.wildcardHost f.host)) hostForwards));
+  forwardHostLines = lib.unique (
+    lib.concatMap (f: map (ip: hostLines ip [ f.host ]) f.addresses) (
+      lib.filter (f: !(service.wildcardHost f.host)) hostForwards
+    )
+  );
   wildcardZones = map (host: rec {
     zone = net.fqdn (lib.removePrefix "*." host);
     match = "^[a-z0-9-]+\\.${lib.replaceStrings [ "." ] [ "\\." ] zone}\\.$";
@@ -140,10 +215,8 @@ let
   }) (lib.unique (map (f: f.host) (lib.filter (f: service.wildcardHost f.host) hostForwards)));
 
   publicAddressFile = "/run/public-address/hosts";
-  publicAddressTimeoutS = 20;
   publicPrefixFile = "/run/public-address/prefix6";
-  fritzboxUpnpPort = 49000;
-  fritzboxPrefixUrl = "http://${net.wan.gateway}:${toString fritzboxUpnpPort}/igdupnp/control/WANIPConn1";
+  fritzboxUpnpUrl = "http://${net.wan.gateway}:${toString ports.fritzboxUpnp}/igdupnp/control/WANIPConn1";
   # an answer coredns keeps serving while every upstream is down
   dnsStaleS = 86400;
 
@@ -159,13 +232,15 @@ let
   blockyAddress = "127.0.0.1:5335";
   blockyUpstream = "tcp-tls:1.1.1.1:853";
   # dns over tls when blocky is down: a fallback, but never a plaintext one
-  dnsFallback = { servers = [ "tls://1.1.1.1" "tls://1.0.0.1" ]; name = "cloudflare-dns.com"; };
+  dnsFallback = {
+    servers = [
+      "tls://1.1.1.1"
+      "tls://1.0.0.1"
+    ];
+    name = "cloudflare-dns.com";
+  };
   # an egress class's members resolve through its exit and fail with it, so no name they look up leaves through the house
   viewOf = members: lib.concatMapStringsSep " || " (ip: "incidr(client_ip(), '${ip}/32')") members;
-
-  # -------------------------------------------------------------------------------------------------------------
-  # WAN LIMITS
-  # -------------------------------------------------------------------------------------------------------------
 
   # per internet source: far above a browser's kept-alive handful, far below a flood
   wanSynPerSecond = 50;
@@ -188,15 +263,25 @@ let
   # bounds the journal under a flood
   forwardLogPerMinute = 60;
   # the wan and, hairpinned, the trusted networks; never a dmz
-  forwardSources = set (map (n: "\"${n.interface}\"") (lib.attrValues (lib.filterAttrs (name: n: name == "lan" || n.reaches == "everything") flows.networks)));
+  forwardSources = set (
+    map (n: "\"${n.interface}\"") (
+      lib.attrValues (lib.filterAttrs (name: n: name == "lan" || n.reaches == "everything") flows.networks)
+    )
+  );
   conntrackMax = 262144;
   # a forward to several guests (an app's nodes) keeps each client on one of them
-  dnatTarget = f: if lib.length f.addresses == 1 then "${lib.head f.addresses}:${toString f.targetPort}"
-    else "jhash ip saddr mod ${toString (lib.length f.addresses)} map { "
-      + lib.concatStringsSep ", " (lib.imap0 (i: ip: "${toString i} : ${ip}") f.addresses) + " } : ${toString f.targetPort}";
+  dnatTarget =
+    f:
+    if lib.length f.addresses == 1 then
+      "${lib.head f.addresses}:${toString f.targetPort}"
+    else
+      "jhash ip saddr mod ${toString (lib.length f.addresses)} map { "
+      + lib.concatStringsSep ", " (lib.imap0 (i: ip: "${toString i} : ${ip}") f.addresses)
+      + " } : ${toString f.targetPort}";
 
   dhcpUnaddressed = "0.0.0.0";
-in {
+in
+{
   imports = [ ./lib/onion-services.nix ];
 
   assertions = [
@@ -228,11 +313,28 @@ in {
   networking.usePredictableInterfaceNames = lib.mkForce true;
   networking.useDHCP = false;
   networking.interfaces = {
-    ${wan}.ipv4.addresses = [{ address = net.wan.address; prefixLength = lib.toInt (lib.last (lib.splitString "/" net.wan.subnet)); }];
-  } // lib.mapAttrs' (_: z: lib.nameValuePair z.interface {
-    ipv4.addresses = [{ address = z.routerIp; prefixLength = z.prefix; }];
-  }) zones;
-  networking.defaultGateway = { address = net.wan.gateway; interface = wan; };
+    ${wan}.ipv4.addresses = [
+      {
+        inherit (net.wan) address;
+        prefixLength = lib.toInt (lib.last (lib.splitString "/" net.wan.subnet));
+      }
+    ];
+  }
+  // lib.mapAttrs' (
+    _: z:
+    lib.nameValuePair z.interface {
+      ipv4.addresses = [
+        {
+          address = z.routerIp;
+          prefixLength = z.prefix;
+        }
+      ];
+    }
+  ) zones;
+  networking.defaultGateway = {
+    address = net.wan.gateway;
+    interface = wan;
+  };
 
   boot.kernel.sysctl = {
     "net.ipv4.ip_forward" = 1;
@@ -258,9 +360,11 @@ in {
       chain prerouting {
         type filter hook prerouting priority raw; policy accept;
         ip saddr ${dhcpUnaddressed} udp dport ${toString ports.dhcpServer} return
-    '' + lib.concatMapStrings (n: ''
-        iifname "${n.interface}" ip saddr != ${set n.sources} counter drop
-    '') labNetworks + ''
+    ''
+    + lib.concatMapStrings (n: ''
+      iifname "${n.interface}" ip saddr != ${set n.sources} counter drop
+    '') labNetworks
+    + ''
         # the wan carries the internet and the house, never a lab address
         iifname "${wan}" ip saddr ${set (lib.concatMap (n: n.sources) labNetworks)} counter drop
       }
@@ -269,35 +373,41 @@ in {
 
   networking.nftables.tables.egress = lib.mkIf (vpnMembers != [ ] || torMembers != [ ]) {
     family = "ip";
-    content = lib.optionalString (vpnMembers != [ ]) ''
-      chain premark {
-        type filter hook prerouting priority mangle; policy accept;
-        # never divert lab or house traffic: replies to them would blackhole
-        ip daddr ${privateRanges} return
-        ip saddr ${set vpnMembers} meta mark set ${toString egressMarks.vpn.mark}
-      }
-      # the tunnel's mtu is below the zones' 1500 and icmp too-big rarely makes it back through the provider
-      chain mssclamp {
-        type filter hook forward priority mangle; policy accept;
-        oifname "${vpnInterface}" tcp flags syn tcp option maxseg size set rt mtu
-      }
-    '' + lib.optionalString (torMembers != [ ]) ''
-      chain torredirect {
-        type nat hook prerouting priority dstnat; policy accept;
-        ip saddr ${set torMembers} ip daddr != ${privateRanges} meta l4proto tcp counter redirect to :${toString torPorts.trans}
-      }
-    '' + ''
-      # stateless, ahead of nixos-fw: a lost rule or route must never leak through the house
-      chain killswitch {
-        type filter hook forward priority filter - 5; policy accept;
-    '' + lib.optionalString (vpnMembers != [ ]) ''
+    content =
+      lib.optionalString (vpnMembers != [ ]) ''
+        chain premark {
+          type filter hook prerouting priority mangle; policy accept;
+          # never divert lab or house traffic: replies to them would blackhole
+          ip daddr ${privateRanges} return
+          ip saddr ${set vpnMembers} meta mark set ${toString egressMarks.vpn.mark}
+        }
+        # the tunnel's mtu is below the zones' 1500 and icmp too-big rarely makes it back through the provider
+        chain mssclamp {
+          type filter hook forward priority mangle; policy accept;
+          oifname "${vpnInterface}" tcp flags syn tcp option maxseg size set rt mtu
+        }
+      ''
+      + lib.optionalString (torMembers != [ ]) ''
+        chain torredirect {
+          type nat hook prerouting priority dstnat; policy accept;
+          ip saddr ${set torMembers} ip daddr != ${privateRanges} meta l4proto tcp counter redirect to :${toString torPorts.trans}
+        }
+      ''
+      + ''
+        # stateless, ahead of nixos-fw: a lost rule or route must never leak through the house
+        chain killswitch {
+          type filter hook forward priority filter - 5; policy accept;
+      ''
+      + lib.optionalString (vpnMembers != [ ]) ''
         ip saddr ${set vpnMembers} oifname "${wan}" ip daddr != ${privateRanges} counter drop
-    '' + lib.optionalString (torMembers != [ ]) ''
+      ''
+      + lib.optionalString (torMembers != [ ]) ''
         # through no interface: what tor carries never reaches forward, the rest has no exit
         ip saddr ${set torMembers} ip daddr != ${privateRanges} counter drop
-    '' + ''
-      }
-    '';
+      ''
+      + ''
+        }
+      '';
   };
 
   systemd.services.egress-policy = lib.mkIf (vpnMembers != [ ]) {
@@ -306,7 +416,12 @@ in {
     wantedBy = [ "multi-user.target" ];
     path = [ pkgs.iproute2 ];
     startLimitIntervalSec = 0;
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 5; };
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+      Restart = "on-failure";
+      RestartSec = 5;
+    };
     script = ''
       set -euo pipefail
       table=${toString egressMarks.vpn.table}
@@ -325,13 +440,17 @@ in {
 
   homelab.egress.vpn = {
     enable = true;
-    table = egressMarks.vpn.table;
+    inherit (egressMarks.vpn) table;
     # clients cannot share a key
     privateKeyFile = config.sops.secrets.protonvpn-private-key.path;
     address = "10.2.0.2/32";
-    publicKey = "36G8+pInNcPK9F1TpHglWs9Pk5uJOY9o8SCNrCBgvHE=";
     # CH#684; an address: dns is in the tunnel
-    endpoint = "89.222.96.158:51820";
+    servers = [
+      {
+        publicKey = "36G8+pInNcPK9F1TpHglWs9Pk5uJOY9o8SCNrCBgvHE=";
+        endpoint = "89.222.96.158:51820";
+      }
+    ];
   };
   sops.secrets.protonvpn-private-key = { };
 
@@ -353,7 +472,11 @@ in {
   systemd.services.protonvpn-port = lib.mkIf (vpnInbound != [ ]) {
     description = "Renew the Proton forwarded port and publish it";
     after = [ "wireguard-${vpnInterface}.service" ];
-    serviceConfig = { Type = "oneshot"; StateDirectory = "protonvpn"; ExecStart = "${protonvpnPort}"; };
+    serviceConfig = {
+      Type = "oneshot";
+      StateDirectory = "protonvpn";
+      ExecStart = "${protonvpnPort}";
+    };
     environment = {
       PEER_HOST = vpnInboundIp;
       GATEWAY = vpnCfg.gateway;
@@ -362,7 +485,11 @@ in {
   };
   systemd.timers.protonvpn-port = lib.mkIf (vpnInbound != [ ]) {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnBootSec = "90s"; OnUnitActiveSec = "45s"; AccuracySec = "5s"; };
+    timerConfig = {
+      OnBootSec = "90s";
+      OnUnitActiveSec = "45s";
+      AccuracySec = "5s";
+    };
   };
 
   services.tor = {
@@ -372,24 +499,48 @@ in {
     client = {
       enable = true;
       # the owner's check from the router itself (hermes skill downloads); the firewall opens it to nobody
-      socksListenAddress = { addr = zones.internal.routerIp; port = torPorts.socks; };
+      socksListenAddress = {
+        addr = zones.internal.routerIp;
+        port = torPorts.socks;
+      };
     };
     settings = {
-      SocksPolicy = map (ip: "accept ${ip}") (torClients ++ [ zones.internal.routerIp torDnsAddress ]) ++ [ "reject *" ];
+      SocksPolicy =
+        map (ip: "accept ${ip}") (
+          torClients
+          ++ [
+            zones.internal.routerIp
+            torDnsAddress
+          ]
+        )
+        ++ [ "reject *" ];
       # one circuit per indexer: no exit sees two of them from one client
-      SOCKSPort = [{
-        addr = zones.internal.routerIp;
-        port = torPorts.socksIsolated;
-        IsolateDestAddr = true;
-        IsolateDestPort = true;
-      }];
-      TransPort = map (addr: { inherit addr; port = torPorts.trans; }) torTransAddresses;
-      DNSPort = lib.optional (torMembers != [ ]) { addr = torDnsAddress; port = torPorts.dns; };
+      SOCKSPort = [
+        {
+          addr = zones.internal.routerIp;
+          port = torPorts.socksIsolated;
+          IsolateDestAddr = true;
+          IsolateDestPort = true;
+        }
+      ];
+      TransPort = map (addr: {
+        inherit addr;
+        port = torPorts.trans;
+      }) torTransAddresses;
+      DNSPort = lib.optional (torMembers != [ ]) {
+        addr = torDnsAddress;
+        port = torPorts.dns;
+      };
       ClientUseIPv6 = false;
       MaxCircuitDirtiness = 600;
       NewCircuitPeriod = 120;
       CircuitBuildTimeout = 30;
-      ControlPort = [{ addr = "127.0.0.1"; port = torPorts.control; }];
+      ControlPort = [
+        {
+          addr = "127.0.0.1";
+          port = torPorts.control;
+        }
+      ];
       CookieAuthentication = true;
     };
   };
@@ -405,15 +556,25 @@ in {
   systemd.timers.tor-new-circuits = {
     wantedBy = [ "timers.target" ];
     # jitter so rotation is no clock fingerprint
-    timerConfig = { OnBootSec = "10m"; OnUnitActiveSec = "30m"; RandomizedDelaySec = "10m"; };
+    timerConfig = {
+      OnBootSec = "10m";
+      OnUnitActiveSec = "30m";
+      RandomizedDelaySec = "10m";
+    };
   };
 
   # tor down or without a circuit: the gauge says 0, never its last 1
-  homelab.textfiles = [ torTextfile ];
+  homelab.textfiles = [
+    torTextfile
+    forwardDenyTextfile
+  ];
   systemd.services.tor-status = {
     description = "Publish whether tor has a circuit";
     after = [ "tor.service" ];
-    path = [ pkgs.coreutils pkgs.gnugrep ];
+    path = [
+      pkgs.coreutils
+      pkgs.gnugrep
+    ];
     serviceConfig.Type = "oneshot";
     script = ''
       metrics=${config.homelab.textfileDir}/${torTextfile}.prom
@@ -427,7 +588,10 @@ in {
   };
   systemd.timers.tor-status = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnBootSec = "5m"; OnUnitActiveSec = "5m"; };
+    timerConfig = {
+      OnBootSec = "5m";
+      OnUnitActiveSec = "5m";
+    };
   };
 
   # flows.nix `router` opens every port, per network and source
@@ -441,8 +605,45 @@ in {
     # nixos forwardPorts would match all wan traffic
     forwardPorts = [ ];
   };
+  # proxmox routes the lab back through the router (pve-install.nu), so its firewall tells the guests apart instead of
+  # seeing every one of them as the router; ahead of nixos nat's masquerade in the same chain
+  networking.nftables.tables.nixos-nat.content = lib.mkBefore ''
+    chain post {
+      type nat hook postrouting priority srcnat;
+      oifname "${wan}" ip daddr ${net.wan.proxmox} return
+    }
+  '';
 
   networking.nftables.enable = true;
+  # named before the forward rules that count into them
+  networking.nftables.tables.nixos-fw.content = lib.mkBefore (
+    lib.concatMapStrings (network: "counter ${denyCounterOf network} { }\n") denyingNetworks
+  );
+  systemd.services.forward-deny-textfile = {
+    description = "Publish the forwards refused between the networks";
+    path = [
+      pkgs.nftables
+      pkgs.jq
+    ];
+    serviceConfig.Type = "oneshot";
+    script = ''
+      metrics=${config.homelab.textfileDir}/${forwardDenyTextfile}.prom
+      {
+        printf '# TYPE homelab_forward_denied_packets_total counter\n'
+        nft -j list counters table inet nixos-fw | jq -r '
+          .nftables[].counter // empty | select(.name | startswith("fwd-deny-"))
+          | "homelab_forward_denied_packets_total{network=\"\(.name | ltrimstr("fwd-deny-"))\"} \(.packets)"'
+      } > "$metrics.tmp"
+      mv "$metrics.tmp" "$metrics"
+    '';
+  };
+  systemd.timers.forward-deny-textfile = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "1m";
+      OnUnitActiveSec = "1m";
+    };
+  };
   # nixos' stop deletes every table while forwarding stays on; start replaces them in one transaction anyway
   systemd.services.nftables.serviceConfig.ExecStop = lib.mkForce [ ];
   networking.firewall = {
@@ -484,7 +685,10 @@ in {
   systemd.services.wan-limits-house = {
     description = "Exempt the house's public address from the wan limits";
     after = [ "nftables.service" ];
-    serviceConfig = { Type = "oneshot"; ExecStart = houseAddressFill; };
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = houseAddressFill;
+    };
   };
   systemd.paths.wan-limits-house = {
     wantedBy = [ "paths.target" ];
@@ -496,43 +700,64 @@ in {
     content = ''
       chain prerouting {
         type nat hook prerouting priority dstnat - 1; policy accept;
-    '' + lib.concatMapStrings (f: let match = "iifname ${forwardSources} ip daddr ${net.wan.address} ${f.proto} dport ${toString f.port}"; in ''
+    ''
+    + lib.concatMapStrings (
+      f:
+      let
+        match = "iifname ${forwardSources} ip daddr ${net.wan.address} ${f.proto} dport ${toString f.port}";
+      in
+      ''
         # ${f.why}
-    '' + lib.optionalString (lib.elem "inflightLimit" f.on) ''
+      ''
+      + lib.optionalString (lib.elem "inflightLimit" f.on) ''
         ${match} ct state new ct count over ${toString forwardConnsMax} counter drop
-    '' + lib.optionalString (lib.elem "accessLog" f.on) ''
+      ''
+      + lib.optionalString (lib.elem "accessLog" f.on) ''
         ${match} ct state new limit rate ${toString forwardLogPerMinute}/minute log prefix "dnat ${toString f.port}: " level info
-    '' + ''
+      ''
+      + ''
         ${match} dnat to ${dnatTarget f}
-    '') flows.portForwards + ''
+      ''
+    ) flows.portForwards
+    + ''
       }
     '';
   };
 
   # never on a guest's static address (lib.tf invariants)
-  services.kea.dhcp4 = let pooled = lib.filter (z: z.dhcpPool != null) (lib.attrValues zones); in {
-    enable = true;
-    settings = {
-      valid-lifetime = 3600;
-      renew-timer = 900;
-      rebind-timer = 1800;
-      interfaces-config.interfaces = map (z: z.interface) pooled;
-      lease-database = {
-        type = "memfile";
-        persist = true;
-        name = "/var/lib/kea/dhcp4.leases";
+  services.kea.dhcp4 =
+    let
+      pooled = lib.filter (z: z.dhcpPool != null) (lib.attrValues zones);
+    in
+    {
+      enable = true;
+      settings = {
+        valid-lifetime = 3600;
+        renew-timer = 900;
+        rebind-timer = 1800;
+        interfaces-config.interfaces = map (z: z.interface) pooled;
+        lease-database = {
+          type = "memfile";
+          persist = true;
+          name = "/var/lib/kea/dhcp4.leases";
+        };
+        subnet4 = lib.imap1 (id: z: {
+          inherit id;
+          inherit (z) subnet interface;
+          pools = [ { pool = "${z.dhcpPool.first} - ${z.dhcpPool.last}"; } ];
+          option-data = [
+            {
+              name = "routers";
+              data = z.routerIp;
+            }
+            {
+              name = "domain-name-servers";
+              data = z.routerIp;
+            }
+          ];
+        }) pooled;
       };
-      subnet4 = lib.imap1 (id: z: {
-        inherit id;
-        inherit (z) subnet interface;
-        pools = [{ pool = "${z.dhcpPool.first} - ${z.dhcpPool.last}"; }];
-        option-data = [
-          { name = "routers"; data = z.routerIp; }
-          { name = "domain-name-servers"; data = z.routerIp; }
-        ];
-      }) pooled;
     };
-  };
 
   services.blocky = {
     enable = true;
@@ -544,13 +769,20 @@ in {
       ];
       # bootstrap dot hostnames without a dns loop
       bootstrapDns = [
-        { upstream = blockyUpstream; ips = [ "1.1.1.1" ]; }
+        {
+          upstream = blockyUpstream;
+          ips = [ "1.1.1.1" ];
+        }
       ];
       blocking = {
         denylists.ads = map (name: "${blocklistDir}/${name}") (lib.attrNames blocklists);
         clientGroupsBlock.default = [ "ads" ];
       };
-      caching = { minTime = "5m"; maxTime = "30m"; prefetching = true; };
+      caching = {
+        minTime = "5m";
+        maxTime = "30m";
+        prefetching = true;
+      };
       # a line per query was most of the router's journal
       queryLog.type = "none";
     };
@@ -564,31 +796,37 @@ in {
     config = ''
       ${net.domain}:53 {
         hosts ${publicAddressFile} {
-    '' + hostLines (ingressIp "internal") (hostsOf "internal" ++ internalExtraHosts) + ''
-    '' + hostLines (ingressIp "external") (hostsOf "external" ++ installHosts) + ''
-    '' + lib.concatStrings (lib.mapAttrsToList (h: ip: hostLines ip [ h ]) directHosts)
-      + lib.concatStrings forwardHostLines + ''
-          fallthrough
-        }
-    '' + lib.concatMapStrings (f: ''
-        template IN SRV ${f.srv}.${net.fqdn f.host} {
-          answer "{{ .Name }} 3600 IN SRV 0 0 ${toString f.port} ${net.fqdn f.host}."
-        }
+    ''
+    + hostLines (ingressIp "internal") (hostsOf "internal" ++ internalExtraHosts)
+    + ""
+    + hostLines (ingressIp "external") (hostsOf "external" ++ installHosts)
+    + ""
+    + lib.concatStrings (lib.mapAttrsToList (h: ip: hostLines ip [ h ]) directHosts)
+    + lib.concatStrings forwardHostLines
+    + ''
+        fallthrough
+      }
+    ''
+    + lib.concatMapStrings (f: ''
+      template IN SRV ${f.srv}.${net.fqdn f.host} {
+        answer "{{ .Name }} 3600 IN SRV 0 0 ${toString f.port} ${net.fqdn f.host}."
+      }
     '') (lib.filter (f: f.srv != null) hostForwards)
-      + lib.concatMapStrings (w: ''
-        # every name one label below a wildcard forward, straight to its backend; coredns runs template before hosts,
-        # so the zone stays this one and falls through to the lines above
-        template IN A ${w.zone} {
-          match ${w.match}
-          ${lib.concatStringsSep "\n          " (map (ip: ''answer "{{ .Name }} 3600 IN A ${ip}"'') w.addresses)}
-          fallthrough
-        }
-        # the nodata the hosts plugin gives an exact name, instead of asking blocky for a name only the lab knows
-        template IN AAAA ${w.zone} {
-          match ${w.match}
-          fallthrough
-        }
-    '') wildcardZones + ''
+    + lib.concatMapStrings (w: ''
+      # every name one label below a wildcard forward, straight to its backend; coredns runs template before hosts,
+      # so the zone stays this one and falls through to the lines above
+      template IN A ${w.zone} {
+        match ${w.match}
+        ${lib.concatStringsSep "\n          " (map (ip: ''answer "{{ .Name }} 3600 IN A ${ip}"'') w.addresses)}
+        fallthrough
+      }
+      # the nodata the hosts plugin gives an exact name, instead of asking blocky for a name only the lab knows
+      template IN AAAA ${w.zone} {
+        match ${w.match}
+        fallthrough
+      }
+    '') wildcardZones
+    + ''
         # mx, txt and public-only records
         forward . ${blockyAddress}
       }
@@ -597,7 +835,8 @@ in {
       ${net.fqdn net.wan.publicPrefixHost}:53 {
         hosts ${publicPrefixFile}
       }
-    '' + lib.optionalString (vpnMembers != [ ]) ''
+    ''
+    + lib.optionalString (vpnMembers != [ ]) ''
 
       .:53 {
         view vpn {
@@ -606,7 +845,8 @@ in {
         forward . ${vpnCfg.dns}
         cache 300
       }
-    '' + lib.optionalString (torMembers != [ ]) ''
+    ''
+    + lib.optionalString (torMembers != [ ]) ''
 
       .:53 {
         view tor {
@@ -614,7 +854,8 @@ in {
         }
         forward . ${torDnsAddress}:${toString torPorts.dns}
       }
-    '' + ''
+    ''
+    + ''
 
       .:53 {
         # dns survives blocky, encrypted
@@ -633,28 +874,33 @@ in {
   sops.secrets.wireguard-private-key = { };
   sops.secrets.cloudflare-token = { };
 
-  systemd.tmpfiles.rules = [ "d ${dirOf publicAddressFile} 0755 root root -" "f ${publicAddressFile} 0644 root root -"
-    "f ${publicPrefixFile} 0644 root root -""d ${blocklistDir} 0755 root root -" ];
+  systemd.tmpfiles.rules = [
+    "d ${dirOf publicAddressFile} 0755 root root -"
+    "f ${publicAddressFile} 0644 root root -"
+    "f ${publicPrefixFile} 0644 root root -"
+    "d ${blocklistDir} 0755 root root -"
+  ];
   systemd.services.public-address = {
     description = "Learn the house's public address";
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
     onSuccess = [ "ddns-cloudflare.service" ];
-    path = [ pkgs.curl pkgs.coreutils ];
-    serviceConfig = { Type = "oneshot"; SuccessExitStatus = [ upstream.unavailable ]; };
-    script = ''
-      ip=$(${upstream.run} ipify curl -sSf --max-time ${toString publicAddressTimeoutS} ${lab.upstreams.ipify.url})
-      if ! [[ "$ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
-        echo "ipify answered no ipv4 address: '$ip'" >&2
-        exit 1
-      fi
-      printf '%s %s\n' "$ip" ${net.fqdn net.wan.publicHost} > ${publicAddressFile}.tmp
-      mv ${publicAddressFile}.tmp ${publicAddressFile}
-    '';
+    environment = {
+      PUBLIC_URL = fritzboxUpnpUrl;
+      PUBLIC_FILE = publicAddressFile;
+      PUBLIC_HOST = net.fqdn net.wan.publicHost;
+    };
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${publicAddress} v4";
+    };
   };
   systemd.timers.public-address = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnBootSec = "1min"; OnUnitActiveSec = "5min"; };
+    timerConfig = {
+      OnBootSec = "1min";
+      OnUnitActiveSec = "5min";
+    };
   };
 
   systemd.services.public-prefix = {
@@ -662,16 +908,22 @@ in {
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
     environment = {
-      PREFIX_URL = fritzboxPrefixUrl;
-      PREFIX_FILE = publicPrefixFile;
-      PREFIX_HOST = net.fqdn net.wan.publicPrefixHost;
-      PREFIX_LENGTH = toString net.wan.publicPrefixLength;
+      PUBLIC_URL = fritzboxUpnpUrl;
+      PUBLIC_FILE = publicPrefixFile;
+      PUBLIC_HOST = net.fqdn net.wan.publicPrefixHost;
+      PUBLIC_PREFIX_LENGTH = toString net.wan.publicPrefixLength;
     };
-    serviceConfig = { Type = "oneshot"; ExecStart = "${publicPrefix}"; };
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${publicAddress} prefix6";
+    };
   };
   systemd.timers.public-prefix = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnBootSec = "1min"; OnUnitActiveSec = "5min"; };
+    timerConfig = {
+      OnBootSec = "1min";
+      OnUnitActiveSec = "5min";
+    };
   };
 
   systemd.services.ddns-cloudflare = {
@@ -697,8 +949,16 @@ in {
     description = "Fetch blocky's deny lists";
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
-    path = [ pkgs.curl pkgs.coreutils pkgs.diffutils pkgs.systemd ];
-    serviceConfig = { Type = "oneshot"; SuccessExitStatus = [ upstream.unavailable ]; };
+    path = [
+      pkgs.curl
+      pkgs.coreutils
+      pkgs.diffutils
+      pkgs.systemd
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      SuccessExitStatus = [ upstream.unavailable ];
+    };
     script = ''
       status=0
       changed=0
@@ -723,7 +983,12 @@ in {
   };
   systemd.timers.blocklists-fetch = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnBootSec = "2min"; OnCalendar = "daily"; RandomizedDelaySec = "1h"; Persistent = true; };
+    timerConfig = {
+      OnBootSec = "2min";
+      OnCalendar = "daily";
+      RandomizedDelaySec = "1h";
+      Persistent = true;
+    };
   };
 
   # clients need DNS = 10.0.0.1
@@ -732,19 +997,23 @@ in {
     listenPort = ports.wireguard;
     privateKeyFile = config.sops.secrets.wireguard-private-key.path;
     peers = [
-      { # laptop
+      {
+        # laptop
         publicKey = "uS6fCRVw/IvsfT4R7r0coMLxWl9+gHRY0H/KlNFkBVs=";
         allowedIPs = [ "10.0.0.2/32" ];
       }
-      { # phone
+      {
+        # phone
         publicKey = "lplUjlL/gPLRaSwi/wbtmpZ34BCinSq9bY9dmwxXh3s=";
         allowedIPs = [ "10.0.0.3/32" ];
       }
-      { # tablet
+      {
+        # tablet
         publicKey = "AW4t+4glZqmUl8ZAtrq60K/GTDmzZJisz1+6EqYnmzI=";
         allowedIPs = [ "10.0.0.4/32" ];
       }
-      { # pc, config in secrets repo wg0.pc.conf
+      {
+        # pc, config in secrets repo wg0.pc.conf
         publicKey = "rvtqHdSDK3JGZhZkzVYIcb9gKHiZUTsenfpJtm4adT0=";
         allowedIPs = [ "10.0.0.5/32" ];
       }
@@ -755,7 +1024,10 @@ in {
   sops.secrets.workstation-mac = { };
   # a command, not a shell alias: `ssh <router> wol-pc` runs no profile
   environment.systemPackages = with pkgs; [
-    tcpdump iperf3 wireguard-tools ethtool
+    tcpdump
+    iperf3
+    wireguard-tools
+    ethtool
     (writeShellApplication {
       name = "wol-pc";
       runtimeInputs = [ wakeonlan ];

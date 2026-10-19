@@ -3,6 +3,7 @@
 Imported by the tests of 114-internal-terminal's energy-sync and 103-internal-grafana's spot-price; import it after
 setting ENERGY_SPOT_API, which energy_model reads at import.
 """
+
 import datetime
 import io
 import json

@@ -1,4 +1,4 @@
-# sync the syncthing folder with its proton drive copy both ways: this front holds the proton lock and refuses what
+# sync the syncthing folder with its proton drive copy both ways: this front holds the nas job lock and refuses what
 # must not sync, the engine (proton-bisync.py, whose header says how) does the rest
 #
 # usage: proton-bisync sync|resync, the environment as kopia.nix's bisyncEnv sets it
@@ -48,7 +48,7 @@ def main [mode: string]: nothing -> nothing {
     let wait = if $mode == "sync" { [--nonblock --conflict-exit-code $"($EXIT_LOCK_BUSY)"] } else { [] }
     let status = status-of flock ...$wait $env.PROTON_BISYNC_LOCK $nu.current-exe --no-config-file $env.CURRENT_FILE locked $mode
     if $status == $EXIT_LOCK_BUSY {
-        print $"another off-site run holds ($env.PROTON_BISYNC_LOCK); skipping this hour"
+        print $"another nas job holds ($env.PROTON_BISYNC_LOCK); skipping this hour"
         return
     }
     exit $status

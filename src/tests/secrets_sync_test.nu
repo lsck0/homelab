@@ -150,9 +150,7 @@ def main [src_in: path, seed: int, plans: path]: nothing -> nothing {
         }
     }
 
-    # -------------------------------------------------------------------------
     # 1 to 4: a first run over an empty repo, a first deploy
-    # -------------------------------------------------------------------------
     let r = $t | path join repo
     do $repo_create $r
     do $refuses $r "vault in src/secrets/shared.sops.json" A1 [$a1 $a2] base [--apply]
@@ -210,9 +208,7 @@ def main [src_in: path, seed: int, plans: path]: nothing -> nothing {
     if (value $r $CAT $a1_key df) != "desk-v2" { fail "locked dotfiles lost df" }
     ok "4b dotfiles: the lab copy follows the dotfiles' file, never the other way; locked dotfiles keep it"
 
-    # -------------------------------------------------------------------------
     # 5 to 8: idempotence, dry run, moves, prune, hosts leaving
-    # -------------------------------------------------------------------------
     ^git -C $r init -q
     ^git -C $r add -A
     ^git -C $r -c user.name=t -c user.email=t@t commit -qm run1
@@ -258,9 +254,7 @@ def main [src_in: path, seed: int, plans: path]: nothing -> nothing {
     do $check_layout $r base A1 [$a1 $a2]
     ok "8 removed hosts lose key, copy and folder, the app's file its reader; others byte-identical; they come back"
 
-    # -------------------------------------------------------------------------
     # 9: refusals leave the tree as it was
-    # -------------------------------------------------------------------------
     do $refuses $r "101-internal-b reads nope, which nothing declares" A1 [$a1 $a2] problem [--apply]
     do $refuses $r "vault2 in src/secrets/shared.sops.json" A1 [$a1 $a2] renamed [--apply]
     do $refuses $r "is not an admin recipient" A1 [$a2 $a3] base [--apply]
@@ -271,9 +265,7 @@ def main [src_in: path, seed: int, plans: path]: nothing -> nothing {
     cp ($t | path join pub.saved) $router_pub
     ok "9 refused, nothing written: an undeclared read, a guarded secret without its value, a run locking its own key out, a foreign age.pub"
 
-    # -------------------------------------------------------------------------
     # 10: rotating the admin key, A1 out and A3 in
-    # -------------------------------------------------------------------------
     let history = $t | path join history
     cp -r ($r | path join src) $history
     do $sync $r A1 [$a1 $a2 $a3] base [--apply] | ignore
@@ -303,9 +295,7 @@ def main [src_in: path, seed: int, plans: path]: nothing -> nothing {
     }
     ok "10 adding an admin re-encrypts and keeps host keys; removing A1 re-encrypts without it, renews every host key, the splice fails"
 
-    # -------------------------------------------------------------------------
     # 11: an injected sops failure loses no value and leaves every file whole; a rerun converges
-    # -------------------------------------------------------------------------
     let shim = $t | path join shim
     mkdir $shim
     let real_sops = which sops | get 0.path
@@ -374,9 +364,7 @@ def main [src_in: path, seed: int, plans: path]: nothing -> nothing {
     }
     ok $"11 ($FAULT_TRIALS) injected sops failures: safe, and a rerun converges"
 
-    # -------------------------------------------------------------------------
     # 12: the real plan
-    # -------------------------------------------------------------------------
     let rr = $t | path join real
     do $repo_create $rr
     do $sync $rr A1 [$a1 $a2] real [--apply --generate-guarded] | ignore

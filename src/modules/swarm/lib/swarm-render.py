@@ -6,7 +6,10 @@ The builder (instances/core/107-internal-swarm/lib/app-builder.nix) sends the ap
 and every env_file already inlined. This adds the homelab and enforces its policy (modules/swarm runs it):
 
 - services the catalog `exclude`s are dropped, with every depends_on pointing at them; the catalog `override`
-  is merged next, then each service's catalog `env` (secrets resolved by sops) over that service's environment
+  is merged next, then each service's catalog `env` (secrets resolved by sops) over that service's environment; an
+  `envRequired` value (a third party's secret, set by hand) left empty refuses the stack
+- a catalog `secretFiles` entry is a swarm secret named by its content's digest, mounted at /run/secrets/<KEY> with
+  <KEY>_FILE naming it: its value is in no service spec, `docker inspect` or process environment
 - ports are the homelab's: the app's own are dropped, the catalog's `published` (routes and exporters) are published
   with their transport (tcp, or udp for a udp route)
 - limits are the homelab's: the catalog `resources` of a service, else the catalog's task defaults; memory is
@@ -33,14 +36,12 @@ A refusal names the service and the field and exits 2; nothing is deployed.
 Rejected: a deny-list of service keys. Every key a newer compose schema adds passed by default (oom_score_adj),
 and app-set limits overrode the defaults; the allow-lists below make a new key a deliberate change here.
 """
+
+import hashlib
 import json
 import sys
 
 import yaml
-
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
 
 STATE_CONSTRAINT = "node.labels.homelab.state == true"
 # the homelab's own placement labels: an app constraint naming them could reach another app's state volumes
@@ -50,20 +51,56 @@ PLACEHOLDERS = ("CHANGE_ME",)
 ENV_FILE_SEPARATOR = "="
 # <service>.<KEY>: an env key never holds a dot, a service name may
 ENV_FILE_SERVICE_SEPARATOR = "."
+SECRETS_DIR = "/run/secrets/"
+SECRET_FILE_SUFFIX = "_FILE"
+# a changed value is a new secret: swarm secrets are immutable, a service moves to the new one on deploy
+SECRET_DIGEST_CHARS = 12
 
 STACK_KEYS = {"version", "services", "networks", "volumes"}
 # compose extension fields (x-common: &anchor), resolved by the yaml loader already
 STACK_EXTENSION_PREFIX = "x-"
 SERVICE_KEYS = {
-    "image", "command", "entrypoint", "environment", "working_dir", "user", "healthcheck", "deploy", "depends_on",
-    "volumes", "networks", "stop_grace_period", "stop_signal", "labels", "hostname", "tty", "stdin_open",
-    "read_only", "init", "cap_drop", "cap_add",
+    "image",
+    "command",
+    "entrypoint",
+    "environment",
+    "working_dir",
+    "user",
+    "healthcheck",
+    "deploy",
+    "depends_on",
+    "volumes",
+    "networks",
+    "stop_grace_period",
+    "stop_signal",
+    "labels",
+    "hostname",
+    "tty",
+    "stdin_open",
+    "read_only",
+    "init",
+    "cap_drop",
+    "cap_add",
     # dropped: the homelab sets ports and logging, the builder inlined env_file, swarm ignores the rest
-    "ports", "logging", "env_file", "container_name", "restart", "expose",
+    "ports",
+    "logging",
+    "env_file",
+    "container_name",
+    "restart",
+    "expose",
 }
 SERVICE_KEYS_DROPPED = {"ports", "logging", "env_file", "container_name", "restart", "expose"}
-DEPLOY_KEYS = {"mode", "replicas", "placement", "resources", "restart_policy", "update_config", "rollback_config",
-               "labels", "endpoint_mode"}
+DEPLOY_KEYS = {
+    "mode",
+    "replicas",
+    "placement",
+    "resources",
+    "restart_policy",
+    "update_config",
+    "rollback_config",
+    "labels",
+    "endpoint_mode",
+}
 PLACEMENT_KEYS = {"constraints", "preferences", "max_replicas_per_node"}
 UPDATE_KEYS = {"parallelism", "delay", "failure_action", "monitor", "max_failure_ratio", "order"}
 RESTART_KEYS = {"condition", "delay", "max_attempts", "window"}
@@ -81,10 +118,6 @@ CAPS_DROPPED = ["ALL"]
 MEBIBYTE_SUFFIX = "M"
 MILLIS_PER_CPU = 1000
 
-
-# -----------------------------------------------------------------------------
-# INTERNAL
-# -----------------------------------------------------------------------------
 
 def refuse(where, why):
     print(f"swarm-render: refused: {where}: {why}", file=sys.stderr)
@@ -128,12 +161,15 @@ def compose_unescape(value, where):
         if value[i] != "$":
             out.append(value[i])
             i += 1
-        elif value[i + 1:i + 2] == "$":
+        elif value[i + 1 : i + 2] == "$":
             out.append("$")
             i += 2
         else:
-            refuse(where, "compose interpolation ($VAR, ${VAR}) is not offered: write $$ for a literal $, "
-                          "put the value in the catalog env")
+            refuse(
+                where,
+                "compose interpolation ($VAR, ${VAR}) is not offered: write $$ for a literal $, "
+                "put the value in the catalog env",
+            )
     return "".join(out)
 
 
@@ -245,9 +281,12 @@ def reservation_check(app, spec, services):
         needs = {n: s["deploy"]["replicas"] * spec["tasks"][n][key] for n, s in services.items()}
         if sum(needs.values()) > reservation[key]:
             parts = ", ".join(f"{n} {v}" for n, v in sorted(needs.items()))
-            refuse("catalog", f"the stack's tasks need {sum(needs.values())} {unit} ({parts}), "
-                              f"apps.{app}.reservation.{field} holds {reservation[key]} {unit}: raise it or lower "
-                              f"apps.{app}.resources")
+            refuse(
+                "catalog",
+                f"the stack's tasks need {sum(needs.values())} {unit} ({parts}), "
+                f"apps.{app}.reservation.{field} holds {reservation[key]} {unit}: raise it or lower "
+                f"apps.{app}.resources",
+            )
 
 
 def deploy_render(name, svc, stateful, task, catalog):
@@ -304,6 +343,21 @@ def deploy_render(name, svc, stateful, task, catalog):
     return deploy
 
 
+def secret_files_render(name, svc, files):
+    """The service's secretFiles mounted as swarm secrets -> the stack's top-level entries for them."""
+    secrets = {}
+    for key, path in sorted(files.items()):
+        with open(path, "rb") as f:
+            value = f.read()
+        if not value:
+            refuse(f"secretFiles.{name}.{key}", "its secret is empty: set it with sops, then sync")
+        secret = f"{name}-{key}-{hashlib.sha256(value).hexdigest()[:SECRET_DIGEST_CHARS]}"
+        secrets[secret] = {"file": path}
+        svc.setdefault("secrets", []).append({"source": secret, "target": key})
+        svc.setdefault("environment", {})[key + SECRET_FILE_SUFFIX] = SECRETS_DIR + key
+    return secrets
+
+
 def service_render(app, name, svc, spec, catalog, env, published, declared_volumes):
     for key in svc:
         if key == "build":
@@ -324,8 +378,10 @@ def service_render(app, name, svc, spec, catalog, env, published, declared_volum
         if source not in spec["volumes"]:
             refuse(f"{name}.volumes", f"{source}: declare apps.{app}.volumes.{source}.backup in the catalog")
         if name not in stateful:
-            refuse(f"{name}.volumes", f"{source} on a stateless service lives on whichever node runs it: list "
-                                      f"{name} in apps.{app}.stateful")
+            refuse(
+                f"{name}.volumes",
+                f"{source} on a stateless service lives on whichever node runs it: list {name} in apps.{app}.stateful",
+            )
         used.add(source)
 
     merged = environment_to_dict(svc.get("environment"), f"{name}.environment")
@@ -384,10 +440,6 @@ def volumes_render(volumes, used):
     return out
 
 
-# -----------------------------------------------------------------------------
-# FUNCTIONS
-# -----------------------------------------------------------------------------
-
 def render(app, catalog, env, stack):
     """The stack the swarm runs, as yaml text; refuses (exit 2) with the field and the reason."""
     assert app in catalog["apps"], app
@@ -431,17 +483,29 @@ def render(app, catalog, env, stack):
     published = {}
     for entry in spec["published"]:
         published.setdefault(entry["service"], set()).add((entry["targetPort"], entry["port"], entry["protocol"]))
-    for what, names in (("publishes", published), ("lists as stateful", spec["stateful"]),
-                        ("sets env for", env), ("sets resources for", spec["resources"])):
+    for entry in spec["envRequired"]:
+        if not env.get(entry["service"], {}).get(entry["key"]):
+            refuse(f"env.{entry['service']}.{entry['key']}", "its secret is empty: set it with sops, then sync")
+    for what, names in (
+        ("publishes", published),
+        ("lists as stateful", spec["stateful"]),
+        ("sets env for", env),
+        ("mounts secret files for", spec["secretFiles"]),
+        ("sets resources for", spec["resources"]),
+    ):
         missing = set(names) - set(services)
         if missing:
             refuse("catalog", f"{what} services the stack lacks: {sorted(missing)}")
 
     declared_volumes = set((stack.get("volumes") or {}).keys())
     used = set()
+    secrets = {}
     for name, svc in services.items():
         used |= service_render(app, name, svc, spec, catalog, env, published, declared_volumes)
+        secrets |= secret_files_render(name, svc, spec["secretFiles"].get(name, {}))
     reservation_check(app, spec, services)
+    if secrets:
+        stack["secrets"] = secrets
 
     stack["networks"] = networks_render(stack.get("networks") or {})
     volumes = volumes_render(stack.get("volumes"), used)

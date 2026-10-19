@@ -10,6 +10,7 @@ What reaches TRMNL's cloud: guest names, load and state, request counts per rout
 host names of the public ingress, disk use, and torrent counts and progress. Torrent names only with
 STATS_TORRENT_NAMES=1; without, a row shows the torrent's category.
 """
+
 import json
 import os
 import socket
@@ -20,10 +21,6 @@ import urllib.request
 from datetime import datetime, timezone
 
 import feed_io
-
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
 
 PROMETHEUS = os.environ.get("STATS_PROMETHEUS", "")
 LOKI = os.environ.get("STATS_LOKI", "")
@@ -78,17 +75,13 @@ AGENT_FAMILY = (
     '{{ else if contains "Safari/" .ua }}Safari'
     '{{ else if or (contains "Go-http" .ua) (contains "connect-go" .ua) }}Go'
     '{{ else if or (contains "curl" .ua) (contains "Wget" .ua) }}curl'
-    '{{ else }}other{{ end }}'
+    "{{ else }}other{{ end }}"
 )
 
 # qbittorrent's many states reduced to three buckets
 DOWNLOADING = {"downloading", "metaDL", "stalledDL", "queuedDL", "forcedDL", "checkingDL"}
 SEEDING = {"uploading", "stalledUP", "queuedUP", "forcedUP", "checkingUP"}
 PAUSED = {"pausedDL", "pausedUP", "stoppedDL", "stoppedUP"}
-
-# -----------------------------------------------------------------------------
-# INTERNAL
-# -----------------------------------------------------------------------------
 
 
 def promql(query):
@@ -159,11 +152,14 @@ def human_count(n):
 def bars(pairs, scale=None):
     """(name, count) -> rows with pct of the largest (or scale)."""
     top = scale if scale is not None else max((c for _, c in pairs), default=0)
-    return [{
-        "name": n,
-        "count": human_count(c),
-        "pct": round(PERCENT * c / top) if top else 0,
-    } for n, c in pairs]
+    return [
+        {
+            "name": n,
+            "count": human_count(c),
+            "pct": round(PERCENT * c / top) if top else 0,
+        }
+        for n, c in pairs
+    ]
 
 
 def ranked(results, label, fallback="?"):
@@ -190,11 +186,6 @@ def eta(seconds, pct):
     return f"{seconds // SECONDS_PER_DAY}d"
 
 
-# -----------------------------------------------------------------------------
-# SECTIONS
-# -----------------------------------------------------------------------------
-
-
 def services():
     """One row per declared VM, down ones included."""
     inv = feed_io.file_json_load(INVENTORY)
@@ -204,24 +195,28 @@ def services():
 
     # by the `vm` label prometheus and the inventory share (modules/telemetry.nix vmName)
     up = by_label(promql('up{job="homelab-node-exporter"}'), "vm")
-    cpu = by_label(promql(f'100 - (avg by (vm) (rate(node_cpu_seconds_total{{mode="idle"}}[{RATE_WINDOW}])) * 100)'), "vm")
-    mem = by_label(promql('(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100'), "vm")
+    cpu = by_label(
+        promql(f'100 - (avg by (vm) (rate(node_cpu_seconds_total{{mode="idle"}}[{RATE_WINDOW}])) * 100)'), "vm"
+    )
+    mem = by_label(promql("(1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100"), "vm")
 
     rows = []
     for vmid, vm in sorted(inv.items(), key=lambda kv: int(kv[0])):
         name = vm["vm"]
         online = up.get(name, 0) >= 1
-        rows.append({
-            "vmid": vmid,
-            "name": name,
-            "online": online,
-            "disabled": not vm["powered"],
-            "on_demand": vm["idle"] is not None,
-            "cpu": round(cpu.get(name, 0.0), 1) if online else 0.0,
-            "mem": round(mem.get(name, 0.0), 1) if online else 0.0,
-            "cpu_pct": percent_clamp(cpu.get(name, 0.0)) if online else 0,
-            "mem_pct": percent_clamp(mem.get(name, 0.0)) if online else 0,
-        })
+        rows.append(
+            {
+                "vmid": vmid,
+                "name": name,
+                "online": online,
+                "disabled": not vm["powered"],
+                "on_demand": vm["idle"] is not None,
+                "cpu": round(cpu.get(name, 0.0), 1) if online else 0.0,
+                "mem": round(mem.get(name, 0.0), 1) if online else 0.0,
+                "cpu_pct": percent_clamp(cpu.get(name, 0.0)) if online else 0,
+                "mem_pct": percent_clamp(mem.get(name, 0.0)) if online else 0,
+            }
+        )
 
     expected = [r for r in rows if not r["disabled"]]
     # cpu tile's second line names the busiest vm
@@ -238,19 +233,23 @@ def services():
 def network():
     """Lab throughput and busiest hosts, virtual devices excluded."""
     real = 'device!~"lo|veth.*|docker.*|podman.*|br-.*|cni.*|tailscale.*|wg.*"'
-    rx = promql(f'sum(rate(node_network_receive_bytes_total{{{real}}}[{RATE_WINDOW}]))')
-    tx = promql(f'sum(rate(node_network_transmit_bytes_total{{{real}}}[{RATE_WINDOW}]))')
+    rx = promql(f"sum(rate(node_network_receive_bytes_total{{{real}}}[{RATE_WINDOW}]))")
+    tx = promql(f"sum(rate(node_network_transmit_bytes_total{{{real}}}[{RATE_WINDOW}]))")
     top = promql(
-        f'topk({NETWORK_TOP_ROWS}, sum by (vm) ('
-        f'rate(node_network_receive_bytes_total{{{real}}}[{RATE_WINDOW}])'
-        f' + rate(node_network_transmit_bytes_total{{{real}}}[{RATE_WINDOW}])))')
+        f"topk({NETWORK_TOP_ROWS}, sum by (vm) ("
+        f"rate(node_network_receive_bytes_total{{{real}}}[{RATE_WINDOW}])"
+        f" + rate(node_network_transmit_bytes_total{{{real}}}[{RATE_WINDOW}])))"
+    )
     return {
         "rx": human_rate(scalar(rx)),
         "tx": human_rate(scalar(tx)),
-        "top": [{
-            "vm": r["metric"].get("vm", "?"),
-            "rate": human_rate(float(r["value"][1])),
-        } for r in top],
+        "top": [
+            {
+                "vm": r["metric"].get("vm", "?"),
+                "rate": human_rate(float(r["value"][1])),
+            }
+            for r in top
+        ],
     }
 
 
@@ -258,12 +257,15 @@ def totals():
     """Host cpu and memory; summed guests are oversubscribed."""
     sel = f'{{vm="{HOST_VM}"}}'
     idle = f'{{vm="{HOST_VM}",mode="idle"}}'
-    busy = scalar(promql(
-        f'100 * (1 - (sum(rate(node_cpu_seconds_total{idle}[{RATE_WINDOW}]))'
-        f' / sum(rate(node_cpu_seconds_total{sel}[{RATE_WINDOW}]))))'))
-    cores = scalar(promql(f'count(count by (cpu) (node_cpu_seconds_total{sel}))'))
-    mem_total = scalar(promql(f'node_memory_MemTotal_bytes{sel}'))
-    mem_free = scalar(promql(f'node_memory_MemAvailable_bytes{sel}'))
+    busy = scalar(
+        promql(
+            f"100 * (1 - (sum(rate(node_cpu_seconds_total{idle}[{RATE_WINDOW}]))"
+            f" / sum(rate(node_cpu_seconds_total{sel}[{RATE_WINDOW}]))))"
+        )
+    )
+    cores = scalar(promql(f"count(count by (cpu) (node_cpu_seconds_total{sel}))"))
+    mem_total = scalar(promql(f"node_memory_MemTotal_bytes{sel}"))
+    mem_free = scalar(promql(f"node_memory_MemAvailable_bytes{sel}"))
     used = mem_total - mem_free
 
     return {
@@ -277,8 +279,7 @@ def totals():
 
 def requests():
     """Request counts per route over REQUEST_WINDOW, lan vs internet."""
-    rows = promql(f'sum by (router, instance)'
-                  f' (increase(traefik_router_requests_total[{REQUEST_WINDOW}]))')
+    rows = promql(f"sum by (router, instance) (increase(traefik_router_requests_total[{REQUEST_WINDOW}]))")
     by_router = {}
     for r in rows:
         name = r["metric"].get("router", "")
@@ -302,14 +303,16 @@ def requests():
         total = e["int"] + e["ext"]
         if total < 1:
             continue
-        out.append({
-            "name": e["name"],
-            "rate": total,
-            "rpm": human_count(total),
-            # origin in one word, not two columns
-            "origin": "ext" if e["ext"] > e["int"] else ("int" if e["int"] else "ext"),
-            "mixed": e["int"] > 0 and e["ext"] > 0,
-        })
+        out.append(
+            {
+                "name": e["name"],
+                "rate": total,
+                "rpm": human_count(total),
+                # origin in one word, not two columns
+                "origin": "ext" if e["ext"] > e["int"] else ("int" if e["int"] else "ext"),
+                "mixed": e["int"] > 0 and e["ext"] > 0,
+            }
+        )
     out.sort(key=lambda x: -x["rate"])
     out = out[:REQUEST_ROWS]
     top = out[0]["rate"] if out else 0
@@ -326,18 +329,21 @@ def clients():
     k = CLIENT_ROWS
 
     # no Cf-Ipcountry means it bypassed cloudflare
-    countries = ranked(
-        logql(f'topk({k}, sum by (country) (count_over_time({sel}[{w}])))'),
-        "country", "direct")
+    countries = ranked(logql(f"topk({k}, sum by (country) (count_over_time({sel}[{w}])))"), "country", "direct")
     agents = ranked(
-        logql(f'topk({k}, sum by (agent) (count_over_time({sel}'
-              f' | json ua=`["request_User-Agent"]` | __error__=""'
-              f' | label_format agent=`{AGENT_FAMILY}` [{w}])))'),
-        "agent", "other")
+        logql(
+            f"topk({k}, sum by (agent) (count_over_time({sel}"
+            f' | json ua=`["request_User-Agent"]` | __error__=""'
+            f" | label_format agent=`{AGENT_FAMILY}` [{w}])))"
+        ),
+        "agent",
+        "other",
+    )
     hosts = ranked(
-        logql(f'topk({k}, sum by (h) (count_over_time({sel}'
-              f' | json h="RequestHost" | __error__="" [{w}])))'),
-        "h", "direct")
+        logql(f'topk({k}, sum by (h) (count_over_time({sel} | json h="RequestHost" | __error__="" [{w}])))'),
+        "h",
+        "direct",
+    )
     for h in hosts:
         if h["name"].endswith(CLIENT_DOMAIN):
             h["name"] = h["name"][: -len(CLIENT_DOMAIN)]
@@ -347,7 +353,7 @@ def clients():
 
     # how that traffic went
     by_status, exact = {}, {}
-    for r in logql(f'sum by (status) (count_over_time({sel}[{w}]))'):
+    for r in logql(f"sum by (status) (count_over_time({sel}[{w}]))"):
         code = str(r["metric"].get("status") or "")
         try:
             n = float(r["value"][1])
@@ -359,13 +365,13 @@ def clients():
     total = sum(by_status.values())
 
     # ClientHost is real: cloudflare ranges are trusted
-    visitors = scalar(logql(
-        f'count(count by (ip) (count_over_time({sel} | json ip="ClientHost"'
-        f' | __error__="" [{w}])))'))
+    visitors = scalar(
+        logql(f'count(count by (ip) (count_over_time({sel} | json ip="ClientHost" | __error__="" [{w}])))')
+    )
 
     # method label is on the stream, so free
     by_method = {}
-    for r in logql(f'sum by (method) (count_over_time({sel}[{w}]))'):
+    for r in logql(f"sum by (method) (count_over_time({sel}[{w}]))"):
         try:
             by_method[r["metric"].get("method") or "?"] = float(r["value"][1])
         except (KeyError, TypeError, ValueError):
@@ -392,12 +398,14 @@ def clients():
 
 def storage():
     """Fullest real filesystems; tmpfs and nfs excluded."""
-    real = ('fstype!~"tmpfs|ramfs|overlay|squashfs|nfs.*|fuse.*|autofs",'
-            'mountpoint!~"/nix/store|/run.*|/var/lib/docker.*|/var/lib/containers.*"')
+    real = (
+        'fstype!~"tmpfs|ramfs|overlay|squashfs|nfs.*|fuse.*|autofs",'
+        'mountpoint!~"/nix/store|/run.*|/var/lib/docker.*|/var/lib/containers.*"'
+    )
     rows = promql(
-        f'topk({DISK_ROWS}, 100 * (1 - node_filesystem_avail_bytes{{{real}}}'
-        f' / node_filesystem_size_bytes{{{real}}}))')
-    free = promql(f'sum(node_filesystem_avail_bytes{{{real}}})')
+        f"topk({DISK_ROWS}, 100 * (1 - node_filesystem_avail_bytes{{{real}}} / node_filesystem_size_bytes{{{real}}}))"
+    )
+    free = promql(f"sum(node_filesystem_avail_bytes{{{real}}})")
 
     out = []
     for r in rows:
@@ -406,11 +414,13 @@ def storage():
             pct = round(float(r["value"][1]))
         except (TypeError, ValueError):
             continue
-        out.append({
-            "vm": m.get("vm", "?"),
-            "mount": m.get("mountpoint", "?"),
-            "pct": percent_clamp(pct),
-        })
+        out.append(
+            {
+                "vm": m.get("vm", "?"),
+                "mount": m.get("mountpoint", "?"),
+                "pct": percent_clamp(pct),
+            }
+        )
     return {"top": out, "free_total": human_size(scalar(free))}
 
 
@@ -426,8 +436,16 @@ def qb_get(path):
 
 
 def torrents():
-    empty = {"available": False, "dl": "0B/s", "ul": "0B/s",
-             "downloading": 0, "seeding": 0, "paused": 0, "total": 0, "items": []}
+    empty = {
+        "available": False,
+        "dl": "0B/s",
+        "ul": "0B/s",
+        "downloading": 0,
+        "seeding": 0,
+        "paused": 0,
+        "total": 0,
+        "items": [],
+    }
     if not QBITTORRENT:
         return empty
     listing = qb_get("/api/v2/torrents/info")
@@ -451,10 +469,13 @@ def torrents():
     # active downloads first, fastest first
     active = sorted(
         (t for t in listing if bucket(t.get("state", "")) == "downloading"),
-        key=lambda t: (t.get("dlspeed", 0), t.get("progress", 0)), reverse=True)
+        key=lambda t: (t.get("dlspeed", 0), t.get("progress", 0)),
+        reverse=True,
+    )
     # unfinished only; finished torrents are noise
-    rest = sorted((t for t in listing if float(t.get("progress", 0)) < 1),
-                  key=lambda t: t.get("added_on", 0), reverse=True)
+    rest = sorted(
+        (t for t in listing if float(t.get("progress", 0)) < 1), key=lambda t: t.get("added_on", 0), reverse=True
+    )
     ordered = active + [t for t in rest if t not in active]
 
     items = []
@@ -463,15 +484,17 @@ def torrents():
         name = t.get("name", "?") if TORRENT_NAMES else (t.get("category") or "torrent")
         # scene and magnet-only names overflow a line
         if len(name) > NAME_CHARS:
-            name = name[:NAME_CHARS - 1].rstrip() + "\u2026"
-        items.append({
-            "name": name,
-            "pct": pct,
-            "state": bucket(t.get("state", "")),
-            "speed": human_rate(t.get("dlspeed", 0)),
-            "size": human_size(t.get("size", 0)),
-            "eta": eta(t.get("eta", 0), pct),
-        })
+            name = name[: NAME_CHARS - 1].rstrip() + "\u2026"
+        items.append(
+            {
+                "name": name,
+                "pct": pct,
+                "state": bucket(t.get("state", "")),
+                "speed": human_rate(t.get("dlspeed", 0)),
+                "size": human_size(t.get("size", 0)),
+                "eta": eta(t.get("eta", 0), pct),
+            }
+        )
 
     return {
         "available": True,
@@ -521,10 +544,12 @@ def main():
 
     os.makedirs(out_dir, exist_ok=True)
     feed_io.file_write_atomic(os.path.join(out_dir, "stats.json"), json.dumps(payload, indent=2))
-    print(f"{summary['up']}/{summary['total']} up, cpu {load['cpu_pct']}%, "
-          f"mem {load['mem_used']}/{load['mem_total']}, {len(reqs)} busy routes, "
-          f"{tor['total']} torrents, rx {net['rx']} tx {net['tx']}, "
-          f"{len(who['countries'])} countries calling")
+    print(
+        f"{summary['up']}/{summary['total']} up, cpu {load['cpu_pct']}%, "
+        f"mem {load['mem_used']}/{load['mem_total']}, {len(reqs)} busy routes, "
+        f"{tor['total']} torrents, rx {net['rx']} tx {net['tx']}, "
+        f"{len(who['countries'])} countries calling"
+    )
     return 0
 
 

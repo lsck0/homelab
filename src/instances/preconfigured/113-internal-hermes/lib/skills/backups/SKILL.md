@@ -14,8 +14,12 @@ metadata:
 # Backups (Kopia on vm-104, the NAS itself)
 
 Kopia snapshots the NAS tree `/srv/nas` except `bulk/` (media, torrents) daily at 02:00 (keeps 3 latest,
-7 daily, 8 weekly, 12 monthly, 2 annual). Every service keeps its persistent
-data in `/srv/nas/data/<service>`. Web UI for the owner: https://backup.lsck0.dev
+7 daily, 8 weekly, 12 monthly, 2 annual) into its repository on the hdd (`/srv/nas/bulk/BACKUPS/kopia`). Every
+service keeps its persistent data in `/srv/nas/data/<service>`. Web UI for the owner: https://backup.lsck0.dev
+
+The syncthing folders (the sync folder and the machines' borg repos) live on the hdd and have a repository of their
+own on the ssd (`/srv/nas/BACKUPS/kopia-syncthing`), snapshotted at 03:00 by `kopia-syncthing`; it refuses to run
+while the ssd's root is over 85% full. `systemctl status kopia-syncthing` on vm-104.
 
 ## Databases are dumped, not snapshotted
 

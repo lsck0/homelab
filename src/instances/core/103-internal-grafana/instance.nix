@@ -1,5 +1,11 @@
 # observability: prometheus, loki, tempo, pyroscope, grafana and the alerting
-{ net, telemetry, profiles, ... }: {
+{
+  net,
+  telemetry,
+  profiles,
+  ...
+}:
+{
   roles = [ "collector" ];
 
   vm = {
@@ -15,18 +21,40 @@
 
   grants = [
     {
-      from = [ "dashboard" "114" "operator" ];
+      from = [
+        "dashboard"
+        "114"
+        "operator"
+      ];
       tcp = [ telemetry.ports.prometheus ];
       why = "the dashboard's widgets, the terminal's feeds and hermes read the query api";
     }
     # the house lan does not: the readings would tell anyone on it when the house is occupied
     {
-      from = [ "workstation" "notebook" "wireguard" ];
-      tcp = [ telemetry.ports.prometheus ];
-      why = "the desktop bar's homelab widget reads the query api (lab.json monitoring), at home and on the road";
+      from = [
+        "workstation"
+        "notebook"
+        "wireguard"
+      ];
+      tcp = with telemetry.ports; [
+        prometheus
+        loki
+      ];
+      why = "the desktop bar's homelab widget reads both query apis (lab.json monitoring), at home and on the road";
     }
-    { from = [ "114" "operator" ]; tcp = [ telemetry.ports.loki ]; why = "stats-sync and hermes read logs"; }
-    { from = [ net.zones.external.ingress ]; tcp = [ telemetry.ports.otlpFrontend ]; why = "the edge relays the browsers' frontend telemetry"; }
+    {
+      from = [
+        "114"
+        "operator"
+      ];
+      tcp = [ telemetry.ports.loki ];
+      why = "stats-sync and hermes read logs";
+    }
+    {
+      from = [ net.zones.external.ingress ];
+      tcp = [ telemetry.ports.otlpFrontend ];
+      why = "the edge relays the browsers' frontend telemetry";
+    }
   ];
 
   services = {
@@ -35,7 +63,21 @@
       homepage = {
         group = "Core";
         icon = "grafana";
-        widget = { type = "prometheus"; url = telemetry.urls.prometheus; };
+        # main.nix grafana-alerts-export: the firing alerts, the watchdog left out
+        widget = {
+          type = "prometheusmetric";
+          url = telemetry.urls.prometheus;
+          settings.metrics = [
+            {
+              label = "Alerts firing";
+              query = "count(homelab_alert_firing) or vector(0)";
+            }
+            {
+              label = "Targets down";
+              query = "count(up{idle=\"\"} == 0) or vector(0)";
+            }
+          ];
+        };
       };
       on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
@@ -46,7 +88,8 @@
     title = "Spot price unavailable";
     category = "service";
     expr = "max_over_time(energy_spot_price_available[2h])";
-    op = "lt"; threshold = 1;
+    op = "lt";
+    threshold = 1;
     for = "0m";
     summary = "energy-charts unavailable: no day-ahead price for 2 hours";
     description = "The price cache ran out and energy-charts.info does not answer; the cost panels show no spot price meanwhile. spot-price asks again every hour and this resolves by itself. `journalctl -u spot-price` on vm-103.";

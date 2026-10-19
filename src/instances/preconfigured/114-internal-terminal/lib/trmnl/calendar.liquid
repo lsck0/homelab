@@ -7,12 +7,10 @@
 .cal { --u: min(calc(100cqw / 780), calc(100cqh / 420)); display: flex; flex-direction: column; height: 100%; width: 100%; padding: calc(4 * var(--u)) calc(8 * var(--u)) 0; box-sizing: border-box; font-family: "Inter Variable", Inter, sans-serif; color: #000; }
 .cal--day { flex-direction: row; gap: calc(10 * var(--u)); }
 
-/* ---- shared event text ------------------------------------------------- */
 .ev-t { font-weight: 800; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ev-s { font-weight: 600; overflow-wrap: anywhere; }
 .ev-src { font-weight: 800; letter-spacing: .08em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ---- day: agenda left ---------------------------------------------------- */
 .ag { flex: 0 0 38%; min-width: 0; display: flex; flex-direction: column; gap: calc(6 * var(--u)); min-height: 0; }
 .ag-date { display: flex; align-items: center; gap: calc(10 * var(--u)); border-bottom: calc(3 * var(--u)) solid #000; padding-bottom: calc(4 * var(--u)); flex: 0 0 auto; }
 .ag-dom { font-size: calc(54 * var(--u)); font-weight: 800; line-height: .95; font-variant-numeric: tabular-nums; }
@@ -30,7 +28,6 @@
 .ag-none { font-size: calc(20 * var(--u)); font-weight: 700; padding-top: calc(8 * var(--u)); }
 .ag-more { font-size: calc(12 * var(--u)); font-weight: 800; }
 
-/* ---- time grid (day + week) ------------------------------------------ */
 .tg { flex: 1 1 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 /* rows share columns so axis and events align */
 .tg-row { display: flex; width: 100%; }
@@ -79,7 +76,6 @@
 .tg-ev--wide { flex-direction: row; align-items: center; justify-content: flex-start; gap: calc(8 * var(--u)); }
 .tg-ev--wide .ev-s { -webkit-line-clamp: 1; font-size: calc(14 * var(--u)); }
 
-/* ---- month ----------------------------------------------------------- */
 .mo { display: flex; flex-direction: column; flex: 1 1 auto; width: 100%; min-height: 0; box-sizing: border-box; border-top: calc(2 * var(--u)) solid #000; }
 .mo-dows { display: flex; padding: calc(2 * var(--u)) 0; border-bottom: calc(1 * var(--u)) solid #000; }
 .mo-dow { flex: 1 1 0; font-size: calc(11 * var(--u)); font-weight: 800; letter-spacing: .1em; text-transform: uppercase; text-align: center; }

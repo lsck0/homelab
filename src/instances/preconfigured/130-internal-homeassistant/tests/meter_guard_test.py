@@ -5,6 +5,7 @@ Usage: meter_guard_test.py <meter_reading.jinja>
 Table cases for every verdict, the owner's real typos, and the law that a corrected typo never counts as consumption
 (hypothesis, derandomized).
 """
+
 import os
 import sys
 import unittest
@@ -18,17 +19,26 @@ DAY = 86400
 PROPERTY = settings(max_examples=200, deadline=None, derandomize=True)
 
 
-GUARD = jinja2.Environment(loader=jinja2.FileSystemLoader(os.path.dirname(METER_GUARD)), undefined=jinja2.StrictUndefined)
+GUARD = jinja2.Environment(
+    loader=jinja2.FileSystemLoader(os.path.dirname(METER_GUARD)), undefined=jinja2.StrictUndefined
+)
 GUARD_CALL = GUARD.from_string(
     "{% from '" + os.path.basename(METER_GUARD) + "' import meter_verdict %}"
-    "{{ meter_verdict(reading, accepted, previous, read_at_s, now_s, replaced_s, max_rise) | trim }}")
+    "{{ meter_verdict(reading, accepted, previous, read_at_s, now_s, replaced_s, max_rise) | trim }}"
+)
 ACCEPTING = ("accept", "accept_first", "correct")
 
 
 def verdict(reading, accepted, previous, read_at_s, now_s, replaced_s=0.0, max_rise=40.0):
-    return GUARD_CALL.render(reading=float(reading), accepted=float(accepted), previous=float(previous),
-                             read_at_s=float(read_at_s), now_s=float(now_s), replaced_s=float(replaced_s),
-                             max_rise=float(max_rise))
+    return GUARD_CALL.render(
+        reading=float(reading),
+        accepted=float(accepted),
+        previous=float(previous),
+        read_at_s=float(read_at_s),
+        now_s=float(now_s),
+        replaced_s=float(replaced_s),
+        max_rise=float(max_rise),
+    )
 
 
 class Meter:
@@ -79,8 +89,10 @@ class MeterGuard(unittest.TestCase):
 
     def test_the_owners_typos_count_nothing(self):
         # the live history that made the old max-min count 3269.8 m³ of gas and 275 m³ of water in a week
-        for readings, typo_at, fixed, max_rise in (([3256.821, 3261.321, 3269.8, 327.8], 3, 3278.0, 40.0),
-                                                   ([273, 274, 275, 27.6], 3, 276.0, 3.0)):
+        for readings, typo_at, fixed, max_rise in (
+            ([3256.821, 3261.321, 3269.8, 327.8], 3, 3278.0, 40.0),
+            ([273, 274, 275, 27.6], 3, 276.0, 3.0),
+        ):
             meter = Meter(max_rise)
             for i, reading in enumerate(readings):
                 v = meter.enter(reading, (i + 1) * DAY)
@@ -89,11 +101,18 @@ class MeterGuard(unittest.TestCase):
             self.assertAlmostEqual(meter.rise(), fixed - readings[0])
 
     @PROPERTY
-    @given(st.floats(min_value=100, max_value=9000), st.lists(st.tuples(
-        st.integers(min_value=1, max_value=3),                      # days since the last reading
-        st.floats(min_value=0, max_value=0.9),                      # share of the allowed rise used
-        st.sampled_from(["none", "times10", "div10", "high"])),    # the typo typed first, then the right value
-        min_size=1, max_size=40))
+    @given(
+        st.floats(min_value=100, max_value=9000),
+        st.lists(
+            st.tuples(
+                st.integers(min_value=1, max_value=3),  # days since the last reading
+                st.floats(min_value=0, max_value=0.9),  # share of the allowed rise used
+                st.sampled_from(["none", "times10", "div10", "high"]),
+            ),  # the typo typed first, then the right value
+            min_size=1,
+            max_size=40,
+        ),
+    )
     def test_a_corrected_typo_never_counts(self, start, entries):
         max_rise = 40.0
         meter = Meter(max_rise)
@@ -103,8 +122,12 @@ class MeterGuard(unittest.TestCase):
         for days, share, typo in entries:
             now_s += days * DAY
             true_value = round(true_value + share * max_rise * days, 3)
-            wrong = {"none": None, "times10": true_value * 10, "div10": true_value / 10,
-                     "high": true_value + (max_rise * days - (true_value - meter.accepted)) / 2 + 0.001}[typo]
+            wrong = {
+                "none": None,
+                "times10": true_value * 10,
+                "div10": true_value / 10,
+                "high": true_value + (max_rise * days - (true_value - meter.accepted)) / 2 + 0.001,
+            }[typo]
             if wrong is not None and wrong != true_value:
                 meter.enter(wrong, now_s)
             meter.enter(true_value, now_s + 60)

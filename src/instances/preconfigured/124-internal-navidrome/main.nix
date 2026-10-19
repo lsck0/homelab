@@ -1,4 +1,15 @@
-{ config, lib, pkgs, inventory, site, catalog, nasMedia, retry, setupUnit, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inventory,
+  site,
+  catalog,
+  nasMedia,
+  retry,
+  setupUnit,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   route = catalog.internal.navidrome;
@@ -10,12 +21,17 @@ let
   adminUser = "admin";
   # the subsonic api level hermes speaks (navidrome skill)
   subsonicApiVersion = "1.16.1";
-in {
+in
+{
   homelab.nasMounts = nasMedia musicDir "music";
-  homelab.localState.navidrome = { path = stateDir; unit = "podman-navidrome"; sqlite = [ "navidrome.db" ]; };
+  homelab.localState.navidrome = {
+    path = stateDir;
+    unit = "podman-navidrome";
+    sqlite = [ "navidrome.db" ];
+  };
 
   virtualisation.oci-containers.containers.navidrome = {
-    image = "deluan/navidrome:0.64.0";
+    image = "deluan/navidrome:0.64.0@sha256:a384948b81bd1529986c5960169e7fc4fa00f46bde6bd517971a4c36671db2af";
     ports = [ "${toString route.port}:${toString containerPort}" ];
     volumes = [
       "${stateDir}:/data"
@@ -41,7 +57,11 @@ in {
   systemd.services.navidrome-setup = setupUnit {
     description = "Create the Navidrome admin and export its Subsonic credentials";
     after = [ "podman-navidrome.service" ];
-    path = [ pkgs.curl pkgs.coreutils pkgs.jq ];
+    path = [
+      pkgs.curl
+      pkgs.coreutils
+      pkgs.jq
+    ];
     script = ''
       ${retry} 90 2 curl -sf ${local}/ping
       # the password goes on stdin, never on argv

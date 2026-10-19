@@ -131,6 +131,10 @@ export def proxmox-install-run [src: path, ssh: list<string>, host: string, acti
     try { $all | to json | ^$ssh.0 ...($ssh | skip 1) $host $run; true } catch { false }
 }
 
+export def proxmox-upgrade [src: path, ssh: list<string>, host: string]: nothing -> nothing {
+    if not (proxmox-install-run $src $ssh $host upgrade) { die "the Proxmox host was not upgraded (above)." }
+}
+
 export def proxmox-teardown [src: path, ssh: list<string>, host: string]: nothing -> nothing {
     if not (proxmox-install-run $src $ssh $host teardown) { die "the Proxmox host was not torn down (above)." }
 }
@@ -150,13 +154,17 @@ export def proxmox-converge [src: path, ssh: list<string>, user: string, lab_exp
     if $bind_password == "" or $root_password == "" {
         die "lldap-proxmox-bind-password or proxmox-root-pass is empty: run src/scripts/secrets-sync.nu --apply."
     }
+    let zones = open $files.zones | values
     let inputs = {
         proxmox_ip: $site.lan.proxmox
-        zone_bridges: (open $files.zones | values | get bridge)
+        router_ip: $site.lan.router
+        lab_subnets: ($zones | get subnet | append $exported.wireguard.subnet)
+        zone_bridges: ($zones | get bridge)
         wake_zones: ($exported.zones | transpose zone spec | where { $in.spec.ingress? != null } | get zone)
         gpu_ids: ($site.gpu?.functionIds? | default [])
         bulk_disk: $bulk_disk
         nas_id: $exported.routes.nas.vmid
+        journal_upload: $exported.monitoring.journalUpload
         lldap: {
             vmid: $ldap.vmid, host: $ldap.host, port: $ldap.port, base_dn: $ldap.baseDn, admin_group: $ldap.adminGroup
             cert: $ldap.certFile, bind_user: $ldap.bindUser, bind_password: $bind_password

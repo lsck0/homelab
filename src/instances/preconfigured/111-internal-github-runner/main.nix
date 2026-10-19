@@ -6,18 +6,21 @@
 # (home, images, volumes, caches, user units), reaching the internet and the lab's dns and nothing else inside;
 # it holds no cache or registry credential. A repo gets a runner only when its workflows target self-hosted, and
 # exactly one: the per-job wipe needs the user to itself. The subuid range follows the uid.
-{ config, lib, pkgs, inputs, inventory, site, upstream, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inputs,
+  upstream,
+  ...
+}:
 let
-  net = import ../../../modules/net.nix { inherit lib inventory site; };
-
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
-
   # ADD OR REMOVE A REPO HERE, with its runner user's fixed uid (2010 up): one runner each, see the header
   repos = {
     # the scheduled benchmarks (scheduled.yml, vars.BENCH_RUNNER)
-    "lsck0/nyangine" = { uid = 2010; };
+    "lsck0/nyangine" = {
+      uid = 2010;
+    };
   };
 
   # see nixpkgs-unstable in flake.nix
@@ -38,87 +41,115 @@ let
   # the start includes the mint's retries and backoff (modules/upstream), several minutes during a github blip
   startTimeout = "10min";
 
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
-
   nameOf = repo: lib.toLower (lib.last (lib.splitString "/" repo));
   userOf = repo: "gh-${nameOf repo}";
   regTokenFile = repo: "${regTokenDir}/${nameOf repo}";
 
   # an ExecCondition: github down skips the start (the resume timer retries), any other failure fails it
-  mintToken = repo: pkgs.writeShellScript "github-runner-${nameOf repo}-mint-token" ''
-    set -uo pipefail
-    umask 077
-    unavailable=${toString upstream.unavailable}
-    failed=${toString conditionFailed}
-    answer=${regTokenDir}/${nameOf repo}.answer
-    trap 'rm -f "$answer"' EXIT
-    status=0
-    ${upstream.run} github ${pkgs.curl}/bin/curl -sSf --max-time 30 -X POST -o "$answer" \
-      -H @${config.sops.templates."github-runner-auth".path} \
-      -H "Accept: application/vnd.github+json" \
-      -H "X-GitHub-Api-Version: 2022-11-28" \
-      "https://api.github.com/repos/${repo}/actions/runners/registration-token" || status=$?
-    [ "$status" -ne "$unavailable" ] || exit "$status"
-    if [ "$status" -ne 0 ] || ! ${pkgs.jq}/bin/jq -je .token "$answer" > ${regTokenFile repo}; then
-      exit "$failed"
-    fi
-  '';
+  mintToken =
+    repo:
+    pkgs.writeShellScript "github-runner-${nameOf repo}-mint-token" ''
+      set -uo pipefail
+      umask 077
+      unavailable=${toString upstream.unavailable}
+      failed=${toString conditionFailed}
+      answer=${regTokenDir}/${nameOf repo}.answer
+      trap 'rm -f "$answer"' EXIT
+      status=0
+      ${upstream.run} github ${pkgs.curl}/bin/curl -sSf --max-time 30 -X POST -o "$answer" \
+        -H @${config.sops.templates."github-runner-auth".path} \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        "https://api.github.com/repos/${repo}/actions/runners/registration-token" || status=$?
+      [ "$status" -ne "$unavailable" ] || exit "$status"
+      if [ "$status" -ne 0 ] || ! ${pkgs.jq}/bin/jq -je .token "$answer" > ${regTokenFile repo}; then
+        exit "$failed"
+      fi
+    '';
 
-  runner = repo: let daemon = config.homelab.rootlessDocker.${userOf repo}; in {
-    enable = true;
-    package = runnerPackage;
-    inherit nodeRuntimes;
-    url = "https://github.com/${repo}";
-    name = "${config.networking.hostName}-${nameOf repo}";
-    tokenFile = regTokenFile repo;
-    # one job per registration; the module then cleans the runner's state and work dirs
-    ephemeral = true;
-    # take over a stale same-name registration
-    replace = true;
-    extraLabels = [ "nixos" "homelab" ];
-    user = userOf repo;
-    group = userOf repo;
-    # tools workflows expect on PATH; no nix: the daemon refuses these users
-    extraPackages = with pkgs; [
-      bash coreutils findutils gnugrep gnused gnutar gzip xz which
-      git gh curl jq
-      docker docker-compose
-      gnumake gcc pkg-config
-      nodejs python3
-    ];
-    # steps build and run containers on the repo user's own rootless daemon
-    extraEnvironment = {
-      DOCKER_HOST = daemon.dockerHost;
-      DOCKER_BUILDKIT = "1";
+  runner =
+    repo:
+    let
+      daemon = config.homelab.rootlessDocker.${userOf repo};
+    in
+    {
+      enable = true;
+      package = runnerPackage;
+      inherit nodeRuntimes;
+      url = "https://github.com/${repo}";
+      name = "${config.networking.hostName}-${nameOf repo}";
+      tokenFile = regTokenFile repo;
+      # one job per registration; the module then cleans the runner's state and work dirs
+      ephemeral = true;
+      # take over a stale same-name registration
+      replace = true;
+      extraLabels = [
+        "nixos"
+        "homelab"
+      ];
+      user = userOf repo;
+      group = userOf repo;
+      # tools workflows expect on PATH; no nix: the daemon refuses these users
+      extraPackages = with pkgs; [
+        bash
+        coreutils
+        findutils
+        gnugrep
+        gnused
+        gnutar
+        gzip
+        xz
+        which
+        git
+        gh
+        curl
+        jq
+        docker
+        docker-compose
+        gnumake
+        gcc
+        pkg-config
+        nodejs
+        python3
+      ];
+      # steps build and run containers on the repo user's own rootless daemon
+      extraEnvironment = {
+        DOCKER_HOST = daemon.dockerHost;
+        DOCKER_BUILDKIT = "1";
+      };
+      serviceOverrides = {
+        # "+": as root, outside the sandbox: a registration token from sops, then the user starts from nothing
+        ExecCondition = "+${mintToken repo}";
+        ExecStartPre = lib.mkBefore [ "+${daemon.resetScript}" ];
+        TimeoutStartSec = startTimeout;
+        # "-": unconfigure.sh deletes the file
+        InaccessiblePaths = lib.mkForce [
+          "-${regTokenFile repo}"
+          "-${stateRoot}/${nameOf repo}/.current-token"
+        ];
+        Slice = daemon.slice;
+        RuntimeMaxSec = jobRuntimeMax;
+        Restart = lib.mkForce "always";
+        RestartSec = restartDelayS;
+        # the rootless socket lives under /run/user, which the module's default hides
+        ProtectHome = "read-only";
+      };
     };
-    serviceOverrides = {
-      # "+": as root, outside the sandbox: a registration token from sops, then the user starts from nothing
-      ExecCondition = "+${mintToken repo}";
-      ExecStartPre = lib.mkBefore [ "+${daemon.resetScript}" ];
-      TimeoutStartSec = startTimeout;
-      # "-": unconfigure.sh deletes the file
-      InaccessiblePaths = lib.mkForce [ "-${regTokenFile repo}" "-${stateRoot}/${nameOf repo}/.current-token" ];
-      Slice = daemon.slice;
-      RuntimeMaxSec = jobRuntimeMax;
-      Restart = lib.mkForce "always";
-      RestartSec = restartDelayS;
-      # the rootless socket lives under /run/user, which the module's default hides
-      ProtectHome = "read-only";
-    };
-  };
-in {
+in
+{
   imports = [
     ../../../modules/rootless-docker.nix
     ./lib/forgejo-runner.nix
   ];
 
-  homelab.rootlessDocker = lib.mapAttrs' (repo: r: lib.nameValuePair (userOf repo) {
-    inherit (r) uid;
-    ephemeral = true;
-    # no labAccess: a job reaches the internet and the host's resolvers, never a lab service
-  }) repos;
+  homelab.rootlessDocker = lib.mapAttrs' (
+    repo: r:
+    lib.nameValuePair (userOf repo) {
+      inherit (r) uid;
+      ephemeral = true;
+      # no labAccess: a job reaches the internet and the host's resolvers, never a lab service
+    }
+  ) repos;
 
   # the runners' jobs could otherwise build fixed-output derivations, which run as nixbld with the network
   nix.settings.allowed-users = [ "root" ];
@@ -131,10 +162,16 @@ in {
   services.github-runners = lib.mapAttrs' (repo: _: lib.nameValuePair (nameOf repo) (runner repo)) repos;
 
   # a runner whose start a github outage skipped (ExecCondition) is no failure and no restart: this starts it again
-  systemd.timers = lib.mapAttrs' (repo: _: lib.nameValuePair "github-runner-${nameOf repo}-resume" {
-    wantedBy = [ "timers.target" ];
-    timerConfig = { Unit = "github-runner-${nameOf repo}.service"; OnUnitInactiveSec = outageRetry; };
-  }) repos;
+  systemd.timers = lib.mapAttrs' (
+    repo: _:
+    lib.nameValuePair "github-runner-${nameOf repo}-resume" {
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        Unit = "github-runner-${nameOf repo}.service";
+        OnUnitInactiveSec = outageRetry;
+      };
+    }
+  ) repos;
 
   systemd.tmpfiles.rules = [
     "d ${regTokenDir} 0700 root root -"

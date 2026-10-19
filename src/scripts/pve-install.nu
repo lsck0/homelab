@@ -2,17 +2,20 @@
 # converge the Proxmox VE host to what the lab declares; every run of init.nu and sync.nu runs it, reruns change
 # nothing. deinit.nu runs its teardown.
 #
-# usage: pve-install.nu converge|teardown, its inputs a json record on stdin, out of argv. lib/proxmox.nu installs the
+# usage: pve-install.nu converge|upgrade|teardown, its inputs a json record on stdin, out of argv. lib/proxmox.nu installs the
 # pinned nu first (PROXMOX_NU) and runs this file under it:
 #   token_dir            where a new api token's secret is left, one file per role
 #   templates            the golden image and the lxc template sync.nu uploads
 # converge only:
 #   proxmox_ip           the host's lan address (site.json), which its api certificate must name
+#   router_ip            the lab router's lan address (site.json), the host's route to the lab's subnets
+#   lab_subnets          every zone's subnet (zones.json) and the wireguard peers' (the lab export)
 #   zone_bridges         every zone's bridge (zones.json); vmbr0 comes from the installer
 #   wake_zones           the zones whose ingress wakes onDemand guests (terraform/lib.tf grants each its guests)
 #   gpu_ids              the passthrough gpu's functions (site.json), empty for none
 #   bulk_disk            the disk the bulk pool is created on; init.nu asks it once, empty keeps the pool as it is
 #   nas_id               the nas guest, whose hookscript wakes the bulk pool around its start and stop
+#   journal_upload       vm-103's journal-remote url, where the host's journal goes
 #   lldap                {vmid host port base_dn admin_group cert bind_user bind_password}: the guest running lldap, its
 #                        ldaps listener and self-signed certificate (which the realm pins), the directory and its group
 #                        that administers the datacentre, and the read-only user the realm binds as
@@ -26,11 +29,9 @@
 # lab: while one is unavailable, what needs it is left for the next run and the rest converges. Every function takes
 # the host record (pve-host plus the inputs), so tests/pve_install_test.nu runs them against its own paths.
 
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
-
-const PACKAGES = [prometheus-node-exporter prometheus-node-exporter-collectors smartmontools nvme-cli rasdaemon jq]
+const PACKAGES = [
+    prometheus-node-exporter prometheus-node-exporter-collectors smartmontools nvme-cli rasdaemon jq systemd-journal-remote
+]
 const OSSEC_BUILD_PACKAGES = [build-essential libevent-dev libpcre2-dev libz-dev libssl-dev libsystemd-dev wget ca-certificates]
 # a mirror or github that does not answer costs a run at most this, per try
 const APT_OPTIONS = [-o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=3]
@@ -59,8 +60,6 @@ const SNIPPETS_DIR = "/var/lib/vz/snippets"
 # bulk (hdd) stays disabled in proxmox: pvestatd polls enabled storages every 10s, which keeps the disk spinning;
 # the nas guest's hookscript enables it only around its own start and stop
 const BULK_HOOK_NAME = "homelab-bulk.nu"
-# the hook's name while it was a shell script; removed once the nas guest runs the new one
-const BULK_HOOK_LEGACY_NAME = "homelab-bulk.sh"
 const PVE_GUESTS_DROPIN = "/etc/systemd/system/pve-guests.service.d/homelab-bulk.conf"
 # pve-manager's own global_filter: zfs zvols and ceph rbds are never pvs
 const PVE_LVM_REJECTS = ['r|/dev/zd.*|' 'r|/dev/rbd.*|']
@@ -88,13 +87,24 @@ const OSSEC_WATCH = '  <!-- homelab-managed: see src/scripts/pve-install.nu -->
     <ignore>/etc/adjtime</ignore>
   </syscheck>
 '
-# a panic or a stalled kernel reboots the host instead of waiting for a power cycle
-const RECOVERY_SYSCTL = ["kernel.panic = 10" "kernel.panic_on_oops = 1" "kernel.hung_task_panic = 1" "kernel.softlockup_panic = 1"]
+# a panic or a stalled kernel reboots the host instead of waiting for a power cycle; a hard lockup is the nmi
+# watchdog's to catch
+const RECOVERY_SYSCTL = [
+    "kernel.panic = 10" "kernel.panic_on_oops = 1" "kernel.hung_task_panic = 1" "kernel.softlockup_panic = 1"
+    "kernel.hardlockup_panic = 1"
+]
 # a kernel hang stops every software timer, so only the chipset's watchdog resets the board. watchdog-mux
 # (pve-ha-manager) opens /dev/watchdog on every pve host and feeds it, so it is the feeder: systemd's
 # RuntimeWatchdogSec would find the device busy. Mux loads its module at boot, so a change arms at the next one.
 const WATCHDOG_MODULE = "sp5100_tco"
 const WATCHDOG_MODULE_LINE = '^\s*#?\s*WATCHDOG_MODULE='
+# what the kernel names that module's device; mux keeps the first watchdog it found at boot open (softdog, until
+# the module loads before it)
+const WATCHDOG_IDENTITY = "SP5100 TCO timer"
+# Debian's own sshd_config includes sshd_config.d first, and sshd keeps the first value it reads
+const SSHD_KEYS_ONLY = ["PermitRootLogin prohibit-password" "PasswordAuthentication no" "KbdInteractiveAuthentication no"]
+# a full-upgrade keeps every config file the host changed, as an interactive one answering "keep" would
+const APT_KEEP_CONFIG = [-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold]
 
 # the host's files this script reads and writes
 export def pve-host []: nothing -> record {
@@ -116,13 +126,14 @@ export def pve-host []: nothing -> record {
         disk_by_id_dir: "/dev/disk/by-id"
         recovery_sysctl_file: "/etc/sysctl.d/90-homelab-recovery.conf"
         watchdog_defaults: "/etc/default/pve-ha-manager"
+        watchdog_class_dir: "/sys/class/watchdog"
+        sshd_dropin: "/etc/ssh/sshd_config.d/10-homelab.conf"
+        lab_route_unit: "/etc/systemd/system/homelab-lab-route.service"
+        journal_upload_dropin: "/etc/systemd/journal-upload.conf.d/homelab.conf"
+        boot_dir: "/boot"
         ossec_dir: "/var/ossec"
     }
 }
-
-# -----------------------------------------------------------------------------
-# INTERNAL
-# -----------------------------------------------------------------------------
 
 def fail [message: string] {
     error make {msg: $message}
@@ -242,10 +253,6 @@ def textfile-job-install [name: string, what: string, boot_delay: string, script
     if ($changed | any { $in }) { textfile-job-start $name }
 }
 
-# -----------------------------------------------------------------------------
-# HOST
-# -----------------------------------------------------------------------------
-
 def apt-sources-converge []: nothing -> nothing {
     let codename = open --raw /etc/os-release | lines | parse 'VERSION_CODENAME={name}' | get 0.name | str trim --char '"'
     # enterprise repos need a paid subscription
@@ -356,6 +363,36 @@ export def recovery-converge [host: record]: nothing -> nothing {
     if (file-converge $host.watchdog_defaults "644" (lines-text ($kept | append $"WATCHDOG_MODULE=($WATCHDOG_MODULE)"))) {
         print $">>> Proxmox: watchdog-mux arms the ($WATCHDOG_MODULE) hardware watchdog from the next host boot"
     }
+    let active = watchdogs-active $host.watchdog_class_dir
+    if $WATCHDOG_IDENTITY not-in $active {
+        warn ([
+            $"watchdog-mux feeds ($active | str join ', ' | default --empty none), not the ($WATCHDOG_IDENTITY): a hard hang"
+            "waits for a power cycle until the host reboots, or until: systemctl stop watchdog-mux && rmmod softdog &&"
+            "systemctl start watchdog-mux"
+        ] | str join " ")
+    }
+}
+
+# the identity of every watchdog device something holds open
+def watchdogs-active [class_dir: path]: nothing -> list<string> {
+    glob ($class_dir | path join *) | where { (open --raw ($in | path join state) | str trim) == "active" }
+        | each { open --raw ($in | path join identity) | str trim }
+}
+
+# root logs in with its keys alone; the console stays the way back in
+export def sshd-converge [host: record]: nothing -> nothing {
+    if not (file-converge $host.sshd_dropin "644" (lines-text $SSHD_KEYS_ONLY)) { return }
+    # sshd refusing its config would lock out the next login, not this one
+    if not (succeeds [sshd -t]) {
+        rm --force $host.sshd_dropin
+        fail "sshd refuses its config with the keys-only drop-in, which is removed again."
+    }
+    let effective = ^sshd -T | lines
+    if "passwordauthentication no" not-in $effective {
+        fail $"sshd does not read ($host.sshd_dropin): its sshd_config includes no sshd_config.d."
+    }
+    ^systemctl reload ssh
+    print ">>> Proxmox: root logs in over ssh with its keys alone"
 }
 
 # root takes exactly the lab's root keys plus the node's own, which pve uses to reach itself
@@ -366,11 +403,35 @@ def root-converge [host: record]: nothing -> nothing {
     let wanted = lines-text ($node_keys ++ $host.root_keys)
     # in place: the file is pmxcfs' (/etc/pve/priv), a rename across its link would break the link
     if (open --raw $keys_file) != $wanted { $wanted | save --force $keys_file }
+    sshd-converge $host
 }
 
-# -----------------------------------------------------------------------------
-# API ACCESS
-# -----------------------------------------------------------------------------
+# the lab's subnets through its router, so the host answers a guest at the guest's own address: the router leaves
+# traffic to the host unmasqueraded, and the host firewall admits by that address (terraform/lib.tf)
+export def lab-route-converge [host: record]: nothing -> nothing {
+    let routes = $host.lab_subnets | each { $"($in) via ($host.router_ip)" }
+    let unit = lines-text ([
+        "[Unit]" "Description=Route the lab's subnets through its router" "After=network-online.target"
+        "Wants=network-online.target"
+        "[Service]" "Type=oneshot" "RemainAfterExit=yes"
+    ] ++ ($routes | each { $"ExecStart=/usr/sbin/ip route replace ($in)" })
+      ++ ($routes | each { $"ExecStop=-/usr/sbin/ip route del ($in)" })
+      ++ ["[Install]" "WantedBy=multi-user.target"])
+    if not (file-converge $host.lab_route_unit "644" $unit) { return }
+    let name = $host.lab_route_unit | path basename
+    ^systemctl daemon-reload
+    ^systemctl enable $name
+    ^systemctl restart $name
+    print $">>> Proxmox: the lab's subnets route through ($host.router_ip)"
+}
+
+# proxmox-firewall enforces the rules through nftables, whose guest chains sync.nu reads back
+export def firewall-backend-converge []: nothing -> nothing {
+    let options = $"/nodes/(node-name)/firewall/options"
+    if (pve-json pvesh get $options | get --optional nftables) == 1 { return }
+    ^pvesh set $options --nftables 1
+    print ">>> Proxmox: the host firewall runs on nftables (proxmox-firewall)"
+}
 
 def users-converge [host: record]: nothing -> nothing {
     let declared = [terraform-prov@pve homepage@pve] ++ ($host.wake_zones | each { $"wake-($in)@pve" })
@@ -489,10 +550,6 @@ export def api-cert-converge [host: record]: nothing -> nothing {
     if not (api-cert-names-ip $host) { fail $"the re-signed ($host.api_cert) still does not name ($host.proxmox_ip)." }
 }
 
-# -----------------------------------------------------------------------------
-# STORAGE
-# -----------------------------------------------------------------------------
-
 # pvestatd's lvm.conf, rejecting every name of the bulk pv; written whole, never an edit of the host's lvm.conf, whose
 # layout pve-manager owns
 def pvestatd-lvm-render [names: list<string>]: nothing -> string {
@@ -593,14 +650,9 @@ def bulk-converge [host: record]: nothing -> nothing {
     if $"hookscript: local:snippets/($BULK_HOOK_NAME)" not-in ($config | lines) {
         ^qm set $nas --hookscript $"local:snippets/($BULK_HOOK_NAME)" out> /dev/null
     }
-    rm --force ($SNIPPETS_DIR | path join $BULK_HOOK_LEGACY_NAME)
     let status = ^qm status $nas
     if ($status | str trim | split row " " | get --optional 1) == "running" { ^pvesm set bulk --disable 1 }
 }
-
-# -----------------------------------------------------------------------------
-# MONITORING
-# -----------------------------------------------------------------------------
 
 # fill of every thin pool on this host, for node_exporter's textfile collector
 def thinpool-metrics []: nothing -> string {
@@ -630,22 +682,56 @@ def main [] {
 '
 }
 
-# run by smartd on a warning, which it describes in SMARTD_DEVICE and SMARTD_FAILTYPE
-def smartd-textfile []: nothing -> string {
-    nu-script ('# one file per device and kind of failure
+# run by smartd on a warning, which it describes in SMARTD_DEVICE, SMARTD_FAILTYPE and SMARTD_MESSAGE
+export def smartd-textfile []: nothing -> string {
+    nu-script ('# one file per device and kind of failure, the warning itself in the message label
 def main [...args: string] {
     let device = $env.SMARTD_DEVICE
     let type = $env.SMARTD_FAILTYPE
+    let message = $env.SMARTD_MESSAGE? | default "" | lines | get --optional 0 | default "" | str trim
+        | str replace --all "\\" "\\\\" | str replace --all "\"" "\\\""
     let name = $"($device)-($type)" | str replace --all --regex "[^A-Za-z0-9]" "_"
     let file = "TEXTFILE_DIR" | path join $"smartd-($name).prom"
     [
         "# HELP homelab_smartd_warning_timestamp_seconds When smartd last warned about a disk."
         "# TYPE homelab_smartd_warning_timestamp_seconds gauge"
-        $"homelab_smartd_warning_timestamp_seconds{device=\"($device)\",type=\"($type)\"} (date now | format date %s)"
+        $"homelab_smartd_warning_timestamp_seconds{device=\"($device)\",type=\"($type)\",message=\"($message)\"} (date now | format date %s)"
     ] | each { $"($in)\n" } | str join | save --force $"($file).tmp"
     mv --force $"($file).tmp" $file
 }
 ' | str replace TEXTFILE_DIR $TEXTFILE_DIR)
+}
+
+# the nvme collector reports neither the drives' thermal management time nor the machine checks
+export def hardware-metrics []: nothing -> string {
+    nu-script '# the throttled and over-temperature time of every nvme namespace, and the machine checks of this boot
+def main [] {
+    let listed = ^nvme list --output-format json | from json
+    let drives = $listed.Devices | get DevicePath | sort | each {|path|
+        let log = ^nvme smart-log $path --output-format json | from json
+        let labels = $"device=\"($path | path basename)\""
+        [
+            $"homelab_nvme_thermal_throttle_seconds_total{($labels)} ($log.thm_temp1_total_time + $log.thm_temp2_total_time)"
+            $"homelab_nvme_warning_temperature_seconds_total{($labels)} ($log.warning_temp_time * 60)"
+        ]
+    } | flatten
+    # journalctl exits 1 when no line matches
+    let found = do { ^journalctl -k -b -q -o cat --grep "\\[Hardware Error\\]" } | complete
+    let text = [
+        "# HELP homelab_nvme_thermal_throttle_seconds_total Time the drive throttled itself for heat."
+        "# TYPE homelab_nvme_thermal_throttle_seconds_total counter"
+        "# HELP homelab_nvme_warning_temperature_seconds_total Time the drive ran above its warning temperature."
+        "# TYPE homelab_nvme_warning_temperature_seconds_total counter"
+        ...$drives
+        "# HELP homelab_mce_events_total Kernel hardware error lines since this boot."
+        "# TYPE homelab_mce_events_total gauge"
+        $"homelab_mce_events_total ($found.stdout | lines | length)"
+    ] | each { $"($in)\n" } | str join
+    let file = $env.TEXTFILE_DIR | path join hardware.prom
+    $text | save --force $"($file).tmp"
+    mv --force $"($file).tmp" $file
+}
+'
 }
 
 def ossec-metrics [ossec_dir: path]: nothing -> string {
@@ -676,11 +762,14 @@ def main [] {
 
 def exporter-converge []: nothing -> nothing {
     ^install -d -m 0755 $TEXTFILE_DIR
-    if (file-converge /etc/default/prometheus-node-exporter "644" $"ARGS=\"--collector.textfile.directory=($TEXTFILE_DIR)\"\n") {
+    # the watchdog collector shows which watchdog mux feeds (node_watchdog_info), which vm-103 alerts on
+    let args = $"--collector.textfile.directory=($TEXTFILE_DIR) --collector.watchdog"
+    if (file-converge /etc/default/prometheus-node-exporter "644" $"ARGS=\"($args)\"\n") {
         ^systemctl restart prometheus-node-exporter
     }
     ^systemctl -q enable --now prometheus-node-exporter
-    for collector in [smartmon nvme] { ^systemctl -q enable --now $"prometheus-node-exporter-($collector).timer" }
+    # apt: pending upgrades by origin, the security ones among them
+    for collector in [apt smartmon nvme] { ^systemctl -q enable --now $"prometheus-node-exporter-($collector).timer" }
 
     # guests overprovision local-lvm (pve/data) and bulk/data; a full thin pool pauses every guest on it, and
     # node_exporter has no lvm collector, so lvs feeds gauges that vm-103 alerts on
@@ -693,6 +782,16 @@ def exporter-converge []: nothing -> nothing {
     if (file-converge /etc/smartd.conf "644" $smartd) { ^systemctl restart smartd }
     # machine-check and memory errors land in rasdaemon's database and the journal
     ^systemctl -q enable --now rasdaemon
+    textfile-job-install hardware-metrics "nvme thermal time and machine checks" 1m (hardware-metrics)
+}
+
+# the host's journal to vm-103's journal-remote, as every guest's goes: its logins, kernel and hang evidence reach loki
+export def journal-upload-converge [host: record]: nothing -> nothing {
+    ^install -d ($host.journal_upload_dropin | path dirname)
+    if (file-converge $host.journal_upload_dropin "644" (lines-text ["[Upload]" $"URL=($host.journal_upload)"])) {
+        ^systemctl restart systemd-journal-upload
+    }
+    ^systemctl -q enable --now systemd-journal-upload
 }
 
 # the source archive, checked against the pinned hash before anything of it runs as root; false when github or the
@@ -758,12 +857,8 @@ export def ossec-converge [host: record]: nothing -> nothing {
     textfile-job-install ossec-metrics "OSSEC alert counts" 5m (ossec-metrics $dir)
 }
 
-# -----------------------------------------------------------------------------
-# FUNCTIONS
-# -----------------------------------------------------------------------------
-
 def converge [host: record]: nothing -> nothing {
-    let required = [proxmox_ip zone_bridges wake_zones nas_id root_password root_keys lldap]
+    let required = [proxmox_ip router_ip lab_subnets zone_bridges wake_zones nas_id journal_upload root_password root_keys lldap]
     let absent = $required | where {|k| ($host | get --optional $k | default "" | is-empty) }
     if ($absent | is-not-empty) { fail $"converge needs ($absent | str join ', ')" }
     let ldap_absent = [vmid host port base_dn admin_group cert bind_user bind_password]
@@ -776,6 +871,8 @@ def converge [host: record]: nothing -> nothing {
     ipmi-converge $host
     recovery-converge $host
     root-converge $host
+    lab-route-converge $host
+    firewall-backend-converge
     users-converge $host
     realm-converge $host
     hosts-converge $host
@@ -783,12 +880,32 @@ def converge [host: record]: nothing -> nothing {
     bulk-converge $host
     if (packages-install $PACKAGES) {
         exporter-converge
+        journal-upload-converge $host
     } else {
-        warn "the package mirrors are unavailable: the host exporter and rasdaemon wait for the next run."
+        warn "the package mirrors are unavailable: the host exporter, rasdaemon and the journal upload wait for the next run."
     }
     ossec-converge $host
     let version = ^pveversion
     print $">>> Proxmox ($version | str trim) converged."
+}
+
+def kernel-newest [boot_dir: path]: nothing -> string {
+    glob ($boot_dir | path join "vmlinuz-*") | path basename | str replace "vmlinuz-" "" | sort --natural | last
+}
+
+# every package to its newest version; the new kernel and microcode wait for the host's next boot
+export def upgrade [host: record]: nothing -> nothing {
+    with-env {DEBIAN_FRONTEND: noninteractive} {
+        if not (succeeds [apt-get ...$APT_OPTIONS update]) { fail "the package mirrors are unavailable: nothing upgraded." }
+        "" | ^apt-get ...$APT_OPTIONS ...$APT_KEEP_CONFIG full-upgrade -y
+    }
+    let running = ^uname -r | str trim
+    let newest = kernel-newest $host.boot_dir
+    if $newest == $running {
+        print $">>> Proxmox upgraded, still on its newest kernel ($running)."
+    } else {
+        print $">>> Proxmox upgraded: REBOOT the host to run kernel ($newest) instead of ($running), and the new microcode."
+    }
 }
 
 def guest-ids [kind: string]: nothing -> list<string> {
@@ -802,9 +919,9 @@ def guest-running [kind: string, id: string]: nothing -> bool {
 }
 
 # every guest and what converge and terraform made on the host, except what it keeps working without the lab: OSSEC,
-# the bulk pool, gpu passthrough, apt sources, root's password and keys, the node's address and certificate, the
-# power, recovery, module and smartd settings. The datacenter firewall goes off with its rules, which a fresh
-# terraform state would add a second time.
+# the bulk pool, gpu passthrough, apt sources, root's password, keys and ssh settings, the node's address and
+# certificate, the firewall backend, the power, recovery, module and smartd settings. The datacenter firewall goes off
+# with its rules, which a fresh terraform state would add a second time.
 export def teardown [host: record]: nothing -> nothing {
     for id in (guest-ids qm) {
         if (guest-running qm $id) { ^qm stop $id --skiplock 1 out> /dev/null }
@@ -833,6 +950,11 @@ export def teardown [host: record]: nothing -> nothing {
     }
     rm --force $host.realm_password_file $host.realm_ca_file
 
+    if ($host.lab_route_unit | path exists) {
+        ^systemctl disable --now ($host.lab_route_unit | path basename)
+        rm --force $host.lab_route_unit
+    }
+
     with-env {DEBIAN_FRONTEND: noninteractive} {
         "" | ^apt-get purge -y prometheus-node-exporter out> /dev/null
         "" | ^apt-get autoremove -y out> /dev/null
@@ -850,8 +972,9 @@ def main [action: string]: string -> nothing {
         if (which pveversion | is-empty) { fail "install Proxmox VE first, then rerun init.nu." }
         match $action {
             "converge" => { converge $host }
+            "upgrade" => { upgrade $host }
             "teardown" => { teardown $host }
-            _ => { fail $"the action is converge or teardown, not ($action)" }
+            _ => { fail $"the action is converge, upgrade or teardown, not ($action)" }
         }
     } catch {|e|
         print -e $"ERROR: ($e.msg)"

@@ -1,5 +1,6 @@
 # hermes: telegram agent, cloud models only, root on the lab
-{ id, ... }: {
+{ id, ... }:
+{
   vm = {
     bootPhase = "dev";
     needs = [ "nfs" ];
@@ -20,7 +21,9 @@
 
   shares = {
     "bulk/media" = { };
-    "data/db-dumps/vm-${id}" = { mode = "0700"; };
+    "data/db-dumps/vm-${id}" = {
+      mode = "0700";
+    };
     "syncthing/sync" = { };
   };
 }

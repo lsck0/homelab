@@ -1,12 +1,20 @@
-# an app's state comes back: a volume archived by the state worker restores into its volume, and an app asleep
-# (idle) is woken for its dump instead of failing it
+# an app's state comes back: a volume archived by the state worker restores into its volume, an app asleep (idle)
+# is woken for its dump instead of failing it, and the dump restores into its service
 #
 # The real swarm (manager vm-107, state worker vm-250, nas vm-104) with two stateful apps of one image: `keep`
 # archives its volume nightly, `sleepy` dumps from its container and sleeps when idle. The controller's door
 # (lib/controller-api.py) is the only way the state worker wakes an app.
-{ pkgs, lib, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  specialArgs,
+  ...
+}:
 let
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = _: apps; };
+  lab = import ../../../tests/lib/lab.nix {
+    inherit pkgs lib specialArgs;
+    apps = _: apps;
+  };
   registryAddress = lab.inventory."100".ip;
   manager = lab.inventory."107".ip;
   inherit (lab.appsCatalog) controllerPort;
@@ -14,36 +22,66 @@ let
   image = pkgs.dockerTools.buildLayeredImage {
     name = "fixture";
     tag = "v1";
-    contents = [ pkgs.busybox pkgs.curl ];
-    config.Cmd = [ "httpd" "-f" "-p" "8000" "-h" "/data" ];
+    contents = [
+      pkgs.busybox
+      pkgs.curl
+    ];
+    config.Cmd = [
+      "httpd"
+      "-f"
+      "-p"
+      "8000"
+      "-h"
+      "/data"
+    ];
   };
   inherit (lab) profiles;
   # every telemetry and the card, as an app the owner deploys
-  appOn = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
-  appOf = name: port: extra: lib.recursiveUpdate {
-    enable = true;
-    repo = "lsck0/${name}";
-    branch = "master";
-    routes.${name} = { inherit port; on = profiles.hardenedExternal ++ [ "probe" ]; };
-    on = appOn ++ [ "scaleToZero" ];
-    stateful = [ "web" ];
-    volumes.data.backup = true;
-    # both apps and a deploy's surge on the one worker (modules/limits workerCountOf)
-    resources.web.memoryMiB = 128;
-    reservation.memoryMiB = 256;
-  } extra;
+  appOn =
+    profiles.observed
+    ++ profiles.traced
+    ++ [
+      "frontend"
+      "homepage"
+    ];
+  appOf =
+    name: port: extra:
+    lib.recursiveUpdate {
+      enable = true;
+      repo = "lsck0/${name}";
+      branch = "master";
+      routes.${name} = {
+        inherit port;
+        on = profiles.hardenedExternal ++ [ "probe" ];
+      };
+      on = appOn ++ [ "scaleToZero" ];
+      stateful = [ "web" ];
+      volumes.data.backup = true;
+      # both apps and a deploy's surge on the one worker (modules/limits workerCountOf)
+      resources.web.memoryMiB = 128;
+      reservation.memoryMiB = 256;
+    } extra;
   apps = {
     # never sleeps, so the controller refuses its wake
     keep = appOf "keep" 20160 { on = appOn; };
     sleepy = appOf "sleepy" 20170 {
       volumes.data.backup = lib.mkForce false;
-      dumps.page = { service = "web"; command = "cat /data/index.html"; };
+      dumps.page = {
+        service = "web";
+        command = "cat /data/index.html";
+        restore = "cat > /data/index.html";
+      };
       idle.stopAfter = "30m";
     };
   };
 
   node = vmid: {
-    imports = [ (lab.guest vmid { flat = true; nas = true; }) ];
+    imports = [
+      (lab.guest vmid {
+        flat = true;
+        nas = true;
+      })
+    ];
     networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
     environment.systemPackages = [ pkgs.curl ];
     virtualisation.memorySize = 2048;
@@ -62,7 +100,10 @@ pkgs.testers.runNixOSTest {
       enable = true;
       listenAddress = "0.0.0.0";
       port = 443;
-      extraConfig.http.tls = { certificate = lab.pki.lsck0.cert; key = lab.pki.lsck0.key; };
+      extraConfig.http.tls = {
+        certificate = lab.pki.lsck0.cert;
+        inherit (lab.pki.lsck0) key;
+      };
     };
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
   };
@@ -124,6 +165,15 @@ pkgs.testers.runNixOSTest {
         dump = vm_250.succeed("cat $(ls -1 /var/backup/db/sleepy-page/*.sql | tail -n1)").strip()
         assert dump == "sleepy-v1", dump
         assert vm_250.succeed("curl -sf http://${manager}:${toString controllerPort}/state/sleepy").strip() == "running"
+
+    with subtest("a dump restores into its service's task"):
+        vm_250.succeed(f"docker exec {task('sleepy')} sh -c 'echo lost > /data/index.html'")
+        vm_250.fail("swarm-dump-restore sleepy nope")
+        vm_250.succeed("swarm-dump-restore sleepy page")
+        assert page("sleepy") == "sleepy-v1", page("sleepy")
+
+    with subtest("the routing mesh between the nodes is encrypted like the apps' overlays"):
+        vm_107.succeed("docker network inspect ingress --format '{{index .Options \"encrypted\"}}' | grep -qx true")
 
     with subtest("the door answers wakes only for idle apps and from its wakers, redeploys only with the app's token"):
         vm_250.fail("curl -sf -X POST http://${manager}:${toString controllerPort}/wake/keep")

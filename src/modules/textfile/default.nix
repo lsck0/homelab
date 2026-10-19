@@ -3,14 +3,17 @@
 #
 # activation removes the files of names the previous generation declared and this one no longer does (lib/prune.nu);
 # a file no generation declared is left alone, so a writer that forgot to declare loses nothing
-{ config, lib, pkgs, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 let
   cfg = config.homelab;
   prune = pkgs.writers.writeNu "textfile-prune" ./lib/prune.nu;
-  # names written before hosts recorded their files, taken as a host's first record; delete once every host has
-  # activated a generation with this module
-  legacyTextfiles = [ "app_builder" ];
-in {
+in
+{
   options.homelab = {
     textfileDir = lib.mkOption {
       type = lib.types.str;
@@ -25,6 +28,5 @@ in {
     };
   };
 
-  config.system.activationScripts.textfile-prune =
-    "${prune} ${cfg.textfileDir} ${lib.escapeShellArg (toString legacyTextfiles)} ${lib.escapeShellArgs cfg.textfiles}";
+  config.system.activationScripts.textfile-prune = "${prune} ${cfg.textfileDir} ${lib.escapeShellArgs cfg.textfiles}";
 }

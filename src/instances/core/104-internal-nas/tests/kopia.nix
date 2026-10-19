@@ -1,13 +1,23 @@
 # kopia on the nas: init, snapshot, restore; a restore of a guest's local state copy (paperless, instance.nix
-# `shares`) is marked with a fresh generation for its seed (modules/local-state), any other share is not
-{ pkgs, ... }:
+# `shares`) is marked with a fresh generation for its seed (modules/local-state), any other share is not; the
+# syncthing folders and cold storage snapshot into their own repository, cold storage's upload skips without a
+# session, and the repository mirror keeps its remote copy; a repository left at its old place stops init
+{ pkgs, lib, ... }:
 pkgs.testers.runNixOSTest {
   name = "kopia";
 
   nodes.machine = {
-    imports = [ ../../../../tests/stubs.nix ../lib/kopia.nix ];
+    imports = [
+      ../../../../tests/stubs.nix
+      ../lib/kopia.nix
+    ];
     virtualisation.memorySize = 2048;
     environment.systemPackages = [ pkgs.curl ];
+    # main.nix's folder; syncthing itself stays off, and the test starts every run itself
+    services.syncthing.settings.folders.sync.path = "/srv/nas/syncthing/sync";
+    systemd.timers = lib.genAttrs [ "kopia-syncthing" "proton-bisync" ] (_: {
+      wantedBy = lib.mkForce [ ];
+    });
     # tiny nas tree
     systemd.tmpfiles.rules = [
       "d /srv/nas/data/paperless 0777 root root -"
@@ -16,6 +26,9 @@ pkgs.testers.runNixOSTest {
       "d /srv/nas/data/minecraft/cobblemon/world 0777 root root -"
       "f /srv/nas/data/minecraft/cobblemon/world/level.dat 0644 root root - world-v1"
       "d /srv/nas/BACKUPS 0700 root root -"
+      "f /srv/nas/syncthing/sync/notes.txt 0644 root root - notes-v1"
+      "f /srv/nas/syncthing/borg-luca-pc/data 0644 root root - borg"
+      "f /srv/nas/bulk/cold-storage/island_2019/beach.jpg 0644 root root - photo"
       # kopia-init snapshots the nas's local state too
       "d /var/lib/syncthing 0700 root root -"
       "d /var/lib/filebrowser 0700 root root -"
@@ -43,7 +56,7 @@ pkgs.testers.runNixOSTest {
         print(listing)
 
     with subtest("snapshot does not contain the repository itself"):
-        machine.fail("nas-restore files 0 BACKUPS/kopia")
+        machine.fail("nas-restore files 0 bulk/BACKUPS/kopia")
         machine.succeed("nas-restore files 0 data/paperless | grep invoice.txt")
 
     with subtest("restore latest in place"):
@@ -68,6 +81,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("select by snapshot id and by date (stable when new snapshots are taken)"):
         import json
+        import re
         snaps = json.loads(machine.succeed("kopia-nas snapshot list /srv/nas --json"))
         # newest, retention may prune older ones
         first_id = snaps[-1]["id"]
@@ -94,7 +108,7 @@ pkgs.testers.runNixOSTest {
 
     with subtest("freshness metric for the backup alert"):
         machine.succeed("nas-restore now")
-        tree = int(machine.succeed("find /srv/nas -path /srv/nas/BACKUPS -prune -o -type f -print | wc -l"))
+        tree = int(machine.succeed("find /srv/nas \\( -path /srv/nas/BACKUPS -o -path /srv/nas/bulk -o -path /srv/nas/syncthing \\) -prune -o -type f -print | wc -l"))
         machine.succeed("systemctl start kopia-metrics.service")
         prom = machine.succeed("cat /var/lib/node-exporter-textfile/nas_backup.prom")
         print(prom)
@@ -110,7 +124,7 @@ pkgs.testers.runNixOSTest {
         machine.fail("test -e /var/lib/node-exporter-textfile/backup_verify_offsite.prom")
         # the off-site sample picks pack blobs by the path kopia writes them under (lib/kopia.nix): sharded as
         # p00/2ab/<rest>, so a match on the file name alone found none in the real repository
-        packs = machine.succeed("cd /srv/nas/BACKUPS/kopia && find . -type f | sed 's|^[.]/||' | grep -cE '^[pq][0-9a-f]'")
+        packs = machine.succeed("cd /srv/nas/bulk/BACKUPS/kopia && find . -type f | sed 's|^[.]/||' | grep -cE '^[pq][0-9a-f]'")
         assert int(packs) > 0, "the off-site sample's pack pattern matches no blob of a real repository"
 
     with subtest("the repository mirror skips without a proton session and publishes no success (tests/proton-mirror.nix runs it)"):
@@ -126,5 +140,39 @@ pkgs.testers.runNixOSTest {
         machine.succeed("systemctl restart kopia-init.service kopia-server.service")
         machine.wait_for_open_port(51515)
         machine.succeed("nas-restore list | grep -c . ")
+
+    with subtest("the syncthing folders snapshot into their own repository on the ssd, under the nas job lock"):
+        machine.succeed("systemctl start kopia-syncthing.service")
+        snaps = json.loads(machine.succeed("kopia-syncthing snapshot list /srv/nas/syncthing --json"))
+        assert len(snaps) == 1, snaps
+        listing = machine.succeed("kopia-syncthing ls -r " + snaps[0]["rootEntry"]["obj"])
+        assert "borg-luca-pc/data" in listing and "sync/notes.txt" in listing, listing
+        machine.succeed("test -e /srv/nas/BACKUPS/kopia-syncthing/kopia.repository.f")
+        prom = machine.succeed("cat /var/lib/node-exporter-textfile/syncthing_backup.prom")
+        assert 'homelab_backup_last_success_timestamp_seconds{type="syncthing"}' in prom, prom
+        machine.fail("nas-restore files 0 syncthing")
+
+    with subtest("cold storage snapshots into the syncthing folders' repository on the ssd, not beside itself on the hdd"):
+        snaps = json.loads(machine.succeed("kopia-syncthing snapshot list /srv/nas/bulk/cold-storage --json"))
+        assert len(snaps) == 1, snaps
+        listing = machine.succeed("kopia-syncthing ls -r " + snaps[0]["rootEntry"]["obj"])
+        assert "island_2019/beach.jpg" in listing, listing
+        policy = machine.succeed("kopia-syncthing policy show /srv/nas/bulk/cold-storage")
+        assert re.search(r"Annual snapshots:\s+10\b", policy), policy
+        prom = machine.succeed("cat /var/lib/node-exporter-textfile/cold_storage_backup.prom")
+        assert 'homelab_backup_last_success_timestamp_seconds{type="cold-storage"}' in prom, prom
+        machine.fail("nas-restore files 0 bulk/cold-storage")
+
+    with subtest("cold storage's upload skips without a proton session; the repository mirror keeps its remote copy"):
+        machine.succeed("systemctl start proton-cold-storage.service")
+        machine.succeed("journalctl -u proton-cold-storage --no-pager | grep -q 'no proton session'")
+        machine.fail("ls /var/lib/node-exporter-textfile/proton_cold_storage.prom")
+        keep = machine.succeed("systemctl show -p Environment --value proton-sync")
+        assert "PROTON_MIRROR_ROOT_KEEP=BACKUPS cold-storage sync" in keep, keep
+
+    with subtest("a repository left at its old place on the ssd stops init instead of starting a second one"):
+        machine.succeed("mkdir -p /srv/nas/BACKUPS/kopia && touch /srv/nas/BACKUPS/kopia/kopia.repository.f")
+        machine.fail("systemctl restart kopia-init.service")
+        machine.succeed("journalctl -u kopia-init --no-pager | grep -q 'move /srv/nas/BACKUPS/kopia'")
   '';
 }

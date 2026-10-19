@@ -8,7 +8,19 @@
 # firefly's address and token current. The daily headless import reuses the stored persistence to skip the tan;
 # once bank credentials exist, anything but a clean import fails the unit, so the failed-unit alert says the bank
 # wants a new tan or the importer broke.
-{ config, lib, pkgs, inventory, catalog, lab, nasMount, retry, setupUnit, site, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inventory,
+  catalog,
+  lab,
+  nasMount,
+  retry,
+  setupUnit,
+  site,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   route = catalog.internal.firefly;
@@ -28,20 +40,27 @@ let
     listen = 127.0.0.1:9000
   '';
 
-  fintsNetwork = { name = "fints"; interface = "fints0"; subnet = "10.89.124.0/24"; gateway = "10.89.124.1"; };
+  fintsNetwork = {
+    name = "fints";
+    interface = "fints0";
+    subnet = "10.89.124.0/24";
+    gateway = "10.89.124.1";
+  };
   fireflyApiProxyPort = 8081;
   fireflyApiProxyUrl = "http://${fintsNetwork.gateway}:${toString fireflyApiProxyPort}";
   # the image's own port, published for the ingress on the route's
   fintsContainerPort = 8080;
 
   # bootstraps firefly's framework inside its container (the image dropped `tinker`); the code is the argument
-  fireflyPhp = code: pkgs.writeText "firefly-boot.php" ''
-    <?php
-    require "/var/www/html/vendor/autoload.php";
-    $app = require "/var/www/html/bootstrap/app.php";
-    $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
-    ${code}
-  '';
+  fireflyPhp =
+    code:
+    pkgs.writeText "firefly-boot.php" ''
+      <?php
+      require "/var/www/html/vendor/autoload.php";
+      $app = require "/var/www/html/bootstrap/app.php";
+      $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
+      ${code}
+    '';
   # firefly logs warnings to stdout: the token comes between markers
   mintToken = fireflyPhp ''
     $u = \FireflyIII\User::orderBy("id")->first();
@@ -64,11 +83,12 @@ let
     }
 
     ${retry} 60 5 curl -sf ${local}/health'';
-in {
+in
+{
   homelab.nasMounts = nasMount dataDir "firefly";
 
-  sops.secrets.firefly-app-key = {};
-  sops.secrets.firefly-db-password = {};
+  sops.secrets.firefly-app-key = { };
+  sops.secrets.firefly-db-password = { };
   sops.templates."firefly.env".restartUnits = [ "podman-firefly.service" ];
   sops.templates."firefly.env".content = ''
     APP_KEY=${config.sops.placeholder.firefly-app-key}
@@ -94,15 +114,19 @@ in {
 
   virtualisation.oci-containers.containers = {
     firefly-db = {
-      image = "docker.io/library/postgres:16.15-alpine";
+      image = "docker.io/library/postgres:16.15-alpine@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea";
       # host network: only firefly beside it connects
-      cmd = [ "postgres" "-c" "listen_addresses=127.0.0.1" ];
+      cmd = [
+        "postgres"
+        "-c"
+        "listen_addresses=127.0.0.1"
+      ];
       volumes = [ "${dataDir}/db:/var/lib/postgresql/data" ];
       environmentFiles = [ config.sops.templates."firefly-db.env".path ];
       extraOptions = [ "--network=host" ];
     };
     firefly = {
-      image = "docker.io/fireflyiii/core:version-6.7.2";
+      image = "docker.io/fireflyiii/core:version-6.7.2@sha256:30f14402bb0b080313608c9e5ed6b7f1348faa16ab0f46a3b3ea4201fe16f14c";
       dependsOn = [ "firefly-db" ];
       # host network: the route's port, postgres on 127.0.0.1:5432
       volumes = [
@@ -132,7 +156,10 @@ in {
     requiredBy = [ "podman-firefly-fints-importer.service" ];
     before = [ "podman-firefly-fints-importer.service" ];
     path = [ config.virtualisation.podman.package ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
     script = ''
       podman network exists ${fintsNetwork.name} || podman network create --interface-name=${fintsNetwork.interface} \
         --subnet=${fintsNetwork.subnet} --gateway=${fintsNetwork.gateway} ${fintsNetwork.name}
@@ -143,7 +170,12 @@ in {
   services.nginx = {
     enable = true;
     virtualHosts.firefly-api = {
-      listen = [ { addr = "0.0.0.0"; port = fireflyApiProxyPort; } ];
+      listen = [
+        {
+          addr = "0.0.0.0";
+          port = fireflyApiProxyPort;
+        }
+      ];
       extraConfig = ''
         allow ${fintsNetwork.subnet};
         deny all;
@@ -168,7 +200,10 @@ in {
     requiredBy = [ "podman-firefly-fints-importer.service" ];
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
-    path = [ pkgs.podman pkgs.coreutils ];
+    path = [
+      pkgs.podman
+      pkgs.coreutils
+    ];
     serviceConfig.Type = "oneshot";
     script = ''
       set -euo pipefail
@@ -192,7 +227,10 @@ in {
   systemd.services.firefly-owner-email = setupUnit {
     description = "Give Firefly III's owner account the owner's mail";
     after = [ "podman-firefly.service" ];
-    path = [ pkgs.podman pkgs.curl ];
+    path = [
+      pkgs.podman
+      pkgs.curl
+    ];
     script = ''
       ${fireflyReady}
       firefly_run ${ownerEmail} -e FF_EMAIL=${config.homelab.acmeEmail}
@@ -202,11 +240,22 @@ in {
   # rechecked every half hour: the owner may register later and a db restore revokes the token
   systemd.services.firefly-hermes-token = setupUnit {
     description = "Export a Firefly III API token for Hermes and the FinTS importer";
-    after = [ "podman-firefly.service" "firefly-owner-email.service" ];
+    after = [
+      "podman-firefly.service"
+      "firefly-owner-email.service"
+    ];
     # the timer runs it; a failed check waits for the next tick
     wantedBy = [ ];
-    serviceConfig = { RemainAfterExit = false; Restart = "no"; };
-    path = [ pkgs.podman pkgs.coreutils pkgs.curl pkgs.gnused ];
+    serviceConfig = {
+      RemainAfterExit = false;
+      Restart = "no";
+    };
+    path = [
+      pkgs.podman
+      pkgs.coreutils
+      pkgs.curl
+      pkgs.gnused
+    ];
     script = ''
       ${fireflyReady}
       if current=$(token_read firefly-token); then
@@ -232,14 +281,20 @@ in {
   };
   systemd.timers.firefly-hermes-token = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnBootSec = "5m"; OnUnitActiveSec = "30m"; };
+    timerConfig = {
+      OnBootSec = "5m";
+      OnUnitActiveSec = "30m";
+    };
   };
 
   systemd.services.firefly-fints-seed = setupUnit {
     description = "Point the FinTS importer config at Firefly III";
     wants = [ "firefly-hermes-token.service" ];
     after = [ "firefly-hermes-token.service" ];
-    path = [ pkgs.coreutils pkgs.jq ];
+    path = [
+      pkgs.coreutils
+      pkgs.jq
+    ];
     script = ''
       token=$(token_read firefly-token 2>/dev/null || true)
       current='{}'
@@ -258,14 +313,25 @@ in {
   # refill the firefly token once it exists
   systemd.timers.firefly-fints-seed = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnBootSec = "6m"; OnUnitActiveSec = "30m"; };
+    timerConfig = {
+      OnBootSec = "6m";
+      OnUnitActiveSec = "30m";
+    };
   };
 
   systemd.services.firefly-fints-import = {
     description = "Headless FinTS import into Firefly III";
     after = [ "podman-firefly-fints-importer.service" ];
-    path = [ pkgs.curl pkgs.gnugrep pkgs.jq pkgs.coreutils ];
-    serviceConfig = { Type = "oneshot"; RuntimeDirectory = "firefly-fints-import"; };
+    path = [
+      pkgs.curl
+      pkgs.gnugrep
+      pkgs.jq
+      pkgs.coreutils
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      RuntimeDirectory = "firefly-fints-import";
+    };
     script = ''
       set -euo pipefail
       if [ -z "$(jq -r '.bank_username // ""' ${fintsConfig})" ]; then
@@ -287,7 +353,11 @@ in {
   };
   systemd.timers.firefly-fints-import = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnCalendar = importAt; Persistent = true; RandomizedDelaySec = "20m"; };
+    timerConfig = {
+      OnCalendar = importAt;
+      Persistent = true;
+      RandomizedDelaySec = "20m";
+    };
   };
 
   systemd.tmpfiles.rules = [

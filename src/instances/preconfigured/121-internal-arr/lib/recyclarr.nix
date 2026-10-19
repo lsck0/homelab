@@ -1,5 +1,14 @@
 # recyclarr and arr-wire: no web ui, they configure and link the media stack
-{ config, lib, pkgs, inventory, catalog, site, instance, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inventory,
+  catalog,
+  site,
+  instance,
+  ...
+}:
 let
   # the router's tor socks port isolated per destination
   torSocksIsolatedPort = (import ../../../../modules/tor-ports.nix).socksIsolated;
@@ -10,8 +19,14 @@ let
 
   # public indexers seeded into prowlarr on first run
   indexers = [
-    "nyaasi" "yts" "thepiratebay" "limetorrents" "Knaben"
-    "ebookbay" "internetarchive" "postman"
+    "nyaasi"
+    "yts"
+    "thepiratebay"
+    "limetorrents"
+    "Knaben"
+    "ebookbay"
+    "internetarchive"
+    "postman"
   ];
 
   # arr-wire.nu's inputs; src/tests/media-stack.nu runs the same script with its own
@@ -19,12 +34,18 @@ let
     TOKEN_DIR = config.homelab.tokens.dir;
     SECRET_DIR = dirOf config.sops.secrets.radarr-key.path;
     INDEXERS = lib.concatStringsSep " " indexers;
-    QBIT_HOST = ipOf "qbittorrent";         QBIT_PORT = portOf "qbittorrent";
-    PROWLARR_HOST = ipOf "prowlarr";        PROWLARR_PORT = portOf "prowlarr";
-    RADARR_HOST = ipOf "radarr";            RADARR_PORT = portOf "radarr";
-    SONARR_HOST = ipOf "sonarr";            SONARR_PORT = portOf "sonarr";
-    LIDARR_HOST = ipOf "lidarr";            LIDARR_PORT = portOf "lidarr";
-    JELLYFIN_HOST = ipOf "jellyfin";        JELLYFIN_PORT = portOf "jellyfin";
+    QBIT_HOST = ipOf "qbittorrent";
+    QBIT_PORT = portOf "qbittorrent";
+    PROWLARR_HOST = ipOf "prowlarr";
+    PROWLARR_PORT = portOf "prowlarr";
+    RADARR_HOST = ipOf "radarr";
+    RADARR_PORT = portOf "radarr";
+    SONARR_HOST = ipOf "sonarr";
+    SONARR_PORT = portOf "sonarr";
+    LIDARR_HOST = ipOf "lidarr";
+    LIDARR_PORT = portOf "lidarr";
+    JELLYFIN_HOST = ipOf "jellyfin";
+    JELLYFIN_PORT = portOf "jellyfin";
     JELLYSEERR_URL = "http://${ipOf "jellyseerr"}:${portOf "jellyseerr"}";
     BAZARR_URL = "http://${ipOf "bazarr"}:${portOf "bazarr"}";
     RADARR_PUBLIC_URL = publicUrlOf "radarr";
@@ -52,26 +73,39 @@ let
         quality_definition:
           type: series
   '';
-in {
+in
+{
   # arr-wire links the arrs to jellyfin and the download client
   sops.secrets = lib.genAttrs [ "jellyfin-admin-pass" "qbittorrent-pass" ] (_: { });
   sops.templates."recyclarr.yml".content = recyclarrConfig;
 
   systemd.services.arr-wire = {
     description = "Wire the media stack (*arr, qBittorrent, Prowlarr, Jellyseerr, Bazarr)";
-    after = [ "network-online.target" "remote-fs.target" ];
+    after = [
+      "network-online.target"
+      "remote-fs.target"
+    ];
     wants = [ "network-online.target" ];
     environment = arrWireEnvironment;
-    serviceConfig = { Type = "oneshot"; ExecStart = arrWire; };
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = arrWire;
+    };
   };
   systemd.timers.arr-wire = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnBootSec = "3min"; OnUnitActiveSec = "10min"; };
+    timerConfig = {
+      OnBootSec = "3min";
+      OnUnitActiveSec = "10min";
+    };
   };
 
   systemd.services.recyclarr-sync = {
     description = "Recyclarr sync to Sonarr/Radarr";
-    after = [ "network-online.target" "remote-fs.target" ];
+    after = [
+      "network-online.target"
+      "remote-fs.target"
+    ];
     wants = [ "network-online.target" ];
     serviceConfig = {
       Type = "oneshot";
@@ -80,6 +114,10 @@ in {
   };
   systemd.timers.recyclarr-sync = {
     wantedBy = [ "timers.target" ];
-    timerConfig = { OnBootSec = "10min"; OnUnitActiveSec = "1d"; Persistent = true; };
+    timerConfig = {
+      OnBootSec = "10min";
+      OnUnitActiveSec = "1d";
+      Persistent = true;
+    };
   };
 }

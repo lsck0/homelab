@@ -1,19 +1,28 @@
 # public file sharing
-{ lib, profiles, ... }: {
+{ lib, profiles, ... }:
+{
   vm = {
     # parked while unused; "on" brings it back
     power = "off";
     bootPhase = "public";
-    needs = [ "containers" "nfs" ];
+    needs = [
+      "containers"
+      "nfs"
+    ];
     memoryMiB = 1024;
   };
 
-  idle = { stopAfter = "30m"; };
+  idle = {
+    stopAfter = "30m";
+  };
 
   services = {
     share = {
       port = 80;
-      homepage = { group = "Public"; icon = "pingvin-share"; };
+      homepage = {
+        group = "Public";
+        icon = "pingvin-share";
+      };
       # anubis fronts it at the edge; file uploads
       on = lib.subtractLists [ "cloudflare" "bodyLimit" ] profiles.hardenedExternal ++ profiles.listed ++ profiles.observed;
     };

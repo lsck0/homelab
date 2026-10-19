@@ -66,9 +66,7 @@ DAY_MIN_BLOCK_PCT = float(os.environ.get("CALENDAR_DAY_MIN_BLOCK_PCT", "9.5"))
 # source display names
 SOURCE_LABELS = dict(
     pair.split("=", 1)
-    for pair in os.environ.get(
-        "CALENDAR_SOURCE_LABELS", "proton=Private,uni=University,work=Work"
-    ).split(",")
+    for pair in os.environ.get("CALENDAR_SOURCE_LABELS", "proton=Private,uni=University,work=Work").split(",")
     if "=" in pair
 )
 
@@ -215,8 +213,7 @@ def event_row(name, event, day=None):
         "end": to_iso(stop_value) if stop_value is not None else None,
         "all_day": all_day,
         # pre-rendered so liquid needn't parse timestamps
-        "time": "" if all_day or start_value is None
-                else start_value.astimezone(LOCAL_TZ).strftime("%H:%M"),
+        "time": "" if all_day or start_value is None else start_value.astimezone(LOCAL_TZ).strftime("%H:%M"),
     }
 
     # minute offsets for a real time grid
@@ -238,8 +235,8 @@ def assign_lanes(events):
     timed = [e for e in events if "start_min" in e]
     timed.sort(key=lambda e: (e["start_min"], -(e["end_min"] - e["start_min"])))
 
-    lane_ends = []          # end minute of each lane's last event
-    cluster = []            # events in the current run of overlapping activity
+    lane_ends = []  # end minute of each lane's last event
+    cluster = []  # events in the current run of overlapping activity
     cluster_end = None
 
     def close(group, width):
@@ -322,17 +319,19 @@ def week(calendars, offset, today):
         rows = sorted(by_day[day], key=lambda e: (not e["all_day"], e["time"]))
         timed = assign_lanes(rows)
         all_day = [e for e in rows if e["all_day"]]
-        days.append({
-            "date": day.isoformat(),
-            "day": day.day,
-            "weekday": day.strftime("%a"),
-            "is_today": day == today,
-            "events": rows,
-            "all_day_events": all_day[:ALLDAY_CELL_EVENTS],
-            "all_day_more": max(0, len(all_day) - ALLDAY_CELL_EVENTS),
-            "timed_events": timed,
-            "max_lanes": max([e.get("lanes", 1) for e in timed], default=1),
-        })
+        days.append(
+            {
+                "date": day.isoformat(),
+                "day": day.day,
+                "weekday": day.strftime("%a"),
+                "is_today": day == today,
+                "events": rows,
+                "all_day_events": all_day[:ALLDAY_CELL_EVENTS],
+                "all_day_more": max(0, len(all_day) - ALLDAY_CELL_EVENTS),
+                "timed_events": timed,
+                "max_lanes": max([e.get("lanes", 1) for e in timed], default=1),
+            }
+        )
 
     grid_start, grid_end = max(0, GRID_START_MIN), min(MINUTES_PER_DAY, GRID_END_MIN)
     if grid_end - grid_start < GRID_SPAN_MIN_MINUTES:
@@ -366,17 +365,22 @@ def week(calendars, offset, today):
 
     hours = []
     for m in range(grid_start, grid_end + 1, MINUTES_PER_HOUR):
-        hours.append({
-            "label": f"{m // MINUTES_PER_HOUR:02d}:00",
-            "hour": m // MINUTES_PER_HOUR,
-            # label every other hour to keep the axis readable
-            "major": (m // MINUTES_PER_HOUR) % 2 == 0,
-            "top_pct": round((m - grid_start) / span * PERCENT, 3),
-        })
+        hours.append(
+            {
+                "label": f"{m // MINUTES_PER_HOUR:02d}:00",
+                "hour": m // MINUTES_PER_HOUR,
+                # label every other hour to keep the axis readable
+                "major": (m // MINUTES_PER_HOUR) % 2 == 0,
+                "top_pct": round((m - grid_start) / span * PERCENT, 3),
+            }
+        )
 
     same_month = monday.strftime("%b") == sunday.strftime("%b")
-    label = (f"{monday.day} to {sunday.day} {sunday.strftime('%b %Y')}" if same_month
-             else f"{monday.day} {monday.strftime('%b')} to {sunday.day} {sunday.strftime('%b %Y')}")
+    label = (
+        f"{monday.day} to {sunday.day} {sunday.strftime('%b %Y')}"
+        if same_month
+        else f"{monday.day} {monday.strftime('%b')} to {sunday.day} {sunday.strftime('%b %Y')}"
+    )
 
     return {
         "view": "week",
@@ -407,7 +411,7 @@ def day_view(calendars, offset, today):
     want = (today + timedelta(days=offset)).isoformat()
 
     match = next((d for d in grid["days"] if d["date"] == want), None)
-    if match is None:                      # offset fell outside the current week
+    if match is None:  # offset fell outside the current week
         grid = week(calendars, 1 if offset > 0 else -1, today)
         match = next((d for d in grid["days"] if d["date"] == want), grid["days"][0])
 
@@ -432,8 +436,9 @@ def day_view(calendars, offset, today):
 
 def month_view(calendars, offset, today):
     """Monday-first month grid built from the week builder."""
-    first = date(today.year + (today.month + offset - 1) // MONTHS_PER_YEAR,
-                 (today.month + offset - 1) % MONTHS_PER_YEAR + 1, 1)
+    first = date(
+        today.year + (today.month + offset - 1) // MONTHS_PER_YEAR, (today.month + offset - 1) % MONTHS_PER_YEAR + 1, 1
+    )
     grid_start = first - timedelta(days=first.weekday())
     last = date(first.year + first.month // MONTHS_PER_YEAR, first.month % MONTHS_PER_YEAR + 1, 1) - timedelta(days=1)
     grid_end = last + timedelta(days=DAYS_PER_WEEK - 1 - last.weekday())
@@ -454,18 +459,20 @@ def month_view(calendars, offset, today):
         for _ in range(DAYS_PER_WEEK):
             src = by_date.get(cursor.isoformat())
             events = src["events"] if src else []
-            row["days"].append({
-                "date": cursor.isoformat(),
-                "day": cursor.day,
-                "weekday": cursor.strftime("%a"),
-                "is_today": cursor == today,
-                "other_month": cursor.month != first.month,
-                "is_weekend": cursor.weekday() >= SATURDAY,
-                "count": len(events),
-                # only the first few fit; the rest become "+n"
-                "events": events[:MONTH_CELL_EVENTS],
-                "more": max(0, len(events) - MONTH_CELL_EVENTS),
-            })
+            row["days"].append(
+                {
+                    "date": cursor.isoformat(),
+                    "day": cursor.day,
+                    "weekday": cursor.strftime("%a"),
+                    "is_today": cursor == today,
+                    "other_month": cursor.month != first.month,
+                    "is_weekend": cursor.weekday() >= SATURDAY,
+                    "count": len(events),
+                    # only the first few fit; the rest become "+n"
+                    "events": events[:MONTH_CELL_EVENTS],
+                    "more": max(0, len(events) - MONTH_CELL_EVENTS),
+                }
+            )
             cursor += timedelta(days=1)
         weeks.append(row)
 
@@ -525,10 +532,12 @@ def main():
         feed_io.file_write_atomic(os.path.join(out_dir, name), json.dumps(grid, indent=2))
         weeks.append(f"{name}:{grid['total_events']}")
 
-    for name, payload in [("day.json", day_view(calendars, 0, today)),
-                          ("day-next.json", day_view(calendars, 1, today)),
-                          ("month.json", month_view(calendars, 0, today)),
-                          ("month-next.json", month_view(calendars, 1, today))]:
+    for name, payload in [
+        ("day.json", day_view(calendars, 0, today)),
+        ("day-next.json", day_view(calendars, 1, today)),
+        ("month.json", month_view(calendars, 0, today)),
+        ("month-next.json", month_view(calendars, 1, today)),
+    ]:
         payload["generated_at"] = generated_at
         payload["sources"] = source_names
         feed_io.file_write_atomic(os.path.join(out_dir, name), json.dumps(payload, indent=2))

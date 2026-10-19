@@ -20,12 +20,6 @@ import (
 	"time"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * PUZZLE
- * -----------------------------------------------------------------------------
- */
-
 // the generator's bound holds: every seed yields a well-posed puzzle, its answer six hex characters taken from a
 // plate (or a plate backwards), its wording naming no label
 func TestPuzzleEverySeedPosed(t *testing.T) {
@@ -99,12 +93,6 @@ func TestPuzzleRenderPng(t *testing.T) {
 	}
 }
 
-/*
- * -----------------------------------------------------------------------------
- * COOKIE
- * -----------------------------------------------------------------------------
- */
-
 func TestCookie(t *testing.T) {
 	key := []byte(strings.Repeat("k", captchaKeyBytesMin))
 	now := time.Unix(1_700_000_000, 0)
@@ -132,12 +120,6 @@ func TestCookie(t *testing.T) {
 		}
 	}
 }
-
-/*
- * -----------------------------------------------------------------------------
- * VERDICT
- * -----------------------------------------------------------------------------
- */
 
 // the policy, every combination: a ban always stops, a captcha decision asks unless the route opts out, the request
 // is the answer, a cookie proves a solve or the ingress asks none; crowdsec down asks too
@@ -245,12 +227,6 @@ func TestReturnPathParse(t *testing.T) {
 		}
 	}
 }
-
-/*
- * -----------------------------------------------------------------------------
- * STATE
- * -----------------------------------------------------------------------------
- */
 
 func TestChallengesOneTry(t *testing.T) {
 	const regenerationsMax = 5
@@ -407,12 +383,6 @@ func TestTarpitBounds(t *testing.T) {
 		t.Fatal("a released slot stays taken")
 	}
 }
-
-/*
- * -----------------------------------------------------------------------------
- * END TO END
- * -----------------------------------------------------------------------------
- */
 
 type gateFixture struct {
 	gate      *Gate
@@ -612,12 +582,6 @@ func TestTarpitServe(t *testing.T) {
 		t.Fatalf("trickled %q", body)
 	}
 }
-
-/*
- * -----------------------------------------------------------------------------
- * ONION
- * -----------------------------------------------------------------------------
- */
 
 const (
 	// hello's address (src/generated/onions.json)
@@ -909,5 +873,49 @@ func TestGateOnionBanPerSession(t *testing.T) {
 	}
 	if status, _, _ := gateFixtureAuth(t, f, testRouter, routeAll); status != http.StatusOK {
 		t.Fatalf("the router at a name: %d", status)
+	}
+}
+
+func TestCookiesStrip(t *testing.T) {
+	names := map[string]bool{"authelia_session": true}
+	cases := []struct {
+		values []string
+		kept   string
+	}{
+		{nil, ""},
+		{[]string{"authelia_session=s3cret"}, ""},
+		{[]string{"a=1; authelia_session=s3cret; b=2"}, "a=1; b=2"},
+		{[]string{"a=1", "authelia_session=s3cret", "b=x=y"}, "a=1; b=x=y"},
+		{[]string{" authelia_session = s3cret ;lab_gate=v"}, "lab_gate=v"},
+		{[]string{"authelia_session_other=1; ;"}, "authelia_session_other=1"},
+	}
+	for _, c := range cases {
+		if kept := cookiesStrip(c.values, names); kept != c.kept {
+			t.Fatalf("%q: %q, want %q", c.values, kept, c.kept)
+		}
+	}
+}
+
+// what traefik puts in place of the client's cookies: the rest, or no header at all
+func TestGateStrip(t *testing.T) {
+	f := gateFixtureCreate(t)
+	f.gate.stripCookies = map[string]bool{"authelia_session": true}
+	for _, c := range []struct {
+		cookie string
+		kept   []string
+	}{
+		{"authelia_session=s3cret; theme=dark", []string{"theme=dark"}},
+		{"authelia_session=s3cret", nil},
+	} {
+		request, _ := http.NewRequest(http.MethodGet, f.server.URL+pathStrip, nil)
+		request.Header.Set(headerCookie, c.cookie)
+		response, err := http.DefaultClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != http.StatusOK || !slices.Equal(response.Header.Values(headerCookie), c.kept) {
+			t.Fatalf("%q: %d %q", c.cookie, response.StatusCode, response.Header.Values(headerCookie))
+		}
 	}
 }

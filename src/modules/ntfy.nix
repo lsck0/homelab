@@ -9,7 +9,8 @@ let
     # hermes reports to the owner here
     hermes = "homelab-hermes";
   };
-in {
+in
+{
   inherit topics;
   # what the desktop account reads with its token (ntfy-desktop-token); the desktop subscribes to exactly these
   desktopTopics = [ topics.alerts ];

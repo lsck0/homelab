@@ -12,7 +12,8 @@
 { pkgs }:
 let
   labprobe = import ./labprobe.nix { inherit pkgs; };
-in {
+in
+{
   # instances/core/106-internal-registry/main.nix
   registry = pkgs.dockerTools.pullImage {
     imageName = "registry";
@@ -48,7 +49,10 @@ in {
   labprobe = pkgs.dockerTools.buildLayeredImage {
     name = "labprobe";
     tag = "test";
-    contents = [ labprobe pkgs.busybox ];
+    contents = [
+      labprobe
+      pkgs.busybox
+    ];
     config.Entrypoint = [ "/bin/labprobe" ];
   };
 
@@ -68,7 +72,10 @@ in {
       '')
     ];
     config = {
-      Cmd = [ "${pkgs.python3}/bin/python3" "${./crowdsec-stub.py}" ];
+      Cmd = [
+        "${pkgs.python3}/bin/python3"
+        "${./crowdsec-stub.py}"
+      ];
       Env = [ "PATH=/bin" ];
     };
   };

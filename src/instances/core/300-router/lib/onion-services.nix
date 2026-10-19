@@ -2,7 +2,15 @@
 #
 # Rejected: a key tor generates on first start: it lives on the router's disk alone (losing it loses the address) and
 # is unknown when the edge's rules are evaluated. The key is the secret <route>-onion-key instead.
-{ config, lib, pkgs, inventory, site, catalog, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inventory,
+  site,
+  catalog,
+  ...
+}:
 let
   net = import ../../../../modules/net.nix { inherit lib inventory site; };
   service = import ../../../../modules/service.nix { inherit lib; };
@@ -14,14 +22,25 @@ let
   virtualPort = net.ports.http;
   # --stdin: a nu script's main sees its stdin only with it
   onionKey = "${lib.getExe pkgs.nushell} --no-config-file --stdin ${../../../../scripts/lib/onion.nu} secret-key";
-in {
+in
+{
   services.tor.relay.onionServices = lib.mapAttrs (name: _: {
     version = 3;
-    map = [ { port = virtualPort; target = { addr = net.ipOf net.zones.external.ingress; port = torPorts.onionIngress; }; } ];
+    map = [
+      {
+        port = virtualPort;
+        target = {
+          addr = net.ipOf net.zones.external.ingress;
+          port = torPorts.onionIngress;
+        };
+      }
+    ];
     secretKey = "${keyDir}/${name}";
   }) onionRoutes;
 
-  sops.secrets = lib.mapAttrs' (name: _: lib.nameValuePair (service.onionKeyOf name) { restartUnits = [ "tor.service" ]; }) onionRoutes;
+  sops.secrets = lib.mapAttrs' (
+    name: _: lib.nameValuePair (service.onionKeyOf name) { restartUnits = [ "tor.service" ]; }
+  ) onionRoutes;
 
   systemd.services.tor-onion-keys = lib.mkIf (onionRoutes != { }) {
     description = "Turn the onion routes' seeds into tor's key files";

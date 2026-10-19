@@ -18,10 +18,6 @@ import (
 	"text/template"
 )
 
-// -----------------------------------------------------------------------------
-// TYPES
-// -----------------------------------------------------------------------------
-
 type Value struct {
 	Labels map[string]string
 	Value  float64
@@ -43,10 +39,6 @@ type Rule struct {
 type Group struct {
 	Rules []Rule `json:"rules"`
 }
-
-// -----------------------------------------------------------------------------
-// INTERNAL
-// -----------------------------------------------------------------------------
 
 // grafana's prefix: the variables a rule's template reads
 const templatePrefix = "{{- $labels := .Labels -}}{{- $values := .Values -}}{{- $value := .Value -}}"
@@ -87,10 +79,6 @@ func render(text string, data Data) (string, error) {
 	err = parsed.Execute(&out, data)
 	return out.String(), err
 }
-
-// -----------------------------------------------------------------------------
-// FUNCTIONS
-// -----------------------------------------------------------------------------
 
 func main() {
 	raw, err := os.ReadFile(os.Args[1])

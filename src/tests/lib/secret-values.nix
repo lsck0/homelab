@@ -9,38 +9,63 @@
 let
   seedOf = name: "homelab-test/${name}";
   hexOf = name: builtins.hashString "sha256" (seedOf name);
-  wireguardOf = name: builtins.convertHash { hash = hexOf name; hashAlgo = "sha256"; toHashFormat = "base64"; };
+  wireguardOf =
+    name:
+    builtins.convertHash {
+      hash = hexOf name;
+      hashAlgo = "sha256";
+      toHashFormat = "base64";
+    };
 
-  wireguardPublic = name: pkgs.runCommand "${name}.pub" { nativeBuildInputs = [ pkgs.wireguard-tools ]; } ''
-    printf '%s' ${wireguardOf name} | wg pubkey | tr -d '\n' > $out
-  '';
+  wireguardPublic =
+    name:
+    pkgs.runCommand "${name}.pub" { nativeBuildInputs = [ pkgs.wireguard-tools ]; } ''
+      printf '%s' ${wireguardOf name} | wg pubkey | tr -d '\n' > $out
+    '';
 
-  rsaKey = name: pkgs.runCommand name { nativeBuildInputs = [ pkgs.openssl ]; } ''
-    openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out $out
-  '';
-  rsaPublic = name: key: pkgs.runCommand "${name}.pub" { nativeBuildInputs = [ pkgs.openssl ]; } ''
-    openssl pkey -in ${key} -pubout -out $out
-  '';
+  rsaKey =
+    name:
+    pkgs.runCommand name { nativeBuildInputs = [ pkgs.openssl ]; } ''
+      openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out $out
+    '';
+  rsaPublic =
+    name: key:
+    pkgs.runCommand "${name}.pub" { nativeBuildInputs = [ pkgs.openssl ]; } ''
+      openssl pkey -in ${key} -pubout -out $out
+    '';
 
-  sshKey = name: comment: pkgs.runCommand name { nativeBuildInputs = [ pkgs.openssh ]; } ''
-    ssh-keygen -q -t ed25519 -N "" -C ${comment} -f key
-    mv key $out
-  '';
-  sshPublic = name: key: pkgs.runCommand "${name}.pub" { nativeBuildInputs = [ pkgs.openssh ]; } ''
-    ssh-keygen -y -f ${key} | tr -d '\n' > $out
-  '';
+  sshKey =
+    name: comment:
+    pkgs.runCommand name { nativeBuildInputs = [ pkgs.openssh ]; } ''
+      ssh-keygen -q -t ed25519 -N "" -C ${comment} -f key
+      mv key $out
+    '';
+  sshPublic =
+    name: key:
+    pkgs.runCommand "${name}.pub" { nativeBuildInputs = [ pkgs.openssh ]; } ''
+      ssh-keygen -y -f ${key} | tr -d '\n' > $out
+    '';
 
   authelia-oidc-issuer-key = rsaKey "authelia-oidc-issuer-key";
   # lldap's opaque server setup, base64 as vm-101's lldap decodes it; lldap itself writes one for a fresh db
-  lldap-server-key = pkgs.runCommand "lldap-server-key" { nativeBuildInputs = [ pkgs.lldap pkgs.coreutils ]; } ''
-    export LLDAP_JWT_SECRET=build-time-only-jwt-secret LLDAP_LDAP_USER_PASS=build-time-only
-    export LLDAP_KEY_FILE=$PWD/server_key LLDAP_DATABASE_URL="sqlite://$PWD/users.db?mode=rwc"
-    lldap create_schema >/dev/null
-    base64 -w0 server_key > $out
-  '';
+  lldap-server-key =
+    pkgs.runCommand "lldap-server-key"
+      {
+        nativeBuildInputs = [
+          pkgs.lldap
+          pkgs.coreutils
+        ];
+      }
+      ''
+        export LLDAP_JWT_SECRET=build-time-only-jwt-secret LLDAP_LDAP_USER_PASS=build-time-only
+        export LLDAP_KEY_FILE=$PWD/server_key LLDAP_DATABASE_URL="sqlite://$PWD/users.db?mode=rwc"
+        lldap create_schema >/dev/null
+        base64 -w0 server_key > $out
+      '';
   # the comment the production key carries (modules/swarm homelab.swarm.deployKey)
   app-deploy-key = sshKey "app-deploy-key" "app-builder";
-in {
+in
+{
   wireguard-private-key = wireguardOf "wireguard-private-key";
   protonvpn-private-key = wireguardOf "protonvpn-private-key";
   anubis-ed25519-key = hexOf "anubis-ed25519-key";

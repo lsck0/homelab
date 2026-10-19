@@ -17,7 +17,6 @@
 #                          (src/scripts/secrets-check.nu) skips it, since it legitimately appears in code
 #   "dotfiles:<file>"      copied from that file of the dotfiles' secrets on every run
 {
-  attic-pull-token = "manual"; # atticadm make-token, read-only: every guest substitutes from the cache with it
   cloudflare-token = "manual";
   github-mirror-token = "manual";
   ntfy-grafana-password = "hex:24";

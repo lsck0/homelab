@@ -5,22 +5,22 @@ if the two disagree, one of them is wrong, and the test says which probe showed 
 lab are the ones the claim itself is about: which guests vm-104 exports to (nas clients), which ports the enabled
 swarm apps publish, who leaves through the vpn exit, and which worker holds the apps' state.
 
-    oracle = ZoneOracle(facts)        # facts: {"nasClients", "appsPorts", "vpnMembers", "appsNodes", "stateWorker"}
+    oracle = ZoneOracle(facts)        # facts: {"nasClients", "appsPorts", "vpnMembers", "appsNodes", "stateWorker",
+                                      #   "dashboardWidgets"}
     expect, seen_src = oracle.forward("10.200.0.201", "10.100.0.104", "tcp", 2049)
 
 expect is "open" or "closed" (labprobe's vocabulary); seen_src is the source the destination sees: the router's wan
-address when the path leaves through the house (masquerade), the probe's own source otherwise.
+address when the path leaves through the house (masquerade), the probe's own source otherwise, and towards proxmox,
+whose firewall names the guests it admits, never masqueraded.
 """
 
 import ipaddress
 
-# -----------------------------------------------------------------------------
-# CONSTANTS: the lab as the owner describes it
-# -----------------------------------------------------------------------------
-
 ROUTER_WAN = "192.168.178.29"
 WORKSTATION = "192.168.178.138"
 PROXMOX = "192.168.178.200"
+FRITZBOX = "192.168.178.1"
+INVERTER = "192.168.178.46"
 NETWORKS = {
     "internal": ipaddress.ip_network("10.100.0.0/24"),
     "dmz": ipaddress.ip_network("10.200.0.0/24"),
@@ -30,10 +30,17 @@ NETWORKS = {
 PRIVATE = [ipaddress.ip_network(n) for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")]
 
 INGRESS = "10.100.0.100"
+DASHBOARD = "10.100.0.102"
 COLLECTOR = "10.100.0.103"
 NAS = "10.100.0.104"
+ARCHBUILD = "10.100.0.112"
 MANAGER = "10.100.0.107"
+OPERATOR = "10.100.0.113"
 EDGE = "10.200.0.200"
+NTFY = "10.200.0.201"
+MIRROR = "10.200.0.210"
+# the forwarded tcp routes the prober checks at their guest: minecraft, teamspeak's file transfer
+PROBED_FORWARDS = {("10.200.0.214", 25565), ("10.200.0.215", 30033)}
 
 NFS_PORTS = (111, 2049)
 # the push door; the query api (3100) is for named readers only
@@ -45,15 +52,15 @@ OTLP_FRONTEND = 4319
 PYROSCOPE = 4040
 # the swarm controller on the manager: ci's redeploy through the edge's public deploy route, the state worker's wakes
 CONTROLLER = 8095
+HTTP = 80
 HTTPS = 443
 SSH = 22
 PROXMOX_API = 8006
-SWARM_TCP = (2377, 7946)
+NODE_EXPORTER = 9100
+FRITZBOX_UPNP = 49000
+SWARM_GOSSIP = 7946
+SWARM_TCP = (2377, SWARM_GOSSIP)
 SWARM_UDP = (7946, 4789)
-
-# -----------------------------------------------------------------------------
-# FUNCTIONS
-# -----------------------------------------------------------------------------
 
 
 def network_of(address):
@@ -74,12 +81,13 @@ class ZoneOracle:
         self.vpn_members = set(facts["vpnMembers"])
         self.apps_nodes = set(facts["appsNodes"])
         self.state_worker = facts["stateWorker"]
+        self.dashboard_widgets = {tuple(w) for w in facts["dashboardWidgets"]}
 
     def _dmz_allows(self, src, dst, proto, port):
         tcp = proto == "tcp"
         return (
             (src == EDGE and dst == INGRESS and tcp and port == HTTPS)
-            or (src == EDGE and dst == COLLECTOR and tcp and port in (LOKI_PUSH, OTLP_FRONTEND))
+            or (src == EDGE and dst == COLLECTOR and tcp and port in (LOKI_PUSH, OTLP, OTLP_FRONTEND))
             or (src == EDGE and dst == MANAGER and tcp and port == CONTROLLER)
             or (dst == COLLECTOR and tcp and port == JOURNAL)
             or (src in self.nas_clients and dst == NAS and proto in ("tcp", "udp") and port in NFS_PORTS)
@@ -87,12 +95,38 @@ class ZoneOracle:
             or (src == EDGE and dst in self.apps_nodes and tcp and port in self.apps_ports)
         )
 
+    def _internal_allows(self, src, dst, proto, port):
+        tcp = proto == "tcp"
+        zd = network_of(dst)
+        return (
+            (src == OPERATOR and dst == PROXMOX and tcp and port == SSH)
+            or (src in (INGRESS, DASHBOARD) and dst == PROXMOX and tcp and port == PROXMOX_API)
+            or (src == COLLECTOR and dst == PROXMOX and tcp and port == NODE_EXPORTER)
+            or (src == DASHBOARD and dst == FRITZBOX and tcp and port in (HTTP, FRITZBOX_UPNP))
+            or (src == DASHBOARD and tcp and (dst, port) in self.dashboard_widgets)
+            or (src == COLLECTOR and dst == INVERTER and tcp and port == HTTP)
+            or (dst == EDGE and tcp and port == HTTPS)
+            or (src == COLLECTOR and dst == NTFY and tcp and port == HTTP)
+            or (src == COLLECTOR and tcp and (dst, port) in PROBED_FORWARDS)
+            or (src == OPERATOR and zd in ("dmz", "apps") and tcp and port == SSH)
+            or (src == ARCHBUILD and dst == MIRROR and tcp and port == SSH)
+            or (src == COLLECTOR and zd in ("dmz", "apps") and tcp and port == NODE_EXPORTER)
+            or (
+                src == MANAGER
+                and zd == "apps"
+                and ((tcp and port == SWARM_GOSSIP) or (proto == "udp" and port in SWARM_UDP) or proto == "esp")
+            )
+        )
+
     def _apps_allows(self, src, dst, proto, port):
         tcp = proto == "tcp"
         return (
             (dst == INGRESS and tcp and port == HTTPS)
             or (dst == COLLECTOR and tcp and port in (JOURNAL, OTLP, OTLP_HTTP, PYROSCOPE, LOKI_PUSH))
-            or (dst == MANAGER and ((tcp and port in SWARM_TCP) or (proto == "udp" and port in SWARM_UDP) or proto == "esp"))
+            or (
+                dst == MANAGER
+                and ((tcp and port in SWARM_TCP) or (proto == "udp" and port in SWARM_UDP) or proto == "esp")
+            )
             or (src == self.state_worker and dst == MANAGER and tcp and port == CONTROLLER)
             or (src in self.nas_clients and dst == NAS and proto in ("tcp", "udp") and port in NFS_PORTS)
         )
@@ -102,12 +136,15 @@ class ZoneOracle:
         zs, zd = network_of(src), network_of(dst)
         assert zs != zd, f"{src} -> {dst} does not cross the router"
         leaves_through_house = zd in ("lan", "internet")
-        seen = ROUTER_WAN if leaves_through_house and zs in ("internal", "dmz", "apps") else src
+        masqueraded = leaves_through_house and zs in ("internal", "dmz", "apps") and dst != PROXMOX
+        seen = ROUTER_WAN if masqueraded else src
         # the vpn exit is offline in the lab: a member's internet traffic dies in the killswitch
         if src in self.vpn_members and zd == "internet":
             return "closed", None
         if zs == "internal":
-            return "open", seen
+            if self._internal_allows(src, dst, proto, port):
+                return "open", seen
+            return ("open", seen) if zd == "internet" else ("closed", None)
         if zs == "lan":
             if zd in ("internal", "dmz"):
                 return "open", seen

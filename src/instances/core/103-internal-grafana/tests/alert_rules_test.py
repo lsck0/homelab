@@ -15,6 +15,7 @@ must stay quiet (an idle guest asleep, a disk forecast with headroom or from an 
 stale only because its guest just woke up, a stale deploy metric on a guest that is no builder, a manager failure the
 builder already reports).
 """
+
 import json
 import os
 import sys
@@ -63,6 +64,14 @@ def expect(uid, **series):
 
 
 paperless = {"instance": "10.100.0.131:9100", "vm": "paperless"}
+# smartd's own words for the warning ride along as a label, so the alert says why
+SMARTD_NVME1_LABELS = {
+    "vm": "proxmox",
+    "device": "/dev/nvme1",
+    "type": "Health",
+    "message": "Device: /dev/nvme1, Critical Warning (0x02): Temperature",
+}
+SMARTD_NVME1 = ",".join(f'{k}="{v}"' for k, v in SMARTD_NVME1_LABELS.items())
 nas = {"instance": "10.100.0.104:9100", "vm": "nas"}
 # idle: the scrape labels a guest that sleeps on purpose
 archbuild = {"instance": "10.100.0.112:9100", "vm": "archbuild", "idle": "true"}
@@ -74,7 +83,7 @@ app_server = f"{APP}_server"
 tests = [
     {
         "name": "guests: an enabled guest down pages, an idle one asleep does not; a service on a down guest is "
-                "the guest's alert",
+        "the guest's alert",
         "interval": "1m",
         "input_series": [
             {"series": f'up{{{NODE},instance="{paperless["instance"]}",vm="paperless"}}', "values": "1x20"},
@@ -85,52 +94,100 @@ tests = [
         ],
         "alert_rule_test": [
             {"eval_time": "4m", "alertname": "instance_down", "exp_alerts": []},
-            {"eval_time": "6m", "alertname": "instance_down", "exp_alerts": [expect("instance_down", job="homelab-node-exporter", **nas)]},
+            {
+                "eval_time": "6m",
+                "alertname": "instance_down",
+                "exp_alerts": [expect("instance_down", job="homelab-node-exporter", **nas)],
+            },
             {"eval_time": "9m", "alertname": "service_down", "exp_alerts": []},
-            {"eval_time": "11m", "alertname": "service_down",
-             "exp_alerts": [expect("service_down", job="blackbox-http", service="paperless", vm="paperless")]},
+            {
+                "eval_time": "11m",
+                "alertname": "service_down",
+                "exp_alerts": [expect("service_down", job="blackbox-http", service="paperless", vm="paperless")],
+            },
         ],
     },
     {
         "name": "services: 5xx pages above the share at real traffic only, a guest's route like an app's; a failed deploy and a restart loop are reported",
         "interval": "1m",
         "input_series": [
-            {"series": f'traefik_service_requests_total{{instance="{EDGE}",service="{app_root}",code="200"}}', "values": "0+60x20"},
-            {"series": f'traefik_service_requests_total{{instance="{EDGE}",service="{app_root}",code="500"}}', "values": "0+60x20"},
-            {"series": f'traefik_service_requests_total{{instance="{EDGE}",service="{app_api}",code="500"}}', "values": "0+3x20"},
-            {"series": f'traefik_service_requests_total{{instance="{INTERNAL}",service="{GUEST_ROUTE}",code="500"}}', "values": "0+60x20"},
+            {
+                "series": f'traefik_service_requests_total{{instance="{EDGE}",service="{app_root}",code="200"}}',
+                "values": "0+60x20",
+            },
+            {
+                "series": f'traefik_service_requests_total{{instance="{EDGE}",service="{app_root}",code="500"}}',
+                "values": "0+60x20",
+            },
+            {
+                "series": f'traefik_service_requests_total{{instance="{EDGE}",service="{app_api}",code="500"}}',
+                "values": "0+3x20",
+            },
+            {
+                "series": f'traefik_service_requests_total{{instance="{INTERNAL}",service="{GUEST_ROUTE}",code="500"}}',
+                "values": "0+60x20",
+            },
             {"series": f'homelab_app_deploy_ok{{app="{APP}",vm="{BUILDER}"}}', "values": "1 1 0x10"},
             # the builder's old guest kept its last file: it must not page, nor outvote the builder
             {"series": f'homelab_app_deploy_ok{{app="{APP}",vm="github-runner"}}', "values": "0x15"},
             # the manager failed the same deploy: the builder's alert is the page
             {"series": f'homelab_swarm_deploy_ok{{app="{APP}",vm="swarm-internal"}}', "values": "1 1 0x10"},
-            {"series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{app_server}",name="{app_server}.1.a"}}', "values": "1 1 1 _x10"},
-            {"series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{app_server}",name="{app_server}.1.b"}}', "values": "_ _ 1 1 _x10"},
-            {"series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{app_server}",name="{app_server}.1.c"}}', "values": "_ _ _ 1 1 _x10"},
-            {"series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{app_server}",name="{app_server}.1.d"}}', "values": "_ _ _ _ 1 1x10"},
-            {"series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{APP}_db",name="{APP}_db.1.a"}}', "values": "1x15"},
+            {
+                "series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{app_server}",name="{app_server}.1.a"}}',
+                "values": "1 1 1 _x10",
+            },
+            {
+                "series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{app_server}",name="{app_server}.1.b"}}',
+                "values": "_ _ 1 1 _x10",
+            },
+            {
+                "series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{app_server}",name="{app_server}.1.c"}}',
+                "values": "_ _ _ 1 1 _x10",
+            },
+            {
+                "series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{app_server}",name="{app_server}.1.d"}}',
+                "values": "_ _ _ _ 1 1x10",
+            },
+            {
+                "series": f'container_start_time_seconds{{swarm_stack="{APP}",swarm_service="{APP}_db",name="{APP}_db.1.a"}}',
+                "values": "1x15",
+            },
         ],
         "alert_rule_test": [
             {"eval_time": "9m", "alertname": "app_5xx", "exp_alerts": []},
-            {"eval_time": "16m", "alertname": "app_5xx",
-             "exp_alerts": [expect("app_5xx", service=app_root), expect("app_5xx", service=GUEST_ROUTE)]},
+            {
+                "eval_time": "16m",
+                "alertname": "app_5xx",
+                "exp_alerts": [expect("app_5xx", service=app_root), expect("app_5xx", service=GUEST_ROUTE)],
+            },
             {"eval_time": "1m", "alertname": "app_deploy_failed", "exp_alerts": []},
             {"eval_time": "3m", "alertname": "app_deploy_failed", "exp_alerts": [expect("app_deploy_failed", app=APP)]},
             {"eval_time": "3m", "alertname": "app_swarm_deploy_failed", "exp_alerts": []},
-            {"eval_time": "6m", "alertname": "app_restart_loop", "exp_alerts": [expect("app_restart_loop", swarm_service=app_server)]},
+            {
+                "eval_time": "6m",
+                "alertname": "app_restart_loop",
+                "exp_alerts": [expect("app_restart_loop", swarm_service=app_server)],
+            },
         ],
     },
     {
         "name": "backups: a dump goes stale only once its guest has been up for the catch-up hour",
         "interval": "5m",
         "input_series": [
-            {"series": 'homelab_db_dump_last_success_timestamp_seconds{vm="paperless",db="paperless"}', "values": "0x400"},
+            {
+                "series": 'homelab_db_dump_last_success_timestamp_seconds{vm="paperless",db="paperless"}',
+                "values": "0x400",
+            },
             {"series": f'up{{{NODE},instance="{paperless["instance"]}",vm="paperless"}}', "values": "0x330 1x70"},
             {"series": 'homelab_backup_last_success_timestamp_seconds{type="daily"}', "values": "0x400"},
         ],
         "alert_rule_test": [
             {"eval_time": "1675m", "alertname": "db_dump_stale", "exp_alerts": []},
-            {"eval_time": "1720m", "alertname": "db_dump_stale", "exp_alerts": [expect("db_dump_stale", vm="paperless", db="paperless")]},
+            {
+                "eval_time": "1720m",
+                "alertname": "db_dump_stale",
+                "exp_alerts": [expect("db_dump_stale", vm="paperless", db="paperless")],
+            },
             {"eval_time": "1580m", "alertname": "backup_stale", "exp_alerts": []},
             {"eval_time": "1600m", "alertname": "backup_stale", "exp_alerts": [expect("backup_stale")]},
         ],
@@ -143,8 +200,11 @@ tests = [
             {"series": f'homelab_archrepo_held_back{{{NODE},vm="archbuild"}}', "values": "_x3 0 _x30"},
         ],
         "alert_rule_test": [
-            {"eval_time": "20h", "alertname": "archrepo_missing",
-             "exp_alerts": [expect("archrepo_missing", job="homelab-node-exporter", vm="archbuild")]},
+            {
+                "eval_time": "20h",
+                "alertname": "archrepo_missing",
+                "exp_alerts": [expect("archrepo_missing", job="homelab-node-exporter", vm="archbuild")],
+            },
             {"eval_time": "31h", "alertname": "archrepo_missing", "exp_alerts": []},
             {"eval_time": "20h", "alertname": "archrepo_held_back", "exp_alerts": []},
         ],
@@ -169,37 +229,74 @@ tests = [
             {"series": 'homelab_thinpool_data_percent{vm="proxmox",vg="pve"}', "values": "40x40"},
         ],
         "alert_rule_test": [
-            {"eval_time": "35m", "alertname": "thinpool_data_warn", "exp_alerts": [expect("thinpool_data_warn", vm="proxmox", vg="bulk")]},
+            {
+                "eval_time": "35m",
+                "alertname": "thinpool_data_warn",
+                "exp_alerts": [expect("thinpool_data_warn", vm="proxmox", vg="bulk")],
+            },
         ],
     },
     {
         "name": "storage: a sustained decline on a fuller disk is forecast; one with headroom, an idle guest's and a "
-                "down guest's stale samples are not",
+        "down guest's stale samples are not",
         "interval": "1m",
         "input_series": [
             # 10% free, 100 megabytes less a minute
-            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/data",vm="nas"}', "values": "100000000000-100000000x400"},
-            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/data",vm="nas"}', "values": "1000000000000x400"},
-            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="nas"}', "values": "100000000000x400"},
-            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="nas"}', "values": "1000000000000x400"},
+            {
+                "series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/data",vm="nas"}',
+                "values": "100000000000-100000000x400",
+            },
+            {
+                "series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/data",vm="nas"}',
+                "values": "1000000000000x400",
+            },
+            {
+                "series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="nas"}',
+                "values": "100000000000x400",
+            },
+            {
+                "series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="nas"}',
+                "values": "1000000000000x400",
+            },
             {"series": f'up{{{NODE},vm="nas"}}', "values": "1x400"},
             # the same decline with over half the disk free: a step, not a trend
-            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="forgejo"}', "values": "180000000000-100000000x400"},
-            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="forgejo"}', "values": "250000000000x400"},
+            {
+                "series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="forgejo"}',
+                "values": "180000000000-100000000x400",
+            },
+            {
+                "series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="forgejo"}',
+                "values": "250000000000x400",
+            },
             {"series": f'up{{{NODE},vm="forgejo"}}', "values": "1x400"},
             # an idle guest awake for a build
-            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="archbuild",idle="true"}', "values": "100000000000-100000000x400"},
-            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="archbuild",idle="true"}', "values": "1000000000000x400"},
+            {
+                "series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="archbuild",idle="true"}',
+                "values": "100000000000-100000000x400",
+            },
+            {
+                "series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="archbuild",idle="true"}',
+                "values": "1000000000000x400",
+            },
             {"series": f'up{{{NODE},vm="archbuild",idle="true"}}', "values": "1x400"},
             # a guest that went down: its samples stay in the window
-            {"series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="paperless"}', "values": "100000000000-100000000x20 _x380"},
-            {"series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="paperless"}', "values": "1000000000000x20 _x380"},
+            {
+                "series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="paperless"}',
+                "values": "100000000000-100000000x20 _x380",
+            },
+            {
+                "series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="paperless"}',
+                "values": "1000000000000x20 _x380",
+            },
             {"series": f'up{{{NODE},vm="paperless"}}', "values": "1x20 0x380"},
         ],
         "alert_rule_test": [
             {"eval_time": "355m", "alertname": "disk_fill_predicted", "exp_alerts": []},
-            {"eval_time": "365m", "alertname": "disk_fill_predicted",
-             "exp_alerts": [expect("disk_fill_predicted", fstype="ext4", mountpoint="/data", vm="nas")]},
+            {
+                "eval_time": "365m",
+                "alertname": "disk_fill_predicted",
+                "exp_alerts": [expect("disk_fill_predicted", fstype="ext4", mountpoint="/data", vm="nas")],
+            },
         ],
     },
     {
@@ -207,14 +304,24 @@ tests = [
         "interval": "1m",
         "input_series": [
             {"series": 'up{job="prometheus",instance="127.0.0.1:9091"}', "values": "1x30"},
-            {"series": 'node_systemd_unit_state{name="loki.service",state="active",vm="grafana"}', "values": "1 1 0x20"},
+            {
+                "series": 'node_systemd_unit_state{name="loki.service",state="active",vm="grafana"}',
+                "values": "1 1 0x20",
+            },
             {"series": 'node_systemd_unit_state{name="grafana.service",state="active",vm="grafana"}', "values": "1x22"},
             {"series": 'loki_distributor_lines_received_total{component="loki"}', "values": "0+600x10 6000x30"},
         ],
         "alert_rule_test": [
-            {"eval_time": "1m", "alertname": "watchdog", "exp_alerts": [expect("watchdog", job="prometheus", instance="127.0.0.1:9091")]},
-            {"eval_time": "8m", "alertname": "monitoring_unit_down",
-             "exp_alerts": [expect("monitoring_unit_down", name="loki.service", state="active", vm="grafana")]},
+            {
+                "eval_time": "1m",
+                "alertname": "watchdog",
+                "exp_alerts": [expect("watchdog", job="prometheus", instance="127.0.0.1:9091")],
+            },
+            {
+                "eval_time": "8m",
+                "alertname": "monitoring_unit_down",
+                "exp_alerts": [expect("monitoring_unit_down", name="loki.service", state="active", vm="grafana")],
+            },
             {"eval_time": "20m", "alertname": "logs_not_arriving", "exp_alerts": []},
             {"eval_time": "40m", "alertname": "logs_not_arriving", "exp_alerts": [expect("logs_not_arriving")]},
         ],
@@ -230,8 +337,11 @@ tests += [
             {"series": f'homelab_swarm_deploy_ok{{app="{APP}",vm="swarm-internal"}}', "values": "1 0x9"},
         ],
         "alert_rule_test": [
-            {"eval_time": "3m", "alertname": "app_swarm_deploy_failed",
-             "exp_alerts": [expect("app_swarm_deploy_failed", app=APP, vm="swarm-internal")]},
+            {
+                "eval_time": "3m",
+                "alertname": "app_swarm_deploy_failed",
+                "exp_alerts": [expect("app_swarm_deploy_failed", app=APP, vm="swarm-internal")],
+            },
             {"eval_time": "3m", "alertname": "app_deploy_failed", "exp_alerts": []},
         ],
     },
@@ -246,54 +356,102 @@ tests += [
             {"series": 'nvme_temperature_celsius{vm="proxmox",device="nvme0n1"}', "values": "40x30"},
         ],
         "alert_rule_test": [
-            {"eval_time": "20m", "alertname": "memory_pressure", "exp_alerts": [expect("memory_pressure", vm="traefik-internal")]},
-            {"eval_time": "3m", "alertname": "nvme_critical_warning",
-             "exp_alerts": [expect("nvme_critical_warning", vm="proxmox", device="nvme1n1")]},
-            {"eval_time": "20m", "alertname": "nvme_temperature",
-             "exp_alerts": [expect("nvme_temperature", vm="proxmox", device="nvme1n1")]},
+            {
+                "eval_time": "20m",
+                "alertname": "memory_pressure",
+                "exp_alerts": [expect("memory_pressure", vm="traefik-internal")],
+            },
+            {
+                "eval_time": "3m",
+                "alertname": "nvme_critical_warning",
+                "exp_alerts": [expect("nvme_critical_warning", vm="proxmox", device="nvme1n1")],
+            },
+            {
+                "eval_time": "20m",
+                "alertname": "nvme_temperature",
+                "exp_alerts": [expect("nvme_temperature", vm="proxmox", device="nvme1n1")],
+            },
         ],
     },
     {
         "name": "idle: a wake that never answered and an api the ingress cannot reach page",
         "interval": "1m",
         "input_series": [
-            {"series": 'homelab_ondemand_wake_ok{vm="traefik-internal",service="archbuild",target="vm-112"}', "values": "1 0x5"},
-            {"series": 'homelab_ondemand_wake_ok{vm="traefik-internal",service="paperless",target="vm-131"}', "values": "1x6"},
+            {
+                "series": 'homelab_ondemand_wake_ok{vm="traefik-internal",service="archbuild",target="vm-112"}',
+                "values": "1 0x5",
+            },
+            {
+                "series": 'homelab_ondemand_wake_ok{vm="traefik-internal",service="paperless",target="vm-131"}',
+                "values": "1x6",
+            },
             {"series": 'homelab_ondemand_api_ok{vm="traefik-external"}', "values": "0x20"},
         ],
         "alert_rule_test": [
-            {"eval_time": "2m", "alertname": "ondemand_wake_failed",
-             "exp_alerts": [expect("ondemand_wake_failed", vm="traefik-internal", target="vm-112")]},
+            {
+                "eval_time": "2m",
+                "alertname": "ondemand_wake_failed",
+                "exp_alerts": [expect("ondemand_wake_failed", vm="traefik-internal", target="vm-112")],
+            },
             {"eval_time": "10m", "alertname": "ondemand_api_failing", "exp_alerts": []},
-            {"eval_time": "16m", "alertname": "ondemand_api_failing", "exp_alerts": [expect("ondemand_api_failing", vm="traefik-external")]},
+            {
+                "eval_time": "16m",
+                "alertname": "ondemand_api_failing",
+                "exp_alerts": [expect("ondemand_api_failing", vm="traefik-external")],
+            },
         ],
     },
     {
         "name": "alert path: a channel that keeps failing is named once, a single retried failure is not",
         "interval": "1m",
         "input_series": [
-            {"series": 'grafana_alerting_notifications_failed_total{integration="webhook",component="grafana"}', "values": "0+1x40"},
-            {"series": 'grafana_alerting_notifications_failed_total{integration="telegram",component="grafana"}', "values": "0 1x40"},
+            {
+                "series": 'grafana_alerting_notifications_failed_total{integration="webhook",component="grafana"}',
+                "values": "0+1x40",
+            },
+            {
+                "series": 'grafana_alerting_notifications_failed_total{integration="telegram",component="grafana"}',
+                "values": "0 1x40",
+            },
         ],
         "alert_rule_test": [
             {"eval_time": "10m", "alertname": "notifications_failing", "exp_alerts": []},
-            {"eval_time": "20m", "alertname": "notifications_failing",
-             "exp_alerts": [expect("notifications_failing", integration="ntfy")]},
-            {"eval_time": "40m", "alertname": "notifications_failing",
-             "exp_alerts": [expect("notifications_failing", integration="ntfy")]},
+            {
+                "eval_time": "20m",
+                "alertname": "notifications_failing",
+                "exp_alerts": [expect("notifications_failing", integration="ntfy")],
+            },
+            {
+                "eval_time": "40m",
+                "alertname": "notifications_failing",
+                "exp_alerts": [expect("notifications_failing", integration="ntfy")],
+            },
         ],
     },
     {
         "name": "alert path: telegram's outage is its upstream alert alone, its failed deliveries add none",
         "interval": "1m",
         "input_series": [
-            {"series": 'grafana_alerting_notifications_failed_total{integration="telegram",component="grafana"}', "values": "0+1x40"},
-            {"series": 'probe_success{job="upstream",upstream="telegram",instance="https://api.telegram.org"}', "values": "0x40"},
+            {
+                "series": 'grafana_alerting_notifications_failed_total{integration="telegram",component="grafana"}',
+                "values": "0+1x40",
+            },
+            {
+                "series": 'probe_success{job="upstream",upstream="telegram",instance="https://api.telegram.org"}',
+                "values": "0x40",
+            },
         ],
         "alert_rule_test": [
             {"eval_time": "30m", "alertname": "notifications_failing", "exp_alerts": []},
-            {"eval_time": "30m", "alertname": "upstream_unavailable",
-             "exp_alerts": [expect("upstream_unavailable", job="upstream", upstream="telegram", instance="https://api.telegram.org")]},
+            {
+                "eval_time": "30m",
+                "alertname": "upstream_unavailable",
+                "exp_alerts": [
+                    expect(
+                        "upstream_unavailable", job="upstream", upstream="telegram", instance="https://api.telegram.org"
+                    )
+                ],
+            },
         ],
     },
     {
@@ -311,12 +469,187 @@ tests += [
         "name": "disks: a smartd warning pages while smartd repeats it, and ends a day after the last one",
         "interval": "1h",
         "input_series": [
-            {"series": 'homelab_smartd_warning_timestamp_seconds{vm="proxmox",device="/dev/nvme1",type="Temperature"}', "values": "0x40"},
+            {
+                "series": f"homelab_smartd_warning_timestamp_seconds{{{SMARTD_NVME1}}}",
+                "values": "0x40",
+            },
         ],
         "alert_rule_test": [
-            {"eval_time": "1h", "alertname": "smartd_warning",
-             "exp_alerts": [expect("smartd_warning", vm="proxmox", device="/dev/nvme1", type="Temperature")]},
+            {
+                "eval_time": "1h",
+                "alertname": "smartd_warning",
+                "exp_alerts": [expect("smartd_warning", **SMARTD_NVME1_LABELS)],
+            },
             {"eval_time": "27h", "alertname": "smartd_warning", "exp_alerts": []},
+        ],
+    },
+    {
+        "name": "host: a reboot pages for an hour; an unsafe shutdown pages after an outage longer than its window",
+        "interval": "10m",
+        "input_series": [
+            # booted at 0, rebooted at 29000 s after a hang that silenced the scrapes for five hours
+            {"series": f'node_boot_time_seconds{{{NODE},vm="proxmox"}}', "values": "0x19 _x30 29000x20"},
+            {"series": 'nvme_unsafe_shutdowns_total{vm="proxmox",device="nvme1n1"}', "values": "111x19 _x30 112x20"},
+            {"series": 'nvme_unsafe_shutdowns_total{vm="proxmox",device="nvme0n1"}', "values": "40x19 _x30 40x20"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "150m", "alertname": "host_rebooted", "exp_alerts": []},
+            {"eval_time": "150m", "alertname": "nvme_unsafe_shutdown", "exp_alerts": []},
+            {
+                "eval_time": "510m",
+                "alertname": "host_rebooted",
+                "exp_alerts": [expect("host_rebooted", job="homelab-node-exporter", vm="proxmox")],
+            },
+            {
+                "eval_time": "510m",
+                "alertname": "nvme_unsafe_shutdown",
+                "exp_alerts": [expect("nvme_unsafe_shutdown", vm="proxmox", device="nvme1n1")],
+            },
+            {"eval_time": "600m", "alertname": "host_rebooted", "exp_alerts": []},
+            {"eval_time": "600m", "alertname": "nvme_unsafe_shutdown", "exp_alerts": []},
+        ],
+    },
+    {
+        "name": "host: a throttling nvme, one over its warning temperature and machine checks page; a cool drive does not",
+        "interval": "5m",
+        "input_series": [
+            {
+                "series": 'homelab_nvme_thermal_throttle_seconds_total{vm="proxmox",device="nvme1n1"}',
+                "values": "0+30x20",
+            },
+            {"series": 'homelab_nvme_thermal_throttle_seconds_total{vm="proxmox",device="nvme0n1"}', "values": "0x20"},
+            {
+                "series": 'homelab_nvme_warning_temperature_seconds_total{vm="proxmox",device="nvme1n1"}',
+                "values": "0x6 60x14",
+            },
+            {
+                "series": 'homelab_nvme_warning_temperature_seconds_total{vm="proxmox",device="nvme0n1"}',
+                "values": "0x20",
+            },
+            {"series": 'homelab_mce_events_total{vm="proxmox"}', "values": "0x4 2x16"},
+        ],
+        "alert_rule_test": [
+            {
+                "eval_time": "65m",
+                "alertname": "nvme_throttling",
+                "exp_alerts": [expect("nvme_throttling", vm="proxmox", device="nvme1n1")],
+            },
+            {"eval_time": "25m", "alertname": "nvme_over_warning_temperature", "exp_alerts": []},
+            {
+                "eval_time": "40m",
+                "alertname": "nvme_over_warning_temperature",
+                "exp_alerts": [expect("nvme_over_warning_temperature", vm="proxmox", device="nvme1n1")],
+            },
+            {"eval_time": "15m", "alertname": "machine_check", "exp_alerts": []},
+            {"eval_time": "25m", "alertname": "machine_check", "exp_alerts": [expect("machine_check", vm="proxmox")]},
+        ],
+    },
+    {
+        "name": "guests: a unit failed for a quarter hour, an oom kill and a drifted host alert; healthy guests do not",
+        "interval": "1m",
+        "input_series": [
+            {"series": 'homelab_systemd_failed_units{vm="nas",unit="kopia.service"}', "values": "1x90"},
+            {"series": 'node_vmstat_oom_kill{instance="10.100.0.104:9100",vm="nas"}', "values": "0 0 0 1x87"},
+            {"series": f'node_vmstat_oom_kill{{instance="{paperless["instance"]}",vm="paperless"}}', "values": "5x90"},
+            {"series": 'homelab_system_drift{vm="nas"}', "values": "1x90"},
+            {"series": 'homelab_system_drift{vm="paperless"}', "values": "0x90"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "14m", "alertname": "unit_failed", "exp_alerts": []},
+            {
+                "eval_time": "16m",
+                "alertname": "unit_failed",
+                "exp_alerts": [expect("unit_failed", vm="nas", unit="kopia.service")],
+            },
+            {"eval_time": "2m", "alertname": "oom_kill", "exp_alerts": []},
+            {"eval_time": "10m", "alertname": "oom_kill", "exp_alerts": [expect("oom_kill", vm="nas")]},
+            {"eval_time": "50m", "alertname": "system_drift", "exp_alerts": []},
+            {"eval_time": "70m", "alertname": "system_drift", "exp_alerts": [expect("system_drift", vm="nas")]},
+        ],
+    },
+    {
+        "name": "router: a refusal from the dmz alerts, the house's and the internal zone's do not",
+        "interval": "1m",
+        "input_series": [
+            {"series": 'homelab_forward_denied_packets_total{network="external"}', "values": "0 0 0+1x88"},
+            {"series": 'homelab_forward_denied_packets_total{network="internal"}', "values": "0+5x90"},
+            {"series": 'homelab_forward_denied_packets_total{network="lan"}', "values": "0+5x90"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "1m", "alertname": "forward_refused", "exp_alerts": []},
+            {
+                "eval_time": "10m",
+                "alertname": "forward_refused",
+                "exp_alerts": [expect("forward_refused", network="external")],
+            },
+        ],
+    },
+    {
+        "name": "host: the softdog in place of the chipset watchdog alerts after an hour",
+        "interval": "1m",
+        "input_series": [
+            {"series": f'up{{{NODE},vm="proxmox"}}', "values": "1x90"},
+            {
+                "series": 'node_watchdog_info{vm="proxmox",identity="Software Watchdog",state="active"}',
+                "values": "1x90",
+            },
+            {
+                "series": 'node_watchdog_info{vm="proxmox",identity="SP5100 TCO timer",state="inactive"}',
+                "values": "1x90",
+            },
+        ],
+        "alert_rule_test": [
+            {"eval_time": "50m", "alertname": "host_watchdog_unarmed", "exp_alerts": []},
+            {
+                "eval_time": "70m",
+                "alertname": "host_watchdog_unarmed",
+                "exp_alerts": [
+                    expect("host_watchdog_unarmed", vm="proxmox", identity="SP5100 TCO timer", state="active")
+                ],
+            },
+        ],
+    },
+    {
+        "name": "host: an armed chipset watchdog stays quiet",
+        "interval": "1m",
+        "input_series": [
+            {"series": f'up{{{NODE},vm="proxmox"}}', "values": "1x90"},
+            {"series": 'node_watchdog_info{vm="proxmox",identity="SP5100 TCO timer",state="active"}', "values": "1x90"},
+        ],
+        "alert_rule_test": [{"eval_time": "70m", "alertname": "host_watchdog_unarmed", "exp_alerts": []}],
+    },
+    {
+        "name": "host: security upgrades pending for a week alert, other upgrades never do",
+        # within the 5 minute lookback, so the week holds without a gap
+        "interval": "4m",
+        "input_series": [
+            {
+                "series": 'apt_upgrades_pending{vm="proxmox",arch="amd64",origin="Debian:trixie-security/stable-security"}',
+                "values": "3x2600",
+            },
+            {
+                "series": 'apt_upgrades_pending{vm="proxmox",arch="amd64",origin="Proxmox:trixie/pve-no-subscription"}',
+                "values": "40x2600",
+            },
+        ],
+        "alert_rule_test": [
+            {"eval_time": "160h", "alertname": "host_security_upgrades", "exp_alerts": []},
+            {
+                "eval_time": "170h",
+                "alertname": "host_security_upgrades",
+                "exp_alerts": [expect("host_security_upgrades")],
+            },
+        ],
+    },
+    {
+        "name": "deploys: a builder without a full pass for two hours pages",
+        "interval": "1m",
+        "input_series": [
+            {"series": f'homelab_app_builder_last_run_timestamp_seconds{{vm="{BUILDER}"}}', "values": "0x200"},
+        ],
+        "alert_rule_test": [
+            {"eval_time": "60m", "alertname": "app_builder_stalled", "exp_alerts": []},
+            {"eval_time": "130m", "alertname": "app_builder_stalled", "exp_alerts": [expect("app_builder_stalled")]},
         ],
     },
     {
@@ -329,8 +662,11 @@ tests += [
         ],
         "alert_rule_test": [
             {"eval_time": "25m", "alertname": "minecraft_start_failed", "exp_alerts": []},
-            {"eval_time": "55m", "alertname": "minecraft_start_failed",
-             "exp_alerts": [expect("minecraft_start_failed", server="cobblemon")]},
+            {
+                "eval_time": "55m",
+                "alertname": "minecraft_start_failed",
+                "exp_alerts": [expect("minecraft_start_failed", server="cobblemon")],
+            },
         ],
     },
     {
@@ -342,14 +678,23 @@ tests += [
         ],
         "alert_rule_test": [
             {"eval_time": "20m", "alertname": "ingress_ban_surge", "exp_alerts": []},
-            {"eval_time": "80m", "alertname": "ingress_ban_surge", "exp_alerts": [expect("ingress_ban_surge", vm="traefik-external")]},
+            {
+                "eval_time": "80m",
+                "alertname": "ingress_ban_surge",
+                "exp_alerts": [expect("ingress_ban_surge", vm="traefik-external")],
+            },
         ],
     },
 ]
 
 # the oracle's own premises: the rules it tests exist, and their paging is what the policy says
-for uid, page in (("instance_down", CRITICAL_PAGE), ("service_down", CRITICAL_PAGE), ("backup_stale", CRITICAL_PAGE),
-                  ("app_5xx", WARNING_PAGE), ("monitoring_unit_down", CRITICAL_PAGE)):
+for uid, page in (
+    ("instance_down", CRITICAL_PAGE),
+    ("service_down", CRITICAL_PAGE),
+    ("backup_stale", CRITICAL_PAGE),
+    ("app_5xx", WARNING_PAGE),
+    ("monitoring_unit_down", CRITICAL_PAGE),
+):
     assert {k: rule_labels[uid].get(k) for k in page} == page, (uid, rule_labels[uid])
 assert "notify" not in rule_labels["watchdog"] and rule_labels["watchdog"]["category"] == "heartbeat"
 assert "notify" not in rule_labels["disk_fill_predicted"], "a forecast never pages"

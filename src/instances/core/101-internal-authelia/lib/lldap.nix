@@ -1,4 +1,4 @@
-# lldap: the lab's single account store; authelia and the proxmox realm read it through read-only bind users
+# lldap: the lab's single account store; authelia and the proxmox realm read it through bind users of their own
 #
 # Authelia binds over loopback. The proxmox realm binds over ldaps only: its certificate is self-signed for this
 # guest's address, and the hypervisor reads it from inside the guest (scripts/pve-install.nu), the same channel that
@@ -6,10 +6,22 @@
 #
 # No secret reaches a command line: passwords go to ldappasswd in files, the session token to curl in a header file,
 # both in a private directory removed with the session, whose tokens are blacklisted when the script exits.
-{ config, lib, pkgs, retry, inventory, site, catalog, instance, lab, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  retry,
+  inventory,
+  site,
+  catalog,
+  instance,
+  lab,
+  ...
+}:
 let
   net = import ../../../../modules/net.nix { inherit lib inventory site; };
   routes = catalog.internal;
+  authelia = config.services.authelia.instances.main;
   ldapPort = 3890;
   realm = (import ../../../../modules/lab-export.nix { inherit lib lab; }).ldap;
   ldaps = {
@@ -28,7 +40,13 @@ let
   guestUser = "guest";
   openssl = lib.getExe pkgs.openssl;
   adminPassword = config.sops.secrets.lldap-admin-password.path;
-  apiInputs = [ pkgs.curl pkgs.jq pkgs.openldap pkgs.coreutils pkgs.gnugrep ];
+  apiInputs = [
+    pkgs.curl
+    pkgs.jq
+    pkgs.openldap
+    pkgs.coreutils
+    pkgs.gnugrep
+  ];
 
   # every group authelia admits, forwardauth and oidc (modules/catalog.nix access)
   inherit (catalog.access) admins;
@@ -37,11 +55,23 @@ let
   # the example account: the pages a route opens to it (its `guest`)
   guestGroups = map (name: catalog.access.groups.${name}) (lib.attrNames (lib.filterAttrs (_: r: r.guest) routes));
 
-  # services that read the directory: a user each in lldap's built-in read-only group, never the admin
+  # services that read the directory: a user each in one of lldap's built-in groups, never the admin. Where mail
+  # delivers authelia's reset links (main.nix), its user may set passwords, of users outside the admins alone
   readonlyGroup = "lldap_strict_readonly";
+  passwordManagerGroup = "lldap_password_manager";
+  bindGroups = [
+    readonlyGroup
+    passwordManagerGroup
+  ];
   bindUsers = {
-    authelia-bind = "lldap-authelia-bind-password";
-    ${realm.bindUser} = "lldap-proxmox-bind-password";
+    authelia-bind = {
+      secret = "lldap-authelia-bind-password";
+      group = if authelia.settings.authentication_backend.password_reset.disable then readonlyGroup else passwordManagerGroup;
+    };
+    ${realm.bindUser} = {
+      secret = "lldap-proxmox-bind-password";
+      group = readonlyGroup;
+    };
   };
 
   # admin session helpers for lab-user and the bootstrap; set -e callers stop on any failure
@@ -82,16 +112,33 @@ let
     user_create() { # id email
       gql "$(jq -cn --arg u "$1" --arg e "$2" '{query:"mutation($u:CreateUserInput!){createUser(user:$u){id}}",variables:{u:{id:$u,email:$e}}}')" >/dev/null
     }
+    groups_of() { # user
+      gql "$(jq -cn --arg u "$1" '{query:"query($u:String!){user(userId:$u){groups{displayName}}}",variables:{u:$u}}')" \
+        | jq -r '.data.user.groups[].displayName'
+    }
+    group_id() { # group
+      local gid
+      gid=$(gql '{"query":"{groups{id displayName}}"}' | jq -r --arg g "$1" '.data.groups[] | select(.displayName==$g) | .id')
+      [ -n "$gid" ] || { echo "no group $1" >&2; return 1; }
+      echo "$gid"
+    }
+    membership_set() { # mutation user group
+      local gid
+      gid=$(group_id "$3")
+      gql "$(jq -cn --arg u "$2" --argjson g "$gid" --arg m "$1" '{query:"mutation($u:String!,$g:Int!){\($m)(userId:$u,groupId:$g){ok}}",variables:{u:$u,g:$g}}')" >/dev/null
+    }
     join() { # user group..., skips groups the user is already in
-      local u=$1 all have g gid; shift
-      all=$(gql '{"query":"{groups{id displayName}}"}')
-      have=$(gql "$(jq -cn --arg u "$u" '{query:"query($u:String!){user(userId:$u){groups{displayName}}}",variables:{u:$u}}')" \
-        | jq -r '.data.user.groups[].displayName')
+      local u=$1 have g; shift
+      have=$(groups_of "$u")
       for g in "$@"; do
-        grep -qxF "$g" <<<"$have" && continue
-        gid=$(echo "$all" | jq -r --arg g "$g" '.data.groups[] | select(.displayName==$g) | .id')
-        [ -n "$gid" ] || { echo "no group $g" >&2; return 1; }
-        gql "$(jq -cn --arg u "$u" --argjson g "$gid" '{query:"mutation($u:String!,$g:Int!){addUserToGroup(userId:$u,groupId:$g){ok}}",variables:{u:$u,g:$g}}')" >/dev/null
+        grep -qxF "$g" <<<"$have" || membership_set addUserToGroup "$u" "$g"
+      done
+    }
+    leave() { # user group..., skips groups the user is not in
+      local u=$1 have g; shift
+      have=$(groups_of "$u")
+      for g in "$@"; do
+        ! grep -qxF "$g" <<<"$have" || membership_set removeUserFromGroup "$u" "$g"
       done
     }
   '';
@@ -103,17 +150,22 @@ let
     text = ''
       usage() {
         cat <<USAGE
-      lab-user list                      users and their groups
-      lab-user add <name> [group...]     asks for the password; groups: admins or app-<service>
-      lab-user passwd <name>             asks for the new password
-      lab-user groups <name> <group...>  add groups
-      lab-user del <name>
+      lab-user list                       users and their groups
+      lab-user add <name> [group...]      asks for the password; groups: admins or app-<service>
+      lab-user passwd <name>              asks for the new password
+      lab-user groups <name> <group...>   add groups
+      lab-user ungroup <name> <group...>  remove groups
+      lab-user offboard <name>            delete the user and its second factors
       USAGE
         exit 1
       }
       # shellcheck disable=SC1091
       source ${lldapApi}
       lldap_login
+      authelia_storage() {
+        AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=${config.sops.secrets.authelia-storage-key.path} \
+          ${lib.getExe authelia.package} storage "$@" --sqlite.path ${authelia.settings.storage.local.path}
+      }
       ask_and_set() {
         local a b
         read -rsp "password for $1: " a; echo >&2
@@ -135,30 +187,47 @@ let
                 ask_and_set "$name"
                 echo "password set for $name" ;;
         groups) name=''${1:?name}; shift; join "$name" "$@"; echo "groups added to $name" ;;
-        del)    name=''${1:?name}
+        ungroup) name=''${1:?name}; shift; leave "$name" "$@"; echo "groups removed from $name" ;;
+        offboard) name=''${1:?name}
                 gql "$(jq -cn --arg u "$name" '{query:"mutation($u:String!){deleteUser(userId:$u){ok}}",variables:{u:$u}}')" >/dev/null
-                echo "deleted $name" ;;
+                # a later user of the same name must enrol afresh, not inherit these
+                authelia_storage user totp delete "$name" || true
+                authelia_storage user webauthn delete "$name" --all || true
+                echo "offboarded $name: its sso sessions end within ${authelia.settings.authentication_backend.refresh_interval}"
+                echo "the apps keep their own account of $name until removed there: ${
+                  lib.concatMapStringsSep ", " (c: c.name) lab.oidc
+                }" ;;
         *)      usage ;;
       esac
     '';
   };
-in {
+in
+{
   environment.systemPackages = [ labUser ];
 
-  sops.secrets = lib.genAttrs [
-    "lldap-jwt-secret"
-    "lldap-admin-password"
-    # the admin's password, reused from authelia admin
-    "authelia-admin-pass"
-    "lldap-guest-password"
-    # derives every opaque password: a restored users.db is useless without it
-    "lldap-server-key"
-  ] (_: { owner = "lldap"; group = "lldap"; })
-  # the bootstrap (root) sets them; a reader on this host declares its own owner (authelia)
-  // lib.mapAttrs' (_: secret: lib.nameValuePair secret { }) bindUsers;
+  sops.secrets =
+    lib.genAttrs
+      [
+        "lldap-jwt-secret"
+        "lldap-admin-password"
+        # the admin's password, reused from authelia admin
+        "authelia-admin-pass"
+        "lldap-guest-password"
+        # derives every opaque password: a restored users.db is useless without it
+        "lldap-server-key"
+      ]
+      (_: {
+        owner = "lldap";
+        group = "lldap";
+      })
+    # the bootstrap (root) sets them; a reader on this host declares its own owner (authelia)
+    // lib.mapAttrs' (_: bind: lib.nameValuePair bind.secret { }) bindUsers;
 
-  users.users.lldap = { isSystemUser = true; group = "lldap"; };
-  users.groups.lldap = {};
+  users.users.lldap = {
+    isSystemUser = true;
+    group = "lldap";
+  };
+  users.groups.lldap = { };
 
   services.lldap = {
     enable = true;
@@ -232,10 +301,13 @@ in {
       # passwords via opaque, from the secret files
       password_set ${adminUser} "$(cat ${config.sops.secrets.authelia-admin-pass.path})"
       password_set ${guestUser} "$(cat ${config.sops.secrets.lldap-guest-password.path})"
-      ${lib.concatStrings (lib.mapAttrsToList (user: secret: ''
-        password_set ${user} "$(cat ${config.sops.secrets.${secret}.path})"
-        join ${user} ${readonlyGroup}
-      '') bindUsers)}
+      ${lib.concatStrings (
+        lib.mapAttrsToList (user: bind: ''
+          password_set ${user} "$(cat ${config.sops.secrets.${bind.secret}.path})"
+          join ${user} ${bind.group}
+          leave ${user} ${lib.escapeShellArgs (lib.remove bind.group bindGroups)}
+        '') bindUsers
+      )}
 
       join ${adminUser} ${admins}
       # lldap's own rights come only from its built-in lldap_admin, so every admin gets it too
@@ -244,8 +316,11 @@ in {
         join "$u" lldap_admin
       done
       join ${guestUser} ${lib.escapeShellArgs guestGroups}
+      leave ${guestUser} ${lib.escapeShellArgs (lib.subtractLists guestGroups groups)}
 
-      echo "lldap seeded: admins are lldap admins, ${guestUser} in ${lib.concatStringsSep ", " guestGroups}, ${lib.concatStringsSep " and " (lib.attrNames bindUsers)} read only"
+      echo "lldap seeded: admins are lldap admins, ${guestUser} in exactly ${lib.concatStringsSep ", " guestGroups}, ${
+        lib.concatStringsSep ", " (lib.mapAttrsToList (user: bind: "${user} in ${bind.group}") bindUsers)
+      }"
     '';
   };
 

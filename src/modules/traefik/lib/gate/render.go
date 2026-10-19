@@ -8,12 +8,6 @@ import (
 	"math"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 // The plate under a shape: the label in a 5x7 pixel font, scaled up, on white, readable on a light and a dark page.
 const (
 	glyphColumns  = 5
@@ -109,12 +103,6 @@ const (
 	triangleHalfBase   = 0.866
 	triangleBaseDrop   = 0.5
 )
-
-/*
- * -----------------------------------------------------------------------------
- * INTERNAL
- * -----------------------------------------------------------------------------
- */
 
 // blend paints c over the pixel with coverage in [0,1], straight alpha compositing.
 func blend(canvas *image.NRGBA, x, y int, c color.NRGBA, coverage float64) {
@@ -251,12 +239,6 @@ func rowDraw(canvas *image.NRGBA, index int, row Row) {
 		textDraw(canvas, panel.Min.X+rowPaddingPx, top+line*lineHeight, text, addressScale, addressGapPx)
 	}
 }
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 // puzzleSize is the picture's size in pixels: the scene's, or as many rows as the puzzle has.
 func puzzleSize(puzzle Puzzle) image.Point {

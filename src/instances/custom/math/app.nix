@@ -1,4 +1,5 @@
-{ lib, profiles, ... }: {
+{ lib, profiles, ... }:
+{
   enable = true;
   repo = "lsck0/university";
   branch = "master";

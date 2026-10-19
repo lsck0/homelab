@@ -5,8 +5,6 @@
 creation_rules:
   - path_regex: src/generated/nodes/250-apps-swarm/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/generated/nodes/250-apps-swarm/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1yu4cmtzf8yf5lks30glkqhmrc74dsfml2vw44telf85zqfa274ys5a66rf
   - path_regex: src/instances/core/100-internal-traefik/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
   - path_regex: src/instances/core/100-internal-traefik/secrets\.shared\.sops\.json$
@@ -31,15 +29,11 @@ creation_rules:
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1m6fq7d3wmhgxmxy8kwgpt3dr2338hahe4vlxz5cu69622cgxy5ksyq8jv0
   - path_regex: src/instances/core/104-internal-nas/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/core/104-internal-nas/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1tqzt74wgwu2mj5wxm69pll6vr5vr78nx0lhtmg44dcavasc4pe2q99fc4w
   - path_regex: src/instances/core/104-internal-nas/secrets\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1tqzt74wgwu2mj5wxm69pll6vr5vr78nx0lhtmg44dcavasc4pe2q99fc4w
   - path_regex: src/instances/core/105-internal-cache/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
   - path_regex: src/instances/core/105-internal-cache/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1fmrtg456ykj78pzwd9093hgr8eqwvmmqdgsg8kvfzg3np9ga4fqq0l3pfw
-  - path_regex: src/instances/core/105-internal-cache/secrets\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1fmrtg456ykj78pzwd9093hgr8eqwvmmqdgsg8kvfzg3np9ga4fqq0l3pfw
   - path_regex: src/instances/core/106-internal-registry/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
@@ -89,8 +83,6 @@ creation_rules:
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age189ljr97m5a9hztk2wh37uqf4ly8jvfp0q424q6c04ppnqltc8d9shry50k
   - path_regex: src/instances/preconfigured/112-internal-archbuild/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/112-internal-archbuild/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1nn6c25y2xlm7fnl6xwhcm5w4ak8qemfd8ak2q8ceyxmd6msej3ysqauc7c
   - path_regex: src/instances/preconfigured/112-internal-archbuild/secrets\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1nn6c25y2xlm7fnl6xwhcm5w4ak8qemfd8ak2q8ceyxmd6msej3ysqauc7c
   - path_regex: src/instances/preconfigured/113-internal-hermes/age\.sops$
@@ -121,12 +113,8 @@ creation_rules:
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1xpqjxte284tg4ngmght00wmrah5wcuxsqm3c5yamcrdusjsjx98sn7ussp
   - path_regex: src/instances/preconfigured/123-internal-jellyseerr/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/123-internal-jellyseerr/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1s9sgwge05vg6e3ac22x36wsmk0ap5vwsruve2d9ytl2jf53z3e6qk9a3u3
   - path_regex: src/instances/preconfigured/124-internal-navidrome/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/124-internal-navidrome/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1my3m3349ueeh6e366zlu3a05f84xme3yjdq939sh42hsup94kv2qsnqvpz
   - path_regex: src/instances/preconfigured/124-internal-navidrome/secrets\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1my3m3349ueeh6e366zlu3a05f84xme3yjdq939sh42hsup94kv2qsnqvpz
   - path_regex: src/instances/preconfigured/130-internal-homeassistant/age\.sops$
@@ -135,22 +123,14 @@ creation_rules:
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1w3daca0dd7yvyzfq2gaumwg7ts2z8pyny7zmefj67lksyywt6pxq62qcdy
   - path_regex: src/instances/preconfigured/131-internal-paperless/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/131-internal-paperless/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1upqg2tfvkj97mgtp97s5kpt46gylf6xdf3p9w4h0lgcvvsxy836s8ga0ul
   - path_regex: src/instances/preconfigured/132-internal-firefly/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/132-internal-firefly/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1y8tu5mrlh6dm75fv48kx2tnyt7eupxhtyyyx8nusg40hphrtl9dsrah7u2
   - path_regex: src/instances/preconfigured/132-internal-firefly/secrets\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1y8tu5mrlh6dm75fv48kx2tnyt7eupxhtyyyx8nusg40hphrtl9dsrah7u2
   - path_regex: src/instances/preconfigured/133-internal-huginn/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/133-internal-huginn/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1lrztrmyfyyvpq0e77u6durzlj3nynwf2m4wfttxq5z5vk0rm25jslr59cx
   - path_regex: src/instances/preconfigured/134-internal-taskchampion/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/134-internal-taskchampion/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1zyznkejqum0rg7d7szx6f0xhpal4j2vz6yznls0m67jeee243sjqzlezca
   - path_regex: src/instances/preconfigured/134-internal-taskchampion/secrets\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1zyznkejqum0rg7d7szx6f0xhpal4j2vz6yznls0m67jeee243sjqzlezca
   - path_regex: src/instances/preconfigured/140-internal-headscale/age\.sops$
@@ -159,30 +139,18 @@ creation_rules:
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1r6ns3kus07fjkyxrh8rpreje99nxcfxrhzslpu6xay6855epevtqy8m4s8
   - path_regex: src/instances/preconfigured/210-external-mirror/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/210-external-mirror/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1asef4h3hn95v08swla608yhvm60qqh44ddw9pm9shc827qf63q4sh0e4mu
   - path_regex: src/instances/preconfigured/211-external-searxng/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/211-external-searxng/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1xwerut28pcf4nnvg3vwe7t44qaa0m6zltxrk0yem5zy88wc2wp6q3w3kut
   - path_regex: src/instances/preconfigured/212-external-privatebin/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/212-external-privatebin/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1t4lq5kcqk89ny70963gewa7w8aeu9pc7zehtu3t2xm93xsyn2y0sl784jz
   - path_regex: src/instances/preconfigured/213-external-share/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/213-external-share/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1c7mvxlqdx46jsd6ecs8qc08ya9wamgwp97j24quf73ftfdk9vfhsyvfygs
   - path_regex: src/instances/preconfigured/214-external-minecraft/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/214-external-minecraft/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age17acysswqg64s02p2kse3reqvealgkalh0x0fdv6lu480563jfdfq3wmew7
   - path_regex: src/instances/preconfigured/214-external-minecraft/secrets\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age17acysswqg64s02p2kse3reqvealgkalh0x0fdv6lu480563jfdfq3wmew7
   - path_regex: src/instances/preconfigured/215-external-teamspeak/age\.sops$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
-  - path_regex: src/instances/preconfigured/215-external-teamspeak/secrets\.shared\.sops\.json$
-    age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80,age1pwyru6hgdn8c5kttteyr0ap02gf8ckt2nvt9xmtzpvaw4e4nt5asax35pg
   - path_regex: src/secrets/shared\.sops\.json$
     age: age1ws68kvrg7fxxw8epnv8xc8pas2va5j8qchsjfpsns3zle0p0uq6qe9r609,age1yubikey1qtpq7nvpdtnktqu0yerz30q75ee4tm685my3jtag0vgzp5jgees9qn9my80
   - path_regex: src/terraform/terraform\.tfvars\.sops\.json$

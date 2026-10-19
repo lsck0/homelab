@@ -17,8 +17,15 @@ HTTP_DIR_VM = "/run/lab-http"
 HTTP_TIMEOUT_S = 20
 
 
-def http_request(machine: Machine, url: str, address: str | None = None, src: str | None = None,
-                 method: str = "GET", headers: dict[str, str] | None = None, body: str | None = None) -> dict:
+def http_request(
+    machine: Machine,
+    url: str,
+    address: str | None = None,
+    src: str | None = None,
+    method: str = "GET",
+    headers: dict[str, str] | None = None,
+    body: str | None = None,
+) -> dict:
     """Send one request with curl from `machine` and return {status, headers, body, body_bytes}."""
     parsed = urllib.parse.urlsplit(url)
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
@@ -26,8 +33,20 @@ def http_request(machine: Machine, url: str, address: str | None = None, src: st
     method_args = ["--head"] if method == "HEAD" else ["-X", method]
     machine.succeed(f"mkdir -p {HTTP_DIR_VM} && : > {HTTP_DIR_VM}/body")
     body_out = "/dev/null" if method == "HEAD" else f"{HTTP_DIR_VM}/body"
-    args = ["curl", "-sS", "--max-time", str(HTTP_TIMEOUT_S), *method_args, "-o", body_out,
-            "-D", f"{HTTP_DIR_VM}/headers", "-w", "%{http_code}", "--path-as-is"]
+    args = [
+        "curl",
+        "-sS",
+        "--max-time",
+        str(HTTP_TIMEOUT_S),
+        *method_args,
+        "-o",
+        body_out,
+        "-D",
+        f"{HTTP_DIR_VM}/headers",
+        "-w",
+        "%{http_code}",
+        "--path-as-is",
+    ]
     if address is not None:
         args += ["--resolve", f"{parsed.hostname}:{port}:{address}"]
     if src is not None:

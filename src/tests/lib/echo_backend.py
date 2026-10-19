@@ -55,8 +55,14 @@ def handler_for(log_path, stopped_path):
             if self.headers.get("Transfer-Encoding", "").lower() == "chunked":
                 body = self.read_chunked()
             node, port = self.connection.getsockname()[:2]
-            entry = {"node": node, "port": port, "method": self.command, "path": self.path,
-                     "headers": {k.lower(): v for k, v in self.headers.items()}, "body_len": len(body)}
+            entry = {
+                "node": node,
+                "port": port,
+                "method": self.command,
+                "path": self.path,
+                "headers": {k.lower(): v for k, v in self.headers.items()},
+                "body_len": len(body),
+            }
             with lock, open(log_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
             stopped = open(stopped_path).read().split() if os.path.exists(stopped_path) else []

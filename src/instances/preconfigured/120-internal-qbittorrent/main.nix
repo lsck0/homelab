@@ -1,5 +1,19 @@
 # qbittorrent: the arrs' download client, peers through the router's vpn exit
-{ config, pkgs, lib, inventory, catalog, instance, lab, nasMount, nasPath, retry, setupUnit, site, ... }:
+{
+  config,
+  pkgs,
+  lib,
+  inventory,
+  catalog,
+  instance,
+  lab,
+  nasMount,
+  nasPath,
+  retry,
+  setupUnit,
+  site,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   route = catalog.internal.qbittorrent;
@@ -14,8 +28,10 @@ let
   peerPorts = "1024:65535";
 
   # the webui skips its own login for the ingress and every source instance.nix grants the port
-  apiClients = [ (net.hostSource net.zones.${instance.zone}.ingress) ]
-    ++ map (lab.sourceOf instance.zone) (lib.concatMap (g: g.from) (lib.filter (g: g.to == instance.id) lab.grants));
+  apiClients = [
+    (net.hostSource net.zones.${instance.zone}.ingress)
+  ]
+  ++ map (lab.sourceOf instance.zone) (lib.concatMap (g: g.from) (lib.filter (g: g.to == instance.id) lab.grants));
 
   # download only: finished torrents stop at once (ratio 0) for the arrs to import; upload slots serve queued ones
   activeDownloadsMax = 5;
@@ -23,64 +39,83 @@ let
   # what a video, music or book release never needs and malware releases ship (a fake episode was one .exe):
   # qbittorrent never writes a file matching these, so nothing runnable reaches the media share
   excludedFileNames = map (extension: "*.${extension}") [
-    "exe" "scr" "bat" "cmd" "com" "pif" "lnk" "msi" "jar" "js" "vbs" "wsf" "hta" "ps1" "reg"
+    "exe"
+    "scr"
+    "bat"
+    "cmd"
+    "com"
+    "pif"
+    "lnk"
+    "msi"
+    "jar"
+    "js"
+    "vbs"
+    "wsf"
+    "hta"
+    "ps1"
+    "reg"
   ];
 
   # router routes peer traffic, no proxy here
-  prefs = pkgs.writeText "qbittorrent-prefs.json" (builtins.toJSON {
-    proxy_type = "None";
-    proxy_bittorrent = false;
-    proxy_peer_connections = false;
-    proxy_misc = false;
-    proxy_rss = false;
-    anonymous_mode = false;
-    save_path = torrentsDir;
-    # download to the vm's own nvme disk, move to the hdd once: the hdd sleeps between finished downloads
-    temp_path_enabled = true;
-    temp_path = incompleteMount;
-    bypass_auth_subnet_whitelist_enabled = true;
-    bypass_auth_subnet_whitelist = lib.concatStringsSep ", " apiClients;
-    # dht and pex find the swarm
-    dht = true;
-    pex = true;
-    lsd = true;
-    web_ui_port = route.port;
-    # placeholder, protonvpn-port sets the leased port
-    listen_port = 6881;
-    random_port = false;
-    upnp = false;
-    queueing_enabled = true;
-    max_active_downloads = activeDownloadsMax;
-    max_active_uploads = activeUploadsMax;
-    # every slot of both kinds may be busy at once
-    max_active_torrents = activeDownloadsMax + activeUploadsMax;
-    dont_count_slow_torrents = true;
-    # download only: stop on completion, the arr imports then removes it
-    max_ratio_enabled = true;
-    max_ratio = 0;
-    max_seeding_time_enabled = true;
-    max_seeding_time = 0;
-    max_ratio_act = 0;
-    excluded_file_names_enabled = true;
-    excluded_file_names = lib.concatStringsSep "\n" excludedFileNames;
-  });
-in {
+  prefs = pkgs.writeText "qbittorrent-prefs.json" (
+    builtins.toJSON {
+      proxy_type = "None";
+      proxy_bittorrent = false;
+      proxy_peer_connections = false;
+      proxy_misc = false;
+      proxy_rss = false;
+      anonymous_mode = false;
+      save_path = torrentsDir;
+      # download to the vm's own nvme disk, move to the hdd once: the hdd sleeps between finished downloads
+      temp_path_enabled = true;
+      temp_path = incompleteMount;
+      bypass_auth_subnet_whitelist_enabled = true;
+      bypass_auth_subnet_whitelist = lib.concatStringsSep ", " apiClients;
+      # dht and pex find the swarm
+      dht = true;
+      pex = true;
+      lsd = true;
+      web_ui_port = route.port;
+      # placeholder, protonvpn-port sets the leased port
+      listen_port = 6881;
+      random_port = false;
+      upnp = false;
+      queueing_enabled = true;
+      max_active_downloads = activeDownloadsMax;
+      max_active_uploads = activeUploadsMax;
+      # every slot of both kinds may be busy at once
+      max_active_torrents = activeDownloadsMax + activeUploadsMax;
+      dont_count_slow_torrents = true;
+      # download only: stop on completion, the arr imports then removes it
+      max_ratio_enabled = true;
+      max_ratio = 0;
+      max_seeding_time_enabled = true;
+      max_seeding_time = 0;
+      max_ratio_act = 0;
+      excluded_file_names_enabled = true;
+      excluded_file_names = lib.concatStringsSep "\n" excludedFileNames;
+    }
+  );
+in
+{
   # egress: router holds the tunnel and killswitch; dns asks the provider through it, never from the home ip
   networking.nameservers = lib.mkForce [ config.homelab.egress.vpn.gateway ];
 
-  homelab.nasMounts = nasMount configDir "qbittorrent"
-    // nasPath "/data" "bulk";
+  homelab.nasMounts = nasMount configDir "qbittorrent" // nasPath "/data" "bulk";
   # instance.nix extra disk; nofail plus RequiresMountsFor: a missing disk stops qbittorrent, not the boot
   fileSystems."${incompleteDir}" = {
     device = "/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1";
     fsType = "ext4";
     autoFormat = true;
-    options = [ "noatime" "nofail" ];
+    options = [
+      "noatime"
+      "nofail"
+    ];
   };
 
   # host networking, not a published port
   virtualisation.oci-containers.containers.qbittorrent = {
-    image = "lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls476";
+    image = "lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls476@sha256:2be038f3421f60f62e8e4bf201f66f385b68e4fbc9ed3ab79051069ea22e2650";
     extraOptions = [ "--network=host" ];
     volumes = [
       "${configDir}:/config"
@@ -99,7 +134,12 @@ in {
   systemd.services.qbittorrent-disable-auth = setupUnit {
     description = "Disable qBittorrent built-in auth";
     after = [ "podman-qbittorrent.service" ];
-    path = [ pkgs.gnused pkgs.gnugrep pkgs.systemd pkgs.coreutils ];
+    path = [
+      pkgs.gnused
+      pkgs.gnugrep
+      pkgs.systemd
+      pkgs.coreutils
+    ];
     script = ''
       conf="${configDir}/qBittorrent/qBittorrent.conf"
       ${retry} 60 2 test -f "$conf"
@@ -122,8 +162,15 @@ in {
 
   systemd.services.qbittorrent-settings = setupUnit {
     description = "Configure qBittorrent: peer settings, save path, API whitelist, WebUI password";
-    after = [ "podman-qbittorrent.service" "qbittorrent-disable-auth.service" ];
-    path = [ pkgs.podman pkgs.jq pkgs.coreutils ];
+    after = [
+      "podman-qbittorrent.service"
+      "qbittorrent-disable-auth.service"
+    ];
+    path = [
+      pkgs.podman
+      pkgs.jq
+      pkgs.coreutils
+    ];
     # tests/downloads.nix reads the rendered preferences from here
     environment.QBITTORRENT_PREFS = prefs;
     script = ''

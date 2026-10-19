@@ -17,8 +17,10 @@
 #                or app (a swarm app's), port the backend's, health null for none, onion its onion address or null
 #   infra        [{ name; href; ping; }]  the lab's frame (modules/infra.nix) in display order, null where none
 #   proxmox      { ip; url; }  the hypervisor and its web ui
-#   monitoring   { prometheus; loki; grafana; dashboard; accessLog; }  the query apis, grafana's url, the overview
-#                board's path on it, the promtail `host` of the public ingress's access log
+#   wireguard    { subnet; }  the owner's devices' tunnel network, which the hypervisor routes back through the router
+#   monitoring   { prometheus; loki; journalUpload; grafana; dashboard; accessLog; }  the query apis, the journal
+#                upload url (the Proxmox host's, scripts/pve-install.nu), grafana's url, the overview board's path on
+#                it, the promtail `host` of the public ingress's access log
 #   ntfy         { url; topics; desktop; }  the server, its topics by role, the topics the desktop token reads
 #   ldap         { baseDn; adminGroup; vmid; host; port; certFile; bindUser; }  the directory the proxmox realm binds to
 #                over ldaps, the guest serving it, its self-signed certificate inside the guest, which the realm pins,
@@ -34,7 +36,15 @@ let
   urlOf = host: "https://${net.fqdn host}";
   routeOf = r: {
     host = net.fqdn r.host;
-    inherit (r) path zone protocol vmid app port health;
+    inherit (r)
+      path
+      zone
+      protocol
+      vmid
+      app
+      port
+      health
+      ;
     onion = r.onionAddress;
   };
 in
@@ -50,9 +60,20 @@ in
   }) net.zones;
 
   guests = lib.mapAttrs (_: g: {
-    inherit (g) name ip powered idle;
+    inherit (g)
+      name
+      ip
+      powered
+      idle
+      ;
     zone = g.type;
-    enabled = if !g.powered then "false" else if g.idle != null then "onDemand" else "true";
+    enabled =
+      if !g.powered then
+        "false"
+      else if g.idle != null then
+        "onDemand"
+      else
+        "true";
   }) inventory;
 
   routes = lib.mapAttrs (_: routeOf) (catalog.internal // catalog.external // catalog.l4);
@@ -64,8 +85,10 @@ in
     url = urlOf net.ingressPages.proxmox;
   };
 
+  wireguard = { inherit (net.wireguard) subnet; };
+
   monitoring = {
-    inherit (telemetry.urls) prometheus loki;
+    inherit (telemetry.urls) prometheus loki journalUpload;
     grafana = urlOf catalog.internal.grafana.host;
     dashboard = "/d/${telemetry.homelabDashboardUid}";
     accessLog = "vm-${net.zones.external.ingress}";
@@ -80,7 +103,7 @@ in
   ldap = {
     baseDn = net.domainDn;
     adminGroup = catalog.access.admins;
-    vmid = catalog.internal.lldap.vmid;
+    inherit (catalog.internal.lldap) vmid;
     host = inventory.${toString catalog.internal.lldap.vmid}.ip;
     port = net.ports.ldaps;
     certFile = "/var/lib/lldap/ldaps-cert.pem";

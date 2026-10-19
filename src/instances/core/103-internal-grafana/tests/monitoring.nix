@@ -1,13 +1,25 @@
 # vm-103, the real instance at its real address, among three lab guests: the ingress (vm-100), a reader of the query
 # api whom the guard keeps off grafana (vm-102, the dashboard), and a powered guest to watch (vm-134). Checks that every
-# provisioned rule evaluates, the boards are there, only the ingress may name a grafana user, prometheus is read-only
-# from other hosts, the watchdog beats, a guest going down pages through both contact points and resolves, and the
-# provisioned telegram template names an alert whose summary grafana left unexpanded by its labels.
-{ pkgs, lib, specialArgs, ... }:
+# provisioned rule evaluates, the boards are there and the lab's is home, only the ingress may name a grafana user and
+# only an admin administers, prometheus is read-only from other hosts, the watchdog beats, a guest going down pages
+# through both contact points and resolves, and the provisioned telegram template names an alert whose summary
+# grafana left unexpanded by its labels and carries a firing alert's runbook and rule link.
+{
+  pkgs,
+  lib,
+  specialArgs,
+  ...
+}:
 let
   lab = import ../../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
-  telemetry = import ../../../../modules/telemetry.nix { inherit lib; inherit (lab) inventory; };
-  notifications = import ../lib/notifications.nix { inherit lib; };
+  telemetry = import ../../../../modules/telemetry.nix {
+    inherit lib;
+    inherit (lab) inventory;
+  };
+  notifications = import ../lib/notifications.nix {
+    inherit lib;
+    grafanaUrl = "https://grafana.test";
+  };
   inherit (telemetry) ports;
   collector = lab.inventory.${telemetry.collectorVmid}.ip;
   # from the other guests; on vm-103 itself grafana trusts the header from loopback only
@@ -26,16 +38,33 @@ pkgs.testers.runNixOSTest {
 
   node.specialArgs = lab.specialArgs;
   nodes.vm-103 = {
-    imports = [ (lab.guest telemetry.collectorVmid { flat = true; instance = ../main.nix; }) ];
+    imports = [
+      (lab.guest telemetry.collectorVmid {
+        flat = true;
+        instance = ../main.nix;
+      })
+    ];
     virtualisation.memorySize = 3072;
-    environment.systemPackages = [ pkgs.curl pkgs.jq ];
+    environment.systemPackages = [
+      pkgs.curl
+      pkgs.jq
+    ];
     # an empty nas copy for grafana-seed (the nas shares are local dirs, lib/nas-local.nix); rsync -a hands its owner
     # to /var/lib/grafana
     systemd.tmpfiles.rules = [ "d /srv/grafana-nas 0700 grafana grafana -" ];
   };
-  nodes.vm-100 = { imports = [ (lab.guest "100" { flat = true; }) ]; environment.systemPackages = [ pkgs.curl ]; };
-  nodes.vm-102 = { imports = [ (lab.guest "102" { flat = true; }) ]; environment.systemPackages = [ pkgs.curl ]; };
-  nodes.vm-134 = { imports = [ (lab.guest "134" { flat = true; }) ]; environment.systemPackages = [ pkgs.curl ]; };
+  nodes.vm-100 = {
+    imports = [ (lab.guest "100" { flat = true; }) ];
+    environment.systemPackages = [ pkgs.curl ];
+  };
+  nodes.vm-102 = {
+    imports = [ (lab.guest "102" { flat = true; }) ];
+    environment.systemPackages = [ pkgs.curl ];
+  };
+  nodes.vm-134 = {
+    imports = [ (lab.guest "134" { flat = true; }) ];
+    environment.systemPackages = [ pkgs.curl ];
+  };
 
   testScript = ''
     import json
@@ -61,6 +90,14 @@ pkgs.testers.runNixOSTest {
         for unit in ("loki", "tempo", "pyroscope", "promtail", "systemd-journal-remote", "prometheus-blackbox-exporter"):
             vm_103.wait_for_unit(f"{unit}.service")
 
+    with subtest("the log pipeline labels a line by the level it names, whatever journald's priority"):
+        vm_103.succeed("logger -p user.err -t level-probe 'level=warn msg=\"the level-probe line\"'")
+        query = "{job=\\\"systemd-journal\\\"} |= \\\"the level-probe line\\\""
+        vm_103.wait_until_succeeds(
+            "curl -sfG -H 'X-Scope-OrgID: ${telemetry.labTenant}' http://127.0.0.1:${toString ports.lokiLocal}/loki/api/v1/query_range"
+            f" --data-urlencode \"query={query}\" | jq -e '[.data.result[].stream.level] == [\"warning\"]'",
+            timeout=120)
+
     with subtest("there is exactly one alerting path: no Alertmanager, no prometheus rules"):
         vm_103.fail("systemctl list-unit-files | grep -q '^alertmanager.service'")
         vm_103.succeed("curl -sf ${prometheus}/api/v1/rules | jq -e '.data.groups | length == 0'")
@@ -77,15 +114,29 @@ pkgs.testers.runNixOSTest {
         boards = json.loads(vm_103.succeed("curl -sf -H 'Remote-User: admin' '${localApi}/search?type=dash-db'"))
         uids = {b["uid"] for b in boards}
         assert {"homelab", "energy"} <= uids, uids
+        home = json.loads(vm_103.succeed("curl -sf -H 'Remote-User: admin' '${localApi}/dashboards/home'"))
+        assert home["dashboard"].get("uid") == "${telemetry.homelabDashboardUid}", home["dashboard"].get("uid")
 
     with subtest("only the ingress and vm-103 itself may name the grafana user"):
-        vm_100.succeed("curl -sf -H 'Remote-User: admin' ${grafanaApi}/user | grep -q '\"login\":\"admin\"'")
+        vm_100.succeed("curl -sf -H 'Remote-User: admin' -H 'Remote-Groups: admins' ${grafanaApi}/user | grep -q '\"login\":\"admin\"'")
         vm_103.succeed("curl -sf -H 'Remote-User: admin' ${localApi}/user | grep -q '\"login\":\"admin\"'")
         # vm-103's own address passes the guard but not grafana's proxy whitelist: there the header is no login
         status = vm_103.succeed("curl -s -o /dev/null -w '%{http_code}' -H 'Remote-User: admin' ${grafanaApi}/user").strip()
         assert status == "401", status
         # any other guest never reaches grafana: the dashboard's status dots go through the ingress
         vm_102.fail("curl -s -m ${toString droppedTimeoutS} -H 'Remote-User: admin' ${grafanaApi}/user")
+
+    with subtest("an admin administers grafana, any other user views"):
+        def role(user, groups):
+            out = vm_100.succeed(f"curl -sf -H 'Remote-User: {user}' -H 'Remote-Groups: {groups}' ${grafanaApi}/user/orgs")
+            return json.loads(out)[0]["role"]
+        assert role("owner", "app-grafana,admins") == "Admin"
+        assert role("member", "app-grafana") == "Viewer"
+        # a group named like admins is not admins
+        assert role("lookalike", "admins-old") == "Viewer"
+        # a role header of the caller's own never reaches grafana
+        out = vm_100.succeed("curl -sf -H 'Remote-User: forger' -H 'X-Grafana-Role: Admin' ${grafanaApi}/user/orgs")
+        assert json.loads(out)[0]["role"] == "Viewer", out
 
     with subtest("prometheus answers queries to other hosts and takes writes on loopback only"):
         vm_102.succeed("curl -sf '${prometheus}/api/v1/query?query=up' | grep -q success")
@@ -119,7 +170,9 @@ pkgs.testers.runNixOSTest {
                 # restored after a restart and gone at the next evaluation: the rule's text, never expanded
                 {"labels": offline, "annotations": dict(headers, summary="{{ $labels.vm }} is offline"),
                  "startsAt": "2026-01-01T00:00:00Z", "endsAt": "2026-01-01T01:00:00Z"},
-                {"labels": dict(offline, vm="nas"), "annotations": dict(headers, summary="nas <id> is offline"),
+                {"labels": dict(offline, vm="nas"),
+                 "annotations": dict(headers, summary="nas <id> is offline", description="`qm list` <on> the host"),
+                 "generatorURL": "https://grafana.test/alerting/grafana/x/view",
                  "startsAt": "2026-01-01T00:00:00Z", "endsAt": "2099-01-01T00:00:00Z"},
             ],
         }
@@ -131,6 +184,8 @@ pkgs.testers.runNixOSTest {
         assert "{{" not in text, text
         assert "<s>Guest offline: vm=taskchampion</s>" in text, text
         assert "nas &lt;id&gt; is offline" in text, text
+        assert "<i>`qm list` &lt;on&gt; the host</i>" in text, text
+        assert '<a href="https://grafana.test/alerting/grafana/x/view' in text, text
 
     with subtest("a guest meant to run is up: no alert for it"):
         vm_103.wait_until_succeeds(

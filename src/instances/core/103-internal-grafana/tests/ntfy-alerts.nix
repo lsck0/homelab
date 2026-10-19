@@ -1,11 +1,19 @@
 # vm-103's ntfy query (lib/notifications.nix) rendered by the real vm-201: a grafana webhook body with one resolved
 # alert whose summary grafana left raw and one firing alert reads as the rule and its labels, marked over, and the
-# firing summary as is.
-{ pkgs, lib, specialArgs, ... }:
+# firing summary as is with its runbook below it; the notification opens grafana's alert list.
+{
+  pkgs,
+  lib,
+  specialArgs,
+  ...
+}:
 let
   lab = import ../../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
   ntfy = import ../../../../modules/ntfy.nix;
-  notifications = import ../lib/notifications.nix { inherit lib; };
+  notifications = import ../lib/notifications.nix {
+    inherit lib;
+    grafanaUrl = "https://grafana.test";
+  };
   # ntfy tokens are tk_ and 29 of [a-z0-9]
   desktopToken = "tk_${lib.fixedWidthString 29 "0" "desktop"}";
   # the sops stub's value of a secret (tests/stubs/sops.nix)
@@ -31,7 +39,8 @@ pkgs.testers.runNixOSTest {
         "commonAnnotations": {"firing": "Offline", "resolved": "Back online"},
         "alerts": [
             {"status": "resolved", "labels": offline, "annotations": {"summary": "{{ $labels.vm }} is offline"}},
-            {"status": "firing", "labels": dict(offline, vm="nas"), "annotations": {"summary": "nas is offline"}},
+            {"status": "firing", "labels": dict(offline, vm="nas"),
+             "annotations": {"summary": "nas is offline", "description": "`qm list` on the host."}},
         ],
     }
 
@@ -43,6 +52,7 @@ pkgs.testers.runNixOSTest {
     out = vm_201.succeed("curl -sf -u luca:${password "ntfy-admin-password"} 'http://127.0.0.1/${ntfy.topics.alerts}/json?poll=1'")
     alert = [json.loads(line) for line in out.splitlines() if line.strip()][-1]
     assert alert["title"] == "FIRING: Offline", alert
-    assert alert["message"] == "${notifications.resolvedPrefix}Guest offline: vm=paperless\nnas is offline", alert
+    assert alert["message"] == "${notifications.resolvedPrefix}Guest offline: vm=paperless\nnas is offline\n`qm list` on the host.", alert
+    assert alert["click"] == "${notifications.alertListUrl}", alert
   '';
 }

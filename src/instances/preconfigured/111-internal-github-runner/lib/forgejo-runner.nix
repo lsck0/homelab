@@ -3,13 +3,19 @@
 # git.lsck0.dev is the owner's forge: only the owner pushes, its mirrors follow branches the owner merged. Its
 # jobs are trusted with the shared compile cache (sccache on vm-105) and the registry, as user `ci`, and with
 # nothing else; the github runners, which take strangers' pull requests, are other users without either.
-{ config, lib, pkgs, retry, inventory, site, catalog, lab, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  retry,
+  inventory,
+  site,
+  catalog,
+  lab,
+  ...
+}:
 let
   net = import ../../../../modules/net.nix { inherit lib inventory site; };
-
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
 
   user = "ci";
   uid = 2000;
@@ -19,7 +25,15 @@ let
   forge = "git.${catalog.domain}";
   instance = "https://${forge}";
   name = "${config.networking.hostName}-runner";
-  sccache = let r = lab.routes.sccache; in { host = net.fqdn r.host; ip = net.ipOf (toString r.vmid); inherit (r) port; };
+  sccache =
+    let
+      r = lab.routes.sccache;
+    in
+    {
+      host = net.fqdn r.host;
+      ip = net.ipOf (toString r.vmid);
+      inherit (r) port;
+    };
   inherit (config.homelab.tokens) dir;
 
   # the job container image per label, pinned: an upstream tag push never changes what jobs run; changing them
@@ -32,21 +46,26 @@ let
   ];
   # the lab names jobs use, at the internal ingress (git, the registry) and the cache
   hosts = {
-    ${catalog.ingress.internal.ip} = [ forge catalog.registry ];
+    ${catalog.ingress.internal.ip} = [
+      forge
+      catalog.registry
+    ];
     ${sccache.ip} = [ sccache.host ];
   };
   # job containers resolve the lab like the vm does
   addHosts = lib.concatLists (lib.mapAttrsToList (ip: names: map (h: "--add-host=${h}:${ip}") names) hosts);
   # one job at a time on a shared vm
-  jobLimits = [ "--memory=1536m" "--cpus=1.5" ];
+  jobLimits = [
+    "--memory=1536m"
+    "--cpus=1.5"
+  ];
   capacity = 1;
   jobTimeout = "3h";
-  registrationWait = { attempts = 30; intervalS = 5; };
+  registrationWait = {
+    attempts = 30;
+    intervalS = 5;
+  };
   restartDelayS = 10;
-
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
 
   configFile = (pkgs.formats.yaml { }).generate "forgejo-runner.yaml" {
     log.level = "info";
@@ -58,7 +77,10 @@ let
       timeout = jobTimeout;
       inherit labels;
     };
-    cache = { enabled = true; dir = "${stateDir}/cache"; };
+    cache = {
+      enabled = true;
+      dir = "${stateDir}/cache";
+    };
     container = {
       privileged = false;
       options = lib.concatStringsSep " " (addHosts ++ jobLimits);
@@ -86,11 +108,18 @@ let
       --instance ${instance} --token "$(cat "$token")" --name ${name} --labels "$wanted"
     printf '%s' "$wanted" > "$labels_file"
   '';
-in {
+in
+{
   homelab.rootlessDocker.${user} = {
     inherit uid;
     # git and the registry through the internal ingress, the compile cache; nothing else inside the lab
-    labAccess = [ { ip = catalog.ingress.internal.ip; port = net.ports.https; } { inherit (sccache) ip port; } ];
+    labAccess = [
+      {
+        inherit (catalog.ingress.internal) ip;
+        port = net.ports.https;
+      }
+      { inherit (sccache) ip port; }
+    ];
   };
   # lab names without cloudflare; the ingress, not the services: traefik terminates https and gates pushes
   networking.hosts = hosts;
@@ -105,8 +134,14 @@ in {
   systemd.services.forgejo-runner = {
     description = "Forgejo Actions runner";
     wantedBy = [ "multi-user.target" ];
-    wants = [ "network-online.target" ci.userUnit ];
-    after = [ "network-online.target" ci.userUnit ];
+    wants = [
+      "network-online.target"
+      ci.userUnit
+    ];
+    after = [
+      "network-online.target"
+      ci.userUnit
+    ];
     unitConfig.RequiresMountsFor = config.homelab.tokens.mountPoints;
     environment.DOCKER_HOST = ci.dockerHost;
     serviceConfig = {

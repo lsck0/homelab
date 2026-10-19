@@ -15,16 +15,16 @@ import pathlib
 import re
 import sys
 
-# -----------------------------------------------------------------------------
-# CONSTANTS
 
 TOKEN_RE = re.compile(r"lab-token ([a-z0-9][a-z0-9-]*)")
 TOOL_RE = re.compile(r"(?<![\w/.-])(lab-[a-z][a-z0-9-]*)")
 SECRET_RE = re.compile(r"/run/secrets/([A-Za-z0-9_.-]+)")
 SSH_RE = re.compile(r"ssh (?:-\S+ (?:\S+ )?)*(\d+\.\d+\.\d+\.\d+)")
 ON_VM_RE = re.compile(r"\bon vm-(\d+)\b")
-UNIT_RE = re.compile(r"(?:systemctl (?:[a-z-]+ )*(?:--[a-z-]+ )*|journalctl (?:-[a-zA-Z]+ )*-[a-zA-Z]*u ?)"
-                     r"([a-z][a-z0-9@._-]*)")
+UNIT_RE = re.compile(
+    r"(?:systemctl (?:[a-z-]+ )*(?:--[a-z-]+ )*|journalctl (?:-[a-zA-Z]+ )*-[a-zA-Z]*u ?)"
+    r"([a-z][a-z0-9@._-]*)"
+)
 ADDRESS_RE = re.compile(r"(?<![\d.])(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(/\d{1,2})?(?!\.?\d)")
 NAME_RE = re.compile(r"^name: (\S+)$", re.M)
 RELATED_RE = re.compile(r"^\s*related_skills: \[([^\]]*)\]$", re.M)
@@ -33,9 +33,6 @@ GENERIC_ADDRESSES = {"127.0.0.1", "0.0.0.0"}
 # systemctl verbs and words that take no unit
 SYSTEMCTL_WORDS = {"daemon-reload", "list-units", "list-timers", "--failed", "-n", "status"}
 
-
-# -----------------------------------------------------------------------------
-# FUNCTIONS
 
 def facts_load(path):
     facts = json.loads(pathlib.Path(path).read_text())
@@ -134,9 +131,6 @@ def skills_check(facts, hosts, skills_dir):
             carried = address if line.rstrip().endswith("\\") else None
     return files, problems
 
-
-# -----------------------------------------------------------------------------
-# MAIN
 
 def main():
     facts, hosts = facts_load(sys.argv[1])

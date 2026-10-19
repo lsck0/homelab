@@ -2,11 +2,14 @@
 # evaluation time: every broken catalog below fails with a message that names the fix, every well-formed one holds
 # and evaluates through the hosts that consume it (router, edge, ingress, grafana, the swarm manager, the builder).
 # Each refusal is one change to a catalog the positive control accepts.
-{ pkgs, lib, inputs, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  inputs,
+  specialArgs,
+  ...
+}:
 let
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
 
   inherit (specialArgs) lab;
   profiles = import ../../profiles.nix;
@@ -15,7 +18,11 @@ let
     enable = true;
     repo = "lsck0/demo";
     branch = "master";
-    routes.demo = { service = "web"; targetPort = 8000; port = 20130; };
+    routes.demo = {
+      service = "web";
+      targetPort = 8000;
+      port = 20130;
+    };
   };
   # a case: the lab collected with these app folders over the real ones
   withApps = apps: lab.withApps (folders: lib.recursiveUpdate folders apps);
@@ -27,60 +34,169 @@ let
   # a schema error is a throw of the module system, which evaluation can catch
   evaluates = case: (builtins.tryEval (builtins.deepSeq case.appsCatalog true)).success;
 
-  # -----------------------------------------------------------------------------
-  # TABLES
-  # -----------------------------------------------------------------------------
-
   # a lab -> a line of its catalog's problems must contain this
   refused = {
-    duplicate-port = { lab = withApps { demo = demo; other = demo // { repo = "lsck0/other"; }; }; expect = "port 20130 is published for"; };
-    port-outside-range = { lab = withDemo { routes.demo.port = 8080; }; expect = "outside swarm.portRange"; };
-    host-of-a-lab-service = { lab = withDemo { routes.demo.host = "git"; }; expect = "host git.lsck0.dev is claimed by"; };
+    duplicate-port = {
+      lab = withApps {
+        inherit demo;
+        other = demo // {
+          repo = "lsck0/other";
+        };
+      };
+      expect = "port 20130 is published for";
+    };
+    port-outside-range = {
+      lab = withDemo { routes.demo.port = 8080; };
+      expect = "outside swarm.portRange";
+    };
+    host-of-a-lab-service = {
+      lab = withDemo { routes.demo.host = "git"; };
+      expect = "host git.lsck0.dev is claimed by";
+    };
     route-of-a-lab-service = {
-      lab = withDemo { routes.grafana = { zone = "internal"; port = 20131; }; };
+      lab = withDemo {
+        routes.grafana = {
+          zone = "internal";
+          port = 20131;
+        };
+      };
       expect = "route name grafana is claimed by";
     };
     host-in-both-zones = {
-      lab = withDemo { routes.demo-admin = { zone = "internal"; host = "demo"; port = 20131; }; };
+      lab = withDemo {
+        routes.demo-admin = {
+          zone = "internal";
+          host = "demo";
+          port = 20131;
+        };
+      };
       expect = "host demo.lsck0.dev is routed by both ingresses";
     };
-    secret-without-generator = { lab = withDemo { env.web.PASSWORD = "{{demo-password}}"; }; expect = "which `secrets` does not generate"; };
-    generator-without-reference = { lab = withDemo { secrets.demo-password = "hex:24"; }; expect = "is named by no env value"; };
-    unknown-placeholder = { lab = withDemo { env.web.A = "{{DEMO_PASSWORD}}"; }; expect = "is neither a secret"; };
-    unknown-lab-endpoint = { lab = withDemo { env.web.A = "{{homelab.loki}}"; }; expect = "is no lab endpoint"; };
-    unknown-origin = { lab = withDemo { env.web.A = "{{homelab.origin-nowhere}}"; }; expect = "is no lab endpoint"; };
+    secret-without-generator = {
+      lab = withDemo { env.web.PASSWORD = "{{demo-password}}"; };
+      expect = "which `secrets` does not generate";
+    };
+    generator-without-reference = {
+      lab = withDemo { secrets.demo-password = "hex:24"; };
+      expect = "is named by no env value";
+    };
+    unknown-placeholder = {
+      lab = withDemo { env.web.A = "{{DEMO_PASSWORD}}"; };
+      expect = "is neither a secret";
+    };
+    unknown-lab-endpoint = {
+      lab = withDemo { env.web.A = "{{homelab.loki}}"; };
+      expect = "is no lab endpoint";
+    };
+    unknown-origin = {
+      lab = withDemo { env.web.A = "{{homelab.origin-nowhere}}"; };
+      expect = "is no lab endpoint";
+    };
     telemetry-endpoint-without-telemetry = {
       lab = withDemo { env.web.A = "{{homelab.otlp-grpc}}"; };
       expect = "without traces or profiles in `on`";
     };
-    sso-on-the-edge = { lab = withDemo { routes.demo.on = [ "sso" ]; }; expect = "sso on the external zone"; };
+    sso-on-the-edge = {
+      lab = withDemo { routes.demo.on = [ "sso" ]; };
+      expect = "sso on the external zone";
+    };
     anubis-behind-sso = {
-      lab = withDemo { routes.demo = { zone = "internal"; on = [ "sso" "anubis" ]; }; };
+      lab = withDemo {
+        routes.demo = {
+          zone = "internal";
+          on = [
+            "sso"
+            "anubis"
+          ];
+        };
+      };
       expect = "anubis behind sso adds nothing";
     };
-    waf-without-crowdsec = { lab = withDemo { routes.demo.on = [ "waf" ]; }; expect = "waf acts through crowdsec's gate"; };
-    tarpit-without-crowdsec = { lab = withDemo { routes.demo.on = [ "tarpit" ]; }; expect = "tarpit acts through crowdsec's gate"; };
+    waf-without-crowdsec = {
+      lab = withDemo { routes.demo.on = [ "waf" ]; };
+      expect = "waf acts through crowdsec's gate";
+    };
+    tarpit-without-crowdsec = {
+      lab = withDemo { routes.demo.on = [ "tarpit" ]; };
+      expect = "tarpit acts through crowdsec's gate";
+    };
     cloudflare-without-internet = {
-      lab = withDemo { routes.demo = { zone = "internal"; on = [ "cloudflare" ]; }; };
+      lab = withDemo {
+        routes.demo = {
+          zone = "internal";
+          on = [ "cloudflare" ];
+        };
+      };
       expect = "which an internal route has with internet alone";
     };
-    internet-on-the-edge = { lab = withDemo { routes.demo.on = [ "internet" ]; }; expect = "an external route is public already"; };
-    dump-of-a-stateless-service = { lab = withDemo { dumps.db = { service = "db"; command = "true"; }; }; expect = "is not stateful"; };
-    limits-above-a-worker = { lab = withDemo { resources.web.memoryMiB = 8192; }; expect = "above swarm.taskMax.memoryMiB"; };
-    excluded-but-used = { lab = withDemo { exclude = [ "web" ]; }; expect = "drops web"; };
-    publishes-nothing = { lab = withDemo { routes = lib.mkForce { }; }; expect = "publishes nothing"; };
-    app-name = { lab = withApps { Demo = lib.recursiveUpdate demo { routes.demo.host = "demo"; }; }; expect = "an app name is"; };
-    service-key = { lab = withApps { grafana = demo; }; expect = "is an instance service's too"; };
+    internet-on-the-edge = {
+      lab = withDemo { routes.demo.on = [ "internet" ]; };
+      expect = "an external route is public already";
+    };
+    dump-of-a-stateless-service = {
+      lab = withDemo {
+        dumps.db = {
+          service = "db";
+          command = "true";
+          restore = "true";
+        };
+      };
+      expect = "is not stateful";
+    };
+    limits-above-a-worker = {
+      lab = withDemo { resources.web.memoryMiB = 8192; };
+      expect = "above swarm.taskMax.memoryMiB";
+    };
+    excluded-but-used = {
+      lab = withDemo { exclude = [ "web" ]; };
+      expect = "drops web";
+    };
+    publishes-nothing = {
+      lab = withDemo { routes = lib.mkForce { }; };
+      expect = "publishes nothing";
+    };
+    app-name = {
+      lab = withApps { Demo = lib.recursiveUpdate demo { routes.demo.host = "demo"; }; };
+      expect = "an app name is";
+    };
+    service-key = {
+      lab = withApps { grafana = demo; };
+      expect = "is an instance service's too";
+    };
     cadvisor-in-range = {
-      lab = { catalog = import ../../catalog.nix { inherit lib lab; inherit (lab) inventory site; appsCatalog = lab.appsCatalog // { cadvisorPort = 20500; }; }; };
+      lab = {
+        catalog = import ../../catalog.nix {
+          inherit lib lab;
+          inherit (lab) inventory site;
+          appsCatalog = lab.appsCatalog // {
+            cadvisorPort = 20500;
+          };
+        };
+      };
       expect = "cadvisorPort 20500 lies inside";
     };
     idle-tcp = {
-      lab = withDemo { on = [ "scaleToZero" ]; routes.demo-game = { protocol = "tcp"; publicPort = 25565; port = 20131; }; };
+      lab = withDemo {
+        on = [ "scaleToZero" ];
+        routes.demo-game = {
+          protocol = "tcp";
+          publicPort = 25565;
+          port = 20131;
+        };
+      };
       expect = "route demo-game: a tcp route goes from the router straight to its backend";
     };
-    asleep-never = { lab = withDemo { on = [ "scaleToZero" ]; idle.stopAfter = null; }; expect = "never sleeps"; };
-    stopped-unasked = { lab = withDemo { idle.stopAfter = "30m"; }; expect = "without scaleToZero in `on`"; };
+    asleep-never = {
+      lab = withDemo {
+        on = [ "scaleToZero" ];
+        idle.stopAfter = null;
+      };
+      expect = "never sleeps";
+    };
+    stopped-unasked = {
+      lab = withDemo { idle.stopAfter = "30m"; };
+      expect = "without scaleToZero in `on`";
+    };
     dotted-http-host = {
       lab = withDemo { routes.demo.host = "lab.demo"; };
       expect = "host lab.demo goes through its zone's ingress";
@@ -90,17 +206,40 @@ let
       expect = "host *.demo goes through its zone's ingress";
     };
     wildcard-without-publicport = {
-      lab = withDemo { routes.demo-game = { protocol = "tcp"; port = 20131; host = "*.demo"; }; };
+      lab = withDemo {
+        routes.demo-game = {
+          protocol = "tcp";
+          port = 20131;
+          host = "*.demo";
+        };
+      };
       expect = "host *.demo is reached by the house's forwarded port alone";
     };
     srv-on-a-wildcard = {
-      lab = withDemo { routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "*.demo"; srv = "_demo._tcp"; }; };
+      lab = withDemo {
+        routes.demo-game = {
+          protocol = "tcp";
+          publicPort = wildcardPort;
+          port = 20131;
+          host = "*.demo";
+          srv = "_demo._tcp";
+        };
+      };
       expect = "an srv record names one host, which *.demo is not";
     };
     exact-host-under-a-wildcard = {
       lab = withDemo {
-        routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "*.demo"; };
-        routes.demo-one = { protocol = "tcp"; port = 20132; host = "one.demo"; };
+        routes.demo-game = {
+          protocol = "tcp";
+          publicPort = wildcardPort;
+          port = 20131;
+          host = "*.demo";
+        };
+        routes.demo-one = {
+          protocol = "tcp";
+          port = 20132;
+          host = "one.demo";
+        };
       };
       expect = "host one.demo.lsck0.dev lies under apps.demo route demo-game's *.demo.lsck0.dev";
     };
@@ -118,9 +257,19 @@ let
     missing-repo = withApps { demo = removeAttrs demo [ "repo" ]; };
     unpinned-image = withDemo { images = [ "docker.io/library/redis:8" ]; };
     climbing-build = withDemo { build.web.context = "../other"; };
-    unknown-generator = withDemo { secrets.x = "random"; env.web.X = "{{x}}"; };
+    unknown-generator = withDemo {
+      secrets.x = "random";
+      env.web.X = "{{x}}";
+    };
     # a wildcard stands for one label below a name: it leads the host, and nothing else about it bends
-    wildcard-in-the-middle = withDemo { routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "a.*.demo"; }; };
+    wildcard-in-the-middle = withDemo {
+      routes.demo-game = {
+        protocol = "tcp";
+        publicPort = wildcardPort;
+        port = 20131;
+        host = "a.*.demo";
+      };
+    };
   };
 
   # every app of the real catalog enabled, an app left disabled by omission, an internal-only app
@@ -128,29 +277,72 @@ let
     production = lab;
     everything-enabled = lab.withApps (lib.mapAttrs (_: a: a // { enable = true; }));
     enable-omitted = withApps { demo = removeAttrs demo [ "enable" ]; };
-    internal-only = withApps { demo = removeAttrs demo [ "routes" ] // { routes.demo-admin = { zone = "internal"; port = 20131; }; }; };
+    internal-only = withApps {
+      demo = removeAttrs demo [ "routes" ] // {
+        routes.demo-admin = {
+          zone = "internal";
+          port = 20131;
+        };
+      };
+    };
     # repo and branch only: one plain route at demo.<domain> on the edge
     defaults-only = withApps { demo = removeAttrs demo [ "routes" ]; };
-    tcp-stays-up = withDemo { routes.demo-game = { protocol = "tcp"; port = 20131; }; };
+    tcp-stays-up = withDemo {
+      routes.demo-game = {
+        protocol = "tcp";
+        port = 20131;
+      };
+    };
     # protection per path: /api rate limited on the root's backend, / plain
     # an external route's name is public already: the proxy needs nothing more
     cloudflare-on-the-edge = withDemo { routes.demo.on = [ "cloudflare" ]; };
-    per-path = withDemo { routes.demo-api = { host = "demo"; path = "/api"; port = 20130; on = [ "rateLimit" ]; }; };
+    per-path = withDemo {
+      routes.demo-api = {
+        host = "demo";
+        path = "/api";
+        port = 20130;
+        on = [ "rateLimit" ];
+      };
+    };
     # a wildcard tcp route: every name one label below it, forwarded by port, resolved by the router's template
     wildcard-tcp-host = withDemo {
-      routes.demo-game = { protocol = "tcp"; publicPort = wildcardPort; port = 20131; host = "*.demo"; };
+      routes.demo-game = {
+        protocol = "tcp";
+        publicPort = wildcardPort;
+        port = 20131;
+        host = "*.demo";
+      };
     };
     hardened = withDemo {
       routes.demo.on = profiles.hardenedExternal ++ [ "probe" ];
-      on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" "scaleToZero" ];
+      on =
+        profiles.observed
+        ++ profiles.traced
+        ++ [
+          "frontend"
+          "homepage"
+          "scaleToZero"
+        ];
     };
   };
 
   # a lab -> the demo app's idle.stopAfter: up unless it opts into scaleToZero
   stopAfter = {
-    by-default = { lab = withDemo { }; expect = null; };
-    scales-to-zero = { lab = withDemo { on = [ "scaleToZero" ]; }; expect = "15m"; };
-    tuned = { lab = withDemo { on = [ "scaleToZero" ]; idle.stopAfter = "1h"; }; expect = "1h"; };
+    by-default = {
+      lab = withDemo { };
+      expect = null;
+    };
+    scales-to-zero = {
+      lab = withDemo { on = [ "scaleToZero" ]; };
+      expect = "15m";
+    };
+    tuned = {
+      lab = withDemo {
+        on = [ "scaleToZero" ];
+        idle.stopAfter = "1h";
+      };
+      expect = "1h";
+    };
   };
 
   # the hosts that read the catalog, evaluated with it: what a consumer would choke on shows here
@@ -164,33 +356,61 @@ let
   };
   # rendered as json: a store path stays a string, nothing is built; the host's facts are the case's whole lab
   hostWith = import ../../../tests/lib/host-with.nix { inherit inputs; };
-  consumerEvaluates = case: host: select: (builtins.tryEval (builtins.toJSON (select (hostWith case host)))).success;
-
-  # -----------------------------------------------------------------------------
-  # RESULTS
-  # -----------------------------------------------------------------------------
+  consumerEvaluates =
+    case: host: select:
+    (builtins.tryEval (builtins.toJSON (select (hostWith case host)))).success;
 
   failures =
-    lib.concatLists (lib.mapAttrsToList (name: c: let problems = problemsOf c.lab; in
-      lib.optional (!(lib.any (lib.hasInfix c.expect) problems))
-        "refused.${name}: no problem says \"${c.expect}\"; problems: ${builtins.toJSON problems}") refused)
-    ++ lib.concatLists (lib.mapAttrsToList (name: case:
-      lib.optional (evaluates case) "invalid.${name}: the schema accepted it") invalid)
-    ++ lib.concatLists (lib.mapAttrsToList (name: c: let got = c.lab.appsCatalog.apps.demo.idle.stopAfter; in
-      lib.optional (got != c.expect) "stopAfter.${name}: ${builtins.toJSON got}, expected ${builtins.toJSON c.expect}") stopAfter)
-    ++ lib.concatLists (lib.mapAttrsToList (name: case: let problems = problemsOf case; in
-      lib.optional (!(evaluates case)) "accepted.${name}: the schema rejected it"
-      ++ map (p: "accepted.${name}: ${p}") problems
-      ++ lib.concatLists (lib.mapAttrsToList (host: select:
-        lib.optional (!(consumerEvaluates case host select)) "accepted.${name}: ${host} does not evaluate with it") consumers)
-    ) accepted);
+    lib.concatLists (
+      lib.mapAttrsToList (
+        name: c:
+        let
+          problems = problemsOf c.lab;
+        in
+        lib.optional (
+          !(lib.any (lib.hasInfix c.expect) problems)
+        ) "refused.${name}: no problem says \"${c.expect}\"; problems: ${builtins.toJSON problems}"
+      ) refused
+    )
+    ++ lib.concatLists (
+      lib.mapAttrsToList (name: case: lib.optional (evaluates case) "invalid.${name}: the schema accepted it") invalid
+    )
+    ++ lib.concatLists (
+      lib.mapAttrsToList (
+        name: c:
+        let
+          got = c.lab.appsCatalog.apps.demo.idle.stopAfter;
+        in
+        lib.optional (got != c.expect) "stopAfter.${name}: ${builtins.toJSON got}, expected ${builtins.toJSON c.expect}"
+      ) stopAfter
+    )
+    ++ lib.concatLists (
+      lib.mapAttrsToList (
+        name: case:
+        let
+          problems = problemsOf case;
+        in
+        lib.optional (!(evaluates case)) "accepted.${name}: the schema rejected it"
+        ++ map (p: "accepted.${name}: ${p}") problems
+        ++ lib.concatLists (
+          lib.mapAttrsToList (
+            host: select: lib.optional (!(consumerEvaluates case host select)) "accepted.${name}: ${host} does not evaluate with it"
+          ) consumers
+        )
+      ) accepted
+    );
   count = attrs: toString (lib.length (lib.attrNames attrs));
 in
-pkgs.runCommand "apps-catalog" { } (if failures == [ ] then ''
-  echo "apps-catalog: ${count refused} refusals, ${count invalid} schema rejections, ${count stopAfter} idle defaults and ${count accepted} accepted catalogs hold"
-  touch $out
-'' else ''
-  echo "apps-catalog: ${toString (lib.length failures)} failure(s):" >&2
-  cat ${pkgs.writeText "apps-catalog-failures" (lib.concatLines failures)} >&2
-  exit 1
-'')
+pkgs.runCommand "apps-catalog" { } (
+  if failures == [ ] then
+    ''
+      echo "apps-catalog: ${count refused} refusals, ${count invalid} schema rejections, ${count stopAfter} idle defaults and ${count accepted} accepted catalogs hold"
+      touch $out
+    ''
+  else
+    ''
+      echo "apps-catalog: ${toString (lib.length failures)} failure(s):" >&2
+      cat ${pkgs.writeText "apps-catalog-failures" (lib.concatLines failures)} >&2
+      exit 1
+    ''
+)

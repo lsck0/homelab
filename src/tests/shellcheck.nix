@@ -12,7 +12,10 @@
 # unit's environment or nix-rendered code sets).
 { pkgs, lib, ... }:
 let
-  nixFiles = lib.fileset.toSource { root = ../.; fileset = lib.fileset.fileFilter (f: f.hasExt "nix") ../.; };
+  nixFiles = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.fileFilter (f: f.hasExt "nix") ../.;
+  };
 
   extract = pkgs.writeText "shellcheck-bodies.py" ''
     """the shell bodies of `nix-instantiate --parse` outputs: extract.py <parsed dir> <out dir>, one parsed file per
@@ -147,14 +150,23 @@ let
     main()
   '';
 in
-pkgs.runCommand "shellcheck" { nativeBuildInputs = [ pkgs.shellcheck pkgs.findutils pkgs.nix pkgs.python3 ]; } ''
-  export HOME=$TMPDIR NIX_STATE_DIR=$TMPDIR/nix
-  (cd ${nixFiles} && find . -name '*.nix' -printf '%P\n') | while read -r f; do
-    mkdir -p "$TMPDIR/parsed/$(dirname "$f")"
-    nix-instantiate --store dummy:// --parse "${nixFiles}/$f" > "$TMPDIR/parsed/$f"
-  done
-  python3 ${extract} "$TMPDIR/parsed" bodies
-  find bodies -type f -print0 | sort -z | xargs -0 shellcheck -e SC1091,SC2043,SC2154
-  echo "shellcheck: $(find bodies -type f | wc -l) embedded bodies clean"
-  touch $out
-''
+pkgs.runCommand "shellcheck"
+  {
+    nativeBuildInputs = [
+      pkgs.shellcheck
+      pkgs.findutils
+      pkgs.nix
+      pkgs.python3
+    ];
+  }
+  ''
+    export HOME=$TMPDIR NIX_STATE_DIR=$TMPDIR/nix
+    (cd ${nixFiles} && find . -name '*.nix' -printf '%P\n') | while read -r f; do
+      mkdir -p "$TMPDIR/parsed/$(dirname "$f")"
+      nix-instantiate --store dummy:// --parse "${nixFiles}/$f" > "$TMPDIR/parsed/$f"
+    done
+    python3 ${extract} "$TMPDIR/parsed" bodies
+    find bodies -type f -print0 | sort -z | xargs -0 shellcheck -e SC1091,SC2043,SC2154
+    echo "shellcheck: $(find bodies -type f | wc -l) embedded bodies clean"
+    touch $out
+  ''

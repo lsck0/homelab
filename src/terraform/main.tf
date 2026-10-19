@@ -26,10 +26,6 @@ locals {
   proxmox_api_port = 8006
 }
 
-# -----------------------------------------------------------------------------
-# PROXMOX CONNECTION
-# -----------------------------------------------------------------------------
-
 variable "proxmox_api_token_id" { type = string }
 variable "proxmox_api_token_secret" {
   type      = string
@@ -47,10 +43,6 @@ variable "proxmox_ssh_user" {
   type    = string
   default = "root"
 }
-
-# -----------------------------------------------------------------------------
-# VM DEFAULTS
-# -----------------------------------------------------------------------------
 
 variable "nixos_lxc_template" {
   description = "NixOS container template (sync.nu uploads packages.lxc-template)."

@@ -4,13 +4,22 @@
 # configs: name -> an evaluated nixos `config`, the nas itself left out. A config counts when its hostName is vm-<id>
 # of an inventory guest and it mounts at least one share (homelab.nasShares); anything else (the router, a test's
 # stand-in nodes) is skipped. A node runs whatever the guest's vm.power: the lab parks a guest, a test boots it.
-{ lib, inventory, configs }:
+{
+  lib,
+  inventory,
+  configs,
+}:
 let
-  vmOf = config: let match = builtins.match "vm-([0-9]+)" config.networking.hostName; in
+  vmOf =
+    config:
+    let
+      match = builtins.match "vm-([0-9]+)" config.networking.hostName;
+    in
     if match == null then null else inventory.${builtins.head match} or null;
   clients = lib.filter (config: vmOf config != null) (lib.attrValues configs);
   ips = map (config: (vmOf config).ip) clients;
 in
 assert lib.assertMsg (lib.allUnique ips) "nas-clients: two configurations claim one guest address";
-lib.filterAttrs (_: shares: shares != [ ])
-  (lib.listToAttrs (map (config: lib.nameValuePair (vmOf config).ip config.homelab.nasShares) clients))
+lib.filterAttrs (_: shares: shares != [ ]) (
+  lib.listToAttrs (map (config: lib.nameValuePair (vmOf config).ip config.homelab.nasShares) clients)
+)

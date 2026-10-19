@@ -18,7 +18,9 @@ Ports and addresses are defined once in `src/modules/telemetry.nix`; rules, cont
 
 - Prometheus `http://10.100.0.103:9090` is read-only from other hosts (GET, and POST on the query endpoints);
   writes (remote write, admin api) only reach it on vm-103's loopback.
-  node-exporter on every VM (:9100, label `vm`), Traefik (:8082), the monitoring stack itself (job `monitoring`,
+  node-exporter on every VM (:9100, label `vm`), Traefik (:8082) and beside it on each ingress the access log
+  shipper (job `ingress-logs`), crowdsec (`crowdsec`) and anubis (`anubis`), authelia (`service-authelia-authelia`),
+  the monitoring stack itself (job `monitoring`,
   label `component`: loki, tempo, pyroscope, grafana, promtail), itself (job `prometheus`; capped at 50GB).
   Swarm apps (`src/instances/custom/<app>/app.nix`, enabled ones only): one job per exporter `app-<app>-<name>` every 15s,
   label `app`, at most 10000 samples a scrape (above, that scrape fails alone: `up` 0,
@@ -28,7 +30,7 @@ Ports and addresses are defined once in `src/modules/telemetry.nix`; rules, cont
   Query: `curl -sG http://10.100.0.103:9090/api/v1/query --data-urlencode 'query=up{idle=""} == 0'`.
   Useful: `100 - avg by(vm)(rate(node_cpu_seconds_total{mode="idle"}[5m]))*100`,
   `node_filesystem_avail_bytes{mountpoint="/"}`, `node_memory_MemAvailable_bytes`,
-  `time() - homelab_backup_last_success_timestamp_seconds` (backup age),
+  `time() - homelab_backup_last_success_timestamp_seconds` (backup age per repository, `type`),
   `homelab_app_deploy_ok` (1 if an app's last build and deploy on vm-107 worked).
 - Loki `http://10.100.0.103:3100`, one tenant per app plus the lab's: a request without `X-Scope-OrgID` is the
   lab's (tenant `fake`, the name loki stored everything under before it had tenants): journal of every VM (label
@@ -42,15 +44,14 @@ Ports and addresses are defined once in `src/modules/telemetry.nix`; rules, cont
   board `service-<app>` (deploys, resources per service and task, routes and refusals at the edge, tcp/udp
   forwards, logs, traces, profiles, frontend, scrapes) plus the boards the app ships (`<app>-<uid>`, from its repo
   at deploy), and the folder "Lab services" with the same board for every nixos service (its guest's resources and
-  journal), each where the service opts into `dashboard`, `alerts`, `metrics`. It takes the `Remote-User` header
-  only from the ingress and from vm-103 itself, so its API is called on vm-103:
+  journal), each where the service opts into `dashboard`, `alerts`, `metrics`. "Homelab" is the home board. Its
+  nginx door takes the `Remote-User` header only from the ingress and from vm-103 itself: a member of `admins` is
+  Admin, any other user Viewer, a call on vm-103's loopback Admin. So its API is called on vm-103:
   `ssh 10.100.0.103 curl -s -H 'Remote-User: hermes' localhost/api/search`.
-- Alerting is Grafana unified alerting only; there is no Alertmanager. It used
-  to run alongside Grafana with the same rule and the same receivers, which
-  delivered every alert twice. Notifications are grouped by the `category` label
-  (offline, service, backups, attack, storage, apps, monitoring): one message per
-  category with one line per alert, to ntfy topic `homelab-alerts`, and to Telegram
-  for rules labeled `notify=telegram`.
+- Alerting is Grafana unified alerting only; there is no Alertmanager. Notifications are grouped by the `category`
+  label (offline, service, backups, attack, storage, apps, monitoring): one message per category with one line per
+  alert and, for a firing one, its description (the runbook), to ntfy topic `homelab-alerts` (a tap opens the alert
+  list), and to Telegram for rules labeled `notify=telegram` (with a link to the rule).
   Firing alerts: `ssh 10.100.0.103 curl -s -H 'Remote-User: hermes' localhost/api/alertmanager/grafana/api/v2/alerts`.
   Silence: `POST localhost/api/alertmanager/grafana/api/v2/silences` (same way) with matchers, startsAt, endsAt,
   createdBy, comment.
@@ -61,8 +62,9 @@ Ports and addresses are defined once in `src/modules/telemetry.nix`; rules, cont
 - Tempo (traces) OTLP at 10.100.0.103:4317/4318 and Pyroscope (profiles) at :4040, push only, 14 days, one tenant
   per app: an app's containers send to their node's relay (the docker bridge's gateway, same ports), which names
   the tenant `app-<app>` from the sending container's address, whatever the app claims; each tenant 1 MiB/s (burst
-  4 MiB) of each, above that 429 for that app alone. Datasources "Tempo <app>", "Pyroscope <app>", "Loki <app>". Span metrics
-  (`traces_spanmetrics_*`, `traces_service_graph_*`, label `tenant`) land in Prometheus.
+  4 MiB) of each, above that 429 for that app alone. Datasources "Tempo <app>", "Pyroscope <app>", "Loki <app>";
+  "Tempo" holds the lab's own spans, the ingresses' requests among them, each linked to its access log line. Span
+  metrics (`traces_spanmetrics_*`, `traces_service_graph_*`, label `tenant`) land in Prometheus.
   Read one trace, on vm-103: `curl -s -H 'X-Scope-OrgID: app-wat' http://127.0.0.1:3200/api/traces/<id>`.
 - Browsers: `<host>/otlp/` on each app's own origin reaches the frontend intake (:4319, from the ingresses only),
   which keeps allow-listed attributes (no cookies, query strings or form data) and files them under the app's
@@ -72,8 +74,13 @@ Ports and addresses are defined once in `src/modules/telemetry.nix`; rules, cont
   (builder), `app_swarm_deploy_failed` (manager), `app_postgres_down`, `app_redis_down`, `app_<app>_walg_stale`;
   an app asleep (idle) is not down. Builds: `archrepo_missing`, `archrepo_held_back` (vm-112's nightly repo). Disk: `disk_full` (90%, every ext4 data fs),
   `disk_critical` (95%, telegram), `disk_fill_predicted`, `thinpool_*` (Proxmox thin pools, per `vg`),
-  `disk_health`, `smartd_warning`, `nvme_wear`, `nvme_critical_warning`, `nvme_temperature` (Proxmox SMART and NVMe
-  collectors). Monitoring: `monitoring_unit_down`, `logs_not_arriving`, `promtail_dropping`, `notifications_failing`
+  `disk_health`, `smartd_warning`, `nvme_wear`, `nvme_critical_warning`, `nvme_temperature`, `nvme_throttling`,
+  `nvme_over_warning_temperature` (Proxmox SMART and NVMe collectors). Host: `host_rebooted` (an hour after the
+  Proxmox host booted), `nvme_unsafe_shutdown` (it lost power or hung), `machine_check` (hardware errors this boot),
+  `host_watchdog_unarmed`, `host_security_upgrades` (a week pending). Guests: `unit_failed`, `oom_kill`,
+  `system_drift` (not the generation sync.nu deployed), `guard_refused`, `forward_refused` (the router's drops from
+  the dmz or the apps zone), `vpn_unavailable`, `app_builder_stalled`, `ingress_exporter_down`.
+  Logins: `ssh_login_unexpected` (from outside the operators' addresses, or by password), `proxmox_login`. Monitoring: `monitoring_unit_down`, `logs_not_arriving`, `promtail_dropping`, `notifications_failing`
   (a channel), `deadman_unavailable` (the off-site switch), `ossec_down` (the host's intrusion detection).
   Third parties: `upstream_unavailable` per service of `src/modules/upstream/lib/upstreams.nix`; its callers keep their last state.
 

@@ -10,9 +10,6 @@
 # top, a full worker ran into global out of memory, and the kernel killed whichever app was largest.
 { lib }:
 let
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
 
   # a worker's own share: dockerd (image pulls, log copies), gossip, cadvisor, the log shipper, node exporter, sshd
   nodeReserveMiB = 512;
@@ -39,89 +36,147 @@ let
   # a browser's beacon: a batch of spans or web vitals is a few KiB; an unauthenticated public input is cut here
   frontend.bodyBytes = 256 * 1024;
   # twice a busy client's per-client limit: one client cannot use a route's budget alone, a crowd is cut at the door
-  route = { average = 100; burst = 200; inFlight = 200; };
+  route = {
+    average = 100;
+    burst = 200;
+    inFlight = 200;
+  };
   # loki's own defaults, under which the lab's journals and the edge's access log always ran
-  lab = { logBytesPerSecond = 4 * mib; logBurstBytes = 6 * mib; };
-
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
+  lab = {
+    logBytesPerSecond = 4 * mib;
+    logBurstBytes = 6 * mib;
+  };
 
   # reservations round up and capacities down, so rounding never admits what does not fit
-  cpuMillisUp = cpus: let m = cpus * millisPerCpu; f = builtins.floor m; in if m > f then f + 1 else f;
+  cpuMillisUp =
+    cpus:
+    let
+      m = cpus * millisPerCpu;
+      f = builtins.floor m;
+    in
+    if m > f then f + 1 else f;
   cpuMillisDown = cpus: builtins.floor (cpus * millisPerCpu);
   sumOf = key: sets: lib.foldl' (acc: s: acc + s.${key}) 0 sets;
   maxOf = key: sets: lib.foldl' (acc: s: lib.max acc s.${key}) 0 sets;
   minOf = key: sets: lib.foldl' (acc: s: lib.min acc s.${key}) (lib.head sets).${key} sets;
 
-  reservationOf = a: { inherit (a.reservation) memoryMiB; cpuMillis = cpuMillisUp a.reservation.cpus; };
+  reservationOf = a: {
+    inherit (a.reservation) memoryMiB;
+    cpuMillis = cpuMillisUp a.reservation.cpus;
+  };
   # what the apps reserve plus one deploy's surge: what their workers must hold together
-  demandOf = apps: let reservations = map reservationOf (lib.attrValues apps); in
+  demandOf =
+    apps:
+    let
+      reservations = map reservationOf (lib.attrValues apps);
+    in
     lib.genAttrs [ "memoryMiB" "cpuMillis" ] (key: sumOf key reservations + maxOf key reservations);
 
   # proxmox's cpu limit, when set, is what the guest can use of its cores
   allocatableOf = vm: {
     memoryMiB = vm.memoryMiB - nodeReserveMiB;
-    cpuMillis = cpuMillisDown (if (vm.cpuLimitCores or null) == null then vm.cores else vm.cpuLimitCores)
-      - nodeReserveCpuMillis;
+    cpuMillis =
+      cpuMillisDown (if (vm.cpuLimitCores or null) == null then vm.cores else vm.cpuLimitCores) - nodeReserveCpuMillis;
   };
 
-  # -----------------------------------------------------------------------------
-  # FUNCTIONS
-  # -----------------------------------------------------------------------------
+  workerCountOf =
+    { apps, vm }:
+    let
+      allocatable = allocatableOf vm;
+      demand = demandOf apps;
+      countOf =
+        key:
+        assert lib.assertMsg (allocatable.${key} > 0) "limits.workerCountOf: a worker keeps all its ${key} for itself";
+        (demand.${key} + allocatable.${key} - 1) / allocatable.${key};
+    in
+    lib.max 1 (lib.max (countOf "memoryMiB") (countOf "cpuMillis"));
 
-  workerCountOf = { apps, vm }: let
-    allocatable = allocatableOf vm;
-    demand = demandOf apps;
-    countOf = key: assert lib.assertMsg (allocatable.${key} > 0) "limits.workerCountOf: a worker keeps all its ${key} for itself";
-      (demand.${key} + allocatable.${key} - 1) / allocatable.${key};
-  in lib.max 1 (lib.max (countOf "memoryMiB") (countOf "cpuMillis"));
+  clusterOf =
+    {
+      apps,
+      workers,
+      taskDefaults,
+    }:
+    let
+      allocatable = lib.mapAttrs (_: allocatableOf) workers;
 
-  clusterOf = { apps, workers, taskDefaults }: let
-    allocatable = lib.mapAttrs (_: allocatableOf) workers;
+      reservations = lib.mapAttrs (_: reservationOf) apps;
+      totalsOf = sets: {
+        memoryMiB = sumOf "memoryMiB" sets;
+        cpuMillis = sumOf "cpuMillis" sets;
+      };
+      capacity = totalsOf (lib.attrValues allocatable);
+      reserved = totalsOf (lib.attrValues reservations);
+      surge = lib.genAttrs [ "memoryMiB" "cpuMillis" ] (key: maxOf key (lib.attrValues reservations));
 
-    reservations = lib.mapAttrs (_: reservationOf) apps;
-    totalsOf = sets: { memoryMiB = sumOf "memoryMiB" sets; cpuMillis = sumOf "cpuMillis" sets; };
-    capacity = totalsOf (lib.attrValues allocatable);
-    reserved = totalsOf (lib.attrValues reservations);
-    surge = lib.genAttrs [ "memoryMiB" "cpuMillis" ] (key: maxOf key (lib.attrValues reservations));
+      taskOf = a: service: (a.resources.${service} or taskDefaults) // { cpuMillis = taskCpuMillis; };
 
-    taskOf = a: service: (a.resources.${service} or taskDefaults) // { cpuMillis = taskCpuMillis; };
-
-    largestOf = key:
-      lib.head (lib.sort (x: y: reservations.${x}.${key} > reservations.${y}.${key}) (lib.attrNames reservations));
-    fitProblem = key: unit: knob:
-      lib.optional (apps != { } && (demandOf apps).${key} > capacity.${key})
-        ("the apps reserve ${toString reserved.${key}} ${unit} plus ${toString surge.${key}} ${unit} for a rolling deploy, "
+      largestOf =
+        key: lib.head (lib.sort (x: y: reservations.${x}.${key} > reservations.${y}.${key}) (lib.attrNames reservations));
+      fitProblem =
+        key: unit: knob:
+        lib.optional (apps != { } && (demandOf apps).${key} > capacity.${key}) (
+          "the apps reserve ${toString reserved.${key}} ${unit} plus ${toString surge.${key}} ${unit} for a rolling deploy, "
           + "the workers hold ${toString capacity.${key}} ${unit}: lower apps.<app>.reservation.${knob} "
-          + "(the largest: ${largestOf key}) or grow the workers (instances/core/swarm.nix nodes.vm, an app's placement.vm)");
+          + "(the largest: ${largestOf key}) or grow the workers (instances/core/swarm.nix nodes.vm, an app's placement.vm)"
+        );
 
-    # the smallest worker bounds a task: a larger one finds no worker once another is down
-    taskProblems = app: a: let smallest = minOf "memoryMiB" (lib.attrValues allocatable); in
-      map (service: "apps.${app}.resources.${service}.memoryMiB ${toString a.resources.${service}.memoryMiB} "
-        + "is more than a worker holds for apps (${toString smallest} MiB)")
-        (lib.filter (service: a.resources.${service}.memoryMiB > smallest) (lib.attrNames a.resources))
-      ++ lib.optional (a.reservation.memoryMiB < taskDefaults.memoryMiB && a.resources == { })
-        ("apps.${app}.reservation.memoryMiB ${toString a.reservation.memoryMiB} holds no task at "
-          + "swarm.taskDefaults.memoryMiB ${toString taskDefaults.memoryMiB}: raise it or set resources");
+      # the smallest worker bounds a task: a larger one finds no worker once another is down
+      taskProblems =
+        app: a:
+        let
+          smallest = minOf "memoryMiB" (lib.attrValues allocatable);
+        in
+        map (
+          service:
+          "apps.${app}.resources.${service}.memoryMiB ${toString a.resources.${service}.memoryMiB} "
+          + "is more than a worker holds for apps (${toString smallest} MiB)"
+        ) (lib.filter (service: a.resources.${service}.memoryMiB > smallest) (lib.attrNames a.resources))
+        ++ lib.optional (a.reservation.memoryMiB < taskDefaults.memoryMiB && a.resources == { }) (
+          "apps.${app}.reservation.memoryMiB ${toString a.reservation.memoryMiB} holds no task at "
+          + "swarm.taskDefaults.memoryMiB ${toString taskDefaults.memoryMiB}: raise it or set resources"
+        );
 
-    problems =
-      if apps == { } then [ ]
-      else if workers == { } then [ "apps are enabled, but the swarm has no running worker" ]
-      else map (id: "worker vm-${id} keeps ${toString nodeReserveMiB} MiB and ${toString nodeReserveCpuMillis} "
-          + "millicores for itself and has nothing left for apps")
-          (lib.attrNames (lib.filterAttrs (_: w: w.memoryMiB <= 0 || w.cpuMillis <= 0) allocatable))
-        ++ fitProblem "memoryMiB" "MiB" "memoryMiB"
-        ++ fitProblem "cpuMillis" "millicores" "cpus"
-        ++ lib.concatLists (lib.mapAttrsToList taskProblems apps);
-  in {
-    inherit capacity reserved surge problems;
-    workers = allocatable;
-    taskOf = app: taskOf apps.${app};
-    taskDefaults = taskDefaults // { cpuMillis = taskCpuMillis; };
-    reservationOf = app: reservations.${app};
-  };
+      problems =
+        if apps == { } then
+          [ ]
+        else if workers == { } then
+          [ "apps are enabled, but the swarm has no running worker" ]
+        else
+          map (
+            id:
+            "worker vm-${id} keeps ${toString nodeReserveMiB} MiB and ${toString nodeReserveCpuMillis} "
+            + "millicores for itself and has nothing left for apps"
+          ) (lib.attrNames (lib.filterAttrs (_: w: w.memoryMiB <= 0 || w.cpuMillis <= 0) allocatable))
+          ++ fitProblem "memoryMiB" "MiB" "memoryMiB"
+          ++ fitProblem "cpuMillis" "millicores" "cpus"
+          ++ lib.concatLists (lib.mapAttrsToList taskProblems apps);
+    in
+    {
+      inherit
+        capacity
+        reserved
+        surge
+        problems
+        ;
+      workers = allocatable;
+      taskOf = app: taskOf apps.${app};
+      taskDefaults = taskDefaults // {
+        cpuMillis = taskCpuMillis;
+      };
+      reservationOf = app: reservations.${app};
+    };
 in
 {
-  inherit tenant route frontend lab clusterOf allocatableOf workerCountOf taskCpuMillis cpuMillisUp;
+  inherit
+    tenant
+    route
+    frontend
+    lab
+    clusterOf
+    allocatableOf
+    workerCountOf
+    taskCpuMillis
+    cpuMillisUp
+    ;
 }

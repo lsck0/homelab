@@ -6,45 +6,88 @@
 # guests' shape.
 { pkgs, lib, ... }:
 let
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
 
-  inherit ((import ../default.nix { inherit lib; }).layout) core preconfigured custom swarm;
-  treeOf = folders: pkgs.runCommand "lab-fixture" { } (''
-    mkdir -p $out/${core} $out/${preconfigured} $out/${custom} $out/generated
-    cp ${../../../generated/zones.json} $out/generated/zones.json
-    cp ${../../../generated/site.json} $out/generated/site.json
-    cp ${../../../instances/core/swarm.nix} $out/${swarm}
-  '' + lib.concatStrings (lib.mapAttrsToList (folder: files: "mkdir -p $out/${preconfigured}/${folder}\n"
-    + lib.concatStrings (lib.mapAttrsToList (file: text: "cp ${pkgs.writeText file text} $out/${preconfigured}/${folder}/${file}\n") files)
-  ) folders));
-  instance = text: { "main.nix" = "{ ... }: { }"; "instance.nix" = text; };
-  problemsOf = folders: (import ../default.nix { inherit lib; root = treeOf folders; }).problems;
+  inherit ((import ../default.nix { inherit lib; }).layout)
+    core
+    preconfigured
+    custom
+    swarm
+    ;
+  treeOf =
+    folders:
+    pkgs.runCommand "lab-fixture" { } (
+      ''
+        mkdir -p $out/${core} $out/${preconfigured} $out/${custom} $out/generated
+        cp ${../../../generated/zones.json} $out/generated/zones.json
+        cp ${../../../generated/site.json} $out/generated/site.json
+        cp ${../../../instances/core/swarm.nix} $out/${swarm}
+      ''
+      + lib.concatStrings (
+        lib.mapAttrsToList (
+          folder: files:
+          "mkdir -p $out/${preconfigured}/${folder}\n"
+          + lib.concatStrings (
+            lib.mapAttrsToList (file: text: "cp ${pkgs.writeText file text} $out/${preconfigured}/${folder}/${file}\n") files
+          )
+        ) folders
+      )
+    );
+  instance = text: {
+    "main.nix" = "{ ... }: { }";
+    "instance.nix" = text;
+  };
+  problemsOf =
+    folders:
+    (import ../default.nix {
+      inherit lib;
+      root = treeOf folders;
+    }).problems;
   cidr = import ../../cidr.nix { inherit lib; };
-
-  # -----------------------------------------------------------------------------
-  # TABLES
-  # -----------------------------------------------------------------------------
 
   # folders -> a line of the problems must contain this
   refused = {
-    folder-name = { folders."1x-internal-demo" = instance "{ }"; expect = "an instance folder is"; };
-    missing-instance-nix = { folders."199-internal-demo"."main.nix" = "{ ... }: { }"; expect = "holds main.nix and instance.nix"; };
-    vmid-outside-zone = { folders."250-internal-demo" = instance "{ }"; expect = "outside zone internal's range"; };
+    folder-name = {
+      folders."1x-internal-demo" = instance "{ }";
+      expect = "an instance folder is";
+    };
+    missing-instance-nix = {
+      folders."199-internal-demo"."main.nix" = "{ ... }: { }";
+      expect = "holds main.nix and instance.nix";
+    };
+    vmid-outside-zone = {
+      folders."250-internal-demo" = instance "{ }";
+      expect = "outside zone internal's range";
+    };
     vmid-twice = {
-      folders = { "199-internal-demo" = instance "{ }"; "199-internal-other" = instance "{ }"; };
+      folders = {
+        "199-internal-demo" = instance "{ }";
+        "199-internal-other" = instance "{ }";
+      };
       expect = "vmid 199 is claimed by";
     };
     service-twice = {
-      folders = { "198-internal-demo" = instance "{ services.x.port = 80; }"; "199-internal-other" = instance "{ services.x.port = 80; }"; };
+      folders = {
+        "198-internal-demo" = instance "{ services.x.port = 80; }";
+        "199-internal-other" = instance "{ services.x.port = 80; }";
+      };
       expect = "service x is declared by";
     };
-    lxc-with-pci = { folders."199-internal-demo" = instance ''{ vm = { kind.lxc = "test"; pci = [ "gpu" ]; }; }''; expect = "an lxc takes no pci devices"; };
-    privileged-vm = { folders."199-internal-demo" = instance ''{ vm = { privileged = true; needs = [ "nfs" ]; }; }''; expect = "privileged is lxc only"; };
-    guest-names-itself = { folders."199-internal-demo" = instance ''{ hostName = "demo"; }''; expect = "hostName is vm-199"; };
-    idle-without-ingress = { folders."260-apps-demo" = instance ''{ idle.stopAfter = "30m"; }''; expect = "idle needs a zone whose ingress"; };
-    role-named-like-a-source = { folders."199-internal-demo" = instance ''{ roles = [ "lan" ]; }''; expect = "is a grant source's name already"; };
+    lxc-with-pci = {
+      folders."199-internal-demo" = instance ''{ vm = { kind.lxc = "test"; pci = [ "gpu" ]; }; }'';
+      expect = "an lxc takes no pci devices";
+    };
+    guest-names-itself = {
+      folders."199-internal-demo" = instance ''{ hostName = "demo"; }'';
+      expect = "hostName is vm-199";
+    };
+    idle-without-ingress = {
+      folders."260-apps-demo" = instance ''{ idle.stopAfter = "30m"; }'';
+      expect = "idle needs a zone whose ingress";
+    };
+    role-named-like-a-source = {
+      folders."199-internal-demo" = instance ''{ roles = [ "lan" ]; }'';
+      expect = "is a grant source's name already";
+    };
     prefix-without-house = {
       folders."249-external-demo" = instance ''{ services.demo = { port = 80; publicPrefix = "/public"; }; }'';
       expect = "publicPrefix narrows what everyone but the house sees";
@@ -55,11 +98,16 @@ let
     };
   };
 
-  # -----------------------------------------------------------------------------
-  # ADDING: the real tree plus each template, copied the way the templates say
-  # -----------------------------------------------------------------------------
+  # the real tree plus each template, copied the way the templates say
 
-  added = { id = "199"; zone = "internal"; service = "demo"; app = "sample"; share = "data/demo"; port = 80; };
+  added = {
+    id = "199";
+    zone = "internal";
+    service = "demo";
+    app = "sample";
+    share = "data/demo";
+    port = 80;
+  };
   addedFolder = "${added.id}-${added.zone}-${added.service}";
   # the template's instance.nix as copied, plus the two facts it leaves out
   addedInstance = pkgs.writeText "instance.nix" ''
@@ -76,23 +124,29 @@ let
     cp ${addedInstance} $out/${preconfigured}/${addedFolder}/instance.nix
     cp -r $out/${custom}/_template $out/${custom}/${added.app}
   '';
-  grown = import ../default.nix { inherit lib; root = addedTree; };
+  grown = import ../default.nix {
+    inherit lib;
+    root = addedTree;
+  };
   addedIp = grown.inventory.${added.id}.ip or null;
-  zoneSubnet = (import ../../net.nix { inherit lib; inherit (grown) inventory site; }).zones.${added.zone}.subnet;
+  zoneSubnet =
+    (import ../../net.nix {
+      inherit lib;
+      inherit (grown) inventory site;
+    }).zones.${added.zone}.subnet;
   addedChecks = {
     "the tree holds" = grown.problems == [ ];
     "the folder is a host" = (grown.hosts.${addedFolder}.main or null) != null;
     "the guest has its zone's address" = addedIp == cidr.host zoneSubnet (lib.toInt added.id);
     "its service is a route" = (grown.routes.${added.service}.vmid or null) == lib.toInt added.id;
-    "its service is plain, no card" = grown.routes.${added.service}.on == [ ] && !(lib.any (c: c.route == added.service) grown.homepage);
+    "its service is plain, no card" =
+      grown.routes.${added.service}.on == [ ] && !(lib.any (c: c.route == added.service) grown.homepage);
     "its grant names the role's guest" = lib.any (g: g.to == added.id && g.from == [ grown.roles.operator ]) grown.grants;
     "its share is exported to it" = lib.any (s: s.path == "/srv/nas/${added.share}") (grown.nasClients.${addedIp} or [ ]);
     "the app is in the catalog" = grown.catalog.apps ? ${added.app};
   };
 
-  # -----------------------------------------------------------------------------
-  # EXPORT: lab.json's guests and routes as the desktop clients read them
-  # -----------------------------------------------------------------------------
+  # lab.json's guests and routes as the desktop clients read them
 
   real = import ../default.nix { inherit lib; };
   exportOf = lab: import ../../lab-export.nix { inherit lib lab; };
@@ -101,32 +155,77 @@ let
     enable = true;
     repo = "lsck0/demo";
     branch = "master";
-    routes.demo-game = { service = "web"; targetPort = 8000; protocol = "tcp"; publicPort = 25566; port = 20131; host = "*.demo"; };
+    routes.demo-game = {
+      service = "web";
+      targetPort = 8000;
+      protocol = "tcp";
+      publicPort = 25566;
+      port = 20131;
+      host = "*.demo";
+    };
   };
   wildcardLab = real.withApps (folders: folders // { demo = wildcardApp; });
   exportedWildcardHost = (exportOf wildcardLab).routes.demo-game.host;
-  exportGuestKeys = [ "enabled" "idle" "ip" "name" "powered" "zone" ];
-  exportProblems = lib.concatLists (lib.mapAttrsToList (id: g:
-    lib.optional (lib.attrNames g != exportGuestKeys) "lab.export guest ${id} has [ ${toString (lib.attrNames g)} ], not [ ${toString exportGuestKeys} ]"
-    ++ lib.optional (!(lib.isBool g.powered && (g.idle == null || lib.isString g.idle) && lib.elem g.enabled [ "true" "false" "onDemand" ]))
-      "lab.export guest ${id}: ${builtins.toJSON g}"
-  ) (exportOf real).guests)
+  exportGuestKeys = [
+    "enabled"
+    "idle"
+    "ip"
+    "name"
+    "powered"
+    "zone"
+  ];
+  exportProblems =
+    lib.concatLists (
+      lib.mapAttrsToList (
+        id: g:
+        lib.optional (
+          lib.attrNames g != exportGuestKeys
+        ) "lab.export guest ${id} has [ ${toString (lib.attrNames g)} ], not [ ${toString exportGuestKeys} ]"
+        ++ lib.optional (
+          !(
+            lib.isBool g.powered
+            && (g.idle == null || lib.isString g.idle)
+            && lib.elem g.enabled [
+              "true"
+              "false"
+              "onDemand"
+            ]
+          )
+        ) "lab.export guest ${id}: ${builtins.toJSON g}"
+      ) (exportOf real).guests
+    )
     ++ map (p: "the wildcard fixture is refused: ${p}") wildcardLab.problems
-    ++ lib.optional (exportedWildcardHost != "*.demo.${real.site.domain}")
-      "lab.export writes the wildcard route's host as ${exportedWildcardHost}";
+    ++ lib.optional (
+      exportedWildcardHost != "*.demo.${real.site.domain}"
+    ) "lab.export writes the wildcard route's host as ${exportedWildcardHost}";
 
-  failures = lib.concatLists (lib.mapAttrsToList (name: c: let problems = problemsOf c.folders; in
-    lib.optional (!(lib.any (lib.hasInfix c.expect) problems))
-      "refused.${name}: no problem says \"${c.expect}\"; problems: ${builtins.toJSON problems}") refused)
+  failures =
+    lib.concatLists (
+      lib.mapAttrsToList (
+        name: c:
+        let
+          problems = problemsOf c.folders;
+        in
+        lib.optional (
+          !(lib.any (lib.hasInfix c.expect) problems)
+        ) "refused.${name}: no problem says \"${c.expect}\"; problems: ${builtins.toJSON problems}"
+      ) refused
+    )
     ++ map (p: "the real tree: ${p}") real.problems
-    ++ map (check: "adding ${addedFolder} and ${custom}/${added.app}: ${check} fails; problems: ${builtins.toJSON grown.problems}")
-      (lib.attrNames (lib.filterAttrs (_: ok: !ok) addedChecks))
+    ++ map (
+      check: "adding ${addedFolder} and ${custom}/${added.app}: ${check} fails; problems: ${builtins.toJSON grown.problems}"
+    ) (lib.attrNames (lib.filterAttrs (_: ok: !ok) addedChecks))
     ++ exportProblems;
 in
-pkgs.runCommand "lab" { } (if failures == [ ] then ''
-  echo "lab: ${toString (lib.length (lib.attrNames refused))} broken trees refused, the real tree and a copy of each template hold"
-  touch $out
-'' else ''
-  cat ${pkgs.writeText "lab-failures" (lib.concatLines failures)} >&2
-  exit 1
-'')
+pkgs.runCommand "lab" { } (
+  if failures == [ ] then
+    ''
+      echo "lab: ${toString (lib.length (lib.attrNames refused))} broken trees refused, the real tree and a copy of each template hold"
+      touch $out
+    ''
+  else
+    ''
+      cat ${pkgs.writeText "lab-failures" (lib.concatLines failures)} >&2
+      exit 1
+    ''
+)

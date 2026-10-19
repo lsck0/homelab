@@ -9,6 +9,7 @@ reference points at the app's own datasources (its loki, tempo and pyroscope ten
 an app's series carry its `app` label), and a reference to anything else refuses the file. A refusal names the file
 and the reason and exits 2; the deploy itself stands, the previous dashboards stay.
 """
+
 import glob
 import json
 import os
@@ -16,17 +17,18 @@ import shutil
 import sys
 import tempfile
 
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
 
 DASHBOARD_BYTES_MAX = 1024 * 1024
 DASHBOARDS_MAX = 20
 # grafana's own limit on a dashboard uid
 UID_LENGTH_MAX = 40
 # datasource type -> the app's datasource uid ("{app}" filled in)
-DATASOURCES = {"prometheus": "prometheus", "loki": "loki-{app}", "tempo": "tempo-{app}",
-               "grafana-pyroscope-datasource": "pyroscope-{app}"}
+DATASOURCES = {
+    "prometheus": "prometheus",
+    "loki": "loki-{app}",
+    "tempo": "tempo-{app}",
+    "grafana-pyroscope-datasource": "pyroscope-{app}",
+}
 # a datasource named instead of referenced: its default name -> its type
 NAMES = {"prometheus": "prometheus", "loki": "loki", "tempo": "tempo", "pyroscope": "grafana-pyroscope-datasource"}
 # grafana's built-in pseudo datasources: annotations, mixed panels, dashboard reuse
@@ -36,10 +38,6 @@ BUILTIN = {"grafana", "-- Grafana --", "-- Mixed --", "-- Dashboard --", "dataso
 class Refused(Exception):
     pass
 
-
-# -----------------------------------------------------------------------------
-# FUNCTIONS
-# -----------------------------------------------------------------------------
 
 def datasource_rewrite(ref, app, inputs):
     """The app's own datasource for one reference, or Refused."""
@@ -69,7 +67,9 @@ def node_rewrite(node, app, inputs):
     if isinstance(node, dict):
         out = {}
         for key, value in node.items():
-            out[key] = datasource_rewrite(value, app, inputs) if key == "datasource" else node_rewrite(value, app, inputs)
+            out[key] = (
+                datasource_rewrite(value, app, inputs) if key == "datasource" else node_rewrite(value, app, inputs)
+            )
         if out.get("type") == "datasource" and "query" in out:
             # a datasource variable lists only the app's own of that type
             kind = out["query"]

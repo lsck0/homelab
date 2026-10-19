@@ -12,12 +12,6 @@ import (
 	"strings"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
-
 // Settings is the gate's one configuration file, rendered by modules/traefik/gate.nix; an unknown field is an error.
 type Settings struct {
 	Listen       string            `json:"listen"`
@@ -28,6 +22,8 @@ type Settings struct {
 	Session      *SettingsSession  `json:"session"`
 	Anonymous    SettingsAnonymous `json:"anonymous"`
 	Tarpit       SettingsTarpit    `json:"tarpit"`
+	// cookies only the sso portal may read, which /strip removes from a request
+	StripCookies []string `json:"stripCookies"`
 }
 
 // SettingsLapi is crowdsec's local api, asked for a client's decisions with the gate's bouncer key.
@@ -78,12 +74,6 @@ type SettingsTarpit struct {
 	Upstream string `json:"upstream"`
 }
 
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
-
 // settingsParse reads the file strictly: every rule a later stage relies on is checked here, once.
 func settingsParse(data []byte) (Settings, error) {
 	var settings Settings
@@ -126,6 +116,11 @@ func settingsParse(data []byte) (Settings, error) {
 		}
 		if _, err := onionRoutes(captcha.Onions); err != nil {
 			return Settings{}, fmt.Errorf("settings: captcha.onions: %w", err)
+		}
+	}
+	for _, name := range settings.StripCookies {
+		if name == "" || strings.ContainsAny(name, cookieDelimiter+"= ") {
+			return Settings{}, fmt.Errorf("settings: stripCookies: %q is no cookie name", name)
 		}
 	}
 	if session := settings.Session; session != nil {

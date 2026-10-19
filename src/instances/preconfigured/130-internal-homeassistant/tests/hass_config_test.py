@@ -6,6 +6,7 @@ Validates the helpers and the guarded meter sensors (trigger, variables, actions
 assistant applies at startup, so a key it does not know fails here and not on vm-130. The template integration
 logs an invalid entry and drops it instead of reporting it, so both the log and the surviving entries are checked.
 """
+
 import logging
 import sys
 
@@ -37,8 +38,10 @@ if not DOMAINS <= set(loaded):
 blocks = loaded.get("template", [])
 sensors = sum(len(block.get("sensor", [])) for block in blocks)
 if len(blocks) != meters or sensors != meters * SENSORS_PER_METER:
-    failures.append(f"template: {len(blocks)} blocks, {sensors} sensors survived validation, expected {meters} and "
-                    f"{meters * SENSORS_PER_METER}")
+    failures.append(
+        f"template: {len(blocks)} blocks, {sensors} sensors survived validation, expected {meters} and "
+        f"{meters * SENSORS_PER_METER}"
+    )
 for failure in failures:
     print(failure, file=sys.stderr)
 if failures:

@@ -1,17 +1,29 @@
 # dashboard / service landing page
-{ profiles, ... }: {
+{ profiles, ... }:
+{
   vm = {
     bootPhase = "apps";
-    needs = [ "containers" "nfs" ];
-    kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";
-    # nfs mounts need a privileged container
-    privileged = true;
-    features = "nesting=1,mount=nfs";
+    needs = [
+      "containers"
+      "nfs"
+    ];
+    # two homepage containers, 110 MB each, besides the system
+    memoryMiB = 1024;
   };
 
   services = {
-    # the dashboard itself, no card on it
-    homepage = { host = "homelab"; port = 80; guest = true; on = profiles.hardenedInternal ++ [ "probe" ] ++ profiles.observed; };
+    # the dashboards themselves, no card on them: the admins' with the widgets, and the one everybody else opens
+    homepage = {
+      host = "homelab";
+      port = 80;
+      on = profiles.hardenedInternal ++ [ "probe" ] ++ profiles.observed;
+    };
+    start = {
+      host = "start";
+      port = 81;
+      guest = true;
+      on = profiles.hardenedInternal ++ [ "probe" ] ++ profiles.observed;
+    };
   };
 
   secrets = {
@@ -21,8 +33,4 @@
 
   # reads every widget's token (modules/lab)
   roles = [ "dashboard" ];
-
-  shares = {
-    "data/homepage" = { };
-  };
 }

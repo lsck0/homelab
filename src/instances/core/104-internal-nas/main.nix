@@ -1,16 +1,26 @@
 # the nas: nfs exports (lib/nas-exports.nix), the owner's smb shares (lib/samba.nix), syncthing, filebrowser, kopia
 # (lib/kopia.nix), the lsck0 pacman repo vm-112 builds, and a full official arch mirror beside it
 #
-# The mirror lives on the ssd root next to the lsck0 repo (the hdd keeps syncthing and media alone), so a -Syu or a pacstrap whose exact version is not in last
-# night's lsck0 snapshot pulls from the lan. nginx serves it at /archlinux of the repo's vhost, so lsck0 keeps /x86_64
-# and its authority over overridden and aur packages. Symlinks stay enabled: the package files are relative links into
-# the shared pool/ and rsync's --safe-links already bars any escape, so disable_symlinks would 404 every package.
-{ config, lib, pkgs, inventory, site, catalog, upstream, ... }:
+# The mirror lives on the ssd beside the lsck0 repo, so a -Syu or a pacstrap whose exact version is not in last night's
+# lsck0 snapshot pulls from the lan; nginx serves it at /archlinux of the repo's vhost. Symlinks stay enabled: the
+# package files are relative links into the shared pool/, and rsync's --safe-links already bars any escape.
+{
+  config,
+  lib,
+  pkgs,
+  inventory,
+  site,
+  catalog,
+  lab,
+  upstream,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   routes = catalog.internal;
 
-  inherit (net) tailnet;
+  firewall = import ./lib/firewall-allow.nix { inherit lib net; };
+  nasJob = import ./lib/nas-job.nix { inherit lab; };
 
   bulk = "/srv/nas/bulk";
   bulkLabel = "bulk";
@@ -18,24 +28,49 @@ let
   # media and torrents together; the rest of the hdd stays free for the arch repo and whatever comes next
   mediaQuotaGiB = 750;
   mediaProject = 1;
-  mediaDirs = [ "${bulk}/media" "${bulk}/torrents" ];
-  mediaLibraries = [ "tv" "movies" "music" "anime" "leaving-soon" ];
+  mediaDirs = [
+    "${bulk}/media"
+    "${bulk}/torrents"
+  ];
+  mediaLibraries = [
+    "tv"
+    "movies"
+    "music"
+    "anime"
+    "leaving-soon"
+  ];
 
   archrepoPort = 8090;
+  # the lab's internal zone, the house lan, wireguard and the tailnet
+  archrepoClients = [
+    net.zones.internal.subnet
+    net.wan.subnet
+    net.wireguard.subnet
+    net.tailnet
+  ];
   filebrowserPort = 8080;
   syncthingSyncPort = 22000;
-  syncthingDiscoveryPort = 21027;
+  # a full scan of the sync folder peaked at 1.44 GiB (2026-10-18)
+  syncthingMemoryMaxMiB = 1536;
 
   mirrorDir = "/srv/nas/archmirror";
   syncthingDir = "/srv/nas/syncthing";
+  # what must be kept but is rarely opened, on the hdd; snapshotted and uploaded one way by lib/kopia.nix
+  coldStorage = "${bulk}/cold-storage";
   # tier 1, german, rsync-enabled; the trailing slash is the module root; its https side is the upstream probe
   mirrorUpstream = "rsync://ftp.halifax.rwth-aachen.de/archlinux/";
   # 1 GbE nas; cap the pull so a sync never starves live nfs serving or the nightly archbuild writes
   mirrorBwlimitKBps = 60 * 1024;
-  mirrorLock = "/run/archmirror-sync.lock";
+  # a sync waits this long for another nas job before skipping its hour
+  mirrorLockWaitSeconds = 45 * 60;
   mirrorSync = import ./lib/archmirror-sync.nix { inherit pkgs; };
-in {
-  imports = [ ./lib/kopia.nix ./lib/nas-exports.nix ./lib/samba.nix ];
+in
+{
+  imports = [
+    ./lib/kopia.nix
+    ./lib/nas-exports.nix
+    ./lib/samba.nix
+  ];
 
   homelab.textfiles = [ "media_quota" ];
 
@@ -44,7 +79,12 @@ in {
     device = "/dev/disk/by-label/${bulkLabel}";
     fsType = "ext4";
     # nofail: state exports matter more than media; noatime: a read must not write the hdd awake
-    options = [ "defaults" "noatime" "nofail" "x-systemd.device-timeout=30s" ];
+    options = [
+      "defaults"
+      "noatime"
+      "nofail"
+      "x-systemd.device-timeout=30s"
+    ];
   };
 
   # syncthing's folders (the sync folder, the machines' borg repos) outgrow the root disk; the bind keeps
@@ -52,14 +92,24 @@ in {
   fileSystems.${syncthingDir} = {
     device = "${bulk}/syncthing";
     fsType = "none";
-    options = [ "bind" "nofail" "x-systemd.requires-mounts-for=${bulk}" ];
+    options = [
+      "bind"
+      "nofail"
+      "x-systemd.requires-mounts-for=${bulk}"
+    ];
   };
 
   # the documents share's read-only view of the paperless archive; bindfs because paperless keeps the tree 0700
   fileSystems."/srv/nas/documents/archive" = {
     device = "/srv/nas/data/paperless/media/documents/archive";
     fsType = "fuse.bindfs";
-    options = [ "ro" "perms=a+rX" "force-user=nobody" "force-group=nogroup" "allow_other" ];
+    options = [
+      "ro"
+      "perms=a+rX"
+      "force-user=nobody"
+      "force-group=nogroup"
+      "allow_other"
+    ];
   };
   system.fsPackages = [ pkgs.bindfs ];
 
@@ -68,8 +118,15 @@ in {
     description = "Format the bulk disk when blank, enable its project quotas";
     wantedBy = [ "multi-user.target" ];
     before = [ bulkMount ];
-    path = [ pkgs.util-linux pkgs.e2fsprogs pkgs.gnugrep ];
-    serviceConfig = { Type = "oneshot"; RemainAfterExit = true; };
+    path = [
+      pkgs.util-linux
+      pkgs.e2fsprogs
+      pkgs.gnugrep
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
     script = ''
       disk=/dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
       [ -b "$disk" ] || { echo "no bulk disk attached"; exit 0; }
@@ -90,8 +147,18 @@ in {
     requires = [ bulkMount ];
     wantedBy = [ "multi-user.target" ];
     startAt = "hourly";
-    path = [ pkgs.e2fsprogs pkgs.quota pkgs.gawk pkgs.gnugrep pkgs.coreutils pkgs.findutils ];
-    serviceConfig = { Type = "oneshot"; StateDirectory = "bulk-quota"; };
+    path = [
+      pkgs.e2fsprogs
+      pkgs.quota
+      pkgs.gawk
+      pkgs.gnugrep
+      pkgs.coreutils
+      pkgs.findutils
+    ];
+    serviceConfig = {
+      Type = "oneshot";
+      StateDirectory = "bulk-quota";
+    };
     script = ''
       tune2fs -l /dev/disk/by-label/${bulkLabel} | grep -q "^Filesystem features:.*project" || { echo "no project quotas yet"; exit 0; }
       for d in ${lib.escapeShellArgs mediaDirs}; do
@@ -121,27 +188,26 @@ in {
   homelab.nasExports.enable = true;
 
   homelab.smb.shares = {
-    public = { path = "/srv/nas/public"; writable = true; };
-    media = { path = "${bulk}/media"; writable = true; };
-    documents = { path = "/srv/nas/documents"; writable = true; };
+    public = {
+      path = "/srv/nas/public";
+      writable = true;
+    };
+    media = {
+      path = "${bulk}/media";
+      writable = true;
+    };
+    documents = {
+      path = "/srv/nas/documents";
+      writable = true;
+    };
     BACKUPS.path = "/srv/nas/BACKUPS";
-    syncthing = { path = syncthingDir; writable = true; };
-  };
-
-  services.samba-wsdd = {
-    enable = true;
-    openFirewall = true;
-  };
-
-  # mdns so file managers find the nas
-  services.avahi = {
-    enable = true;
-    nssmdns4 = true;
-    publish = {
-      enable = true;
-      addresses = true;
-      workstation = true;
-      userServices = true;
+    syncthing = {
+      path = syncthingDir;
+      writable = true;
+    };
+    cold-storage = {
+      path = coldStorage;
+      writable = true;
     };
   };
 
@@ -152,7 +218,9 @@ in {
     # 1000: the uid every writing container uses
     "d ${bulk} 0775 1000 1000 -"
     "d ${bulk}/media 0775 1000 1000 -"
-  ] ++ map (library: "d ${bulk}/media/${library} 0775 1000 1000 -") mediaLibraries ++ [
+  ]
+  ++ map (library: "d ${bulk}/media/${library} 0775 1000 1000 -") mediaLibraries
+  ++ [
     "d /srv/nas/BACKUPS 0700 root root -"
     # terraform state, pushed by sync.nu; it holds secrets: closed to filebrowser, open to the owner's smb share
     "d /srv/nas/terraform 0700 root root -"
@@ -169,13 +237,15 @@ in {
     "d ${bulk}/syncthing 0775 nobody nogroup -"
     "d ${syncthingDir} 0775 nobody nogroup -"
     "d ${syncthingDir}/sync 0775 nobody nogroup -"
+    # owned like the syncthing data, so a folder moved over from the sync folder keeps its owner
+    "d ${coldStorage} 0775 nobody nogroup -"
     "d /var/lib/syncthing 0700 nobody nogroup -"
     "d /var/lib/filebrowser 0750 1000 1000 -"
     "f /var/lib/filebrowser/filebrowser.db 0640 1000 1000 -"
   ];
 
   virtualisation.oci-containers.containers.filebrowser = {
-    image = "filebrowser/filebrowser:v2.63.3";
+    image = "filebrowser/filebrowser:v2.63.3@sha256:289c5dd677c56662440f26eeb44266ed9746fe563d2e9100f546bff558534d70";
     ports = [ "${toString routes.nas.port}:${toString filebrowserPort}" ];
     volumes = [
       "/srv/nas:/srv"
@@ -190,9 +260,12 @@ in {
     };
   };
 
-  systemd.services.syncthing.environment.HOME = "/var/lib/syncthing";
-  # without the hdd the bind is missing, and syncthing must not take an empty mountpoint for deleted folders
-  systemd.services.syncthing.unitConfig.RequiresMountsFor = syncthingDir;
+  systemd.services.syncthing = {
+    environment.HOME = "/var/lib/syncthing";
+    # without the hdd the bind is missing, and syncthing must not take an empty mountpoint for deleted folders
+    unitConfig.RequiresMountsFor = syncthingDir;
+    serviceConfig.MemoryMax = "${toString syncthingMemoryMaxMiB}M";
+  };
   services.syncthing = {
     enable = true;
     user = "nobody";
@@ -204,11 +277,12 @@ in {
     overrideFolders = false;
     # authelia gates the route, so the gui skips its own host check
     settings.gui.insecureSkipHostcheck = true;
-    # both devices reach the nas directly (lan or wireguard): no discovery servers, relays or reports
+    # both devices dial the nas directly (lan or wireguard): no discovery, relays or reports
     settings.options = {
       urAccepted = -1;
       crashReportingEnabled = false;
       globalAnnounceEnabled = false;
+      localAnnounceEnabled = false;
       relaysEnabled = false;
       natEnabled = false;
     };
@@ -220,7 +294,10 @@ in {
     settings.folders.sync = {
       id = "sync";
       path = "${syncthingDir}/sync";
-      devices = [ "luca-pc" "luca-notebook" ];
+      devices = [
+        "luca-pc"
+        "luca-notebook"
+      ];
       type = "sendreceive";
       ignorePerms = true;
     };
@@ -243,17 +320,14 @@ in {
   services.nginx = {
     enable = true;
     virtualHosts.archrepo = {
-      listen = [{ addr = "0.0.0.0"; port = archrepoPort; }];
+      listen = [
+        {
+          addr = "0.0.0.0";
+          port = archrepoPort;
+        }
+      ];
       root = "/srv/nas/archrepo";
-      extraConfig = ''
-        autoindex on;
-        # internal, lan, wireguard, tailnet
-        allow ${net.zones.internal.subnet};
-        allow ${net.wan.subnet};
-        allow ${net.wireguard.subnet};
-        allow ${tailnet};
-        deny all;
-      '';
+      extraConfig = "autoindex on;";
       # builder state, and the mirror's .~tmp~ staging dirs mid-sync
       locations."~ /\\.".return = "404";
       locations."/archlinux/" = {
@@ -286,8 +360,9 @@ in {
     serviceConfig = {
       Type = "oneshot";
       SuccessExitStatus = [ upstream.unavailable ];
-      # a tick the running sync holds the lock against is skipped, not failed
-      ExecStart = "${pkgs.util-linux}/bin/flock --nonblock --conflict-exit-code 0 ${mirrorLock} ${lib.getExe mirrorSync}";
+      # a tick that finds another nas job past the wait is skipped, not failed
+      ExecStart = "${pkgs.util-linux}/bin/flock --wait ${toString mirrorLockWaitSeconds} --conflict-exit-code 0 ${nasJob.lock} ${lib.getExe mirrorSync}";
+      MemoryMax = "${toString nasJob.memoryMaxMiB}M";
       # behind live nfs serving and the nightly archbuild
       IOSchedulingClass = "idle";
       Nice = 19;
@@ -300,11 +375,22 @@ in {
   systemd.services.journal-flush = {
     description = "Reopen the persistent journal after a full disk";
     startAt = "*:0/15";
-    serviceConfig = { Type = "oneshot"; ExecStart = "${config.systemd.package}/bin/journalctl --flush"; };
+    serviceConfig = {
+      Type = "oneshot";
+      ExecStart = "${config.systemd.package}/bin/journalctl --flush";
+    };
   };
 
-  networking.firewall.allowedTCPPorts = [ archrepoPort syncthingSyncPort ];
-  networking.firewall.allowedUDPPorts = [ syncthingSyncPort syncthingDiscoveryPort ];
+  networking.firewall.extraCommands =
+    firewall.allowFrom {
+      sources = archrepoClients;
+      tcp = [ archrepoPort ];
+    }
+    + firewall.allowFrom {
+      sources = firewall.ownerSources;
+      tcp = [ syncthingSyncPort ];
+      udp = [ syncthingSyncPort ];
+    };
 
   # hot page cache is the point here (nfs serving, tsdb, streams)
   homelab.dropCaches = false;

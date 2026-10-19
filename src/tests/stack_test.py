@@ -18,10 +18,14 @@ STATES = ("on", "off")
 
 def guest_files(src):
     """file (relative to src) -> (boot phase, text) for every guest file stack.nu edits."""
-    files = [p for d in INSTANCE_DIRS for p in sorted((src / d).glob("*/instance.nix")) if not p.parent.name.startswith("_")]
+    files = [
+        p for d in INSTANCE_DIRS for p in sorted((src / d).glob("*/instance.nix")) if not p.parent.name.startswith("_")
+    ]
     files.append(src / SWARM_FILE)
-    return {str(p.relative_to(src)): (re.search(r'bootPhase\s*=\s*"([^"]+)"', p.read_text()).group(1), p.read_text())
-            for p in files}
+    return {
+        str(p.relative_to(src)): (re.search(r'bootPhase\s*=\s*"([^"]+)"', p.read_text()).group(1), p.read_text())
+        for p in files
+    }
 
 
 def status_name(file):
@@ -30,7 +34,9 @@ def status_name(file):
 
 
 def stack(root, *args):
-    return subprocess.run(["nu", "--no-config-file", str(root / "src/scripts/stack.nu"), *args], capture_output=True, text=True)
+    return subprocess.run(
+        ["nu", "--no-config-file", str(root / "src/scripts/stack.nu"), *args], capture_output=True, text=True
+    )
 
 
 def main():
@@ -55,7 +61,7 @@ def main():
             assert status.returncode == 0, status.stderr
             for file, (p, _) in before.items():
                 if p == phase:
-                    line = next(l for l in status.stdout.splitlines() if l.split()[:1] == [status_name(file)])
+                    line = next(row for row in status.stdout.splitlines() if row.split()[:1] == [status_name(file)])
                     assert state in line.split(), f"{phase} {state}: {file} reports {line}"
             assert stack(root, phase, state, "--apply").stdout.endswith("nothing to change.\n"), "not idempotent"
             checked += 1

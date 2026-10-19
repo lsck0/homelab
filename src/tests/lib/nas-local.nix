@@ -10,8 +10,16 @@ let
   localRoot = "/srv/lab-nas";
   localOf = device: localRoot + lib.removePrefix "/srv/nas" (lib.last (lib.splitString ":" device));
   # the systemd and access options carry over; the nfs ones (nfsvers, hard, timeo, retry, ...) mean nothing here
-  keep = option: lib.elem option [ "ro" "rw" "_netdev" ] || lib.hasPrefix "x-systemd." option;
-in {
+  keep =
+    option:
+    lib.elem option [
+      "ro"
+      "rw"
+      "_netdev"
+    ]
+    || lib.hasPrefix "x-systemd." option;
+in
+{
   # activation runs before systemd mounts anything; a tmpfiles rule would need an ordering that cycles with
   # local-fs.target for the mounts without automount
   system.activationScripts.labNasLocal = lib.concatMapStrings (m: ''

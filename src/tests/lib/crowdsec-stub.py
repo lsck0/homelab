@@ -58,21 +58,51 @@ class Handler(http.server.BaseHTTPRequestHandler):
         url = urllib.parse.urlsplit(self.path)
         ip = urllib.parse.parse_qs(url.query).get("ip", [None])[0]
         banned = url.path == "/v1/decisions" and ip in bans_load()
-        call_log({"api": "lapi", "port": LAPI_PORT, "method": self.command, "path": url.path, "ip": ip,
-                  "attack": False, "verdict": "ban" if banned else "allow"})
+        call_log(
+            {
+                "api": "lapi",
+                "port": LAPI_PORT,
+                "method": self.command,
+                "path": url.path,
+                "ip": ip,
+                "attack": False,
+                "verdict": "ban" if banned else "allow",
+            }
+        )
         if not banned:
             self.reply(200, None)
             return
-        self.reply(200, [{"id": 1, "origin": "cscli", "scenario": "homelab-test", "scope": "Ip", "type": "ban",
-                          "value": ip, "duration": BAN_DURATION}])
+        self.reply(
+            200,
+            [
+                {
+                    "id": 1,
+                    "origin": "cscli",
+                    "scenario": "homelab-test",
+                    "scope": "Ip",
+                    "type": "ban",
+                    "value": ip,
+                    "duration": BAN_DURATION,
+                }
+            ],
+        )
 
     def appsec(self):
         length = int(self.headers.get("Content-Length") or 0)
         if length:
             self.rfile.read(length)
         attack = self.headers.get(ATTACK_HEADER) == "1"
-        call_log({"api": "appsec", "port": self.server.server_address[1], "method": self.command, "path": self.path,
-                  "ip": self.headers.get(APPSEC_IP_HEADER), "attack": attack, "verdict": "ban" if attack else "allow"})
+        call_log(
+            {
+                "api": "appsec",
+                "port": self.server.server_address[1],
+                "method": self.command,
+                "path": self.path,
+                "ip": self.headers.get(APPSEC_IP_HEADER),
+                "attack": attack,
+                "verdict": "ban" if attack else "allow",
+            }
+        )
         if attack:
             self.reply(403, {"action": "ban", "http_status": 403})
         else:

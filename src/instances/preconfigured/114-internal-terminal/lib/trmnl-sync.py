@@ -3,6 +3,7 @@
 Usage: trmnl-sync.py <id>=<path> [<id>=<path> ...]
 The key comes from TRMNL_API_KEY_FILE.
 """
+
 import json
 import os
 import pathlib

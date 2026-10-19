@@ -6,51 +6,77 @@
 #   gate.middlewareName { captcha = false; limit = true; tarpit = true; scale = 20; }     # "gate-nocaptcha-x20"
 { pkgs, lib }:
 let
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
 
   loopback = "127.0.0.1";
   port = 27100;
   tarpitPort = 27101;
   authPath = "/auth";
+  stripPath = "/strip";
   metricsPath = "/metrics";
   # the captcha form's target on every host; dotted, so no app's own path is shadowed
   answerPath = "/.lab-gate/answer";
   binary = "gate";
   # what forwardauth passes the gate: the client client-ip named and the cookies (its own, authelia's); nothing else
   # of the request leaves traefik but forwardauth's own X-Forwarded-Host and -Uri (an onion route's address, the path)
-  authRequestHeaders = [ "X-Real-Ip" "Cookie" ];
-  flagNames = [ "captcha" "limit" "tarpit" ];
+  authRequestHeaders = [
+    "X-Real-Ip"
+    "Cookie"
+  ];
+  flagNames = [
+    "captcha"
+    "limit"
+    "tarpit"
+  ];
+  # what the strip reads and rewrites of a request
+  stripHeaders = [ "Cookie" ];
   # a captcha page is under 32 KiB (a png of flat shapes); traefik reads no gate answer past this
   pageBytesMax = 256 * 1024;
 
-  # -----------------------------------------------------------------------------
-  # FUNCTIONS
-  # -----------------------------------------------------------------------------
-
   bit = on: if on then "1" else "0";
-  middlewareName = flags: "gate"
+  middlewareName =
+    flags:
+    "gate"
     + lib.concatMapStrings (name: lib.optionalString (!flags.${name}) "-no${name}") flagNames
     + lib.optionalString (flags.scale != 1) "-x${toString flags.scale}";
-in {
-  inherit loopback port tarpitPort answerPath metricsPath middlewareName;
+in
+{
+  inherit
+    loopback
+    port
+    tarpitPort
+    answerPath
+    metricsPath
+    middlewareName
+    ;
 
   # go's standard library only; buildGoModule runs its tests (gate_test.go) before anything ships
   package = pkgs.buildGoModule {
     pname = "lab-gate";
     version = "1.0.0";
-    src = lib.fileset.toSource { root = ./gate; fileset = ./gate; };
+    src = lib.fileset.toSource {
+      root = ./gate;
+      fileset = ./gate;
+    };
     vendorHash = null;
     env.CGO_ENABLED = "0";
     meta.mainProgram = binary;
   };
 
+  stripMiddlewareName = "strip-session-cookie";
+  # traefik replaces the request's cookies with the gate's answer: the client's without the sso portal's
+  stripMiddleware.forwardAuth = {
+    address = "http://${loopback}:${toString port}${stripPath}";
+    authRequestHeaders = stripHeaders;
+    authResponseHeaders = stripHeaders;
+  };
+
   # flags: { captcha; limit; tarpit; scale; } -> its traefik middleware
   middleware = flags: {
     forwardAuth = {
-      address = "http://${loopback}:${toString port}${authPath}?"
-        + lib.concatMapStrings (name: "${name}=${bit flags.${name}}&") flagNames + "scale=${toString flags.scale}";
+      address =
+        "http://${loopback}:${toString port}${authPath}?"
+        + lib.concatMapStrings (name: "${name}=${bit flags.${name}}&") flagNames
+        + "scale=${toString flags.scale}";
       inherit authRequestHeaders;
       maxResponseBodySize = pageBytesMax;
     };

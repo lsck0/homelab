@@ -23,7 +23,7 @@ wins over any address or state a skill mentions.
 - `vm start <id>`: start a VM and wait until SSH answers. Use this before
   talking to a VM whose AGENTS.md power is `idle after <time>`; it powers off
   again by itself after that long.
-- `vm stop <id>` / `vm reboot <id>`.
+- `vm status <id>`, `vm stop <id>`, `vm reboot <id>`.
 - `ssh <ip> <command>`: root on any VM (10.100.0.<id> internal, 10.200.0.<id> external,
   10.250.0.<id> apps zone) and on the router (10.100.0.1). `ssh 192.168.178.200` is the Proxmox host (`qm`, `pct`, `pvesh`).
 - `pve <get|create|set|delete> <api path> [--<param> <value>...]`: the Proxmox API through `pvesh` on the host,

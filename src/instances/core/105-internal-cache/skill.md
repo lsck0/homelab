@@ -1,23 +1,17 @@
 ---
 name: cache
-description: Nix binary cache (Attic) and sccache.
+description: The ci runner's shared compile cache (sccache on redis).
 version: 1.0.0
 author: homelab
 license: MIT
 platforms: [linux]
 metadata:
   hermes:
-    tags: [Homelab, Nix, Attic, sccache]
+    tags: [Homelab, sccache, Redis]
     related_skills: [homelab-ops]
 ---
 
-# Build caches
-
-## Attic (vm-105, LXC, http://10.100.0.105:8080, https://attic.lsck0.dev, cache `homelab`)
-
-Every VM uses it as a substituter. On vm-105: `atticd` service, client `attic`.
-- Push a store path: `ssh 10.100.0.105 attic push homelab <path>` (client logged in as server admin).
-- Storage: `du -sh /var/lib/atticd/storage`; garbage collection runs from atticd config.
+# Build cache
 
 ## sccache (vm-105, redis://10.100.0.105:6379)
 

@@ -2,12 +2,6 @@ package main
 
 import "sync"
 
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
-
 // table is a map keyed by client with a hard size bound: every per-client state the gate keeps is one, so no client
 // population, however large or spoofed, grows the gate past countMax entries per table.
 type table[V any] struct {
@@ -15,12 +9,6 @@ type table[V any] struct {
 	entries  map[string]V
 	countMax int
 }
-
-/*
- * -----------------------------------------------------------------------------
- * LIFETIME
- * -----------------------------------------------------------------------------
- */
 
 func tableCreate[V any](countMax int) *table[V] {
 	if countMax < 1 {
@@ -37,12 +25,6 @@ func tableDestroy[V any](t *table[V]) {
 	t.entries = nil
 	t.mu.Unlock()
 }
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 // tableRoomMake frees a slot before an insert, the lock held: stale entries go first, then arbitrary ones (go's map
 // order is randomized) down to three quarters, so a flood of new clients costs the old ones their state, not memory.

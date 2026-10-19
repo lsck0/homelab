@@ -11,12 +11,6 @@ import (
 	"time"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 const (
 	// a logout or an expired session keeps passing the gate this long at most
 	sessionCacheTTL = time.Minute
@@ -31,12 +25,6 @@ const (
 	// authelia's level for a first factor; zero is anonymous
 	sessionLevelMin = 1
 )
-
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
 
 type sessionEntry struct {
 	authenticated bool
@@ -60,12 +48,6 @@ type autheliaState struct {
 	} `json:"data"`
 }
 
-/*
- * -----------------------------------------------------------------------------
- * LIFETIME
- * -----------------------------------------------------------------------------
- */
-
 func sessionsCreate(settings SettingsSession) *Sessions {
 	// the ingress serves the portal's certificate; it is verified for the portal's name, whatever address carries it
 	transport := http.DefaultTransport.(*http.Transport).Clone()
@@ -87,12 +69,6 @@ func sessionsDestroy(s *Sessions) {
 	s.http.CloseIdleConnections()
 	tableDestroy(s.cache)
 }
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 func sessionsCheck(ctx context.Context, s *Sessions, value string) (bool, error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, s.url, nil)

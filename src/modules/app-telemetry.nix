@@ -10,15 +10,18 @@
 #
 # Rejected: the docker journald driver. Every container logs as docker.service, so one flooding app got every app on
 # the node rate-limited, and the upload filled vm-103's journal-remote directory, which ignores its size cap.
-{ config, lib, pkgs, inventory, catalog, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inventory,
+  catalog,
+  ...
+}:
 let
   cfg = config.homelab.appTelemetry;
   telemetry = import ./telemetry.nix { inherit lib inventory; };
   inherit (catalog.swarm) cadvisorPort;
-
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
 
   # what `docker service logs` still shows after the shipper read it
   logFileBytes = "10m";
@@ -36,7 +39,9 @@ let
   relay = "app-relay";
   relayDir = "/run/${relay}";
   relayTenants = "${relayDir}/tenants.map";
-  relayPorts = with telemetry.ports; { inherit otlpHttp otlpGrpc pyroscope; };
+  relayPorts = with telemetry.ports; {
+    inherit otlpHttp otlpGrpc pyroscope;
+  };
   collector = inventory.${telemetry.collectorVmid};
   # nginx closes a stream idle this long: the resolver and promtail reconnect
   streamTimeout = "1d";
@@ -46,16 +51,23 @@ let
   shipperJob = "app-logs";
   positions = "/var/lib/promtail/positions.yaml";
   # process: for the pids limit; the per-cpu and tcp families stay off
-  cadvisorMetrics = [ "cpu" "memory" "network" "diskIO" "oom_event" "process" ];
+  cadvisorMetrics = [
+    "cpu"
+    "memory"
+    "network"
+    "diskIO"
+    "oom_event"
+    "process"
+  ];
   # vm-103 scrapes every 15s; the 1s default spent a third of a core on a worker with a dozen tasks
   cadvisorHousekeeping = "10s";
 
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
-
   # the docker api names a container /<stack>_<service>.<slot>.<task id>
-  taskLabel = pattern: label: { source_labels = [ "__meta_docker_container_name" ]; regex = "/${pattern}"; target_label = label; };
+  taskLabel = pattern: label: {
+    source_labels = [ "__meta_docker_container_name" ];
+    regex = "/${pattern}";
+    target_label = label;
+  };
 
   budget = (import ./limits { inherit lib; }).tenant;
   signalApps = lib.attrNames (lib.filterAttrs (_: telemetry.sendsSignals) catalog.apps);
@@ -97,13 +109,15 @@ let
     }
   '';
 
-  relayLocations = door: proxy: lib.concatMapStrings (path: ''
+  relayLocations =
+    door: proxy:
+    lib.concatMapStrings (path: ''
       location = ${path} {
         limit_except POST { deny all; }
         if ($tenant = "") { return 403; }
         ${proxy}
       }
-  '') telemetry.pushPaths.${door};
+    '') telemetry.pushPaths.${door};
   relayConf = nginxConf relayDir ''
     map $remote_addr $tenant {
       default "";
@@ -114,8 +128,8 @@ let
       client_max_body_size ${toString budget.traceBurstBytes};
       location / { return 404; }
     ${relayLocations "otlpHttp" ''
-        proxy_set_header ${telemetry.tenantHeader} $tenant;
-        proxy_pass ${telemetry.urls.otlpHttp};
+      proxy_set_header ${telemetry.tenantHeader} $tenant;
+      proxy_pass ${telemetry.urls.otlpHttp};
     ''}
     }
     server {
@@ -124,8 +138,8 @@ let
       client_max_body_size ${toString budget.traceBurstBytes};
       location / { return 404; }
     ${relayLocations "otlpGrpc" ''
-        grpc_set_header ${telemetry.tenantHeader} $tenant;
-        grpc_pass grpc://${collector.ip}:${toString telemetry.ports.otlpGrpc};
+      grpc_set_header ${telemetry.tenantHeader} $tenant;
+      grpc_pass grpc://${collector.ip}:${toString telemetry.ports.otlpGrpc};
     ''}
     }
     server {
@@ -133,8 +147,8 @@ let
       client_max_body_size ${toString budget.profileBurstBytes};
       location / { return 404; }
     ${relayLocations "pyroscope" ''
-        proxy_set_header ${telemetry.tenantHeader} $tenant;
-        proxy_pass ${telemetry.urls.pyroscope};
+      proxy_set_header ${telemetry.tenantHeader} $tenant;
+      proxy_pass ${telemetry.urls.pyroscope};
     ''}
     }
   '';
@@ -142,7 +156,10 @@ let
   # the relay's address map from the running task containers, rewritten on every container start and stop
   relayResolver = pkgs.writeShellApplication {
     name = "${relay}-resolver";
-    runtimeInputs = [ config.virtualisation.docker.package pkgs.coreutils ];
+    runtimeInputs = [
+      config.virtualisation.docker.package
+      pkgs.coreutils
+    ];
     runtimeEnv.DOCKER_HOST = "unix://${readSocket}";
     text = ''
       apps=" ${toString signalApps} "
@@ -172,15 +189,31 @@ let
   };
   appJob = app: {
     job_name = "app-${app}";
-    docker_sd_configs = [{
-      host = "unix://${readSocket}";
-      refresh_interval = discoveryInterval;
-      filters = [{ name = "label"; values = [ "${stackLabel}=${app}" ]; }];
-    }];
+    docker_sd_configs = [
+      {
+        host = "unix://${readSocket}";
+        refresh_interval = discoveryInterval;
+        filters = [
+          {
+            name = "label";
+            values = [ "${stackLabel}=${app}" ];
+          }
+        ];
+      }
+    ];
     relabel_configs = [
-      { target_label = "job"; replacement = shipperJob; }
-      { target_label = "host"; replacement = config.networking.hostName; }
-      { source_labels = [ "__meta_docker_container_log_stream" ]; target_label = "stream"; }
+      {
+        target_label = "job";
+        replacement = shipperJob;
+      }
+      {
+        target_label = "host";
+        replacement = config.networking.hostName;
+      }
+      {
+        source_labels = [ "__meta_docker_container_log_stream" ];
+        target_label = "stream";
+      }
       (taskLabel telemetry.swarmTaskPatterns.container "container_name")
       (taskLabel telemetry.swarmTaskPatterns.service "swarm_service")
       (taskLabel telemetry.swarmTaskPatterns.stack "swarm_stack")
@@ -198,7 +231,8 @@ let
       }
     ];
   };
-in {
+in
+{
   options.homelab.appTelemetry = {
     enable = lib.mkEnableOption "the swarm worker's per-app log shipping and container metrics";
     shipperJob = lib.mkOption {
@@ -220,18 +254,34 @@ in {
     virtualisation.docker.daemon.settings = {
       bip = telemetry.relayBridge;
       log-driver = "local";
-      log-opts = { max-size = logFileBytes; max-file = logFiles; mode = "non-blocking"; max-buffer-size = logBufferBytes; };
+      log-opts = {
+        max-size = logFileBytes;
+        max-file = logFiles;
+        mode = "non-blocking";
+        max-buffer-size = logBufferBytes;
+      };
     };
 
     services.promtail = {
       enable = true;
       configuration = {
-        server = { http_listen_port = telemetry.ports.promtail; grpc_listen_port = 0; };
+        server = {
+          http_listen_port = telemetry.ports.promtail;
+          grpc_listen_port = 0;
+        };
         positions.filename = positions;
         # a refused batch (loki restarting, a limit) is dropped and counted, never retried ahead of the next app's
-        clients = [{ url = telemetry.urls.lokiPush; drop_rate_limited_batches = true; }];
+        clients = [
+          {
+            url = telemetry.urls.lokiPush;
+            drop_rate_limited_batches = true;
+          }
+        ];
         # longer lines are cut, not dropped; loki cuts at the same length
-        limits_config = { max_line_size = budget.logLineBytes; max_line_size_truncate = true; };
+        limits_config = {
+          max_line_size = budget.logLineBytes;
+          max_line_size_truncate = true;
+        };
         scrape_configs = map appJob (lib.attrNames catalog.apps);
       };
     };
@@ -242,7 +292,11 @@ in {
       wants = [ "${readApi}.service" ];
     };
 
-    users.users.${readApi} = { isSystemUser = true; group = readApi; extraGroups = [ "docker" ]; };
+    users.users.${readApi} = {
+      isSystemUser = true;
+      group = readApi;
+      extraGroups = [ "docker" ];
+    };
     users.groups.${readApi} = { };
     systemd.services.${readApi} = {
       description = "Read-only proxy of the docker api";
@@ -259,7 +313,11 @@ in {
       };
     };
 
-    users.users.${relay} = { isSystemUser = true; group = relay; extraGroups = [ readApi ]; };
+    users.users.${relay} = {
+      isSystemUser = true;
+      group = relay;
+      extraGroups = [ readApi ];
+    };
     users.groups.${relay} = { };
     systemd.tmpfiles.rules = [
       "d ${relayDir} 0750 ${relay} ${relay} -"
@@ -270,11 +328,17 @@ in {
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
       wantedBy = [ "multi-user.target" ];
-      serviceConfig = nginxUnit relay relayConf // { User = relay; Group = relay; };
+      serviceConfig = nginxUnit relay relayConf // {
+        User = relay;
+        Group = relay;
+      };
     };
     systemd.services."${relay}-resolver" = {
       description = "Map the task containers' addresses to their apps' tenants for the relay";
-      after = [ "${relay}.service" "${readApi}.service" ];
+      after = [
+        "${relay}.service"
+        "${readApi}.service"
+      ];
       requires = [ "${relay}.service" ];
       wants = [ "${readApi}.service" ];
       wantedBy = [ "multi-user.target" ];
@@ -291,8 +355,14 @@ in {
 
     homelab.openings.appTelemetry = "the apps' log shipper, cadvisor and the tasks' telemetry relay";
     # vm-103 scrapes the shipper for what it dropped per app and cadvisor for the containers (modules/flows.nix)
-    networking.firewall.allowedTCPPorts = [ telemetry.ports.promtail cadvisorPort ];
-    homelab.ingressOnly.ports = [ telemetry.ports.promtail cadvisorPort ];
+    networking.firewall.allowedTCPPorts = [
+      telemetry.ports.promtail
+      cadvisorPort
+    ];
+    homelab.ingressOnly.ports = [
+      telemetry.ports.promtail
+      cadvisorPort
+    ];
 
     services.cadvisor = {
       enable = true;

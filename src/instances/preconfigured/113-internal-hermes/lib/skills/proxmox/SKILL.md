@@ -29,13 +29,17 @@ Everything else with `terminal` on the host: `ssh 192.168.178.200 <cmd>`.
 - Console when SSH is dead: `qm guest exec <id> -- <cmd>` (QEMU guest agent) or `qm terminal <id>`.
 - Storage: `pvesm status`; disk health `smartctl -a /dev/sda` (also scraped: debian's smartmon and nvme collectors,
   textfile dir `/var/lib/prometheus/node-exporter`).
-- Firewall (`src/terraform/lib.tf` FIREWALL, on; `sync.nu` fails while it is not running): every guest but the
-  router is bound to its own address and mac (ipset `ipfilter-net0` per guest); the host drops what it does not name:
-  ssh from the house lan, 8006 from the owner's workstation and notebook and the router (the ingresses, the homepage
-  and Hermes come through the router), 9100 from the router, ping. A guest that cannot talk after an address change
-  needs its ipset, which the next `sync.nu` writes. `pve-firewall status`, `pve-firewall compile`; the owner's
+- Firewall (`src/terraform/lib.tf`, on; `sync.nu` fails while it is not running): every guest but the
+  router is bound to its own address and mac (ipset `ipfilter-net0` per guest); the host drops what it does not name,
+  by each guest's own address (the router does not masquerade the lab toward it): ssh from the owner's workstation,
+  notebook and wireguard devices and Hermes, 8006 from the owner's, the ingresses and the dashboard (vm-102), 9100
+  from vm-103, ping from the lan and the dashboard.
+  Every guest's own ssh and 9100 are held to the same sources by Proxmox too, refusals in `/var/log/pve-firewall.log`.
+  Root's ssh takes keys alone. A guest that cannot talk after an address change needs its ipset, which the next
+  `sync.nu` writes. `pve-firewall status`, `pve-firewall compile`; the owner's
   rollback is FEATURES.md "Proxmox host".
-- Login: the `lldap` realm over ldaps with a TOTP code; `root@pam` is the fallback (FEATURES.md "Proxmox host").
+- Login: the `lldap` realm over ldaps with a TOTP code; `root@pam` is the fallback with its own second factor
+  (FEATURES.md "Proxmox host").
 - GPU mapping `gpu` = RTX 2060, 10de:1f08 at 0000:2b:00.0 (`lspci -nnk -s 2b:00.0` shows `vfio-pci`).
 
 ## Rules

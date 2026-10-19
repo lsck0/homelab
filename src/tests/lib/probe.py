@@ -29,8 +29,9 @@ PROBE_DIR_VIA = "/var/lib/labprobe"
 PROBE_STATE = {"next_id": 0}
 
 
-def probe_sinks_start(sinks: list[Machine], tcp: tuple[int, ...] = (), udp: tuple[int, ...] = (),
-                      esp: bool = False) -> None:
+def probe_sinks_start(
+    sinks: list[Machine], tcp: tuple[int, ...] = (), udp: tuple[int, ...] = (), esp: bool = False
+) -> None:
     """Start `labprobe sink` on every machine, as a transient unit, and wait until all listeners are bound."""
     ports = (f" --tcp {','.join(map(str, tcp))}" if tcp else "") + (f" --udp {','.join(map(str, udp))}" if udp else "")
     ports += " --esp" if esp else ""
@@ -41,8 +42,14 @@ def probe_sinks_start(sinks: list[Machine], tcp: tuple[int, ...] = (), udp: tupl
         machine.wait_for_file(f"{PROBE_SINK_LOG}.ready", timeout=60)
 
 
-def probe_check(plan: list[dict], sources: dict[str, Machine], sinks: list[Machine], seed: int,
-                timeout_ms: int = 700, runners: dict[str, str] | None = None) -> None:
+def probe_check(
+    plan: list[dict],
+    sources: dict[str, Machine],
+    sinks: list[Machine],
+    seed: int,
+    timeout_ms: int = 700,
+    runners: dict[str, str] | None = None,
+) -> None:
     """Run every probe from its source machine and assert every expectation; ids are assigned here."""
     commands: dict[str, str] = runners or {}
     probes = []
@@ -64,8 +71,10 @@ def probe_check(plan: list[dict], sources: dict[str, Machine], sinks: list[Machi
         machine.copy_from_host(plan_path, f"{vm_dir}/plan.json")
         machine.succeed(f"chmod 0644 {vm_dir}/plan.json")
         prefix = f"{commands[via]} " if via else ""
-        machine.succeed(f"{prefix}labprobe run --plan {vm_dir}/plan.json --out {vm_dir}/results.json "
-                        f"--seed {seed} --timeout-ms {timeout_ms}")
+        machine.succeed(
+            f"{prefix}labprobe run --plan {vm_dir}/plan.json --out {vm_dir}/results.json "
+            f"--seed {seed} --timeout-ms {timeout_ms}"
+        )
         results.update(json.loads(machine.succeed(f"cat {vm_dir}/results.json")))
     log_paths = []
     for index, machine in enumerate(sinks):
@@ -77,8 +86,19 @@ def probe_check(plan: list[dict], sources: dict[str, Machine], sinks: list[Machi
         json.dump(probes, f)
     with open(os.path.join(host_dir, "results.json"), "w", encoding="utf-8") as f:
         json.dump(results, f)
-    report = subprocess.run([LABPROBE, "expect", "--plan", os.path.join(host_dir, "all.json"),
-                             "--results", os.path.join(host_dir, "results.json"), "--sink-logs", ",".join(log_paths)],
-                            capture_output=True, text=True)
+    report = subprocess.run(
+        [
+            LABPROBE,
+            "expect",
+            "--plan",
+            os.path.join(host_dir, "all.json"),
+            "--results",
+            os.path.join(host_dir, "results.json"),
+            "--sink-logs",
+            ",".join(log_paths),
+        ],
+        capture_output=True,
+        text=True,
+    )
     print(report.stdout, end="")
     assert report.returncode == 0, f"probe_check: the lab does not match the plan\n{report.stdout}{report.stderr}"

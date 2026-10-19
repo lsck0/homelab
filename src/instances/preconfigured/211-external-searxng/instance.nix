@@ -1,5 +1,6 @@
 # privacy metasearch
-{ lib, profiles, ... }: {
+{ lib, profiles, ... }:
+{
   vm = {
     bootPhase = "public";
     needs = [ "containers" ];
@@ -12,7 +13,9 @@
   on = profiles.vpnEgress;
 
   # a wake holds the first search 6 to 8 s, and 1h woke it 20 times in 4 days: an idle lxc costs ~165 MiB
-  idle = { stopAfter = "4h"; };
+  idle = {
+    stopAfter = "4h";
+  };
 
   services = {
     searxng = {
@@ -24,7 +27,11 @@
       bodyLimitBytes = 32 * 1024 * 1024;
       # the query is in the url: no referrer leaves
       referrer = false;
-      homepage = { group = "Public"; icon = "searxng"; name = "SearXNG"; };
+      homepage = {
+        group = "Public";
+        icon = "searxng";
+        name = "SearXNG";
+      };
       # anubis fronts it at the edge; the search query is in the url, which the access log would keep
       on = lib.subtractLists [ "cloudflare" "accessLog" ] profiles.hardenedExternal ++ profiles.listed ++ profiles.observed;
     };

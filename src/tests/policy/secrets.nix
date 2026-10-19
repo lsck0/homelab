@@ -14,13 +14,24 @@
 # - the dmz and the apps zone mount per-service state only
 # - no sqlite database (homelab.dbBackup) and no local state (homelab.localState) lies on a nas mount: sqlite over nfs
 #   corrupts or dies of SIGBUS
-{ lib, configs, inventory, lab, src, ... }:
+{
+  lib,
+  configs,
+  inventory,
+  lab,
+  src,
+  ...
+}:
 let
   # the rules live beside src/; a tree evaluated as `path:src` lacks them, a git checkout has them
   sopsConfig = ../../../.sops.yaml;
-  adminRecipients = lib.sort lib.lessThan (lib.filter (r: r != "") (map
-    (line: lib.head (lib.splitString " " (lib.trim (lib.head (lib.splitString "#" line)))))
-    (lib.splitString "\n" (builtins.readFile (src + "/secrets/admins.txt")))));
+  adminRecipients = lib.sort lib.lessThan (
+    lib.filter (r: r != "") (
+      map (line: lib.head (lib.splitString " " (lib.trim (lib.head (lib.splitString "#" line))))) (
+        lib.splitString "\n" (builtins.readFile (src + "/secrets/admins.txt"))
+      )
+    )
+  );
   keyFile = "/var/lib/sops-nix/key.txt";
   # sops-nix's placeholder shape: <SOPS:<sha256 of the name>:PLACEHOLDER>
   placeholderMark = "<SOPS:";
@@ -28,107 +39,220 @@ let
   layout = import ../../modules/secrets.nix { inherit lib lab; };
   plan = layout.planOf configs;
   catalog = import ../../secrets/shared.nix;
-  idOf = config: let m = builtins.match "vm-([0-9]+)" config.networking.hostName; in
+  idOf =
+    config:
+    let
+      m = builtins.match "vm-([0-9]+)" config.networking.hostName;
+    in
     if m == null then null else lib.head m;
   zoneOf = config: if idOf config == null then null else inventory.${idOf config}.type or null;
 
   # one secret only a single folder host reads, declared as shared: it belongs in that folder
-  readersOf = key: lib.attrNames (lib.filterAttrs (_: h: lib.elem key (h.shared)) plan.hosts);
-  placementLaws = lib.concatMap (key: let readers = readersOf key; in
-    lib.optional (lib.length readers == 1 && lib.any (kind: lib.hasPrefix "${kind}/" plan.hosts.${lib.head readers}.home)
-        [ lab.layout.core lab.layout.preconfigured ])
-      ("src/secrets/shared.nix declares ${key}, which only ${lib.head readers} reads: "
-        + "move it to ${plan.hosts.${lib.head readers}.home}/instance.nix `secrets`")
+  readersOf = key: lib.attrNames (lib.filterAttrs (_: h: lib.elem key h.shared) plan.hosts);
+  placementLaws = lib.concatMap (
+    key:
+    let
+      readers = readersOf key;
+    in
+    lib.optional
+      (
+        lib.length readers == 1
+        && lib.any (kind: lib.hasPrefix "${kind}/" plan.hosts.${lib.head readers}.home) [
+          lab.layout.core
+          lab.layout.preconfigured
+        ]
+      )
+      (
+        "src/secrets/shared.nix declares ${key}, which only ${lib.head readers} reads: "
+        + "move it to ${plan.hosts.${lib.head readers}.home}/instance.nix `secrets`"
+      )
   ) (lib.attrNames catalog);
 
-  wiringLaws = name: config: let host = layout.hostOf config.networking.hostName; in
-    lib.optionals (host != null) (map (s: "${name}: secret ${s.key} comes from ${toString s.sopsFile}, not ${layout.fileOf host s.key}")
-      (lib.filter (s: toString s.sopsFile != "${toString src}/${layout.fileOf host s.key}") (lib.attrValues config.sops.secrets)))
-    ++ lib.optional (config.sops.age.keyFile != keyFile) "${name}: sops reads its key from ${toString config.sops.age.keyFile}, not ${keyFile}"
-    ++ lib.optional (config.sops.age.sshKeyPaths != [ ] || config.sops.gnupg.sshKeyPaths != [ ])
-      "${name}: an ssh host key doubles as a sops key"
-    ++ map (f: "${name}: ${f.path} is readable by others (mode ${f.mode})")
-      (lib.filter (f: !(lib.hasSuffix "0" f.mode)) (lib.attrValues config.sops.secrets ++ lib.attrValues config.sops.templates));
+  wiringLaws =
+    name: config:
+    let
+      host = layout.hostOf config.networking.hostName;
+    in
+    lib.optionals (host != null) (
+      map (s: "${name}: secret ${s.key} comes from ${toString s.sopsFile}, not ${layout.fileOf host s.key}") (
+        lib.filter (s: toString s.sopsFile != "${toString src}/${layout.fileOf host s.key}") (
+          lib.attrValues config.sops.secrets
+        )
+      )
+    )
+    ++ lib.optional (
+      config.sops.age.keyFile != keyFile
+    ) "${name}: sops reads its key from ${toString config.sops.age.keyFile}, not ${keyFile}"
+    ++ lib.optional (
+      config.sops.age.sshKeyPaths != [ ] || config.sops.gnupg.sshKeyPaths != [ ]
+    ) "${name}: an ssh host key doubles as a sops key"
+    ++ map (f: "${name}: ${f.path} is readable by others (mode ${f.mode})") (
+      lib.filter (f: !(lib.hasSuffix "0" f.mode)) (lib.attrValues config.sops.secrets ++ lib.attrValues config.sops.templates)
+    );
 
   # the files on disk against the plan; recipients by name: the admins, and each host by its age.pub
   pubOf = c: lib.trim (builtins.readFile (src + "/${plan.hosts.${c}.home}/age.pub"));
   recipientsOf = file: lib.sort lib.lessThan (map (a: a.recipient) ((lib.importJSON (src + "/${file}")).sops.age or [ ]));
   wantRecipients = file: lib.sort lib.lessThan (adminRecipients ++ map pubOf plan.files.${file});
-  namesWanted = file:
-    if lib.hasSuffix "/${layout.sharedName}" file
-    then lib.sort lib.lessThan (lib.findFirst (h: "${h.home}/${layout.sharedName}" == file) null (lib.attrValues plan.hosts)).shared
-    else lib.attrNames (lib.filterAttrs (_: d: d.file == file) plan.secrets);
+  namesWanted =
+    file:
+    if lib.hasSuffix "/${layout.sharedName}" file then
+      lib.sort lib.lessThan
+        (lib.findFirst (h: "${h.home}/${layout.sharedName}" == file) null (lib.attrValues plan.hosts)).shared
+    else
+      lib.attrNames (lib.filterAttrs (_: d: d.file == file) plan.secrets);
   isValues = lib.hasSuffix ".json";
-  fileLaws = file:
-    if !(builtins.pathExists (src + "/${file}")) then [ "src/${file} is missing: run src/scripts/secrets-sync.nu --apply" ]
-    else lib.optional (recipientsOf file != wantRecipients file)
-      "src/${file} is encrypted to [ ${toString (recipientsOf file)} ], not the admins and its readers [ ${toString plan.files.${file}} ]"
-    ++ lib.optional (isValues file && lib.attrNames (removeAttrs (lib.importJSON (src + "/${file}")) [ "sops" ]) != namesWanted file)
-      "src/${file} does not hold exactly [ ${toString (namesWanted file)} ]: run src/scripts/secrets-sync.nu --apply";
-  pubs = map (c: { inherit c; pub = pubOf c; }) (lib.filter (c: builtins.pathExists (src + "/${plan.hosts.${c}.home}/age.pub")) (lib.attrNames plan.hosts));
-  uniqueRecipients = lib.concatLists (lib.mapAttrsToList (pub: es:
-    lib.optional (lib.length es > 1 || lib.elem pub adminRecipients) "hosts ${toString (map (e: e.c) es)} share the recipient ${pub}")
-    (lib.groupBy (e: e.pub) pubs));
+  fileLaws =
+    file:
+    if !(builtins.pathExists (src + "/${file}")) then
+      [ "src/${file} is missing: run src/scripts/secrets-sync.nu --apply" ]
+    else
+      lib.optional (recipientsOf file != wantRecipients file)
+        "src/${file} is encrypted to [ ${toString (recipientsOf file)} ], not the admins and its readers [ ${toString plan.files.${file}} ]"
+      ++ lib.optional (
+        isValues file && lib.attrNames (removeAttrs (lib.importJSON (src + "/${file}")) [ "sops" ]) != namesWanted file
+      ) "src/${file} does not hold exactly [ ${toString (namesWanted file)} ]: run src/scripts/secrets-sync.nu --apply";
+  pubs = map (c: {
+    inherit c;
+    pub = pubOf c;
+  }) (lib.filter (c: builtins.pathExists (src + "/${plan.hosts.${c}.home}/age.pub")) (lib.attrNames plan.hosts));
+  uniqueRecipients = lib.concatLists (
+    lib.mapAttrsToList (
+      pub: es:
+      lib.optional (
+        lib.length es > 1 || lib.elem pub adminRecipients
+      ) "hosts ${toString (map (e: e.c) es)} share the recipient ${pub}"
+    ) (lib.groupBy (e: e.pub) pubs)
+  );
 
   # .sops.yaml: "  - path_regex: src/<file regex>$" followed by "    age: <recipients>"
   ruleLines = lib.splitString "\n" (builtins.readFile sopsConfig);
-  rules = lib.listToAttrs (lib.concatLists (lib.imap0 (i: line: let m = builtins.match "  - path_regex: src/(.*)\\$" line; in
-    lib.optional (m != null) (lib.nameValuePair (builtins.replaceStrings [ "\\." ] [ "." ] (lib.head m))
-      (lib.sort lib.lessThan (lib.splitString "," (lib.removePrefix "    age: " (lib.elemAt ruleLines (i + 1))))))) ruleLines));
-  ruleLaws = lib.optionals (builtins.pathExists sopsConfig) (lib.concatMap (file:
-    lib.optional ((rules.${file} or null) != wantRecipients file) ".sops.yaml has no rule for src/${file} to the admins and its readers"
-  ) (lib.attrNames plan.files));
+  rules = lib.listToAttrs (
+    lib.concatLists (
+      lib.imap0 (
+        i: line:
+        let
+          m = builtins.match "  - path_regex: src/(.*)\\$" line;
+        in
+        lib.optional (m != null) (
+          lib.nameValuePair (builtins.replaceStrings [ "\\." ] [ "." ] (lib.head m)) (
+            lib.sort lib.lessThan (lib.splitString "," (lib.removePrefix "    age: " (lib.elemAt ruleLines (i + 1))))
+          )
+        )
+      ) ruleLines
+    )
+  );
+  ruleLaws = lib.optionals (builtins.pathExists sopsConfig) (
+    lib.concatMap (
+      file:
+      lib.optional (
+        (rules.${file} or null) != wantRecipients file
+      ) ".sops.yaml has no rule for src/${file} to the admins and its readers"
+    ) (lib.attrNames plan.files)
+  );
 
-  layoutLaws = map (p: "secrets layout: ${p}") plan.problems ++ placementLaws
-    ++ lib.concatMap fileLaws (lib.attrNames plan.files) ++ uniqueRecipients ++ ruleLaws;
+  layoutLaws =
+    map (p: "secrets layout: ${p}") plan.problems
+    ++ placementLaws
+    ++ lib.concatMap fileLaws (lib.attrNames plan.files)
+    ++ uniqueRecipients
+    ++ ruleLaws;
 
   # every string a unit runs or is handed: a placeholder there is never replaced
-  unitStrings = unit: lib.filter builtins.isString (
-    [ (unit.script or "") (unit.preStart or "") (unit.postStart or "") ]
-    ++ lib.attrValues (unit.environment or { })
-    ++ lib.flatten (map (k: unit.serviceConfig.${k} or [ ]) [ "ExecStart" "ExecStartPre" "ExecStartPost" "Environment" ]));
-  leakLaws = name: config: lib.concatLists (lib.mapAttrsToList (unit: u:
-    lib.optional (lib.any (lib.hasInfix placeholderMark) (unitStrings u))
-      "${name}: unit ${unit} contains a sops placeholder, which only templates replace") config.systemd.services);
+  unitStrings =
+    unit:
+    lib.filter builtins.isString (
+      [
+        (unit.script or "")
+        (unit.preStart or "")
+        (unit.postStart or "")
+      ]
+      ++ lib.attrValues (unit.environment or { })
+      ++ lib.flatten (
+        map (k: unit.serviceConfig.${k} or [ ]) [
+          "ExecStart"
+          "ExecStartPre"
+          "ExecStartPost"
+          "Environment"
+        ]
+      )
+    );
+  leakLaws =
+    name: config:
+    lib.concatLists (
+      lib.mapAttrsToList (
+        unit: u:
+        lib.optional (lib.any (lib.hasInfix placeholderMark) (unitStrings u)) "${name}: unit ${unit} contains a sops placeholder, which only templates replace"
+      ) config.systemd.services
+    );
 
-  tokenLaws = name: config: let
-    t = config.homelab.tokens;
-    own = idOf config;
-    mints = lib.attrNames (lib.filterAttrs (_: id: toString id == own) t.producers);
-    tokenShares = lib.filter (s: builtins.match "/srv/nas/data/tokens/vm-[0-9]+" s.path != null) config.homelab.nasShares;
-    ownShare = "/srv/nas/data/tokens/vm-${toString own}";
-  in
-    map (s: "${name}: mounts another producer's ${s.path} read-write")
-      (lib.filter (s: s.path != ownShare && !s.readOnly) tokenShares)
-    ++ lib.optional (mints != [ ] && !(lib.any (s: s.path == ownShare && !s.readOnly) tokenShares))
-      "${name}: mints [ ${toString mints} ] without its own token dir mounted read-write"
-    ++ lib.optional (mints == [ ] && lib.any (s: s.path == ownShare) tokenShares)
-      "${name}: mounts a token dir of its own but mints nothing";
+  tokenLaws =
+    name: config:
+    let
+      t = config.homelab.tokens;
+      own = idOf config;
+      mints = lib.attrNames (lib.filterAttrs (_: id: toString id == own) t.producers);
+      tokenShares = lib.filter (s: builtins.match "/srv/nas/data/tokens/vm-[0-9]+" s.path != null) config.homelab.nasShares;
+      ownShare = "/srv/nas/data/tokens/vm-${toString own}";
+    in
+    map (s: "${name}: mounts another producer's ${s.path} read-write") (
+      lib.filter (s: s.path != ownShare && !s.readOnly) tokenShares
+    )
+    ++ lib.optional (
+      mints != [ ] && !(lib.any (s: s.path == ownShare && !s.readOnly) tokenShares)
+    ) "${name}: mints [ ${toString mints} ] without its own token dir mounted read-write"
+    ++ lib.optional (
+      mints == [ ] && lib.any (s: s.path == ownShare) tokenShares
+    ) "${name}: mounts a token dir of its own but mints nothing";
 
-  dumpLaws = name: config: let
-    dumpShares = lib.filter (s: lib.hasPrefix "/srv/nas/data/db-dumps" s.path) config.homelab.nasShares;
-    ownDumps = "/srv/nas/data/db-dumps/${config.networking.hostName}";
-    hasDatabases = config.homelab.dbBackup.databases != { };
-  in
+  dumpLaws =
+    name: config:
+    let
+      dumpShares = lib.filter (s: lib.hasPrefix "/srv/nas/data/db-dumps" s.path) config.homelab.nasShares;
+      ownDumps = "/srv/nas/data/db-dumps/${config.networking.hostName}";
+      hasDatabases = config.homelab.dbBackup.databases != { };
+    in
     map (s: "${name}: mounts ${s.path}, not its own dump dir") (lib.filter (s: s.path != ownDumps) dumpShares)
-    ++ lib.optional (hasDatabases && !(lib.any (s: s.path == ownDumps && !s.readOnly) dumpShares))
-      "${name}: dumps databases without its own dump dir mounted read-write";
+    ++ lib.optional (
+      hasDatabases && !(lib.any (s: s.path == ownDumps && !s.readOnly) dumpShares)
+    ) "${name}: dumps databases without its own dump dir mounted read-write";
 
-  sqliteLaws = name: config: let
-    mountOf = path: lib.findFirst (m: path == m || lib.hasPrefix "${m}/" path) null (lib.attrNames config.homelab.nasMounts);
-    onNas = lib.filter (p: mountOf p != null);
-    sqlitePaths = lib.filter (p: p != null) (map (db: db.sqlite) (lib.attrValues config.homelab.dbBackup.databases));
-    localPaths = map (s: s.path) (lib.attrValues config.homelab.localState);
-  in
-    map (p: "${name}: sqlite database ${p} lies on the nas mount ${mountOf p}: keep it on the guest's disk (homelab.localState)")
-      (onNas sqlitePaths)
+  sqliteLaws =
+    name: config:
+    let
+      mountOf =
+        path: lib.findFirst (m: path == m || lib.hasPrefix "${m}/" path) null (lib.attrNames config.homelab.nasMounts);
+      onNas = lib.filter (p: mountOf p != null);
+      sqlitePaths = lib.filter (p: p != null) (map (db: db.sqlite) (lib.attrValues config.homelab.dbBackup.databases));
+      localPaths = map (s: s.path) (lib.attrValues config.homelab.localState);
+    in
+    map (
+      p: "${name}: sqlite database ${p} lies on the nas mount ${mountOf p}: keep it on the guest's disk (homelab.localState)"
+    ) (onNas sqlitePaths)
     ++ map (p: "${name}: local state ${p} lies on the nas mount ${mountOf p}") (onNas localPaths);
 
-  zoneLaws = name: config:
-    lib.optionals (lib.elem (zoneOf config) [ "external" "apps" ]) (map (s: "${name}: dmz or apps host mounts ${s.path}")
-      (lib.filter (s: !(lib.hasPrefix "/srv/nas/data/" s.path)) config.homelab.nasShares));
+  zoneLaws =
+    name: config:
+    lib.optionals
+      (lib.elem (zoneOf config) [
+        "external"
+        "apps"
+      ])
+      (
+        map (s: "${name}: dmz or apps host mounts ${s.path}") (
+          lib.filter (s: !(lib.hasPrefix "/srv/nas/data/" s.path)) config.homelab.nasShares
+        )
+      );
 in
-lib.concatLists (lib.mapAttrsToList (name: config:
-  wiringLaws name config ++ leakLaws name config ++ tokenLaws name config ++ dumpLaws name config ++ zoneLaws name config
-  ++ sqliteLaws name config
-) configs) ++ layoutLaws
+lib.concatLists (
+  lib.mapAttrsToList (
+    name: config:
+    wiringLaws name config
+    ++ leakLaws name config
+    ++ tokenLaws name config
+    ++ dumpLaws name config
+    ++ zoneLaws name config
+    ++ sqliteLaws name config
+  ) configs
+)
+++ layoutLaws

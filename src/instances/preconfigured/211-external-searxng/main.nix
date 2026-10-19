@@ -1,4 +1,13 @@
-{ config, lib, pkgs, inventory, catalog, site, lab, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inventory,
+  catalog,
+  site,
+  lab,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   route = catalog.external.searxng;
@@ -53,7 +62,10 @@ let
       # every keystroke would go to the provider
       autocomplete = "";
       # json for hermes, everyone else is held to the limiter's api cap
-      formats = [ "html" "json" ];
+      formats = [
+        "html"
+        "json"
+      ];
     };
     outgoing = {
       # a page waits for its slowest engine; every working engine answers under 1.2 s at p95 through the tunnel
@@ -63,24 +75,65 @@ let
     };
     # off: google html and qwant (403 on this exit), mojeek (altcha captcha, answers nothing), google cse stands in
     engines = [
-      { name = "bing"; disabled = false; }
+      {
+        name = "bing";
+        disabled = false;
+      }
       # google's ranking through its anubis solver: bing and duckduckgo web both rank bing's index, so it counts double
-      { name = "startpage"; inactive = false; disabled = false; weight = 2; }
+      {
+        name = "startpage";
+        inactive = false;
+        disabled = false;
+        weight = 2;
+      }
       # the html endpoint refuses curl_cffi's chrome tls with a 403; duckduckgo web speaks firefox tls and answers
-      { name = "duckduckgo"; disabled = true; }
-      { name = "duckduckgo web"; disabled = false; }
+      {
+        name = "duckduckgo";
+        disabled = true;
+      }
+      {
+        name = "duckduckgo web";
+        disabled = false;
+      }
       # a proof-of-work captcha on this exit: every end of its suspension cost one search the full timeout
-      { name = "brave"; disabled = true; }
-      { name = "brave.images"; disabled = true; }
-      { name = "brave.videos"; disabled = true; }
-      { name = "brave.news"; disabled = true; }
+      {
+        name = "brave";
+        disabled = true;
+      }
+      {
+        name = "brave.images";
+        disabled = true;
+      }
+      {
+        name = "brave.videos";
+        disabled = true;
+      }
+      {
+        name = "brave.news";
+        disabled = true;
+      }
       # the infobox when sparql answers in time; it missed a few queries in ten and held those pages at the timeout
-      { name = "wikidata"; timeout = 1.5; }
-      { name = "nixos wiki"; disabled = false; }
-      { name = "duden"; disabled = false; }
+      {
+        name = "wikidata";
+        timeout = 1.5;
+      }
+      {
+        name = "nixos wiki";
+        disabled = false;
+      }
+      {
+        name = "duden";
+        disabled = false;
+      }
       # onion engines need a tor proxy, they fail to load on every start
-      { name = "ahmia"; inactive = true; }
-      { name = "torch"; inactive = true; }
+      {
+        name = "ahmia";
+        inactive = true;
+      }
+      {
+        name = "torch";
+        inactive = true;
+      }
     ];
     hostnames = {
       high_priority = [
@@ -97,7 +150,11 @@ let
   limiter = (pkgs.formats.toml { }).generate "searxng-limiter.toml" {
     botdetection = {
       # without the ingress here every client is its ip and shares one quota
-      trusted_proxies = [ "127.0.0.0/8" "::1" "${ingressIp}/32" ];
+      trusted_proxies = [
+        "127.0.0.0/8"
+        "::1"
+        "${ingressIp}/32"
+      ];
       ip_limit.link_token = true;
       ip_lists = {
         pass_ip = [ "${hermesIp}/32" ];
@@ -107,8 +164,12 @@ let
     };
   };
 
-  units = [ "podman-searxng.service" "podman-searxng-valkey.service" ];
-in {
+  units = [
+    "podman-searxng.service"
+    "podman-searxng-valkey.service"
+  ];
+in
+{
   systemd.services.podman-network-searxng = {
     description = "Podman network for searxng and its valkey";
     requiredBy = units;
@@ -136,20 +197,27 @@ in {
 
   virtualisation.oci-containers.containers = {
     searxng-valkey = {
-      image = "docker.io/valkey/valkey:9.1.2-alpine";
+      image = "docker.io/valkey/valkey:9.1.2-alpine@sha256:48332870af354a799964c0012ae1194a0bf2bf894eb508f945810596dc2d8d11";
       networks = [ network ];
       user = valkeyUser;
       # limiter counters only: a restart just resets every client's window
       cmd = [
         "valkey-server"
         # reachable only from the searxng network, nothing publishes it
-        "--bind" "0.0.0.0"
-        "--protected-mode" "no"
-        "--port" valkeyPort
-        "--save" ""
-        "--appendonly" "no"
-        "--maxmemory" valkeyMaxMemory
-        "--maxmemory-policy" "allkeys-lru"
+        "--bind"
+        "0.0.0.0"
+        "--protected-mode"
+        "no"
+        "--port"
+        valkeyPort
+        "--save"
+        ""
+        "--appendonly"
+        "no"
+        "--maxmemory"
+        valkeyMaxMemory
+        "--maxmemory-policy"
+        "allkeys-lru"
       ];
       capabilities.ALL = false;
       extraOptions = [
@@ -161,7 +229,7 @@ in {
     };
 
     searxng = {
-      image = "docker.io/searxng/searxng:2026.9.16-461f174b0";
+      image = "docker.io/searxng/searxng:2026.9.16-461f174b0@sha256:a31763b7af3caf6ae9aac1816ba774214eb550252e06a4998f276ded8d60461b";
       # pings valkey once at start and exits without it (public_instance)
       dependsOn = [ "searxng-valkey" ];
       networks = [ network ];

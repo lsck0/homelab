@@ -10,12 +10,6 @@ import (
 	"time"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 const (
 	// time to read the scene and type six characters, with room to think; an answer after it counts as wrong
 	puzzleLifetime = 10 * time.Minute
@@ -26,12 +20,6 @@ const (
 	// clients holding a puzzle at once
 	challengeCountMax = 16384
 )
-
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
 
 // Notice is what the next captcha page tells its client about the last answer.
 type Notice int
@@ -79,12 +67,6 @@ type Challenges struct {
 	clients          *table[challenge]
 }
 
-/*
- * -----------------------------------------------------------------------------
- * LIFETIME
- * -----------------------------------------------------------------------------
- */
-
 func challengesCreate(regenerationsMax int, answerLogPath *string) (*Challenges, error) {
 	c := &Challenges{colorCount: len(shapeColors), regenerationsMax: regenerationsMax, clients: tableCreate[challenge](challengeCountMax)}
 	if answerLogPath != nil {
@@ -106,12 +88,6 @@ func challengesDestroy(c *Challenges) {
 	}
 	tableDestroy(c.clients)
 }
-
-/*
- * -----------------------------------------------------------------------------
- * INTERNAL
- * -----------------------------------------------------------------------------
- */
 
 func seedRandom() uint64 {
 	var bytes [8]byte
@@ -141,12 +117,6 @@ func challengePuzzle(c *Challenges, state challenge) Puzzle {
 	}
 	return puzzleFromSeed(state.seed, c.colorCount)
 }
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 // challengesShow is the puzzle a client sees now: its current one while it lasts, else a new one, a scene or, for an
 // onion session, its route's address among lookalikes. A reload shows the same puzzle, so reloading earns nothing;

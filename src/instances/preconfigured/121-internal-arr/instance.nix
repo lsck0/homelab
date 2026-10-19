@@ -4,31 +4,74 @@ let
   # each api key is <name>-key: a sops secret the servarr apps take from their environment (lib/servarr.nix), a lab
   # token bazarr mints itself; hermes' skill of the same name calls the api
   arrs = {
-    bazarr = { port = 6767; description = "Subtitles"; minted = true; };
-    lidarr = { port = 8686; description = "Music"; minted = false; };
-    prowlarr = { port = 9696; description = "Indexers (Tor)"; minted = false; };
-    radarr = { port = 7878; description = "Movies"; minted = false; };
-    sonarr = { port = 8989; description = "Series & anime"; minted = false; };
+    bazarr = {
+      port = 6767;
+      description = "Subtitles";
+      minted = true;
+    };
+    lidarr = {
+      port = 8686;
+      description = "Music";
+      minted = false;
+    };
+    prowlarr = {
+      port = 9696;
+      description = "Indexers (Tor)";
+      minted = false;
+    };
+    radarr = {
+      port = 7878;
+      description = "Movies";
+      minted = false;
+    };
+    sonarr = {
+      port = 8989;
+      description = "Series & anime";
+      minted = false;
+    };
   };
   keyOf = name: "${name}-key";
   # where a widget finds the key: the token share, or sops
   keySource = arr: if arr.minted then "tokens" else "secrets";
-in {
+in
+{
   vm = {
     # parked while unused; "on" brings it back
     power = "off";
     bootPhase = "media";
-    needs = [ "containers" "nfs" ];
+    needs = [
+      "containers"
+      "nfs"
+    ];
     # five .net apps plus flaresolverr's chromium: 1510 MiB peak over 7d
     memoryMiB = 3072;
     balloonMiB = 1536;
     diskGiB = 16;
   };
 
-  grants = lib.mapAttrsToList (name: arr: { from = [ "operator" ]; tcp = [ arr.port ]; why = "hermes' ${name} skill calls the api"; }) arrs
+  grants =
+    lib.mapAttrsToList (name: arr: {
+      from = [ "operator" ];
+      tcp = [ arr.port ];
+      why = "hermes' ${name} skill calls the api";
+    }) arrs
     ++ [
-      { from = [ "122" ]; tcp = [ arrs.radarr.port arrs.sonarr.port ]; why = "janitorr on jellyfin reads and cleans the libraries"; }
-      { from = [ "123" ]; tcp = [ arrs.radarr.port arrs.sonarr.port ]; why = "jellyseerr hands approved requests over, at the addresses arr-wire gives it"; }
+      {
+        from = [ "122" ];
+        tcp = [
+          arrs.radarr.port
+          arrs.sonarr.port
+        ];
+        why = "janitorr on jellyfin reads and cleans the libraries";
+      }
+      {
+        from = [ "123" ];
+        tcp = [
+          arrs.radarr.port
+          arrs.sonarr.port
+        ];
+        why = "jellyseerr hands approved requests over, at the addresses arr-wire gives it";
+      }
     ];
 
   tokens = map keyOf (lib.attrNames (lib.filterAttrs (_: arr: arr.minted) arrs));
@@ -39,7 +82,10 @@ in {
       inherit (arr) description;
       group = "Media";
       icon = name;
-      widget = { ${keySource arr}.key = keyOf name; type = name; };
+      widget = {
+        ${keySource arr}.key = keyOf name;
+        type = name;
+      };
     };
     on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
   }) arrs;

@@ -1,9 +1,22 @@
 # hermes: the owner's telegram agent, root on every guest and the proxmox host, with the lab's tools and skills
-{ config, lib, pkgs, inputs, inventory, nasPath, site, catalog, lab, retry, upstream, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  inputs,
+  inventory,
+  nasPath,
+  site,
+  catalog,
+  lab,
+  retry,
+  upstream,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   ntfy = import ../../../modules/ntfy.nix;
-  stateDir = config.services.hermes-agent.stateDir;
+  inherit (config.services.hermes-agent) stateDir;
   tokensDir = config.homelab.tokens.dir;
   # the sops template adds the trailing newline openssh needs
   sshKey = config.sops.templates."hermes-ssh-key".path;
@@ -18,11 +31,11 @@ let
   bootWaitAttempts = 60;
   bootWaitIntervalS = 5;
 
-  # root on every guest (the router's lan side included), on the router's zone legs and on the proxmox host
+  # root on every guest, on the router's zone legs and on the proxmox host
   guests = lib.filter (v: v.type != "router") (lib.attrValues inventory);
   router = lib.findSingle (v: v.type == "router") null null (lib.attrValues inventory);
   routerLegs = lib.unique (map (v: v.gateway) guests);
-  rootHosts = lib.unique (map (v: v.ip) (lib.attrValues inventory) ++ routerLegs ++ [ site.lan.proxmox ]);
+  rootHosts = lib.unique (map (v: v.ip) guests ++ routerLegs ++ [ site.lan.proxmox ]);
   # every host key of the lab, the proxmox host's included, checked strictly: no trust on first use
   knownHosts = ../../../generated/known_hosts;
 
@@ -38,7 +51,14 @@ let
 
   vm = pkgs.writeShellScriptBin "vm" ''
     set -euo pipefail
-    export PATH="${lib.makeBinPath [ pve pkgs.jq pkgs.openssh pkgs.coreutils ]}:$PATH"
+    export PATH="${
+      lib.makeBinPath [
+        pve
+        pkgs.jq
+        pkgs.openssh
+        pkgs.coreutils
+      ]
+    }:$PATH"
     inventory=${pkgs.writeText "inventory.json" (builtins.toJSON inventory)}
     node=/nodes/${site.node}
     field() { jq -er --arg id "$1" --arg f "$2" '.[$id][$f]' "$inventory"; }
@@ -61,17 +81,27 @@ let
   '';
 
   # the api keys the skills call (`lab-token <name>`): a lab token an app minted, or a sops secret the lab chose
-  apiSecrets = [ "jellyfin-admin-pass" "lidarr-key" "prowlarr-key" "radarr-key" "sonarr-key" ];
-  labToken = pkgs.writeShellScriptBin "lab-token" ''
-    if [ -z "''${1:-}" ]; then
-      for token in ${tokensDir}/*.token; do [ ! -e "$token" ] || basename "$token" .token; done | cat - <(printf '%s\n' ${toString apiSecrets}) | sort
-      exit 0
-    fi
-    for secret in ${toString (map (name: config.sops.secrets.${name}.path) apiSecrets)}; do
-      [ "''${secret##*/}" != "$1" ] || exec cat "$secret"
-    done
-    exec cat "${tokensDir}/$1.token"
-  '' // { names = config.homelab.tokens.reads ++ apiSecrets; };
+  apiSecrets = [
+    "jellyfin-admin-pass"
+    "lidarr-key"
+    "prowlarr-key"
+    "radarr-key"
+    "sonarr-key"
+  ];
+  labToken =
+    pkgs.writeShellScriptBin "lab-token" ''
+      if [ -z "''${1:-}" ]; then
+        for token in ${tokensDir}/*.token; do [ ! -e "$token" ] || basename "$token" .token; done | cat - <(printf '%s\n' ${toString apiSecrets}) | sort
+        exit 0
+      fi
+      for secret in ${toString (map (name: config.sops.secrets.${name}.path) apiSecrets)}; do
+        [ "''${secret##*/}" != "$1" ] || exec cat "$secret"
+      done
+      exec cat "${tokensDir}/$1.token"
+    ''
+    // {
+      names = config.homelab.tokens.reads ++ apiSecrets;
+    };
 
   # mc <command...>: rcon through vm-214
   mc = pkgs.writeShellScriptBin "mc" ''
@@ -101,7 +131,12 @@ let
 
   # the github app may push branches and open prs
   githubAppToken = pkgs.writers.writeNu "github-app-token" {
-    makeWrapperArgs = [ "--prefix" "PATH" ":" (lib.makeBinPath [ pkgs.openssl ]) ];
+    makeWrapperArgs = [
+      "--prefix"
+      "PATH"
+      ":"
+      (lib.makeBinPath [ pkgs.openssl ])
+    ];
   } ./lib/github-app-token.nu;
   labGithubToken = pkgs.writeShellScriptBin "lab-github-token" ''
     exec ${upstream.run} github ${githubAppToken} ${toString githubApp.id} ${config.sops.secrets.hermes-github-app-key.path} ${githubRepo}
@@ -114,7 +149,15 @@ let
   # push the hermes/<topic> branch and open its pr
   labPr = pkgs.writeShellScriptBin "lab-pr" ''
     set -euo pipefail
-    export PATH="${lib.makeBinPath [ pkgs.git pkgs.curl pkgs.jq pkgs.coreutils labGithubToken ]}:$PATH"
+    export PATH="${
+      lib.makeBinPath [
+        pkgs.git
+        pkgs.curl
+        pkgs.jq
+        pkgs.coreutils
+        labGithubToken
+      ]
+    }:$PATH"
     api=https://api.github.com/repos/${githubRepo}
     branch=$(git symbolic-ref --short HEAD)
     [[ "$branch" =~ ^hermes/[a-z0-9._-]+$ ]] || { echo "lab-pr: branch must be hermes/<topic> (lowercase), not $branch" >&2; exit 1; }
@@ -138,13 +181,29 @@ let
     echo "pull request: $url"
   '';
 
-  urlOf = id: lib.concatStringsSep ", " (lib.concatLists (lib.mapAttrsToList (_: side:
-    lib.mapAttrsToList (_: r: "https://${net.fqdn r.host}") (lib.filterAttrs (_: r: r.vmid != null && toString r.vmid == id) side)
-  ) { inherit (catalog) internal external; }));
-  powerOf = v: if !v.powered then "off" else if v.idle != null then "idle after ${v.idle}" else "on";
-  inventoryTable = lib.concatStringsSep "\n" (lib.mapAttrsToList (id: v:
-    "| ${id} | ${v.name} | ${v.ip} | ${powerOf v} | ${urlOf id} |"
-  ) inventory);
+  urlOf =
+    id:
+    lib.concatStringsSep ", " (
+      lib.concatLists (
+        lib.mapAttrsToList (
+          _: side:
+          lib.mapAttrsToList (_: r: "https://${net.fqdn r.host}") (
+            lib.filterAttrs (_: r: r.vmid != null && toString r.vmid == id) side
+          )
+        ) { inherit (catalog) internal external; }
+      )
+    );
+  powerOf =
+    v:
+    if !v.powered then
+      "off"
+    else if v.idle != null then
+      "idle after ${v.idle}"
+    else
+      "on";
+  inventoryTable = lib.concatStringsSep "\n" (
+    lib.mapAttrsToList (id: v: "| ${id} | ${v.name} | ${v.ip} | ${powerOf v} | ${urlOf id} |") inventory
+  );
 
   agentsMd = ''
     # Homelab
@@ -173,7 +232,7 @@ let
 
     - Zones: ${net.zones.internal.subnet} internal, ${net.zones.external.subnet} external DMZ,
       ${net.zones.apps.subnet} apps (swarm workers); VM id = last octet. Router
-      ${net.zones.internal.routerIp} / ${net.zones.external.routerIp} / ${net.zones.apps.routerIp} / ${site.lan.router}.
+      ${net.zones.internal.routerIp} / ${net.zones.external.routerIp} / ${net.zones.apps.routerIp}.
     - Public names *.${site.domain} go through Traefik (vm-100 internal, vm-200
       external) with Authelia SSO; from here, call VMs by IP instead.
     - NAS vm-104: all persistent service data under /srv/nas/data/<service>,
@@ -196,40 +255,66 @@ let
   # needs no edit here
   generalSkillsDir = ./lib/skills;
   serviceOf = i: lib.removePrefix "${i.zone}-" (lib.removePrefix "${i.id}-" i.name);
-  skillEntries = map (name: { inherit name; file = generalSkillsDir + "/${name}/SKILL.md"; })
-      (lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir generalSkillsDir)))
-    ++ map (i: { name = serviceOf i; file = i.dir + "/skill.md"; })
-      (lib.filter (i: i.dir != null && builtins.pathExists (i.dir + "/skill.md")) (lib.attrValues lab.instances));
+  skillEntries =
+    map (name: {
+      inherit name;
+      file = generalSkillsDir + "/${name}/SKILL.md";
+    }) (lib.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir generalSkillsDir)))
+    ++ map (i: {
+      name = serviceOf i;
+      file = i.dir + "/skill.md";
+    }) (lib.filter (i: i.dir != null && builtins.pathExists (i.dir + "/skill.md")) (lib.attrValues lab.instances));
   skillNamesTwice = lib.attrNames (lib.filterAttrs (_: es: lib.length es > 1) (lib.groupBy (e: e.name) skillEntries));
-  skills = assert lib.assertMsg (skillNamesTwice == [ ]) "hermes skills named twice: ${toString skillNamesTwice}";
+  skills =
+    assert lib.assertMsg (skillNamesTwice == [ ]) "hermes skills named twice: ${toString skillNamesTwice}";
     lib.listToAttrs (map (e: lib.nameValuePair e.name e.file) skillEntries);
   skillNames = lib.attrNames skills;
 
   lucaSkillsDir = "${inputs.dotfiles}/skills";
-  lucaSkillNames = lib.attrNames (lib.filterAttrs
-    (n: t: t == "directory" && builtins.pathExists "${lucaSkillsDir}/${n}/SKILL.md")
-    (builtins.readDir lucaSkillsDir));
+  lucaSkillNames = lib.attrNames (
+    lib.filterAttrs (n: t: t == "directory" && builtins.pathExists "${lucaSkillsDir}/${n}/SKILL.md") (
+      builtins.readDir lucaSkillsDir
+    )
+  );
 
   # every declared skill as one read-only tree (skills.external_dirs): a skill dropped here is gone on the next
   # deploy, and the skills hermes writes itself stay in its own skills dir
   skillsTree = pkgs.linkFarm "hermes-skills" (
-    lib.mapAttrsToList (name: file: { name = "homelab/${name}/SKILL.md"; path = file; }) skills
-    ++ map (name: { name = "luca/${name}/SKILL.md"; path = "${lucaSkillsDir}/${name}/SKILL.md"; }) lucaSkillNames);
+    lib.mapAttrsToList (name: file: {
+      name = "homelab/${name}/SKILL.md";
+      path = file;
+    }) skills
+    ++ map (name: {
+      name = "luca/${name}/SKILL.md";
+      path = "${lucaSkillsDir}/${name}/SKILL.md";
+    }) lucaSkillNames
+  );
   # root's copies in the skills dir would shadow skillsTree; what hermes writes is its own and stays
   skillsCopiesRemove = pkgs.writeShellScript "hermes-skills-copies-remove" ''
     ${pkgs.findutils}/bin/find ${stateDir}/.hermes/skills -mindepth 1 -maxdepth 1 -user root -exec ${pkgs.coreutils}/bin/rm -rf {} +
   '';
-in {
+in
+{
   imports = [ inputs.hermes-agent.nixosModules.default ];
 
   sops.secrets = {
-    hermes-ssh-key = { owner = "hermes"; mode = "0400"; };
-    hermes-github-app-key = { owner = "hermes"; mode = "0400"; };
-    hermes-claude-token = {};
-    telegram-bot-token = {};
-    telegram-chat-id = {};
-    ntfy-hermes-password = {};
-  } // lib.genAttrs apiSecrets (_: { owner = "hermes"; mode = "0400"; });
+    hermes-ssh-key = {
+      owner = "hermes";
+      mode = "0400";
+    };
+    hermes-github-app-key = {
+      owner = "hermes";
+      mode = "0400";
+    };
+    hermes-claude-token = { };
+    telegram-bot-token = { };
+    telegram-chat-id = { };
+    ntfy-hermes-password = { };
+  }
+  // lib.genAttrs apiSecrets (_: {
+    owner = "hermes";
+    mode = "0400";
+  });
   sops.templates."hermes-ntfy.netrc" = {
     owner = "hermes";
     mode = "0400";
@@ -258,8 +343,7 @@ in {
   };
 
   # /srv/sync is the owner's ~/Sync
-  homelab.nasMounts = nasPath "/srv/sync" "syncthing/sync"
-    // nasPath "/srv/media" "bulk/media";
+  homelab.nasMounts = nasPath "/srv/sync" "syncthing/sync" // nasPath "/srv/media" "bulk/media";
 
   programs.ssh.extraConfig = ''
     # one router, one host key, whichever zone leg answers
@@ -276,7 +360,10 @@ in {
   programs.git = {
     enable = true;
     config = {
-      user = { name = "Hermes"; email = "hermes@${site.domain}"; };
+      user = {
+        name = "Hermes";
+        email = "hermes@${site.domain}";
+      };
       credential."https://github.com".helper = "${gitCredential}";
     };
   };
@@ -309,11 +396,33 @@ in {
     };
 
     extraPackages = with pkgs; [
-      pve vm mc labToken labNotify labPr labGithubToken config.nix.package
-      openssh curl jq yq-go git gnugrep gnused coreutils findutils netcat-gnu
-      poppler-utils python3 openssl
+      pve
+      vm
+      mc
+      labToken
+      labNotify
+      labPr
+      labGithubToken
+      config.nix.package
+      openssh
+      curl
+      jq
+      yq-go
+      git
+      gnugrep
+      gnused
+      coreutils
+      findutils
+      netcat-gnu
+      poppler-utils
+      python3
+      openssl
       # fetching into /srv/sync or /srv/media
-      wget aria2 yt-dlp rsync unzip
+      wget
+      aria2
+      yt-dlp
+      rsync
+      unzip
     ];
 
     workingDirectory = "${stateDir}/workspace";

@@ -7,12 +7,6 @@ import (
 	"sync"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 const (
 	metricVerdicts     = "homelab_gate_verdicts_total"
 	metricAnswers      = "homelab_gate_answers_total"
@@ -22,12 +16,6 @@ const (
 	metricTarpitActive = "homelab_gate_tarpit_active"
 	metricOnionDecoys  = "homelab_gate_onion_decoys_total"
 )
-
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
 
 type metricSpec struct {
 	name  string
@@ -54,12 +42,6 @@ type Metrics struct {
 	values map[string]map[string]int64
 }
 
-/*
- * -----------------------------------------------------------------------------
- * LIFETIME
- * -----------------------------------------------------------------------------
- */
-
 func metricsCreate() *Metrics {
 	values := map[string]map[string]int64{}
 	for _, spec := range metricSpecs {
@@ -69,12 +51,6 @@ func metricsCreate() *Metrics {
 }
 
 func metricsDestroy(_ *Metrics) {}
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 // metricsAdd moves a series by delta; label is its one label's value, "" for a metric without one.
 func metricsAdd(m *Metrics, name, label string, delta int64) {

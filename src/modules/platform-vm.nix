@@ -1,8 +1,14 @@
 # qemu guest: disk, bootloader, agent
-{ config, lib, modulesPath, ... }:
+{
+  config,
+  lib,
+  modulesPath,
+  ...
+}:
 let
   dropCachesEveryMin = 30;
-in {
+in
+{
   imports = [ (modulesPath + "/profiles/qemu-guest.nix") ];
 
   options.homelab.dropCaches = lib.mkOption {

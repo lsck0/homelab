@@ -3,7 +3,14 @@
 # Public routes (modules/catalog.nix) go to their guest or the swarm with their protection (modules/traefik);
 # every internal route is relayed to the internal ingress over tls verified for its host, so authelia decides there.
 # A host no router names gets a 404 here, nothing travels inward for it.
-{ config, lib, inventory, site, catalog, ... }:
+{
+  config,
+  lib,
+  inventory,
+  site,
+  catalog,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   service = import ../../../modules/service.nix { inherit lib; };
@@ -31,7 +38,8 @@ let
   installRule = lib.concatMapStringsSep " || " (h: "Host(`${net.fqdn h}`)") (lib.attrNames installHosts);
 
   relayTarget = "https://${net.ipOf net.zones.internal.ingress}:${toString net.ports.https}";
-in {
+in
+{
   homelab.onDemand = {
     enable = true;
     side = "external";
@@ -45,47 +53,70 @@ in {
 
     # cloudflare connects here and appends the client it saw
     trustCloudflare = true;
-    crowdsecBouncer = { enable = true; whitelistCidrs = net.privateRanges; };
+    crowdsecBouncer = {
+      enable = true;
+      whitelistCidrs = net.privateRanges;
+    };
     # the internet's ingress asks the captcha; a logged-in user is known by authelia behind the internal ingress
     gate = {
       captcha.enable = true;
-      session = { url = "${relayTarget}/api/state"; host = net.fqdn catalog.internal.authelia.host; };
+      session = {
+        url = "${relayTarget}/api/state";
+        host = net.fqdn catalog.internal.authelia.host;
+      };
     };
     botDefense.enable = true;
     cloudflareOnly.enable = true;
 
-    loopbackPorts = { install-nginx = installPort; }
-      // lib.mapAttrs' (name: svc: lib.nameValuePair "ondemand-${name}" svc.listenPort) config.homelab.onDemand.services;
+    loopbackPorts = {
+      install-nginx = installPort;
+    }
+    // lib.mapAttrs' (name: svc: lib.nameValuePair "ondemand-${name}" svc.listenPort) config.homelab.onDemand.services;
 
-    routers = lib.listToAttrs (map (b: lib.nameValuePair (metricsBlockName b) {
-      # /API/Metrics, //api/metrics/x reach one handler too; traefik already resolved dot segments and escapes
-      rule = "Host(`${net.fqdn b.host}`) && PathRegexp(`${service.prefixPattern b.path}(/|$)`)";
-      service = "noop@internal";
-      entryPoints = [ "websecure" ];
-      priority = metricsBlockPriority;
-      middlewares = [ "deny-all" ];
-      on = service.protectionFeatures;
-    }) catalog.metricsBlocks) // {
-      install-tls = {
-        rule = installRule;
-        service = "install";
-        entryPoints = [ "websecure" ];
-        # published raw for a bare arch iso's curl, piped into sh, which solves no captcha
-        on = lib.subtractLists [ "cloudflare" "captcha" ] service.protectionFeatures;
+    routers =
+      lib.listToAttrs (
+        map (
+          b:
+          lib.nameValuePair (metricsBlockName b) {
+            # /API/Metrics, //api/metrics/x reach one handler too; traefik already resolved dot segments and escapes
+            rule = "Host(`${net.fqdn b.host}`) && PathRegexp(`${service.prefixPattern b.path}(/|$)`)";
+            service = "noop@internal";
+            entryPoints = [ "websecure" ];
+            priority = metricsBlockPriority;
+            middlewares = [ "deny-all" ];
+            on = service.protectionFeatures;
+          }
+        ) catalog.metricsBlocks
+      )
+      // {
+        install-tls = {
+          rule = installRule;
+          service = "install";
+          entryPoints = [ "websecure" ];
+          # published raw for a bare arch iso's curl, piped into sh, which solves no captcha
+          on = lib.subtractLists [ "cloudflare" "captcha" ] service.protectionFeatures;
+        };
       };
-    };
 
-    services.install.loadBalancer.servers = [{ url = "http://127.0.0.1:${toString installPort}"; }];
+    services.install.loadBalancer.servers = [ { url = "http://127.0.0.1:${toString installPort}"; } ];
   };
 
   services.nginx = {
     enable = true;
-    virtualHosts = lib.mapAttrs' (host: line: lib.nameValuePair (net.fqdn host) {
-      listen = [{ addr = "127.0.0.1"; port = installPort; }];
-      locations."/".extraConfig = ''
-        default_type text/plain;
-        return 200 "${line}\n";
-      '';
-    }) installHosts;
+    virtualHosts = lib.mapAttrs' (
+      host: line:
+      lib.nameValuePair (net.fqdn host) {
+        listen = [
+          {
+            addr = "127.0.0.1";
+            port = installPort;
+          }
+        ];
+        locations."/".extraConfig = ''
+          default_type text/plain;
+          return 200 "${line}\n";
+        '';
+      }
+    ) installHosts;
   };
 }

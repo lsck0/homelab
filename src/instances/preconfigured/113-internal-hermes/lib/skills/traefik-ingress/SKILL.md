@@ -62,8 +62,9 @@ metadata:
 - 502/504: backend down; check the VM (`vm status <id>`, `podman ps`) or on-demand wake logs.
   A single 502 on an on-demand service right after it was shut down is expected
   to be retried away: every route carries a `retry-upstream` middleware.
-- 403 on vm-200: WAF or `internal-only` middleware. `registry` and `attic` are
-  blocked publicly by design (headless, token-only, no browser login).
+- 403 on vm-200: WAF or `internal-only` middleware. `registry` is blocked publicly by design (headless,
+  token-only, no browser login).
+- 503 at once: the route's guest is powered off (instance.nix `vm.power`), or an app is not deployed.
 - A page loads without CSS, or every request re-challenges: Anubis client-IP or
   cookie problem, see above.
 - A browser gets nonsense prose: its User-Agent matched the labyrinth list.

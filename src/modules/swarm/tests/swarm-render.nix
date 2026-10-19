@@ -2,8 +2,17 @@
 # and the laws of both platform parsers over generated input (tests/render_properties_test.py, hypothesis,
 # derandomized: the same examples every run)
 { pkgs, ... }:
-pkgs.runCommand "swarm-render" { nativeBuildInputs = [ (pkgs.python3.withPackages (ps: [ ps.pyyaml ps.hypothesis ])) ]; } ''
-  python3 ${./swarm_render_test.py} ${../lib/swarm-render.py}
-  python3 ${./render_properties_test.py} ${../lib/swarm-render.py} ${../../../instances/core/107-internal-swarm/lib/app-builder.py}
-  touch $out
-''
+pkgs.runCommand "swarm-render"
+  {
+    nativeBuildInputs = [
+      (pkgs.python3.withPackages (ps: [
+        ps.pyyaml
+        ps.hypothesis
+      ]))
+    ];
+  }
+  ''
+    python3 ${./swarm_render_test.py} ${../lib/swarm-render.py}
+    python3 ${./render_properties_test.py} ${../lib/swarm-render.py} ${../../../instances/core/107-internal-swarm/lib/app-builder.py}
+    touch $out
+  ''

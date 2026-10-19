@@ -6,6 +6,7 @@ Env:   GITHUB_TOKEN_FILE (a read-only token), GITHUB_USER, GITHUB_PRIVATE (1: in
 The payload goes to TRMNL's cloud, so only public repos, their ci notifications and their issues and pull
 requests are in it unless GITHUB_PRIVATE=1: the token sees the private ones, the panel must not show them.
 """
+
 import json
 import os
 import sys
@@ -108,22 +109,27 @@ def payload_build(repos, notes, issues, prs, commits7, commits30, now, include_p
     for row in ci_rows:
         row["age"] = ago(row["last"], now)
 
-    active = [{
-        "name": r["name"][:REPO_NAME_CHARS],
-        "lang": (r.get("language") or "-")[:LANG_CHARS],
-        "stars": r.get("stargazers_count", 0),
-        "age": ago(r.get("pushed_at"), now),
-    } for r in repos[:REPO_ROWS]]
+    active = [
+        {
+            "name": r["name"][:REPO_NAME_CHARS],
+            "lang": (r.get("language") or "-")[:LANG_CHARS],
+            "stars": r.get("stargazers_count", 0),
+            "age": ago(r.get("pushed_at"), now),
+        }
+        for r in repos[:REPO_ROWS]
+    ]
 
     work = []
     for kind, res in (("issue", issues), ("pr", prs)):
         for i in (res.get("items") or [])[:WORK_ROWS]:
-            work.append({
-                "kind": kind,
-                "repo": i.get("repository_url", "").rsplit("/", 1)[-1][:WORK_REPO_CHARS],
-                "title": (i.get("title") or "")[:WORK_TITLE_CHARS],
-                "age": ago(i.get("created_at"), now),
-            })
+            work.append(
+                {
+                    "kind": kind,
+                    "repo": i.get("repository_url", "").rsplit("/", 1)[-1][:WORK_REPO_CHARS],
+                    "title": (i.get("title") or "")[:WORK_TITLE_CHARS],
+                    "age": ago(i.get("created_at"), now),
+                }
+            )
     work = work[:WORK_ROWS]
 
     # from the repo list, not per-repo /languages calls
@@ -177,19 +183,25 @@ def main():
 
     # a failed call keeps the last github.json; the unit's upstream wrapper retries and tells an outage apart
     try:
-        payload = payload_build(get(f"user/repos?per_page={PAGE_SIZE_MAX}&affiliation=owner&sort=pushed", token),
-                                get(f"notifications?per_page={PAGE_SIZE_MAX}", token),
-                                search("issue"), search("pr"),
-                                commits(token, COMMITS_SHORT_DAYS), commits(token, COMMITS_LONG_DAYS),
-                                datetime.now(timezone.utc))
+        payload = payload_build(
+            get(f"user/repos?per_page={PAGE_SIZE_MAX}&affiliation=owner&sort=pushed", token),
+            get(f"notifications?per_page={PAGE_SIZE_MAX}", token),
+            search("issue"),
+            search("pr"),
+            commits(token, COMMITS_SHORT_DAYS),
+            commits(token, COMMITS_LONG_DAYS),
+            datetime.now(timezone.utc),
+        )
     except (urllib.error.URLError, ValueError, TimeoutError) as e:
         print(f"github: {e}, keeping the last github.json", file=sys.stderr)
         return 1
     os.makedirs(out, exist_ok=True)
     feed_io.file_write_atomic(os.path.join(out, "github.json"), json.dumps(payload))
-    print(f"github: {payload['commits7']} commits/7d, {payload['repos']} repos, "
-          f"{payload['ci_failing']} repos with failing CI, {payload['issues']} issues, "
-          f"{payload['prs']} PRs")
+    print(
+        f"github: {payload['commits7']} commits/7d, {payload['repos']} repos, "
+        f"{payload['ci_failing']} repos with failing CI, {payload['issues']} issues, "
+        f"{payload['prs']} PRs"
+    )
     return 0
 
 

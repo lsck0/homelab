@@ -8,7 +8,7 @@ use tools.nu [sh-quote warn]
 
 const HOST_KEY_PATH = "/etc/ssh/ssh_host_ed25519_key.pub"
 # a guest booting or rebooting: up to 5 minutes for its sshd, and 3 for its qemu agent or container to answer
-export const SSH_WAIT_ATTEMPTS = 60
+const SSH_WAIT_ATTEMPTS = 60
 const SSH_WAIT_INTERVAL = 5sec
 const HOST_KEY_ATTEMPTS = 36
 const HOST_KEY_RETRY = 5sec
@@ -28,6 +28,8 @@ const HOST_AGE_KEY_PATH = "/var/lib/sops-nix/key.txt"
 const NIX_FEATURES = [--extra-experimental-features "nix-command flakes"]
 # the switch's own status, as the last line of its output: a timeout or a lost connection leaves none
 const SWITCH_STATUS_MARK = "homelab-switch-status="
+# the toplevel sync.nu last deployed, for the guest to tell from the one it runs (drift: a hand switch, a rollback)
+const DEPLOYED_TOPLEVEL_FILE = "/var/lib/homelab/deployed-toplevel"
 const KNOWN_HOSTS_HEADER = [
     "# every ssh host key of the lab, checked strictly by sync.nu, hermes and the owner's ssh config"
     "# Proxmox: pinned by src/scripts/init.nu --pin after a console check. Guests: written by sync.nu from each"
@@ -47,14 +49,6 @@ const HOST_KEYS_REMOTE = r#'for g in "${@:2}"; do
 done
 true'#
 const ED25519_KEY = '^[A-Za-z0-9+/]+=*$'
-
-# -----------------------------------------------------------------------------
-# REACHING THE LAB
-# -----------------------------------------------------------------------------
-
-export def --wrapped lab-ssh [lab: record, ...args: string]: any -> any {
-    $in | ^ssh -F $lab.ssh_config ...$args
-}
 
 # the command's {exit_code, stdout, stderr} on a guest, never raising
 export def lab-ssh-try [lab: record, ip: string, command: string, --timeout-s: int = 5]: any -> record {
@@ -103,10 +97,6 @@ export def guest-sleep [lab: record, id: string]: nothing -> nothing {
     print $">>>   stopping vm-($id) again, it scales to zero"
     api $lab -X POST $"($lab.api.url)/nodes/($lab.api.node)/(api-kind $lab $id)/($id)/status/shutdown" | ignore
 }
-
-# -----------------------------------------------------------------------------
-# HOST KEYS
-# -----------------------------------------------------------------------------
 
 # {<id>: "<key type> <key>"} of every guest whose ed25519 host key the hypervisor could read from inside it; a guest
 # still booting is left out
@@ -159,10 +149,6 @@ export def host-keys-learn [lab: record, ids: list<string>]: nothing -> nothing 
     mv --force $tmp $lab.known_hosts
 }
 
-# -----------------------------------------------------------------------------
-# DEPLOY
-# -----------------------------------------------------------------------------
-
 # scripts/lib/<script> under the nu of the closure being deployed (modules/base), its input on stdin: a guest still on
 # a generation without nu runs it too. ssh joins argv into one remote command
 def guest-payload [lab: record, ip: string, toplevel: string, script: string, ...args: string]: any -> record {
@@ -191,6 +177,13 @@ def wait-for-reboot [lab: record, ip: string, boot_id: string]: nothing -> bool 
         sleep $SSH_WAIT_INTERVAL
     }
     false
+}
+
+def deployed-toplevel-record [lab: record, name: string, ip: string, toplevel: string]: nothing -> bool {
+    let dir = $DEPLOYED_TOPLEVEL_FILE | path dirname
+    let recorded = lab-ssh-try $lab $ip $"mkdir -p ($dir) && echo ($toplevel) > ($DEPLOYED_TOPLEVEL_FILE)"
+    if $recorded.exit_code != 0 { print $"ERROR: ($name): the deployed toplevel is not recorded: ($recorded.stderr | str trim)" }
+    $recorded.exit_code == 0
 }
 
 # the router deploys before the batch build finishes and builds its own (toplevel null); a host the batch failed has ""
@@ -226,7 +219,7 @@ export def deploy-nixos [lab: record, name: string, ip: string, toplevel: any, h
     let current = lab-ssh-try $lab $ip "readlink -f /run/current-system" | get stdout | str trim
     if $current == $toplevel and $key_state != "changed" {
         print $">>> ($name) already up-to-date. Skipping."
-        return true
+        return (deployed-toplevel-record $lab $name $ip $toplevel)
     }
     if $key_state == "changed" { print $">>> ($name): age key replaced, re-activating to decrypt its secrets" }
 
@@ -242,15 +235,17 @@ export def deploy-nixos [lab: record, name: string, ip: string, toplevel: any, h
         return false
     }
     if $status != "0" {
-        let judged = $output | str join "\n" | guest-payload $lab $ip $toplevel switch-failures.nu
+        let printed = $output | where { not ($in | str starts-with $SWITCH_STATUS_MARK) } | str join "\n"
+        let judged = $printed | guest-payload $lab $ip $toplevel switch-failures.nu
         let failed = if $judged.exit_code == 0 { $judged.stdout | str trim | lines | str join " " } else { "unknown: the guest did not answer" }
         if $failed != "" {
-            print $"ERROR: ($name): the switch failed: ($failed)"
+            print $"ERROR: ($name): the switch failed \(exit ($status)\): ($failed)"
             return false
         }
         print $">>> ($name): only transient units failed during the switch."
     }
     if $key_state == "changed" and (host-age-key-run $lab $toplevel settle $host_key $ip) == null { return false }
+    if not (deployed-toplevel-record $lab $name $ip $toplevel) { return false }
     print $">>> ($name) deployed."
 
     # a terraform disk bump grows the disk, not the partition; an lxc has no /dev/sda, reads 0

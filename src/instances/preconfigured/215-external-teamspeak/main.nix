@@ -12,18 +12,25 @@ let
   uid = "9987";
   voicePort = toString catalog.l4.teamspeak.port;
   filesPort = toString catalog.l4.teamspeak-files.port;
-in {
+in
+{
   homelab.localState.teamspeak = {
     path = stateDir;
     unit = "podman-${container}";
     sqlite = [ "*.sqlitedb" ];
     # the logs hold the privilege key: they stay on the guest, out of the nas and its snapshots
-    exclude = [ "logs" "crashdumps" ];
+    exclude = [
+      "logs"
+      "crashdumps"
+    ];
   };
 
   virtualisation.oci-containers.containers.${container} = {
     inherit image;
-    ports = [ "${voicePort}:${voicePort}/udp" "${filesPort}:${filesPort}/tcp" ];
+    ports = [
+      "${voicePort}:${voicePort}/udp"
+      "${filesPort}:${filesPort}/tcp"
+    ];
     volumes = [ "${stateDir}:${dataDir}" ];
     environment = {
       TSSERVER_LICENSE_ACCEPTED = "accept";

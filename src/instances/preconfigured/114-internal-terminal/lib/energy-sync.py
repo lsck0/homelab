@@ -14,6 +14,7 @@ the panel and the board cannot disagree. Writes:
 
 A Prometheus that does not answer leaves "-" everywhere, never a 0, and says so in the footer.
 """
+
 import datetime
 import os
 import sys
@@ -22,10 +23,6 @@ import urllib.request
 
 import energy_model as em
 import feed_io
-
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
 
 # the panel's chart viewbox (energy.liquid), the template scales it to its box
 CHART_WIDTH_PX = 480
@@ -61,10 +58,6 @@ PROMETHEUS = os.environ.get("ENERGY_PROMETHEUS", "")
 SPOT_API = os.environ.get("ENERGY_SPOT_API", em.SPOT_API)
 
 
-# -----------------------------------------------------------------------------
-# FORMATTING
-# -----------------------------------------------------------------------------
-
 def format_decimal(value, digits=1):
     """German decimal with thousands dots, "-" when unknown."""
     if value is None:
@@ -76,8 +69,11 @@ def format_decimal(value, digits=1):
 def format_power(watts):
     if watts is None:
         return MISSING
-    return f"{format_decimal(watts / em.WATTS_PER_KILOWATT, 2)} kW" if abs(watts) >= em.WATTS_PER_KILOWATT \
+    return (
+        f"{format_decimal(watts / em.WATTS_PER_KILOWATT, 2)} kW"
+        if abs(watts) >= em.WATTS_PER_KILOWATT
         else f"{watts:.0f} W"
+    )
 
 
 def format_age(seconds):
@@ -99,8 +95,13 @@ def chart_path(points, t0, t1, value_max, close):
     assert t1 > t0, (t0, t1)
     if not points or value_max <= 0:
         return ""
-    xy = [((t - t0) / (t1 - t0) * CHART_WIDTH_PX,
-           CHART_HEIGHT_PX - max(0.0, min(v, value_max)) / value_max * CHART_HEIGHT_PX) for t, v in points]
+    xy = [
+        (
+            (t - t0) / (t1 - t0) * CHART_WIDTH_PX,
+            CHART_HEIGHT_PX - max(0.0, min(v, value_max)) / value_max * CHART_HEIGHT_PX,
+        )
+        for t, v in points
+    ]
     d = "M" + " L".join(f"{x:.1f},{y:.1f}" for x, y in xy)
     if close:
         d += f" L{xy[-1][0]:.1f},{CHART_HEIGHT_PX} L{xy[0][0]:.1f},{CHART_HEIGHT_PX} Z"
@@ -113,10 +114,6 @@ def ratio_from(numerator, denominator):
         return None
     return 1 - numerator / denominator
 
-
-# -----------------------------------------------------------------------------
-# QUERIES
-# -----------------------------------------------------------------------------
 
 class Source:
     """Prometheus at one instant: batched queries, None when it did not answer."""
@@ -151,10 +148,6 @@ def period_terms(window):
     terms = em.energy_terms(window) | em.cost_terms(window)
     return {name: terms[name] for name in em.PERIOD_TERMS}
 
-
-# -----------------------------------------------------------------------------
-# PERIODS
-# -----------------------------------------------------------------------------
 
 def days_kept_from(today):
     """The first day the month bars need: the first of the month PERIOD_COUNTS["month"] months back."""
@@ -207,7 +200,8 @@ def textfile_render(day_totals, month_totals):
             for term, value in sorted(values.items()):
                 unit, label, kind = em.PERIOD_TERMS[term]
                 by_metric.setdefault(em.period_metric(period, unit), []).append(
-                    f'{em.period_metric(period, unit)}{{{period}="{label_value}",{label}="{kind}"}} {value!r}')
+                    f'{em.period_metric(period, unit)}{{{period}="{label_value}",{label}="{kind}"}} {value!r}'
+                )
         for metric, samples in sorted(by_metric.items()):
             lines.append(f"# HELP {metric} Energy totals per local {period}, from energy-sync.py.")
             lines.append(f"# TYPE {metric} gauge")
@@ -220,22 +214,24 @@ def periods_shown(days, today_values, today):
     all_days = dict(days)
     if today_values:
         all_days[today.isoformat()] = today_values
-    day_keys = sorted(all_days)[-(em.PERIOD_COUNTS["day"] + 1):]
+    day_keys = sorted(all_days)[-(em.PERIOD_COUNTS["day"] + 1) :]
     months = months_from_days(all_days)
-    month_keys = sorted(months)[-(em.PERIOD_COUNTS["month"] + 1):]
+    month_keys = sorted(months)[-(em.PERIOD_COUNTS["month"] + 1) :]
     return {k: all_days[k] for k in day_keys}, {k: months[k] for k in month_keys}
 
 
-# -----------------------------------------------------------------------------
-# PANEL SECTIONS
-# -----------------------------------------------------------------------------
-
 def section_now(source):
-    values = source.terms({
-        "pv": f"max({em.PV_W})", "load": f"max({em.LOAD_W})", "grid": f"max({em.GRID_W})",
-        "battery": f"max({em.BATTERY_W})", "soc": f"max({em.SOC_RATIO})", "unaccounted": f"max({em.UNACCOUNTED_W})",
-        "online": "min(fronius_up)",
-    })
+    values = source.terms(
+        {
+            "pv": f"max({em.PV_W})",
+            "load": f"max({em.LOAD_W})",
+            "grid": f"max({em.GRID_W})",
+            "battery": f"max({em.BATTERY_W})",
+            "soc": f"max({em.SOC_RATIO})",
+            "unaccounted": f"max({em.UNACCOUNTED_W})",
+            "online": "min(fronius_up)",
+        }
+    )
     if values is None:
         values = {}
     grid, battery, soc = values.get("grid"), values.get("battery"), values.get("soc")
@@ -259,8 +255,12 @@ def section_now(source):
 
 
 def section_chart(source, midnight_s, next_midnight_s, now_s):
-    series = source.ranges({"pv": f"max({em.PV_W})", "load": f"max({em.LOAD_W})", "soc": f"max({em.SOC_RATIO})"},
-                           midnight_s, now_s, CHART_STEP_S)
+    series = source.ranges(
+        {"pv": f"max({em.PV_W})", "load": f"max({em.LOAD_W})", "soc": f"max({em.SOC_RATIO})"},
+        midnight_s,
+        now_s,
+        CHART_STEP_S,
+    )
     pv, load, soc = series.get("pv", []), series.get("load", []), series.get("soc", [])
     peak = max([v for _, v in pv + load] + [CHART_AXIS_STEP_W])
     top = -(-peak // CHART_AXIS_STEP_W) * CHART_AXIS_STEP_W
@@ -276,11 +276,14 @@ def section_chart(source, midnight_s, next_midnight_s, now_s):
 def section_today(values):
     values = values or {}
     return {
-        "pv": format_decimal(values.get("pv_kwh")), "load": format_decimal(values.get("load_kwh")),
-        "import": format_decimal(values.get("import_kwh")), "export": format_decimal(values.get("export_kwh")),
+        "pv": format_decimal(values.get("pv_kwh")),
+        "load": format_decimal(values.get("load_kwh")),
+        "import": format_decimal(values.get("import_kwh")),
+        "export": format_decimal(values.get("export_kwh")),
         "autarky": format_percent(ratio_from(values.get("import_known_load_kwh"), values.get("load_kwh"))),
         "self_use": format_percent(ratio_from(values.get("export_known_pv_kwh"), values.get("pv_kwh"))),
-        "cost": format_decimal(values.get("net_eur"), 2), "saved": format_decimal(values.get("savings_eur"), 2),
+        "cost": format_decimal(values.get("net_eur"), 2),
+        "saved": format_decimal(values.get("savings_eur"), 2),
     }
 
 
@@ -293,12 +296,22 @@ def today_terms(midnight_s, now_s):
 
 def section_forecast(source):
     last30 = em.cost_terms(em.window_from_seconds(em.COVERAGE_S), fee_seconds=em.covered_seconds())
-    values = source.terms({"month": em.cost_forecast(last30, em.SECONDS_PER_MONTH),
-                           "year": em.cost_forecast(last30, em.SECONDS_PER_YEAR),
-                           "covered_s": em.covered_seconds()}) or {}
+    values = (
+        source.terms(
+            {
+                "month": em.cost_forecast(last30, em.SECONDS_PER_MONTH),
+                "year": em.cost_forecast(last30, em.SECONDS_PER_YEAR),
+                "covered_s": em.covered_seconds(),
+            }
+        )
+        or {}
+    )
     covered_s = values.get("covered_s")
-    return {"month": format_decimal(values.get("month"), 0), "year": format_decimal(values.get("year"), 0),
-            "days": round(covered_s / em.SECONDS_PER_DAY) if covered_s is not None else 0}
+    return {
+        "month": format_decimal(values.get("month"), 0),
+        "year": format_decimal(values.get("year"), 0),
+        "days": round(covered_s / em.SECONDS_PER_DAY) if covered_s is not None else 0,
+    }
 
 
 def section_history(days, today):
@@ -307,8 +320,14 @@ def section_history(days, today):
     for back in range(HISTORY_DAYS, 0, -1):
         day = today - datetime.timedelta(days=back)
         values = days.get(day.isoformat(), {})
-        rows.append({"label": WEEKDAYS[day.weekday()], "date": day.strftime("%d."),
-                     "pv": values.get("pv_kwh"), "load": values.get("load_kwh")})
+        rows.append(
+            {
+                "label": WEEKDAYS[day.weekday()],
+                "date": day.strftime("%d."),
+                "pv": values.get("pv_kwh"),
+                "load": values.get("load_kwh"),
+            }
+        )
     top = max([r[k] or 0 for r in rows for k in ("pv", "load")] + [1])
     for r in rows:
         r["pv_pct"] = round((r["pv"] or 0) / top * PERCENT)
@@ -346,8 +365,13 @@ def section_spot(slots, now_s):
     hourly = em.spot_hourly(slots, now_s, SPOT_HOURS_SHOWN)
     current = em.spot_current(slots, now_s)
     if not hourly:
-        return {"now": format_decimal(current * CENTS_PER_EURO if current is not None else None), "hours": [],
-                "lo": MISSING, "hi": MISSING, "cheap": MISSING}
+        return {
+            "now": format_decimal(current * CENTS_PER_EURO if current is not None else None),
+            "hours": [],
+            "lo": MISSING,
+            "hi": MISSING,
+            "cheap": MISSING,
+        }
     lo, hi = min(p for _, p in hourly), max(p for _, p in hourly)
     span = hi - lo or 1
     cheap = em.spot_cheapest_window(hourly, CHEAP_WINDOW_HOURS)
@@ -359,17 +383,22 @@ def section_spot(slots, now_s):
     hours = []
     for t, p in hourly:
         hour = datetime.datetime.fromtimestamp(t, em.HOUSE_ZONE).hour
-        hours.append({"h": hour, "label": hour % SPOT_HOUR_LABEL_EVERY == 0,
-                      "pct": round(SPOT_BAR_FLOOR_PERCENT + (p - lo) / span * (PERCENT - SPOT_BAR_FLOOR_PERCENT)),
-                      "cheap": bool(cheap) and cheap[0] <= t < cheap[0] + CHEAP_WINDOW_HOURS * em.SECONDS_PER_HOUR})
-    return {"now": format_decimal(current * CENTS_PER_EURO if current is not None else None, 1), "hours": hours,
-            "lo": format_decimal(lo * CENTS_PER_EURO, 1), "hi": format_decimal(hi * CENTS_PER_EURO, 1),
-            "cheap": cheap_label}
+        hours.append(
+            {
+                "h": hour,
+                "label": hour % SPOT_HOUR_LABEL_EVERY == 0,
+                "pct": round(SPOT_BAR_FLOOR_PERCENT + (p - lo) / span * (PERCENT - SPOT_BAR_FLOOR_PERCENT)),
+                "cheap": bool(cheap) and cheap[0] <= t < cheap[0] + CHEAP_WINDOW_HOURS * em.SECONDS_PER_HOUR,
+            }
+        )
+    return {
+        "now": format_decimal(current * CENTS_PER_EURO if current is not None else None, 1),
+        "hours": hours,
+        "lo": format_decimal(lo * CENTS_PER_EURO, 1),
+        "hi": format_decimal(hi * CENTS_PER_EURO, 1),
+        "cheap": cheap_label,
+    }
 
-
-# -----------------------------------------------------------------------------
-# MAIN
-# -----------------------------------------------------------------------------
 
 def run(feed_dir, state_dir, now_s, urlopen=urllib.request.urlopen):
     """One sync: the payload, the gauges and the state, all from Prometheus and the price cache at now_s."""
@@ -385,8 +414,10 @@ def run(feed_dir, state_dir, now_s, urlopen=urllib.request.urlopen):
 
     spot_path = os.path.join(state_dir, "spot.json")
     spot_cache = em.spot_cache_refresh(
-        feed_io.file_json_load(spot_path), now_s,
-        lambda first, last: em.spot_fetch(urlopen, SPOT_API, em.SPOT_ZONE, first, last))
+        feed_io.file_json_load(spot_path),
+        now_s,
+        lambda first, last: em.spot_fetch(urlopen, SPOT_API, em.SPOT_ZONE, first, last),
+    )
 
     payload = {
         "view": "energy",
@@ -405,15 +436,18 @@ def run(feed_dir, state_dir, now_s, urlopen=urllib.request.urlopen):
     }
 
     shown_days, shown_months = periods_shown(
-        days, {k: v for k, v in (today_values or {}).items() if k in em.PERIOD_TERMS}, today)
+        days, {k: v for k, v in (today_values or {}).items() if k in em.PERIOD_TERMS}, today
+    )
     os.makedirs(feed_dir, exist_ok=True)
     feed_io.file_write_atomic(os.path.join(feed_dir, "energy.json"), feed_io.json_dumps(payload))
     feed_io.file_write_atomic(os.path.join(state_dir, "energy.prom"), textfile_render(shown_days, shown_months))
     feed_io.file_write_atomic(days_path, feed_io.json_dumps({"days": days}))
     feed_io.file_write_atomic(spot_path, feed_io.json_dumps(spot_cache))
-    feed_io.log(f"pv {payload['now']['pv']}, load {payload['now']['load']}, today {payload['today']['cost']} EUR, "
-                f"spot {payload['spot']['now']} ct, {payload['prices_missing']} prices unset, "
-                f"{len(days)} days cached, prometheus {'ok' if payload['source_ok'] else 'unreachable'}")
+    feed_io.log(
+        f"pv {payload['now']['pv']}, load {payload['now']['load']}, today {payload['today']['cost']} EUR, "
+        f"spot {payload['spot']['now']} ct, {payload['prices_missing']} prices unset, "
+        f"{len(days)} days cached, prometheus {'ok' if payload['source_ok'] else 'unreachable'}"
+    )
     return 0 if payload["source_ok"] else 1
 
 

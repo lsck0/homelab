@@ -44,9 +44,6 @@ def main [fixture: path]: nothing -> nothing {
     $env.SOPS_AGE_KEY_FILE = $t | path join admin.key
     let yubikey_identity = $"AGE-PLUGIN-YUBIKEY-1('' | fill --character Q --width $YUBIKEY_IDENTITY_BODY_CHARS)"
 
-    # -------------------------------------------------------------------------
-    # the base repo every case starts from
-    # -------------------------------------------------------------------------
     let b = $t | path join base
     mkdir ($b | path join $H) ($b | path join src secrets) ($b | path join src terraform)
     # coreutils: nu's cp keeps the store's read-only modes on the directories it creates, then cannot fill them
@@ -90,9 +87,7 @@ def main [fixture: path]: nothing -> nothing {
     ^git -C $b add -A
     ^git -C $b commit -qm base --no-verify
 
-    # -------------------------------------------------------------------------
     # one case: a fresh copy, the setup stages files, a commit decides
-    # -------------------------------------------------------------------------
     mut cases = 0
     let check = {|n: int, name: string, expect: string, says: string, setup: closure, settings: record|
         let r = $t | path join $"case-($n)"
@@ -112,9 +107,6 @@ def main [fixture: path]: nothing -> nothing {
     }
     let write = {|file: string, content: string| $content | save --force $file; ^git add -- $file }
 
-    # -------------------------------------------------------------------------
-    # sops-managed paths
-    # -------------------------------------------------------------------------
     let cases_table = [
         [name expect says setup];
         ["encrypted host file" accepted "" {|r| {"lldap-admin-password": "changed-value-x"} | to json | encrypt $r $"($H)/secrets.sops.json"; ^git add $"($H)/secrets.sops.json" }]

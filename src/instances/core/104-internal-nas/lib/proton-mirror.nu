@@ -1,20 +1,23 @@
-# mirror the kopia repository to proton drive with proton's own cli: upload what is new, prune what vanished
+# copy a folder to proton drive with proton's own cli, one way
 #
-# usage: proton-mirror, the environment as kopia.nix's proton-sync unit sets it
+# usage: proton-mirror mirror|upload, the environment as kopia.nix's proton-sync and proton-cold-storage units set it
+#   mirror  the kopia repository: upload what is new, prune what vanished
+#   upload  cold storage: upload what is new, a changed file as a new revision; nothing remote is ever trashed, so a
+#           file deleted here stays off-site
 #
-# The source lands at <target>/<basename of source>. Its files are content-addressed blobs, uploaded as they are; a
-# vanished one is trashed by path, then deleted from the trash by its name, which no other trashed item shares.
-# The cli (0.8.0) has no mirror mode, so the manifest (paths earlier runs uploaded, or failed to prune) is the only
-# memory of what is remote: lose it and the remote keeps what was deleted before. An upload's verdict comes from the
-# cli's json summary (-j, the last stdout line), never from the log text, where a warning shaped like an item error
-# would flip it. A run that would prune more than MAX_GONE_PERCENT of the manifest stops until
+# The source lands at <target>/<basename of source>. In a mirror its files are content-addressed blobs, uploaded as
+# they are; a vanished one is trashed by path, then deleted from the trash by its name, which no other trashed item
+# shares. The cli (0.8.0) has no mirror mode, so the manifest (paths earlier runs uploaded, or failed to prune) is the
+# only memory of what is remote: lose it and the remote keeps what was deleted before. An upload's verdict comes from
+# the cli's json summary (-j, the last stdout line), never from the log text, where a warning shaped like an item
+# error would flip it. A mirror that would prune more than MAX_GONE_PERCENT of the manifest stops until
 # <manifest>.allow-large is touched.
 
 # paths per trash or delete call: the cli lists each path's folder, so a bound keeps a call's runtime and argv small
 const BATCH_COUNT = 100
 # a list, rename, trash or delete call; the upload is bounded by the unit's timeout alone, it moves the whole repository
 const CALL_TIMEOUT_SECONDS = 600
-# the nightly run waits this long for an hourly bisync or a verify to let go of proton, then the night counts as failed
+# a run waits this long for a bisync, a verify or the other mode to let go of proton, then counts as failed
 const LOCK_WAIT_SECONDS = 7200
 const GONE = "Node not found"
 const TRASH_GONE = "Trashed node not found"
@@ -138,44 +141,27 @@ def prune [remote: string, gone: list<string>, purge_queue: path]: nothing -> li
     $kept
 }
 
-def main []: nothing -> nothing {
-    let max_gone_percent = $env.PROTON_MIRROR_MAX_GONE_PERCENT
-    let target = $env.PROTON_MIRROR_TARGET
-    if not ($max_gone_percent =~ '^[0-9]+$') {
-        print --stderr $"proton-mirror: '($max_gone_percent)' is no percentage"
-        exit 2
+# the upload, retried once if only files changed during it
+def upload-settled [source: path, parent: string]: nothing -> bool {
+    match (upload $source $parent) {
+        0 => true
+        2 => {
+            print $">>> ($source) changed during the upload, once more"
+            (upload $source $parent) == 0
+        }
+        _ => false
     }
-    if not ($target | str starts-with "/my-files/") {
-        print --stderr $"proton-mirror: target '($target)' is not below /my-files"
-        exit 2
-    }
-    let status = (status-of flock --wait $"($LOCK_WAIT_SECONDS)" $env.PROTON_MIRROR_LOCK
-        $nu.current-exe --no-config-file $env.CURRENT_FILE locked)
-    exit $status
 }
 
-def "main locked" []: nothing -> nothing {
-    let source = $env.PROTON_MIRROR_SOURCE
-    let target = $env.PROTON_MIRROR_TARGET
+# prunes what the source dropped, uploads the rest, clears the remote root of strays: whether all of it succeeded
+def mirror [source: path, target: string, state: path]: nothing -> bool {
     let root = $env.PROTON_MIRROR_ROOT
     let root_keep = $env.PROTON_MIRROR_ROOT_KEEP | split row " " | where $it != ""
     let manifest = $env.PROTON_MIRROR_MANIFEST
     let max_gone_percent = $env.PROTON_MIRROR_MAX_GONE_PERCENT | into int
-    let state = $env.PROTON_MIRROR_STATE
     let remote = $"($target)/($source | path basename)"
     let allow_large = $"($manifest).allow-large"
     let purge_queue = $state | path join offsite-purge.txt
-
-    if not (file-filled ($state | path join auth-session.json)) {
-        print "no proton session; run 'proton-drive-login' on this host once (opens a sign-in url)"
-        return
-    }
-    source-guard $source $env.PROTON_MIRROR_MARKER
-    # an outage skips the run: the off-site copy stays as the last run left it
-    let probe = status-of $env.PROTON_MIRROR_PROBE
-    if $probe != 0 { exit $probe }
-    proton-events-lock-repair $state
-    if not (target-ensure $target) { failed $"cannot create the remote folders of ($target)" }
 
     mut ok = true
     # listed before the upload: a file written during it is in the next run's list and upload
@@ -206,14 +192,7 @@ def "main locked" []: nothing -> nothing {
     if ($kept | is-not-empty) { $ok = false }
 
     print $">>> ($source) -> ($remote)"
-    match (upload $source $target) {
-        0 => {}
-        2 => {
-            print $">>> ($source) changed during the upload, once more"
-            if (upload $source $target) != 0 { $ok = false }
-        }
-        _ => { $ok = false }
-    }
+    if not (upload-settled $source $target) { $ok = false }
 
     # the next run retries what could not be pruned
     $current | append $kept | lines-save $manifest
@@ -236,7 +215,51 @@ def "main locked" []: nothing -> nothing {
         $left | lines-save $purge_queue
         if ($left | is-not-empty) { $ok = false }
     }
+    $ok
+}
 
+def main [mode: string]: nothing -> nothing {
+    let target = $env.PROTON_MIRROR_TARGET
+    if $mode not-in [mirror upload] {
+        print --stderr "usage: proton-mirror mirror|upload"
+        exit 2
+    }
+    if $mode == "mirror" and not ($env.PROTON_MIRROR_MAX_GONE_PERCENT =~ '^[0-9]+$') {
+        print --stderr $"proton-mirror: '($env.PROTON_MIRROR_MAX_GONE_PERCENT)' is no percentage"
+        exit 2
+    }
+    if not ($target | str starts-with "/my-files/") {
+        print --stderr $"proton-mirror: target '($target)' is not below /my-files"
+        exit 2
+    }
+    let status = (status-of flock --wait $"($LOCK_WAIT_SECONDS)" $env.PROTON_MIRROR_LOCK
+        $nu.current-exe --no-config-file $env.CURRENT_FILE locked $mode)
+    exit $status
+}
+
+def "main locked" [mode: string]: nothing -> nothing {
+    let source = $env.PROTON_MIRROR_SOURCE
+    let target = $env.PROTON_MIRROR_TARGET
+    let state = $env.PROTON_MIRROR_STATE
+
+    if not (file-filled ($state | path join auth-session.json)) {
+        print "no proton session; run 'proton-drive-login' on this host once (opens a sign-in url)"
+        return
+    }
+    # an upload trashes nothing, so an empty or wiped folder costs nothing off-site
+    if $mode == "mirror" { source-guard $source $env.PROTON_MIRROR_MARKER }
+    # an outage skips the run: the off-site copy stays as the last run left it
+    let probe = status-of $env.PROTON_MIRROR_PROBE
+    if $probe != 0 { exit $probe }
+    proton-events-lock-repair $state
+    if not (target-ensure $target) { failed $"cannot create the remote folders of ($target)" }
+
+    let ok = if $mode == "mirror" {
+        mirror $source $target $state
+    } else {
+        print $">>> ($source) -> ($target)/($source | path basename), deleting nothing"
+        upload-settled $source $target
+    }
     if not $ok { failed "one or more uploads or prunes failed" }
     # freshness only on a fully successful run
     exit (status-of $env.PROTON_MIRROR_METRIC (date now | format date "%s"))

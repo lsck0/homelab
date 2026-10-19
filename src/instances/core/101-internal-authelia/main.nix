@@ -2,7 +2,15 @@
 #
 # security: every secret is read from its sops file at start (*File options, the template filter's `{{ secret }}`);
 # no script writes yaml or holds a secret.
-{ config, lib, inventory, site, catalog, lab, ... }:
+{
+  config,
+  lib,
+  inventory,
+  site,
+  catalog,
+  lab,
+  ...
+}:
 let
   net = import ../../../modules/net.nix { inherit lib inventory site; };
   service = import ../../../modules/service.nix { inherit lib; };
@@ -15,27 +23,55 @@ let
   portal = catalog.internal.authelia;
   routes = catalog.internal // catalog.external;
 
+  # the mail relay site.json may name ({ host, port, username, sender }; instance.nix then declares its password):
+  # identity verification codes and password resets reach the user by mail, without it a file only root reads
+  mail = site.smtp or null;
+  # implicit tls; any other port submits over starttls
+  submissionsPort = 465;
+
   # admins reach everything, anyone else needs the page's or the client's own group (lldap creates them all)
   adminsSubject = "group:${catalog.access.admins}";
   appSubject = name: "group:${catalog.access.groups.${name}}";
 
   gate = name: match: [
-    (match // { policy = "two_factor"; subject = [ [ adminsSubject ] [ (appSubject name) ] ]; })
+    (
+      match
+      // {
+        policy = "two_factor";
+        subject = [
+          [ adminsSubject ]
+          [ (appSubject name) ]
+        ];
+      }
+    )
     (match // { policy = "deny"; })
   ];
   ssoRoutes = lib.filterAttrs (_: r: lib.elem "sso" r.on) routes;
   routeRules = lib.concatLists (lib.mapAttrsToList (name: r: gate name { domain = [ (net.fqdn r.host) ]; }) ssoRoutes);
   # a public route's ssoPaths, by the pattern its router matches them with (modules/traefik)
   pathRoutes = lib.filterAttrs (_: r: r.ssoPaths != [ ]) routes;
-  pathRules = lib.concatLists (lib.mapAttrsToList (name: r:
-    gate name { domain = [ (net.fqdn r.host) ]; resources = map service.prefixPattern r.ssoPaths; }) pathRoutes);
+  pathRules = lib.concatLists (
+    lib.mapAttrsToList (
+      name: r:
+      gate name {
+        domain = [ (net.fqdn r.host) ];
+        resources = map service.prefixPattern r.ssoPaths;
+      }
+    ) pathRoutes
+  );
 
   oidcClients = map (c: {
-    inherit (c) id name tokenAuthMethod pkce;
+    inherit (c)
+      id
+      name
+      tokenAuthMethod
+      pkce
+      ;
     secretName = c.secret;
     redirectUris = [ "${url routes.${c.route}.host}${c.callback}" ];
   }) lab.oidc;
-in {
+in
+{
   imports = [ ./lib/lldap.nix ];
 
   services.redis.servers.authelia = {
@@ -45,7 +81,11 @@ in {
     unixSocketPerm = 660;
   };
   users.users.${user}.extraGroups = [ "redis-authelia" ];
-  systemd.services.authelia-main.after = [ "redis-authelia.service" "lldap.service" "lldap-bootstrap.service" ];
+  systemd.services.authelia-main.after = [
+    "redis-authelia.service"
+    "lldap.service"
+    "lldap-bootstrap.service"
+  ];
 
   systemd.tmpfiles.rules = [
     "d ${stateDir} 0700 ${user} ${user} -"
@@ -53,15 +93,24 @@ in {
 
   homelab.dbBackup.databases.authelia.sqlite = dbFile;
 
-  sops.secrets = lib.genAttrs ([
-    "authelia-jwt-secret"
-    "authelia-storage-key"
-    "authelia-session-secret"
-    "authelia-oidc-hmac"
-    "authelia-oidc-issuer-key"
-    # lib/lldap.nix sets the read-only bind user's password from it
-    "lldap-authelia-bind-password"
-  ] ++ map (c: c.secretName) oidcClients) (_: { owner = user; });
+  sops.secrets =
+    lib.genAttrs
+      (
+        [
+          "authelia-jwt-secret"
+          "authelia-storage-key"
+          "authelia-session-secret"
+          "authelia-oidc-hmac"
+          "authelia-oidc-issuer-key"
+          # lib/lldap.nix sets the bind user's password from it
+          "lldap-authelia-bind-password"
+        ]
+        ++ lib.optional (mail != null) "smtp-password"
+        ++ map (c: c.secretName) oidcClients
+      )
+      (_: {
+        owner = user;
+      });
 
   services.authelia.instances.main = {
     enable = true;
@@ -78,6 +127,9 @@ in {
     environmentVariables = {
       AUTHELIA_AUTHENTICATION_BACKEND_LDAP_PASSWORD_FILE = config.sops.secrets.lldap-authelia-bind-password.path;
       X_AUTHELIA_CONFIG_FILTERS = "template";
+    }
+    // lib.optionalAttrs (mail != null) {
+      AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE = config.sops.secrets.smtp-password.path;
     };
 
     settings = {
@@ -88,10 +140,14 @@ in {
       server.timeouts.idle = "120s";
       log.level = "info";
       log.format = "text";
+      telemetry.metrics = {
+        enabled = true;
+        address = "tcp://0.0.0.0:${toString catalog.services.authelia.metrics.authelia.port}/metrics";
+      };
 
       authentication_backend = {
-        # the notifier is a file nobody reads and the bind user may not write: a reset could never complete
-        password_reset.disable = true;
+        # a reset link in a file nobody reads could never complete (lib/lldap.nix lets the bind user write with mail)
+        password_reset.disable = mail == null;
         # 5m: 1m queued binds behind homepage's pings
         refresh_interval = "5m";
         ldap = {
@@ -105,23 +161,45 @@ in {
 
       # oidc must not be a cheaper way in: the client's own app group, or admins, as for forwardauth
       identity_providers.oidc = {
-        authorization_policies = lib.listToAttrs (map (c: lib.nameValuePair c.id {
-          default_policy = "deny";
-          rules = [{ policy = "two_factor"; subject = [ adminsSubject (appSubject c.id) ]; }];
-        }) oidcClients);
-        clients = map (c: {
-          client_id = c.id;
-          client_name = c.name;
-          # compared in constant time; the sops file is its only copy
-          client_secret = "$plaintext$" + "{{ secret \"${config.sops.secrets.${c.secretName}.path}\" }}";
-          public = false;
-          authorization_policy = c.id;
-          require_pkce = c.pkce;
-          consent_mode = "implicit";
-          token_endpoint_auth_method = c.tokenAuthMethod;
-          redirect_uris = c.redirectUris;
-          scopes = [ "openid" "profile" "email" "groups" ];
-        } // lib.optionalAttrs c.pkce { pkce_challenge_method = "S256"; }) oidcClients;
+        authorization_policies = lib.listToAttrs (
+          map (
+            c:
+            lib.nameValuePair c.id {
+              default_policy = "deny";
+              rules = [
+                {
+                  policy = "two_factor";
+                  subject = [
+                    adminsSubject
+                    (appSubject c.id)
+                  ];
+                }
+              ];
+            }
+          ) oidcClients
+        );
+        clients = map (
+          c:
+          {
+            client_id = c.id;
+            client_name = c.name;
+            # compared in constant time; the sops file is its only copy
+            client_secret = "$plaintext$" + "{{ secret \"${config.sops.secrets.${c.secretName}.path}\" }}";
+            public = false;
+            authorization_policy = c.id;
+            require_pkce = c.pkce;
+            consent_mode = "implicit";
+            token_endpoint_auth_method = c.tokenAuthMethod;
+            redirect_uris = c.redirectUris;
+            scopes = [
+              "openid"
+              "profile"
+              "email"
+              "groups"
+            ];
+          }
+          // lib.optionalAttrs c.pkce { pkce_challenge_method = "S256"; }
+        ) oidcClients;
       };
 
       webauthn = {
@@ -134,31 +212,41 @@ in {
       access_control = {
         default_policy = "deny";
         # ssoPaths first: no rule of their host, the portal's bypass included, may decide them
-        rules = pathRules ++ [
-          {
-            domain = [ (net.fqdn portal.host) ];
-            policy = "bypass";
-          }
-        ] ++ routeRules ++ [
-          # hosts no route names
-          {
-            domain = [ "*.${net.domain}" net.domain ];
-            policy = "two_factor";
-            subject = [ [ adminsSubject ] ];
-          }
-        ];
+        rules =
+          pathRules
+          ++ [
+            {
+              domain = [ (net.fqdn portal.host) ];
+              policy = "bypass";
+            }
+          ]
+          ++ routeRules
+          ++ [
+            # hosts no route names
+            {
+              domain = [
+                "*.${net.domain}"
+                net.domain
+              ];
+              policy = "two_factor";
+              subject = [ [ adminsSubject ] ];
+            }
+          ];
       };
 
       session = {
         name = net.autheliaSessionCookie;
         expiration = "12h";
         inactivity = "45m";
-        remember_me = "1M";
-        cookies = [{
-          inherit (net) domain;
-          authelia_url = url portal.host;
-          default_redirection_url = url catalog.internal.homepage.host;
-        }];
+        # a remembered login outlives a closed browser: a lost or shared device holds it this long
+        remember_me = "1w";
+        cookies = [
+          {
+            inherit (net) domain;
+            authelia_url = url portal.host;
+            default_redirection_url = url catalog.internal.homepage.host;
+          }
+        ];
 
         redis = {
           host = redisSocket;
@@ -168,11 +256,23 @@ in {
 
       storage.local.path = dbFile;
 
-      # no smtp, notifications (the identity verification codes) go to a file
       notifier = {
+        # a relay that is down must not keep anyone from logging in
         disable_startup_check = true;
-        filesystem.filename = "${stateDir}/notification.txt";
-      };
+      }
+      // (
+        if mail == null then
+          { filesystem.filename = "${stateDir}/notification.txt"; }
+        else
+          {
+            smtp = {
+              address = "${
+                if mail.port == submissionsPort then "submissions" else "submission"
+              }://${mail.host}:${toString mail.port}";
+              inherit (mail) username sender;
+            };
+          }
+      );
 
       # by client address, never by user: the admin's name is public, and three wrong passwords from anyone would lock
       # him out; the address is the client the ingress resolved, the only entry of X-Forwarded-For (modules/traefik)

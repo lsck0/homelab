@@ -9,6 +9,7 @@ of the house's families (fronius_, hass_, energy_, homelab_energy_) must be one 
 the inverter exporter (its exposition of every fixture in tests/exporters_test.py), the spot price export,
 energy-sync's period gauges, the home assistant inputs.
 """
+
 import json
 import os
 import re
@@ -17,8 +18,14 @@ import sys
 OUT, EXPORTERS, SPOT_PRICE, BOARDS = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
 GRID_COLUMNS = 24
 # Grafana's macros and the boards' variables, as a query would see them
-MACROS = {"$__range_s": "3600", "$__range": "1h", "$__rate_interval": "1m", "$__interval": "1m", "$vm": ".*",
-          "$service": ".*"}
+MACROS = {
+    "$__range_s": "3600",
+    "$__range": "1h",
+    "$__rate_interval": "1m",
+    "$__interval": "1m",
+    "$vm": ".*",
+    "$service": ".*",
+}
 FAMILIES = re.compile(r"\b(fronius_[a-z_]+|hass_[a-z_]+|energy_spot_[a-z_]+|homelab_energy_[a-z_]+)\b")
 
 
@@ -31,22 +38,25 @@ def macros_fill(expr):
 def producers():
     """Every metric name of the house's families something in this repo writes."""
     import energy_model as em
+
     names = set()
     for exposition in (f for f in os.listdir(EXPORTERS) if f.startswith("fronius-")):
         with open(os.path.join(EXPORTERS, exposition)) as handle:
             names |= {line.split("{")[0].split(" ")[0] for line in handle if line.strip() and not line.startswith("#")}
     with open(SPOT_PRICE) as handle:
         names |= set(re.findall(r"(energy_spot_price_[a-z_]+)", handle.read()))
-    names |= {em.period_metric(period, unit) for period in em.PERIOD_LABEL_FORMATS
-              for unit, _, _ in em.PERIOD_TERMS.values()}
+    names |= {
+        em.period_metric(period, unit) for period in em.PERIOD_LABEL_FORMATS for unit, _, _ in em.PERIOD_TERMS.values()
+    }
     names |= {m[key] for m in em.METERS.values() for key in ("readingMetric", "readAtMetric")}
     names.add(em.INPUTS["helperMetricPrefix"])
     return names
 
 
 def overlaps(a, b):
-    return (a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"]
-            and a["y"] < b["y"] + b["h"] and b["y"] < a["y"] + a["h"])
+    return (
+        a["x"] < b["x"] + b["w"] and b["x"] < a["x"] + a["w"] and a["y"] < b["y"] + b["h"] and b["y"] < a["y"] + a["h"]
+    )
 
 
 failures, rules = [], []
@@ -66,7 +76,7 @@ for path in BOARDS:
             if (t.get("datasource") or p.get("datasource") or {}).get("type") == "prometheus":
                 rules.append({"record": f"check:{name.replace('-', '_')}:{len(rules)}", "expr": macros_fill(t["expr"])})
     for i, a in enumerate(panels):
-        for b in panels[i + 1:]:
+        for b in panels[i + 1 :]:
             if overlaps(a["gridPos"], b["gridPos"]):
                 failures.append(f"{name}: {a.get('title')} overlaps {b.get('title')}")
     if name == "energy":

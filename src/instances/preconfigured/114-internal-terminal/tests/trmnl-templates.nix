@@ -4,7 +4,10 @@
 let
   # the payloads come from the real builders, run by feeds.nix
   feeds = import ./feeds.nix { inherit pkgs lib; };
-  ruby = pkgs.ruby.withPackages (ps: [ ps.liquid ps.minitest ]);
+  ruby = pkgs.ruby.withPackages (ps: [
+    ps.liquid
+    ps.minitest
+  ]);
 in
 pkgs.runCommand "trmnl-templates" { nativeBuildInputs = [ ruby ]; } ''
   ruby ${./trmnl_templates_test.rb} ${../lib/trmnl} ${feeds}/payloads --seed 1

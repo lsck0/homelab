@@ -2,7 +2,7 @@
 #
 # copy to src/instances/preconfigured/<vmid>-<zone>-<service>/, the vmid in the zone's range (src/generated/zones.json
 # `vmids`); fields and defaults: modules/instance-schema.nix, modules/service.nix, README.md "Adding an instance"
-{ ... }: {
+_: {
   vm.bootPhase = "apps";
 
   # its internet traffic through the router's vpn exit or tor, with a killswitch; lab traffic stays direct

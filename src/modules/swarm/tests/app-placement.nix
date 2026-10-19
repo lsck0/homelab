@@ -4,44 +4,80 @@
 # The real lab plus two apps (tests/lib/lab.nix `apps`): `level` runs on the shared swarm
 # (manager vm-107, worker vm-250), `own` is placed on its own guest, a swarm of one. Every property is checked by
 # one function over both apps, so a difference between the two placements is a failure of that property.
-{ pkgs, lib, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  specialArgs,
+  ...
+}:
 let
-  # -----------------------------------------------------------------------------
-  # CONSTANTS
-  # -----------------------------------------------------------------------------
 
   placedId = "220";
-  ports = { level = 20160; own = 20170; };
-  task = { memoryMiB = 192; cpus = 0.5; pids = 96; };
+  ports = {
+    level = 20160;
+    own = 20170;
+  };
+  task = {
+    memoryMiB = 192;
+    cpus = 0.5;
+    pids = 96;
+  };
   cloudflare = "104.16.0.10";
   requestTimeoutS = 10;
   guestMemoryMiB = 1536;
 
   inherit (lab) profiles;
-  appOf = name: extra: {
-    enable = true;
-    repo = "lsck0/${name}";
-    branch = "master";
-    # no browser here
-    routes.${name} = { port = ports.${name}; health = "/"; on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ]; };
-    resources.web = task;
-    reservation = { memoryMiB = 256; cpus = 0.5; };
-    # stays up: the test places apps, app-idle wakes them
-    on = profiles.observed ++ profiles.traced ++ [ "frontend" "homepage" ];
-  } // extra;
+  appOf =
+    name: extra:
+    {
+      enable = true;
+      repo = "lsck0/${name}";
+      branch = "master";
+      # no browser here
+      routes.${name} = {
+        port = ports.${name};
+        health = "/";
+        on = lib.remove "anubis" profiles.hardenedExternal ++ [ "probe" ];
+      };
+      resources.web = task;
+      reservation = {
+        memoryMiB = 256;
+        cpus = 0.5;
+      };
+      # stays up: the test places apps, app-idle wakes them
+      on =
+        profiles.observed
+        ++ profiles.traced
+        ++ [
+          "frontend"
+          "homepage"
+        ];
+    }
+    // extra;
   apps = {
     level = appOf "level" { };
-    own = appOf "own" { placement = { zone = "external"; vmid = lib.toInt placedId; vm.memoryMiB = guestMemoryMiB; }; };
+    own = appOf "own" {
+      placement = {
+        zone = "external";
+        vmid = lib.toInt placedId;
+        vm.memoryMiB = guestMemoryMiB;
+      };
+    };
   };
 
-  # -----------------------------------------------------------------------------
-  # INTERNAL
-  # -----------------------------------------------------------------------------
-
-  lab = import ../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; apps = folders: folders // apps; };
+  lab = import ../../../tests/lib/lab.nix {
+    inherit pkgs lib specialArgs;
+    apps = folders: folders // apps;
+  };
   collected = lab.specialArgs.lab;
-  net = import ../../net.nix { inherit lib; inherit (collected) inventory site; };
-  telemetry = import ../../telemetry.nix { inherit lib; inherit (collected) inventory; };
+  net = import ../../net.nix {
+    inherit lib;
+    inherit (collected) inventory site;
+  };
+  telemetry = import ../../telemetry.nix {
+    inherit lib;
+    inherit (collected) inventory;
+  };
   ip = id: collected.inventory.${id}.ip;
   registryAddress = ip "100";
   edge = ip "200";
@@ -49,8 +85,18 @@ let
   image = pkgs.dockerTools.buildLayeredImage {
     name = "fixture";
     tag = "v1";
-    contents = [ pkgs.busybox (pkgs.writeTextDir "www/index.html" "app\n") ];
-    config.Cmd = [ "httpd" "-f" "-p" "8000" "-h" "/www" ];
+    contents = [
+      pkgs.busybox
+      (pkgs.writeTextDir "www/index.html" "app\n")
+    ];
+    config.Cmd = [
+      "httpd"
+      "-f"
+      "-p"
+      "8000"
+      "-h"
+      "/www"
+    ];
   };
   common = {
     networking.hosts.${registryAddress} = [ "registry.lsck0.dev" ];
@@ -58,7 +104,13 @@ let
     virtualisation.diskSize = 4096;
   };
   swarmNode = vmid: {
-    imports = [ (lab.guest vmid { flat = true; nas = true; }) common ];
+    imports = [
+      (lab.guest vmid {
+        flat = true;
+        nas = true;
+      })
+      common
+    ];
     virtualisation.memorySize = guestMemoryMiB;
   };
 in
@@ -73,7 +125,10 @@ pkgs.testers.runNixOSTest {
       enable = true;
       listenAddress = "0.0.0.0";
       port = 443;
-      extraConfig.http.tls = { certificate = lab.pki.lsck0.cert; key = lab.pki.lsck0.key; };
+      extraConfig.http.tls = {
+        certificate = lab.pki.lsck0.cert;
+        inherit (lab.pki.lsck0) key;
+      };
     };
     systemd.services.docker-registry.serviceConfig.AmbientCapabilities = [ "CAP_NET_BIND_SERVICE" ];
   };
@@ -81,11 +136,27 @@ pkgs.testers.runNixOSTest {
   nodes.vm-250 = swarmNode "250";
   nodes."vm-${placedId}" = swarmNode placedId;
   nodes.vm-200 = {
-    imports = [ (lab.guest "200" { flat = true; instance = ../../../instances/core/200-external-traefik/main.nix; }) ../../../tests/lib/offline-traefik.nix common ];
+    imports = [
+      (lab.guest "200" {
+        flat = true;
+        instance = ../../../instances/core/200-external-traefik/main.nix;
+      })
+      ../../../tests/lib/offline-traefik.nix
+      common
+    ];
     virtualisation.memorySize = 1536;
   };
   nodes.world = {
-    imports = [ (lab.multi { addresses = [ "10.100.0.1/8" "10.200.0.1/8" "10.250.0.1/8" "${cloudflare}/13" ]; }) ];
+    imports = [
+      (lab.multi {
+        addresses = [
+          "10.100.0.1/8"
+          "10.200.0.1/8"
+          "10.250.0.1/8"
+          "${cloudflare}/13"
+        ];
+      })
+    ];
     environment.systemPackages = [ pkgs.curl ];
   };
 

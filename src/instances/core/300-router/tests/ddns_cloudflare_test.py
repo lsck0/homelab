@@ -16,9 +16,6 @@ import tempfile
 import threading
 import urllib.parse
 
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
 
 ZONE = "lsck0.dev"
 ZONE_ID = "zone-1"
@@ -32,10 +29,6 @@ RECORDS = [
 ]
 # a route the lab gains between two runs at the same address
 GAINED = {"name": f"mc.{ZONE}", "proxied": False}
-
-# -----------------------------------------------------------------------------
-# FAKE API
-# -----------------------------------------------------------------------------
 
 
 class Fake:
@@ -83,8 +76,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         query = dict(urllib.parse.parse_qsl(url.query))
         length = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(length)) if length else None
-        FAKE.calls.append({"method": method, "path": url.path, "query": query, "body": body,
-                           "auth": self.headers.get("Authorization")})
+        FAKE.calls.append(
+            {
+                "method": method,
+                "path": url.path,
+                "query": query,
+                "body": body,
+                "auth": self.headers.get("Authorization"),
+            }
+        )
         if self.headers.get("Authorization") != f"Bearer {TOKEN}":
             return self.reply(403, {"success": False, "errors": ["bad token"]})
         status = FAKE.fault_take(method, url.path)
@@ -94,8 +94,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if method == "GET" and url.path == "/zones":
             return self.reply(200, {"success": True, "result": [{"id": ZONE_ID}] if query.get("name") == ZONE else []})
         if method == "GET" and url.path == records_path:
-            found = [r for r in FAKE.records.values() if r["type"] == query.get("type")
-                     and query.get("name", r["name"]) == r["name"] and query.get("content.exact", r["content"]) == r["content"]]
+            found = [
+                r
+                for r in FAKE.records.values()
+                if r["type"] == query.get("type")
+                and query.get("name", r["name"]) == r["name"]
+                and query.get("content.exact", r["content"]) == r["content"]
+            ]
             return self.reply(200, {"success": True, "result": found, "result_info": {"total_pages": 1}})
         if method == "POST" and url.path == records_path:
             record_id = FAKE.record_add(body["name"], body["content"], body["proxied"])
@@ -123,11 +128,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         self.handle_any("DELETE")
-
-
-# -----------------------------------------------------------------------------
-# HARNESS
-# -----------------------------------------------------------------------------
 
 
 def run(env_base):
@@ -169,9 +169,15 @@ def main():
     with open(os.path.join(work, "token"), "w") as f:
         f.write(TOKEN)
     os.makedirs(os.path.join(work, "state"))
-    env = dict(os.environ, DDNS_RECORDS=os.path.join(work, "records.json"), DDNS_ZONE=ZONE,
-               DDNS_TOKEN_FILE=os.path.join(work, "token"), DDNS_STATE_DIR=os.path.join(work, "state"),
-               DDNS_ADDRESS_FILE=os.path.join(work, "address"), DDNS_API_URL=base)
+    env = dict(
+        os.environ,
+        DDNS_RECORDS=os.path.join(work, "records.json"),
+        DDNS_ZONE=ZONE,
+        DDNS_TOKEN_FILE=os.path.join(work, "token"),
+        DDNS_STATE_DIR=os.path.join(work, "state"),
+        DDNS_ADDRESS_FILE=os.path.join(work, "address"),
+        DDNS_API_URL=base,
+    )
 
     print("case: no address learned yet costs no api call and is no failure")
     FAKE.address = ""

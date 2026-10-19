@@ -3,11 +3,15 @@
 # real one, an upload keeps the local mtime as the file's claimed modification time (ms) and skips nothing, a download
 # does not set the local mtime, trash lets same-named items pile up and delete refuses an ambiguous one. Faults:
 # FAKE_UPLOAD_FAIL set fails every upload; a call naming a path that matches a glob line of the file FAKE_FAIL_FILE
-# fails whole.
+# fails whole, its cause on stdout under a banner on stderr, as the real one prints some.
 { pkgs }:
 pkgs.writeShellApplication {
   name = "proton-drive";
-  runtimeInputs = with pkgs; [ coreutils findutils jq ];
+  runtimeInputs = with pkgs; [
+    coreutils
+    findutils
+    jq
+  ];
   text = ''
     echo "$*" >> "$FAKE_LOG"
     [ "$1" = filesystem ] || { echo "fake: no command $1" >&2; exit 2; }
@@ -17,7 +21,7 @@ pkgs.writeShellApplication {
       for arg in "$@"; do
         while IFS= read -r pattern; do
           # shellcheck disable=SC2053 # the pattern is a glob on purpose
-          [[ $arg == $pattern ]] && { echo "fake: $arg fails" >&2; exit 1; }
+          [[ $arg == $pattern ]] && { echo "fake: $arg fails"; echo "=====" >&2; exit 1; }
         done < "$FAKE_FAIL_FILE"
       done
     fi

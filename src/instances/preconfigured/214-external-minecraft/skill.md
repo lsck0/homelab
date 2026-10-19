@@ -23,9 +23,8 @@ The servers, each at its own address:
 - **atm**, `atm.mc.lsck0.dev`: the All the Mons modpack 1.3.0 (CurseForge), NeoForge 21.1.249. Players install
   the same pack version in their launcher. A pack update: put the new ServerFiles zip into
   `/var/lib/minecraft-modpacks/`, change `GENERIC_PACK` in `/var/lib/minecraft/atm/modpack.env` and in the
-  repo's `servers.atm.pack`. Extra mods beyond the pack (Mahou Tsukai) are jars in
-  `/var/lib/minecraft-modpacks/atm-extra/`, loaded on atm's next start; players need the same jars.
-  The pack zip ships its own `config/` and the image re-extracts it on every start, so a changed config
+  repo's `servers.atm.pack`. Its extra mods (Mahou Tsukai, LitematicaTool) are managed with `mc-mod`
+  below. The pack zip ships its own `config/` and the image re-extracts it on every start, so a changed config
   there is lost: put the changed file into `/var/lib/minecraft-modpacks/atm-config/` (copied over the pack's
   on every start, e.g. `mahoutsukai-server.toml`) and restart atm while nobody is on.
 
@@ -61,6 +60,23 @@ Nothing to start: a server boots by itself when a player joins its address. Repl
 
 If the owner sends a pack name instead of a URL, find it with `web_search` on
 modrinth.com and use the URL.
+
+## Extra mods
+
+Every server loads the jars in `/var/lib/minecraft-modpacks/extra/<server>/` on top of its pack, copied into its
+mods at each start. Players need the same jars in their launcher.
+
+- `ssh 10.200.0.214 mc-mod list [server]`: the extra mods of every server, or of one, with mod id and version.
+- `ssh 10.200.0.214 mc-mod add <server> <jar>`: copy the jar to vm-214 first (`scp mod.jar 10.200.0.214:/tmp/`).
+  It reads the jar's `META-INF/neoforge.mods.toml` or `fabric.mod.json` and refuses a mod of another loader, or one
+  whose minecraft or neoforge range leaves out the server's version (from its `modpack.env`), saying what the mod
+  needs and what the server runs. A jar of a mod the server already has replaces the old one.
+- `ssh 10.200.0.214 mc-mod remove <server> <file or mod id>`.
+- Nothing restarts: the server loads the change at its next start. To load it now, run the printed
+  `systemctl restart minecraft-<server>.service` while `mc-state` shows nobody online.
+
+The start makes every file there owned by the container's user (1000, group minecraft) and readable, so a jar
+copied in by hand as root cannot fail the start.
 
 ## Server commands
 

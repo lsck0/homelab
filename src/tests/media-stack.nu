@@ -105,9 +105,6 @@ def main []: nothing -> nothing {
     do $run_app jellyseerr (image 123-internal-jellyseerr jellyseerr) 15055:5055 [--init -e PORT=5055 -v $"($w)/jellyseerr:/app/config"]
     do $run_app bazarr (image 121-internal-arr bazarr) 16767:6767 [-v $"($w)/bazarr:/config" -v $"($w)/media:/data/media"]
 
-    # -------------------------------------------------------------------------
-    # PER-VM SETUP UNITS
-    # -------------------------------------------------------------------------
     do $run_unit 120-internal-qbittorrent qbittorrent-disable-auth [
         $"s#/var/lib/qbittorrent#($w)/qbittorrent#g"
         $"s#systemctl stop podman-qbittorrent.service#docker stop ($PREFIX)qbittorrent#"
@@ -132,9 +129,6 @@ def main []: nothing -> nothing {
     do $run_unit 122-internal-jellyfin jellyfin-setup $jf
     do $run_unit 123-internal-jellyseerr jellyseerr-token ($tok ++ [$"s#/var/lib/jellyseerr#($w)/jellyseerr#g"])
 
-    # -------------------------------------------------------------------------
-    # JELLYFIN SETUP UNDER A RESTART (the readiness contract, no fixed waits)
-    # -------------------------------------------------------------------------
     print ">>> jellyfin restarted, setup at once: it waits for ready instead of failing"
     ^docker restart $"($PREFIX)jellyfin" out> /dev/null
     if not (do $check "jellyfin-setup right after a restart" { do $run_unit 122-internal-jellyfin jellyfin-setup $jf; true }) { $failed = true }
@@ -148,9 +142,7 @@ def main []: nothing -> nothing {
     }
     print $">>> Exported tokens: (ls ($w | path join tokens) | get name | path basename | str join ' ')"
 
-    # -------------------------------------------------------------------------
-    # ARR-WIRE (THE REAL SCRIPT BUILT FOR VM-121, RUN ON THE TEST NETWORK)
-    # -------------------------------------------------------------------------
+    # the real arr-wire built for vm-121, run on the test network
     ^nix build --no-warn-dirty --no-link $"($SRC)#nixosConfigurations.121-internal-arr.config.systemd.services.arr-wire.serviceConfig.ExecStart"
     let wire = nix-eval 121-internal-arr systemd.services.arr-wire.serviceConfig.ExecStart
     # the unit's own environment, addresses replaced by the test network's below
@@ -290,9 +282,6 @@ def main []: nothing -> nothing {
     print $"  (if $changes { 'FAIL  arr-wire second run made changes' } else { 'PASS  arr-wire second run is a no-op' })"
     if $changes { $failed = true }
 
-    # -------------------------------------------------------------------------
-    # JANITORR
-    # -------------------------------------------------------------------------
     print ">>> Janitorr with the config NixOS renders"
     mkdir ($w | path join janitorr logs) ($w | path join janitorr stats)
     ^chmod -R 777 ($w | path join janitorr)

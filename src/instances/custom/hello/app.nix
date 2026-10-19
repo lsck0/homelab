@@ -19,12 +19,25 @@ in
   # this repo moves with every sync; hello only with its own folder
   watch = [ dir ];
   # main.c's port
-  routes.hello = { service = "web"; targetPort = 8000; port = 20100; onion = true; on = profiles.hardenedExternal ++ [ "probe" ]; };
-  homepage = { name = "Hello"; icon = "mdi-hand-wave"; };
+  routes.hello = {
+    service = "web";
+    targetPort = 8000;
+    port = 20100;
+    onion = true;
+    on = profiles.hardenedExternal ++ [ "probe" ];
+  };
+  homepage = {
+    name = "Hello";
+    icon = "mdi-hand-wave";
+  };
   # one static c server
   resources.web.memoryMiB = 128;
   reservation.memoryMiB = 128;
   # scales to zero: a static page with no job of its own and no client holding a connection
   # no traces or profiles: the static c server emits none
-  on = profiles.observed ++ [ "frontend" "homepage" "scaleToZero" ];
+  on = profiles.observed ++ [
+    "frontend"
+    "homepage"
+    "scaleToZero"
+  ];
 }

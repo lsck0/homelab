@@ -15,8 +15,8 @@ metadata:
 
 Everything lands in `/data/media/<kind>` on the NAS and shows up in the
 players automatically. Downloads go through qBittorrent (VPN egress), indexers
-through Prowlarr (Tor). Media nobody watched for ~4 months is deleted by Janitorr
-(tag `janitorr_keep` in Radarr/Sonarr to keep something).
+through Prowlarr (Tor). Janitorr flags media nobody watched for ~4 months but, as a
+dry run, deletes nothing (skill `jellyfin`; tag `janitorr_keep` in Radarr/Sonarr to keep something).
 
 | Kind | Manager (API) | Key | Folder | Player |
 |---|---|---|---|---|

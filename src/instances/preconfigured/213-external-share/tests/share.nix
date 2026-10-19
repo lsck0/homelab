@@ -2,23 +2,38 @@
 # ships now: an account made on the old image signs in on the new one, so the data dir and its sqlite carry over, and
 # the declared config.yaml closes sign up.
 # Images are pinned here and fetched at build time, nothing pulls at run time.
-{ pkgs, lib, inputs, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  inputs,
+  specialArgs,
+  ...
+}:
 let
   lab = import ../../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
-  shippedContainer = inputs.self.nixosConfigurations."213-external-share".config.virtualisation.oci-containers.containers.share;
+  shippedContainer =
+    inputs.self.nixosConfigurations."213-external-share".config.virtualisation.oci-containers.containers.share;
   shipped = shippedContainer.image;
 
-  imageOf = { name, tag, imageDigest, hash }: {
-    name = "${name}:${tag}";
-    file = pkgs.dockerTools.pullImage {
-      imageName = name;
-      inherit imageDigest hash;
-      finalImageName = name;
-      finalImageTag = tag;
-      os = "linux";
-      arch = "amd64";
+  imageOf =
+    {
+      name,
+      tag,
+      imageDigest,
+      hash,
+    }:
+    {
+      name = "${name}:${tag}";
+      pinned = "${name}:${tag}@${imageDigest}";
+      file = pkgs.dockerTools.pullImage {
+        imageName = name;
+        inherit imageDigest hash;
+        finalImageName = name;
+        finalImageTag = tag;
+        os = "linux";
+        arch = "amd64";
+      };
     };
-  };
   # the image the lab ran before (archived upstream)
   before = imageOf {
     name = "stonith404/pingvin-share";
@@ -34,21 +49,30 @@ let
     hash = "sha256-nczOK5z+gzIcOrPqtcWQ6NxXFaXY7idWacLWV10qzYQ=";
   };
   imageOverride = lib.mkOverride 40;
-  account = { email = "owner@example.org"; username = "owner"; password = "kept-across-the-upgrade"; };
+  account = {
+    email = "owner@example.org";
+    username = "owner";
+    password = "kept-across-the-upgrade";
+  };
   declared = {
     "security.allowRegistration" = "false";
     "share.maxExpiration" = "30 days";
     "general.appUrl" = "https://${lab.catalog.external.share.host}.${lab.site.domain}";
   };
 in
-assert lib.assertMsg (current.name == shipped) "tests/share.nix pins ${current.name}, 213 ships ${shipped}: bump the pin";
+assert lib.assertMsg (
+  current.pinned == shipped
+) "tests/share.nix pins ${current.pinned}, 213 ships ${shipped}: bump the pin";
 pkgs.testers.runNixOSTest {
   name = "share";
 
   node.specialArgs = lab.specialArgs;
   nodes.vm-213 = {
     imports = [ (lab.guest "213" { instance = ../main.nix; }) ];
-    virtualisation = { memorySize = 2048; diskSize = 4096; };
+    virtualisation = {
+      memorySize = 2048;
+      diskSize = 4096;
+    };
     services.journald.upload.enable = lib.mkForce false;
     virtualisation.oci-containers.containers.share = {
       image = lib.mkForce before.name;

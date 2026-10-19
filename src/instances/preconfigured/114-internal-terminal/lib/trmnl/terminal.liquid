@@ -7,7 +7,6 @@
 .hl { --u: min(calc(100cqw / 780), calc(100cqh / 460)); display: flex; flex-direction: column; height: 100%; width: 100%; gap: calc(5 * var(--u)); padding: calc(6 * var(--u)) calc(8 * var(--u)) calc(2 * var(--u)); box-sizing: border-box; font-family: "Inter Variable", Inter, sans-serif; color: #000; }
 .hl b { font-weight: 700; }
 
-/* ---- headline numbers ------------------------------------------------- */
 .hl-top { display: flex; gap: calc(6 * var(--u)); flex: 0 0 auto; }
 .hl-stat { flex: 1 1 0; border: calc(2 * var(--u)) solid #000; border-radius: calc(4 * var(--u)); padding: calc(3 * var(--u)) calc(8 * var(--u)) calc(4 * var(--u)); min-width: 0; }
 .hl-stat--bad { background: #000; color: #fff; }
@@ -17,7 +16,6 @@
 .hl-v--pair { font-size: calc(14 * var(--u)); line-height: 1.05; }
 .hl-sub { font-size: calc(12 * var(--u)); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
-/* ---- services --------------------------------------------------------- */
 .hl-svc { flex: 0 0 auto; display: grid; grid-template-columns: repeat(6, 1fr); gap: calc(1 * var(--u)) calc(12 * var(--u)); border: calc(2 * var(--u)) solid #000; border-radius: calc(4 * var(--u)); padding: calc(4 * var(--u)) calc(8 * var(--u)); }
 .hl-row { display: flex; align-items: center; gap: calc(5 * var(--u)); font-size: calc(13 * var(--u)); font-weight: 500; line-height: 1.3; min-width: 0; }
 .hl-dot { width: calc(8 * var(--u)); height: calc(8 * var(--u)); flex: 0 0 auto; border: calc(1.5 * var(--u)) solid #000; border-radius: 50%; background: #000; }
@@ -28,7 +26,6 @@
 .hl-bar { height: calc(4 * var(--u)); border: calc(1 * var(--u)) solid #000; box-sizing: border-box; }
 .hl-bar span { display: block; height: 100%; background: #000; }
 
-/* ---- bottom: traffic + side panels ------------------------------------- */
 .hl-mid { display: flex; gap: calc(6 * var(--u)); flex: 1 1 auto; min-height: 0; }
 .hl-box { border: calc(2 * var(--u)) solid #000; border-radius: calc(4 * var(--u)); padding: calc(3 * var(--u)) calc(8 * var(--u)); min-width: 0; min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
 .hl-h { font-size: calc(11 * var(--u)); font-weight: 800; letter-spacing: .08em; text-transform: uppercase; border-bottom: calc(2 * var(--u)) solid #000; margin-bottom: calc(2 * var(--u)); padding-bottom: calc(1 * var(--u)); display: flex; justify-content: space-between; gap: calc(6 * var(--u)); white-space: nowrap; flex: 0 0 auto; }
@@ -56,7 +53,7 @@
 .hl-prog span { display: block; height: 100%; background: #000; }
 .hl-empty { font-size: calc(12 * var(--u)); }
 
-/* ---- footer: own line, title_bar costs 40px ------------------------------ */
+/* the footer gets its own line: title_bar costs 40px */
 .hl-foot { flex: 0 0 auto; display: flex; justify-content: space-between; gap: calc(10 * var(--u)); font-size: calc(11 * var(--u)); line-height: 1.25; }
 .hl-foot b { letter-spacing: .08em; text-transform: uppercase; }
 .hl-foot span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }

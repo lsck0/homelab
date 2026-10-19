@@ -14,12 +14,6 @@ import (
 	"time"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 const (
 	// client-ip (modules/traefik/lib/traefik-clientip) writes the real client here on every websecure router
 	headerClient = "X-Real-Ip"
@@ -29,6 +23,7 @@ const (
 	headerForwardedHost = "X-Forwarded-Host"
 
 	pathAuth    = "/auth"
+	pathStrip   = "/strip"
 	pathMetrics = "/metrics"
 
 	answerField        = "answer"
@@ -45,12 +40,6 @@ const (
 	// not 403: crowdsec's probing scenarios count 403s, and a flagged person's page loads are no probe
 	captchaStatus = http.StatusTooManyRequests
 )
-
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
 
 // Verdict is what the gate does with one request.
 type Verdict int
@@ -94,15 +83,11 @@ type Gate struct {
 	captcha   *Captcha
 	tarpit    *Tarpit
 	metrics   *Metrics
+	// cookie name -> stripped by /strip
+	stripCookies map[string]bool
 	// crowdsec's state as last seen, so an outage logs once, not per request
 	lapiFailing atomic.Bool
 }
-
-/*
- * -----------------------------------------------------------------------------
- * INTERNAL
- * -----------------------------------------------------------------------------
- */
 
 // routeFlagsParse reads the forwardauth address's query; anything malformed is the module's bug and stops the route.
 func routeFlagsParse(query url.Values) (RouteFlags, bool) {
@@ -300,12 +285,6 @@ func gateAuthOnion(ctx context.Context, g *Gate, w http.ResponseWriter, r *http.
 	return verdict
 }
 
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
-
 // gateAuth is traefik's forwardauth call for every request of a gated route: 2xx lets it through, anything else is
 // the answer its client gets.
 func gateAuth(g *Gate, w http.ResponseWriter, r *http.Request) {
@@ -436,6 +415,7 @@ func gateMetrics(g *Gate, w http.ResponseWriter, _ *http.Request) {
 func gateMux(g *Gate) *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc(pathAuth, func(w http.ResponseWriter, r *http.Request) { gateAuth(g, w, r) })
+	mux.HandleFunc(pathStrip, func(w http.ResponseWriter, r *http.Request) { gateStrip(g, w, r) })
 	mux.HandleFunc(pathMetrics, func(w http.ResponseWriter, r *http.Request) { gateMetrics(g, w, r) })
 	if g.captcha != nil {
 		mux.HandleFunc(g.captcha.answerPath, func(w http.ResponseWriter, r *http.Request) { gateAnswer(g, w, r) })

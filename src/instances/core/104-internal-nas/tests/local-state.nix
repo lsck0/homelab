@@ -4,7 +4,12 @@
 # are refused; a service whose state lay on the share itself moves onto the guest's disk with its data; a dropped
 # share leaves no stale automount (modules/nas.nix nasMountsPrune); what lies in the nas data tree without a share
 # is closed to root and listed, never deleted (lib/nas-exports.nix).
-{ pkgs, lib, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  specialArgs,
+  ...
+}:
 let
   lab = import ../../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
   name = "demo";
@@ -23,22 +28,44 @@ pkgs.testers.runNixOSTest {
 
   node.specialArgs = lab.specialArgs;
   nodes.vm-104 = {
-    imports = [ (lab.nas { flat = true; }) ../lib/kopia.nix ];
+    imports = [
+      (lab.nas { flat = true; })
+      ../lib/kopia.nix
+    ];
     virtualisation.memorySize = 2048;
     # kopia-init snapshots the nas's own local state too
-    systemd.tmpfiles.rules = [ "d /var/lib/syncthing 0700 root root -" "d /var/lib/filebrowser 0700 root root -" ];
+    systemd.tmpfiles.rules = [
+      "d /var/lib/syncthing 0700 root root -"
+      "d /var/lib/filebrowser 0700 root root -"
+    ];
   };
   nodes.vm-131 = {
-    imports = [ (lab.guest "131" { flat = true; nas = true; }) ];
-    homelab.localState.${name} = { path = local; unit = "demo"; };
+    imports = [
+      (lab.guest "131" {
+        flat = true;
+        nas = true;
+      })
+    ];
+    homelab.localState.${name} = {
+      path = local;
+      unit = "demo";
+    };
     # no collector in this test: a failed upload would fail every switch below
     services.journald.upload.enable = lib.mkForce false;
-    users.users.demo = { isSystemUser = true; group = "demo"; };
+    users.users.demo = {
+      isSystemUser = true;
+      group = "demo";
+    };
     users.groups.demo = { };
     # the app the seed must precede
     systemd.services.demo = {
       wantedBy = [ "multi-user.target" ];
-      serviceConfig = { Type = "oneshot"; RemainAfterExit = true; ExecStart = "${pkgs.coreutils}/bin/true"; User = "demo"; };
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStart = "${pkgs.coreutils}/bin/true";
+        User = "demo";
+      };
     };
     systemd.services."${name}-mirror" = {
       path = lib.mkBefore [ vanishingRsync ];
@@ -47,10 +74,12 @@ pkgs.testers.runNixOSTest {
     };
     specialisation.dropped.configuration.homelab.localState = lib.mkForce { };
     # the layout before localState: the app's state directory is the share itself
-    specialisation.onShare.configuration = { nasMount, ... }: {
-      homelab.localState = lib.mkForce { };
-      homelab.nasMounts = nasMount local name;
-    };
+    specialisation.onShare.configuration =
+      { nasMount, ... }:
+      {
+        homelab.localState = lib.mkForce { };
+        homelab.nasMounts = nasMount local name;
+      };
   };
 
   testScript = ''

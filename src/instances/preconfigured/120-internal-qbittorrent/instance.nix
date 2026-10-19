@@ -1,10 +1,14 @@
 # torrent client, egress through the router's vpn exit
-{ lib, profiles, ... }: {
+{ lib, profiles, ... }:
+{
   vm = {
     # parked while unused; "on" brings it back
     power = "off";
     bootPhase = "media";
-    needs = [ "containers" "nfs" ];
+    needs = [
+      "containers"
+      "nfs"
+    ];
     memoryMiB = 1024;
     # unfinished downloads: the size caps what torrents can take of the nvme pool
     disks = [ { sizeGiB = 150; } ];
@@ -12,11 +16,18 @@
 
   tokens = [ "qbittorrent-user" ];
 
-  grants = [ {
-    from = [ "router" "114" "operator" "121" ];
-    tcp = [ 80 ];
-    why = "the webui api without its login: the router's protonvpn-port sets the leased port, terminal stats, hermes, the arrs' download client";
-  } ];
+  grants = [
+    {
+      from = [
+        "router"
+        "114"
+        "operator"
+        "121"
+      ];
+      tcp = [ 80 ];
+      why = "the webui api without its login: the router's protonvpn-port sets the leased port, terminal stats, hermes, the arrs' download client";
+    }
+  ];
 
   shares = {
     "data/qbittorrent" = { };
@@ -36,8 +47,12 @@
         icon = "qbittorrent";
         name = "qBittorrent";
         widget = {
-          tokens = { username = "qbittorrent-user"; };
-          secrets = { password = "qbittorrent-pass"; };
+          tokens = {
+            username = "qbittorrent-user";
+          };
+          secrets = {
+            password = "qbittorrent-pass";
+          };
           type = "qbittorrent";
         };
       };

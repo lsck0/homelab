@@ -9,12 +9,6 @@ import (
 	"time"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 const (
 	// the house's public address and prefix rotate rarely; a request after this long resolves them again, in the background
 	allowResolveInterval = 5 * time.Minute
@@ -23,12 +17,6 @@ const (
 
 // a host's network and the bits of an address of it
 var allowNetworkBits = map[string]int{"ip4": 32, "ip6": 128}
-
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
 
 // AllowLookup resolves a name to its addresses of one network, as net.Resolver.LookupNetIP.
 type AllowLookup func(ctx context.Context, network, host string) ([]netip.Addr, error)
@@ -46,12 +34,6 @@ type Allow struct {
 	resolvedAt time.Time
 	resolving  bool
 }
-
-/*
- * -----------------------------------------------------------------------------
- * LIFETIME
- * -----------------------------------------------------------------------------
- */
 
 func allowCreate(settings SettingsAllow) *Allow {
 	return allowCreateWith(settings, net.DefaultResolver.LookupNetIP)
@@ -73,12 +55,6 @@ func allowCreateWith(settings SettingsAllow, lookup AllowLookup) *Allow {
 }
 
 func allowDestroy(_ *Allow) {}
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 func allowResolve(a *Allow) {
 	ctx, cancel := context.WithTimeout(context.Background(), allowResolveTimeout)

@@ -2,7 +2,8 @@
 #
 # Only for tests that do not import modules/base (through stubs.nix); base.nix brings the real nas.nix, and a
 # lab test that wants the real mounts serves them from a test nas (lib/lab.nix `nas`, lib/nas-mounts.nix).
-{ lib, ... }: {
+{ lib, ... }:
+{
   options.homelab.nasMounts = lib.mkOption {
     type = lib.types.attrsOf lib.types.anything;
     default = { };

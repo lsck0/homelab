@@ -2,7 +2,14 @@
 # with the upstream's status before forgejo is touched, a failure of its own fails it, and only a 404 means missing
 { pkgs, lib, ... }:
 let
-  inherit ((import ../../../../modules/upstream { inherit lib pkgs; lab.upstreams = { }; })._module.args.upstream) unavailable;
+  inherit
+    ((import ../../../../modules/upstream {
+      inherit lib pkgs;
+      lab.upstreams = { };
+    })._module.args.upstream
+    )
+    unavailable
+    ;
   owner = "luca";
   mirror = pkgs.writers.writeNu "forgejo-mirror" ../lib/forgejo-mirror.nu;
 
@@ -51,12 +58,54 @@ let
   '';
 
   cases = {
-    mirrored = { github = "up"; forgejoHas = "yes"; migrate = "ok"; status = 0; touchesForgejo = true; migrates = false; };
-    created = { github = "up"; forgejoHas = "no"; migrate = "ok"; status = 0; touchesForgejo = true; migrates = true; };
-    outage = { github = "down"; forgejoHas = "yes"; migrate = "ok"; status = unavailable; touchesForgejo = false; migrates = false; };
-    outage-mid-run = { github = "flaky"; forgejoHas = "no"; migrate = "fail"; status = unavailable; touchesForgejo = true; migrates = true; };
-    own-failure = { github = "up"; forgejoHas = "no"; migrate = "fail"; status = 1; touchesForgejo = true; migrates = true; };
-    forgejo-error = { github = "up"; forgejoHas = "error"; migrate = "ok"; status = 1; touchesForgejo = true; migrates = false; };
+    mirrored = {
+      github = "up";
+      forgejoHas = "yes";
+      migrate = "ok";
+      status = 0;
+      touchesForgejo = true;
+      migrates = false;
+    };
+    created = {
+      github = "up";
+      forgejoHas = "no";
+      migrate = "ok";
+      status = 0;
+      touchesForgejo = true;
+      migrates = true;
+    };
+    outage = {
+      github = "down";
+      forgejoHas = "yes";
+      migrate = "ok";
+      status = unavailable;
+      touchesForgejo = false;
+      migrates = false;
+    };
+    outage-mid-run = {
+      github = "flaky";
+      forgejoHas = "no";
+      migrate = "fail";
+      status = unavailable;
+      touchesForgejo = true;
+      migrates = true;
+    };
+    own-failure = {
+      github = "up";
+      forgejoHas = "no";
+      migrate = "fail";
+      status = 1;
+      touchesForgejo = true;
+      migrates = true;
+    };
+    forgejo-error = {
+      github = "up";
+      forgejoHas = "error";
+      migrate = "ok";
+      status = 1;
+      touchesForgejo = true;
+      migrates = false;
+    };
   };
 
   caseScript = name: c: ''
@@ -76,14 +125,21 @@ let
     fi
   '';
 in
-pkgs.runCommand "forgejo-mirror" { nativeBuildInputs = [ curlStub pkgs.coreutils ]; } ''
-  printf forgejo-token > forgejo.token
-  printf github-token > github.token
-  export FORGEJO_URL=http://forgejo FORGEJO_OWNER=${owner} MIRROR_INTERVAL=8h
-  export FORGEJO_TOKEN_FILE=$PWD/forgejo.token GITHUB_TOKEN_FILE=$PWD/github.token
-  export UPSTREAM=${upstreamStub} UPSTREAM_UNAVAILABLE=${toString unavailable}
-  failed=0
-  ${lib.concatStrings (lib.mapAttrsToList caseScript cases)}
-  [ "$failed" = 0 ] || exit 1
-  echo "${toString (lib.length (lib.attrNames cases))} cases pass" > $out
-''
+pkgs.runCommand "forgejo-mirror"
+  {
+    nativeBuildInputs = [
+      curlStub
+      pkgs.coreutils
+    ];
+  }
+  ''
+    printf forgejo-token > forgejo.token
+    printf github-token > github.token
+    export FORGEJO_URL=http://forgejo FORGEJO_OWNER=${owner} MIRROR_INTERVAL=8h
+    export FORGEJO_TOKEN_FILE=$PWD/forgejo.token GITHUB_TOKEN_FILE=$PWD/github.token
+    export UPSTREAM=${upstreamStub} UPSTREAM_UNAVAILABLE=${toString unavailable}
+    failed=0
+    ${lib.concatStrings (lib.mapAttrsToList caseScript cases)}
+    [ "$failed" = 0 ] || exit 1
+    echo "${toString (lib.length (lib.attrNames cases))} cases pass" > $out
+  ''

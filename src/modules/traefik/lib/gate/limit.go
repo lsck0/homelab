@@ -6,20 +6,8 @@ import (
 	"time"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 // anonymous clients bucketed at once, per client and route scale
 const limitCountMax = 65536
-
-/*
- * -----------------------------------------------------------------------------
- * TYPES
- * -----------------------------------------------------------------------------
- */
 
 type bucket struct {
 	tokens float64
@@ -35,12 +23,6 @@ type Limiter struct {
 	buckets          *table[bucket]
 }
 
-/*
- * -----------------------------------------------------------------------------
- * LIFETIME
- * -----------------------------------------------------------------------------
- */
-
 func limiterCreate(settings SettingsAnonymous) *Limiter {
 	return &Limiter{
 		averagePerSecond: float64(settings.AveragePerSecond),
@@ -55,12 +37,6 @@ func limiterDestroy(l *Limiter) {
 	}
 	tableDestroy(l.buckets)
 }
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 // limiterTake spends one token of the client's bucket at the route's scale; false: the client is over its limit.
 func limiterTake(l *Limiter, client string, scale int, now time.Time) bool {

@@ -1,14 +1,19 @@
 """Build and deploy the app catalog: a github repo and a branch each, everything else derived.
 
-Usage: app-builder.py <catalog.json> <state-dir> [app]
+Usage: app-builder.py <catalog.json> <state-dir> [app | --rollback app]
 
 For every app (or the one named) whose branch, catalog entry or base images moved: build each service the registry
 lacks an image of the same content for, push it, pin it by digest, and hand the stack to the app's swarm manager. A
-failed app is retried with backoff; an upstream that is down skips the app as "<name> unavailable", no failure.
-Each app's turn holds that app's lock.
+failed app is retried with backoff, unless a run names it (its ci's /redeploy); an upstream that is down skips the
+app as "<name> unavailable", no failure. An app that requires checks deploys a commit once its GitHub check runs
+passed. Each app's turn holds that app's lock.
 
-State per app in <state-dir>/<app>.json, written after every attempt:
-    {"head", "sha", "build_hash", "deployed_at", "committed_at", "built", "reused",
+--rollback holds the app at the commit it ran before its current one, until a new commit lands on its branch; the
+next run for the app deploys it.
+
+State per app in <state-dir>/<app>.json, written after every attempt and published to the catalog's deployStatusDir:
+    {"head", "sha", "previous_sha", "build_hash", "deployed_at", "committed_at", "built", "reused",
+     "hold": null | {"sha", "head"},
      "failure": null | {"head", "sha", "build_hash", "count", "retry_at"}}
 
 Content key: the git tree of the build context, the dockerfile's blob, the target, the build args and the digest of
@@ -24,6 +29,7 @@ own, and the content key already skips every unchanged service whole.
 Rejected: a state file per step (.head, .sha, .done) checked head first: a forced redeploy did nothing while the head
 stood still, and a catalog-only change never rebuilt.
 """
+
 import base64
 import concurrent.futures
 import datetime
@@ -42,15 +48,16 @@ import urllib.request
 
 import yaml
 
-# -----------------------------------------------------------------------------
-# CONSTANTS
-# -----------------------------------------------------------------------------
 
 # looked up at the repo root when the catalog names no stack file, in this order
 STACK_CONVENTIONS = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml", "stack.yaml")
 # a repo without a compose file is one image built from its root
 STACK_DEFAULT = {"services": {"web": {"build": "."}}}
 BUILD_KEYS = {"context", "dockerfile", "args", "target"}
+# github's check runs api: one page holds every run of a commit; a skipped or neutral run blocks nothing
+CHECK_RUNS_MAX = 100
+CHECK_COMPLETED = "completed"
+CHECK_PASSED = ("success", "neutral", "skipped")
 # a static app's one service, and where its build sees the checkout
 STATIC_SERVICE = "web"
 STATIC_CHECKOUT = "/src"
@@ -60,8 +67,6 @@ STATIC_PAGE_SUFFIX = ".html"
 STATIC_INDEX = "index.html"
 ROBOTS_FILE = "robots.txt"
 SITEMAP_FILE = "sitemap.xml"
-# git sends it on every request to github, never on argv
-GITHUB_HEADER_KEY = "http.https://github.com/.extraheader"
 # git's own abbreviation is 7; 12 hex digits never collide in repos this size
 SHA_SHORT_LENGTH = 12
 # the registry's prune keeps it, so the digest a service is pinned to stays pullable for a node that joins later
@@ -75,15 +80,30 @@ LABEL_REVISION = "org.opencontainers.image.revision"
 LABEL_CREATED = "org.opencontainers.image.created"
 LABEL_SOURCE = "org.opencontainers.image.source"
 # the manifest kinds a docker push leaves, so the registry answers the digest docker recorded
-MANIFEST_ACCEPT = ", ".join(("application/vnd.oci.image.index.v1+json", "application/vnd.oci.image.manifest.v1+json",
-                             "application/vnd.docker.distribution.manifest.list.v2+json",
-                             "application/vnd.docker.distribution.manifest.v2+json"))
+MANIFEST_ACCEPT = ", ".join(
+    (
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    )
+)
 HTTP_NOT_FOUND = 404
 LOCK_SUFFIX = ".lock"
 METRICS_FILE = "metrics.prom"
 STATE_SUFFIX = ".json"
-STATE_EMPTY = {"head": None, "sha": None, "build_hash": None, "deployed_at": None, "committed_at": None,
-               "built": None, "reused": None, "failure": None}
+STATE_EMPTY = {
+    "head": None,
+    "sha": None,
+    "previous_sha": None,
+    "build_hash": None,
+    "deployed_at": None,
+    "committed_at": None,
+    "built": None,
+    "reused": None,
+    "hold": None,
+    "failure": None,
+}
 # a stage starting from nothing or from an earlier stage has no base image of its own
 BASE_NONE = "scratch"
 FROM_LINE = re.compile(r"^\s*FROM\s+(?:--\S+\s+)*(\S+)(?:\s+AS\s+(\S+))?\s*$", re.IGNORECASE)
@@ -122,9 +142,8 @@ class UpstreamUnavailable(Exception):
         self.name = name
 
 
-# -----------------------------------------------------------------------------
-# BOUNDARY: the forge, git, docker, the manager, the clock. tests/app_builder_sim_test.py replaces these.
-# -----------------------------------------------------------------------------
+# the boundary: the forge, git, docker, the manager, the clock; tests/app_builder_sim_test.py replaces these
+
 
 def process_run(args, timeout_s, **kwargs):
     try:
@@ -155,11 +174,36 @@ def upstream_reachable(ctx, name):
 
 
 def branch_head(ctx, repo, branch):
-    out = process_run(["git", "ls-remote", f"{ctx['github']}/{repo}", f"refs/heads/{branch}"],
-                      ctx["timeouts"]["gitS"], capture_output=True).stdout.split()
+    out = process_run(
+        ["git", "ls-remote", f"{ctx['github']}/{repo}", f"refs/heads/{branch}"],
+        ctx["timeouts"]["gitS"],
+        capture_output=True,
+        env=git_env(ctx, repo),
+    ).stdout.split()
     if not out:
         raise BuildError(f"no branch {branch} in {repo}")
     return out[0]
+
+
+def check_runs(ctx, repo, sha):
+    """The commit's github check runs, each {name, status, conclusion}."""
+    url = f"{ctx['githubApi']}/repos/{repo}/commits/{sha}/check-runs?per_page={CHECK_RUNS_MAX}"
+    token = ctx.get("githubToken")
+    request = urllib.request.Request(url, headers={"Authorization": f"Bearer {token}"} if token else {})
+    try:
+        with urllib.request.urlopen(request, timeout=ctx["timeouts"]["apiS"]) as r:
+            return json.load(r)["check_runs"]
+    except (urllib.error.URLError, OSError, ValueError, KeyError, TypeError) as e:
+        raise BuildError(f"the check runs api failed for {sha_short(sha)}: {e}") from e
+
+
+def checks_pending(runs):
+    """No run yet, or one still running: the commit is not judged."""
+    return not runs or any(r["status"] != CHECK_COMPLETED for r in runs)
+
+
+def checks_failed(runs):
+    return sorted(r["name"] for r in runs if r["conclusion"] not in CHECK_PASSED)
 
 
 def branch_last_change(ctx, repo, branch, paths):
@@ -185,31 +229,39 @@ def branch_last_change(ctx, repo, branch, paths):
 def repo_checkout(ctx, repo, sha, into):
     """The commit at `into`; its committer date, which images carry as LAST_UPDATED."""
     git_s = ctx["timeouts"]["gitS"]
-    process_run(["git", "init", "-q", into], git_s)
-    process_run(["git", "-C", into, "fetch", "-q", "--depth", "1", f"{ctx['github']}/{repo}", sha], git_s)
-    process_run(["git", "-C", into, "checkout", "-q", "FETCH_HEAD"], git_s)
+    env = git_env(ctx, repo)
+    process_run(["git", "init", "-q", into], git_s, env=env)
+    process_run(["git", "-C", into, "fetch", "-q", "--depth", "1", f"{ctx['github']}/{repo}", sha], git_s, env=env)
+    process_run(["git", "-C", into, "checkout", "-q", "FETCH_HEAD"], git_s, env=env)
     # vendored code and large assets are part of the build: nyangine has both
     if os.path.exists(os.path.join(into, ".gitmodules")):
-        process_run(["git", "-C", into, "submodule", "update", "-q", "--init", "--recursive", "--depth", "1"], git_s)
+        submodule_update = ["git", "-C", into, "submodule", "update", "-q", "--init", "--recursive", "--depth", "1"]
+        process_run(submodule_update, git_s, env=env)
     attributes = os.path.join(into, ".gitattributes")
     if os.path.exists(attributes):
         with open(attributes, encoding="utf-8", errors="replace") as f:
             if "filter=lfs" in f.read():
-                process_run(["git", "-C", into, "lfs", "install", "--local"], git_s, capture_output=True)
-                process_run(["git", "-C", into, "lfs", "pull"], git_s)
-    return process_run(["git", "-C", into, "log", "-1", "--format=%cI"], git_s, capture_output=True).stdout.strip()
+                process_run(["git", "-C", into, "lfs", "install", "--local"], git_s, capture_output=True, env=env)
+                process_run(["git", "-C", into, "lfs", "pull"], git_s, env=env)
+    log_date = ["git", "-C", into, "log", "-1", "--format=%cI"]
+    return process_run(log_date, git_s, capture_output=True, env=env).stdout.strip()
 
 
 def registry_login(ctx):
     with open(ctx["registryPasswordFile"], encoding="utf-8") as f:
-        process_run(["docker", "login", ctx["registry"], "-u", ctx["registryUser"], "--password-stdin"],
-                    ctx["timeouts"]["loginS"], stdin=f, capture_output=True)
+        process_run(
+            ["docker", "login", ctx["registry"], "-u", ctx["registryUser"], "--password-stdin"],
+            ctx["timeouts"]["loginS"],
+            stdin=f,
+            capture_output=True,
+        )
 
 
 def git_object(ctx, repo_dir, path):
     """The object id of the tree or blob at `path` of the checked-out commit ("" is the root tree)."""
-    return process_run(["git", "-C", repo_dir, "rev-parse", f"HEAD:{path}"], ctx["timeouts"]["gitS"],
-                       capture_output=True).stdout.strip()
+    return process_run(
+        ["git", "-C", repo_dir, "rev-parse", f"HEAD:{path}"], ctx["timeouts"]["gitS"], capture_output=True
+    ).stdout.strip()
 
 
 def registry_request(ctx, method, path, headers=None, data=None):
@@ -217,8 +269,11 @@ def registry_request(ctx, method, path, headers=None, data=None):
     with open(ctx["registryPasswordFile"], encoding="utf-8") as f:
         credentials = f"{ctx['registryUser']}:{f.read().strip()}"
     request = urllib.request.Request(
-        f"https://{ctx['registry']}/v2/{path}", method=method, data=data,
-        headers=dict(headers or {}, Authorization="Basic " + base64.b64encode(credentials.encode()).decode()))
+        f"https://{ctx['registry']}/v2/{path}",
+        method=method,
+        data=data,
+        headers=dict(headers or {}, Authorization="Basic " + base64.b64encode(credentials.encode()).decode()),
+    )
     with urllib.request.urlopen(request, timeout=ctx["timeouts"]["apiS"]) as r:
         return r.headers, r.read()
 
@@ -245,8 +300,11 @@ def image_base_digest(ctx, image):
         return image.split(DIGEST_SEPARATOR, 1)[1]
     timeout_s = ctx["timeouts"]["pushS"]
     process_run(["docker", "pull", "-q", image], timeout_s, capture_output=True)
-    digests = json.loads(process_run(["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image],
-                                     timeout_s, capture_output=True).stdout)
+    digests = json.loads(
+        process_run(
+            ["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", image], timeout_s, capture_output=True
+        ).stdout
+    )
     if not digests:
         raise BuildError(f"the registry of {image} named no digest")
     return digests[0].split(DIGEST_SEPARATOR, 1)[1]
@@ -257,8 +315,19 @@ def image_build_push(ctx, app, name, build, tag, labels, args):
     timeouts = ctx["timeouts"]
     ref = f"{ctx['registry']}/{app}/{name}"
     # the last live image's layers when the local cache is empty (a fresh or pruned builder)
-    cmd = ["docker", "build", "--pull", "-f", build["dockerfile"], "-t", f"{ref}:{tag}",
-           "--cache-from", f"{ref}:{LIVE_TAG}", "--build-arg", "BUILDKIT_INLINE_CACHE=1"]
+    cmd = [
+        "docker",
+        "build",
+        "--pull",
+        "-f",
+        build["dockerfile"],
+        "-t",
+        f"{ref}:{tag}",
+        "--cache-from",
+        f"{ref}:{LIVE_TAG}",
+        "--build-arg",
+        "BUILDKIT_INLINE_CACHE=1",
+    ]
     if build["target"] is not None:
         cmd += ["--target", build["target"]]
     for key, value in sorted(args.items()):
@@ -269,12 +338,26 @@ def image_build_push(ctx, app, name, build, tag, labels, args):
     return image_push(ctx, ref, tag)
 
 
+def cache_mounts_prune(ctx):
+    """security: buildkit shares a RUN --mount=type=cache directory by its id across every build of this user, so
+    another app's build could have filled one this app's dockerfile names; each app builds on empty ones. The layer
+    cache is keyed by content and stays. A second app's run at the same moment (app-builder@) is the one window."""
+    process_run(
+        ["docker", "builder", "prune", "--force", "--filter", "type=exec.cachemount"],
+        ctx["timeouts"]["buildS"],
+        capture_output=True,
+    )
+
+
 def image_push(ctx, ref, tag):
     """Push <ref>:<tag> and return its digest-pinned reference."""
     timeout_s = ctx["timeouts"]["pushS"]
     process_run(["docker", "push", "-q", f"{ref}:{tag}"], timeout_s, capture_output=True)
-    digests = process_run(["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", f"{ref}:{tag}"],
-                          timeout_s, capture_output=True).stdout
+    digests = process_run(
+        ["docker", "image", "inspect", "--format", "{{json .RepoDigests}}", f"{ref}:{tag}"],
+        timeout_s,
+        capture_output=True,
+    ).stdout
     pinned = [d for d in json.loads(digests) if d.startswith(f"{ref}@")]
     if not pinned:
         raise BuildError(f"the registry answered no digest for {ref}:{tag}")
@@ -297,19 +380,48 @@ def static_site_build(ctx, static, repo_dir):
     The checkout is bind-mounted, so it lives where the rootless daemon sees it (`workDir`), not in a private /tmp.
     """
     bins = f"{static['toolchain']}/bin"
-    process_run(["docker", "run", "--rm", "--network", "none", "--pids-limit", str(STATIC_PIDS_MAX), "--read-only",
-                 "--tmpfs", "/tmp:exec", "-e", "HOME=/tmp", "-e", "PATH=/usr/bin",
-                 "-v", "/nix/store:/nix/store:ro", "-v", f"{bins}:/usr/bin:ro", "-v", f"{bins}:/bin:ro",
-                 "-v", f"{repo_dir}:{STATIC_CHECKOUT}", "-w", STATIC_CHECKOUT,
-                 image_local(ctx, static["build"]), "sh", "-c", static["command"]], ctx["timeouts"]["buildS"])
+    process_run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--network",
+            "none",
+            "--pids-limit",
+            str(STATIC_PIDS_MAX),
+            "--read-only",
+            "--tmpfs",
+            "/tmp:exec",
+            "-e",
+            "HOME=/tmp",
+            "-e",
+            "PATH=/usr/bin",
+            "-v",
+            "/nix/store:/nix/store:ro",
+            "-v",
+            f"{bins}:/usr/bin:ro",
+            "-v",
+            f"{bins}:/bin:ro",
+            "-v",
+            f"{repo_dir}:{STATIC_CHECKOUT}",
+            "-w",
+            STATIC_CHECKOUT,
+            image_local(ctx, static["build"]),
+            "sh",
+            "-c",
+            static["command"],
+        ],
+        ctx["timeouts"]["buildS"],
+    )
 
 
 def static_image_push(ctx, app, static, site, tag, labels):
     """The platform's server image with the site at its root, committed as <app>/web and pushed; its pinned ref."""
     timeout_s = ctx["timeouts"]["pushS"]
     ref = f"{ctx['registry']}/{app}/{STATIC_SERVICE}"
-    container = process_run(["docker", "create", image_local(ctx, static["server"])], timeout_s,
-                            capture_output=True).stdout.strip()
+    container = process_run(
+        ["docker", "create", image_local(ctx, static["server"])], timeout_s, capture_output=True
+    ).stdout.strip()
     try:
         process_run(["docker", "cp", f"{site}/.", f"{container}:{static['root']}"], timeout_s, capture_output=True)
         changes = [arg for key, value in sorted(labels.items()) for arg in ("--change", f"LABEL {key}={value}")]
@@ -325,9 +437,16 @@ def image_mark_live(ctx, app, name, digest):
     The stack names the digest; the tag keeps it from the registry's prune and is the next build's cache.
     """
     try:
-        headers, manifest = registry_request(ctx, "GET", f"{app}/{name}/manifests/{digest}", {"Accept": MANIFEST_ACCEPT})
-        registry_request(ctx, "PUT", f"{app}/{name}/manifests/{LIVE_TAG}",
-                         {"Content-Type": headers.get("Content-Type", "")}, manifest)
+        headers, manifest = registry_request(
+            ctx, "GET", f"{app}/{name}/manifests/{digest}", {"Accept": MANIFEST_ACCEPT}
+        )
+        registry_request(
+            ctx,
+            "PUT",
+            f"{app}/{name}/manifests/{LIVE_TAG}",
+            {"Content-Type": headers.get("Content-Type", "")},
+            manifest,
+        )
     except (urllib.error.URLError, OSError) as e:
         raise BuildError(f"the registry refused the live tag of {app}/{name}: {e}") from e
 
@@ -351,29 +470,45 @@ def stack_deploy(ctx, app, manager, stack):
         unit = ctx["deployUnit"] + app + ".service"
         # the unit counts the manager's "unavailable" as a success: its status tells
         process_run(["systemctl", "start", unit], timeouts["deployS"])
-        status = process_run(["systemctl", "show", "-P", "ExecMainStatus", unit], timeouts["deployS"],
-                             capture_output=True).stdout.strip()
+        status = process_run(
+            ["systemctl", "show", "-P", "ExecMainStatus", unit], timeouts["deployS"], capture_output=True
+        ).stdout.strip()
         if status == str(unavailable):
             raise UpstreamUnavailable(STACK_REGISTRY)
         return
     try:
-        process_run(["ssh", "-i", ctx["deployKeyFile"], "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes",
-                     "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={manager['knownHosts']}",
-                     "-o", "GlobalKnownHostsFile=/dev/null",
-                     "-o", f"ConnectTimeout={timeouts['sshConnectS']}",
-                     "-o", f"ServerAliveInterval={timeouts['sshAliveIntervalS']}",
-                     "-o", f"ServerAliveCountMax={timeouts['sshAliveCountMax']}",
-                     f"root@{manager['address']}", app],
-                    timeouts["deployS"], input=text)
+        process_run(
+            [
+                "ssh",
+                "-i",
+                ctx["deployKeyFile"],
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                f"UserKnownHostsFile={manager['knownHosts']}",
+                "-o",
+                "GlobalKnownHostsFile=/dev/null",
+                "-o",
+                f"ConnectTimeout={timeouts['sshConnectS']}",
+                "-o",
+                f"ServerAliveInterval={timeouts['sshAliveIntervalS']}",
+                "-o",
+                f"ServerAliveCountMax={timeouts['sshAliveCountMax']}",
+                f"root@{manager['address']}",
+                app,
+            ],
+            timeouts["deployS"],
+            input=text,
+        )
     except BuildError as e:
         if e.status == unavailable:
             raise UpstreamUnavailable(STACK_REGISTRY) from e
         raise
 
-
-# -----------------------------------------------------------------------------
-# UPSTREAMS: modules/upstream's contract, for the calls leaving the lab
-# -----------------------------------------------------------------------------
 
 def upstream_error(ctx, names, error):
     """What a failed call raises: the outage of the first named upstream whose probe says down, else its own error."""
@@ -408,10 +543,6 @@ def image_upstream(ctx, image):
     host = first if slash and ("." in first or ":" in first or first == LOCALHOST) else DOCKER_HUB
     return ctx["upstreams"]["registries"].get(host)
 
-
-# -----------------------------------------------------------------------------
-# STACK: which file, which builds, which environment
-# -----------------------------------------------------------------------------
 
 def path_resolve_inside(root, path):
     """The path, resolved, if it stays in the checkout; a repo must not point a build or an env file elsewhere."""
@@ -464,13 +595,18 @@ def build_resolve(svc, hint, stack_dir, repo_dir):
         raise BuildError(f"build.{sorted(unknown)[0]} is not supported: the builder knows {sorted(BUILD_KEYS)}")
     stack_rel = os.path.relpath(stack_dir, repo_dir)
     context = path_resolve_inside(repo_dir, os.path.join(stack_rel, str(build.get("context", "."))))
-    dockerfile = path_resolve_inside(repo_dir, os.path.join(os.path.relpath(context, repo_dir),
-                                                            str(build.get("dockerfile", "Dockerfile"))))
+    dockerfile = path_resolve_inside(
+        repo_dir, os.path.join(os.path.relpath(context, repo_dir), str(build.get("dockerfile", "Dockerfile")))
+    )
     args = build.get("args") or {}
     if isinstance(args, list):
         args = dict(a.split("=", 1) if "=" in a else (a, "") for a in map(str, args))
-    return {"context": context, "dockerfile": dockerfile, "target": build.get("target"),
-            "args": {str(k): "" if v is None else str(v) for k, v in args.items()}}
+    return {
+        "context": context,
+        "dockerfile": dockerfile,
+        "target": build.get("target"),
+        "args": {str(k): "" if v is None else str(v) for k, v in args.items()},
+    }
 
 
 def dotenv_value_parse(raw):
@@ -574,29 +710,49 @@ def content_key(ctx, repo_dir, build, args):
     for image in sorted(set(dockerfile_bases(build["dockerfile"], args))):
         digest = upstream_call(ctx, image_upstream(ctx, image), lambda image=image: image_base_digest(ctx, image))
         bases.append((image, digest))
-    parts = [git_object(ctx, repo_dir, "" if context == os.curdir else context),
-             git_object(ctx, repo_dir, os.path.relpath(build["dockerfile"], repo_dir)), build["target"], sorted(read.items()),
-             bases]
+    parts = [
+        git_object(ctx, repo_dir, "" if context == os.curdir else context),
+        git_object(ctx, repo_dir, os.path.relpath(build["dockerfile"], repo_dir)),
+        build["target"],
+        sorted(read.items()),
+        bases,
+    ]
     return hashlib.sha256(json.dumps(parts).encode()).hexdigest()[:KEY_LENGTH]
+
+
+def site_file_create(path, text):
+    """A file the site does not ship. security: a link the build left in its place, dangling or not, is the site's
+    own file and never followed: the build is the app's code, the write the builder's."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(text)
 
 
 def site_index_write(site, origin, created):
     """robots.txt admitting every crawler and a sitemap.xml of every page at the origin; a site's own file wins."""
     robots = os.path.join(site, ROBOTS_FILE)
-    if not os.path.exists(robots):
-        with open(robots, "w", encoding="utf-8") as f:
-            f.write(f"User-agent: *\nAllow: /\n\nSitemap: {origin}/{SITEMAP_FILE}\n")
+    if not os.path.lexists(robots):
+        site_file_create(robots, f"User-agent: *\nAllow: /\n\nSitemap: {origin}/{SITEMAP_FILE}\n")
     sitemap = os.path.join(site, SITEMAP_FILE)
-    if os.path.exists(sitemap):
+    if os.path.lexists(sitemap):
         return
-    pages = sorted(os.path.relpath(os.path.join(d, f), site) for d, _, files in os.walk(site) for f in files
-                   if f.endswith(STATIC_PAGE_SUFFIX))
-    day = created[:len("yyyy-mm-dd")]
-    urls = "".join(f"  <url><loc>{origin}/{urllib.parse.quote(page.removesuffix(STATIC_INDEX))}</loc>"
-                   f"<lastmod>{day}</lastmod></url>\n" for page in pages)
-    with open(sitemap, "w", encoding="utf-8") as f:
-        f.write('<?xml version="1.0" encoding="UTF-8"?>\n'
-                f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}</urlset>\n')
+    pages = sorted(
+        os.path.relpath(os.path.join(d, f), site)
+        for d, _, files in os.walk(site)
+        for f in files
+        if f.endswith(STATIC_PAGE_SUFFIX)
+    )
+    day = created[: len("yyyy-mm-dd")]
+    urls = "".join(
+        f"  <url><loc>{origin}/{urllib.parse.quote(page.removesuffix(STATIC_INDEX))}</loc>"
+        f"<lastmod>{day}</lastmod></url>\n"
+        for page in pages
+    )
+    site_file_create(
+        sitemap,
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        f'<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n{urls}</urlset>\n',
+    )
 
 
 def static_image(ctx, app, static, repo_dir, created, labels):
@@ -658,11 +814,20 @@ def app_build_deploy(ctx, app, spec, sha):
         if (builds or static is not None) and not ctx["loggedIn"]:
             registry_login(ctx)
             ctx["loggedIn"] = True
+        if builds:
+            cache_mounts_prune(ctx)
         metadata = {"GIT_COMMIT": sha, "LAST_UPDATED": created}
         labels = {LABEL_REVISION: sha, LABEL_CREATED: created, LABEL_SOURCE: f"https://github.com/{spec['repo']}"}
         with concurrent.futures.ThreadPoolExecutor(max_workers=ctx["buildParallelism"]) as pool:
-            images = dict(zip(builds, pool.map(
-                lambda item: service_image(ctx, app, item[0], item[1], repo_dir, metadata, labels), builds.items())))
+            images = dict(
+                zip(
+                    builds,
+                    pool.map(
+                        lambda item: service_image(ctx, app, item[0], item[1], repo_dir, metadata, labels),
+                        builds.items(),
+                    ),
+                )
+            )
         if static is not None:
             images[STATIC_SERVICE] = static_image(ctx, app, static, repo_dir, created, labels)
         for name, (image, _) in images.items():
@@ -675,13 +840,12 @@ def app_build_deploy(ctx, app, spec, sha):
         for name, (image, _) in images.items():
             image_mark_live(ctx, app, name, image.split("@", 1)[1])
     built = sum(1 for _, was_built in images.values() if was_built)
-    return {"committed_at": int(datetime.datetime.fromisoformat(created).timestamp()), "built": built,
-            "reused": len(images) - built}
+    return {
+        "committed_at": int(datetime.datetime.fromisoformat(created).timestamp()),
+        "built": built,
+        "reused": len(images) - built,
+    }
 
-
-# -----------------------------------------------------------------------------
-# STATE
-# -----------------------------------------------------------------------------
 
 def log(app, message):
     print(f"{app}: {message}", flush=True)
@@ -714,6 +878,11 @@ def state_save(state_dir, app, state):
     file_write_atomic(os.path.join(state_dir, app + STATE_SUFFIX), json.dumps(state, sort_keys=True) + "\n")
 
 
+def status_publish(status_dir, app, state):
+    """The app's state where its manager's controller answers GET /deploy/<app> from (modules/swarm)."""
+    file_write_atomic(os.path.join(status_dir, app + STATE_SUFFIX), json.dumps(state, sort_keys=True) + "\n")
+
+
 def backoff_s(ctx, count):
     """1, 2, 4, ... times the base for the count-th failure of one commit, at most the cap."""
     assert count >= 1, count
@@ -741,36 +910,53 @@ def metrics_render(states, run_at):
         "# HELP homelab_app_deploy_failures Consecutive failed attempts at the app's newest commit.",
         "# TYPE homelab_app_deploy_failures gauge",
     ]
-    lines += [f'homelab_app_deploy_failures{{app="{app}"}} {s["failure"]["count"] if s["failure"] else 0}'
-              for app, s in attempted.items()]
+    lines += [
+        f'homelab_app_deploy_failures{{app="{app}"}} {s["failure"]["count"] if s["failure"] else 0}'
+        for app, s in attempted.items()
+    ]
     lines += [
         "# HELP homelab_app_deploy_last_success_timestamp_seconds Last good deploy of the app.",
         "# TYPE homelab_app_deploy_last_success_timestamp_seconds gauge",
     ]
-    lines += [f'homelab_app_deploy_last_success_timestamp_seconds{{app="{app}"}} {s["deployed_at"]}'
-              for app, s in attempted.items() if s["deployed_at"] is not None]
+    lines += [
+        f'homelab_app_deploy_last_success_timestamp_seconds{{app="{app}"}} {s["deployed_at"]}'
+        for app, s in attempted.items()
+        if s["deployed_at"] is not None
+    ]
+    lines += [
+        "# HELP homelab_app_deployed_info The commit the app runs, and whether a rollback holds it there.",
+        "# TYPE homelab_app_deployed_info gauge",
+    ]
+    lines += [
+        f'homelab_app_deployed_info{{app="{app}",sha="{s["sha"]}",held="{str(s["hold"] is not None).lower()}"}} 1'
+        for app, s in attempted.items()
+        if s["sha"] is not None
+    ]
     deployed = {app: s for app, s in attempted.items() if s["committed_at"] is not None}
     lines += [
         "# HELP homelab_app_deploy_latency_seconds From the deployed commit's date to its deploy.",
         "# TYPE homelab_app_deploy_latency_seconds gauge",
     ]
-    lines += [f'homelab_app_deploy_latency_seconds{{app="{app}"}} {s["deployed_at"] - s["committed_at"]}'
-              for app, s in deployed.items()]
+    lines += [
+        f'homelab_app_deploy_latency_seconds{{app="{app}"}} {s["deployed_at"] - s["committed_at"]}'
+        for app, s in deployed.items()
+    ]
     lines += [
         "# HELP homelab_app_images Images of the app's last deploy, built or reused from the registry by content.",
         "# TYPE homelab_app_images gauge",
     ]
-    lines += [f'homelab_app_images{{app="{app}",how="{how}"}} {s[how]}' for app, s in deployed.items()
-              for how in ("built", "reused")]
+    lines += [
+        f'homelab_app_images{{app="{app}",how="{how}"}} {s[how]}'
+        for app, s in deployed.items()
+        for how in ("built", "reused")
+    ]
     return "\n".join(lines) + "\n"
 
 
-# -----------------------------------------------------------------------------
-# FUNCTIONS
-# -----------------------------------------------------------------------------
+def app_run(ctx, app, spec, state, requested):
+    """One app's turn: the next state. Raises nothing for an operating error; that is a failure in the state.
 
-def app_run(ctx, app, spec, state):
-    """One app's turn: the next state. Raises nothing for an operating error; that is a failure in the state."""
+    requested: a run named the app, which tries it now whatever its backoff."""
     now = time_now()
     build_hash = spec["hash"]
     failure = state["failure"]
@@ -778,21 +964,46 @@ def app_run(ctx, app, spec, state):
     fresh = state["deployed_at"] is not None and now - state["deployed_at"] < ctx["baseRefreshS"]
     head = None
     target = None
+    hold = state["hold"]
     try:
         head = upstream_call(ctx, GITHUB, lambda: branch_head(ctx, spec["repo"], spec["branch"]))
-        if head == state["head"] and build_hash == state["build_hash"] and failure is None and fresh:
+        if hold is not None and head != hold["head"]:
+            log(app, f"a new commit releases the rollback to {sha_short(hold['sha'])}")
+            hold = None
+        if hold is None and head == state["head"] and build_hash == state["build_hash"] and failure is None and fresh:
             return state
-        if (failure is not None and head == failure["head"] and build_hash == failure["build_hash"]
-                and now < failure["retry_at"]):
-            log(app, f"failed {failure['count']} times at {sha_short(failure['sha'])}, next try at {failure['retry_at']}")
+        if (
+            not requested
+            and failure is not None
+            and head == failure["head"]
+            and build_hash == failure["build_hash"]
+            and now < failure["retry_at"]
+        ):
+            log(
+                app,
+                f"failed {failure['count']} times at {sha_short(failure['sha'])}, next try at {failure['retry_at']}",
+            )
             return state
-        # an app inside a busy repo follows its own paths, not every commit of the branch
-        if spec["watch"]:
-            target = upstream_call(ctx, GITHUB, lambda: branch_last_change(ctx, spec["repo"], spec["branch"], spec["watch"]))
+        if hold is not None:
+            target = hold["sha"]
+        elif spec["watch"]:
+            # an app inside a busy repo follows its own paths, not every commit of the branch
+            target = upstream_call(
+                ctx, GITHUB, lambda: branch_last_change(ctx, spec["repo"], spec["branch"], spec["watch"])
+            )
         else:
             target = head
         if target == state["sha"] and build_hash == state["build_hash"] and fresh:
-            return dict(state, head=head, failure=None)
+            return dict(state, head=head, hold=hold, failure=None)
+        # a held commit passed its checks when it first deployed
+        if spec.get("requireChecks") and hold is None:
+            runs = upstream_call(ctx, GITHUB, lambda: check_runs(ctx, spec["repo"], target))
+            if checks_pending(runs):
+                log(app, f"{sha_short(target)} waits for its checks, {sha_short(state['sha'])} keeps running")
+                return state
+            failed = checks_failed(runs)
+            if failed:
+                raise BuildError(f"its checks failed: {', '.join(failed)}")
         facts = app_build_deploy(ctx, app, spec, target)
     except UpstreamUnavailable as e:
         # nothing of the app failed: no failure count, no backoff, the running deploy stays; the next look retries
@@ -802,10 +1013,44 @@ def app_run(ctx, app, spec, state):
         log(app, f"failed: {e}")
         same = failure is not None and failure["sha"] == target and failure["build_hash"] == build_hash
         count = failure["count"] + 1 if same else 1
-        return dict(state, failure={"head": head, "sha": target, "build_hash": build_hash, "count": count,
-                                    "retry_at": now + backoff_s(ctx, count)})
+        return dict(
+            state,
+            hold=hold,
+            failure={
+                "head": head,
+                "sha": target,
+                "build_hash": build_hash,
+                "count": count,
+                "retry_at": now + backoff_s(ctx, count),
+            },
+        )
     log(app, f"deployed {sha_short(target)}: {facts['built']} built, {facts['reused']} reused")
-    return dict(facts, head=head, sha=target, build_hash=build_hash, deployed_at=time_now(), failure=None)
+    previous_sha = state["sha"] if state["sha"] != target else state["previous_sha"]
+    return dict(
+        facts,
+        head=head,
+        sha=target,
+        previous_sha=previous_sha,
+        build_hash=build_hash,
+        deployed_at=time_now(),
+        hold=hold,
+        failure=None,
+    )
+
+
+def app_rollback(state_dir, app):
+    """Holds the app at the commit before its current one; the exit code. The deploy is the next run's."""
+    with app_lock(state_dir, app, wait=True):
+        state = state_load(state_dir, app)
+        if state["hold"] is not None:
+            log(app, f"already held at {sha_short(state['hold']['sha'])}; a new commit releases it")
+            return 1
+        if state["previous_sha"] is None or state["head"] is None:
+            log(app, "no earlier deploy to roll back to")
+            return 1
+        state_save(state_dir, app, dict(state, hold={"sha": state["previous_sha"], "head": state["head"]}))
+    log(app, f"held at {sha_short(state['previous_sha'])} until a new commit lands on its branch")
+    return 0
 
 
 def app_lock(state_dir, app, wait):
@@ -821,24 +1066,40 @@ def app_lock(state_dir, app, wait):
 
 def app_waits_for_schedule(spec, state, only):
     """A scheduled app is left to its timer's run once deployed, until its catalog entry moves."""
-    return (only is None and spec.get("schedule") is not None and state["sha"] is not None
-            and state["build_hash"] == spec["hash"])
+    return (
+        only is None
+        and spec.get("schedule") is not None
+        and state["sha"] is not None
+        and state["build_hash"] == spec["hash"]
+    )
 
 
-def github_auth_set(path):
-    """git and the commits api read with the file's token, through the environment, never argv; the token or None."""
-    os.environ["GIT_TERMINAL_PROMPT"] = "0"
+def github_token_read(path):
+    """The builder's github token, or None: public repos only."""
     try:
         with open(path, encoding="utf-8") as f:
-            token = f.read().strip()
+            return f.read().strip() or None
     except FileNotFoundError:
         return None
-    if not token:
-        return None
-    basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
-    os.environ.update({"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": GITHUB_HEADER_KEY,
-                       "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}"})
-    return token
+
+
+def git_env(ctx, repo):
+    """git's environment for one app's repo: the token through the environment, never argv.
+
+    security: git sends the header only below the app's own repo url, so a submodule of another private repo of the
+    owner fetches without it and fails instead of landing in the build context."""
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    token = ctx.get("githubToken")
+    if token is not None:
+        basic = base64.b64encode(f"x-access-token:{token}".encode()).decode()
+        env.update(
+            {
+                "GIT_CONFIG_COUNT": "1",
+                "GIT_CONFIG_KEY_0": f"http.{ctx['github']}/{repo}.extraheader",
+                "GIT_CONFIG_VALUE_0": f"Authorization: Basic {basic}",
+            }
+        )
+    return env
 
 
 def builder_run(ctx, apps, state_dir, only):
@@ -854,27 +1115,36 @@ def builder_run(ctx, apps, state_dir, only):
         with lock:
             state = state_load(state_dir, app)
             if not app_waits_for_schedule(apps[app], state, only):
-                state = app_run(ctx, app, apps[app], state)
+                state = app_run(ctx, app, apps[app], state, requested=only is not None)
                 state_save(state_dir, app, state)
         failed += state["failure"] is not None
     states = {app: state_load(state_dir, app) for app in apps}
+    for app, state in states.items():
+        status_publish(ctx["deployStatusDir"], app, state)
     file_write_atomic(os.path.join(state_dir, METRICS_FILE), metrics_render(states, time_now()))
     return 1 if failed else 0
 
 
 def main():
-    if len(sys.argv) not in (3, 4):
-        print("usage: app-builder.py <catalog.json> <state-dir> [app]", file=sys.stderr)
+    usage = "usage: app-builder.py <catalog.json> <state-dir> [app | --rollback app]"
+    args = sys.argv[1:]
+    rollback = len(args) == 4 and args[2] == "--rollback"
+    if rollback:
+        del args[2]
+    if len(args) not in (2, 3):
+        print(usage, file=sys.stderr)
         return 2
-    catalog_path, state_dir = sys.argv[1:3]
-    only = sys.argv[3] if len(sys.argv) == 4 else None
+    catalog_path, state_dir = args[:2]
+    only = args[2] if len(args) == 3 else None
     with open(catalog_path, encoding="utf-8") as f:
         catalog = json.load(f)
     if only is not None and only not in catalog["apps"]:
         print(f"app-builder: unknown app {only}; known: {sorted(catalog['apps'])}", file=sys.stderr)
         return 2
+    if rollback:
+        return app_rollback(state_dir, only)
     os.makedirs(catalog["workDir"], exist_ok=True)
-    token = github_auth_set(catalog["githubTokenFile"])
+    token = github_token_read(catalog["githubTokenFile"])
     return builder_run(dict(catalog, loggedIn=False, githubToken=token), catalog["apps"], state_dir, only)
 
 

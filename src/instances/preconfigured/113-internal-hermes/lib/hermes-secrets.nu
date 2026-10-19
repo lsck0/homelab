@@ -89,25 +89,19 @@ def main [--force]: nothing -> nothing {
 
     # the generated private keys pass through $tmp: it goes on every way out, an error included
     let token = try {
-        # -------------------------------------------------------------------------
-        # SSH KEY (LAB)
-        # -------------------------------------------------------------------------
         if (current hermes-ssh-key) == "" or $force or not ($pub | path exists) {
             ^ssh-keygen -q -t ed25519 -N "" -C "hermes@vm-113" -f ($tmp | path join lab)
             secrets-set $SRC hermes-ssh-key (open --raw ($tmp | path join lab))
             rm --force ($tmp | path join lab)
-            # hermes may log in from its own vm and through the router only
+            # hermes may log in from its own vm only
             let ip = ^nix eval --raw --no-warn-dirty $"($SRC)#lab.inventory.\"($HERMES_ID)\".ip"
-            $"from=\"($ip),($site.lan.router)\" (open --raw ($tmp | path join lab.pub) | str trim)\n" | save --force $pub
+            $"from=\"($ip)\" (open --raw ($tmp | path join lab.pub) | str trim)\n" | save --force $pub
             ^git -C $ROOT add $pub
             print ">>> hermes-ssh-key generated, public key in src/secrets/keys/hermes.pub"
         } else {
             print ">>> hermes-ssh-key already set"
         }
 
-        # -------------------------------------------------------------------------
-        # GITHUB APP (PULL REQUESTS)
-        # -------------------------------------------------------------------------
         if (current hermes-github-app-key) == "" or not ($app_json | path exists) or $force {
             # manifest flow: a local page posts the manifest to github, the owner confirms there
             let created = $tmp | path join app.json
@@ -164,9 +158,6 @@ def main [--force]: nothing -> nothing {
     if $applied.exit_code != 0 { die $"ruleset ($RULESET_NAME) not applied: ($applied.stderr | str trim)" }
     print $">>> ruleset ($RULESET_NAME) active"
 
-    # -------------------------------------------------------------------------
-    # PROMPTED
-    # -------------------------------------------------------------------------
     for prompted in [[name question]; [telegram-bot-token "Telegram bot token (from @BotFather)"] [telegram-chat-id "Your Telegram user id (numeric)"]] {
         if (current $prompted.name) != "" and not $force {
             print $">>> ($prompted.name) already set"

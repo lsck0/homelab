@@ -4,6 +4,11 @@
 #   hostWith = import ../../../tests/lib/host-with.nix { inherit inputs; };
 #   grafana = hostWith (specialArgs.lab.withApps (apps: apps // { wat = apps.wat // { enable = true; }; })) "103-internal-grafana";
 { inputs }:
-lab: host: (inputs.self.nixosConfigurations.${host}.extendModules {
-  specialArgs = { inherit lab; inherit (lab) inventory site nasClients; instance = lab.hosts.${host}; };
+lab: host:
+(inputs.self.nixosConfigurations.${host}.extendModules {
+  specialArgs = {
+    inherit lab;
+    inherit (lab) inventory site nasClients;
+    instance = lab.hosts.${host};
+  };
 }).config

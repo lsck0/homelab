@@ -2,12 +2,15 @@
 # energy_model parses, every quarter hour of the asked local days
 { pkgs, ... }:
 let
-  python = pkgs.python3.withPackages (ps: [ (import ../default.nix { inherit pkgs; }) ps.flake8 ]);
+  python = pkgs.python3.withPackages (ps: [
+    (import ../default.nix { inherit pkgs; })
+    ps.flake8
+  ]);
   # the lab's line width
   lineMax = 150;
 in
 pkgs.runCommand "energy-fakes" { nativeBuildInputs = [ python ]; } ''
-  python3 -m flake8 --max-line-length ${toString lineMax} ${./energy_fakes.py} ${../lib/energy_model.py}
+  python3 -m flake8 --extend-ignore E203 --max-line-length ${toString lineMax} ${./energy_fakes.py} ${../lib/energy_model.py}
   PYTHONPATH=${./.} python3 -c '
   import datetime
   import energy_model as em

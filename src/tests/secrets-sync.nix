@@ -3,21 +3,57 @@
 # guarded secrets, idempotence, moves, prune, hosts leaving, the admin-key rotation, atomicity under injected sops
 # failures, and one run over the real plan (secrets_sync_test.nu says what each numbered assertion claims). Throwaway
 # age keys, no network; `seed` draws the injected faults and the sampled pairs.
-{ pkgs, lib, inputs, seed ? 1, ... }:
+{
+  pkgs,
+  lib,
+  inputs,
+  seed ? 1,
+  ...
+}:
 let
-  system = pkgs.stdenv.hostPlatform.system;
+  inherit (pkgs.stdenv.hostPlatform) system;
 
   folders = inputs.self.lab.layout;
   # a guest of the fake lab: a folder (the router's in core) unless it is a swarm worker; `reads` are the sops keys its
   # config reads
-  folderOf = name: if lib.hasSuffix "-apps-swarm" name then null
-    else if lib.hasSuffix "-router" name then "${folders.core}/${name}" else "${folders.preconfigured}/${name}";
-  guest = { id, name, hostName ? "vm-${id}", secrets ? { }, reads }: {
-    instance = { inherit id name; folder = folderOf name; config = { inherit hostName secrets; }; };
-    config.sops.secrets = lib.genAttrs reads (key: { inherit key; });
-  };
+  folderOf =
+    name:
+    if lib.hasSuffix "-apps-swarm" name then
+      null
+    else if lib.hasSuffix "-router" name then
+      "${folders.core}/${name}"
+    else
+      "${folders.preconfigured}/${name}";
+  guest =
+    {
+      id,
+      name,
+      hostName ? "vm-${id}",
+      secrets ? { },
+      reads,
+    }:
+    {
+      instance = {
+        inherit id name;
+        folder = folderOf name;
+        config = { inherit hostName secrets; };
+      };
+      config.sops.secrets = lib.genAttrs reads (key: {
+        inherit key;
+      });
+    };
   # an app as modules/apps-catalog types it, its fields all present
-  planOf = { guests, catalog, apps ? { x = { secrets.x-app = "garage-key-id"; placement = null; }; } }:
+  planOf =
+    {
+      guests,
+      catalog,
+      apps ? {
+        x = {
+          secrets.x-app = "garage-key-id";
+          placement = null;
+        };
+      },
+    }:
     let
       layout = import ../modules/secrets.nix {
         inherit lib catalog;
@@ -30,47 +66,163 @@ let
           catalog.external = { };
         };
       };
-    in builtins.toJSON (layout.planOf (lib.listToAttrs (map (g: lib.nameValuePair g.instance.name g.config) guests)));
+    in
+    builtins.toJSON (layout.planOf (lib.listToAttrs (map (g: lib.nameValuePair g.instance.name g.config) guests)));
 
   catalog = {
-    shared = "hex:16"; gen = "hex:16"; lk = "laravel-key"; pub = "public"; man = "manual"; vault = "guardsData:hex:16"; wg = "wireguard";
+    shared = "hex:16";
+    gen = "hex:16";
+    lk = "laravel-key";
+    pub = "public";
+    man = "manual";
+    vault = "guardsData:hex:16";
+    wg = "wireguard";
     hs = "guardsData:onion";
     df = "dotfiles:desk";
   };
-  a = own: guest { id = "100"; name = "100-internal-a"; secrets = { a-own = "hex:16"; } // own; reads = [ "a-own" "shared" "gen" ]; };
-  b = reads: guest { id = "101"; name = "101-internal-b"; reads = [ "shared" "b-oidc-secret" "x-app" "app-x-redeploy-token" ] ++ reads; };
-  node = guest { id = "250"; name = "250-apps-swarm"; reads = [ "shared" ]; };
-  router = guest { id = "300"; name = "300-router"; hostName = "luca-router"; secrets = { r-own = "manual"; }; reads = [ "r-own" "lk" "b-oidc-secret" ]; };
+  a =
+    own:
+    guest {
+      id = "100";
+      name = "100-internal-a";
+      secrets = {
+        a-own = "hex:16";
+      }
+      // own;
+      reads = [
+        "a-own"
+        "shared"
+        "gen"
+      ];
+    };
+  b =
+    reads:
+    guest {
+      id = "101";
+      name = "101-internal-b";
+      reads = [
+        "shared"
+        "b-oidc-secret"
+        "x-app"
+        "app-x-redeploy-token"
+      ]
+      ++ reads;
+    };
+  node = guest {
+    id = "250";
+    name = "250-apps-swarm";
+    reads = [ "shared" ];
+  };
+  router = guest {
+    id = "300";
+    name = "300-router";
+    hostName = "luca-router";
+    secrets = {
+      r-own = "manual";
+    };
+    reads = [
+      "r-own"
+      "lk"
+      "b-oidc-secret"
+    ];
+  };
 
-  plans = pkgs.linkFarm "secrets-sync-plans" (lib.mapAttrsToList (name: text: { name = "${name}.json"; path = pkgs.writeText name text; }) {
-    base = planOf { guests = [ (a { }) (b [ ]) node router ]; inherit catalog; };
-    # gen: from the shared file into a's own
-    moved = planOf { guests = [ (a { gen = "hex:16"; }) (b [ ]) node router ]; catalog = removeAttrs catalog [ "gen" ]; };
-    # b and the worker gone: their keys and copies go, the app's file loses its reader
-    minus = planOf { guests = [ (a { }) router ]; inherit catalog; };
-    # man no longer declared: unused, or pruned
-    unman = planOf { guests = [ (a { }) (b [ ]) node router ]; catalog = removeAttrs catalog [ "man" ]; };
-    # the guarded vault renamed: a missing guarded secret after the first deploy
-    renamed = planOf { guests = [ (a { }) (b [ ]) node router ]; catalog = removeAttrs catalog [ "vault" ] // { vault2 = "guardsData:hex:16"; }; };
-    # b reads a secret nothing declares
-    problem = planOf { guests = [ (a { }) (b [ "nope" ]) node router ]; inherit catalog; };
-    real = builtins.toJSON inputs.self.legacyPackages.${system}.secrets.plan;
-  });
+  plans = pkgs.linkFarm "secrets-sync-plans" (
+    lib.mapAttrsToList
+      (name: text: {
+        name = "${name}.json";
+        path = pkgs.writeText name text;
+      })
+      {
+        base = planOf {
+          guests = [
+            (a { })
+            (b [ ])
+            node
+            router
+          ];
+          inherit catalog;
+        };
+        # gen: from the shared file into a's own
+        moved = planOf {
+          guests = [
+            (a { gen = "hex:16"; })
+            (b [ ])
+            node
+            router
+          ];
+          catalog = removeAttrs catalog [ "gen" ];
+        };
+        # b and the worker gone: their keys and copies go, the app's file loses its reader
+        minus = planOf {
+          guests = [
+            (a { })
+            router
+          ];
+          inherit catalog;
+        };
+        # man no longer declared: unused, or pruned
+        unman = planOf {
+          guests = [
+            (a { })
+            (b [ ])
+            node
+            router
+          ];
+          catalog = removeAttrs catalog [ "man" ];
+        };
+        # the guarded vault renamed: a missing guarded secret after the first deploy
+        renamed = planOf {
+          guests = [
+            (a { })
+            (b [ ])
+            node
+            router
+          ];
+          catalog = removeAttrs catalog [ "vault" ] // {
+            vault2 = "guardsData:hex:16";
+          };
+        };
+        # b reads a secret nothing declares
+        problem = planOf {
+          guests = [
+            (a { })
+            (b [ "nope" ])
+            node
+            router
+          ];
+          inherit catalog;
+        };
+        real = builtins.toJSON inputs.self.legacyPackages.${system}.secrets.plan;
+      }
+  );
 
   # only what the test runs, so an unrelated edit does not rerun it
   scripts = lib.fileset.toSource {
     root = ../.;
     fileset = lib.fileset.unions [
-      ../scripts/secrets-sync.nu ../scripts/sops-encrypt.nu
-      ../scripts/lib/tools.nu ../scripts/lib/secrets.nu ../scripts/lib/onion.nu
+      ../scripts/secrets-sync.nu
+      ../scripts/sops-encrypt.nu
+      ../scripts/lib/tools.nu
+      ../scripts/lib/secrets.nu
+      ../scripts/lib/onion.nu
     ];
   };
 in
-pkgs.runCommand "secrets-sync-seed-${toString seed}" {
-  nativeBuildInputs = with pkgs; [ nushell sops age openssl git coreutils ];
-  passthru.regressionSeeds = [ ];
-} ''
-  export HOME=$TMPDIR
-  nu --no-config-file ${./secrets_sync_test.nu} ${scripts} ${toString seed} ${plans}
-  touch $out
-''
+pkgs.runCommand "secrets-sync-seed-${toString seed}"
+  {
+    nativeBuildInputs = with pkgs; [
+      nushell
+      sops
+      age
+      openssl
+      git
+      coreutils
+    ];
+    passthru.regressionSeeds = [ ];
+  }
+  ''
+    export HOME=$TMPDIR
+    nu --no-config-file ${./secrets_sync_test.nu} ${scripts} ${toString seed} ${plans}
+    touch $out
+  ''

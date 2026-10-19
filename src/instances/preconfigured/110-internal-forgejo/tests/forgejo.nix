@@ -2,23 +2,37 @@
 # now: the bootstrap units on a fresh forge, tokens written to the guest's own token dir (the link stays a link), a
 # rejected token minted again, the upgrade keeping the old database (root's, the newest copy only) and the forge's
 # data, and every setup unit converging again on the new version. Images are pinned here and fetched at build time, nothing pulls at run time.
-{ pkgs, lib, inputs, specialArgs, ... }:
+{
+  pkgs,
+  lib,
+  inputs,
+  specialArgs,
+  ...
+}:
 let
   lab = import ../../../../tests/lib/lab.nix { inherit pkgs lib specialArgs; };
   instance = ../main.nix;
-  shipped = inputs.self.nixosConfigurations."110-internal-forgejo".config.virtualisation.oci-containers.containers.forgejo.image;
+  shipped =
+    inputs.self.nixosConfigurations."110-internal-forgejo".config.virtualisation.oci-containers.containers.forgejo.image;
 
-  imageOf = { tag, imageDigest, hash }: {
-    name = "codeberg.org/forgejo/forgejo:${tag}";
-    file = pkgs.dockerTools.pullImage {
-      imageName = "codeberg.org/forgejo/forgejo";
-      inherit imageDigest hash;
-      finalImageName = "codeberg.org/forgejo/forgejo";
-      finalImageTag = tag;
-      os = "linux";
-      arch = "amd64";
+  imageOf =
+    {
+      tag,
+      imageDigest,
+      hash,
+    }:
+    {
+      name = "codeberg.org/forgejo/forgejo:${tag}";
+      pinned = "codeberg.org/forgejo/forgejo:${tag}@${imageDigest}";
+      file = pkgs.dockerTools.pullImage {
+        imageName = "codeberg.org/forgejo/forgejo";
+        inherit imageDigest hash;
+        finalImageName = "codeberg.org/forgejo/forgejo";
+        finalImageTag = tag;
+        os = "linux";
+        arch = "amd64";
+      };
     };
-  };
   # the image the lab ran before the upgrade
   before = imageOf {
     tag = "7.0.16";
@@ -33,34 +47,50 @@ let
   };
 
   # authelia's discovery document, as much of it as forgejo reads when it adds the login source
-  discovery = pkgs.writeText "openid-configuration" (builtins.toJSON {
-    issuer = "https://auth.${lab.site.domain}";
-    authorization_endpoint = "https://auth.${lab.site.domain}/api/oidc/authorization";
-    token_endpoint = "https://auth.${lab.site.domain}/api/oidc/token";
-    userinfo_endpoint = "https://auth.${lab.site.domain}/api/oidc/userinfo";
-    jwks_uri = "https://auth.${lab.site.domain}/jwks.json";
-    response_types_supported = [ "code" ];
-    subject_types_supported = [ "public" ];
-    id_token_signing_alg_values_supported = [ "RS256" ];
-  });
+  discovery = pkgs.writeText "openid-configuration" (
+    builtins.toJSON {
+      issuer = "https://auth.${lab.site.domain}";
+      authorization_endpoint = "https://auth.${lab.site.domain}/api/oidc/authorization";
+      token_endpoint = "https://auth.${lab.site.domain}/api/oidc/token";
+      userinfo_endpoint = "https://auth.${lab.site.domain}/api/oidc/userinfo";
+      jwks_uri = "https://auth.${lab.site.domain}/jwks.json";
+      response_types_supported = [ "code" ];
+      subject_types_supported = [ "public" ];
+      id_token_signing_alg_values_supported = [ "RS256" ];
+    }
+  );
   # where the container trusts the test ca: forgejo is go, which reads SSL_CERT_FILE
   containerCa = "/etc/ssl/test-ca.pem";
 
   T = "/var/lib/lab-tokens";
   own = "/var/lib/lab-tokens.d/vm-110";
-  setupUnits = [ "forgejo-init" "forgejo-oauth2-setup" "forgejo-homepage-token" "forgejo-hermes-token" "forgejo-runner-token" ];
+  setupUnits = [
+    "forgejo-init"
+    "forgejo-oauth2-setup"
+    "forgejo-homepage-token"
+    "forgejo-hermes-token"
+    "forgejo-runner-token"
+  ];
   # above the instance's own definition, below nothing: the specialisation's image wins over the base's
   imageOverride = lib.mkOverride 40;
 in
-assert lib.assertMsg (current.name == shipped) "tests/forgejo.nix pins ${current.name}, 110 ships ${shipped}: bump the pin";
+assert lib.assertMsg (
+  current.pinned == shipped
+) "tests/forgejo.nix pins ${current.pinned}, 110 ships ${shipped}: bump the pin";
 pkgs.testers.runNixOSTest {
   name = "forgejo";
 
   node.specialArgs = lab.specialArgs;
   nodes.vm-110 = {
     imports = [ (lab.guest "110" { inherit instance; }) ];
-    virtualisation = { memorySize = 2048; diskSize = 4096; };
-    environment.systemPackages = [ pkgs.sqlite pkgs.jq ];
+    virtualisation = {
+      memorySize = 2048;
+      diskSize = 4096;
+    };
+    environment.systemPackages = [
+      pkgs.sqlite
+      pkgs.jq
+    ];
     # the timer would reach github
     systemd.timers.forgejo-mirror.enable = false;
     # no collector in this test: a failing upload would fail the switch below for a reason outside the forge
@@ -79,7 +109,12 @@ pkgs.testers.runNixOSTest {
 
   # the internal ingress, standing in for authelia behind it: the discovery document forgejo checks the login with
   nodes.ingress = {
-    imports = [ (lab.multi { addresses = [ "${lab.inventory."100".ip}/24" ]; vlan = lab.vlans.internal; }) ];
+    imports = [
+      (lab.multi {
+        addresses = [ "${lab.inventory."100".ip}/24" ];
+        vlan = lab.vlans.internal;
+      })
+    ];
     services.nginx = {
       enable = true;
       virtualHosts."auth.${lab.site.domain}" = {

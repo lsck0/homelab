@@ -9,12 +9,13 @@
 # every file is encrypted to the admins and its readers. A host's home folder holds age.pub and age.sops (its key,
 # admins only). scripts/secrets-sync.nu writes the files from `planOf`; modules/base points every secret at its file.
 # `catalog` is src/secrets/shared.nix; a test passes its own.
-{ lib, lab ? null, catalog ? import ../secrets/shared.nix }:
+{
+  lib,
+  lab ? null,
+  catalog ? import ../secrets/shared.nix,
+}:
 let
   service = import ./service.nix { inherit lib; };
-  # -------------------------------------------------------------------------------------------------------------
-  # CONSTANTS
-  # -------------------------------------------------------------------------------------------------------------
 
   catalogFile = "secrets/shared.sops.json";
   tfvarsFile = "terraform/terraform.tfvars.sops.json";
@@ -38,75 +39,148 @@ let
   onionKind = "guardsData:onion";
   oidcSecretKind = "hex:24";
 
-  # -------------------------------------------------------------------------------------------------------------
-  # DECLARATIONS
-  # -------------------------------------------------------------------------------------------------------------
-
   instanceList = lib.attrValues lab.instances;
   homeOf = i: if i.folder != null then i.folder else "generated/nodes/${i.name}";
 
-  entriesOf = { file, home ? null }: lib.mapAttrsToList (name: kind: { inherit name kind file home; });
-  ownEntriesOf = i: entriesOf { file = "${homeOf i}/${ownName}"; home = homeOf i; };
+  entriesOf =
+    {
+      file,
+      home ? null,
+    }:
+    lib.mapAttrsToList (
+      name: kind: {
+        inherit
+          name
+          kind
+          file
+          home
+          ;
+      }
+    );
+  ownEntriesOf =
+    i:
+    entriesOf {
+      file = "${homeOf i}/${ownName}";
+      home = homeOf i;
+    };
   # the router's tor publishes every onion route with its own key; a lost key loses the address
   router = lib.findFirst (i: i.zone == "router") (throw "modules/secrets.nix: no instance is the router") instanceList;
-  onionKeys = lib.mapAttrs' (name: _: lib.nameValuePair (service.onionKeyOf name) onionKind)
-    (lib.filterAttrs (_: r: r.onion) lab.catalog.external);
+  onionKeys = lib.mapAttrs' (name: _: lib.nameValuePair (service.onionKeyOf name) onionKind) (
+    lib.filterAttrs (_: r: r.onion) lab.catalog.external
+  );
   entries =
     lib.concatMap (i: ownEntriesOf i i.config.secrets) instanceList
     ++ ownEntriesOf router onionKeys
-    ++ lib.concatLists (lib.mapAttrsToList (app: a: entriesOf { file = "${lab.layout.custom}/${app}/${ownName}"; }
-      (a.secrets // { "app-${app}-redeploy-token" = deployTokenKind; })) lab.appsCatalog.apps)
+    ++ lib.concatLists (
+      lib.mapAttrsToList (
+        app: a:
+        entriesOf { file = "${lab.layout.custom}/${app}/${ownName}"; } (
+          a.secrets // { "app-${app}-redeploy-token" = deployTokenKind; }
+        )
+      ) lab.appsCatalog.apps
+    )
     ++ entriesOf { file = catalogFile; } catalog
     ++ entriesOf { file = tfvarsFile; } tfvars
-    ++ map (c: { name = c.secret; kind = oidcSecretKind; file = catalogFile; home = null; }) lab.oidc;
+    ++ map (c: {
+      name = c.secret;
+      kind = oidcSecretKind;
+      file = catalogFile;
+      home = null;
+    }) lab.oidc;
   byName = lib.groupBy (e: e.name) entries;
   declared = lib.mapAttrs (_: es: removeAttrs (lib.head es) [ "name" ]) byName;
 
   hostOf = hostName: lib.findFirst (i: i.config.hostName == hostName) null instanceList;
 
   # a host reads a secret from the file that holds it, a shared one from its own copy
-  fileOf = host: key: let d = declared.${key} or null; in
+  fileOf =
+    host: key:
+    let
+      d = declared.${key} or null;
+    in
     if d != null && d.file != catalogFile then d.file else "${homeOf host}/${sharedName}";
 
-  # -------------------------------------------------------------------------------------------------------------
-  # PLAN
-  # -------------------------------------------------------------------------------------------------------------
-
-  planOf = configs:
+  planOf =
+    configs:
     let
       readsOf = c: lib.sort lib.lessThan (lib.unique (map (s: s.key) (lib.attrValues c.sops.secrets)));
-      hosts = lib.mapAttrs (name: c: let i = lab.instances.${lab.hosts.${name}.id}; in {
-        inherit i;
-        reads = readsOf c;
-        home = homeOf i;
-      }) configs;
-      readEntries = lib.concatLists (lib.mapAttrsToList (name: h:
-        map (key: { inherit key; file = fileOf h.i key; reader = name; }) h.reads) hosts);
+      hosts = lib.mapAttrs (
+        name: c:
+        let
+          i = lab.instances.${lab.hosts.${name}.id};
+        in
+        {
+          inherit i;
+          reads = readsOf c;
+          home = homeOf i;
+        }
+      ) configs;
+      readEntries = lib.concatLists (
+        lib.mapAttrsToList (
+          name: h:
+          map (key: {
+            inherit key;
+            file = fileOf h.i key;
+            reader = name;
+          }) h.reads
+        ) hosts
+      );
 
       problems =
-        lib.concatLists (lib.mapAttrsToList (name: es: lib.optional (lib.length es > 1)
-          "secret ${name} is declared ${toString (lib.length es)} times, for ${lib.concatMapStringsSep " and " (e: e.file) es}") byName)
-        ++ lib.concatMap (e: lib.optional (builtins.match kindPattern e.kind == null) "secret ${e.name} (${e.file}): unknown kind ${e.kind}") entries
-        ++ lib.concatMap (e: let d = declared.${e.key} or null; in
-          if d == null then [ ("${e.reader} reads ${e.key}, which nothing declares: add it to its instance.nix `secrets` "
-            + "(only this host reads it) or to src/secrets/shared.nix") ]
-          else lib.optional (d.home != null && d.home != hosts.${e.reader}.home)
-            "${e.reader} reads ${e.key}, which ${d.home}/instance.nix declares as its own: a secret two hosts read belongs in src/secrets/shared.nix"
+        lib.concatLists (
+          lib.mapAttrsToList (
+            name: es:
+            lib.optional (lib.length es > 1)
+              "secret ${name} is declared ${toString (lib.length es)} times, for ${lib.concatMapStringsSep " and " (e: e.file) es}"
+          ) byName
+        )
+        ++ lib.concatMap (
+          e: lib.optional (builtins.match kindPattern e.kind == null) "secret ${e.name} (${e.file}): unknown kind ${e.kind}"
+        ) entries
+        ++ lib.concatMap (
+          e:
+          let
+            d = declared.${e.key} or null;
+          in
+          if d == null then
+            [
+              (
+                "${e.reader} reads ${e.key}, which nothing declares: add it to its instance.nix `secrets` "
+                + "(only this host reads it) or to src/secrets/shared.nix"
+              )
+            ]
+          else
+            lib.optional (d.home != null && d.home != hosts.${e.reader}.home)
+              "${e.reader} reads ${e.key}, which ${d.home}/instance.nix declares as its own: a secret two hosts read belongs in src/secrets/shared.nix"
         ) readEntries;
-    in {
+    in
+    {
       secrets = lib.mapAttrs (_: d: { inherit (d) kind file; }) declared;
       hosts = lib.mapAttrs (_: h: {
         inherit (h) home;
-        hostName = h.i.config.hostName;
+        inherit (h.i.config) hostName;
         shared = lib.filter (key: (declared.${key}.file or null) == catalogFile) h.reads;
       }) hosts;
       # every sops file -> the configurations that read it, besides the admins
-      files = lib.genAttrs (lib.unique (map (d: d.file) (lib.attrValues declared))) (_: [ ])
+      files =
+        lib.genAttrs (lib.unique (map (d: d.file) (lib.attrValues declared))) (_: [ ])
         // lib.mapAttrs' (_: h: lib.nameValuePair "${h.home}/${keyName}" [ ]) hosts
         // lib.mapAttrs (_: es: lib.unique (map (e: e.reader) es)) (lib.groupBy (e: e.file) readEntries);
       inherit problems;
     };
 in
 {
-  inherit declared hostOf fileOf planOf homeOf catalogFile tfvarsFile sharedName ownName keyName kindPattern;
+  inherit
+    declared
+    hostOf
+    fileOf
+    planOf
+    homeOf
+    catalogFile
+    tfvarsFile
+    sharedName
+    ownName
+    keyName
+    kindPattern
+    ;
 }

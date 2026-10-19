@@ -1,5 +1,13 @@
 # SSO: authelia (OIDC + ForwardAuth) and lldap, its identity store
-{ lib, id, net, profiles, ... }: {
+{
+  lib,
+  id,
+  net,
+  site,
+  profiles,
+  ...
+}:
+{
   vm = {
     bootPhase = "network";
     needs = [ "nfs" ];
@@ -9,14 +17,25 @@
     authelia = {
       host = "auth";
       port = 9091;
-      loginPaths = [ "/api/firstfactor" "/api/secondfactor" ];
-      homepage = { group = "Core"; icon = "authelia"; };
+      loginPaths = [
+        "/api/firstfactor"
+        "/api/secondfactor"
+      ];
+      homepage = {
+        group = "Core";
+        icon = "authelia";
+      };
       # the portal itself, which regulates logins on its own
       on = lib.remove "sso" profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
+      metrics.authelia.port = 9959;
     };
     lldap = {
       port = 17170;
-      homepage = { group = "Core"; icon = "mdi-account-group"; name = "LLDAP"; };
+      homepage = {
+        group = "Core";
+        icon = "mdi-account-group";
+        name = "LLDAP";
+      };
       on = profiles.hardenedInternal ++ profiles.listed ++ profiles.observed;
     };
   };
@@ -35,7 +54,13 @@
     description = "Authelia rejected these passwords; it bans the client address after 3 tries in 2 minutes.";
   };
 
-  grants = [ { from = [ "proxmox" ]; tcp = [ net.ports.ldaps ]; why = "the proxmox realm's logins and sync, over ldaps (scripts/pve-install.nu)"; } ];
+  grants = [
+    {
+      from = [ "proxmox" ];
+      tcp = [ net.ports.ldaps ];
+      why = "the proxmox realm's logins and sync, over ldaps (scripts/pve-install.nu)";
+    }
+  ];
 
   secrets = {
     authelia-admin-pass = "hex:24";
@@ -50,9 +75,13 @@
     lldap-jwt-secret = "hex:24";
     lldap-proxmox-bind-password = "hex:24"; # lldap user proxmox-bind, read-only: the proxmox realm (scripts/pve-install.nu)
     lldap-server-key = "manual"; # base64 of lldap's server key
-  };
+  }
+  # the password of the mail relay site.json names (main.nix)
+  // lib.optionalAttrs (site ? smtp) { smtp-password = "manual"; };
 
   shares = {
-    "data/db-dumps/vm-${id}" = { mode = "0700"; };
+    "data/db-dumps/vm-${id}" = {
+      mode = "0700";
+    };
   };
 }

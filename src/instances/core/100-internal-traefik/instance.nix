@@ -1,5 +1,5 @@
 # internal reverse proxy: tls, forwardauth, on-demand wake
-{ ... }: {
+_: {
   on = [ "ingress" ];
 
   vm = import ../../../modules/traefik/lib/vm.nix // {

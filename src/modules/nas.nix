@@ -1,18 +1,50 @@
 # a guest's nas mounts: the helpers (nasMount, nasMountRo, nasMedia, nasPath), its fileSystems and the shares vm-104 exports
-{ config, lib, pkgs, utils, inventory, lab, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  utils,
+  inventory,
+  lab,
+  ...
+}:
 let
   nasIP = inventory.${lab.roles.nas}.ip;
   # systemd refuses automounts inside a container, so lxc guests mount at boot
   container = config.boot.isContainer;
   # after a power loss the nas may still be booting: a mount waits for it instead of failing its dependents
-  mountOpts = [ "retry=10" "x-systemd.mount-timeout=10min" ]
-    ++ (if container then [ "_netdev" ] else [ "x-systemd.automount" "x-systemd.idle-timeout=60" ]);
+  mountOpts = [
+    "retry=10"
+    "x-systemd.mount-timeout=10min"
+  ]
+  ++ (
+    if container then
+      [ "_netdev" ]
+    else
+      [
+        "x-systemd.automount"
+        "x-systemd.idle-timeout=60"
+      ]
+  );
   # hard: a nas outage blocks writers until it is back, it never corrupts them
-  nfsOpts = [ "nfsvers=4" "rw" "hard" "timeo=50" ] ++ mountOpts;
+  nfsOpts = [
+    "nfsvers=4"
+    "rw"
+    "hard"
+    "timeo=50"
+  ]
+  ++ mountOpts;
   # soft: a reader gets EIO instead of hanging; 5 s x 3 retries ride out a short stall of the nas under load
-  nfsOptsRo = [ "nfsvers=4" "ro" "soft" "timeo=50" "retrans=3" ] ++ mountOpts;
+  nfsOptsRo = [
+    "nfsvers=4"
+    "ro"
+    "soft"
+    "timeo=50"
+    "retrans=3"
+  ]
+  ++ mountOpts;
 
-  vmid = config.homelab.vmid;
+  inherit (config.homelab) vmid;
   # the dmz and the apps zone: anything not internal gets per-service state only
   external = vmid != null && (inventory.${vmid}.type or "internal") != "internal";
 
@@ -29,31 +61,34 @@ let
       inherit options;
     };
   };
-in {
+in
+{
   # a vm test replaces fileSystems wholesale (virtualisation.fileSystems), and nasShares derived back from
   # fileSystems would recurse: the mounts live in their own option, which fileSystems and the tests both read
   options.homelab.nasMounts = lib.mkOption {
-    type = lib.types.attrsOf (lib.types.submodule {
-      options = {
-        device = lib.mkOption { type = lib.types.str; };
-        fsType = lib.mkOption { type = lib.types.str; };
-        options = lib.mkOption { type = lib.types.listOf lib.types.str; };
-        shareMode = lib.mkOption {
-          type = lib.types.nullOr (lib.types.strMatching "0[0-7]{3}");
-          default = null;
-          description = ''
-            Mode of the shared directory on the NAS, owned by root: for a share only root writes (no_root_squash
-            carries the guest's root through), so neither another uid of the guest nor the NAS's nobody smb shares and
-            filebrowser can. null: 0777, any uid may write, for services that run as their own user.
-          '';
+    type = lib.types.attrsOf (
+      lib.types.submodule {
+        options = {
+          device = lib.mkOption { type = lib.types.str; };
+          fsType = lib.mkOption { type = lib.types.str; };
+          options = lib.mkOption { type = lib.types.listOf lib.types.str; };
+          shareMode = lib.mkOption {
+            type = lib.types.nullOr (lib.types.strMatching "0[0-7]{3}");
+            default = null;
+            description = ''
+              Mode of the shared directory on the NAS, owned by root: for a share only root writes (no_root_squash
+              carries the guest's root through), so neither another uid of the guest nor the NAS's nobody smb shares and
+              filebrowser can. null: 0777, any uid may write, for services that run as their own user.
+            '';
+          };
+          localState = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "The share is the nas copy of a guest's homelab.localState (modules/local-state).";
+          };
         };
-        localState = lib.mkOption {
-          type = lib.types.bool;
-          default = false;
-          description = "The share is the nas copy of a guest's homelab.localState (modules/local-state).";
-        };
-      };
-    });
+      }
+    );
     default = { };
     description = ''
       NAS mounts of this host by mountpoint, written with the nasMount, nasMountRo, nasMedia and nasPath helpers:
@@ -70,14 +105,16 @@ in {
   };
 
   options.homelab.nasShares = lib.mkOption {
-    type = lib.types.listOf (lib.types.submodule {
-      options = {
-        path = lib.mkOption { type = lib.types.str; };
-        readOnly = lib.mkOption { type = lib.types.bool; };
-        mode = lib.mkOption { type = lib.types.nullOr lib.types.str; };
-        localState = lib.mkOption { type = lib.types.bool; };
-      };
-    });
+    type = lib.types.listOf (
+      lib.types.submodule {
+        options = {
+          path = lib.mkOption { type = lib.types.str; };
+          readOnly = lib.mkOption { type = lib.types.bool; };
+          mode = lib.mkOption { type = lib.types.nullOr lib.types.str; };
+          localState = lib.mkOption { type = lib.types.bool; };
+        };
+      }
+    );
     readOnly = true;
     description = "NAS paths this host mounts; vm-104 exports each one to this host only.";
   };
@@ -119,10 +156,12 @@ in {
     '';
 
     # the dmz reaches only per-service state, never media or documents
-    assertions = lib.optionals external (map (s: {
-      assertion = lib.hasPrefix "/srv/nas/data/" s.path;
-      message = "${config.networking.hostName} mounts ${s.path}; dmz hosts may only mount /srv/nas/data/<share>";
-    }) config.homelab.nasShares);
+    assertions = lib.optionals external (
+      map (s: {
+        assertion = lib.hasPrefix "/srv/nas/data/" s.path;
+        message = "${config.networking.hostName} mounts ${s.path}; dmz hosts may only mount /srv/nas/data/<share>";
+      }) config.homelab.nasShares
+    );
 
     systemd.services = {
       # nfs postgres outlives the 45s stop default
@@ -140,12 +179,19 @@ in {
         before = map (u: "${u}.service") containerUnits;
         wantedBy = [ "multi-user.target" ];
         startLimitIntervalSec = 0;
-        serviceConfig = { Type = "oneshot"; RemainAfterExit = true; Restart = "on-failure"; RestartSec = 15; };
+        serviceConfig = {
+          Type = "oneshot";
+          RemainAfterExit = true;
+          Restart = "on-failure";
+          RestartSec = 15;
+        };
         script = ''
           for m in ${lib.escapeShellArgs nasMountpoints}; do
             ls "$m" >/dev/null
           done
-          ${config.systemd.package}/bin/systemd-tmpfiles --create ${lib.concatMapStringsSep " " (m: "--prefix=${lib.escapeShellArg m}") nasMountpoints}
+          ${config.systemd.package}/bin/systemd-tmpfiles --create ${
+            lib.concatMapStringsSep " " (m: "--prefix=${lib.escapeShellArg m}") nasMountpoints
+          }
         '';
       };
     }

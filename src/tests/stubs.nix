@@ -6,7 +6,8 @@
 let
   # the collected facts (modules/lab), the same the flake hands every host
   facts = import ../modules/lab { inherit lib; };
-in {
+in
+{
   imports = [
     ./stubs/sops.nix
     ./stubs/nas.nix

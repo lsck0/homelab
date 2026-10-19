@@ -9,20 +9,47 @@ let
   # a route's defences whichever zone serves it: the ingress's chain (modules/traefik), the guard on the backend
   # port, and its public name behind cloudflare's proxy
   defences = [
-    "waf" "crowdsec" "rateLimit" "inflightLimit" "bodyLimit" "botDefense" "secureHeaders" "accessLog" "captcha"
-    "anonymousLimit" "tarpit" "guard" "cloudflare"
+    "waf"
+    "crowdsec"
+    "rateLimit"
+    "inflightLimit"
+    "bodyLimit"
+    "botDefense"
+    "secureHeaders"
+    "accessLog"
+    "captcha"
+    "anonymousLimit"
+    "tarpit"
+    "guard"
+    "cloudflare"
   ];
-in {
+in
+{
   # behind authelia, which stops bots before the app; reachable from the internet through the edge's relay
-  hardenedInternal = [ "sso" "internet" ] ++ defences;
+  hardenedInternal = [
+    "sso"
+    "internet"
+  ]
+  ++ defences;
   # public: the dmz reaches no authelia, anubis stops the bots
   hardenedExternal = [ "anubis" ] ++ defences;
   # a card on the dashboard, its status dot and vm-103 the prober's check
-  listed = [ "homepage" "probe" ];
+  listed = [
+    "homepage"
+    "probe"
+  ];
   # scraped, its logs kept, a board of its own and its alert rules
-  observed = [ "metrics" "logs" "dashboard" "alerts" ];
+  observed = [
+    "metrics"
+    "logs"
+    "dashboard"
+    "alerts"
+  ];
   # an app's traces and profiles sent to its tenant on vm-103
-  traced = [ "traces" "profiles" ];
+  traced = [
+    "traces"
+    "profiles"
+  ];
 
   # the guest's internet traffic through the router's vpn exit, or its tor (killswitch either way)
   vpnEgress = [ "vpnEgress" ];

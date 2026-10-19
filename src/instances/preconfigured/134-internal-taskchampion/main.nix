@@ -6,8 +6,13 @@ let
   route = catalog.internal.taskchampion;
   stateDir = "/var/lib/taskchampion-sync-server";
   db = "taskchampion-sync-server.sqlite3";
-in {
-  homelab.localState.taskchampion = { path = stateDir; unit = "taskchampion-sync-server"; sqlite = [ db ]; };
+in
+{
+  homelab.localState.taskchampion = {
+    path = stateDir;
+    unit = "taskchampion-sync-server";
+    sqlite = [ db ];
+  };
 
   services.taskchampion-sync-server = {
     enable = true;

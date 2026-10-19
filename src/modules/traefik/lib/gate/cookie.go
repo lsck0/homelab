@@ -12,12 +12,6 @@ import (
 	"time"
 )
 
-/*
- * -----------------------------------------------------------------------------
- * CONSTANTS
- * -----------------------------------------------------------------------------
- */
-
 const (
 	cookieName = "lab_gate"
 	// a solved captcha lets its client through this long; past it a still-flagged client solves another
@@ -30,12 +24,6 @@ const (
 	onionSessionIDBytes  = 16
 	onionClientSeparator = "/"
 )
-
-/*
- * -----------------------------------------------------------------------------
- * FUNCTIONS
- * -----------------------------------------------------------------------------
- */
 
 func cookieMac(key []byte, client string, expiresUnix int64) []byte {
 	mac := hmac.New(sha256.New, key)
