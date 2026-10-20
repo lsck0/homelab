@@ -13,7 +13,7 @@
     # (12.9G stayed free at the fullest of the ten nights to 2026-10-19)
     diskGiB = 104;
     # 303 MiB peak over 35d
-    memoryMiB = 512;
+    memoryMiB = 448;
   };
 
   grants = [

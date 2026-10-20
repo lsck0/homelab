@@ -14,7 +14,7 @@ in
     bootPhase = "apps";
     needs = [ "nfs" ];
     # 308 MiB peak over 35d
-    memoryMiB = 512;
+    memoryMiB = 448;
   };
 
   services = {

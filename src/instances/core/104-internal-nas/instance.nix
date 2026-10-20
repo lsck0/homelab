@@ -16,7 +16,7 @@
       "nfs"
     ];
     # at 1.5 GiB the nas oom-killed its own jobs; lib/nas-job.nix caps them from it: 2376 MiB peak over 35d
-    memoryMiB = 2816;
+    memoryMiB = 3072;
     # nvme root: state, documents and the syncthing repository (lib/kopia.nix), which holds cold storage's snapshots
     # too: cold storage was 241 GB on 2026-10-19 and grows only, so the disk grows with it, on the ssd_root_full
     # warning, before kopia-syncthing stops at 85%. Thin on the host's pve pool: what the guest frees reaches the pool

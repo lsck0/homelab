@@ -27,7 +27,7 @@
         "nfs"
       ];
       # memory is the swarm's admission capacity (modules/limits)
-      memoryMiB = 1024;
+      memoryMiB = 896;
       cores = 2;
       # the swarm must never starve the lab: under host contention every lab guest outweighs a worker
       cpuUnits = 50;
