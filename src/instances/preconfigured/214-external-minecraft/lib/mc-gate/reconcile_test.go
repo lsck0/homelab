@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"slices"
 	"testing"
 	"time"
 )
@@ -196,5 +198,55 @@ func Test_reconcile_switch_port(t *testing.T) {
 	testTick(d)
 	if d.servers["alpha"].phase != phaseRunning {
 		t.Fatalf("alpha is %q once its unit is active and the port answers, want running", d.servers["alpha"].phase)
+	}
+}
+
+// Test_reconcile_stale covers a deploy under a running server: it is not restarted while a player is on, and is
+// restarted onto the installed unit file the first tick nobody is.
+func Test_reconcile_stale(t *testing.T) {
+	d, systemd, clock, settings, _ := deciderTestBackend(t)
+	unit, startedUnit := settings.Servers[0].Unit, settings.Servers[0].StartedUnit
+	recordStart := func(file string) {
+		systemd.units[unit].file = file
+		if err := os.WriteFile(startedUnit, []byte(file+"\n"), 0o644); err != nil {
+			t.Fatalf("write %s: %v", startedUnit, err)
+		}
+	}
+	tick := func() {
+		clock.advance(durationFromSeconds(settings.Limits.StatusCacheS) + time.Second)
+		testTick(d)
+	}
+	staleMetric := func() string {
+		return metricsTestValue(t, d.metrics, `homelab_minecraft_server_stale{server="alpha"}`)
+	}
+
+	recordStart("/nix/store/old-minecraft-alpha.service")
+	testRun(t, d, systemd, "alpha", testSource)
+	session := testSessionAdd(d, "alpha", testSource, clock.Now())
+	tick()
+	if d.servers["alpha"].stale || staleMetric() != "0" {
+		t.Fatalf("alpha is stale on the unit it started from (metric %q)", staleMetric())
+	}
+
+	systemd.units[unit].file = "/nix/store/new-minecraft-alpha.service"
+	tick()
+	if !d.servers["alpha"].stale || staleMetric() != "1" {
+		t.Fatalf("alpha is not stale after a deploy (metric %q)", staleMetric())
+	}
+	if slices.Contains(systemd.calls, "restart "+unit) {
+		t.Fatalf("alpha was restarted under a player: %v", systemd.calls)
+	}
+
+	testSessionEnd(d, "alpha", session)
+	clock.advance(durationFromSeconds(settings.Limits.RejoinS))
+	tick()
+	if !slices.Contains(systemd.calls, "restart "+unit) || d.servers["alpha"].phase != phaseStarting {
+		t.Fatalf("alpha is %q with nobody on, calls %v, want a restart", d.servers["alpha"].phase, systemd.calls)
+	}
+
+	recordStart("/nix/store/new-minecraft-alpha.service")
+	tick()
+	if d.servers["alpha"].phase != phaseRunning || d.servers["alpha"].stale || staleMetric() != "0" {
+		t.Fatalf("alpha is %q, stale %v after the restart", d.servers["alpha"].phase, d.servers["alpha"].stale)
 	}
 }

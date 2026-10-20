@@ -57,11 +57,12 @@ type Session struct {
 
 // Server is one declared server's record. Every field is owned by the decider's goroutine and read nowhere else.
 type Server struct {
-	name       string
-	unit       string
-	version    *string
-	protocol   *int
-	modpackEnv string
+	name        string
+	unit        string
+	version     *string
+	protocol    *int
+	modpackEnv  string
+	startedUnit string
 
 	phase          Phase
 	sessions       []Session
@@ -90,6 +91,8 @@ type Server struct {
 	// the unit's own ActiveState was `active` at the last reconcile. Every server shares the one backend port, so
 	// while a switch waits on the old server's save, an answer there is the old server's
 	unitUp bool
+	// the unit is up from another unit file than the one installed now
+	stale bool
 }
 
 // Decision is one login's answer: a relay to the backend, a kick with a text, or a close with neither.
@@ -188,7 +191,7 @@ func deciderDestroy(d *Decider) {
 func serverCreate(d *Decider, declared SettingsServer) *Server {
 	return &Server{
 		name: declared.Name, unit: declared.Unit, version: declared.Version, protocol: declared.Protocol,
-		modpackEnv: declared.ModpackEnv, phase: phaseSleeping,
+		modpackEnv: declared.ModpackEnv, startedUnit: declared.StartedUnit, phase: phaseSleeping,
 		status: statusCacheLoad(d.settings.StateDir, declared.Name),
 	}
 }
@@ -388,6 +391,18 @@ func deciderStop(d *Decider, server *Server, reason string) {
 	logStopWrite(d.log, server.name, reason, netip.Addr{})
 }
 
+// deciderRestart puts a stale server on its installed unit. It is a start the gate issued, so logins are told to
+// wait and the backend is not asked until the new unit is up.
+func deciderRestart(d *Decider, server *Server, now time.Time) {
+	if err := d.systemd.Restart(server.unit); err != nil {
+		d.log.Warn(logRestart, "server", server.name, "reason", reasonStale, "err", err)
+		return
+	}
+	server.phase, server.startedAt, server.unitUp, server.stale = phaseStarting, now, false, false
+	server.startsTotal++
+	d.log.Info(logRestart, "server", server.name, "reason", reasonStale)
+}
+
 // deciderDecide is the decision table, its rows in order.
 func deciderDecide(d *Decider, now time.Time, name string, address netip.Addr) Decision {
 	limits := d.settings.Limits
@@ -542,7 +557,7 @@ func deciderSettingsApply(d *Decider, settings Settings) {
 			continue
 		}
 		server.unit, server.version, server.protocol = declared.Unit, declared.Version, declared.Protocol
-		server.modpackEnv, server.removed = declared.ModpackEnv, false
+		server.modpackEnv, server.startedUnit, server.removed = declared.ModpackEnv, declared.StartedUnit, false
 		kept[declared.Name] = server
 	}
 	for name, server := range d.servers {
@@ -624,7 +639,7 @@ func deciderState(d *Decider) State {
 		state.Servers = append(state.Servers, StateServer{
 			Name: server.name, Phase: string(server.phase), Sessions: len(server.sessions),
 			Players: server.playersOnline, ReservedUntil: stateMoment(server.reservedUntil),
-			IdleSince: stateMoment(server.idleSince), Failures: server.failures,
+			IdleSince: stateMoment(server.idleSince), Failures: server.failures, Stale: server.stale,
 		})
 	}
 	return state

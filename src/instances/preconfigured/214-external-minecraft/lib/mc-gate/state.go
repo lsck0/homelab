@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -47,6 +48,7 @@ type StateServer struct {
 	ReservedUntil *string `json:"reservedUntil"`
 	IdleSince     *string `json:"idleSince"`
 	Failures      int     `json:"failures"`
+	Stale         bool    `json:"stale"`
 }
 
 /*
@@ -110,6 +112,15 @@ func statusCacheLoad(stateDir, name string) []byte {
 
 func statusCacheSave(stateDir, name string, data []byte) error {
 	return fileWriteAtomic(filepath.Join(stateDir, name+statusFileSuffix), data, stateFileMode)
+}
+
+// startedUnitLoad is the unit file a running server's start recorded, or nothing when that start recorded none.
+func startedUnitLoad(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
 }
 
 // startedMarkerTouch records a good start, whose mtime tells a first start after a pack change from a later one.

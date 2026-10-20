@@ -68,15 +68,18 @@ let
     ];
   } (builtins.readFile ./mc-probe.py);
 
-  # what the server unit runs instead of `podman run`: the same port, a name the status ping shows, and for the
-  # stubborn one the flag that makes its stop a kill
+  # the version name vanilla's backend reports after the deploy the stale subtest switches to
+  deployedVersion = "vanilla-deployed";
+
+  # what the server unit runs instead of `podman run`: the same port, a version name the status ping shows, and for
+  # the stubborn one the flag that makes its stop a kill
   fakeStart =
-    name:
+    name: version:
     lib.concatStringsSep " " (
       [
         "${mcGate.package}/bin/fake-server"
         "-listen 127.0.0.1:${toString backendPort}"
-        "-version ${name}"
+        "-version ${version}"
         "-protocol 767"
       ]
       ++ lib.optional (lib.elem name stubborn) "-ignore-sigterm"
@@ -161,6 +164,13 @@ pkgs.testers.runNixOSTest {
         pkgs.jq
       ];
 
+      # no collector in this test: a failing upload would fail the switch below for a reason outside the servers
+      services.journald.upload.enable = lib.mkForce false;
+      # a deploy that changes vanilla's unit under it, for the stale subtest
+      specialisation.deployed.configuration.systemd.services.minecraft-vanilla.serviceConfig.ExecStart = lib.mkOverride 40 (
+        fakeStart "vanilla" deployedVersion
+      );
+
       environment.etc."mc-gate/settings.json".source = lib.mkForce settingsPath;
       systemd.tmpfiles.rules = [
         "d ${settingsDir} 0755 root root -"
@@ -182,7 +192,7 @@ pkgs.testers.runNixOSTest {
         name: _:
         lib.nameValuePair "minecraft-${name}" {
           serviceConfig = {
-            ExecStart = lib.mkForce (fakeStart name);
+            ExecStart = lib.mkForce (fakeStart name name);
             ExecStop = lib.mkForce "${fakeStop}";
           };
         }
@@ -213,6 +223,7 @@ pkgs.testers.runNixOSTest {
       DEPLOY_PENDING_DIR = "/var/lib/homelab"
       DEPLOY_PENDING = f"{DEPLOY_PENDING_DIR}/deploy-pending"
       MINIMUM_ONLINE_S = ${toString testLimits.minimumOnlineS}
+      DEPLOYED_VERSION = "${deployedVersion}"
       # the unit files of the guest with nothing forced: what the lab would really run
       PLAIN_UNITS = ${
         builtins.toJSON (
@@ -652,7 +663,7 @@ pkgs.testers.runNixOSTest {
           assert session_open("r074", "vanilla") == "success tester"
           retry_ok(lambda: server_state("vanilla")["sessions"] == 1)
           added = json.dumps({"name": "extra", "unit": "minecraft-extra.service", "version": None, "protocol": None,
-                              "modpackEnv": f"{DATA}/extra/modpack.env"})
+                              "modpackEnv": f"{DATA}/extra/modpack.env", "startedUnit": "/run/minecraft-extra/unit"})
           vm_214.succeed(f"jq '.servers += [{added}]' {SETTINGS} > {SETTINGS}.tmp && mv {SETTINGS}.tmp {SETTINGS}")
           vm_214.succeed("systemctl reload mc-gate.service")
           retry_ok(lambda: "extra" in phases())
@@ -671,11 +682,42 @@ pkgs.testers.runNixOSTest {
           vm_214.succeed("systemctl reload mc-gate.service")
           retry_ok(lambda: "extra" not in phases())
 
+      with subtest("stale"):
+          def stale_metric():
+              text = vm_214.succeed(f"cat {METRICS}")
+              found = re.search(r'^homelab_minecraft_server_stale\{server="vanilla"\} (\d+)$', text, re.M)
+              assert found, text
+              return int(found.group(1))
+
+          # the start recorded the unit file it ran from, the unit's own store path rather than the whole unit dir's
+          started = vm_214.succeed("cat /run/minecraft-vanilla/unit").strip()
+          assert re.fullmatch(r"/nix/store/[^/]+-unit-minecraft-vanilla\.service/minecraft-vanilla\.service", started), started
+          assert not server_state("vanilla")["stale"] and stale_metric() == 0
+          # a player is on vanilla while a deploy changes its unit: the server keeps running the old one
+          assert session_open("r090", "vanilla") == "success tester"
+          retry_ok(lambda: server_state("vanilla")["sessions"] == 1)
+          pid = show("minecraft-vanilla.service", "MainPID")["MainPID"]
+          vm_214.succeed("/run/booted-system/specialisation/deployed/bin/switch-to-configuration test")
+          retry_ok(lambda: server_state("vanilla")["stale"] and stale_metric() == 1)
+          # several reconcile passes with the player still on
+          time.sleep(5)
+          assert show("minecraft-vanilla.service", "MainPID")["MainPID"] == pid
+          assert server_state("vanilla")["phase"] == "running", state()
+          assert status("vanilla", target=BACKEND, address="direct")["version"]["name"] == "vanilla"
+          # they leave, and the gate restarts it onto the deployed unit
+          session_close("r090")
+          retry_ok(lambda: status("vanilla", target=BACKEND, address="direct")["version"]["name"] == DEPLOYED_VERSION)
+          wait_phase("vanilla", "running")
+          retry_ok(lambda: not server_state("vanilla")["stale"] and stale_metric() == 0)
+          assert vm_214.succeed("cat /run/minecraft-vanilla/unit").strip() != started
+          vm_214.succeed("journalctl -u mc-gate.service --no-pager --grep '\"msg\":\"restart\".*\"reason\":\"stale\"'")
+
       with subtest("polkit"):
-          # the gate's own user may start and stop a server, and nothing else
+          # the gate's own user may start, stop and restart a server, and nothing else
           vm_214.succeed("runuser -u mc-gate -- systemctl start minecraft-vanilla.service")
+          vm_214.succeed("runuser -u mc-gate -- systemctl restart minecraft-vanilla.service")
           vm_214.succeed("runuser -u mc-gate -- systemctl stop minecraft-vanilla.service")
-          for command in ["start notaserver.service", "restart minecraft-vanilla.service"]:
+          for command in ["start notaserver.service", "restart notaserver.service"]:
               out = vm_214.fail(f"runuser -u mc-gate -- systemctl {command} 2>&1").lower()
               assert "denied" in out or "authentication" in out, out
           vm_214.fail("systemctl is-active --quiet notaserver.service")
@@ -755,7 +797,8 @@ pkgs.testers.runNixOSTest {
           assert series["homelab_mc_switches_total"] >= 1, text
           # one # HELP and one # TYPE per family, so the exporter takes it
           for family in ["homelab_mc_phase", "homelab_mc_sessions", "homelab_mc_players", "homelab_mc_starts_total",
-                         "homelab_mc_start_failures_total", "homelab_mc_kicks_total", "homelab_mc_switches_total"]:
+                         "homelab_mc_start_failures_total", "homelab_mc_kicks_total", "homelab_mc_switches_total",
+                         "homelab_minecraft_server_stale"]:
               assert f"# TYPE {family} " in text, (family, text)
           mode = vm_214.succeed(f"stat -c %a {METRICS}").strip()
           assert mode == "644", mode

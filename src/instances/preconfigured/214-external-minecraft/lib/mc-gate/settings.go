@@ -42,13 +42,15 @@ type Settings struct {
 }
 
 // SettingsServer is one declared server. Version and Protocol answer a status ping for a server that has never
-// answered one itself; ModpackEnv is the file whose mtime tells a first start from a later one.
+// answered one itself; ModpackEnv is the file whose mtime tells a first start from a later one; StartedUnit is where
+// the unit's start writes the unit file it ran from.
 type SettingsServer struct {
-	Name       string  `json:"name"`
-	Unit       string  `json:"unit"`
-	Version    *string `json:"version"`
-	Protocol   *int    `json:"protocol"`
-	ModpackEnv string  `json:"modpackEnv"`
+	Name        string  `json:"name"`
+	Unit        string  `json:"unit"`
+	Version     *string `json:"version"`
+	Protocol    *int    `json:"protocol"`
+	ModpackEnv  string  `json:"modpackEnv"`
+	StartedUnit string  `json:"startedUnit"`
 }
 
 // SettingsLimits are every bound the gate holds, in seconds or in counts, so a test can shorten them without a rebuild.
@@ -129,8 +131,8 @@ func settingsParse(data []byte) (Settings, error) {
 			return Settings{}, fmt.Errorf("settings: servers: %q twice", server.Name)
 		}
 		seen[server.Name] = true
-		if !strings.HasSuffix(server.Unit, ".service") || server.ModpackEnv == "" {
-			return Settings{}, fmt.Errorf("settings: servers: %q needs a .service unit and a modpackEnv", server.Name)
+		if !strings.HasSuffix(server.Unit, ".service") || server.ModpackEnv == "" || !strings.HasPrefix(server.StartedUnit, "/") {
+			return Settings{}, fmt.Errorf("settings: servers: %q needs a .service unit, a modpackEnv and an absolute startedUnit", server.Name)
 		}
 	}
 	if err := settingsLimitsCheck(settings.Limits); err != nil {

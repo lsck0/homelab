@@ -45,6 +45,7 @@ func deciderReconcile(d *Decider, now time.Time) *Server {
 func deciderReconcileFinish(d *Decider, now time.Time) {
 	deciderReconcileTimeouts(d, now)
 	deciderReconcileSleep(d, now)
+	deciderReconcileStale(d, now)
 	for address, source := range d.sources {
 		sourcePrune(source, now, d.settings.Limits)
 		if sourceIdle(source) {
@@ -62,7 +63,9 @@ func deciderReconcileFinish(d *Decider, now time.Time) {
 func deciderReconcileServer(d *Decider, server *Server, state UnitState, promoted *bool) {
 	activity := activityFromUnit(state)
 	before := server.phase
-	server.unitUp = state.Active == "active"
+	// a queued restart leaves the old server active and answering until its stop begins
+	server.unitUp = state.Active == "active" && !state.Job
+	server.stale = server.unitUp && state.File != "" && startedUnitLoad(server.startedUnit) != state.File
 	switch server.phase {
 	case phaseStarting, phaseRunning:
 		if activity != activityIdle || state.Job {
@@ -170,5 +173,15 @@ func deciderReconcileSleep(d *Decider, now time.Time) {
 			continue
 		}
 		deciderStop(d, server, reasonIdle)
+	}
+}
+
+// deciderReconcileStale restarts a server running an older unit than the installed one the moment nobody is on it.
+func deciderReconcileStale(d *Decider, now time.Time) {
+	for _, server := range deciderServers(d) {
+		if server.phase != phaseRunning || !server.stale || deciderOccupied(d, server, now) {
+			continue
+		}
+		deciderRestart(d, server, now)
 	}
 }

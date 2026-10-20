@@ -27,6 +27,7 @@ const (
 	metricStartFailures = "homelab_mc_start_failures_total"
 	metricKicks         = "homelab_mc_kicks_total"
 	metricSwitches      = "homelab_mc_switches_total"
+	metricStale         = "homelab_minecraft_server_stale"
 )
 
 // every phase, so a series that stopped being true is written as 0 rather than left at its last value
@@ -101,6 +102,15 @@ func metricsRender(servers []*Server, kicks map[string]int, switches int) []byte
 	for _, server := range servers {
 		metricsLine(out, metricStartFailures, fmt.Sprintf("server=%q", metricsLabel(server.name)),
 			server.startFailuresTotal)
+	}
+
+	metricsHeader(out, metricStale, "gauge", "1 while a Minecraft server runs a unit older than the installed one")
+	for _, server := range servers {
+		value := 0
+		if server.stale {
+			value = 1
+		}
+		metricsLine(out, metricStale, fmt.Sprintf("server=%q", metricsLabel(server.name)), value)
 	}
 
 	metricsHeader(out, metricKicks, "counter", "logins the gate refused, by the reason it gave")

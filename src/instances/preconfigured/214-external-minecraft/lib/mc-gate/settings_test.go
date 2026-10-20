@@ -23,6 +23,7 @@ func settingsTestJSON(t *testing.T, change func(file map[string]any)) []byte {
 		"servers": []any{map[string]any{
 			"name": "cobblemon", "unit": "minecraft-cobblemon.service",
 			"version": "1.21.1", "protocol": 767, "modpackEnv": "/var/lib/minecraft/cobblemon/modpack.env",
+			"startedUnit": "/run/minecraft-cobblemon/unit",
 		}},
 		"limits": map[string]any{
 			"handshakeTimeoutS": 10, "handshakeBytesMax": 1024, "statusCacheS": 5, "reconcileS": 5,
@@ -112,6 +113,12 @@ func Test_settings_parse(t *testing.T) {
 			},
 		},
 		{
+			name: "a relative startedUnit",
+			change: func(file map[string]any) {
+				file["servers"].([]any)[0].(map[string]any)["startedUnit"] = "unit"
+			},
+		},
+		{
 			name:   "a limit of zero",
 			change: func(file map[string]any) { file["limits"].(map[string]any)["sleepAfterS"] = 0 },
 		},
@@ -160,6 +167,7 @@ func Test_settings_reload(t *testing.T) {
 	next := settings
 	next.Servers = append(slices.Clone(settings.Servers), SettingsServer{
 		Name: "gamma", Unit: "minecraft-gamma.service", ModpackEnv: "/var/lib/minecraft/gamma/modpack.env",
+		StartedUnit: "/run/minecraft-gamma/unit",
 	})
 	next.Limits.SleepAfterS = 60
 	testEvent(d, deciderEvent{kind: eventReload, settings: next})

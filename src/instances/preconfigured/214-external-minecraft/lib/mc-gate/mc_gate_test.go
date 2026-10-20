@@ -64,6 +64,8 @@ type fakeUnit struct {
 	dueAt   time.Time
 	// the unit ends a start in `failed`, which is how a crashing backend is simulated
 	failStart bool
+	// the unit file systemd has loaded, which a test changes the way a deploy does
+	file string
 }
 
 // fakeSystemd answers `systemctl show` from its own units and honours what the real units declare: `Conflicts=`
@@ -176,7 +178,7 @@ func (f *fakeSystemd) Show(units []string) (map[string]UnitState, error) {
 		if !known {
 			continue
 		}
-		states[name] = UnitState{Active: unit.active, Job: unit.job}
+		states[name] = UnitState{Active: unit.active, Job: unit.job, File: unit.file}
 	}
 	return states, nil
 }
@@ -203,6 +205,14 @@ func (f *fakeSystemd) Stop(unit string) error {
 		return err
 	}
 	f.units[unit].pending, f.units[unit].begun = pendingStop, false
+	fakeSystemdAdvance(f)
+	return nil
+}
+
+// Restart queues a start of a unit that is up, which `Conflicts=` lets begin at once: it conflicts with nothing up.
+func (f *fakeSystemd) Restart(unit string) error {
+	f.calls = append(f.calls, "restart "+unit)
+	f.units[unit].pending, f.units[unit].begun, f.units[unit].job = pendingStart, false, true
 	fakeSystemdAdvance(f)
 	return nil
 }
@@ -248,7 +258,7 @@ func testSettings(t testing.TB, names ...string) Settings {
 	for _, name := range names {
 		settings.Servers = append(settings.Servers, SettingsServer{
 			Name: name, Unit: "minecraft-" + name + ".service",
-			ModpackEnv: filepath.Join(dir, name+".env"),
+			ModpackEnv: filepath.Join(dir, name+".env"), StartedUnit: filepath.Join(dir, name+".unit"),
 		})
 	}
 	return settings

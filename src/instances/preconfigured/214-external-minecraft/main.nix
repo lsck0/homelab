@@ -146,6 +146,10 @@ let
   modpackEnvOf = name: "${dirOf name}/modpack.env";
   extraModsOf = name: "${extraModsDir}/${name}";
   containerOf = name: "minecraft-${name}";
+  # the unit file a running server started from, which the gate compares with the installed one; the unit's
+  # RuntimeDirectory, so a stopped server leaves none behind
+  runtimeDirOf = name: "minecraft-${name}";
+  startedUnitOf = name: "/run/${runtimeDirOf name}/unit";
   # ordering one way only: a cycle in `Conflicts=` peers makes systemd solve it by deleting a job
   earlierThan = name: map unitOf (lib.filter (other: other < name) names);
   othersThan = name: map unitOf (lib.filter (other: other != name) names);
@@ -174,10 +178,11 @@ let
       [ -s ${modpackEnvOf name} ] || printf '%s' ${lib.escapeShellArg (servers.${name}.pack or defaultModpack)} \
         > ${modpackEnvOf name}
       ${podman} rm --force --ignore ${containerOf name}
+      readlink -f "$(systemctl show -P FragmentPath ${unitOf name})" > ${startedUnitOf name}
     '';
 
   # a boot after the mark runs the generation the sync is about to replace, and a server keeps the unit it started
-  # with until it sleeps (restartIfChanged): it waits for the deploy instead
+  # with until nobody is on it (restartIfChanged): it waits for the deploy instead
   deployGuard = pkgs.writeShellScript "minecraft-deploy-guard" ''
     [ -e ${deployPendingFile} ] || exit 0
     max_s=${toString deployPendingMaxS}
@@ -229,8 +234,7 @@ let
   # only the gate starts a server, so it has no wantedBy
   serverUnit = name: {
     description = "Minecraft server ${name}";
-    # a switch would kick every player: a running server takes a new unit when the gate next stops it, after
-    # sleepAfterS with nobody on, or at `systemctl restart`
+    # a switch would kick every player: the gate restarts a running server onto its new unit once nobody is on
     restartIfChanged = false;
     # the automount, not the mount (RequiresMountsFor): an idle expiry or a restart of the mount would stop the server
     requires = [
@@ -248,6 +252,7 @@ let
       # a condition, not a failure: the start is skipped, the unit stays inactive and the gate puts it back to sleep
       ExecCondition = deployGuard;
       ExecStartPre = serverPreStart name;
+      RuntimeDirectory = runtimeDirOf name;
       ExecStart = serverStart name;
       # podman stops the container, not its client: a stopped client would leave conmon and the jvm holding the ports
       ExecStop = "${podman} stop --time 120 ${containerOf name}";
@@ -274,6 +279,7 @@ let
         version = servers.${name}.version or null;
         protocol = servers.${name}.protocol or null;
         modpackEnv = modpackEnvOf name;
+        startedUnit = startedUnitOf name;
       }) names;
       inherit limits;
       # who the gate never marks as looping and never caps: the sources lab-gate never stops either
@@ -455,14 +461,14 @@ in
   users.groups.${gateUser} = { };
   users.groups.${serverGroup}.gid = lib.toInt serverUid;
 
-  # the gate may start and stop the declared servers, by their exact names: a pattern would also match a unit that
-  # is no server (instances/core/107-internal-swarm/lib/app-builder.nix)
+  # the gate may start, stop and restart the declared servers, by their exact names: a pattern would also match a
+  # unit that is no server (instances/core/107-internal-swarm/lib/app-builder.nix)
   security.polkit.enable = true;
   security.polkit.extraConfig = ''
     polkit.addRule(function(action, subject) {
       var units = ${builtins.toJSON (map unitOf names)};
       if (action.id == "org.freedesktop.systemd1.manage-units" && subject.user == "${gateUser}"
-          && (action.lookup("verb") == "start" || action.lookup("verb") == "stop")
+          && ["start", "stop", "restart"].indexOf(action.lookup("verb")) >= 0
           && units.indexOf(action.lookup("unit")) >= 0) {
         return polkit.Result.YES;
       }

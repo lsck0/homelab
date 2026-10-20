@@ -18,6 +18,7 @@ const (
 	logStop        = "stop"
 	logStartFailed = "start-failed"
 	logReconcile   = "reconcile"
+	logRestart     = "restart"
 )
 
 // why a server was started or stopped, the one field that tells a switch from a sleep apart
@@ -26,6 +27,8 @@ const (
 	reasonSwitch  = "switch"
 	reasonIdle    = "idle"
 	reasonTimeout = "timeout"
+	// the unit changed since the server started: a deploy never restarts a server, the gate does once nobody is on
+	reasonStale = "stale"
 )
 
 /*

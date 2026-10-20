@@ -95,8 +95,7 @@ needs a running server; with none awake, edit `/var/lib/minecraft/whitelist.json
 - `systemctl restart mc-gate` cuts every player on, since every connection is relayed through it: do it
   only when `mc-state` shows nobody online. A changed server list needs no restart,
   `systemctl reload mc-gate` takes it.
-- A deploy never restarts a running server, so nobody is kicked: a changed server takes effect when the gate
-  next stops it (30 minutes without players). To apply it sooner, `systemctl restart minecraft-<server>`
-  while `mc-state` shows nobody online.
+- A deploy never restarts a running server, so nobody is kicked: the gate restarts it onto the changed unit the
+  moment nobody is on (`"stale": true` in `mc-state` until then, metric `homelab_minecraft_server_stale`).
 - Removing a server is a change to `servers` in the repo, and only while that server sleeps: stopping a
   running one drops its players. Its data dir stays until the owner deletes it.

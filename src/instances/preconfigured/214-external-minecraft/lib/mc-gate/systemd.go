@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -37,10 +38,12 @@ const (
 type Activity string
 
 // UnitState is one unit as `systemctl show` reports it. Job is set while a start or stop job is queued, which is how
-// a unit waiting for its conflicting predecessor to save looks: inactive, but with work pending.
+// a unit waiting for its conflicting predecessor to save looks: inactive, but with work pending. File is the unit file
+// systemd has loaded now, its links resolved, which a deploy changes under a running server.
 type UnitState struct {
 	Active string
 	Job    bool
+	File   string
 }
 
 // Systemd is every call the gate makes to the init system. The real one runs systemctl; a test's fake answers from
@@ -49,6 +52,7 @@ type Systemd interface {
 	Show(units []string) (map[string]UnitState, error)
 	Start(unit string) error
 	Stop(unit string) error
+	Restart(unit string) error
 }
 
 // systemdExec is the real implementation: main.nix's polkit rule lets the gate's user run exactly these verbs.
@@ -76,7 +80,8 @@ func (systemdExec) Show(units []string) (map[string]UnitState, error) {
 	if len(units) == 0 {
 		return map[string]UnitState{}, nil
 	}
-	arguments := append([]string{"show", "--property=Id", "--property=ActiveState", "--property=Job"}, units...)
+	arguments := append([]string{"show", "--property=Id", "--property=ActiveState", "--property=Job",
+		"--property=FragmentPath"}, units...)
 	output, err := systemctlRun(arguments)
 	if err != nil {
 		return nil, err
@@ -99,6 +104,9 @@ func (systemdExec) Show(units []string) (map[string]UnitState, error) {
 			state.Active = value
 		case "Job":
 			state.Job = value != ""
+		case "FragmentPath":
+			// a file that does not resolve stays empty, and an empty one is never stale
+			state.File, _ = filepath.EvalSymlinks(value)
 		}
 	}
 	if id != "" {
@@ -114,6 +122,11 @@ func (systemdExec) Start(unit string) error {
 
 func (systemdExec) Stop(unit string) error {
 	_, err := systemctlRun([]string{"stop", "--no-block", unit})
+	return err
+}
+
+func (systemdExec) Restart(unit string) error {
+	_, err := systemctlRun([]string{"restart", "--no-block", unit})
 	return err
 }
 
