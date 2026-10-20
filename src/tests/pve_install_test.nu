@@ -207,7 +207,7 @@ def main [script: path]: nothing -> nothing {
         rm --recursive --force ($t | path join realm)
         do $ok (do $run "realm-converge $host" {GUEST: $guest}) $guest
         do $called $"pveum realm add lldap --type ldap --server1 10.100.0.101 --port 6360 --mode ldaps --verify 1 --capath ($host.realm_ca_file)" $"($guest): ldaps, verified"
-        do $called "--tfa type=oath" $"($guest): a second factor"
+        do $not_called "--tfa" $"($guest): no second factor"
         do $called "pveum acl modify / --groups admins-lldap --roles Administrator" $"($guest): the group administers"
         if (open --raw $host.realm_ca_file | str trim) != $CERT { fail $"($guest): the realm does not trust the guest's own certificate" }
     }

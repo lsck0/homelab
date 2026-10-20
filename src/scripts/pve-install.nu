@@ -49,8 +49,6 @@ const WAKE_ROLE = "HomelabWake"
 const WAKE_PRIVILEGES = "VM.Audit,VM.PowerMgmt"
 const REALM = "lldap"
 const REALM_SYNC_SCHEDULE = "hourly"
-# a realm login asks for a totp code too; root@pam sets each user's key (FEATURES.md, "Proxmox host")
-const REALM_TFA = "type=oath"
 const CERT_BEGIN = "-----BEGIN CERTIFICATE-----"
 const GUEST_EXEC_TIMEOUT_S = 10
 const BRIDGE_PATTERN = '^auto (vmbr[1-9][0-9]*)$'
@@ -491,9 +489,9 @@ def users-converge [host: record]: nothing -> nothing {
     }
 }
 
-# lldap over ldaps verified against its own certificate, a totp code on top of the password, and a sync job proxmox
-# runs itself. Fails closed: until the guest holds a certificate (its first deploy, the run after this one), the
-# realm's group administers nothing.
+# lldap over ldaps verified against its own certificate, the password alone, and a sync job proxmox runs itself. Fails
+# closed: until the guest holds a certificate (its first deploy, the run after this one), the realm's group administers
+# nothing.
 export def realm-converge [host: record]: nothing -> nothing {
     let ldap = $host.lldap
     let group = $"($ldap.admin_group)-($REALM)"
@@ -507,13 +505,13 @@ export def realm-converge [host: record]: nothing -> nothing {
     ^install -d -m 700 ($host.realm_ca_file | path dirname)
     file-converge $host.realm_password_file "600" $ldap.bind_password | ignore
     file-converge $host.realm_ca_file "600" $"($ca)\n" | ignore
-    # the type is fixed at creation, modify refuses it
-    let mode = if (pve-has (pve-json pveum realm list) realm $REALM) { [modify $REALM] } else { [add $REALM --type ldap] }
+    # the type is fixed at creation, modify refuses it; modify drops the second factor a realm of an older run asked for
+    let mode = if (pve-has (pve-json pveum realm list) realm $REALM) { [modify $REALM --delete tfa] } else { [add $REALM --type ldap] }
     (^pveum realm ...$mode
         --server1 $ldap.host --port ($ldap.port | into string) --mode ldaps --verify 1 --capath $host.realm_ca_file
         --base_dn $"ou=people,($ldap.base_dn)" --user_attr uid --bind_dn $"uid=($ldap.bind_user),ou=people,($ldap.base_dn)"
         --group_dn $"ou=groups,($ldap.base_dn)" --group_name_attr cn --group_classes groupOfUniqueNames
-        --sync-defaults-options "enable-new=1,scope=both" --tfa $REALM_TFA --comment "lldap (single sign-on account store)")
+        --sync-defaults-options "enable-new=1,scope=both" --comment "lldap (single sign-on account store)")
     # the sync fills the group it would create; it exists before the first sync so the acl can name it
     if not (pve-has (pve-json pveum group list) groupid $group) { ^pveum group add $group }
     ^pveum acl modify / --groups $group --roles Administrator

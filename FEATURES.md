@@ -112,15 +112,9 @@ runbooks.
 - Firewall rollback: `ssh root@<proxmox> pve-firewall stop` lifts every rule until the host reboots;
   `pvesh set /cluster/firewall/options --enable 0` keeps it off until the next `sync.nu`. Without ssh: the console.
 - Login: the `lldap` realm binds to lldap over ldaps (vm-101, port 6360), verified against the guest's own
-  certificate, which the host reads from inside the guest; it grants Administrator to the lldap group `admins` and asks
-  for a TOTP code after the password. Until the guest has a certificate (the sync after its first deploy), the group
-  administers nothing. Each realm user needs a key, set by root@pam before the deploy that turns TOTP on:
-
-  ```sh
-  head -c 20 /dev/urandom | base32                     # the key; add it to an authenticator app
-  pveum user modify <user>@lldap --keys <base32 key>   # on the Proxmox host, as root
-  ```
-
+  certificate, which the host reads from inside the guest; it grants Administrator to the lldap group `admins` and
+  asks for the lldap uid (`luca`, not the email) and password, no second factor. Until the guest has a certificate (the
+  sync after its first deploy), the group administers nothing.
 - root@pam is outside the realm and keeps its own password (`proxmox-root-pass` in `src/secrets/shared.sops.json`),
   the way back in at the console and the web ui, where it asks for TOTP or WebAuthn too (Datacenter, Two Factor;
   its recovery keys printed and kept offline). Over ssh root takes keys alone.
@@ -235,7 +229,7 @@ runbooks.
   everyone else, links only.
 - lldap's `admin` takes its password from `lldap-admin-password` at every start: rotate it with
   `sops unset src/instances/core/101-internal-authelia/secrets.sops.json '["lldap-admin-password"]'`, then `./sync.nu`.
-- Proxmox logins through the lldap realm with TOTP (Proxmox host above).
+- Proxmox logins through the lldap realm (Proxmox host above).
 
 ## Scale to zero and on-demand
 
