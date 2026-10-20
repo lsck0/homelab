@@ -71,6 +71,8 @@ let
   # a share of wall time in which every task of a guest waited for memory: page-cache thrash, an oom on its way
   # (the 24h worst of a healthy guest is under 0.01, vm-112's nightly oom 0.26)
   memoryStallRatio = 0.1;
+  # a guest's memory is fixed (no balloon but archbuild's): this close to it for a quarter hour, an oom is next
+  guestMemoryFullPercent = 90;
   # a unit restarting more often than every 6 minutes for an hour is a crash loop, not a hiccup
   unitRestartsPerHour = 10;
 
@@ -164,7 +166,17 @@ let
       for = "10m";
       telegram = true;
       summary = "{{ $labels.vm }}: every task waits for memory {{ humanizePercentage $values.A.Value }} of the time";
-      description = "The guest is short of memory: page cache thrash or an oom ahead. Raise its memoryMiB or balloonMiB (instance.nix), or find what grew.";
+      description = "The guest is short of memory: page cache thrash or an oom ahead. Raise its memoryMiB (instance.nix), or find what grew.";
+    };
+    memory_full = {
+      title = "Guest memory full";
+      category = "offline";
+      expr = "max by (vm) (100 * (1 - node_memory_MemAvailable_bytes{vm!=\"proxmox\"} / node_memory_MemTotal_bytes{vm!=\"proxmox\"}))";
+      threshold = guestMemoryFullPercent;
+      for = "15m";
+      telegram = true;
+      summary = "{{ $labels.vm }}: {{ printf \"%.0f\" $values.A.Value }}% of its memory in use";
+      description = "The guest has used its fixed memory (page cache excluded) for a quarter hour; an oom kill is next. Raise its memoryMiB (instance.nix), or find what grew.";
     };
     unit_restart_loop = {
       title = "Unit restart loop";

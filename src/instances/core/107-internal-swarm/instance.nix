@@ -13,10 +13,8 @@
       "containers"
       "nfs"
     ];
-    # at a 1 GiB floor the host never grew it and builds swapped: the floor holds the manager and one build
-    # (lib/app-builder.nix), the rest is the host's to give
-    memoryMiB = 3072;
-    balloonMiB = 2560;
+    # the manager and one build (lib/app-builder.nix); at 1 GiB builds swapped: 629 MiB peak over 35d
+    memoryMiB = 1280;
     cores = 4;
     # images, the buildkit cache and the raft
     diskGiB = 40;

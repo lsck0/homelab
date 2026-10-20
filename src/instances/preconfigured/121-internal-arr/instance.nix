@@ -36,16 +36,15 @@ let
 in
 {
   vm = {
-    # parked while unused; "on" brings it back
+    # parked so atm gets its 10 GiB unballooned; "on" brings it back
     power = "off";
     bootPhase = "media";
     needs = [
       "containers"
       "nfs"
     ];
-    # five .net apps plus flaresolverr's chromium: 1510 MiB peak over 7d
-    memoryMiB = 3072;
-    balloonMiB = 1536;
+    # five .net apps plus flaresolverr's chromium: 1545 MiB peak over 35d
+    memoryMiB = 2048;
     diskGiB = 16;
   };
 

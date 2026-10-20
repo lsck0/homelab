@@ -5,15 +5,15 @@ let
 in
 {
   vm = {
-    # parked while unused; "on" brings it back
+    # parked so atm gets its 10 GiB unballooned; "on" brings it back
     power = "off";
     bootPhase = "media";
     needs = [
       "containers"
       "nfs"
     ];
-    # a node process beside the vm's own kernel and container runtime
-    memoryMiB = 1024;
+    # a node process beside the vm's own kernel and container runtime: 495 MiB peak over 35d
+    memoryMiB = 768;
     # image plus local state filled 8 GiB to 80%, and a vm keeps its nix store beside them
     diskGiB = 16;
   };

@@ -26,9 +26,8 @@
         "containers"
         "nfs"
       ];
-      memoryMiB = 1280;
-      # memory is the swarm's admission capacity (modules/limits): never reclaimed, never overcommitted
-      balloonMiB = 0;
+      # memory is the swarm's admission capacity (modules/limits)
+      memoryMiB = 1024;
       cores = 2;
       # the swarm must never starve the lab: under host contention every lab guest outweighs a worker
       cpuUnits = 50;

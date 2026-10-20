@@ -1,9 +1,9 @@
 # the guests against what they declare and what the node holds
 #
 # - a guest's declared needs (instance.nix `vm.needs`) are the kind its configuration is: containers, nfs
-# - host memory budget: every powered guest's floor (a vm's balloon floor, its whole memory when unballooned, an
-#   lxc's limit), each vm's qemu overhead and the node's reserve fit the node. Past it the balloon squeezes guests
-#   below their floors and the node swaps; onDemand guests count, since all may wake at once
+# - host memory budget: every powered guest's floor (a vm's whole memory, archbuild's balloon floor, an lxc's limit),
+#   each vm's qemu overhead and the node's reserve fit the node. Past it the balloon squeezes archbuild below its
+#   floor and the node swaps; onDemand guests count, since all may wake at once
 # - a service's MemoryMax fits its guest's floor less the guest's base: above it the guest's global oom fires before
 #   the cap, and kills the largest process (syncthing, nfsd's clients) instead of the capped unit
 # - a guest mounts exactly the shares its instance.nix declares: vm-104 exports those, so a mount it does not

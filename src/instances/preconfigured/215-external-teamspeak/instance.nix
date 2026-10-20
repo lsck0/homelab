@@ -2,7 +2,7 @@
 { config, profiles, ... }:
 {
   vm = {
-    # parked so atm gets its 8 GiB unballooned; "on" brings it back
+    # parked so atm gets its 10 GiB unballooned; "on" brings it back
     power = "off";
     bootPhase = "public";
     # the official image; its sqlite db and uploads mirrored to the nas (localState)
@@ -10,8 +10,8 @@
       "containers"
       "nfs"
     ];
-    # the vm's own ~600 MiB plus the server's 100-200 MiB
-    memoryMiB = 1024;
+    # the vm and the server: 371 MiB peak over 35d
+    memoryMiB = 512;
   };
 
   services = {

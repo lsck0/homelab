@@ -11,10 +11,8 @@
   vm = {
     bootPhase = "network";
     needs = [ "nfs" ];
-    # prometheus, loki, grafana: 1122 MiB peak over 7d
-    memoryMiB = 2560;
-    # explicit floor: tsdb head and loki chunks are working memory
-    balloonMiB = 1536;
+    # prometheus, loki, grafana: 1331 MiB peak, 1024 at p95 over 35d
+    memoryMiB = 1536;
     # the stores on local disk (main.nix sizes prometheus' retention from it: 56GB), journal-remote's 1G, the system
     diskGiB = 80;
   };

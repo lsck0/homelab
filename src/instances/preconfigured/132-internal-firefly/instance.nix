@@ -15,7 +15,8 @@
       "containers"
       "nfs"
     ];
-    memoryMiB = 1024;
+    # 437 MiB peak over 35d
+    memoryMiB = 768;
   };
 
   grants = [

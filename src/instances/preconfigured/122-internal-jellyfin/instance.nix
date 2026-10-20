@@ -14,16 +14,15 @@ in
   roles = [ "llm" ];
 
   vm = {
-    # parked while unused; "on" brings it back
+    # parked so atm gets its 10 GiB unballooned; "on" brings it back
     power = "off";
     bootPhase = "media";
     needs = [
       "containers"
       "nfs"
     ];
-    # vfio pins all ram, so no balloon
+    # ollama's MemoryMax 2560 plus the guest's 512 (2222 MiB peak over 35d)
     memoryMiB = 3072;
-    balloonMiB = 0;
     cores = 4;
     # ollama's model (modules/ollama.nix) beside jellyfin
     diskGiB = 24;

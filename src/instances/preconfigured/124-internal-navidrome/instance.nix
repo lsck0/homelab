@@ -7,7 +7,7 @@
 }:
 {
   vm = {
-    # parked while unused; "on" brings it back
+    # parked so atm gets its 10 GiB unballooned; "on" brings it back
     power = "off";
     bootPhase = "media";
     needs = [

@@ -11,6 +11,8 @@
   vm = {
     bootPhase = "network";
     needs = [ "nfs" ];
+    # 381 MiB peak over 35d
+    memoryMiB = 512;
   };
 
   services = {

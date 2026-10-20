@@ -31,6 +31,8 @@ in
       "containers"
       "nfs"
     ];
+    # 346 MiB peak over 35d
+    memoryMiB = 512;
   };
 
   services = {

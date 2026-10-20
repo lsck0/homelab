@@ -12,6 +12,8 @@
     # full rebuild's 7.6G in one night, and the install isos: the same three plus the night's new one at about 1.5G each
     # (12.9G stayed free at the fullest of the ten nights to 2026-10-19)
     diskGiB = 104;
+    # 303 MiB peak over 35d
+    memoryMiB = 512;
   };
 
   grants = [

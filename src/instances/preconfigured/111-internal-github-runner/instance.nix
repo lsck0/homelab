@@ -10,9 +10,8 @@ _: {
       "containers"
       "nfs"
     ];
-    # the floor holds the idle listeners; a job takes what the host has free
-    memoryMiB = 4096;
-    balloonMiB = 768;
+    # 762 MiB peak over 35d; the rest is a heavier job's headroom
+    memoryMiB = 1536;
     cores = 4;
     diskGiB = 40;
   };

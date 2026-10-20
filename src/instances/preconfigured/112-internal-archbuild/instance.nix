@@ -12,7 +12,8 @@
       "containers"
       "nfs"
     ];
-    # a build is sure of the floor only: one compile job plus the guest's services (main.nix buildJobs)
+    # the one ballooned guest, a nightly batch job: a build is sure of the floor only, one compile job plus the guest's
+    # services (main.nix buildJobs), and borrows up to the ceiling what the fixed guests leave
     memoryMiB = 6144;
     balloonMiB = 2816;
     cores = 8;

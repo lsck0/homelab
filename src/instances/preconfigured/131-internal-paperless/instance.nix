@@ -15,10 +15,8 @@
       "containers"
       "nfs"
     ];
-    # ocr plus the paperless-ai node process
+    # ocr plus the paperless-ai node process: 2296 MiB peak over 35d, and it ran at 98% of 2048, page cache included
     memoryMiB = 3072;
-    # ran at 98% of a 2048 floor, page cache included
-    balloonMiB = 2048;
     # paperless-ai image alone is 8.3 GiB
     diskGiB = 24;
   };

@@ -35,13 +35,6 @@ let
     vm = 768;
     lxc = 512;
   };
-  # at 384 MiB a vm drops ssh
-  balloonFloorMiB = 512;
-  # the lab's own path (router, ingresses, sso) and the public side, unless idle: squeezed, every route stalls
-  unballoonedPhases = [
-    "network"
-    "public"
-  ];
   # proxmox's own cpu weight
   cpuUnitsDefault = 100;
   diskDefaultGiB = 8;
@@ -266,13 +259,8 @@ in
       };
       balloonMiB = mkOption {
         type = types.ints.unsigned;
-        default =
-          if lib.elem config.vm.bootPhase unballoonedPhases && config.idle.stopAfter == null then
-            config.vm.memoryMiB
-          else
-            lib.max balloonFloorMiB (config.vm.memoryMiB / 2);
-        defaultText = lib.literalExpression "memoryMiB in boot phases ${toString unballoonedPhases} unless idle, else max ${toString balloonFloorMiB} (memoryMiB / 2)";
-        description = "Balloon floor (vm), 0: no balloon; tests/policy/guests.nix holds the floors to the node's memory.";
+        default = 0;
+        description = "Balloon floor (vm); 0, the default: no balloon, the guest holds memoryMiB fixed. archbuild alone balloons; tests/policy/guests.nix holds the floors to the node's memory.";
       };
       cores = mkOption {
         type = types.ints.positive;

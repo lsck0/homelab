@@ -9,6 +9,8 @@
       "containers"
       "nfs"
     ];
+    # 325 MiB peak over 35d
+    memoryMiB = 512;
   };
 
   idle = {

@@ -3,8 +3,8 @@
 {
   vm = {
     bootPhase = "dev";
-    # 63 MiB peak over 7d; redis caps itself at 256mb
-    memoryMiB = 512;
+    # 67 MiB peak over 35d; redis caps itself at 256mb
+    memoryMiB = 256;
     diskGiB = 40;
   };
 

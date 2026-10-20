@@ -13,6 +13,8 @@ in
   vm = {
     bootPhase = "apps";
     needs = [ "nfs" ];
+    # 308 MiB peak over 35d
+    memoryMiB = 512;
   };
 
   services = {

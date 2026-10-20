@@ -9,9 +9,8 @@
     ];
     # off until there is a use for it
     power = "off";
-    # rails plus postgres, measured 1003 MiB
-    memoryMiB = 2048;
-    balloonMiB = 1536;
+    # rails plus postgres: 1115 MiB peak over 35d
+    memoryMiB = 1536;
     # image plus postgres left 396 MiB free on 8 GiB
     diskGiB = 16;
   };
