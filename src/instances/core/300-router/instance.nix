@@ -8,7 +8,7 @@ _: {
     # every zone guest needs its dhcp, dns and routes: it starts right after the nas, ahead of the network phase
     bootOrder = 1;
     # 537 MiB peak over 35d
-    memoryMiB = 768;
+    memoryMiB = 704;
   };
 
   # tor down or cut off: the tor egress members have no internet (killswitch), prowlarr's searches fail

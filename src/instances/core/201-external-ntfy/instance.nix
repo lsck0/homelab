@@ -7,6 +7,8 @@ in
   vm = {
     bootPhase = "public";
     kind.lxc = "an existing lxc with local state; recreating it as a vm needs a data migration";
+    # 314 MiB peak over 35d
+    memoryMiB = 384;
   };
 
   grants = [

@@ -8,7 +8,7 @@
       "nfs"
     ];
     # two homepage containers, 110 MB each, besides the system: 513 MiB peak over 35d
-    memoryMiB = 768;
+    memoryMiB = 640;
   };
 
   services = {

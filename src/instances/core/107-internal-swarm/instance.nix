@@ -13,8 +13,8 @@
       "containers"
       "nfs"
     ];
-    # the manager and one build (lib/app-builder.nix); at 1 GiB builds swapped: 629 MiB peak over 35d
-    memoryMiB = 1280;
+    # the manager's 1024 and one build's 1024 (lib/app-builder.nix asserts them); 629 MiB peak over 35d
+    memoryMiB = 2048;
     cores = 4;
     # images, the buildkit cache and the raft
     diskGiB = 40;
