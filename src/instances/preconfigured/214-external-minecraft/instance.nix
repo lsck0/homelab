@@ -7,9 +7,8 @@
       "containers"
       "nfs"
     ];
-    # never ballooned: a squeezed jvm is killed by the kernel and loses the unsaved world (it did at 6.1 GiB)
-    memoryMiB = 8192;
-    balloonMiB = 0;
+    # a squeezed jvm is killed by the kernel and loses the unsaved world (it did at 6.1 GiB)
+    memoryMiB = 10240;
     # the tick is one thread, but chunk generation, distant horizons and g1 run beside it: 6 ran at load 6.7 with
     # 20 s stalls exploring; the host has 12 threads, most guests idle, and this one wins when they are not
     cores = 10;

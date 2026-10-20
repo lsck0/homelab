@@ -36,9 +36,9 @@ let
         version = "1.21.1";
         protocol = 767;
         allowFlight = true;
-        # 375 mods in an 8 GiB guest: a shorter view keeps it out of swap
-        viewDistance = 8;
-        simulationDistance = 6;
+        # 375 mods in a 10 GiB guest: still shorter than the default view, which keeps it out of swap
+        viewDistance = 10;
+        simulationDistance = 8;
         pack = ''
           TYPE=NEOFORGE
           VERSION=1.21.1
@@ -83,8 +83,9 @@ let
   # a time, so every server reuses them
   serverPort = 25566;
   rconPort = 25575;
-  # live data is ~2.6 GiB with a few players (spark heapsummary); 5 GiB plus ~2 GiB off-heap stays under the container
-  heapSize = "5G";
+  # live data is ~2.6 GiB with a few players (spark heapsummary), more with the longer view; 6 GiB plus ~2 GiB off-heap
+  # stays under the container
+  heapSize = "6G";
   # the guest's kernel, sshd and the gate (~440 MiB used beside a running pack); the container gets the rest, and
   # past it its coldest pages (atm's ~2 GiB off-heap, 375 mods' classes) go to zram instead of the oom killer
   guestReserveMiB = 768;
@@ -217,8 +218,8 @@ let
         -e OVERRIDE_ICON=TRUE \
         -e "MOTD=[${name}] ${motd}" \
         -e USE_AIKAR_FLAGS=true \
-        -e VIEW_DISTANCE=${toString (servers.${name}.viewDistance or 12)} \
-        -e SIMULATION_DISTANCE=${toString (servers.${name}.simulationDistance or 8)} \
+        -e VIEW_DISTANCE=${toString (servers.${name}.viewDistance or 14)} \
+        -e SIMULATION_DISTANCE=${toString (servers.${name}.simulationDistance or 10)} \
         -e SPAWN_PROTECTION=0 \
         -e MAX_PLAYERS=42069 \
         -e ENABLE_RCON=true \
