@@ -333,7 +333,17 @@ def geomap(title, target_, layer_name, datasource=LOKI, **kw):
         },
         options={
             "view": {"allLayers": True, "id": "zero", "lat": 0, "lon": 0, "zoom": 1},
-            "basemap": {"type": "carto", "name": "Basemap", "config": {"theme": "dark", "showLabels": False}},
+            # the country outlines grafana serves itself: carto's tiles now answer "api key required", and no tile host
+            # learns what the dashboard looks at
+            "basemap": {
+                "type": "geojson",
+                "name": "Countries",
+                "config": {
+                    "src": "public/maps/countries.geojson",
+                    "rules": [],
+                    "style": {"color": {"fixed": "#5a6170"}, "opacity": 0.3, "lineWidth": 1},
+                },
+            },
             "controls": {"mouseWheelZoom": True, "showZoom": True, "showAttribution": True},
             "tooltip": {"mode": "details"},
             "layers": [

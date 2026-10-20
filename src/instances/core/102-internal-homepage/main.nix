@@ -170,7 +170,11 @@ let
       {
         label = "Nodes";
         query = "count(up{job=\"${cadvisorJob}\"} == 1) or vector(0)";
-        format.suffix = "/${toString nodeCount}";
+        # without a type homepage renders common.undefined in place of the value
+        format = {
+          type = "number";
+          suffix = "/${toString nodeCount}";
+        };
       }
       {
         label = "Tasks";
@@ -225,7 +229,10 @@ let
           # the ingress's active health check, one server per node
           label = "Healthy";
           query = "sum(traefik_service_server_up{service=\"${r.name}@file\"})";
-          format.suffix = "/${toString nodeCount}";
+          format = {
+            type = "number";
+            suffix = "/${toString nodeCount}";
+          };
         }
         ++ [
           {

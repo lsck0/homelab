@@ -1056,9 +1056,21 @@ in
         retention_enabled = true;
         delete_request_store = "filesystem";
       };
+      # logs drilldown's patterns tab
+      pattern_ingester.enabled = true;
       limits_config = {
         retention_period = observabilityRetention;
         volume_enabled = true;
+        # logs drilldown groups by service_name: a journal line by its unit, a container's by its name, the rest (the
+        # ingresses' access logs, crowdsec) by job; set at ingestion, so older lines keep the job
+        discover_service_name = [
+          "service_name"
+          "service"
+          "container_name"
+          "unit"
+          "job"
+        ];
+        discover_log_levels = true;
         reject_old_samples = false;
         max_entries_limit_per_query = lokiMaxLines;
         # per tenant: an app's budget (the lab's own in the overrides); lines past the limit are cut, not dropped
@@ -1484,7 +1496,17 @@ in
                   }
                 ];
               };
-            secureJsonData = tenantSecureJsonOf "loki" lokiTenants;
+            # the lab tenant alone: logs drilldown's detected labels and limits refuse a multi-tenant query
+            secureJsonData = tenantSecureJsonOf "loki" telemetry.labTenant;
+          }
+          {
+            name = "Loki (all tenants)";
+            type = "loki";
+            access = "proxy";
+            url = "http://${loopback}:${toString ports.lokiLocal}";
+            uid = "loki-all";
+            jsonData = lokiJsonData // tenantHeader;
+            secureJsonData = tenantSecureJsonOf "loki-all" lokiTenants;
           }
           # the ingresses' request spans: a lab sender's land in the lab tenant (pushTenantMap)
           {
@@ -1505,6 +1527,16 @@ in
               serviceMap.datasourceUid = "prometheus";
               nodeGraph.enabled = true;
             };
+          }
+          # profiles drilldown's source for the lab tenant
+          {
+            name = "Pyroscope";
+            type = "grafana-pyroscope-datasource";
+            access = "proxy";
+            url = "http://${loopback}:${toString ports.pyroscopeLocal}";
+            uid = "pyroscope";
+            secureJsonData = tenantSecureJsonOf "pyroscope" telemetry.labTenant;
+            jsonData = tenantHeader;
           }
         ];
       };
