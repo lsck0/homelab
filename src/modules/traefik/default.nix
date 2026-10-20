@@ -182,9 +182,22 @@ let
           }";
           action = "CHALLENGE";
         };
+        # discord's link preview: a browser user agent, so the bundled policy challenges it, and no published ranges or
+        # reverse dns to verify it by. Anyone may claim the name, so it reaches only what a preview reads: a note's
+        # 5-hex stub (math's link target) and its card image. First, ahead of every bundled rule
+        preview = builtins.toJSON {
+          name = "discord-link-preview";
+          action = "ALLOW";
+          expression.all = [
+            ''userAgent.contains("Discordbot")''
+            ''method == "GET"''
+            # [.], not an escape: a backslash survives json, yaml and cel unequally
+            ''path.matches("^/[0-9A-Fa-f]{5}(/|/index[.]html|/card[.]png)?$")''
+          ];
+        };
       }
       ''
-        yq '.bots += [env(rule)]' ${config.services.anubis.package.src}/data/botPolicies.yaml > $out
+        yq '.bots = [env(preview)] + .bots + [env(rule)]' ${config.services.anubis.package.src}/data/botPolicies.yaml > $out
       '';
 
   # authelia's answer to forwardauth; a client sending its own must never reach an app that trusts them
