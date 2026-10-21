@@ -23,7 +23,7 @@ export def secrets-dotfiles []: nothing -> path {
 }
 
 export def secrets-dotfiles-dir []: nothing -> path {
-    $env.DOTFILES_SECRETS? | default (secrets-dotfiles | path join secrets)
+    $env.DOTFILES_SECRETS? | default (secrets-dotfiles | path join configs secrets keys)
 }
 
 # the private key lines of an age identity file; none while git-crypt holds it locked

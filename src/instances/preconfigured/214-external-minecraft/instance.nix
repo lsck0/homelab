@@ -7,8 +7,9 @@
       "containers"
       "nfs"
     ];
-    # a squeezed jvm is killed by the kernel and loses the unsaved world (it did at 6.1 GiB)
-    memoryMiB = 10240;
+    # a squeezed jvm is killed by the kernel and loses the unsaved world (it did at 6.1 GiB); 5 GiB heap plus ~2.4 GiB
+    # off-heap and the guest reserve, which leaves taskchampion its 512 on the host
+    memoryMiB = 9472;
     # the tick is one thread, but chunk generation, distant horizons and g1 run beside it: 6 ran at load 6.7 with
     # 20 s stalls exploring; the host has 12 threads, most guests idle, and this one wins when they are not
     cores = 10;

@@ -12,7 +12,7 @@ cases below in promtool's unit test format. tests/alert-rules.nix runs `promtool
 rules` on them.
 
 The cases are the policy, written out as an oracle: which series make which rule fire with which labels, and which
-must stay quiet (an idle guest asleep, its host port probe while it sleeps, a disk forecast with headroom or from an idle or down guest, a service on a guest that is down, a 5xx share at noise traffic, a dump
+must stay quiet (an idle guest asleep, its host port probe while it sleeps, a disk forecast from a step, with headroom or from an idle or down guest, a service on a guest that is down, a 5xx share at noise traffic, a dump
 stale only because its guest just woke up, a stale deploy metric on a guest that is no builder, a manager failure the
 builder already reports).
 """
@@ -259,63 +259,72 @@ tests = [
         ],
     },
     {
-        "name": "storage: a sustained decline on a fuller disk is forecast; one with headroom, an idle guest's and a "
+        "name": "storage: a sustained decline on a fuller disk is forecast; a step, one with headroom, an idle guest's and a "
         "down guest's stale samples are not",
         "interval": "1m",
         "input_series": [
-            # 10% free, 100 megabytes less a minute
+            # 10% free, 50 megabytes less a minute
             {
                 "series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/data",vm="nas"}',
-                "values": "100000000000-100000000x400",
+                "values": "100000000000-50000000x1600",
             },
             {
                 "series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/data",vm="nas"}',
-                "values": "1000000000000x400",
+                "values": "1000000000000x1600",
             },
             {
                 "series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="nas"}',
-                "values": "100000000000x400",
+                "values": "100000000000x1600",
             },
             {
                 "series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="nas"}',
-                "values": "1000000000000x400",
+                "values": "1000000000000x1600",
             },
-            {"series": f'up{{{NODE},vm="nas"}}', "values": "1x400"},
+            {"series": f'up{{{NODE},vm="nas"}}', "values": "1x1600"},
+            # a step on a fuller disk (a backup repo created), flat before and after: never a day of decline
+            {
+                "series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/srv",vm="nas"}',
+                "values": "400000000000x100 100000000000x1500",
+            },
+            {
+                "series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/srv",vm="nas"}',
+                "values": "1000000000000x1600",
+            },
             # the same decline with over half the disk free: a step, not a trend
             {
                 "series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="forgejo"}',
-                "values": "180000000000-100000000x400",
+                "values": "230000000000-50000000x1600",
             },
             {
                 "series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="forgejo"}',
-                "values": "250000000000x400",
+                "values": "250000000000x1600",
             },
-            {"series": f'up{{{NODE},vm="forgejo"}}', "values": "1x400"},
+            {"series": f'up{{{NODE},vm="forgejo"}}', "values": "1x1600"},
             # an idle guest awake for a build
             {
                 "series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="archbuild",idle="true"}',
-                "values": "100000000000-100000000x400",
+                "values": "100000000000-50000000x1600",
             },
             {
                 "series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="archbuild",idle="true"}',
-                "values": "1000000000000x400",
+                "values": "1000000000000x1600",
             },
-            {"series": f'up{{{NODE},vm="archbuild",idle="true"}}', "values": "1x400"},
+            {"series": f'up{{{NODE},vm="archbuild",idle="true"}}', "values": "1x1600"},
             # a guest that went down: its samples stay in the window
             {
                 "series": 'node_filesystem_avail_bytes{fstype="ext4",mountpoint="/",vm="paperless"}',
-                "values": "100000000000-100000000x20 _x380",
+                "values": "100000000000-50000000x20 _x1580",
             },
             {
                 "series": 'node_filesystem_size_bytes{fstype="ext4",mountpoint="/",vm="paperless"}',
-                "values": "1000000000000x20 _x380",
+                "values": "1000000000000x20 _x1580",
             },
-            {"series": f'up{{{NODE},vm="paperless"}}', "values": "1x20 0x380"},
+            {"series": f'up{{{NODE},vm="paperless"}}', "values": "1x20 0x1580"},
         ],
         "alert_rule_test": [
-            {"eval_time": "355m", "alertname": "disk_fill_predicted", "exp_alerts": []},
+            {"eval_time": "1495m", "alertname": "disk_fill_predicted", "exp_alerts": []},
             {
-                "eval_time": "365m",
+                "eval_time": "1530m",
                 "alertname": "disk_fill_predicted",
                 "exp_alerts": [expect("disk_fill_predicted", fstype="ext4", mountpoint="/data", vm="nas")],
             },

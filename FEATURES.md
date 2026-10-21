@@ -378,11 +378,11 @@ runbooks.
   guest's by `sync.nu` through Proxmox from inside the guest. Any other key stops the run.
 - Rotating the admin key, whenever it may have leaked (it re-encrypts every file and renews every host key), inside
   `nix develop ./src` with the dotfiles unlocked:
-  1. `age-keygen -o ~/projects/arch-dotfiles/secrets/age.new.txt`; it prints the new public key.
+  1. `age-keygen -o ~/projects/arch-dotfiles/configs/secrets/keys/age.new.txt`; it prints the new public key.
   2. Add it as a new line of `src/secrets/admins.txt`, keep the old line.
   3. `src/scripts/secrets-sync.nu --apply`: every file is re-encrypted to old and new key.
   4. Delete the old line, then
-     `SOPS_AGE_KEY_FILE=~/projects/arch-dotfiles/secrets/age.new.txt src/scripts/secrets-sync.nu --apply`: every file
+     `SOPS_AGE_KEY_FILE=~/projects/arch-dotfiles/configs/secrets/keys/age.new.txt src/scripts/secrets-sync.nu --apply`: every file
      is re-encrypted without the old key and every host gets a new key. It refuses to run unlocked by a key it would
      lock out.
   5. In the dotfiles, replace `age.txt` with `age.new.txt` and commit there; drop other copies

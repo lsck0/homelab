@@ -19,7 +19,7 @@ src/scripts/init.nu <proxmox-ip> --upgrade   # apt full-upgrade of the host; it 
 ```
 
 `terraform-law` and `policy-eval` gate every run: a broken law stops it before anything is applied. The sops age key
-is the dotfiles' `~/projects/arch-dotfiles/secrets/age.txt`; `init.nu` and `sync.nu` keep `secrets/age.txt` linked to
+is the dotfiles' `~/projects/arch-dotfiles/configs/secrets/keys/age.txt`; `init.nu` and `sync.nu` keep `secrets/age.txt` linked to
 it, and `sync.nu` unlocks it with the YubiKey (`dot secrets unlock`). The deploying machine's `~/.ssh/id_ed25519.pub`
 must be one of `src/secrets/keys/`, which every guest, the router and Proxmox root authorize. Proxmox root takes keys
 alone over ssh: leave `init.nu`'s password prompt blank on a converged host. root@pam logs in to the web ui with TOTP

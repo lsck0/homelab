@@ -178,11 +178,11 @@
       "zone": "internal"
     },
     "134": {
-      "enabled": "false",
+      "enabled": "true",
       "idle": null,
       "ip": "10.100.0.134",
       "name": "134-internal-taskchampion",
-      "powered": false,
+      "powered": true,
       "zone": "internal"
     },
     "140": {

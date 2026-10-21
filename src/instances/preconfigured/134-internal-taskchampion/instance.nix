@@ -7,8 +7,6 @@
 }:
 {
   vm = {
-    # parked so atm gets its 10 GiB unballooned; "on" brings it back
-    power = "off";
     bootPhase = "apps";
     # its sqlite on the guest's disk, mirrored to the nas (localState), and the nightly dump
     needs = [ "nfs" ];

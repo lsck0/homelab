@@ -38,6 +38,10 @@ let
   # time to order a disk or clean up
   diskForecastWindow = "7d";
   diskForecastHorizonSeconds = 14 * 86400;
+  # a step (a 238 GB backup repo created on the nas) tilts the week's slope for seven days but leaves the last day
+  # flat once it is a day old; a real trend shows in both, and holding past this window lets a step age out first
+  diskForecastConfirmWindow = "1d";
+  diskForecastFor = "25h";
   # with half the disk free a forecast fill is a step (an import, a build), not a trend; disk_full catches a runaway
   diskForecastFreePercentMax = 50;
   # an idle guest's samples are its short wakes, each after a reboot: no trend, and stale while it sleeps
@@ -73,6 +77,9 @@ let
   memoryStallRatio = 0.1;
   # a guest's memory is fixed (no balloon but archbuild's): this close to it for a quarter hour, an oom is next
   guestMemoryFullPercent = 90;
+  # minecraft's container takes all but its guest reserve by design (6 GiB heap, ~2.4 GiB off-heap) and pages its
+  # coldest into zram; oom_kill still catches it
+  memoryFullSelector = "vm!~\"proxmox|minecraft\"";
   # a unit restarting more often than every 6 minutes for an hour is a crash loop, not a hiccup
   unitRestartsPerHour = 10;
 
@@ -171,7 +178,7 @@ let
     memory_full = {
       title = "Guest memory full";
       category = "offline";
-      expr = "max by (vm) (100 * (1 - node_memory_MemAvailable_bytes{vm!=\"proxmox\"} / node_memory_MemTotal_bytes{vm!=\"proxmox\"}))";
+      expr = "max by (vm) (100 * (1 - node_memory_MemAvailable_bytes{${memoryFullSelector}} / node_memory_MemTotal_bytes{${memoryFullSelector}}))";
       threshold = guestMemoryFullPercent;
       for = "15m";
       telegram = true;
@@ -318,13 +325,13 @@ let
       # the free share is a current sample: a guest that went down has none, while its window's samples outlive it
       expr =
         "predict_linear(node_filesystem_avail_bytes{${diskForecastSelector}}[${diskForecastWindow}], ${toString diskForecastHorizonSeconds})"
+        + " and predict_linear(node_filesystem_avail_bytes{${diskForecastSelector}}[${diskForecastConfirmWindow}], ${toString diskForecastHorizonSeconds}) < 0"
         + " and ${diskFreePercent diskForecastSelector} < ${toString diskForecastFreePercentMax}";
       op = "lt";
       threshold = 0;
-      # a trend, not a spike: nightly dumps, builds and downloads come and go within hours
-      for = "6h";
+      for = diskForecastFor;
       summary = "{{ $labels.vm }} {{ $labels.mountpoint }}: full within 14 days at the 7-day trend";
-      description = "Less than half of this filesystem is free and its free space trend of the last 7 days reaches zero within two weeks. Find what grows before it is full.";
+      description = "Less than half of this filesystem is free and its free space trend of the last 7 days and of the last day both reach zero within two weeks. Find what grows before it is full.";
     };
     ingress_spool = {
       title = "Ingress spool files pile up";
